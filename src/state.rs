@@ -9,6 +9,7 @@
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection};
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 pub struct Store {
     conn: Connection,
@@ -62,6 +63,51 @@ pub struct InboxRow {
     /// The sender's session id (empty when unknown — old peers / untargeted).
     /// Lets the recipient reply to the exact sibling session that wrote this.
     pub from_session: String,
+}
+
+// ── Phase 1 read-model types ─────────────────────────────────────────────────
+
+/// Whether a pubkey is a member of a project at a given timestamp.
+///
+/// - `Unhydrated` — no membership rows exist at all for `project_id`; the
+///   admission path must quarantine inbound events until a backfill arrives.
+/// - `NotMember` — rows exist for the project but not this pubkey.
+/// - `Member` — an admitted, not-yet-revoked row.
+/// - `Revoked` — a row whose `revoked_at <= ts`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MembershipDecision {
+    Member { role: String },
+    Revoked,
+    NotMember,
+    Unhydrated,
+}
+
+/// One row from the `inbound_quarantine` table, returned by `replay_quarantine`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QuarantinedEnvelope {
+    pub native_event_id: String,
+    pub project_id: Option<String>,
+    pub reason: String,
+    pub raw_envelope: String,
+    pub created_at: u64,
+}
+
+// ── ID generation ────────────────────────────────────────────────────────────
+// No uuid crate in Cargo.toml, so we build collision-resistant ids from
+// nanosecond wall-clock time + an in-process monotonic counter.  Format:
+//   te-<nanos_hex>-<counter_hex>
+// The counter prevents collisions inside tight backfill loops where two calls
+// may land within the same nanosecond.
+
+static ID_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+fn gen_id(prefix: &str) -> String {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0);
+    let seq = ID_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("{prefix}-{nanos:x}-{seq:x}")
 }
 
 const SCHEMA: &str = r#"
@@ -158,6 +204,83 @@ CREATE TABLE IF NOT EXISTS group_members (
     role       TEXT NOT NULL DEFAULT 'member',
     updated_at INTEGER NOT NULL,
     PRIMARY KEY (project, pubkey)
+);
+
+-- ── Phase 1: canonical read-model tables ──────────────────────────────────────
+-- Durable project identities with surrogate ids; origin tables map fabric
+-- coordinates back to local ids.
+CREATE TABLE IF NOT EXISTS projects (
+    project_id   TEXT PRIMARY KEY,
+    display_slug TEXT NOT NULL,
+    about        TEXT,
+    created_at   INTEGER NOT NULL,
+    updated_at   INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS project_origins (
+    project_id           TEXT NOT NULL,
+    fabric               TEXT NOT NULL,
+    provider_instance    TEXT NOT NULL,
+    native_project_key   TEXT NOT NULL,
+    UNIQUE(fabric, provider_instance, native_project_key)
+);
+CREATE TABLE IF NOT EXISTS threads (
+    thread_id   TEXT PRIMARY KEY,
+    project_id  TEXT NOT NULL,
+    subject     TEXT,
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL,
+    archived_at INTEGER
+);
+CREATE TABLE IF NOT EXISTS thread_origins (
+    thread_id            TEXT NOT NULL,
+    fabric               TEXT NOT NULL,
+    provider_instance    TEXT NOT NULL,
+    native_thread_key    TEXT NOT NULL,
+    UNIQUE(fabric, provider_instance, native_thread_key)
+);
+-- author_session is the return envelope (the sender's session id so a reply can
+-- target the exact sibling session that wrote the message; NULL when the fabric
+-- can't supply it — reply degrades to agent-level). Populated during dual-write
+-- in a later phase; schema included now per the doc (§2a + Phase 1 spec).
+CREATE TABLE IF NOT EXISTS messages (
+    message_id      TEXT PRIMARY KEY,
+    thread_id       TEXT NOT NULL,
+    author_pubkey   TEXT NOT NULL,
+    author_session  TEXT,
+    body            TEXT NOT NULL,
+    created_at      INTEGER NOT NULL,
+    direction       TEXT NOT NULL,
+    sync_state      TEXT NOT NULL,
+    native_event_id TEXT,
+    error           TEXT
+);
+-- message_recipients PK includes target_session which can be NULL.  SQLite
+-- treats NULL values as distinct in a UNIQUE / PRIMARY KEY constraint, so two
+-- rows with the same (message_id, recipient_pubkey) but NULL target_session are
+-- considered different rows.  That behaviour is acceptable here.
+CREATE TABLE IF NOT EXISTS message_recipients (
+    message_id       TEXT NOT NULL,
+    recipient_pubkey TEXT NOT NULL,
+    target_session   TEXT,
+    delivered_at     INTEGER,
+    PRIMARY KEY(message_id, recipient_pubkey, target_session)
+);
+CREATE TABLE IF NOT EXISTS inbound_quarantine (
+    native_event_id TEXT PRIMARY KEY,
+    project_id      TEXT,
+    reason          TEXT NOT NULL,
+    raw_envelope    TEXT NOT NULL,
+    created_at      INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS membership (
+    project_id  TEXT NOT NULL,
+    pubkey      TEXT NOT NULL,
+    role        TEXT NOT NULL,
+    admitted_at INTEGER NOT NULL,
+    revoked_at  INTEGER,
+    source      TEXT NOT NULL,
+    updated_at  INTEGER NOT NULL,
+    PRIMARY KEY(project_id, pubkey)
 );
 "#;
 
@@ -808,6 +931,327 @@ impl Store {
         )?;
         Ok(rows)
     }
+
+    // ── Phase 1: canonical read-model accessors ──────────────────────────
+    // Write-side primitives the materializer fills; readers come in Phase 2.
+    // These tables are additive — no existing reader consults them yet, so
+    // none of this changes CLI/RPC output.
+
+    /// Map fabric coordinates to a durable `project_id`, creating the project +
+    /// origin on first sight. Idempotent: the same origin always resolves to the
+    /// same id and never clobbers `about`.
+    pub fn ensure_project_origin(
+        &self,
+        fabric: &str,
+        provider_instance: &str,
+        native_project_key: &str,
+        display_slug: &str,
+        now: u64,
+    ) -> Result<String> {
+        if let Some(pid) = self.project_id_for_origin(fabric, provider_instance, native_project_key)? {
+            return Ok(pid);
+        }
+        let pid = gen_id("proj");
+        self.conn.execute(
+            "INSERT INTO projects (project_id, display_slug, about, created_at, updated_at)
+             VALUES (?1, ?2, NULL, ?3, ?3)",
+            params![pid, display_slug, now],
+        )?;
+        self.conn.execute(
+            "INSERT INTO project_origins (project_id, fabric, provider_instance, native_project_key)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![pid, fabric, provider_instance, native_project_key],
+        )?;
+        Ok(pid)
+    }
+
+    pub fn project_id_for_origin(
+        &self,
+        fabric: &str,
+        provider_instance: &str,
+        native_project_key: &str,
+    ) -> Result<Option<String>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT project_id FROM project_origins
+                 WHERE fabric=?1 AND provider_instance=?2 AND native_project_key=?3",
+                params![fabric, provider_instance, native_project_key],
+                |r| r.get::<_, String>(0),
+            )
+            .ok())
+    }
+
+    /// Map a fabric thread key to a durable `thread_id`, creating the thread +
+    /// origin on first sight. Idempotent.
+    pub fn ensure_thread_origin(
+        &self,
+        project_id: &str,
+        fabric: &str,
+        provider_instance: &str,
+        native_thread_key: &str,
+        now: u64,
+    ) -> Result<String> {
+        if let Some(tid) = self
+            .conn
+            .query_row(
+                "SELECT thread_id FROM thread_origins
+                 WHERE fabric=?1 AND provider_instance=?2 AND native_thread_key=?3",
+                params![fabric, provider_instance, native_thread_key],
+                |r| r.get::<_, String>(0),
+            )
+            .ok()
+        {
+            return Ok(tid);
+        }
+        let tid = gen_id("thr");
+        self.conn.execute(
+            "INSERT INTO threads (thread_id, project_id, subject, created_at, updated_at)
+             VALUES (?1, ?2, NULL, ?3, ?3)",
+            params![tid, project_id, now],
+        )?;
+        self.conn.execute(
+            "INSERT INTO thread_origins (thread_id, fabric, provider_instance, native_thread_key)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![tid, fabric, provider_instance, native_thread_key],
+        )?;
+        Ok(tid)
+    }
+
+    /// Insert a canonical message, returning its `message_id`. When
+    /// `native_event_id` is `Some` this is idempotent: a message already carrying
+    /// that native id is returned rather than duplicated (relay echo / refetch).
+    pub fn record_message(
+        &self,
+        thread_id: &str,
+        author_pubkey: &str,
+        body: &str,
+        created_at: u64,
+        direction: &str,
+        sync_state: &str,
+        native_event_id: Option<&str>,
+    ) -> Result<String> {
+        if let Some(eid) = native_event_id {
+            if let Some(mid) = self
+                .conn
+                .query_row(
+                    "SELECT message_id FROM messages WHERE native_event_id=?1",
+                    params![eid],
+                    |r| r.get::<_, String>(0),
+                )
+                .ok()
+            {
+                return Ok(mid);
+            }
+        }
+        let mid = gen_id("msg");
+        self.conn.execute(
+            "INSERT INTO messages
+               (message_id, thread_id, author_pubkey, body, created_at, direction, sync_state, native_event_id, error)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL)",
+            params![mid, thread_id, author_pubkey, body, created_at, direction, sync_state, native_event_id],
+        )?;
+        Ok(mid)
+    }
+
+    pub fn mark_message_sync_state(
+        &self,
+        message_id: &str,
+        sync_state: &str,
+        error: Option<&str>,
+    ) -> Result<()> {
+        self.conn.execute(
+            "UPDATE messages SET sync_state=?2, error=?3 WHERE message_id=?1",
+            params![message_id, sync_state, error],
+        )?;
+        Ok(())
+    }
+
+    /// Idempotent. `target_session = None` stores a NULL addressee (SQLite treats
+    /// NULL as distinct in the PK, matching the doc's recipient model).
+    pub fn add_message_recipient(
+        &self,
+        message_id: &str,
+        recipient_pubkey: &str,
+        target_session: Option<&str>,
+    ) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR IGNORE INTO message_recipients
+               (message_id, recipient_pubkey, target_session, delivered_at)
+             VALUES (?1, ?2, ?3, NULL)",
+            params![message_id, recipient_pubkey, target_session],
+        )?;
+        Ok(())
+    }
+
+    /// Admit (or re-admit) a member. Upsert: preserves the original `admitted_at`,
+    /// clears any prior `revoked_at`, refreshes role/source/updated_at.
+    pub fn admit_member(
+        &self,
+        project_id: &str,
+        pubkey: &str,
+        role: &str,
+        source: &str,
+        ts: u64,
+    ) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO membership (project_id, pubkey, role, admitted_at, revoked_at, source, updated_at)
+             VALUES (?1, ?2, ?3, ?5, NULL, ?4, ?5)
+             ON CONFLICT(project_id, pubkey) DO UPDATE SET
+               role=excluded.role, source=excluded.source, revoked_at=NULL, updated_at=excluded.updated_at",
+            params![project_id, pubkey, role, source, ts],
+        )?;
+        Ok(())
+    }
+
+    pub fn revoke_member(&self, project_id: &str, pubkey: &str, ts: u64) -> Result<()> {
+        self.conn.execute(
+            "UPDATE membership SET revoked_at=?3, updated_at=?3 WHERE project_id=?1 AND pubkey=?2",
+            params![project_id, pubkey, ts],
+        )?;
+        Ok(())
+    }
+
+    /// The admission predicate (write-side) and roster query (read-side) in one.
+    /// `Unhydrated` (no rows at all for the project) is distinct from `NotMember`
+    /// (rows exist, but not this pubkey) so the materializer can quarantine
+    /// inbound events until membership arrives.
+    pub fn is_member_at(&self, project_id: &str, pubkey: &str, ts: u64) -> Result<MembershipDecision> {
+        let project_rows: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM membership WHERE project_id=?1",
+            params![project_id],
+            |r| r.get(0),
+        )?;
+        if project_rows == 0 {
+            return Ok(MembershipDecision::Unhydrated);
+        }
+        let row: Option<(String, u64, Option<u64>)> = self
+            .conn
+            .query_row(
+                "SELECT role, admitted_at, revoked_at FROM membership WHERE project_id=?1 AND pubkey=?2",
+                params![project_id, pubkey],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .ok();
+        match row {
+            None => Ok(MembershipDecision::NotMember),
+            Some((role, admitted_at, revoked_at)) => {
+                if let Some(rev) = revoked_at {
+                    if rev <= ts {
+                        return Ok(MembershipDecision::Revoked);
+                    }
+                }
+                if admitted_at <= ts {
+                    Ok(MembershipDecision::Member { role })
+                } else {
+                    // Admitted in the future relative to ts → not yet a member.
+                    Ok(MembershipDecision::NotMember)
+                }
+            }
+        }
+    }
+
+    /// Park an inbound event that could not be admitted yet. Idempotent on
+    /// `native_event_id`.
+    pub fn quarantine_inbound(
+        &self,
+        native_event_id: &str,
+        project_id: Option<&str>,
+        reason: &str,
+        raw_envelope: &str,
+        ts: u64,
+    ) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR IGNORE INTO inbound_quarantine
+               (native_event_id, project_id, reason, raw_envelope, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![native_event_id, project_id, reason, raw_envelope, ts],
+        )?;
+        Ok(())
+    }
+
+    /// Quarantined envelopes awaiting replay, optionally filtered to one project.
+    pub fn replay_quarantine(&self, project_id: Option<&str>) -> Result<Vec<QuarantinedEnvelope>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT native_event_id, project_id, reason, raw_envelope, created_at
+             FROM inbound_quarantine
+             WHERE (?1 IS NULL OR project_id=?1)
+             ORDER BY created_at",
+        )?;
+        let rows = stmt
+            .query_map(params![project_id], |r| {
+                Ok(QuarantinedEnvelope {
+                    native_event_id: r.get(0)?,
+                    project_id: r.get(1)?,
+                    reason: r.get(2)?,
+                    raw_envelope: r.get(3)?,
+                    created_at: r.get(4)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rows)
+    }
+
+    /// Drop a quarantined envelope once it has been replayed/admitted.
+    pub fn clear_quarantine(&self, native_event_id: &str) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM inbound_quarantine WHERE native_event_id=?1",
+            params![native_event_id],
+        )?;
+        Ok(())
+    }
+
+    /// Backfill canonical project origins + membership from the legacy tables for
+    /// the current kind1/nip29 fabric. `provider_instance` is the relay-set hash
+    /// (the daemon derives it from config and passes it in — not this layer's job).
+    /// Idempotent: re-running creates no duplicate origins or membership rows.
+    pub fn backfill_kind1_nip29_origins(&self, provider_instance: &str, now: u64) -> Result<()> {
+        const FABRIC: &str = "kind1-nip29";
+        // Every project slug ever observed across the legacy tables.
+        let slugs: Vec<String> = {
+            let mut stmt = self.conn.prepare(
+                "SELECT project FROM project_meta
+                 UNION SELECT project FROM sessions
+                 UNION SELECT project FROM peer_sessions
+                 UNION SELECT project FROM group_members",
+            )?;
+            let v: Vec<String> = stmt
+                .query_map([], |r| r.get::<_, String>(0))?
+                .filter_map(|r| r.ok())
+                .collect();
+            v
+        };
+        for slug in &slugs {
+            let pid = self.ensure_project_origin(FABRIC, provider_instance, slug, slug, now)?;
+            // project_meta is the authority for `about`; carry it onto the row.
+            if let Some(about) = self.get_project_meta(slug)? {
+                self.conn.execute(
+                    "UPDATE projects SET about=?2, updated_at=?3 WHERE project_id=?1",
+                    params![pid, about, now],
+                )?;
+            }
+        }
+        // Mirror the nip29 roster snapshot into canonical membership.
+        let members: Vec<(String, String, String)> = {
+            let mut stmt = self
+                .conn
+                .prepare("SELECT project, pubkey, role FROM group_members")?;
+            let v: Vec<(String, String, String)> = stmt
+                .query_map([], |r| {
+                    Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
+                })?
+                .filter_map(|r| r.ok())
+                .collect();
+            v
+        };
+        for (project, pubkey, role) in &members {
+            if let Some(pid) = self.project_id_for_origin(FABRIC, provider_instance, project)? {
+                self.admit_member(&pid, pubkey, role, "nip29-39002", now)?;
+            }
+        }
+        Ok(())
+    }
 }
 
 fn row_to_session(row: &rusqlite::Row) -> rusqlite::Result<SessionRecord> {
@@ -1323,5 +1767,186 @@ mod tests {
         // After drain, both peek and drain return empty.
         assert!(s.peek_inbox("sess-peek").unwrap().is_empty(), "peek after drain must be empty");
         assert!(s.drain_inbox("sess-peek").unwrap().is_empty(), "second drain must be empty");
+    }
+
+    // ── Phase 1: canonical read-model schema ─────────────────────────────
+
+    #[test]
+    fn phase1_new_tables_exist_after_open() {
+        let s = Store::open_memory().unwrap();
+        let n: i64 = s
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN
+                 ('projects','project_origins','threads','thread_origins','messages',
+                  'message_recipients','inbound_quarantine','membership')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(n, 8, "all 8 Phase 1 tables must be created");
+    }
+
+    #[test]
+    fn phase1_ensure_project_origin_is_idempotent() {
+        let s = Store::open_memory().unwrap();
+        let a = s
+            .ensure_project_origin("kind1-nip29", "relayhash", "tenex-edge", "tenex-edge", 100)
+            .unwrap();
+        let b = s
+            .ensure_project_origin("kind1-nip29", "relayhash", "tenex-edge", "tenex-edge", 200)
+            .unwrap();
+        assert_eq!(a, b, "same origin → same project_id");
+        let count: i64 = s
+            .conn
+            .query_row("SELECT COUNT(*) FROM projects", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1, "no duplicate project row");
+        assert_eq!(
+            s.project_id_for_origin("kind1-nip29", "relayhash", "tenex-edge").unwrap(),
+            Some(a.clone())
+        );
+        // A different fabric/instance/key is a distinct project.
+        let c = s
+            .ensure_project_origin("kind1-nip29", "relayhash", "other", "other", 100)
+            .unwrap();
+        assert_ne!(a, c);
+    }
+
+    #[test]
+    fn phase1_is_member_at_lifecycle() {
+        let s = Store::open_memory().unwrap();
+        let pid = s
+            .ensure_project_origin("kind1-nip29", "ri", "p", "p", 10)
+            .unwrap();
+        // No membership rows at all → Unhydrated.
+        assert_eq!(
+            s.is_member_at(&pid, "alice", 100).unwrap(),
+            MembershipDecision::Unhydrated
+        );
+        // Admit bob → bob is Member, alice is NotMember (rows now exist).
+        s.admit_member(&pid, "bob", "member", "nip29-39002", 50).unwrap();
+        assert_eq!(
+            s.is_member_at(&pid, "bob", 100).unwrap(),
+            MembershipDecision::Member { role: "member".into() }
+        );
+        assert_eq!(
+            s.is_member_at(&pid, "alice", 100).unwrap(),
+            MembershipDecision::NotMember
+        );
+        // A query before bob's admission time sees him as not-yet-member.
+        assert_eq!(
+            s.is_member_at(&pid, "bob", 40).unwrap(),
+            MembershipDecision::NotMember
+        );
+        // Revoke bob at t=80 → Revoked when queried at/after 80, still Member before.
+        s.revoke_member(&pid, "bob", 80).unwrap();
+        assert_eq!(s.is_member_at(&pid, "bob", 100).unwrap(), MembershipDecision::Revoked);
+        assert_eq!(
+            s.is_member_at(&pid, "bob", 60).unwrap(),
+            MembershipDecision::Member { role: "member".into() }
+        );
+        // Re-admit clears the revocation.
+        s.admit_member(&pid, "bob", "admin", "nip29-39002", 90).unwrap();
+        assert_eq!(
+            s.is_member_at(&pid, "bob", 100).unwrap(),
+            MembershipDecision::Member { role: "admin".into() }
+        );
+    }
+
+    #[test]
+    fn phase1_record_message_dedups_on_native_event_id() {
+        let s = Store::open_memory().unwrap();
+        let pid = s.ensure_project_origin("kind1-nip29", "ri", "p", "p", 1).unwrap();
+        let tid = s.ensure_thread_origin(&pid, "kind1-nip29", "ri", "root-eid", 1).unwrap();
+        let m1 = s
+            .record_message(&tid, "author", "hi", 10, "inbound", "accepted", Some("evt-1"))
+            .unwrap();
+        let m2 = s
+            .record_message(&tid, "author", "hi (echo)", 10, "inbound", "accepted", Some("evt-1"))
+            .unwrap();
+        assert_eq!(m1, m2, "same native_event_id → same message_id (no dup)");
+        let count: i64 = s
+            .conn
+            .query_row("SELECT COUNT(*) FROM messages", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+        // None native id always inserts a fresh row.
+        let m3 = s
+            .record_message(&tid, "author", "local", 11, "outbound", "published", None)
+            .unwrap();
+        assert_ne!(m1, m3);
+        // Recipient rows are idempotent.
+        s.add_message_recipient(&m1, "rcpt", Some("sess-1")).unwrap();
+        s.add_message_recipient(&m1, "rcpt", Some("sess-1")).unwrap();
+        let rc: i64 = s
+            .conn
+            .query_row("SELECT COUNT(*) FROM message_recipients", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rc, 1);
+    }
+
+    #[test]
+    fn phase1_quarantine_roundtrip_and_idempotent() {
+        let s = Store::open_memory().unwrap();
+        s.quarantine_inbound("evt-q", Some("proj-x"), "unhydrated", "{\"raw\":1}", 5).unwrap();
+        s.quarantine_inbound("evt-q", Some("proj-x"), "unhydrated", "{\"raw\":1}", 9).unwrap();
+        let all = s.replay_quarantine(None).unwrap();
+        assert_eq!(all.len(), 1, "INSERT OR IGNORE dedups by native_event_id");
+        assert_eq!(all[0].project_id.as_deref(), Some("proj-x"));
+        assert!(s.replay_quarantine(Some("nope")).unwrap().is_empty());
+        assert_eq!(s.replay_quarantine(Some("proj-x")).unwrap().len(), 1);
+        s.clear_quarantine("evt-q").unwrap();
+        assert!(s.replay_quarantine(None).unwrap().is_empty());
+    }
+
+    #[test]
+    fn phase1_backfill_is_idempotent() {
+        let s = Store::open_memory().unwrap();
+        // Seed legacy state across the four source tables.
+        s.upsert_project_meta("tenex-edge", "the edge fabric", 1).unwrap();
+        s.upsert_peer_session("ps-1", "pk-peer", "peer", "otherproj", "host", "", 1)
+            .unwrap();
+        s.replace_group_members(
+            "tenex-edge",
+            &[("pk-1".into(), "admin".into()), ("pk-2".into(), "member".into())],
+            1,
+        )
+        .unwrap();
+
+        let projects_before = || -> i64 {
+            s.conn.query_row("SELECT COUNT(*) FROM projects", [], |r| r.get(0)).unwrap()
+        };
+        let members_before = || -> i64 {
+            s.conn.query_row("SELECT COUNT(*) FROM membership", [], |r| r.get(0)).unwrap()
+        };
+
+        s.backfill_kind1_nip29_origins("relayhash", 100).unwrap();
+        let p1 = projects_before();
+        let m1 = members_before();
+        assert!(p1 >= 2, "tenex-edge + otherproj origins created (got {p1})");
+        assert_eq!(m1, 2, "two group_members mirrored into membership");
+
+        // about carried from project_meta onto the canonical project row.
+        let pid = s
+            .project_id_for_origin("kind1-nip29", "relayhash", "tenex-edge")
+            .unwrap()
+            .unwrap();
+        let about: Option<String> = s
+            .conn
+            .query_row("SELECT about FROM projects WHERE project_id=?1", params![pid], |r| r.get(0))
+            .unwrap();
+        assert_eq!(about.as_deref(), Some("the edge fabric"));
+
+        // membership reflects the roster.
+        assert_eq!(
+            s.is_member_at(&pid, "pk-1", 200).unwrap(),
+            MembershipDecision::Member { role: "admin".into() }
+        );
+
+        // Second run is a no-op at the row-count level.
+        s.backfill_kind1_nip29_origins("relayhash", 300).unwrap();
+        assert_eq!(projects_before(), p1, "no duplicate project rows on re-backfill");
+        assert_eq!(members_before(), m1, "no duplicate membership rows on re-backfill");
     }
 }
