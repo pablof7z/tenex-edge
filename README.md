@@ -36,11 +36,20 @@ cli ── runtime ── { domain · codec · transport · state · distill }
   `h` tag, using the project slug as the group id.
 - `transport` — thin adapter over `nostr-sdk` (publish/subscribe/AUTH/fetch).
 - `state` — SQLite: my sessions, the peer directory, the per-session inbox
-  (idempotent on `(mention_event_id, target_session)`).
+  (idempotent on `(mention_event_id, target_session)`). Opened by ONE process
+  only — the daemon — so there is a single writer by construction.
 - `distill` — recent conversation transcript → one-line intent. LLM-based via
   the shared `~/.tenex` provider/model config.
-- `runtime` — the per-session background engine: presence heartbeat, status,
-  distilled activity, peer-directory upkeep, mention routing, liveness reaper.
+- `runtime` — the per-session engine (`run_session_in_daemon`): presence
+  heartbeat, status, distilled activity, watch-pid liveness. Runs as an async
+  task INSIDE the daemon, sharing its store + relay connection.
+- `daemon` — ONE per-machine daemon (`tenex-edge __daemon`, spawned
+  automatically) that solely owns `state.db`, the single relay connection, the
+  ACL, the inbox, presence, and peer pruning. Every CLI invocation is a thin
+  client that talks to it over a Unix socket at `$TENEX_EDGE_HOME/daemon.sock`
+  (newline-delimited JSON-RPC with a versioned handshake). This collapses the
+  former N per-session writers/relay-connections to one. See
+  `docs/daemon-design.md`.
 
 > **Transport note.** M1 named NMP as the transport. On inspection NMP is a full
 > cross-platform *app kernel* (Elm-architecture, FFI, flatbuffers) — a poor fit
@@ -67,16 +76,20 @@ Reads the shared `~/.tenex/config.json` (only `whitelistedPubkeys`, optional
 
 ## Commands
 
+The session/turn lifecycle (session start/end, turn start/check/end) has **no
+standalone commands** — hosts drive it through the single `hook` entry point
+(see _Host integrations_ below), which parses the harness payload on stdin and
+runs the corresponding step. The commands below are the human/agent-facing
+surface.
+
 | Command | Purpose |
 |---|---|
-| `session-start --agent <slug> [--session-id <id>] [--cwd <p>] [--watch-pid <n>]` | Publish identity, fork the background engine, print the session id. |
-| `session-end --session <id>` | Stop the engine cleanly (go idle). |
+| `hook --host <name> --type <hook-type>` | The one entry point for the session/turn lifecycle. Reads the harness's hook JSON on stdin; dispatches `session-start`/`session-end`/`user-prompt-submit`/`post-tool-use`/`stop` to the matching internal step. This is how every host (Claude Code, Codex, opencode) starts sessions and brackets turns. |
 | `send-message --recipient <target> --message <m> --session <id>` | Mention an agent or a specific session. |
 | `who [--project <slug>] [--live]` | List visible peers (with session-id prefixes); `--live` opens a refreshing terminal board. |
 | `tail [--project <slug>]` | Stream all fabric activity, colorized. |
-| `inbox --session <id>` | Drain pending mentions (used by the injection hook). |
-| `turn-start --session <id> [--transcript <path>]` | Mark an agent turn active for transcript-based distillation. |
-| `turn-end --session <id>` | Mark the turn idle and clear live status. |
+| `inbox --session <id>` | Drain pending mentions (opencode injection path + manual "check my messages"). |
+| `wait-for-mention [--session <id>]` | Block until a mention arrives, print it, and exit (run in the background to be woken on a mention). |
 
 ## Host integrations (Claude Code · Codex · OpenCode)
 

@@ -7,14 +7,16 @@ import { join } from "node:path"
 
 // ── tenex-edge ⇄ opencode bridge ─────────────────────────────────────────────
 //
-// Makes an opencode session a citizen on the tenex-edge fabric, mirroring the
-// Claude Code hook integration:
-//   session-start → on first message of a session (forks the presence engine,
-//                   watching opencode's PID so it reaps on exit)
-//   turn-start    → experimental.chat.messages.transform, gated to once per
-//                   user message (marks the session "working" so the engine
-//                   starts its distillation timer)
-//   turn-end      → event → session.idle (marks the session idle)
+// Makes an opencode session a citizen on the tenex-edge fabric. Lifecycle steps
+// all go through the single `hook` entry point (same as Claude Code / Codex) —
+// this plugin pipes a JSON payload on stdin and reads stdout back:
+//   session-start (hook)        → on first message of a session (spawns the
+//                   presence engine, watching opencode's PID so it reaps on exit;
+//                   the daemon generates the session id and returns it on stdout)
+//   user-prompt-submit (hook)   → experimental.chat.messages.transform, gated to
+//                   once per user message (marks the session "working" so the
+//                   engine starts its distillation timer)
+//   stop (hook)                 → event → session.idle (marks the session idle)
 //   inject        → experimental.chat.messages.transform (prepends peer mentions
 //                   addressed to this session, so the agent SEES them and acts)
 //
@@ -41,7 +43,6 @@ function resolveBin(): string {
 
 export const TenexEdge: Plugin = async ({ client, directory }) => {
   const BIN = resolveBin()
-  const AGENT = process.env.TENEX_EDGE_AGENT ?? "opencode"
   let hinted = false
 
   function run(args: string[]): Promise<string> {
@@ -49,6 +50,23 @@ export const TenexEdge: Plugin = async ({ client, directory }) => {
       execFile(BIN, args, { timeout: 60_000, maxBuffer: 8 * 1024 * 1024 }, (_e, out) =>
         resolve(out ?? ""),
       )
+    })
+  }
+
+  // Session/turn lifecycle goes through the single `hook` entry point — the same
+  // door Claude Code and Codex use — by piping a small JSON payload on stdin and
+  // reading stdout back. tenex-edge has no per-step subcommands anymore; `hook
+  // --host opencode --type <t>` parses this payload and drives the lifecycle.
+  // (Peer queries — `who`, `inbox`, `send-message` — stay plain subcommands.)
+  function runHook(type: string, payload: Record<string, unknown>): Promise<string> {
+    return new Promise((resolve) => {
+      const child = execFile(
+        BIN,
+        ["hook", "--host", "opencode", "--type", type],
+        { timeout: 60_000, maxBuffer: 8 * 1024 * 1024 },
+        (_e, out) => resolve(out ?? ""),
+      )
+      child.stdin?.end(JSON.stringify(payload))
     })
   }
 
@@ -105,8 +123,11 @@ export const TenexEdge: Plugin = async ({ client, directory }) => {
   // blocks opencode startup. When it completes we record the session id + export
   // it so the agent's own `tenex-edge` shell commands resolve to THIS session.
   // Watch opencode's PID so the engine reaps + goes idle when opencode exits.
+  // No session id of our own — session-start generates one and returns it on
+  // stdout. We pass our PID so the engine reaps when opencode exits. The agent
+  // slug comes from the inherited TENEX_EDGE_AGENT env (default "opencode").
   let SID = ""
-  run(["session-start", "--agent", AGENT, "--cwd", directory, "--watch-pid", String(process.pid)])
+  runHook("session-start", { cwd: directory, pid: process.pid })
     .then((out) => {
       SID = out.trim()
       if (SID) process.env.TENEX_EDGE_SESSION = SID
@@ -142,9 +163,13 @@ export const TenexEdge: Plugin = async ({ client, directory }) => {
       if (SID && msgID && msgID !== lastTurnMsgID) {
         lastTurnMsgID = msgID
         const transcriptPath = await fetchTranscript(ocSessionID)
-        const args = ["turn-start", "--session", SID]
-        if (transcriptPath) args.push("--transcript", transcriptPath)
-        await run(args)
+        // Turn start maps to the user-prompt-submit hook. We deliberately omit
+        // `prompt`, so (unlike Claude Code / Codex) the prompt is NOT published
+        // as a kind:1 OP — preserving this plugin's existing behavior.
+        await runHook("user-prompt-submit", {
+          session_id: SID,
+          ...(transcriptPath ? { transcript_path: transcriptPath } : {}),
+        })
       }
 
       let blocks: string[] = []
@@ -155,7 +180,7 @@ export const TenexEdge: Plugin = async ({ client, directory }) => {
           `You are a citizen on the tenex-edge fabric. Peers (across Claude Code, ` +
           `Codex, opencode) are reachable by name. See them: \`${BIN} who\`. ` +
           `Check messages others sent you: \`${BIN} inbox\`. ` +
-          `Message one: \`${BIN} send-message --recipient <agent|session-id> --message "..."\`. ` +
+          `Message one: \`${BIN} send-message --recipient <agent@project|session-id> --message "..."\`. ` +
           `(No session id needed — it's resolved from the working directory.) ` +
           `Run \`${BIN} wait-for-mention\` with run_in_background=true now so you are woken when a mention arrives. Re-run it each time one is received.`,
         )
@@ -197,11 +222,11 @@ export const TenexEdge: Plugin = async ({ client, directory }) => {
 
     // Turn finished: opencode emits session.idle when the assistant is done
     // responding. Mark the session idle. session.idle carries the *opencode*
-    // session id, but turn-end wants the tenex-edge SID (1:1 in this plugin).
+    // session id, but the stop hook wants the tenex-edge SID (1:1 in this plugin).
     event: async ({ event }: { event: any }) => {
       if (!SID) return
       if (event?.type === "session.idle") {
-        await run(["turn-end", "--session", SID])
+        await runHook("stop", { session_id: SID })
       }
     },
   }

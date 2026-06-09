@@ -29,25 +29,12 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Start a session: publish identity, begin presence/awareness in the background.
-    SessionStart {
-        #[arg(long)]
-        agent: String,
-        /// Adopt the host's session id (e.g. Claude Code's). Generated if absent.
-        #[arg(long)]
-        session_id: Option<String>,
-        /// Working directory to resolve the project from (default: cwd).
-        #[arg(long)]
-        cwd: Option<PathBuf>,
-        /// Host PID to watch; the background process stops if it dies.
-        #[arg(long)]
-        watch_pid: Option<i32>,
-    },
-    /// End a session cleanly (stops the background process, goes idle).
-    SessionEnd {
-        #[arg(long)]
-        session: String,
-    },
+    // session-start / session-end / turn-start / turn-check / turn-end are NOT
+    // subcommands. They are hook-driven lifecycle steps invoked only through
+    // `hook --type <…>`, which parses the harness's stdin payload and calls the
+    // corresponding private fn (session_start_inner / session_end / turn_start /
+    // turn_check / turn_end). There is no host-facing way — or need — to invoke
+    // them by hand.
     /// Mention another agent or a specific session.
     SendMessage {
         /// session-id (or prefix), agent slug, slug@project, or hex pubkey.
@@ -111,39 +98,6 @@ enum Cmd {
         #[arg(long, default_value = "300")]
         timeout: u64,
     },
-    /// Internal/manual: mark a session as working on a turn and emit fabric
-    /// context (inbox messages + presence/status changes since the last turn).
-    /// Harnesses do not call this directly — `hook --type user-prompt-submit`
-    /// invokes it. Exposed for manual use and debugging.
-    TurnStart {
-        #[arg(long)]
-        session: String,
-        /// Path to the host conversation transcript (JSONL) for this session.
-        #[arg(long)]
-        transcript: Option<String>,
-        /// Emit JSON {"systemMessage": "..."} instead of plain text (for Codex).
-        #[arg(long)]
-        json: bool,
-    },
-    /// Internal/manual: check for new inbox messages mid-turn. Read-only — does
-    /// not drain the inbox; turn-start at the next prompt drains. Harnesses do
-    /// not call this directly — `hook --type post-tool-use` invokes it. Exposed
-    /// for manual use and debugging.
-    TurnCheck {
-        /// Session id; if omitted, resolved from the current directory.
-        #[arg(long)]
-        session: Option<String>,
-        /// Emit JSON {"systemMessage": "..."} instead of plain text (for Codex).
-        #[arg(long)]
-        json: bool,
-    },
-    /// Internal/manual: mark a session idle; the engine clears the agent's
-    /// status on its next poll. Harnesses do not call this directly —
-    /// `hook --type stop` invokes it. Exposed for manual use and debugging.
-    TurnEnd {
-        #[arg(long)]
-        session: String,
-    },
     /// Manage NIP-29 project groups (list, set description).
     Project {
         #[command(subcommand)]
@@ -196,13 +150,6 @@ enum ProjectAction {
 
 pub async fn run(cli: Cli) -> Result<()> {
     match cli.cmd {
-        Cmd::SessionStart {
-            agent,
-            session_id,
-            cwd,
-            watch_pid,
-        } => session_start(agent, session_id, cwd, watch_pid),
-        Cmd::SessionEnd { session } => session_end(session),
         Cmd::SendMessage {
             recipient,
             message,
@@ -235,13 +182,6 @@ pub async fn run(cli: Cli) -> Result<()> {
         Cmd::WaitForMention { session, timeout } => wait_for_mention(session, timeout).await,
         Cmd::Project { action } => project(action).await,
         Cmd::Doctor => doctor().await,
-        Cmd::TurnStart {
-            session,
-            transcript,
-            json,
-        } => turn_start(session, transcript, json).await,
-        Cmd::TurnCheck { session, json } => turn_check(session, json),
-        Cmd::TurnEnd { session } => turn_end(session),
         Cmd::Hook { host, hook_type } => hook_run(host, hook_type).await,
         Cmd::Daemon => crate::daemon::server::run().await,
     }
@@ -255,16 +195,6 @@ const PEER_FRESH_SECS: u64 = 90;
 // are thin clients that forward to it over the UDS.
 
 // ── session-start ────────────────────────────────────────────────────────────
-
-fn session_start(
-    agent: String,
-    session_id: Option<String>,
-    cwd: Option<PathBuf>,
-    watch_pid: Option<i32>,
-) -> Result<()> {
-    println!("{}", session_start_inner(agent, session_id, cwd, watch_pid)?);
-    Ok(())
-}
 
 /// Core session-start logic. Returns the resolved session id.
 /// Callers decide what to do with it (print for CLI, discard for hooks).
@@ -313,6 +243,7 @@ async fn send_message(recipient: String, message: String, session: Option<String
         "message": message,
         "session": session,
         "env_session": std::env::var("TENEX_EDGE_SESSION").ok(),
+        "agent": std::env::var("TENEX_EDGE_AGENT").ok(),
         "cwd": std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()),
     });
     let v = daemon_call_async("send_message", params).await?;
@@ -965,6 +896,7 @@ async fn inbox(session: Option<String>) -> Result<()> {
     let params = serde_json::json!({
         "session": session,
         "env_session": std::env::var("TENEX_EDGE_SESSION").ok(),
+        "agent": std::env::var("TENEX_EDGE_AGENT").ok(),
         "cwd": std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()),
     });
     let v = daemon_call_async("inbox", params).await?;
@@ -1007,6 +939,7 @@ async fn wait_for_mention(session: Option<String>, timeout: u64) -> Result<()> {
     let params = serde_json::json!({
         "session": session,
         "env_session": std::env::var("TENEX_EDGE_SESSION").ok(),
+        "agent": std::env::var("TENEX_EDGE_AGENT").ok(),
         "cwd": std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()),
         "timeout": timeout,
     });
@@ -1138,6 +1071,7 @@ fn turn_check(session: Option<String>, json_out: bool) -> Result<()> {
     let params = serde_json::json!({
         "session": session,
         "env_session": std::env::var("TENEX_EDGE_SESSION").ok(),
+        "agent": std::env::var("TENEX_EDGE_AGENT").ok(),
         "cwd": std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()),
     });
     let v = crate::daemon::blocking::call("turn_check", params)?;
@@ -1354,6 +1288,14 @@ struct HostDef {
     /// Walk process tree for an ancestor whose command contains this string.
     /// None = no watch-pid. Used by harnesses (e.g. Codex) that omit their PID.
     pid_search: Option<&'static str>,
+    /// When true, a session-start payload with no session id makes the daemon
+    /// GENERATE one and the hook prints it to stdout — for programmatic hosts
+    /// (e.g. opencode) that have no harness-assigned id and capture it back.
+    /// When false (Claude Code, Codex), an empty session id is a fail-open
+    /// no-op: those harnesses always supply their own id, so a missing one means
+    /// a malformed payload, and generating would spawn an orphan session that
+    /// later turn-start/stop calls could never match.
+    generates_sid: bool,
 }
 
 static HOOK_HOSTS: &[HostDef] = &[
@@ -1364,6 +1306,7 @@ static HOOK_HOSTS: &[HostDef] = &[
         transcript_field: Some("transcript_path"),
         output_format: HookOutputFormat::PlainText,
         pid_search: None,
+        generates_sid: false,
     },
     HostDef {
         name: "codex",
@@ -1376,6 +1319,20 @@ static HOOK_HOSTS: &[HostDef] = &[
         transcript_field: Some("transcript_path"),
         output_format: HookOutputFormat::JsonSystemMessage,
         pid_search: Some("codex"),
+        generates_sid: false,
+    },
+    HostDef {
+        // opencode is a programmatic TS plugin, not a stdin-JSON harness in the
+        // usual sense: it pipes a small JSON payload to `hook` and reads stdout.
+        // It has no harness-assigned session id, so session-start generates one
+        // and returns it; it passes its own PID in the payload (no pid_search).
+        name: "opencode",
+        agent_slug: "opencode",
+        session_id_fields: &["session_id"],
+        transcript_field: Some("transcript_path"),
+        output_format: HookOutputFormat::PlainText,
+        pid_search: None,
+        generates_sid: true,
     },
 ];
 
@@ -1438,12 +1395,29 @@ async fn hook_run(host_name: String, hook_type: String) -> Result<()> {
 
     match hook_type.as_str() {
         "session-start" => {
+            // PID to watch: an explicit `pid`/`watch_pid` in the payload (set by
+            // programmatic hosts like opencode, which know their own process)
+            // wins; otherwise walk the process tree for the harness's ancestor.
+            let watch_pid = obj
+                .and_then(|o| o.get("pid").or_else(|| o.get("watch_pid")))
+                .and_then(|v| v.as_i64())
+                .map(|n| n as i32)
+                .or_else(|| host.pid_search.and_then(find_ancestor_pid));
+
             if sid.is_empty() {
-                return Ok(());
+                if !host.generates_sid {
+                    // Fail open: a harness that assigns its own id but dropped it
+                    // here sent a malformed payload — don't spawn an orphan.
+                    return Ok(());
+                }
+                // Programmatic host with no id of its own: generate one and hand
+                // it back on stdout so the caller can adopt it.
+                let new_sid = session_start_inner(agent_slug, None, Some(cwd), watch_pid)?;
+                println!("{new_sid}");
+            } else {
+                // Harness supplied its own id — adopt it, discard the echo.
+                session_start_inner(agent_slug, Some(sid), Some(cwd), watch_pid)?;
             }
-            let watch_pid = host.pid_search.and_then(find_ancestor_pid);
-            // Discard returned session id — hooks receive it from the harness.
-            session_start_inner(agent_slug, Some(sid), Some(cwd), watch_pid)?;
         }
         "session-end" => {
             if !sid.is_empty() {
@@ -1463,6 +1437,7 @@ async fn hook_run(host_name: String, hook_type: String) -> Result<()> {
             if let Some(prompt_text) = prompt {
                 let params = serde_json::json!({
                     "env_session": sid,
+                    "agent": std::env::var("TENEX_EDGE_AGENT").ok(),
                     "cwd": cwd.to_string_lossy(),
                     "prompt": prompt_text,
                 });
