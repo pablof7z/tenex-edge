@@ -16,7 +16,9 @@ use crate::state::{InboxRow, Store};
 use crate::transport::Transport;
 use crate::util::now_secs;
 use anyhow::Result;
-use nostr_sdk::prelude::{Event, Filter, PublicKey, RelayMessage, RelayPoolNotification};
+use nostr_sdk::prelude::{
+    Alphabet, Event, Filter, Kind, PublicKey, RelayMessage, RelayPoolNotification, SingleLetterTag,
+};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -103,6 +105,29 @@ pub async fn run_session(p: EngineParams) -> Result<()> {
         );
     }
     transport.subscribe(initial_filters).await?;
+
+    // One-shot fetch of kind 39000 (NIP-29 group metadata) for this project.
+    // Populates the project_meta cache so `who` can show about-text for other
+    // projects without waiting for a live publish.
+    let group_meta_filter = Filter::new()
+        .kind(Kind::from(39000u16))
+        .custom_tag(
+            SingleLetterTag::lowercase(Alphabet::D),
+            p.project.as_str(),
+        );
+    if let Ok(events) = transport
+        .fetch(group_meta_filter, Duration::from_secs(2))
+        .await
+    {
+        for ev in events {
+            if let Some(project) = event_tag(&ev, "d") {
+                let about = event_tag(&ev, "about").unwrap_or("");
+                store
+                    .upsert_project_meta(project, about, ev.created_at.as_secs())
+                    .ok();
+            }
+        }
+    }
 
     // Announce liveness immediately (don't make presence wait on anything).
     let presence = |expires_at| {
@@ -257,6 +282,17 @@ pub async fn run_session(p: EngineParams) -> Result<()> {
 }
 
 fn handle_incoming(store: &Store, me: &str, owners: &[String], codec: &Kind1Codec, event: &Event) {
+    // NIP-29 group metadata: cache the 'about' text for the channel.
+    if event.kind.as_u16() == 39000 {
+        if let Some(project) = event_tag(event, "d") {
+            let about = event_tag(event, "about").unwrap_or("");
+            store
+                .upsert_project_meta(project, about, event.created_at.as_secs())
+                .ok();
+        }
+        return;
+    }
+
     let is_self = event.pubkey.to_hex() == me;
     let Some(de) = codec.decode(event) else {
         return;
@@ -401,6 +437,17 @@ fn de_name(de: &DomainEvent) -> &'static str {
         DomainEvent::Status(_) => "Status",
         DomainEvent::Mention(_) => "Mention",
     }
+}
+
+fn event_tag<'a>(event: &'a Event, name: &str) -> Option<&'a str> {
+    event.tags.iter().find_map(|t| {
+        let s = t.as_slice();
+        if s.first().map(String::as_str) == Some(name) {
+            s.get(1).map(String::as_str)
+        } else {
+            None
+        }
+    })
 }
 
 fn pid_alive(pid: i32) -> bool {

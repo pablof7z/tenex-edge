@@ -58,8 +58,17 @@ enum Cmd {
     /// Mention another agent or a specific session.
     SendMessage {
         /// session-id (or prefix), agent slug, slug@project, or hex pubkey.
-        recipient: String,
-        message: String,
+        #[arg(value_name = "RECIPIENT")]
+        recipient: Option<String>,
+        /// Message body.
+        #[arg(value_name = "MESSAGE")]
+        message: Option<String>,
+        /// session-id (or prefix), agent slug, slug@project, or hex pubkey.
+        #[arg(long = "recipient", value_name = "RECIPIENT")]
+        recipient_flag: Option<String>,
+        /// Message body.
+        #[arg(long = "message", value_name = "MESSAGE")]
+        message_flag: Option<String>,
         /// My session id; if omitted, resolved from the current directory.
         #[arg(long)]
         session: Option<String>,
@@ -71,6 +80,9 @@ enum Cmd {
         /// Include peers whose heartbeat has stopped (stale).
         #[arg(long)]
         all: bool,
+        /// Show agents across all projects (overrides --project / cwd resolution).
+        #[arg(long)]
+        all_projects: bool,
         /// Keep a full-screen live view open, refreshing automatically.
         #[arg(long)]
         live: bool,
@@ -135,6 +147,17 @@ enum Cmd {
     },
     /// Connectivity check: publish a test note to the configured relays and read it back.
     Doctor,
+    /// Handle a hook event from any supported agent harness.
+    /// Reads hook JSON from stdin; emits context to inject into the model (if any).
+    /// Run `tenex-edge hook --host <name> --type <hook-type>`.
+    Hook {
+        /// Harness name: "claude-code", "codex", … Run `--host help` to list.
+        #[arg(long)]
+        host: String,
+        /// Hook type the harness uses: "session-start", "user-prompt-submit", etc.
+        #[arg(long = "type")]
+        hook_type: String,
+    },
     /// Internal: the detached per-session engine. Not for direct use.
     #[command(name = "__run-session", hide = true)]
     RunSession {
@@ -147,6 +170,9 @@ enum Cmd {
         #[arg(long)]
         watch_pid: Option<i32>,
     },
+    /// Internal: the per-machine daemon. Spawned automatically; not for direct use.
+    #[command(name = "__daemon", hide = true)]
+    Daemon,
 }
 
 #[derive(Subcommand)]
@@ -171,18 +197,29 @@ pub async fn run(cli: Cli) -> Result<()> {
         Cmd::SendMessage {
             recipient,
             message,
+            recipient_flag,
+            message_flag,
             session,
-        } => send_message(recipient, message, session).await,
+        } => {
+            let recipient = recipient_flag
+                .or(recipient)
+                .context("missing recipient; use `tenex-edge send-message --recipient <target> --message \"...\"`")?;
+            let message = message_flag
+                .or(message)
+                .context("missing message; use `tenex-edge send-message --recipient <target> --message \"...\"`")?;
+            send_message(recipient, message, session).await
+        }
         Cmd::Who {
             project,
             all,
+            all_projects,
             live,
             refresh_ms,
         } => {
             if live {
-                who_live(project, all, Duration::from_millis(refresh_ms.max(100)))
+                who_live(project, all, all_projects, Duration::from_millis(refresh_ms.max(100)))
             } else {
-                who(project, all)
+                who(project, all, all_projects)
             }
         }
         Cmd::Acl { action } => acl(action).await,
@@ -197,12 +234,14 @@ pub async fn run(cli: Cli) -> Result<()> {
         } => turn_start(session, transcript, json).await,
         Cmd::TurnCheck { session, json } => turn_check(session, json),
         Cmd::TurnEnd { session } => turn_end(session),
+        Cmd::Hook { host, hook_type } => hook_run(host, hook_type).await,
         Cmd::RunSession {
             agent,
             session_id,
             project,
             watch_pid,
         } => run_session(agent, session_id, project, watch_pid).await,
+        Cmd::Daemon => crate::daemon::server::run().await,
     }
 }
 
@@ -257,6 +296,18 @@ fn session_start(
     cwd: Option<PathBuf>,
     watch_pid: Option<i32>,
 ) -> Result<()> {
+    println!("{}", session_start_inner(agent, session_id, cwd, watch_pid)?);
+    Ok(())
+}
+
+/// Core session-start logic. Returns the resolved session id.
+/// Callers decide what to do with it (print for CLI, discard for hooks).
+fn session_start_inner(
+    agent: String,
+    session_id: Option<String>,
+    cwd: Option<PathBuf>,
+    watch_pid: Option<i32>,
+) -> Result<String> {
     let cfg = Config::load().context("loading ~/.tenex/config.json")?;
     let edge = config::edge_home();
     config::ensure_dir(&edge)?;
@@ -308,9 +359,7 @@ fn session_start(
     store.upsert_session(&rec)?;
     store.touch_session(&session_id, now_secs())?;
 
-    // The session id is the only thing the host needs back.
-    println!("{session_id}");
-    Ok(())
+    Ok(session_id)
 }
 
 #[cfg(unix)]
@@ -454,23 +503,37 @@ fn resolve_recipient(
 
 // ── who ──────────────────────────────────────────────────────────────────────
 
-fn who(project: Option<String>, all: bool) -> Result<()> {
+fn who(project: Option<String>, all: bool, all_projects: bool) -> Result<()> {
     let store = open_store()?;
-    let snapshot = load_who_snapshot(&store, project.as_deref(), all, now_secs())?;
+    let current_project = if all_projects {
+        None
+    } else {
+        Some(project.unwrap_or_else(|| {
+            project::resolve(&std::env::current_dir().unwrap_or_default())
+        }))
+    };
+    let snapshot = load_who_snapshot(&store, current_project.as_deref(), all, now_secs())?;
     print!("{}", render_who_once(&snapshot));
     Ok(())
 }
 
-fn who_live(project: Option<String>, all: bool, refresh: Duration) -> Result<()> {
+fn who_live(project: Option<String>, all: bool, all_projects: bool, refresh: Duration) -> Result<()> {
     let refresh = refresh.max(Duration::from_millis(100));
     let store = open_store()?;
+    let current_project = if all_projects {
+        None
+    } else {
+        Some(project.unwrap_or_else(|| {
+            project::resolve(&std::env::current_dir().unwrap_or_default())
+        }))
+    };
     let _terminal = LiveTerminal::enter()?;
     let mut next_draw = Instant::now();
 
     loop {
         let now = Instant::now();
         if now >= next_draw {
-            let snapshot = load_who_snapshot(&store, project.as_deref(), all, now_secs())?;
+            let snapshot = load_who_snapshot(&store, current_project.as_deref(), all, now_secs())?;
             draw_who_live(&snapshot, refresh)?;
             next_draw = Instant::now() + refresh;
         }
@@ -489,22 +552,21 @@ fn who_live(project: Option<String>, all: bool, refresh: Duration) -> Result<()>
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+struct OtherProjectSummary {
+    project: String,
+    agent_count: usize,
+    about: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct WhoSnapshot {
-    project: Option<String>,
+    project: String,
     all: bool,
     now: u64,
     rows: Vec<WhoRow>,
+    other_projects: Vec<OtherProjectSummary>,
 }
 
-impl WhoSnapshot {
-    fn live_count(&self) -> usize {
-        self.rows.iter().filter(|r| r.fresh).count()
-    }
-
-    fn stale_count(&self) -> usize {
-        self.rows.len().saturating_sub(self.live_count())
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct WhoRow {
@@ -526,65 +588,83 @@ enum WhoSource {
 
 fn load_who_snapshot(
     store: &Store,
-    project: Option<&str>,
+    current_project: Option<&str>,
     all: bool,
     now: u64,
 ) -> Result<WhoSnapshot> {
-    let since = if all {
-        0
-    } else {
-        now.saturating_sub(PEER_FRESH_SECS)
-    };
+    let since = if all { 0 } else { now.saturating_sub(PEER_FRESH_SECS) };
 
-    let mut mine = store.list_my_live_sessions(since)?;
-    if let Some(project) = project {
-        mine.retain(|s| s.project == project);
-    }
+    let mine = store.list_my_live_sessions(since)?;
     let my_ids: std::collections::HashSet<String> =
         mine.iter().map(|s| s.session_id.clone()).collect();
-
-    let peers = store
-        .list_peer_sessions(project, since)?
+    let all_peers: Vec<_> = store
+        .list_peer_sessions(None, since)?
         .into_iter()
-        .filter(|p| !my_ids.contains(&p.session_id));
+        .filter(|p| !my_ids.contains(&p.session_id))
+        .collect();
 
     let mut rows = Vec::new();
-    for s in mine {
+    let mut other_counts: std::collections::BTreeMap<String, usize> =
+        std::collections::BTreeMap::new();
+
+    for s in &mine {
         let age_secs = store
             .session_last_seen(&s.session_id)
             .ok()
             .flatten()
-            .map(|last_seen| now.saturating_sub(last_seen));
-        rows.push(WhoRow {
-            source: WhoSource::Local,
-            fresh: age_secs.map(|age| age <= PEER_FRESH_SECS).unwrap_or(true),
-            slug: s.agent_slug,
-            project: s.project.clone(),
-            status: status_for(store, &s.agent_pubkey, &s.project),
-            host: s.host,
-            session_id: s.session_id,
-            age_secs,
-        });
-    }
-    for p in peers {
-        let age = now.saturating_sub(p.last_seen);
-        rows.push(WhoRow {
-            source: WhoSource::Peer,
-            fresh: age <= PEER_FRESH_SECS,
-            slug: p.slug,
-            project: p.project.clone(),
-            status: status_for(store, &p.pubkey, &p.project),
-            host: p.host,
-            session_id: p.session_id,
-            age_secs: Some(age),
-        });
+            .map(|ls| now.saturating_sub(ls));
+        if current_project.map(|p| p == s.project).unwrap_or(true) {
+            rows.push(WhoRow {
+                source: WhoSource::Local,
+                fresh: age_secs.map(|a| a <= PEER_FRESH_SECS).unwrap_or(true),
+                slug: s.agent_slug.clone(),
+                project: s.project.clone(),
+                status: status_for(store, &s.agent_pubkey, &s.project),
+                host: s.host.clone(),
+                session_id: s.session_id.clone(),
+                age_secs,
+            });
+        } else {
+            *other_counts.entry(s.project.clone()).or_default() += 1;
+        }
     }
 
+    for p in &all_peers {
+        let age = now.saturating_sub(p.last_seen);
+        if current_project.map(|cp| cp == p.project).unwrap_or(true) {
+            rows.push(WhoRow {
+                source: WhoSource::Peer,
+                fresh: age <= PEER_FRESH_SECS,
+                slug: p.slug.clone(),
+                project: p.project.clone(),
+                status: status_for(store, &p.pubkey, &p.project),
+                host: p.host.clone(),
+                session_id: p.session_id.clone(),
+                age_secs: Some(age),
+            });
+        } else {
+            *other_counts.entry(p.project.clone()).or_default() += 1;
+        }
+    }
+
+    let other_projects = other_counts
+        .into_iter()
+        .map(|(project, agent_count)| {
+            let about = store.get_project_meta(&project).ok().flatten();
+            OtherProjectSummary {
+                project,
+                agent_count,
+                about,
+            }
+        })
+        .collect();
+
     Ok(WhoSnapshot {
-        project: project.map(str::to_string),
+        project: current_project.unwrap_or("*").to_string(),
         all,
         now,
         rows,
+        other_projects,
     })
 }
 
@@ -597,54 +677,79 @@ fn status_for(store: &Store, pubkey: &str, project: &str) -> String {
 }
 
 fn render_who_once(snapshot: &WhoSnapshot) -> String {
+    let mut out = String::new();
+
+    let scope = if snapshot.project == "*" {
+        "any project".to_string()
+    } else {
+        snapshot.project.clone()
+    };
     if snapshot.rows.is_empty() {
-        return format!(
-            "(no live agents{})\n",
+        let _ = writeln!(
+            out,
+            "(no live agents in {}{})",
+            scope,
             if snapshot.all {
                 ""
             } else {
                 " — start a session, or run with --all to include stale"
             }
         );
-    }
-
-    let mut out = String::new();
-    let _ = writeln!(out, "{}", "agents:".bold());
-    for row in &snapshot.rows {
-        let dot = if row.fresh {
-            "●".green().to_string()
-        } else {
-            "○".dimmed().to_string()
-        };
-        let status = render_status_colored(&row.status);
-        match row.source {
-            WhoSource::Local => {
-                let _ = writeln!(
-                    out,
-                    "  {dot} {}@{}{}  {}  session {}  {}",
-                    row.slug.cyan(),
-                    slugify_host(&row.host),
-                    status,
-                    row.project.dimmed(),
-                    short_id(&row.session_id).yellow(),
-                    "(this machine)".dimmed()
-                );
-            }
-            WhoSource::Peer => {
-                let age = row.age_secs.unwrap_or(0);
-                let _ = writeln!(
-                    out,
-                    "  {dot} {}@{}{}  {}  session {}  ({}s ago)",
-                    row.slug.cyan(),
-                    slugify_host(&row.host),
-                    status,
-                    row.project.dimmed(),
-                    short_id(&row.session_id).yellow(),
-                    age
-                );
+    } else {
+        let _ = writeln!(out, "{}", "agents:".bold());
+        for row in &snapshot.rows {
+            let dot = if row.fresh {
+                "●".green().to_string()
+            } else {
+                "○".dimmed().to_string()
+            };
+            let status = render_status_colored(&row.status);
+            match row.source {
+                WhoSource::Local => {
+                    let _ = writeln!(
+                        out,
+                        "  {dot} {}@{}{}  {}  session {}  {}",
+                        row.slug.cyan(),
+                        slugify_host(&row.host),
+                        status,
+                        row.project.dimmed(),
+                        short_id(&row.session_id).yellow(),
+                        "(this machine)".dimmed()
+                    );
+                }
+                WhoSource::Peer => {
+                    let age = row.age_secs.unwrap_or(0);
+                    let _ = writeln!(
+                        out,
+                        "  {dot} {}@{}{}  {}  session {}  ({}s ago)",
+                        row.slug.cyan(),
+                        slugify_host(&row.host),
+                        status,
+                        row.project.dimmed(),
+                        short_id(&row.session_id).yellow(),
+                        age
+                    );
+                }
             }
         }
     }
+
+    if snapshot.project != "*" && !snapshot.other_projects.is_empty() {
+        let total: usize = snapshot.other_projects.iter().map(|o| o.agent_count).sum();
+        let _ = writeln!(out);
+        let _ = writeln!(out, "{} other agent(s) in other projects:", total);
+        for op in &snapshot.other_projects {
+            match &op.about {
+                Some(about) if !about.is_empty() => {
+                    let _ = writeln!(out, "  * {} — {}", op.project, about);
+                }
+                _ => {
+                    let _ = writeln!(out, "  * {}", op.project);
+                }
+            }
+        }
+    }
+
     out
 }
 
@@ -657,112 +762,18 @@ fn render_status_colored(status: &str) -> String {
 }
 
 fn draw_who_live(snapshot: &WhoSnapshot, refresh: Duration) -> Result<()> {
-    let (width, height) = terminal::size().unwrap_or((100, 30));
-    let screen = render_who_live(snapshot, width as usize, height as usize, refresh);
+    let refresh_ms = refresh.as_millis();
+    let mut screen = render_who_once(snapshot);
+    let _ = writeln!(
+        screen,
+        "{}",
+        format!("  --live  refresh {refresh_ms}ms  q/esc/ctrl-c to quit").dimmed()
+    );
     let mut stdout = io::stdout();
     execute!(stdout, MoveTo(0, 0), Clear(ClearType::All))?;
     write!(stdout, "{screen}")?;
     stdout.flush()?;
     Ok(())
-}
-
-fn render_who_live(
-    snapshot: &WhoSnapshot,
-    width: usize,
-    height: usize,
-    refresh: Duration,
-) -> String {
-    let width = width.max(40);
-    let height = height.max(8);
-    let agent_w = if width < 80 { 20 } else { 28 };
-    let project_w = if width < 80 { 10 } else { 14 };
-    let session_w = 10;
-    let seen_w = if width < 80 { 8 } else { 10 };
-    let fixed = 2 + agent_w + 2 + project_w + 2 + session_w + 2 + seen_w + 2;
-    let status_w = width.saturating_sub(fixed).max(12);
-    let max_rows = height.saturating_sub(7).max(1);
-
-    let mut out = String::new();
-    let scope = snapshot.project.as_deref().unwrap_or("*");
-    let mode = if snapshot.all { "all" } else { "fresh" };
-    let refresh_ms = refresh.as_millis();
-    let _ = writeln!(out, "tenex-edge who --live");
-    let _ = writeln!(
-        out,
-        "{}",
-        fit_plain(
-            &format!(
-                "project: {scope}   mode: {mode}   refresh: {refresh_ms}ms   q/esc/ctrl-c quits"
-            ),
-            width
-        )
-    );
-    let _ = writeln!(
-        out,
-        "{}",
-        fit_plain(
-            &format!(
-                "{} agent(s): {} live, {} stale",
-                snapshot.rows.len(),
-                snapshot.live_count(),
-                snapshot.stale_count()
-            ),
-            width
-        )
-    );
-    let _ = writeln!(out);
-
-    if snapshot.rows.is_empty() {
-        let message = if snapshot.all {
-            "(no agents)"
-        } else {
-            "(no live agents — start a session, or run with --all to include stale)"
-        };
-        let _ = writeln!(out, "{}", fit_plain(message, width));
-        return out;
-    }
-
-    let _ = writeln!(
-        out,
-        "{}",
-        fit_plain(
-            &format!(
-                "  {}  {}  {}  {}  {}",
-                pad_fit("AGENT@HOST", agent_w),
-                pad_fit("PROJECT", project_w),
-                pad_fit("STATUS", status_w),
-                pad_fit("SESSION", session_w),
-                pad_fit("SEEN", seen_w)
-            ),
-            width
-        )
-    );
-
-    for row in snapshot.rows.iter().take(max_rows) {
-        let dot = if row.fresh { "●" } else { "○" };
-        let agent_at_host = format!("{}@{}", row.slug, slugify_host(&row.host));
-        let _ = writeln!(
-            out,
-            "{}",
-            fit_plain(
-                &format!(
-                    "{dot} {}  {}  {}  {}  {}",
-                    pad_fit(&agent_at_host, agent_w),
-                    pad_fit(&row.project, project_w),
-                    pad_fit(&status_plain(&row.status), status_w),
-                    pad_fit(&short_id(&row.session_id), session_w),
-                    pad_fit(&seen_label(row), seen_w),
-                ),
-                width
-            )
-        );
-    }
-
-    let hidden = snapshot.rows.len().saturating_sub(max_rows);
-    if hidden > 0 {
-        let _ = writeln!(out, "{}", fit_plain(&format!("... {hidden} more"), width));
-    }
-    out
 }
 
 fn status_plain(status: &str) -> String {
@@ -773,39 +784,6 @@ fn status_plain(status: &str) -> String {
     }
 }
 
-fn seen_label(row: &WhoRow) -> String {
-    match row.source {
-        WhoSource::Local => row
-            .age_secs
-            .map(|age| format!("local {age}s"))
-            .unwrap_or_else(|| "local".to_string()),
-        WhoSource::Peer => row
-            .age_secs
-            .map(|age| format!("{age}s ago"))
-            .unwrap_or_else(|| "?".to_string()),
-    }
-}
-
-fn pad_fit(value: &str, width: usize) -> String {
-    let fitted = fit_plain(value, width);
-    format!("{fitted:<width$}")
-}
-
-fn fit_plain(value: &str, width: usize) -> String {
-    if width == 0 {
-        return String::new();
-    }
-    let char_count = value.chars().count();
-    if char_count <= width {
-        return value.to_string();
-    }
-    if width <= 3 {
-        return ".".repeat(width);
-    }
-    let mut out = value.chars().take(width - 3).collect::<String>();
-    out.push_str("...");
-    out
-}
 
 fn should_quit_live(event: TermEvent) -> bool {
     let TermEvent::Key(key) = event else {
@@ -904,9 +882,9 @@ mod who_tests {
     }
 
     #[test]
-    fn live_renderer_includes_status_and_controls() {
+    fn live_renderer_same_as_once_with_hint() {
         let snapshot = WhoSnapshot {
-            project: Some("proj".to_string()),
+            project: "proj".to_string(),
             all: false,
             now: 1_000,
             rows: vec![WhoRow {
@@ -919,22 +897,15 @@ mod who_tests {
                 session_id: "remote-session".to_string(),
                 age_secs: Some(5),
             }],
+            other_projects: vec![],
         };
 
-        let rendered = render_who_live(&snapshot, 100, 20, Duration::from_millis(1000));
-
-        assert!(rendered.contains("tenex-edge who --live"));
-        assert!(rendered.contains("q/esc/ctrl-c quits"));
-        assert!(rendered.contains("reviewer"));
-        assert!(rendered.contains("reviewing the patch"));
+        // --live uses render_who_once: same content, plus a dim quit-hint footer.
+        let once = render_who_once(&snapshot);
+        assert!(once.contains("reviewer"));
+        assert!(once.contains("reviewing the patch"));
     }
 
-    #[test]
-    fn fit_plain_truncates_to_width() {
-        assert_eq!(fit_plain("abcdef", 4), "a...");
-        assert_eq!(fit_plain("abcdef", 3), "...");
-        assert_eq!(fit_plain("abc", 4), "abc");
-    }
 }
 
 // ── acl (owner-scoped agent authorization) ───────────────────────────────────
@@ -1154,8 +1125,13 @@ async fn turn_start(session: String, transcript: Option<String>, json_out: bool)
 
     if first_turn {
         blocks.push(
-            "[tenex-edge] Run `tenex-edge wait-for-mention` with run_in_background=true \
-             so you are woken when a mention arrives. Re-run it each time one is received."
+            "[tenex-edge] You are connected to the tenex-edge agent fabric. \
+             You can run `tenex-edge who`, `tenex-edge inbox`, and \
+             `tenex-edge send-message --recipient <agent|session-id> --message \"...\"`. \
+             If the user asks you to message/contact/tell another agent, run `tenex-edge send-message`; \
+             do not say you cannot send messages from here. Run `tenex-edge wait-for-mention` \
+             with run_in_background=true so you are woken when a mention arrives. \
+             Re-run it each time one is received."
                 .to_string(),
         );
     }
@@ -1191,11 +1167,11 @@ async fn turn_start(session: String, transcript: Option<String>, json_out: bool)
 
     // Peer presence — full roster on the first turn; deltas on subsequent turns.
     if first_turn {
-        let snapshot = load_who_snapshot(&store, None, false, now_secs())?;
+        let snapshot = load_who_snapshot(&store, Some(&rec.project), false, now_secs())?;
         if !snapshot.rows.is_empty() {
             let who_text = render_who_plain(&snapshot);
             blocks.push(format!(
-                "tenex-edge fabric — agents you can message with \
+                "tenex-edge fabric — agents you can message. To send, run \
                  `tenex-edge send-message --recipient <agent|session-id> --message \"...\"`:\n{}",
                 who_text.trim_end()
             ));
@@ -1203,10 +1179,12 @@ async fn turn_start(session: String, transcript: Option<String>, json_out: bool)
     } else {
         // Only surface new arrivals and status changes since the last turn began.
         let fresh_since = now_secs().saturating_sub(PEER_FRESH_SECS);
-        let new_peers =
-            store.list_new_peer_sessions(prev_turn_started_at, fresh_since).unwrap_or_default();
-        let status_changes =
-            store.list_status_changes_since(prev_turn_started_at).unwrap_or_default();
+        let new_peers = store
+            .list_new_peer_sessions(prev_turn_started_at, fresh_since, Some(&rec.project))
+            .unwrap_or_default();
+        let status_changes = store
+            .list_status_changes_since(prev_turn_started_at, Some(&rec.project))
+            .unwrap_or_default();
 
         let mut delta: Vec<String> = Vec::new();
         for p in &new_peers {
@@ -1430,4 +1408,191 @@ fn env_u64(key: &str, default: u64) -> u64 {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(default)
+}
+
+// ── hook adapter registry ─────────────────────────────────────────────────────
+//
+// Adding a new agent harness: add one entry to HOOK_HOSTS. Zero new code needed
+// for harnesses that follow the standard pattern (JSON stdin, plain/JSON stdout).
+// Non-standard needs (custom PID detection, exotic output formats) extend the
+// HostDef fields rather than adding branches to hook_run.
+
+/// How context blocks are returned to the model by a given harness.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum HookOutputFormat {
+    /// Plain text on stdout — Claude Code UserPromptSubmit and most harnesses.
+    PlainText,
+    /// Codex-style JSON: {"systemMessage": "<content>"} — all Codex hook types.
+    JsonSystemMessage,
+}
+
+struct HostDef {
+    /// Canonical harness name used in --host.
+    name: &'static str,
+    /// Default agent slug (overridden by TENEX_EDGE_AGENT env var).
+    agent_slug: &'static str,
+    /// JSON fields tried in order to extract the session id from stdin.
+    session_id_fields: &'static [&'static str],
+    /// JSON field for the live transcript path (None if the harness omits it).
+    transcript_field: Option<&'static str>,
+    /// Output format for context injection hooks.
+    output_format: HookOutputFormat,
+    /// Walk process tree for an ancestor whose command contains this string.
+    /// None = no watch-pid. Used by harnesses (e.g. Codex) that omit their PID.
+    pid_search: Option<&'static str>,
+}
+
+static HOOK_HOSTS: &[HostDef] = &[
+    HostDef {
+        name: "claude-code",
+        agent_slug: "claude",
+        session_id_fields: &["session_id"],
+        transcript_field: Some("transcript_path"),
+        output_format: HookOutputFormat::PlainText,
+        pid_search: None,
+    },
+    HostDef {
+        name: "codex",
+        agent_slug: "codex",
+        session_id_fields: &[
+            "session_id", "sessionId",
+            "conversation_id", "conversationId",
+            "thread_id", "threadId",
+        ],
+        transcript_field: Some("transcript_path"),
+        output_format: HookOutputFormat::JsonSystemMessage,
+        pid_search: Some("codex"),
+    },
+];
+
+fn find_hook_host(name: &str) -> Option<&'static HostDef> {
+    if name == "help" {
+        eprintln!(
+            "known hosts: {}",
+            HOOK_HOSTS.iter().map(|h| h.name).collect::<Vec<_>>().join(", ")
+        );
+        return None;
+    }
+    HOOK_HOSTS.iter().find(|h| h.name == name)
+}
+
+// ── hook_run ──────────────────────────────────────────────────────────────────
+
+async fn hook_run(host_name: String, hook_type: String) -> Result<()> {
+    use std::io::Read as _;
+
+    let Some(host) = find_hook_host(&host_name) else {
+        eprintln!("[tenex-edge] unknown host {host_name:?}; run `--host help` to list");
+        return Ok(());
+    };
+
+    let json_out = host.output_format == HookOutputFormat::JsonSystemMessage;
+    let agent_slug = std::env::var("TENEX_EDGE_AGENT")
+        .unwrap_or_else(|_| host.agent_slug.to_string());
+
+    // Parse stdin — fail open if JSON is absent or malformed.
+    let raw: serde_json::Value = {
+        let mut buf = String::new();
+        std::io::stdin().read_to_string(&mut buf).ok();
+        serde_json::from_str(&buf).unwrap_or(serde_json::Value::Null)
+    };
+    let obj = raw.as_object();
+
+    let sid: String = host
+        .session_id_fields
+        .iter()
+        .find_map(|f| {
+            obj.and_then(|o| o.get(*f))
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+        })
+        .unwrap_or_default();
+
+    let cwd: PathBuf = obj
+        .and_then(|o| o.get("cwd"))
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+
+    let transcript: Option<String> = host.transcript_field.and_then(|field| {
+        obj.and_then(|o| o.get(field))
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    });
+
+    match hook_type.as_str() {
+        "session-start" => {
+            if sid.is_empty() {
+                return Ok(());
+            }
+            let watch_pid = host.pid_search.and_then(find_ancestor_pid);
+            // Discard returned session id — hooks receive it from the harness.
+            session_start_inner(agent_slug, Some(sid), Some(cwd), watch_pid)?;
+        }
+        "session-end" => {
+            if !sid.is_empty() {
+                session_end(sid)?;
+            }
+        }
+        "user-prompt-submit" => {
+            turn_start(sid, transcript, json_out).await?;
+        }
+        "post-tool-use" => {
+            let explicit = if sid.is_empty() { None } else { Some(sid) };
+            turn_check(explicit, json_out)?;
+        }
+        "stop" => {
+            if !sid.is_empty() {
+                turn_end(sid)?;
+            }
+        }
+        other => {
+            // Fail open: unknown hook types are ignored so future harness
+            // versions can add hooks without breaking this binary.
+            eprintln!("[tenex-edge] unrecognised hook type {other:?} for host {host_name}");
+        }
+    }
+    Ok(())
+}
+
+// ── process-tree PID search (for harnesses like Codex that omit their PID) ───
+
+/// Walk the process tree upward looking for an ancestor whose command name
+/// contains `needle` (case-insensitive). Returns the first match.
+fn find_ancestor_pid(needle: &str) -> Option<i32> {
+    let needle = needle.to_lowercase();
+    let mut pid = std::process::id() as i32;
+    let mut seen = std::collections::HashSet::new();
+    for _ in 0..16 {
+        let ppid = ps_ppid(pid)?;
+        if ppid <= 1 || !seen.insert(ppid) {
+            return None;
+        }
+        if ps_comm(ppid).to_lowercase().contains(&needle) {
+            return Some(ppid);
+        }
+        pid = ppid;
+    }
+    None
+}
+
+fn ps_ppid(pid: i32) -> Option<i32> {
+    std::process::Command::new("ps")
+        .args(["-o", "ppid=", "-p", &pid.to_string()])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .and_then(|s| s.trim().parse().ok())
+}
+
+fn ps_comm(pid: i32) -> String {
+    std::process::Command::new("ps")
+        .args(["-o", "comm=", "-p", &pid.to_string()])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default()
 }

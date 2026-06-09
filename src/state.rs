@@ -129,6 +129,12 @@ CREATE TABLE IF NOT EXISTS agent_status (
     updated_at INTEGER NOT NULL,
     PRIMARY KEY (pubkey, project)
 );
+-- NIP-29 group metadata cache: the 'about' text for each project channel (kind 39000).
+CREATE TABLE IF NOT EXISTS project_meta (
+    project    TEXT PRIMARY KEY,
+    about      TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+);
 "#;
 
 impl Store {
@@ -511,13 +517,15 @@ impl Store {
         &self,
         since: u64,
         fresh_since: u64,
+        project: Option<&str>,
     ) -> Result<Vec<PeerSession>> {
         let mut stmt = self.conn.prepare(
             "SELECT session_id, pubkey, slug, project, host, last_seen FROM peer_sessions
-             WHERE first_seen>=?1 AND last_seen>=?2 ORDER BY first_seen",
+             WHERE first_seen>=?1 AND last_seen>=?2 AND (?3 IS NULL OR project=?3)
+             ORDER BY first_seen",
         )?;
         let rows: Vec<PeerSession> = stmt
-            .query_map(params![since, fresh_since], |row| {
+            .query_map(params![since, fresh_since, project], |row| {
                 Ok(PeerSession {
                     session_id: row.get(0)?,
                     pubkey: row.get(1)?,
@@ -534,7 +542,11 @@ impl Store {
 
     /// Agent status rows updated at or after `since`. Returns (slug, project, text).
     /// Resolves slug from profiles then peer_sessions, falling back to "unknown".
-    pub fn list_status_changes_since(&self, since: u64) -> Result<Vec<(String, String, String)>> {
+    pub fn list_status_changes_since(
+        &self,
+        since: u64,
+        project: Option<&str>,
+    ) -> Result<Vec<(String, String, String)>> {
         let mut stmt = self.conn.prepare(
             "SELECT COALESCE(
                  (SELECT slug FROM profiles WHERE pubkey=ast.pubkey LIMIT 1),
@@ -542,11 +554,11 @@ impl Store {
                  'unknown'
              ), ast.project, ast.text
              FROM agent_status ast
-             WHERE ast.updated_at>=?1
+             WHERE ast.updated_at>=?1 AND (?2 IS NULL OR ast.project=?2)
              ORDER BY ast.updated_at",
         )?;
         let rows: Vec<(String, String, String)> = stmt
-            .query_map(params![since], |row| {
+            .query_map(params![since, project], |row| {
                 Ok((row.get(0)?, row.get(1)?, row.get(2)?))
             })?
             .filter_map(|r| r.ok())
@@ -618,6 +630,28 @@ impl Store {
             .query_row(
                 "SELECT text FROM agent_status WHERE pubkey=?1 AND project=?2",
                 params![pubkey, project],
+                |r| r.get::<_, String>(0),
+            )
+            .ok())
+    }
+
+    // ── project metadata (NIP-29 kind 39000 cache) ───────────────────────
+
+    pub fn upsert_project_meta(&self, project: &str, about: &str, ts: u64) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO project_meta (project, about, updated_at) VALUES (?1, ?2, ?3)
+             ON CONFLICT(project) DO UPDATE SET about=?2, updated_at=?3",
+            params![project, about, ts],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_project_meta(&self, project: &str) -> Result<Option<String>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT about FROM project_meta WHERE project=?1",
+                params![project],
                 |r| r.get::<_, String>(0),
             )
             .ok())
@@ -793,5 +827,45 @@ mod tests {
         let found = s.find_peer_session_by_prefix("abcdef").unwrap().unwrap();
         assert_eq!(found.pubkey, "pk");
         assert!(s.find_peer_session_by_prefix("zzzz").unwrap().is_none());
+    }
+
+    #[test]
+    fn turn_delta_peer_sessions_can_be_project_scoped() {
+        let s = Store::open_memory().unwrap();
+        s.upsert_peer_session("sess-a", "pk-a", "same", "current", "host", 100)
+            .unwrap();
+        s.upsert_peer_session("sess-b", "pk-b", "other", "elsewhere", "host", 100)
+            .unwrap();
+
+        let scoped = s.list_new_peer_sessions(50, 50, Some("current")).unwrap();
+        assert_eq!(scoped.len(), 1);
+        assert_eq!(scoped[0].session_id, "sess-a");
+
+        let all = s.list_new_peer_sessions(50, 50, None).unwrap();
+        assert_eq!(all.len(), 2);
+    }
+
+    #[test]
+    fn turn_delta_status_changes_can_be_project_scoped() {
+        let s = Store::open_memory().unwrap();
+        s.upsert_profile("pk-a", "alpha", "host", 1).unwrap();
+        s.upsert_profile("pk-b", "bravo", "host", 1).unwrap();
+        s.set_agent_status("pk-a", "current", "working here", 100)
+            .unwrap();
+        s.set_agent_status("pk-b", "elsewhere", "working there", 100)
+            .unwrap();
+
+        let scoped = s.list_status_changes_since(50, Some("current")).unwrap();
+        assert_eq!(
+            scoped,
+            vec![(
+                "alpha".to_string(),
+                "current".to_string(),
+                "working here".to_string()
+            )]
+        );
+
+        let all = s.list_status_changes_since(50, None).unwrap();
+        assert_eq!(all.len(), 2);
     }
 }
