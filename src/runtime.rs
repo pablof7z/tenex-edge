@@ -443,4 +443,137 @@ mod tests {
         assert!(!routed, "agent-wide mention already seen must not re-route");
         assert!(s.drain_inbox("sess-A").unwrap().is_empty());
     }
+
+    // ── freeze tests (Phase-0 regression oracle) ─────────────────────────────
+
+    /// FREEZE A1: TARGETED mention reaches ONLY the named session.
+    /// Two alive sessions (same agent, same project): a mention targeting sess-B
+    /// must land ONLY in sess-B. sess-A (sibling) must not receive it.
+    #[test]
+    fn freeze_targeted_mention_routes_only_to_named_session() {
+        let s = Store::open_memory().unwrap();
+        let keys = Keys::generate();
+        let pubkey = keys.public_key().to_hex();
+        s.upsert_session(&alive_session("sess-A", &pubkey)).unwrap();
+        s.upsert_session(&alive_session("sess-B", &pubkey)).unwrap();
+
+        let (m, event) = signed_mention(&keys, &pubkey, Some("sess-B"));
+        let routed = route_mention_into(&s, &pubkey, &m, &event);
+
+        assert!(routed, "FREEZE: targeted mention to sess-B must be newly routed");
+        assert_eq!(
+            s.drain_inbox("sess-B").unwrap().len(), 1,
+            "FREEZE: sess-B must receive exactly one row"
+        );
+        assert!(
+            s.drain_inbox("sess-A").unwrap().is_empty(),
+            "FREEZE: sess-A (sibling) must NOT receive a targeted mention for sess-B"
+        );
+    }
+
+    /// FREEZE A2: UNTARGETED mention fans out to ALL alive sessions of the recipient
+    /// agent+project, and NOT to sessions of other agents or other projects.
+    ///
+    /// Scenario: three sessions alive —
+    ///   sess-1 (pk1, proj)
+    ///   sess-2 (pk1, proj)   ← both should receive
+    ///   sess-other (pk2, proj) ← different agent: must not receive
+    ///   sess-other-proj (pk1, other-proj) ← different project: must not receive
+    #[test]
+    fn freeze_untargeted_mention_fans_out_to_all_alive_sessions_of_recipient_agent_project() {
+        let s = Store::open_memory().unwrap();
+        let keys1 = Keys::generate();
+        let pk1 = keys1.public_key().to_hex();
+        let keys2 = Keys::generate();
+        let pk2 = keys2.public_key().to_hex();
+
+        s.upsert_session(&alive_session_in_project("sess-1", &pk1, "proj")).unwrap();
+        s.upsert_session(&alive_session_in_project("sess-2", &pk1, "proj")).unwrap();
+        s.upsert_session(&alive_session_in_project("sess-other-agent", &pk2, "proj")).unwrap();
+        s.upsert_session(&alive_session_in_project("sess-other-proj", &pk1, "other-proj")).unwrap();
+
+        // Untargeted mention addressed to pk1/proj.
+        let (m, event) = signed_mention(&keys2, &pk1, None);
+        let routed = route_mention_into(&s, &pk1, &m, &event);
+
+        assert!(routed, "FREEZE: untargeted mention must be newly routed");
+        assert_eq!(
+            s.drain_inbox("sess-1").unwrap().len(), 1,
+            "FREEZE: sess-1 (pk1/proj) must receive untargeted mention"
+        );
+        assert_eq!(
+            s.drain_inbox("sess-2").unwrap().len(), 1,
+            "FREEZE: sess-2 (pk1/proj) must receive untargeted mention"
+        );
+        assert!(
+            s.drain_inbox("sess-other-agent").unwrap().is_empty(),
+            "FREEZE: different-agent session must NOT receive mention to pk1"
+        );
+        assert!(
+            s.drain_inbox("sess-other-proj").unwrap().is_empty(),
+            "FREEZE: same-agent but different-project session must NOT receive mention"
+        );
+    }
+
+    /// FREEZE A3: re-routing the SAME event id is idempotent (inbox PK guarantee).
+    ///
+    /// For UNTARGETED mentions: the per-agent seen-mark deduplicates. But this test
+    /// exercises idempotency at the inbox-PK level WITHOUT marking seen — to prove
+    /// the `INSERT OR IGNORE` constraint is the safety net for every code path.
+    ///
+    /// After the first route_mention_into_with_id: returns true (newly routed).
+    /// After the second call with same eid (without marking seen): returns false
+    /// (inbox PK `(eid, target_session)` already exists — INSERT OR IGNORE fires).
+    /// Drain yields exactly one row per session.
+    #[test]
+    fn freeze_routing_same_event_id_twice_is_idempotent_no_double_delivery() {
+        let s = Store::open_memory().unwrap();
+        let keys = Keys::generate();
+        let pk = keys.public_key().to_hex();
+        s.upsert_session(&alive_session_in_project("sess-1", &pk, "proj")).unwrap();
+        s.upsert_session(&alive_session_in_project("sess-2", &pk, "proj")).unwrap();
+
+        let (m, event) = signed_mention(&keys, &pk, None);
+        let eid = event.id.to_hex();
+
+        // First route: both sessions get the mention.
+        let first = route_mention_into_with_id(&s, &pk, &m, &eid);
+        assert!(first, "FREEZE: first route must be newly enqueued");
+
+        // Second route (same eid, same sessions, no mark_mention_seen in between):
+        // inbox PK (eid, sess-1) and (eid, sess-2) already exist → both INSERT OR
+        // IGNORE fire → nothing new, returns false.
+        let second = route_mention_into_with_id(&s, &pk, &m, &eid);
+        assert!(!second, "FREEZE: second route of same eid must be idempotent (no new rows)");
+
+        // Each session has exactly one undelivered row — no duplicates.
+        assert_eq!(
+            s.drain_inbox("sess-1").unwrap().len(), 1,
+            "FREEZE: sess-1 must have exactly one delivery (no duplicate)"
+        );
+        assert_eq!(
+            s.drain_inbox("sess-2").unwrap().len(), 1,
+            "FREEZE: sess-2 must have exactly one delivery (no duplicate)"
+        );
+    }
+
+    /// FREEZE A4: TARGETED mention to a session id that is NOT among my alive
+    /// sessions results in zero deliveries and route returns false.
+    #[test]
+    fn freeze_targeted_mention_to_unknown_session_delivers_nothing() {
+        let s = Store::open_memory().unwrap();
+        let keys = Keys::generate();
+        let pk = keys.public_key().to_hex();
+        // Only sess-A is alive; the mention targets a nonexistent session.
+        s.upsert_session(&alive_session("sess-A", &pk)).unwrap();
+
+        let (m, _event) = signed_mention(&keys, &pk, Some("nonexistent-session"));
+        let routed = route_mention_into_with_id(&s, &pk, &m, "eid-unknown");
+
+        assert!(!routed, "FREEZE: mention targeting unknown session must not route");
+        assert!(
+            s.drain_inbox("sess-A").unwrap().is_empty(),
+            "FREEZE: sess-A must not receive a mention targeting a different session id"
+        );
+    }
 }

@@ -1142,4 +1142,186 @@ mod tests {
         assert!(!s.is_group_member("proj", "pk-a").unwrap());
         assert!(s.is_group_member("other", "pk-x").unwrap());
     }
+
+    // ── freeze tests (Phase-0 regression oracle) ─────────────────────────────
+
+    /// FREEZE B1: enqueue_mention is idempotent on (mention_event_id, target_session).
+    /// Recording the same event id for the same session twice yields exactly one row;
+    /// the second call returns false. A different session with the same event id is
+    /// a DISTINCT row (different PK component).
+    #[test]
+    fn freeze_inbox_dedup_by_event_id() {
+        let s = Store::open_memory().unwrap();
+        let base = InboxRow {
+            mention_event_id: "evt-freeze-1".into(),
+            target_session: "sess-X".into(),
+            from_pubkey: "pk-sender".into(),
+            from_slug: "sender".into(),
+            project: "proj".into(),
+            body: "hello".into(),
+            created_at: 100,
+            from_session: "".into(),
+        };
+
+        // First insert: new row → true.
+        assert!(s.enqueue_mention(&base).unwrap(), "first insert must return true");
+
+        // Duplicate for the SAME (event_id, session): must be ignored → false.
+        assert!(!s.enqueue_mention(&base).unwrap(), "duplicate must be ignored (idempotent)");
+
+        // Same event id, DIFFERENT session: distinct PK → separate delivery → true.
+        let mut other_session = base.clone();
+        other_session.target_session = "sess-Y".into();
+        assert!(
+            s.enqueue_mention(&other_session).unwrap(),
+            "same event_id, different session = distinct row"
+        );
+
+        // Both sessions have exactly one undelivered row.
+        assert_eq!(s.peek_inbox("sess-X").unwrap().len(), 1);
+        assert_eq!(s.peek_inbox("sess-Y").unwrap().len(), 1);
+
+        // drain_inbox marks delivered; a second drain is empty.
+        let drained = s.drain_inbox("sess-X").unwrap();
+        assert_eq!(drained.len(), 1);
+        assert_eq!(drained[0].body, "hello");
+        assert!(s.drain_inbox("sess-X").unwrap().is_empty(), "delivered rows must not re-drain");
+    }
+
+    /// FREEZE B2: replace_group_members applied TWICE with the same snapshot is
+    /// idempotent — no duplicates, no stale survivors, and other projects are
+    /// unaffected. This extends the existing authoritative-replace test.
+    #[test]
+    fn freeze_replace_group_members_idempotent_re_apply() {
+        let s = Store::open_memory().unwrap();
+        let snapshot: Vec<(String, String)> = vec![
+            ("pk-alpha".into(), "member".into()),
+            ("pk-beta".into(), "admin".into()),
+        ];
+
+        // Seed a stale member that should vanish.
+        s.upsert_group_member("proj", "pk-stale", "member", 50).unwrap();
+
+        // First apply.
+        s.replace_group_members("proj", &snapshot, 200).unwrap();
+        assert!(s.is_group_member("proj", "pk-alpha").unwrap());
+        assert!(s.is_group_member("proj", "pk-beta").unwrap());
+        assert!(!s.is_group_member("proj", "pk-stale").unwrap());
+
+        // Identical second apply — observable membership must be unchanged.
+        s.replace_group_members("proj", &snapshot, 300).unwrap();
+        assert!(s.is_group_member("proj", "pk-alpha").unwrap(), "alpha still member after re-apply");
+        assert!(s.is_group_member("proj", "pk-beta").unwrap(), "beta still member after re-apply");
+        assert!(!s.is_group_member("proj", "pk-stale").unwrap(), "stale still absent after re-apply");
+
+        // A sibling project is completely unaffected by both applies.
+        s.upsert_group_member("other-proj", "pk-other", "member", 100).unwrap();
+        s.replace_group_members("proj", &snapshot, 400).unwrap();
+        assert!(s.is_group_member("other-proj", "pk-other").unwrap(), "sibling project untouched");
+        assert!(!s.is_group_member("other-proj", "pk-alpha").unwrap());
+    }
+
+    /// FREEZE B3: pending_agents store primitives used by the ACL classification.
+    ///
+    /// The end-to-end ACL decision (is_allowed → upsert_profile; owner-overlap and
+    /// not-blocked → upsert_pending_agent; blocked/unrelated → ignore) lives in
+    /// daemon/server.rs and is tested at the integration layer by
+    /// tests/daemon_integration.rs (owned by a sibling agent).
+    ///
+    /// This test pins the STORE PRIMITIVES that the three branches rely on:
+    /// - "allowed" branch: profile in profiles table → resolvable, not in pending.
+    /// - "owner-related but unknown" branch: pubkey in pending_agents → in list,
+    ///   but NOT automatically resolvable via resolve_agent_pubkey (not in profiles
+    ///   or peer_sessions).
+    /// - promotion path: remove_pending_agent + upsert_profile → no longer pending,
+    ///   now resolvable.
+    ///
+    // FREEZE-NOTE: the is_allowed/is_blocked/owner-overlap selector that routes to
+    // these primitives is in daemon/server.rs (private daemon code). It reads
+    // ~/.tenex allowlist/blocklist files (process-global env vars). Pure unit
+    // coverage is impossible without touching those env vars (which would race with
+    // acl.rs's own tests). End-to-end ACL admission is frozen at the integration
+    // layer (tests/daemon_integration.rs).
+    #[test]
+    fn freeze_pending_agents_vs_profiles_store_primitives() {
+        let s = Store::open_memory().unwrap();
+
+        // ── "allowed" branch: upsert_profile → resolvable, not in pending list ──
+        s.upsert_profile("pk-allowed", "allowed-agent", "host-a", 100).unwrap();
+        assert!(
+            s.resolve_agent_pubkey("allowed-agent", None).unwrap().as_deref() == Some("pk-allowed"),
+            "allowed branch: profile resolvable"
+        );
+        assert!(
+            s.list_pending_agents().unwrap().iter().all(|p| p.pubkey != "pk-allowed"),
+            "allowed branch: not in pending_agents"
+        );
+
+        // ── "unknown but owner-related" branch: upsert_pending_agent → in pending, NOT resolvable ──
+        s.upsert_pending_agent("pk-pending", "pending-agent", "host-b", "owner-pk", 200).unwrap();
+        let pending = s.list_pending_agents().unwrap();
+        assert!(
+            pending.iter().any(|p| p.pubkey == "pk-pending"),
+            "owner-related unknown: appears in pending_agents"
+        );
+        // NOT in profiles or peer_sessions → resolve returns None.
+        assert!(
+            s.resolve_agent_pubkey("pending-agent", None).unwrap().is_none(),
+            "owner-related unknown: NOT resolvable via resolve_agent_pubkey"
+        );
+
+        // ── "blocked/unrelated" branch: neither primitive called → nothing in store ──
+        // (We just check the baseline: no row for "blocked-agent" or "pk-blocked".)
+        assert!(
+            s.resolve_agent_pubkey("blocked-agent", None).unwrap().is_none(),
+            "blocked/unrelated: not resolvable"
+        );
+        assert!(
+            s.list_pending_agents().unwrap().iter().all(|p| p.pubkey != "pk-blocked"),
+            "blocked/unrelated: not in pending_agents"
+        );
+
+        // ── promotion path: pending → remove + upsert_profile → no longer pending ──
+        s.remove_pending_agent("pk-pending").unwrap();
+        s.upsert_profile("pk-pending", "pending-agent", "host-b", 300).unwrap();
+        assert!(
+            s.list_pending_agents().unwrap().iter().all(|p| p.pubkey != "pk-pending"),
+            "after promotion: not in pending_agents"
+        );
+        assert!(
+            s.resolve_agent_pubkey("pending-agent", None).unwrap().as_deref() == Some("pk-pending"),
+            "after promotion: resolvable via profiles"
+        );
+    }
+
+    /// FREEZE B4: peek_inbox is read-only — rows survive a peek and remain
+    /// available to drain. drain_inbox marks them delivered.
+    #[test]
+    fn freeze_peek_is_nondestructive_drain_is_final() {
+        let s = Store::open_memory().unwrap();
+        let row = InboxRow {
+            mention_event_id: "evt-peek-1".into(),
+            target_session: "sess-peek".into(),
+            from_pubkey: "pk-s".into(),
+            from_slug: "sender".into(),
+            project: "proj".into(),
+            body: "peek me".into(),
+            created_at: 1,
+            from_session: "".into(),
+        };
+        s.enqueue_mention(&row).unwrap();
+
+        // peek: row is visible.
+        assert_eq!(s.peek_inbox("sess-peek").unwrap().len(), 1, "peek must see the row");
+        // peek again: still there (not consumed).
+        assert_eq!(s.peek_inbox("sess-peek").unwrap().len(), 1, "second peek must still see the row");
+
+        // drain: consumes and marks delivered.
+        let drained = s.drain_inbox("sess-peek").unwrap();
+        assert_eq!(drained.len(), 1);
+
+        // After drain, both peek and drain return empty.
+        assert!(s.peek_inbox("sess-peek").unwrap().is_empty(), "peek after drain must be empty");
+        assert!(s.drain_inbox("sess-peek").unwrap().is_empty(), "second drain must be empty");
+    }
 }

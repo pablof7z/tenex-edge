@@ -1645,3 +1645,193 @@ fn ps_comm(pid: i32) -> String {
         .map(|s| s.trim().to_string())
         .unwrap_or_default()
 }
+
+// ── freeze tests — turn-start / turn-check context assembly ─────────────────
+
+#[cfg(test)]
+mod turn_context_tests {
+    use super::*;
+    use crate::state::{InboxRow, SessionRecord, Store};
+    use std::sync::Mutex;
+
+    /// Build a minimal alive SessionRecord (not first-turn when prev != 0, no peers
+    /// seeded, so the only context block the function can emit is inbox mentions).
+    fn test_session(id: &str) -> SessionRecord {
+        SessionRecord {
+            session_id: id.to_string(),
+            agent_slug: "coder".to_string(),
+            agent_pubkey: "pk-coder".to_string(),
+            project: "proj".to_string(),
+            host: "laptop".to_string(),
+            child_pid: None,
+            watch_pid: None,
+            created_at: 1,
+            alive: true,
+            rel_cwd: String::new(),
+        }
+    }
+
+    fn inbox_row(session_id: &str, eid: &str) -> InboxRow {
+        InboxRow {
+            mention_event_id: eid.to_string(),
+            target_session: session_id.to_string(),
+            from_pubkey: "pk-sender".to_string(),
+            from_slug: "sender".to_string(),
+            project: "proj".to_string(),
+            body: "hello from sender".to_string(),
+            created_at: 100,
+            from_session: String::new(),
+        }
+    }
+
+    /// FREEZE C1: assemble_turn_start_context drains inbox rows and renders them.
+    ///
+    /// On a non-first turn (prev_turn_started_at != 0) with no peer sessions seeded,
+    /// the ONLY possible context block is inbox mentions. With one row present: the
+    /// function returns Some(text) containing the mention line. On a SECOND call
+    /// (the row is now delivered=1), it returns None — the drain was real.
+    #[test]
+    fn freeze_turn_start_context_drains_inbox_and_renders_mention_line() {
+        let store = Store::open_memory().unwrap();
+        let rec = test_session("sess-freeze-1");
+
+        // Seed one inbox row for this session.
+        store.enqueue_mention(&inbox_row("sess-freeze-1", "evt-c1")).unwrap();
+
+        let m = Mutex::new(store);
+
+        // Non-first turn (prev != 0) → no intro block; no peers → no fabric block.
+        // Only the inbox mention block should be present.
+        let ctx = assemble_turn_start_context(&m, &rec, /* prev_turn_started_at */ 1);
+        let text = ctx.expect("FREEZE: turn_start must return Some when inbox has rows");
+
+        assert!(
+            text.contains("Messages from other agents (tenex-edge):"),
+            "FREEZE: mention section header must be present; got: {text:?}"
+        );
+        assert!(
+            text.contains("[mention from sender@proj"),
+            "FREEZE: mention line must contain [mention from sender@proj; got: {text:?}"
+        );
+        assert!(
+            text.contains("hello from sender"),
+            "FREEZE: mention body must be in context; got: {text:?}"
+        );
+
+        // SECOND call: the drain marked the row delivered — no more context to emit.
+        let ctx2 = assemble_turn_start_context(&m, &rec, /* prev_turn_started_at */ 1);
+        assert!(
+            ctx2.is_none(),
+            "FREEZE: second turn_start call must return None (row already drained)"
+        );
+    }
+
+    /// FREEZE C2: assemble_turn_start_context returns None when inbox is empty
+    /// (non-first turn, no peers).
+    #[test]
+    fn freeze_turn_start_context_returns_none_when_inbox_empty_non_first_turn() {
+        let store = Store::open_memory().unwrap();
+        let rec = test_session("sess-freeze-2");
+        // No inbox rows. Non-first turn (prev != 0). No peer sessions.
+        let m = Mutex::new(store);
+
+        let ctx = assemble_turn_start_context(&m, &rec, /* prev_turn_started_at */ 42);
+        assert!(
+            ctx.is_none(),
+            "FREEZE: turn_start with empty inbox, non-first turn, no peers must return None"
+        );
+    }
+
+    /// FREEZE C3: assemble_turn_check_context PEEKs — rows survive and are still
+    /// drainable by turn_start afterward.
+    ///
+    /// This is the discriminating property: peek does NOT set delivered=1, so a
+    /// following drain_inbox still finds the row.
+    #[test]
+    fn freeze_turn_check_context_peeks_not_drains() {
+        let store = Store::open_memory().unwrap();
+        store.enqueue_mention(&inbox_row("sess-freeze-3", "evt-c3")).unwrap();
+        let m = Mutex::new(store);
+
+        // turn_check peeks: returns Some with the mention line.
+        let ctx = assemble_turn_check_context(&m, "sess-freeze-3");
+        let text = ctx.expect("FREEZE: turn_check must return Some when inbox has undelivered rows");
+        assert!(
+            text.contains("[tenex-edge] Message(s) arrived while you were working:"),
+            "FREEZE: turn_check header must be present; got: {text:?}"
+        );
+        assert!(
+            text.contains("[mention from sender@proj"),
+            "FREEZE: turn_check must render the mention line; got: {text:?}"
+        );
+
+        // The row is still in the store (peek, not drain): drain_inbox now consumes it.
+        let g = m.lock().unwrap();
+        let drained = g.drain_inbox("sess-freeze-3").unwrap();
+        assert_eq!(
+            drained.len(), 1,
+            "FREEZE: row must survive turn_check peek and still be drainable"
+        );
+    }
+
+    /// FREEZE C4: assemble_turn_check_context returns None when inbox is empty.
+    #[test]
+    fn freeze_turn_check_context_returns_none_when_inbox_empty() {
+        let store = Store::open_memory().unwrap();
+        let m = Mutex::new(store);
+        let ctx = assemble_turn_check_context(&m, "sess-no-rows");
+        assert!(
+            ctx.is_none(),
+            "FREEZE: turn_check with empty inbox must return None"
+        );
+    }
+
+    /// FREEZE C5: reply-to handle falls back to slug@project when from_session
+    /// is empty (the sender's session id is unknown — old peers / untargeted).
+    #[test]
+    fn freeze_mention_reply_handle_falls_back_to_slug_at_project() {
+        let store = Store::open_memory().unwrap();
+        let row = InboxRow {
+            mention_event_id: "evt-handle".to_string(),
+            target_session: "sess-x".to_string(),
+            from_pubkey: "pk-s".to_string(),
+            from_slug: "reviewer".to_string(),
+            project: "myproj".to_string(),
+            body: "yo".to_string(),
+            created_at: 1,
+            from_session: String::new(), // unknown session id
+        };
+        let handle = mention_reply_handle(&store, &row);
+        assert_eq!(
+            handle, "reviewer@myproj",
+            "FREEZE: empty from_session must fall back to slug@project"
+        );
+    }
+
+    /// FREEZE C6: reply-to handle uses from_session when it resolves in the store
+    /// (peer session prefix lookup succeeds → exact session id is returned).
+    #[test]
+    fn freeze_mention_reply_handle_uses_session_when_resolvable() {
+        let store = Store::open_memory().unwrap();
+        // Register the sender's session in peer_sessions so prefix lookup resolves.
+        store
+            .upsert_peer_session("sender-session-id", "pk-s", "reviewer", "myproj", "host", "", 1000)
+            .unwrap();
+
+        let row = InboxRow {
+            mention_event_id: "evt-handle-2".to_string(),
+            target_session: "sess-x".to_string(),
+            from_pubkey: "pk-s".to_string(),
+            from_slug: "reviewer".to_string(),
+            project: "myproj".to_string(),
+            body: "yo".to_string(),
+            created_at: 1,
+            from_session: "sender-session-id".to_string(),
+        };
+        let handle = mention_reply_handle(&store, &row);
+        assert_eq!(
+            handle, "sender-session-id",
+            "FREEZE: resolvable from_session must be used as reply-to handle"
+        );
+    }
+}
