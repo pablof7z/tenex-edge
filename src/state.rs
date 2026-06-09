@@ -1252,6 +1252,207 @@ impl Store {
         }
         Ok(())
     }
+
+    // ── Phase 2: read-model methods ──────────────────────────────────────────
+    //
+    // Every reader must go through one of these methods so that Phase 8 can
+    // swap the underlying source without touching callers.  Methods that still
+    // query legacy tables carry a TODO naming the removal phase.
+
+    /// All known projects, ordered by slug.
+    ///
+    /// Currently backed by the legacy `project_meta` table (the only durable
+    /// project list we have before dual-write is active).  Falls back to an
+    /// empty vec when the table has no rows.
+    ///
+    // TODO(phase 8): read from canonical `projects` table instead of legacy `project_meta`
+    pub fn list_projects_read_model(&self) -> Result<Vec<(String, String)>> {
+        self.list_project_meta()
+    }
+
+    /// About-text for a single project by its legacy slug.
+    ///
+    // TODO(phase 8): read from canonical `projects` table (join via `project_origins`) instead of legacy `project_meta`
+    pub fn project_meta_read_model(&self, slug: &str) -> Result<Option<String>> {
+        self.get_project_meta(slug)
+    }
+
+    /// Own (local) sessions that are still alive and recently heartbeated.
+    ///
+    // TODO(phase 8): read from canonical `membership` / `projects` instead of legacy `sessions`
+    pub fn list_agents_read_model(&self, project: Option<&str>, since: u64) -> Result<Vec<SessionRecord>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT session_id, agent_slug, agent_pubkey, project, host, child_pid, watch_pid, created_at, alive, rel_cwd
+             FROM sessions WHERE alive=1 AND last_seen>=?1 AND (?2 IS NULL OR project=?2) ORDER BY created_at DESC",
+        )?;
+        let rows = stmt.query_map(params![since, project], |row| row_to_session(row))?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    }
+
+    /// Peer presence rows, ordered by recency.
+    ///
+    // TODO(phase 8): read from canonical presence table instead of legacy `peer_sessions`
+    pub fn list_presence_read_model(
+        &self,
+        project: Option<&str>,
+        since: u64,
+    ) -> Result<Vec<PeerSession>> {
+        self.list_peer_sessions(project, since)
+    }
+
+    /// Agent status for all agents in a project (or all projects when `project` is None).
+    /// Returns `(pubkey, project, text)` tuples.
+    ///
+    // TODO(phase 8): read from canonical status table instead of legacy `agent_status`
+    pub fn list_status_read_model(
+        &self,
+        project: Option<&str>,
+    ) -> Result<Vec<(String, String, String)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT pubkey, project, text FROM agent_status
+             WHERE (?1 IS NULL OR project=?1) ORDER BY updated_at DESC",
+        )?;
+        let rows: Vec<(String, String, String)> = stmt
+            .query_map(params![project], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rows)
+    }
+
+    /// Canonical threads for a project.  Returns empty until Phase 7 populates
+    /// the `threads` table via dual-write.
+    ///
+    /// `project_id` is the canonical surrogate key from `projects`.
+    pub fn list_threads(&self, project_id: &str) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT thread_id FROM threads WHERE project_id=?1 ORDER BY created_at",
+        )?;
+        let rows: Vec<String> = stmt
+            .query_map(params![project_id], |r| r.get(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rows)
+    }
+
+    /// Canonical messages for a thread.  Returns empty until Phase 6 dual-write
+    /// populates the `messages` table.
+    pub fn messages_for_thread(&self, thread_id: &str) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT message_id FROM messages WHERE thread_id=?1 ORDER BY created_at",
+        )?;
+        let rows: Vec<String> = stmt
+            .query_map(params![thread_id], |r| r.get(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rows)
+    }
+
+    /// Peek (non-destructive read) of undelivered inbox rows for a session.
+    ///
+    /// This is the read-model facade for turn_check and any other non-draining
+    /// reader.  `assemble_turn_start_context` intentionally keeps its direct
+    /// `drain_inbox` call because drain is a delivery write, not a read-model
+    /// query; routing it through this method would change the peek/drain
+    /// semantics that freeze tests pin.
+    ///
+    // TODO(phase 8): read from canonical `messages` table instead of legacy `inbox`
+    pub fn undelivered_messages_for_session(&self, session_id: &str) -> Result<Vec<InboxRow>> {
+        self.peek_inbox(session_id)
+    }
+
+    // ── Phase 2: write-facing materializer methods ───────────────────────────
+    //
+    // These are the write surface the Phase 4 materializer will call.  Nothing
+    // calls them in Phase 2; they exist so the seam compiles, so the signatures
+    // are locked, and so unit tests prevent dead-code warnings.
+
+    /// Upsert a peer profile (kind:0).  Wraps `upsert_profile`.
+    pub fn materialize_profile(&self, pubkey: &str, slug: &str, host: &str, ts: u64) -> Result<()> {
+        self.upsert_profile(pubkey, slug, host, ts)
+    }
+
+    /// Record / refresh a peer presence session (kind:0 + relay presence).
+    /// Wraps `upsert_peer_session`.
+    pub fn materialize_presence(
+        &self,
+        session_id: &str,
+        pubkey: &str,
+        slug: &str,
+        project: &str,
+        host: &str,
+        rel_cwd: &str,
+        ts: u64,
+    ) -> Result<()> {
+        self.upsert_peer_session(session_id, pubkey, slug, project, host, rel_cwd, ts)
+    }
+
+    /// Record the current NIP-38 status for an agent.  Wraps `set_agent_status`.
+    pub fn materialize_status(&self, pubkey: &str, project: &str, text: &str, ts: u64) -> Result<()> {
+        self.set_agent_status(pubkey, project, text, ts)
+    }
+
+    /// Apply a relay-authoritative NIP-29 39002 membership snapshot:
+    /// replaces the legacy `group_members` cache wholesale AND mirrors into
+    /// canonical `membership` rows via `admit_member` (source `"nip29-39002"`).
+    ///
+    /// `provider_instance` is the relay-set hash (daemon-derived); used to
+    /// resolve the canonical `project_id` via `project_id_for_origin`.
+    pub fn materialize_membership_snapshot(
+        &self,
+        project_slug: &str,
+        members: &[(String, String)],
+        provider_instance: &str,
+        ts: u64,
+    ) -> Result<()> {
+        // Legacy table: authoritative wholesale replace.
+        self.replace_group_members(project_slug, members, ts)?;
+        // Canonical mirror via Phase 1 accessor.
+        const FABRIC: &str = "kind1-nip29";
+        if let Some(pid) = self.project_id_for_origin(FABRIC, provider_instance, project_slug)? {
+            for (pubkey, role) in members {
+                self.admit_member(&pid, pubkey, role, "nip29-39002", ts)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Record an inbound mention in the legacy inbox with full dedup semantics.
+    /// Returns true when the row was newly stored.
+    ///
+    /// Canonical `messages` dual-write comes in Phase 6.
+    pub fn materialize_inbound_message(&self, m: &InboxRow) -> Result<bool> {
+        self.enqueue_mention(m)
+    }
+
+    /// Record an outbound message in the canonical `messages` table.
+    /// Returns the `message_id`.
+    pub fn materialize_outbound_message(
+        &self,
+        thread_id: &str,
+        author_pubkey: &str,
+        body: &str,
+        created_at: u64,
+        native_event_id: Option<&str>,
+    ) -> Result<String> {
+        self.record_message(thread_id, author_pubkey, body, created_at, "outbound", "pending", native_event_id)
+    }
+
+    /// Transition an outbound message to `accepted` (relay accepted the event).
+    pub fn mark_outbound_accepted(&self, message_id: &str) -> Result<()> {
+        self.mark_message_sync_state(message_id, "accepted", None)
+    }
+
+    /// Transition an outbound message to `echoed` (relay echoed it back to us).
+    pub fn mark_outbound_echoed(&self, message_id: &str) -> Result<()> {
+        self.mark_message_sync_state(message_id, "echoed", None)
+    }
+
+    /// Transition an outbound message to `failed` with an error string.
+    pub fn mark_outbound_failed(&self, message_id: &str, error: &str) -> Result<()> {
+        self.mark_message_sync_state(message_id, "failed", Some(error))
+    }
 }
 
 fn row_to_session(row: &rusqlite::Row) -> rusqlite::Result<SessionRecord> {
@@ -1948,5 +2149,258 @@ mod tests {
         s.backfill_kind1_nip29_origins("relayhash", 300).unwrap();
         assert_eq!(projects_before(), p1, "no duplicate project rows on re-backfill");
         assert_eq!(members_before(), m1, "no duplicate membership rows on re-backfill");
+    }
+
+    // ── Phase 2: read-model and write-facing materializer unit tests ─────────
+
+    /// list_projects_read_model delegates to list_project_meta — same rows, same order.
+    #[test]
+    fn phase2_list_projects_read_model_matches_project_meta() {
+        let s = Store::open_memory().unwrap();
+        assert!(s.list_projects_read_model().unwrap().is_empty());
+        s.upsert_project_meta("zap", "about-zap", 1).unwrap();
+        s.upsert_project_meta("alpha", "about-alpha", 2).unwrap();
+        let rows = s.list_projects_read_model().unwrap();
+        // list_project_meta orders by project slug.
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].0, "alpha");
+        assert_eq!(rows[1].0, "zap");
+        assert_eq!(rows[0].1, "about-alpha");
+    }
+
+    /// project_meta_read_model is a pass-through of get_project_meta.
+    #[test]
+    fn phase2_project_meta_read_model_passthrough() {
+        let s = Store::open_memory().unwrap();
+        assert!(s.project_meta_read_model("missing").unwrap().is_none());
+        s.upsert_project_meta("proj", "the about", 1).unwrap();
+        assert_eq!(s.project_meta_read_model("proj").unwrap().as_deref(), Some("the about"));
+    }
+
+    /// list_agents_read_model returns alive sessions filtered by project + freshness.
+    #[test]
+    fn phase2_list_agents_read_model_filters() {
+        let s = Store::open_memory().unwrap();
+        let mut r = sample_session("s1");
+        r.project = "proj".into();
+        s.upsert_session(&r).unwrap();
+        s.touch_session("s1", 1000).unwrap();
+
+        let mut r2 = sample_session("s2");
+        r2.project = "other".into();
+        s.upsert_session(&r2).unwrap();
+        s.touch_session("s2", 1000).unwrap();
+
+        // Project-scoped.
+        let proj = s.list_agents_read_model(Some("proj"), 0).unwrap();
+        assert_eq!(proj.len(), 1);
+        assert_eq!(proj[0].session_id, "s1");
+
+        // Freshness filter: since=1001 → both stale.
+        assert!(s.list_agents_read_model(None, 1001).unwrap().is_empty());
+
+        // All projects, no freshness filter.
+        assert_eq!(s.list_agents_read_model(None, 0).unwrap().len(), 2);
+    }
+
+    /// list_presence_read_model delegates to list_peer_sessions.
+    #[test]
+    fn phase2_list_presence_read_model_delegates() {
+        let s = Store::open_memory().unwrap();
+        s.upsert_peer_session("ps1", "pk-a", "agentA", "proj", "host", "", 500).unwrap();
+        let rows = s.list_presence_read_model(Some("proj"), 0).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].slug, "agentA");
+        // Since filter.
+        assert!(s.list_presence_read_model(Some("proj"), 600).unwrap().is_empty());
+    }
+
+    /// list_status_read_model returns (pubkey, project, text) rows.
+    #[test]
+    fn phase2_list_status_read_model() {
+        let s = Store::open_memory().unwrap();
+        s.set_agent_status("pk-a", "proj", "working", 100).unwrap();
+        s.set_agent_status("pk-b", "other", "idle", 200).unwrap();
+        let all = s.list_status_read_model(None).unwrap();
+        assert_eq!(all.len(), 2);
+        let scoped = s.list_status_read_model(Some("proj")).unwrap();
+        assert_eq!(scoped.len(), 1);
+        assert_eq!(scoped[0].0, "pk-a");
+        assert_eq!(scoped[0].2, "working");
+    }
+
+    /// list_threads returns empty until populated (canonical table, Phase 7).
+    #[test]
+    fn phase2_list_threads_empty_until_phase7() {
+        let s = Store::open_memory().unwrap();
+        let pid = s.ensure_project_origin("kind1-nip29", "ri", "p", "p", 1).unwrap();
+        assert!(s.list_threads(&pid).unwrap().is_empty(), "threads empty before Phase 7");
+        // After ensure_thread_origin it is populated.
+        let tid = s.ensure_thread_origin(&pid, "kind1-nip29", "ri", "t1", 2).unwrap();
+        assert_eq!(s.list_threads(&pid).unwrap(), vec![tid]);
+    }
+
+    /// messages_for_thread returns empty until populated (canonical table, Phase 6).
+    #[test]
+    fn phase2_messages_for_thread_empty_until_phase6() {
+        let s = Store::open_memory().unwrap();
+        let pid = s.ensure_project_origin("kind1-nip29", "ri", "p", "p", 1).unwrap();
+        let tid = s.ensure_thread_origin(&pid, "kind1-nip29", "ri", "t1", 2).unwrap();
+        assert!(s.messages_for_thread(&tid).unwrap().is_empty());
+        let mid = s.record_message(&tid, "pk", "hello", 3, "inbound", "accepted", None).unwrap();
+        assert_eq!(s.messages_for_thread(&tid).unwrap(), vec![mid]);
+    }
+
+    /// undelivered_messages_for_session is non-destructive (same as peek_inbox).
+    #[test]
+    fn phase2_undelivered_messages_for_session_is_nondestructive() {
+        let s = Store::open_memory().unwrap();
+        let row = InboxRow {
+            mention_event_id: "evt-rdm-1".into(),
+            target_session: "sess-rm".into(),
+            from_pubkey: "pk-s".into(),
+            from_slug: "sender".into(),
+            project: "proj".into(),
+            body: "hello rdm".into(),
+            created_at: 1,
+            from_session: "".into(),
+        };
+        s.enqueue_mention(&row).unwrap();
+        // Call twice — rows survive (non-destructive).
+        assert_eq!(s.undelivered_messages_for_session("sess-rm").unwrap().len(), 1);
+        assert_eq!(s.undelivered_messages_for_session("sess-rm").unwrap().len(), 1);
+        // drain_inbox still works after peeking via the read-model method.
+        let drained = s.drain_inbox("sess-rm").unwrap();
+        assert_eq!(drained.len(), 1);
+        assert!(s.undelivered_messages_for_session("sess-rm").unwrap().is_empty());
+    }
+
+    /// materialize_profile round-trips through upsert_profile.
+    #[test]
+    fn phase2_materialize_profile() {
+        let s = Store::open_memory().unwrap();
+        s.materialize_profile("pk-mp", "agent-mp", "host-mp", 100).unwrap();
+        let pk = s.resolve_agent_pubkey("agent-mp", None).unwrap();
+        assert_eq!(pk.as_deref(), Some("pk-mp"));
+    }
+
+    /// materialize_presence round-trips through upsert_peer_session.
+    #[test]
+    fn phase2_materialize_presence() {
+        let s = Store::open_memory().unwrap();
+        s.materialize_presence("sess-mp", "pk-mp", "agent-mp", "proj", "host", "subdir", 100).unwrap();
+        let rows = s.list_presence_read_model(Some("proj"), 0).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].rel_cwd, "subdir");
+    }
+
+    /// materialize_status round-trips through set_agent_status.
+    #[test]
+    fn phase2_materialize_status() {
+        let s = Store::open_memory().unwrap();
+        s.materialize_status("pk-ms", "proj", "reviewing", 100).unwrap();
+        assert_eq!(s.get_agent_status("pk-ms", "proj").unwrap().as_deref(), Some("reviewing"));
+    }
+
+    /// materialize_membership_snapshot replaces legacy group_members AND mirrors
+    /// into canonical membership when a project origin already exists.
+    #[test]
+    fn phase2_materialize_membership_snapshot_updates_both_tables() {
+        let s = Store::open_memory().unwrap();
+        // Seed a legacy stale member.
+        s.upsert_group_member("proj", "stale", "member", 50).unwrap();
+        // Seed canonical origin.
+        let pid = s.ensure_project_origin("kind1-nip29", "ri", "proj", "proj", 1).unwrap();
+
+        let members = vec![
+            ("pk-a".to_string(), "member".to_string()),
+            ("pk-b".to_string(), "admin".to_string()),
+        ];
+        s.materialize_membership_snapshot("proj", &members, "ri", 200).unwrap();
+
+        // Legacy table: stale gone, new members present.
+        assert!(!s.is_group_member("proj", "stale").unwrap());
+        assert!(s.is_group_member("proj", "pk-a").unwrap());
+        assert!(s.is_group_member("proj", "pk-b").unwrap());
+
+        // Canonical membership mirrored.
+        assert_eq!(
+            s.is_member_at(&pid, "pk-a", 300).unwrap(),
+            MembershipDecision::Member { role: "member".into() }
+        );
+        assert_eq!(
+            s.is_member_at(&pid, "pk-b", 300).unwrap(),
+            MembershipDecision::Member { role: "admin".into() }
+        );
+    }
+
+    /// materialize_membership_snapshot still updates legacy even without a canonical origin.
+    #[test]
+    fn phase2_materialize_membership_no_origin_still_updates_legacy() {
+        let s = Store::open_memory().unwrap();
+        let members = vec![("pk-x".to_string(), "member".to_string())];
+        // No project_origins row → canonical mirror is a no-op, legacy still updates.
+        s.materialize_membership_snapshot("unknown-proj", &members, "ri", 200).unwrap();
+        assert!(s.is_group_member("unknown-proj", "pk-x").unwrap());
+    }
+
+    /// materialize_inbound_message is idempotent (delegates to enqueue_mention).
+    #[test]
+    fn phase2_materialize_inbound_message_idempotent() {
+        let s = Store::open_memory().unwrap();
+        let row = InboxRow {
+            mention_event_id: "evt-mat-1".into(),
+            target_session: "sess-mat".into(),
+            from_pubkey: "pk-s".into(),
+            from_slug: "sender".into(),
+            project: "proj".into(),
+            body: "inbound".into(),
+            created_at: 1,
+            from_session: "".into(),
+        };
+        assert!(s.materialize_inbound_message(&row).unwrap(), "first insert → true");
+        assert!(!s.materialize_inbound_message(&row).unwrap(), "duplicate → false (idempotent)");
+        assert_eq!(s.peek_inbox("sess-mat").unwrap().len(), 1);
+    }
+
+    /// materialize_outbound_message, mark_outbound_accepted/echoed/failed
+    /// round-trip through the canonical messages table.
+    #[test]
+    fn phase2_materialize_outbound_lifecycle() {
+        let s = Store::open_memory().unwrap();
+        let pid = s.ensure_project_origin("kind1-nip29", "ri", "p", "p", 1).unwrap();
+        let tid = s.ensure_thread_origin(&pid, "kind1-nip29", "ri", "t1", 2).unwrap();
+
+        let mid = s.materialize_outbound_message(&tid, "pk-author", "hey", 10, Some("nat-1")).unwrap();
+        // Initial state is "pending".
+        let state: String = s.conn
+            .query_row("SELECT sync_state FROM messages WHERE message_id=?1", params![mid], |r| r.get(0))
+            .unwrap();
+        assert_eq!(state, "pending");
+
+        s.mark_outbound_accepted(&mid).unwrap();
+        let state: String = s.conn
+            .query_row("SELECT sync_state FROM messages WHERE message_id=?1", params![mid], |r| r.get(0))
+            .unwrap();
+        assert_eq!(state, "accepted");
+
+        s.mark_outbound_echoed(&mid).unwrap();
+        let state: String = s.conn
+            .query_row("SELECT sync_state FROM messages WHERE message_id=?1", params![mid], |r| r.get(0))
+            .unwrap();
+        assert_eq!(state, "echoed");
+
+        s.mark_outbound_failed(&mid, "relay rejected").unwrap();
+        let (st, err): (String, Option<String>) = s.conn
+            .query_row("SELECT sync_state, error FROM messages WHERE message_id=?1", params![mid], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        assert_eq!(st, "failed");
+        assert_eq!(err.as_deref(), Some("relay rejected"));
+
+        // Idempotent dedup on native_event_id.
+        let mid2 = s.materialize_outbound_message(&tid, "pk-author", "hey (echo)", 10, Some("nat-1")).unwrap();
+        assert_eq!(mid, mid2, "same native_event_id → same message_id");
     }
 }

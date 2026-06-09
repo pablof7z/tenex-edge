@@ -418,11 +418,13 @@ pub fn load_who_snapshot(
     let local_host = slugify_host(daemon_host);
     let since = if all { 0 } else { now.saturating_sub(PEER_FRESH_SECS) };
 
-    let mine = store.list_my_live_sessions(since)?;
+    // Route through Phase 2 read-model methods so Phase 8 can swap the source
+    // without touching this function.
+    let mine = store.list_agents_read_model(None, since)?;
     let my_ids: std::collections::HashSet<String> =
         mine.iter().map(|s| s.session_id.clone()).collect();
     let all_peers: Vec<_> = store
-        .list_peer_sessions(None, since)?
+        .list_presence_read_model(None, since)?
         .into_iter()
         .filter(|p| !my_ids.contains(&p.session_id))
         .collect();
@@ -484,7 +486,8 @@ pub fn load_who_snapshot(
     let other_projects = other_agents
         .into_iter()
         .map(|(project, agents)| {
-            let about = store.get_project_meta(&project).ok().flatten();
+            // Route through the read-model method so Phase 8 can swap the source.
+            let about = store.project_meta_read_model(&project).ok().flatten();
             let agents: Vec<String> = agents.into_iter().collect();
             OtherProjectSummary {
                 project,
@@ -1190,7 +1193,8 @@ pub fn assemble_turn_start_context(
 pub fn assemble_turn_check_context(store: &std::sync::Mutex<Store>, session_id: &str) -> Option<String> {
     let lines = {
         let s = store.lock().expect("store mutex poisoned");
-        let rows = s.peek_inbox(session_id).unwrap_or_default();
+        // Route through the read-model method (peek semantics preserved).
+        let rows = s.undelivered_messages_for_session(session_id).unwrap_or_default();
         rows.iter()
             .map(|r| {
                 let handle = mention_reply_handle(&s, r);

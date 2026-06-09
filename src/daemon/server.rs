@@ -1016,6 +1016,17 @@ async fn rpc_user_prompt(state: &Arc<DaemonState>, params: &serde_json::Value) -
 async fn rpc_project_list(state: &Arc<DaemonState>) -> Result<serde_json::Value> {
     use nostr_sdk::prelude::{Filter, Kind};
 
+    // Phase 2: prefer local read-model rows when present (avoids a relay round-
+    // trip on every call). Always attempt a relay refresh so the cache stays warm;
+    // the relay result is the materialization source, not the return value.
+    //
+    // TODO(phase 8): when the canonical `projects` table is the write target,
+    // drop the relay-fetch entirely and read only from list_projects_read_model.
+    let local = state
+        .with_store(|s| s.list_projects_read_model())
+        .unwrap_or_default();
+
+    // Kick off relay fetch for materialization regardless of local cache state.
     let filter = Filter::new().kind(Kind::from(39000u16)).limit(200);
     let events = state
         .transport
@@ -1024,17 +1035,29 @@ async fn rpc_project_list(state: &Arc<DaemonState>) -> Result<serde_json::Value>
         .unwrap_or_default();
 
     let now = now_secs();
-    let mut projects: Vec<serde_json::Value> = Vec::new();
+    let mut from_relay: Vec<serde_json::Value> = Vec::new();
     for ev in &events {
         let Some(slug) = event_tag(ev, "d") else {
             continue;
         };
         let about = event_tag(ev, "about").unwrap_or("").to_string();
         state.with_store(|s| {
+            // Materialization refresh: update legacy project_meta cache.
             s.upsert_project_meta(slug, &about, now).ok();
         });
-        projects.push(serde_json::json!({ "slug": slug, "about": about }));
+        from_relay.push(serde_json::json!({ "slug": slug, "about": about }));
     }
+
+    // Prefer relay-derived list (freshest); fall back to local cache when the
+    // relay returns nothing (offline / timeout / empty relay).
+    let mut projects = if !from_relay.is_empty() {
+        from_relay
+    } else {
+        local
+            .into_iter()
+            .map(|(slug, about)| serde_json::json!({ "slug": slug, "about": about }))
+            .collect()
+    };
     projects.sort_by(|a, b| {
         a["slug"].as_str().unwrap_or("").cmp(b["slug"].as_str().unwrap_or(""))
     });
