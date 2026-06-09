@@ -691,6 +691,10 @@ struct ProposeParams {
     agent: Option<String>,
     #[serde(default)]
     thread_id: Option<String>,
+    /// Stable `d` identifier. When Some, the kind:30023 supersedes any prior
+    /// proposal with the same (author, d) — a revision. When None, mint one.
+    #[serde(default)]
+    d: Option<String>,
 }
 
 /// Publish a kind:30023 (NIP-23 long-form) proposal signed by the agent's identity.
@@ -729,14 +733,17 @@ async fn rpc_propose(
     )?;
     let id = identity::load_or_create(&config::edge_home(), &rec.agent_slug, now_secs())?;
 
-    // Generate a short addressable `d` identifier for this proposal.
-    let d_tag = format!(
-        "prop-{:x}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis())
-            .unwrap_or(0)
-    );
+    // Addressable `d` identifier. A caller-supplied `d` makes this a REVISION
+    // that supersedes the prior (author, d) at the same naddr; otherwise mint one.
+    let d_tag = p.d.clone().filter(|s| !s.is_empty()).unwrap_or_else(|| {
+        format!(
+            "prop-{:x}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis())
+                .unwrap_or(0)
+        )
+    });
 
     // Resolve the thread root native key if --thread given.
     let root_native_key: Option<String> = p.thread_id.as_deref().and_then(|tid| {

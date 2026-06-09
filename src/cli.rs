@@ -187,6 +187,11 @@ enum Cmd {
         /// Optional canonical thread id to attach this proposal to.
         #[arg(long = "thread", value_name = "THREAD_ID")]
         thread_id: Option<String>,
+        /// Stable addressable identifier (the kind:30023 `d` tag). Reuse the same
+        /// value to publish a REVISION that supersedes a prior proposal at the
+        /// same address. Omit to mint a fresh id (a new proposal).
+        #[arg(long = "d", value_name = "IDENTIFIER")]
+        d: Option<String>,
         /// My session id; if omitted, resolved from the current directory.
         #[arg(long)]
         session: Option<String>,
@@ -239,9 +244,9 @@ pub async fn run(cli: Cli) -> Result<()> {
             let message = resolve_send_message_body(message_flag.or(message))?;
             send_message(recipient, message, session, thread_id).await
         }
-        Cmd::Propose { title, message, thread_id, session } => {
+        Cmd::Propose { title, message, thread_id, d, session } => {
             let body = resolve_send_message_body(message)?;
-            propose(title, body, thread_id, session).await
+            propose(title, body, thread_id, d, session).await
         }
         Cmd::Threads { project, thread } => threads(project, thread).await,
         Cmd::Who {
@@ -357,6 +362,7 @@ async fn propose(
     title: String,
     body: String,
     thread_id: Option<String>,
+    d: Option<String>,
     session: Option<String>,
 ) -> Result<()> {
     let params = serde_json::json!({
@@ -367,6 +373,7 @@ async fn propose(
         "agent": std::env::var("TENEX_EDGE_AGENT").ok(),
         "cwd": std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()),
         "thread_id": thread_id,
+        "d": d,
     });
     let v = daemon_call_async("propose", params).await?;
     let title_echo = v["title"].as_str().unwrap_or(&title);
