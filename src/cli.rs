@@ -1,13 +1,7 @@
 //! The host-neutral CLI surface (M1 §6).
 
-use crate::codec::{Codec, Kind1Codec, SubScope};
-use crate::config::{self, Config};
-use crate::domain::{AgentRef, DomainEvent, Mention};
-use crate::identity;
-use crate::project;
-use crate::runtime::{self, EngineParams};
+use crate::domain::DomainEvent;
 use crate::state::Store;
-use crate::transport::Transport;
 use crate::util::{now_secs, short_id, slugify_host};
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
@@ -17,12 +11,11 @@ use crossterm::{
     execute,
     terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use nostr_sdk::prelude::RelayPoolNotification;
 use owo_colors::OwoColorize;
 use std::fmt::Write as _;
 use std::io::{self, IsTerminal as _, Read as _, Write as _};
 use std::path::PathBuf;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 #[derive(Parser)]
 #[command(
@@ -100,7 +93,9 @@ enum Cmd {
         #[arg(long)]
         project: Option<String>,
     },
-    /// Print + drain pending mentions for a session (used by the injection hook).
+    /// Print + drain pending mentions for a session. Used by the opencode
+    /// injection path and as a manual "check my messages" command. (Claude Code
+    /// and Codex drain via the `hook --type user-prompt-submit` path instead.)
     Inbox {
         /// Session id; if omitted, resolved from the current directory.
         #[arg(long)]
@@ -116,9 +111,10 @@ enum Cmd {
         #[arg(long, default_value = "300")]
         timeout: u64,
     },
-    /// Mark a session as working on a turn (used by the turn-start hook, e.g.
-    /// Claude Code's UserPromptSubmit). Outputs fabric context for the agent:
-    /// inbox messages, and presence/status changes since the last turn.
+    /// Internal/manual: mark a session as working on a turn and emit fabric
+    /// context (inbox messages + presence/status changes since the last turn).
+    /// Harnesses do not call this directly — `hook --type user-prompt-submit`
+    /// invokes it. Exposed for manual use and debugging.
     TurnStart {
         #[arg(long)]
         session: String,
@@ -129,8 +125,10 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
-    /// Check for new inbox messages mid-turn (used by PostToolUse hook).
-    /// Read-only: does not drain the inbox; turn-start at the next prompt drains.
+    /// Internal/manual: check for new inbox messages mid-turn. Read-only — does
+    /// not drain the inbox; turn-start at the next prompt drains. Harnesses do
+    /// not call this directly — `hook --type post-tool-use` invokes it. Exposed
+    /// for manual use and debugging.
     TurnCheck {
         /// Session id; if omitted, resolved from the current directory.
         #[arg(long)]
@@ -139,11 +137,17 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
-    /// Mark a session idle (used by the turn-end hook, e.g. Claude Code's Stop).
-    /// The engine clears the agent's status on its next poll.
+    /// Internal/manual: mark a session idle; the engine clears the agent's
+    /// status on its next poll. Harnesses do not call this directly —
+    /// `hook --type stop` invokes it. Exposed for manual use and debugging.
     TurnEnd {
         #[arg(long)]
         session: String,
+    },
+    /// Manage NIP-29 project groups (list, set description).
+    Project {
+        #[command(subcommand)]
+        action: ProjectAction,
     },
     /// Connectivity check: publish a test note to the configured relays and read it back.
     Doctor,
@@ -158,19 +162,9 @@ enum Cmd {
         #[arg(long = "type")]
         hook_type: String,
     },
-    /// Internal: the detached per-session engine. Not for direct use.
-    #[command(name = "__run-session", hide = true)]
-    RunSession {
-        #[arg(long)]
-        agent: String,
-        #[arg(long)]
-        session_id: String,
-        #[arg(long)]
-        project: String,
-        #[arg(long)]
-        watch_pid: Option<i32>,
-    },
     /// Internal: the per-machine daemon. Spawned automatically; not for direct use.
+    /// (Replaces the old detached per-session engine, which now runs as an async
+    /// task inside this one daemon — the sole writer of state.db.)
     #[command(name = "__daemon", hide = true)]
     Daemon,
 }
@@ -183,6 +177,21 @@ enum AclAction {
     Allow { target: String },
     /// Block an agent (pubkey or pending-list slug).
     Block { target: String },
+}
+
+#[derive(Subcommand)]
+enum ProjectAction {
+    /// List all NIP-29 project groups on the relay.
+    List,
+    /// Set the description for a project's NIP-29 group (publishes kind:9002).
+    Edit {
+        /// New description text.
+        #[arg(long)]
+        description: String,
+        /// Project slug; defaults to the project resolved from the current directory.
+        #[arg(long)]
+        project: Option<String>,
+    },
 }
 
 pub async fn run(cli: Cli) -> Result<()> {
@@ -224,6 +233,7 @@ pub async fn run(cli: Cli) -> Result<()> {
         Cmd::Tail { project } => tail(project).await,
         Cmd::Inbox { session } => inbox(session).await,
         Cmd::WaitForMention { session, timeout } => wait_for_mention(session, timeout).await,
+        Cmd::Project { action } => project(action).await,
         Cmd::Doctor => doctor().await,
         Cmd::TurnStart {
             session,
@@ -233,12 +243,6 @@ pub async fn run(cli: Cli) -> Result<()> {
         Cmd::TurnCheck { session, json } => turn_check(session, json),
         Cmd::TurnEnd { session } => turn_end(session),
         Cmd::Hook { host, hook_type } => hook_run(host, hook_type).await,
-        Cmd::RunSession {
-            agent,
-            session_id,
-            project,
-            watch_pid,
-        } => run_session(agent, session_id, project, watch_pid).await,
         Cmd::Daemon => crate::daemon::server::run().await,
     }
 }
@@ -246,45 +250,9 @@ pub async fn run(cli: Cli) -> Result<()> {
 /// A peer is "live" only while heartbeats keep it fresh (3× the default 30s tick).
 const PEER_FRESH_SECS: u64 = 90;
 
-fn store_path() -> PathBuf {
-    config::edge_home().join("state.db")
-}
-
-fn open_store() -> Result<Store> {
-    Store::open(&store_path())
-}
-
-/// Resolve the caller's session: explicit id if given, else the most-recent
-/// alive session for the project of the current directory. Lets agents that
-/// don't know their session id just run `tenex-edge inbox` / `send-message`.
-fn resolve_session(store: &Store, explicit: Option<String>) -> Result<crate::state::SessionRecord> {
-    if let Some(id) = explicit {
-        return store
-            .get_session(&id)?
-            .with_context(|| format!("unknown session {id}"));
-    }
-    // Host adapters can export this so an agent resolves ITS OWN session even
-    // when several agents share a project.
-    if let Ok(id) = std::env::var("TENEX_EDGE_SESSION") {
-        if !id.is_empty() {
-            if let Some(rec) = store.get_session(&id)? {
-                return Ok(rec);
-            }
-        }
-    }
-    let project = project::resolve(&std::env::current_dir()?);
-    store
-        .latest_alive_session_for_project(&project)?
-        .with_context(|| format!("no active tenex-edge session for project {project:?} (run session-start, or pass --session)"))
-}
-
-fn gen_session_id() -> String {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    format!("te-{:x}-{}", nanos, std::process::id())
-}
+// Session resolution, session-id generation, recipient resolution, and the
+// store live INSIDE the daemon now (it is the sole writer). The CLI verbs below
+// are thin clients that forward to it over the UDS.
 
 // ── session-start ────────────────────────────────────────────────────────────
 
@@ -300,128 +268,36 @@ fn session_start(
 
 /// Core session-start logic. Returns the resolved session id.
 /// Callers decide what to do with it (print for CLI, discard for hooks).
+///
+/// Thin client: asks the per-machine daemon to spawn an in-process session task
+/// (the relocated engine). The daemon is the sole writer of state.db and owns
+/// the single relay connection — no more per-session fork.
 fn session_start_inner(
     agent: String,
     session_id: Option<String>,
     cwd: Option<PathBuf>,
     watch_pid: Option<i32>,
 ) -> Result<String> {
-    let cfg = Config::load().context("loading ~/.tenex/config.json")?;
-    let edge = config::edge_home();
-    config::ensure_dir(&edge)?;
-    let id = identity::load_or_create(&edge, &agent, now_secs())?;
-    // Our own fleet is auto-authorized: ensure this agent is on the allowlist.
-    let _ = crate::acl::allow(&id.pubkey_hex(), &agent);
     let cwd = cwd.unwrap_or(std::env::current_dir()?);
-    let project = project::resolve(&cwd);
-    let session_id = session_id.unwrap_or_else(gen_session_id);
-
-    let store = open_store()?;
-    store.upsert_session(&crate::state::SessionRecord {
-        session_id: session_id.clone(),
-        agent_slug: agent.clone(),
-        agent_pubkey: id.pubkey_hex(),
-        project: project.clone(),
-        host: cfg.host.clone(),
-        child_pid: None,
-        watch_pid,
-        created_at: now_secs(),
-        alive: true,
-    })?;
-
-    // Fork the detached engine: re-exec ourselves as `__run-session`.
-    let exe = std::env::current_exe().context("locating own executable")?;
-    let mut command = std::process::Command::new(exe);
-    command
-        .arg("__run-session")
-        .arg("--agent")
-        .arg(&agent)
-        .arg("--session-id")
-        .arg(&session_id)
-        .arg("--project")
-        .arg(&project)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
-    if let Some(pid) = watch_pid {
-        command.arg("--watch-pid").arg(pid.to_string());
-    }
-    detach(&mut command);
-    let child = command.spawn().context("forking background engine")?;
-
-    // Record the engine pid so session-end can stop it; mark live immediately.
-    let mut rec = store
-        .get_session(&session_id)?
-        .expect("just-written session");
-    rec.child_pid = Some(child.id() as i32);
-    store.upsert_session(&rec)?;
-    store.touch_session(&session_id, now_secs())?;
-
-    Ok(session_id)
-}
-
-#[cfg(unix)]
-fn detach(command: &mut std::process::Command) {
-    use std::os::unix::process::CommandExt;
-    command.process_group(0); // own process group: survives terminal Ctrl-C / parent exit
-}
-#[cfg(not(unix))]
-fn detach(_command: &mut std::process::Command) {}
-
-// ── __run-session (the engine) ───────────────────────────────────────────────
-
-async fn run_session(
-    agent: String,
-    session_id: String,
-    project: String,
-    watch_pid: Option<i32>,
-) -> Result<()> {
-    let cfg = Config::load()?;
-    let edge = config::edge_home();
-    let id = identity::load_or_create(&edge, &agent, now_secs())?;
-    let _ = crate::acl::allow(&id.pubkey_hex(), &agent);
-
-    let heartbeat = env_duration("TENEX_EDGE_HEARTBEAT_MS", Duration::from_secs(30));
-    let obs_interval = env_duration("TENEX_EDGE_OBS_MS", Duration::from_secs(5));
-    let status_ttl = Duration::from_secs(env_u64("TENEX_EDGE_STATUS_TTL_S", 90));
-    // Turn-driven distillation cadence: first summary 30s into a turn (so quick
-    // turns cost nothing), then refresh every 5m while it keeps running.
-    let turn_first = Duration::from_secs(env_u64("TENEX_EDGE_TURN_FIRST_S", 30));
-    let turn_repeat = Duration::from_secs(env_u64("TENEX_EDGE_TURN_REPEAT_S", 300));
-
-    let params = EngineParams {
-        agent_slug: agent,
-        agent_pubkey: id.pubkey_hex(),
-        keys: id.keys.clone(),
-        project,
-        session_id,
-        host: cfg.host,
-        owners: cfg.whitelisted_pubkeys,
-        relays: cfg.relays,
-        watch_pid,
-        store_path: store_path(),
-        heartbeat,
-        obs_interval,
-        status_ttl,
-        turn_first,
-        turn_repeat,
-    };
-    runtime::run_session(params).await
+    let params = serde_json::json!({
+        "agent": agent,
+        "session_id": session_id,
+        "cwd": cwd.to_string_lossy(),
+        "watch_pid": watch_pid,
+    });
+    let v = crate::daemon::blocking::call("session_start", params)?;
+    let sid = v["session_id"]
+        .as_str()
+        .context("daemon returned no session_id")?
+        .to_string();
+    Ok(sid)
 }
 
 // ── session-end ──────────────────────────────────────────────────────────────
 
 fn session_end(session: String) -> Result<()> {
-    let store = open_store()?;
-    if let Some(rec) = store.get_session(&session)? {
-        if let Some(pid) = rec.child_pid {
-            // SIGTERM -> engine publishes idle status and exits cleanly.
-            let _ = nix::sys::signal::kill(
-                nix::unistd::Pid::from_raw(pid),
-                nix::sys::signal::Signal::SIGTERM,
-            );
-        }
-        store.mark_session_dead(&session)?;
+    let v = crate::daemon::blocking::call("session_end", serde_json::json!({"session": session}))?;
+    if v["ended"].as_bool().unwrap_or(false) {
         eprintln!("session {session} ended");
     } else {
         eprintln!("no such session: {session}");
@@ -432,36 +308,28 @@ fn session_end(session: String) -> Result<()> {
 // ── send-message ─────────────────────────────────────────────────────────────
 
 async fn send_message(recipient: String, message: String, session: Option<String>) -> Result<()> {
-    let cfg = Config::load()?;
-    let store = open_store()?;
-    let rec = resolve_session(&store, session)?;
-    let edge = config::edge_home();
-    let id = identity::load_or_create(&edge, &rec.agent_slug, now_secs())?;
-
-    let (to_pubkey, target_session) = resolve_recipient(&store, &rec.project, &recipient)?;
-
-    let mention = DomainEvent::Mention(Mention {
-        from: AgentRef::new(id.pubkey_hex(), rec.agent_slug.clone()),
-        to_pubkey: to_pubkey.clone(),
-        project: rec.project.clone(),
-        body: message,
-        target_session: target_session.clone(),
+    let params = serde_json::json!({
+        "recipient": recipient,
+        "message": message,
+        "session": session,
+        "env_session": std::env::var("TENEX_EDGE_SESSION").ok(),
+        "cwd": std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()),
     });
-
-    let transport = Transport::connect(&cfg.relays, id.keys.clone()).await?;
-    let codec = Kind1Codec;
-    transport.publish_builder(codec.encode(&mention)?).await?;
-    transport.shutdown().await;
-
+    let v = daemon_call_async("send_message", params).await?;
+    let to_pubkey = v["to_pubkey"].as_str().unwrap_or_default().to_string();
+    let target_session = v["target_session"].as_str().map(str::to_string);
     match target_session {
-        Some(s) => println!(
-            "mentioned {} (session {})",
-            short_id(&to_pubkey),
-            short_id(&s)
-        ),
+        Some(s) => println!("mentioned {} (session {})", short_id(&to_pubkey), short_id(&s)),
         None => println!("mentioned {}", short_id(&to_pubkey)),
     }
     Ok(())
+}
+
+/// Async daemon call helper for `async fn` verbs (uses the async client; we are
+/// inside the tokio runtime so we must NOT block_on a sync client here).
+async fn daemon_call_async(method: &str, params: serde_json::Value) -> Result<serde_json::Value> {
+    let mut client = crate::daemon::client::Client::connect_or_spawn().await?;
+    client.call(method, params).await
 }
 
 fn resolve_send_message_body(raw: Option<String>) -> Result<String> {
@@ -503,74 +371,43 @@ fn strip_single_trailing_newline(mut s: String) -> String {
     s
 }
 
-fn resolve_recipient(
-    store: &Store,
-    my_project: &str,
-    target: &str,
-) -> Result<(String, Option<String>)> {
-    // 1. slug@project
-    if let Some((slug, proj)) = target.split_once('@') {
-        let pk = store
-            .resolve_agent_pubkey(slug, Some(proj))?
-            .with_context(|| {
-                format!("can't resolve {slug}@{proj} (no presence/profile seen yet)")
-            })?;
-        return Ok((pk, None));
-    }
-    // 2. raw hex pubkey
-    if target.len() == 64 && target.chars().all(|c| c.is_ascii_hexdigit()) {
-        return Ok((target.to_string(), None));
-    }
-    // 3. session-id prefix (target a specific session of an agent) — check
-    //    foreign peers first, then my own sessions on this machine.
-    if target.len() >= 6 {
-        if let Some(ps) = store.find_peer_session_by_prefix(target)? {
-            return Ok((ps.pubkey, Some(ps.session_id)));
-        }
-        if let Some(s) = store.find_session_by_prefix(target)? {
-            return Ok((s.agent_pubkey, Some(s.session_id)));
-        }
-    }
-    // 4. bare agent slug in my project
-    if let Some(pk) = store.resolve_agent_pubkey(target, Some(my_project))? {
-        return Ok((pk, None));
-    }
-    bail!("can't resolve recipient {target:?} (try `tenex-edge who`)")
-}
-
 // ── who ──────────────────────────────────────────────────────────────────────
 
+/// `who` params for the daemon RPC. The daemon resolves the current project the
+/// same way the old CLI did (`all_projects ? None : resolve(cwd)`).
+fn who_params(project: &Option<String>, all: bool, all_projects: bool) -> serde_json::Value {
+    serde_json::json!({
+        "project": project,
+        "all": all,
+        "all_projects": all_projects,
+        "cwd": std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()),
+    })
+}
+
+fn who_snapshot_via_daemon(
+    project: &Option<String>,
+    all: bool,
+    all_projects: bool,
+) -> Result<WhoSnapshot> {
+    let v = crate::daemon::blocking::call("who", who_params(project, all, all_projects))?;
+    Ok(serde_json::from_value(v)?)
+}
+
 fn who(project: Option<String>, all: bool, all_projects: bool) -> Result<()> {
-    let store = open_store()?;
-    let current_project = if all_projects {
-        None
-    } else {
-        Some(project.unwrap_or_else(|| {
-            project::resolve(&std::env::current_dir().unwrap_or_default())
-        }))
-    };
-    let snapshot = load_who_snapshot(&store, current_project.as_deref(), all, now_secs())?;
+    let snapshot = who_snapshot_via_daemon(&project, all, all_projects)?;
     print!("{}", render_who_once(&snapshot));
     Ok(())
 }
 
 fn who_live(project: Option<String>, all: bool, all_projects: bool, refresh: Duration) -> Result<()> {
     let refresh = refresh.max(Duration::from_millis(100));
-    let store = open_store()?;
-    let current_project = if all_projects {
-        None
-    } else {
-        Some(project.unwrap_or_else(|| {
-            project::resolve(&std::env::current_dir().unwrap_or_default())
-        }))
-    };
     let _terminal = LiveTerminal::enter()?;
     let mut next_draw = Instant::now();
 
     loop {
         let now = Instant::now();
         if now >= next_draw {
-            let snapshot = load_who_snapshot(&store, current_project.as_deref(), all, now_secs())?;
+            let snapshot = who_snapshot_via_daemon(&project, all, all_projects)?;
             draw_who_live(&snapshot, refresh)?;
             next_draw = Instant::now() + refresh;
         }
@@ -588,15 +425,18 @@ fn who_live(project: Option<String>, all: bool, all_projects: bool, refresh: Dur
     Ok(())
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct OtherProjectSummary {
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct OtherProjectSummary {
     project: String,
     agent_count: usize,
     about: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct WhoSnapshot {
+// The daemon serializes a WhoSnapshot and the thin `who` client renders it with
+// the EXACT renderers below — so output is byte-identical by construction and
+// can never drift from a separate copy.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct WhoSnapshot {
     project: String,
     all: bool,
     now: u64,
@@ -605,7 +445,7 @@ struct WhoSnapshot {
 }
 
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 struct WhoRow {
     source: WhoSource,
     fresh: bool,
@@ -615,20 +455,34 @@ struct WhoRow {
     host: String,
     session_id: String,
     age_secs: Option<u64>,
+    /// Project-relative working dir (§8e). Empty or "." → rendered without a
+    /// `[dir]` bracket; otherwise shown so worktrees render distinctly.
+    #[serde(default)]
+    rel_cwd: String,
+    /// True only for a peer whose host differs from the daemon/viewer's host.
+    /// Local sessions and same-machine peers are never remote (the §8e fix).
+    #[serde(default)]
+    remote: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 enum WhoSource {
     Local,
     Peer,
 }
 
-fn load_who_snapshot(
+pub fn load_who_snapshot(
     store: &Store,
     current_project: Option<&str>,
     all: bool,
     now: u64,
+    daemon_host: &str,
 ) -> Result<WhoSnapshot> {
+    // §8e: "remote" is computed DAEMON-side by comparing each peer's host to the
+    // daemon's own host, so all rendering stays client-side and can't diverge via
+    // a second Config::load(). Local sessions are on this machine by construction
+    // → never remote. A peer is remote ONLY when its host differs from ours.
+    let local_host = slugify_host(daemon_host);
     let since = if all { 0 } else { now.saturating_sub(PEER_FRESH_SECS) };
 
     let mine = store.list_my_live_sessions(since)?;
@@ -660,6 +514,8 @@ fn load_who_snapshot(
                 host: s.host.clone(),
                 session_id: s.session_id.clone(),
                 age_secs,
+                rel_cwd: s.rel_cwd.clone(),
+                remote: false,
             });
         } else {
             *other_counts.entry(s.project.clone()).or_default() += 1;
@@ -678,6 +534,8 @@ fn load_who_snapshot(
                 host: p.host.clone(),
                 session_id: p.session_id.clone(),
                 age_secs: Some(age),
+                rel_cwd: p.rel_cwd.clone(),
+                remote: slugify_host(&p.host) != local_host,
             });
         } else {
             *other_counts.entry(p.project.clone()).or_default() += 1;
@@ -713,6 +571,63 @@ fn status_for(store: &Store, pubkey: &str, project: &str) -> String {
         .unwrap_or_default()
 }
 
+/// Append the turn-start "tenex-edge fabric" block(s): the full roster on the
+/// first turn, or "changes since your last turn" afterward. This is the single
+/// source of truth — both the CLI `turn_start` and the daemon's `turn_start` RPC
+/// call it, so the injected text is identical.
+pub fn push_turn_fabric_block(
+    store: &std::sync::Mutex<Store>,
+    blocks: &mut Vec<String>,
+    first_turn: bool,
+    prev_turn_started_at: u64,
+    project: &str,
+    now: u64,
+    daemon_host: &str,
+) {
+    let store = store.lock().expect("store mutex poisoned");
+    if first_turn {
+        if let Ok(snapshot) = load_who_snapshot(&store, Some(project), false, now, daemon_host) {
+            if !snapshot.rows.is_empty() {
+                let who_text = render_who_plain(&snapshot);
+                blocks.push(format!(
+                "tenex-edge fabric — agents you can message. To send, run \
+                 `tenex-edge send-message --recipient <agent@project|session-id> --message \"...\"`:\n{}",
+                who_text.trim_end()
+            ));
+        }
+        }
+    } else {
+        let fresh_since = now.saturating_sub(PEER_FRESH_SECS);
+        let new_peers = store
+            .list_new_peer_sessions(prev_turn_started_at, fresh_since, Some(project))
+            .unwrap_or_default();
+        let status_changes = store
+            .list_status_changes_since(prev_turn_started_at, Some(project))
+            .unwrap_or_default();
+
+        let mut delta: Vec<String> = Vec::new();
+        for p in &new_peers {
+            let age = now.saturating_sub(p.last_seen);
+            delta.push(format!(
+                "  ● {}@{} joined  {}  session {}  ({age}s ago)",
+                p.slug,
+                slugify_host(&p.host),
+                p.project,
+                short_id(&p.session_id),
+            ));
+        }
+        for (slug, proj, text) in &status_changes {
+            delta.push(format!("  ↻ {slug}@{proj} — {text}"));
+        }
+        if !delta.is_empty() {
+            blocks.push(format!(
+                "tenex-edge fabric — changes since your last turn:\n{}",
+                delta.join("\n")
+            ));
+        }
+    }
+}
+
 fn render_who_once(snapshot: &WhoSnapshot) -> String {
     let mut out = String::new();
 
@@ -735,39 +650,33 @@ fn render_who_once(snapshot: &WhoSnapshot) -> String {
     } else {
         let _ = writeln!(out, "{}", "agents:".bold());
         for row in &snapshot.rows {
-            let dot = if row.fresh {
-                "●".green().to_string()
+            let stale = if row.fresh {
+                String::new()
             } else {
-                "○".dimmed().to_string()
+                format!(" {}", "(stale)".dimmed())
             };
-            let status = render_status_colored(&row.status);
-            match row.source {
-                WhoSource::Local => {
-                    let _ = writeln!(
-                        out,
-                        "  {dot} {}@{}{}  {}  session {}  {}",
-                        row.slug.cyan(),
-                        slugify_host(&row.host),
-                        status,
-                        row.project.dimmed(),
-                        short_id(&row.session_id).yellow(),
-                        "(this machine)".dimmed()
-                    );
-                }
-                WhoSource::Peer => {
-                    let age = row.age_secs.unwrap_or(0);
-                    let _ = writeln!(
-                        out,
-                        "  {dot} {}@{}{}  {}  session {}  ({}s ago)",
-                        row.slug.cyan(),
-                        slugify_host(&row.host),
-                        status,
-                        row.project.dimmed(),
-                        short_id(&row.session_id).yellow(),
-                        age
-                    );
-                }
-            }
+            // §8e: same-machine agents get NO annotation; a true remote (peer on
+            // a different host than the daemon) gets ` (remote)`.
+            let remote = if row.remote {
+                format!(" {}", "(remote)".dimmed())
+            } else {
+                String::new()
+            };
+            let dir = rel_cwd_bracket(&row.rel_cwd)
+                .map(|d| format!(" {}", format!("[{d}]").dimmed()))
+                .unwrap_or_default();
+            // Line 1: identity. Line 2 (indented): what it's doing.
+            let _ = writeln!(
+                out,
+                "  {}@{} [session {}]{}{}{}",
+                row.slug.cyan(),
+                row.project,
+                short_id(&row.session_id).yellow(),
+                dir,
+                remote,
+                stale,
+            );
+            let _ = writeln!(out, "      {}", status_plain(&row.status));
         }
     }
 
@@ -790,11 +699,14 @@ fn render_who_once(snapshot: &WhoSnapshot) -> String {
     out
 }
 
-fn render_status_colored(status: &str) -> String {
-    if status.trim().is_empty() {
-        format!(" — {}", "idle".dimmed())
+/// The `[dir]` to show for a row's `rel_cwd`: `None` when empty or the project
+/// root (`.`), so the project root renders without a bracket (§8e).
+fn rel_cwd_bracket(rel_cwd: &str) -> Option<&str> {
+    let r = rel_cwd.trim();
+    if r.is_empty() || r == "." {
+        None
     } else {
-        format!(" — {status}")
+        Some(r)
     }
 }
 
@@ -808,7 +720,9 @@ fn draw_who_live(snapshot: &WhoSnapshot, refresh: Duration) -> Result<()> {
     );
     let mut stdout = io::stdout();
     execute!(stdout, MoveTo(0, 0), Clear(ClearType::All))?;
-    write!(stdout, "{screen}")?;
+    for line in screen.lines() {
+        write!(stdout, "{line}\r\n")?;
+    }
     stdout.flush()?;
     Ok(())
 }
@@ -863,6 +777,7 @@ mod who_tests {
             watch_pid: None,
             created_at: 1,
             alive: true,
+            rel_cwd: String::new(),
         }
     }
 
@@ -880,6 +795,7 @@ mod who_tests {
                 "coder",
                 "proj",
                 "laptop",
+                "",
                 1_000,
             )
             .unwrap();
@@ -890,6 +806,7 @@ mod who_tests {
                 "reviewer",
                 "proj",
                 "tower",
+                "",
                 995,
             )
             .unwrap();
@@ -897,25 +814,66 @@ mod who_tests {
             .set_agent_status("pk-reviewer", "proj", "reviewing the patch", 995)
             .unwrap();
 
-        let snapshot = load_who_snapshot(&store, Some("proj"), false, 1_000).unwrap();
+        // Daemon/viewer host is "laptop" → the local coder is same-machine; the
+        // "tower" reviewer is a genuine remote.
+        let snapshot = load_who_snapshot(&store, Some("proj"), false, 1_000, "laptop").unwrap();
 
         assert_eq!(snapshot.rows.len(), 2);
-        assert!(snapshot
+        let coder = snapshot
             .rows
             .iter()
-            .any(|r| r.source == WhoSource::Local && r.slug == "coder"));
-        assert!(snapshot
+            .find(|r| r.source == WhoSource::Local && r.slug == "coder")
+            .expect("local coder row");
+        let reviewer = snapshot
             .rows
             .iter()
-            .any(|r| r.source == WhoSource::Peer && r.slug == "reviewer"));
+            .find(|r| r.source == WhoSource::Peer && r.slug == "reviewer")
+            .expect("peer reviewer row");
         assert!(!snapshot
             .rows
             .iter()
             .any(|r| r.source == WhoSource::Peer && r.session_id == "local-session"));
 
+        // §8e same-host/remote: this machine's own session is NOT remote; a peer
+        // on a different host IS.
+        assert!(!coder.remote, "local session must never be remote");
+        assert!(reviewer.remote, "tower peer must be remote vs laptop");
+
         let once = render_who_once(&snapshot);
-        assert!(once.contains("@laptop"));
-        assert!(once.contains("proj"));
+        assert!(once.contains("@proj"));
+        assert!(once.contains("coder"));
+        // The remote tag appears only for the genuine remote.
+        assert!(once.contains("(remote)"));
+    }
+
+    #[test]
+    fn same_host_peer_is_not_remote() {
+        // A sibling agent (e.g. codex@) on the SAME laptop arrives as a peer row;
+        // it must NOT be tagged remote (the bug being fixed).
+        let store = Store::open_memory().unwrap();
+        store
+            .upsert_peer_session("sib", "pk-codex", "codex", "proj", "laptop", "worktree1", 1_000)
+            .unwrap();
+        let snap = load_who_snapshot(&store, Some("proj"), false, 1_000, "laptop").unwrap();
+        let sib = snap.rows.iter().find(|r| r.slug == "codex").expect("sibling row");
+        assert!(!sib.remote, "same-host peer must not be remote");
+        assert_eq!(sib.rel_cwd, "worktree1");
+        let once = render_who_once(&snap);
+        assert!(!once.contains("(remote)"), "no remote tag for same-host peer");
+        assert!(once.contains("[worktree1]"), "rel_cwd shown in bracket");
+    }
+
+    #[test]
+    fn root_rel_cwd_has_no_bracket() {
+        let store = Store::open_memory().unwrap();
+        // rel_cwd "." (project root) → no [dir] bracket.
+        store
+            .upsert_peer_session("r", "pk-a", "a", "proj", "tower", ".", 1_000)
+            .unwrap();
+        let snap = load_who_snapshot(&store, Some("proj"), false, 1_000, "laptop").unwrap();
+        let once = render_who_once(&snap);
+        assert!(!once.contains("[.]"), "root cwd must not render a bracket");
+        assert!(once.contains("(remote)"));
     }
 
     #[test]
@@ -933,6 +891,8 @@ mod who_tests {
                 host: "tower".to_string(),
                 session_id: "remote-session".to_string(),
                 age_secs: Some(5),
+                rel_cwd: String::new(),
+                remote: false,
             }],
             other_projects: vec![],
         };
@@ -948,26 +908,30 @@ mod who_tests {
 // ── acl (owner-scoped agent authorization) ───────────────────────────────────
 
 async fn acl(action: Option<AclAction>) -> Result<()> {
-    let store = open_store()?;
     match action {
         Some(AclAction::Allow { target }) => {
-            let (pk, slug) = resolve_acl_target(&store, &target)?;
-            crate::acl::allow(&pk, &slug)?;
-            store.remove_pending_agent(&pk).ok();
-            println!("authorized {} ({})", slug.cyan(), short_id(&pk));
+            let v = daemon_call_async("acl", serde_json::json!({"action": "allow", "target": target})).await?;
+            println!(
+                "authorized {} ({})",
+                v["slug"].as_str().unwrap_or("").cyan(),
+                short_id(v["pubkey"].as_str().unwrap_or(""))
+            );
         }
         Some(AclAction::Block { target }) => {
-            let (pk, slug) = resolve_acl_target(&store, &target)?;
-            crate::acl::block(&pk, &slug)?;
-            store.remove_pending_agent(&pk).ok();
-            println!("blocked {} ({})", slug, short_id(&pk));
+            let v = daemon_call_async("acl", serde_json::json!({"action": "block", "target": target})).await?;
+            println!(
+                "blocked {} ({})",
+                v["slug"].as_str().unwrap_or(""),
+                short_id(v["pubkey"].as_str().unwrap_or(""))
+            );
         }
         Some(AclAction::List) | None => {
-            let pending = store.list_pending_agents()?;
+            let v = daemon_call_async("acl", serde_json::json!({"action": "list"})).await?;
             println!(
                 "{}",
                 "pending (claim you as owner, awaiting your decision):".bold()
             );
+            let pending = v["pending"].as_array().cloned().unwrap_or_default();
             if pending.is_empty() {
                 println!("  (none)");
             } else {
@@ -975,74 +939,55 @@ async fn acl(action: Option<AclAction>) -> Result<()> {
                     println!(
                         "  {} {}  ({})  host {}",
                         "?".yellow(),
-                        p.slug.cyan(),
-                        short_id(&p.pubkey),
-                        p.host.dimmed()
+                        p["slug"].as_str().unwrap_or("").cyan(),
+                        short_id(p["pubkey"].as_str().unwrap_or("")),
+                        p["host"].as_str().unwrap_or("").dimmed()
                     );
                 }
                 println!(
                     "\n  allow:  tenex-edge acl allow <slug|pubkey>\n  block:  tenex-edge acl block <slug|pubkey>"
                 );
             }
-            let allowed = crate::acl::allowed();
-            let blocked = crate::acl::blocked();
             println!(
                 "\n{} {} authorized, {} blocked",
                 "acl:".bold(),
-                allowed.len(),
-                blocked.len()
+                v["allowed"].as_u64().unwrap_or(0),
+                v["blocked"].as_u64().unwrap_or(0)
             );
         }
     }
     Ok(())
 }
 
-/// Resolve an `acl` target (pubkey, or a pending-agent slug) to (pubkey, slug).
-fn resolve_acl_target(store: &Store, target: &str) -> Result<(String, String)> {
-    if target.len() == 64 && target.chars().all(|c| c.is_ascii_hexdigit()) {
-        let slug = store
-            .list_pending_agents()?
-            .into_iter()
-            .find(|p| p.pubkey == target)
-            .map(|p| p.slug)
-            .unwrap_or_else(|| "agent".to_string());
-        return Ok((target.to_string(), slug));
-    }
-    // else treat as a pending-agent slug
-    let m = store
-        .list_pending_agents()?
-        .into_iter()
-        .find(|p| p.slug == target);
-    match m {
-        Some(p) => Ok((p.pubkey, p.slug)),
-        None => bail!("no pending agent named {target:?}; use a pubkey or `tenex-edge acl list`"),
-    }
-}
-
 // ── inbox ────────────────────────────────────────────────────────────────────
 
 async fn inbox(session: Option<String>) -> Result<()> {
-    let store = open_store()?;
-    let rec = resolve_session(&store, session)?;
-    // Self-fetch: pull recent stored mentions addressed to me straight from the
-    // relay, so receive works even in one-shot sessions where the background
-    // engine hasn't caught up yet. Best-effort; never blocks the drain.
-    let _ = fetch_mentions_into_inbox(&store, &rec).await;
-    let rows = store.drain_inbox(&rec.session_id)?;
-    for r in &rows {
-        println!("[mention from {}@{}] {}", r.from_slug, r.project, r.body);
-        // Mark seen per-agent so it never resurfaces in a later session.
-        store
-            .mark_mention_seen(&rec.agent_pubkey, &r.mention_event_id, now_secs())
-            .ok();
+    let params = serde_json::json!({
+        "session": session,
+        "env_session": std::env::var("TENEX_EDGE_SESSION").ok(),
+        "cwd": std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()),
+    });
+    let v = daemon_call_async("inbox", params).await?;
+    if let Some(rows) = v["rows"].as_array() {
+        for r in rows {
+            println!(
+                "[mention from {}@{}] {}",
+                r["from_slug"].as_str().unwrap_or(""),
+                r["project"].as_str().unwrap_or(""),
+                r["body"].as_str().unwrap_or("")
+            );
+        }
     }
-    // Surface agents awaiting the human's authorization decision, so the agent
-    // can tell its human (the injection hook prints this into context).
-    let pending = store.list_pending_agents().unwrap_or_default();
-    if !pending.is_empty() {
+    if let Some(pending) = v["pending_agents"].as_array().filter(|p| !p.is_empty()) {
         let names: Vec<String> = pending
             .iter()
-            .map(|p| format!("{} ({})", p.slug, short_id(&p.pubkey)))
+            .map(|p| {
+                format!(
+                    "{} ({})",
+                    p["slug"].as_str().unwrap_or(""),
+                    short_id(p["pubkey"].as_str().unwrap_or(""))
+                )
+            })
             .collect();
         println!(
             "[tenex-edge] {} unauthorized agent(s) claim your owner: {}. \
@@ -1054,83 +999,30 @@ They are NOT visible until you decide — tell your human to run `tenex-edge acl
     Ok(())
 }
 
-async fn fetch_mentions_into_inbox(store: &Store, rec: &crate::state::SessionRecord) -> Result<()> {
-    use nostr_sdk::prelude::{Filter, Kind, PublicKey};
-    let cfg = Config::load()?;
-    let id = identity::load_or_create(&config::edge_home(), &rec.agent_slug, now_secs())?;
-    let me = id.pubkey_hex();
-    let pk = PublicKey::from_hex(&me)?;
-    let transport = Transport::connect(&cfg.relays, id.keys.clone()).await?;
-    let codec = Kind1Codec;
-    let filter = Filter::new().kind(Kind::from(1u16)).pubkey(pk).limit(50);
-    if let Ok(events) = transport.fetch(filter, Duration::from_secs(3)).await {
-        for ev in events {
-            if let Some(DomainEvent::Mention(m)) = codec.decode(&ev) {
-                if m.to_pubkey != me {
-                    continue;
-                }
-                // Skip mentions this agent already received in a prior session.
-                if store.is_mention_seen(&me, &ev.id.to_hex()).unwrap_or(false) {
-                    continue;
-                }
-                // Deliver to this session if it's the target, or if untargeted.
-                let deliver = m
-                    .target_session
-                    .as_deref()
-                    .map(|t| t == rec.session_id)
-                    .unwrap_or(true);
-                if deliver {
-                    let _ = store.enqueue_mention(&crate::state::InboxRow {
-                        mention_event_id: ev.id.to_hex(),
-                        target_session: rec.session_id.clone(),
-                        from_pubkey: m.from.pubkey.clone(),
-                        from_slug: m.from.slug.clone(),
-                        project: m.project.clone(),
-                        body: m.body.clone(),
-                        created_at: now_secs(),
-                    });
-                }
-            }
-        }
-    }
-    transport.shutdown().await;
-    Ok(())
-}
-
 // ── wait-for-mention ─────────────────────────────────────────────────────────
 
 async fn wait_for_mention(session: Option<String>, timeout: u64) -> Result<()> {
-    let store = open_store()?;
-    let rec = resolve_session(&store, session)?;
-    // Self-fetch handles the engine warmup race (same as inbox).
-    let _ = fetch_mentions_into_inbox(&store, &rec).await;
-
-    let deadline = if timeout > 0 {
-        Some(std::time::Instant::now() + Duration::from_secs(timeout))
-    } else {
-        None
-    };
-
-    loop {
-        let rows = store.drain_inbox(&rec.session_id)?;
-        if !rows.is_empty() {
-            for r in &rows {
-                println!("[mention from {}@{}] {}", r.from_slug, r.project, r.body);
-                store
-                    .mark_mention_seen(&rec.agent_pubkey, &r.mention_event_id, now_secs())
-                    .ok();
-            }
-            println!("[tenex-edge] Run `tenex-edge wait-for-mention` with run_in_background=true to receive the next mention.");
-            return Ok(());
+    // The daemon long-polls: it holds the request open until a mention for this
+    // session arrives or the timeout fires, then returns the rows.
+    let params = serde_json::json!({
+        "session": session,
+        "env_session": std::env::var("TENEX_EDGE_SESSION").ok(),
+        "cwd": std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()),
+        "timeout": timeout,
+    });
+    let v = daemon_call_async("wait_for_mention", params).await?;
+    if let Some(rows) = v["rows"].as_array().filter(|r| !r.is_empty()) {
+        for r in rows {
+            println!(
+                "[mention from {}@{}] {}",
+                r["from_slug"].as_str().unwrap_or(""),
+                r["project"].as_str().unwrap_or(""),
+                r["body"].as_str().unwrap_or("")
+            );
         }
-        if deadline
-            .map(|d| std::time::Instant::now() >= d)
-            .unwrap_or(false)
-        {
-            return Ok(());
-        }
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        println!("[tenex-edge] Run `tenex-edge wait-for-mention` with run_in_background=true to receive the next mention.");
     }
+    Ok(())
 }
 
 // ── turn-start / turn-check / turn-end ───────────────────────────────────────
@@ -1139,32 +1031,37 @@ async fn turn_start(session: String, transcript: Option<String>, json_out: bool)
     if session.is_empty() {
         return Ok(());
     }
-    let store = open_store()?;
-
-    let (_, prev_turn_started_at) = store.get_turn_state(&session)?;
-    let first_turn = prev_turn_started_at == 0;
-
-    store.mark_turn_start(&session, now_secs())?;
-    if let Some(ref path) = transcript {
-        if !path.is_empty() {
-            store.set_session_transcript(&session, path).ok();
-        }
+    let params = serde_json::json!({
+        "session": session,
+        "transcript": transcript,
+    });
+    let v = daemon_call_async("turn_start", params).await?;
+    if let Some(ctx) = v["context"].as_str() {
+        emit_context(ctx, json_out);
     }
+    Ok(())
+}
 
-    let rec = match store.get_session(&session)? {
-        Some(r) => r,
-        None => return Ok(()), // race with session-start, nothing to inject yet
-    };
-
-    let _ = fetch_mentions_into_inbox(&store, &rec).await;
-
+/// The full turn-start context assembly, shared by the daemon's `turn_start` RPC
+/// (the only caller now). Mutating reads (mark_turn_start, drain, set_transcript)
+/// happen here under the shared store; the relay self-fetch is done by the
+/// caller beforehand. Single source of truth → injected text cannot drift.
+///
+/// `prev_turn_started_at` is the turn_state value BEFORE this turn's mark; the
+/// caller passes it so first-turn detection matches the old behavior.
+pub fn assemble_turn_start_context(
+    store: &std::sync::Mutex<Store>,
+    rec: &crate::state::SessionRecord,
+    prev_turn_started_at: u64,
+) -> Option<String> {
+    let first_turn = prev_turn_started_at == 0;
     let mut blocks: Vec<String> = Vec::new();
 
     if first_turn {
         blocks.push(
             "[tenex-edge] You are connected to the tenex-edge agent fabric. \
              You can run `tenex-edge who`, `tenex-edge inbox`, and \
-             `tenex-edge send-message --recipient <agent|session-id> --message \"...\"`. \
+             `tenex-edge send-message --recipient <agent@project|session-id> --message \"...\"`. \
              If the user asks you to message/contact/tell another agent, run `tenex-edge send-message`; \
              do not say you cannot send messages from here. Run `tenex-edge wait-for-mention` \
              with run_in_background=true so you are woken when a mention arrives. \
@@ -1174,20 +1071,28 @@ async fn turn_start(session: String, transcript: Option<String>, json_out: bool)
     }
 
     // Drain inbox (authoritative delivery; turn_check only peeks).
-    let inbox_rows = store.drain_inbox(&rec.session_id)?;
+    let inbox_rows = {
+        let s = store.lock().expect("store mutex poisoned");
+        let rows = s.drain_inbox(&rec.session_id).unwrap_or_default();
+        for r in &rows {
+            s.mark_mention_seen(&rec.agent_pubkey, &r.mention_event_id, now_secs())
+                .ok();
+        }
+        rows
+    };
     if !inbox_rows.is_empty() {
         let mut text = String::from("Messages from other agents (tenex-edge):");
         for r in &inbox_rows {
             let _ = write!(text, "\n[mention from {}@{}] {}", r.from_slug, r.project, r.body);
-            store
-                .mark_mention_seen(&rec.agent_pubkey, &r.mention_event_id, now_secs())
-                .ok();
         }
         blocks.push(text);
     }
 
     // Pending ACL agents (unknown agents claiming this owner).
-    let pending = store.list_pending_agents().unwrap_or_default();
+    let pending = {
+        let s = store.lock().expect("store mutex poisoned");
+        s.list_pending_agents().unwrap_or_default()
+    };
     if !pending.is_empty() {
         let names: Vec<String> = pending
             .iter()
@@ -1203,70 +1108,42 @@ async fn turn_start(session: String, transcript: Option<String>, json_out: bool)
     }
 
     // Peer presence — full roster on the first turn; deltas on subsequent turns.
-    if first_turn {
-        let snapshot = load_who_snapshot(&store, Some(&rec.project), false, now_secs())?;
-        if !snapshot.rows.is_empty() {
-            let who_text = render_who_plain(&snapshot);
-            blocks.push(format!(
-                "tenex-edge fabric — agents you can message. To send, run \
-                 `tenex-edge send-message --recipient <agent|session-id> --message \"...\"`:\n{}",
-                who_text.trim_end()
-            ));
-        }
+    push_turn_fabric_block(store, &mut blocks, first_turn, prev_turn_started_at, &rec.project, now_secs(), &rec.host);
+
+    if blocks.is_empty() {
+        None
     } else {
-        // Only surface new arrivals and status changes since the last turn began.
-        let fresh_since = now_secs().saturating_sub(PEER_FRESH_SECS);
-        let new_peers = store
-            .list_new_peer_sessions(prev_turn_started_at, fresh_since, Some(&rec.project))
-            .unwrap_or_default();
-        let status_changes = store
-            .list_status_changes_since(prev_turn_started_at, Some(&rec.project))
-            .unwrap_or_default();
-
-        let mut delta: Vec<String> = Vec::new();
-        for p in &new_peers {
-            let age = now_secs().saturating_sub(p.last_seen);
-            delta.push(format!(
-                "  ● {}@{} joined  {}  session {}  ({age}s ago)",
-                p.slug,
-                slugify_host(&p.host),
-                p.project,
-                short_id(&p.session_id),
-            ));
-        }
-        for (slug, project, text) in &status_changes {
-            delta.push(format!("  ↻ {slug}@{project} — {text}"));
-        }
-        if !delta.is_empty() {
-            blocks.push(format!(
-                "tenex-edge fabric — changes since your last turn:\n{}",
-                delta.join("\n")
-            ));
-        }
+        Some(blocks.join("\n\n"))
     }
-
-    if !blocks.is_empty() {
-        emit_context(&blocks.join("\n\n"), json_out);
-    }
-    Ok(())
 }
 
-/// Mid-turn inbox check for PostToolUse hooks. Read-only: only peeks the inbox
-/// without draining. No writes to state.db.
-fn turn_check(session: Option<String>, json_out: bool) -> Result<()> {
-    let store = open_store()?;
-    let rec = resolve_session(&store, session)?;
-
-    let rows = store.peek_inbox(&rec.session_id)?;
+/// Mid-turn inbox PEEK (read-only) shared by the daemon's `turn_check` RPC.
+pub fn assemble_turn_check_context(store: &std::sync::Mutex<Store>, session_id: &str) -> Option<String> {
+    let rows = {
+        let s = store.lock().expect("store mutex poisoned");
+        s.peek_inbox(session_id).unwrap_or_default()
+    };
     if rows.is_empty() {
-        return Ok(());
+        return None;
     }
-
     let mut text = String::from("[tenex-edge] Message(s) arrived while you were working:");
     for r in &rows {
         let _ = write!(text, "\n[mention from {}@{}] {}", r.from_slug, r.project, r.body);
     }
-    emit_context(&text, json_out);
+    Some(text)
+}
+
+/// Mid-turn inbox check for PostToolUse hooks. Thin client: the daemon peeks.
+fn turn_check(session: Option<String>, json_out: bool) -> Result<()> {
+    let params = serde_json::json!({
+        "session": session,
+        "env_session": std::env::var("TENEX_EDGE_SESSION").ok(),
+        "cwd": std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()),
+    });
+    let v = crate::daemon::blocking::call("turn_check", params)?;
+    if let Some(ctx) = v["context"].as_str() {
+        emit_context(ctx, json_out);
+    }
     Ok(())
 }
 
@@ -1274,31 +1151,22 @@ fn render_who_plain(snapshot: &WhoSnapshot) -> String {
     let mut out = String::new();
     let _ = writeln!(out, "agents:");
     for row in &snapshot.rows {
-        let dot = if row.fresh { "●" } else { "○" };
-        let status = status_plain(&row.status);
-        match row.source {
-            WhoSource::Local => {
-                let _ = writeln!(
-                    out,
-                    "  {dot} {}@{} — {status}  {}  session {}  (this machine)",
-                    row.slug,
-                    slugify_host(&row.host),
-                    row.project,
-                    short_id(&row.session_id),
-                );
-            }
-            WhoSource::Peer => {
-                let age = row.age_secs.unwrap_or(0);
-                let _ = writeln!(
-                    out,
-                    "  {dot} {}@{} — {status}  {}  session {}  ({age}s ago)",
-                    row.slug,
-                    slugify_host(&row.host),
-                    row.project,
-                    short_id(&row.session_id),
-                );
-            }
-        }
+        let stale = if row.fresh { "" } else { " (stale)" };
+        let remote = if row.remote { " (remote)" } else { "" };
+        let dir = rel_cwd_bracket(&row.rel_cwd)
+            .map(|d| format!(" [{d}]"))
+            .unwrap_or_default();
+        let _ = writeln!(
+            out,
+            "  {}@{} [session {}]{}{}{}",
+            row.slug,
+            row.project,
+            short_id(&row.session_id),
+            dir,
+            remote,
+            stale,
+        );
+        let _ = writeln!(out, "      {}", status_plain(&row.status));
     }
     out
 }
@@ -1316,56 +1184,76 @@ fn turn_end(session: String) -> Result<()> {
     if session.is_empty() {
         return Ok(());
     }
-    let store = open_store()?;
-    store.mark_turn_end(&session)?;
+    crate::daemon::blocking::call("turn_end", serde_json::json!({"session": session}))?;
+    Ok(())
+}
+
+// ── project ──────────────────────────────────────────────────────────────────
+
+async fn project(action: ProjectAction) -> Result<()> {
+    match action {
+        ProjectAction::List => {
+            let v = daemon_call_async("project_list", serde_json::json!({})).await?;
+            let projects = v["projects"].as_array().map(|a| a.as_slice()).unwrap_or(&[]);
+            if projects.is_empty() {
+                println!("No NIP-29 groups found on the relay.");
+                return Ok(());
+            }
+            let max_slug = projects
+                .iter()
+                .filter_map(|p| p["slug"].as_str())
+                .map(|s| s.len())
+                .max()
+                .unwrap_or(0);
+            for p in projects {
+                let slug = p["slug"].as_str().unwrap_or("");
+                let about = p["about"].as_str().unwrap_or("");
+                if about.is_empty() {
+                    println!("{slug}");
+                } else {
+                    println!("{slug:<max_slug$}  — {about}");
+                }
+            }
+        }
+        ProjectAction::Edit { description, project } => {
+            let slug = project.unwrap_or_else(|| {
+                crate::project::resolve(&std::env::current_dir().unwrap_or_default())
+            });
+            let v = daemon_call_async(
+                "project_edit",
+                serde_json::json!({ "project": slug, "description": description }),
+            )
+            .await?;
+            let event_id = v["event_id"].as_str().unwrap_or("?");
+            println!("Updated {slug}: {}", &event_id[..event_id.len().min(8)]);
+        }
+    }
     Ok(())
 }
 
 // ── doctor ───────────────────────────────────────────────────────────────────
 
 async fn doctor() -> Result<()> {
-    use nostr_sdk::prelude::{Alphabet, EventBuilder, Filter, Keys, Kind, SingleLetterTag, Tag};
-    let cfg = Config::load()?;
-    println!("relays: {:?}", cfg.relays);
-    let keys = Keys::generate();
-    println!("probe pubkey: {}", keys.public_key().to_hex());
-    let t = format!("te-doctor-{}", now_secs());
-
-    let transport = Transport::connect(&cfg.relays, keys).await?;
-    let builder = EventBuilder::new(Kind::from(1u16), format!("tenex-edge doctor {t}"))
-        .tags([Tag::parse(["h", &t])?]);
-    match transport.publish_builder(builder).await {
-        Ok(id) => println!("publish: OK ({})", short_id(&id.to_hex())),
-        Err(e) => println!("publish: ERR {e:#}"),
+    // The daemon owns the single relay connection, so it performs the probe.
+    let v = daemon_call_async("doctor", serde_json::json!({})).await?;
+    if let Some(relays) = v["relays"].as_array() {
+        let relays: Vec<&str> = relays.iter().filter_map(|r| r.as_str()).collect();
+        println!("relays: {relays:?}");
     }
-    tokio::time::sleep(Duration::from_secs(1)).await;
-    let f = Filter::new()
-        .kind(Kind::from(1u16))
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::H), &t)
-        .limit(5);
-    match transport.fetch(f, Duration::from_secs(5)).await {
-        Ok(evs) => println!("read-back: {} event(s) with #h={t}", evs.len()),
-        Err(e) => println!("read-back: ERR {e:#}"),
+    if let Some(pk) = v["probe_pubkey"].as_str() {
+        println!("probe pubkey: {pk}");
     }
-    transport.shutdown().await;
+    println!("publish: {}", v["publish"].as_str().unwrap_or("?"));
+    println!("read-back: {}", v["readback"].as_str().unwrap_or("?"));
     Ok(())
 }
 
 // ── tail ─────────────────────────────────────────────────────────────────────
 
 async fn tail(project: Option<String>) -> Result<()> {
-    let cfg = Config::load()?;
-    let reader = Transport::connect(&cfg.relays, nostr_sdk::prelude::Keys::generate()).await?;
-    let codec = Kind1Codec;
-    let scope = SubScope {
-        authors: Vec::new(),
-        project: project.clone(),
-        mentions_to: None,
-        owners: Vec::new(),
-    };
-    reader.subscribe(codec.filters(&scope)).await?;
-    let mut notifications = reader.notifications();
-
+    // The daemon owns the single relay connection and streams decoded, rendered
+    // fabric lines over the UDS until we disconnect (Ctrl-C). The rendering uses
+    // the SAME `render()` daemon-side, so output is identical.
     let scope_label = project.as_deref().unwrap_or("*");
     eprintln!(
         "{} tailing project {} … (Ctrl-C to stop)",
@@ -1373,23 +1261,26 @@ async fn tail(project: Option<String>) -> Result<()> {
         scope_label.cyan()
     );
 
-    loop {
-        tokio::select! {
-            _ = tokio::signal::ctrl_c() => break,
-            n = notifications.recv() => match n {
-                Ok(RelayPoolNotification::Event { event, .. }) => {
-                    if let Some(de) = codec.decode(&event) {
-                        println!("{}", render(&de));
-                    }
-                }
-                Ok(_) => {}
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                Err(_) => {}
+    let mut client = crate::daemon::client::Client::connect_or_spawn().await?;
+    let stream = client.stream(
+        "tail",
+        serde_json::json!({ "project": project }),
+        |item| {
+            if let Some(line) = item.get("line").and_then(|l| l.as_str()) {
+                println!("{line}");
             }
-        }
+        },
+    );
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => Ok(()),
+        r = stream => r,
     }
-    reader.shutdown().await;
-    Ok(())
+}
+
+/// Public alias so the daemon's `tail` RPC can render fabric lines identically
+/// to the old in-process `tail`.
+pub fn render_fabric(de: &DomainEvent) -> String {
+    render(de)
 }
 
 fn render(de: &DomainEvent) -> String {
@@ -1431,20 +1322,6 @@ fn render(de: &DomainEvent) -> String {
             m.body
         ),
     }
-}
-
-fn env_duration(key: &str, default: Duration) -> Duration {
-    std::env::var(key)
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .map(Duration::from_millis)
-        .unwrap_or(default)
-}
-fn env_u64(key: &str, default: u64) -> u64 {
-    std::env::var(key)
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(default)
 }
 
 // ── hook adapter registry ─────────────────────────────────────────────────────
@@ -1574,7 +1451,25 @@ async fn hook_run(host_name: String, hook_type: String) -> Result<()> {
             }
         }
         "user-prompt-submit" => {
-            turn_start(sid, transcript, json_out).await?;
+            let prompt: Option<String> = obj
+                .and_then(|o| o.get("prompt"))
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(str::to_string);
+            turn_start(sid.clone(), transcript, json_out).await?;
+            // Publish the user's prompt as a kind:1 OP on the Nostr fabric.
+            // Fail open: if userNsec is absent or the relay is unreachable, the
+            // hook must not block the editor.
+            if let Some(prompt_text) = prompt {
+                let params = serde_json::json!({
+                    "env_session": sid,
+                    "cwd": cwd.to_string_lossy(),
+                    "prompt": prompt_text,
+                });
+                if let Err(e) = daemon_call_async("user_prompt", params).await {
+                    eprintln!("[tenex-edge] user_prompt publish skipped: {e:#}");
+                }
+            }
         }
         "post-tool-use" => {
             let explicit = if sid.is_empty() { None } else { Some(sid) };
