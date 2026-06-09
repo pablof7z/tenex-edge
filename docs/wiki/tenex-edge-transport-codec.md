@@ -15,6 +15,7 @@ sources:
   - session:f3a730bf-9a3b-4952-b687-c93ade5fd7ec
   - session:d208c058-7b2b-4ff8-bb82-d63623d51097
   - session:36cc4546-228e-4d07-a1a8-9d0cd7cd5a6c
+  - session:98f9939c-f42b-43dd-baba-d9a176d4b2d7
 ---
 
 # Tenex-Edge Transport Codec
@@ -31,6 +32,8 @@ The initial Nostr codec maps these nouns as follows: Profile → kind:0 with con
 
 NIP-42 AUTH must be built into the transport layer from day one, since relays almost certainly require it for publishes and silently reject publishes without it. Additionally, transport must force NIP-42 AUTH completion (a warm-up fetch) before any subscribe, because relay.tenex.chat requires auth for reads and closes subscriptions opened before auth completes.
 
+The `publish_signed` transport method publishes a B-signed event over an A-authed relay connection, and the event lands under B's authorship.
+
 NIP-29 group management and group-state subscriptions should be properties of a nostr transport/ACL strategy rather than fused into the kind1 event codec.
 
 Transport is built on the lean `nostr`/`nostr-sdk` stack behind a Transport trait, rather than embedding the full NMP kernel (which is unsuitable for headless CLI daemons), with NMP documented as the intended future swap-in behind the codec seam, not at the transport layer. However, the current `Codec` trait is coupled to nostr because its `encode`, `decode`, and `filters` signatures use `nostr_sdk` types (`EventBuilder`, `Event`, `Filter`), meaning it can only swap NIPs, not underlying transports. Furthermore, the `filters` verb bakes in relay REQ semantics, making it incompatible with push/gossip transports that use a different fetch model. To support any transport, the swap seam should be elevated to a `Fabric` trait that takes abstract `DomainEvent` and `SubScope` types, making `encode`/`decode`/`filters` private implementation details of a `NostrFabric`.
@@ -39,4 +42,4 @@ The runtime processes both deduped Event notifications and raw RelayPoolNotifica
 
 Codec integration is feature-complete for M1 with no immediate work needed.
 
-<!-- citations: [^f3a73-36] [^f3a73-37] [^f3a73-38] [^f3a73-46] [^f3a73-58] [^f3a73-79] [^f3a73-85] [^f3a73-97] [^d208c-1] [^36cc4-6] -->
+<!-- citations: [^f3a73-36] [^f3a73-37] [^f3a73-38] [^f3a73-46] [^f3a73-58] [^f3a73-79] [^f3a73-85] [^f3a73-97] [^d208c-1] [^36cc4-6] [^98f99-30] -->

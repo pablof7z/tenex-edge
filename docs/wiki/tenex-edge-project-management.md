@@ -20,17 +20,16 @@ sources:
 
 ## Project List
 
-tenex-edge project list fetches all kind:39000 events from the relay (no author filter since the relay owns these events in NIP-29), caches them in the local project_meta table, and renders them as a table of project slug and description.
+tenex-edge project list fetches all kind:39000 events from the relay (no author filter) and renders them as a left-aligned table of slug and description.
 
-The product's domain verbs fall into two concern-planes: Project-State (open_project, roster, presence, status, project_meta) and Communications (send, inbox, threads, thread_meta). <!-- [^d208c-8] -->
-
-<!-- citations: [^98f99-3] [^98f99-4] [^98f99-5] [^98f99-6] [^98f99-12] [^98f99-21] -->
+<!-- citations: [^d208c-8] [^98f99-3] [^98f99-4] [^98f99-5] [^98f99-6] [^98f99-12] [^98f99-21] [^98f99-27] -->
 ## Project Edit
 
-tenex-edge project edit --description <desc> publishes a kind:9002 (NIP-29 edit-metadata) event signed by userNsec, which the relay validates for admin rights and re-publishes as kind:39000; the local cache is also updated optimistically.
+tenex-edge project edit --description publishes a kind:9002 (NIP-29 edit-metadata) event signed by userNsec; the relay validates admin rights and re-publishes the updated kind:39000.
 
-tenex-edge project edit accepts an optional --project flag to override the slug; it defaults to the project resolved from cwd. <!-- [^98f99-13] -->
+tenex-edge project edit accepts an optional --project flag to override the slug; it defaults to the project resolved from cwd.
 
+<!-- citations: [^98f99-13] [^98f99-28] -->
 ## NIP-29 Event Ownership
 
 In NIP-29, the relay authors kind:39000 group definition events; clients submit kind:9002 edit-metadata events signed by an admin key, which the relay validates and re-publishes as kind:39000. <!-- [^98f99-14] -->
