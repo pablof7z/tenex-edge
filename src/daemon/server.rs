@@ -1092,7 +1092,14 @@ fn rpc_thread_meta(
     }
     let p: P = serde_json::from_value(params.clone()).context("thread_meta params")?;
     let meta = state.with_store(|s| s.thread_meta(&p.thread_id))?;
-    Ok(serde_json::to_value(&meta)?)
+    // Never return a bare `null`: the JSON-RPC client carries the result in an
+    // Option and reads `ok: null` as "no result" ("daemon returned neither ok
+    // nor error"). An unknown thread → an empty object the reader treats as
+    // "no metadata", not an error.
+    match meta {
+        Some(m) => Ok(serde_json::to_value(&m)?),
+        None => Ok(serde_json::json!({})),
+    }
 }
 
 // ── wait_for_mention (long-poll) ─────────────────────────────────────────────

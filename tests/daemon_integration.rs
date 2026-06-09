@@ -217,6 +217,111 @@ fn send_message_then_inbox_roundtrip_same_machine() {
     stop_daemon(&home);
 }
 
+/// Phase 6+7 end-to-end: two agents — "claude" and "codex" — hold a THREADED
+/// conversation through the real daemon + relay. Exercises the whole new
+/// canonical path that unit/store tests only cover in halves:
+///   - send → publish → relay → inbox delivery (legacy view), AND
+///   - the canonical messages/threads read model (list_threads / messages), AND
+///   - a `--thread` reply: the provider stamps a NIP-10 root `e` tag so the
+///     recipient materializer groups it into the SAME thread, AND
+///   - outbound+inbound dual-write dedup on the native event id (a shared daemon
+///     records each event from both sides — it must NOT double-count).
+#[test]
+fn threaded_conversation_between_claude_and_codex_e2e() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let home = Home::new();
+
+    rt().block_on(async {
+        let mut c = Client::connect_or_spawn().await.expect("connect");
+        c.call("session_start", serde_json::json!({"agent": "claude", "session_id": "sess-claude", "cwd": "/tmp"}))
+            .await
+            .unwrap();
+        c.call("session_start", serde_json::json!({"agent": "codex", "session_id": "sess-codex", "cwd": "/tmp"}))
+            .await
+            .unwrap();
+
+        // Project slug for these sessions, read from the daemon (derived from cwd).
+        let who = c.call("who", serde_json::json!({"all": true, "all_projects": true})).await.unwrap();
+        let project = who["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["session_id"] == "sess-claude")
+            .and_then(|r| r["project"].as_str())
+            .expect("claude session project")
+            .to_string();
+
+        // helper: poll an agent's inbox until a body shows up.
+        async fn wait_for_body(c: &mut Client, session: &str, body: &str) {
+            for _ in 0..24 {
+                let inbox = c.call("inbox", serde_json::json!({"session": session})).await.unwrap();
+                if inbox["rows"].as_array().unwrap().iter().any(|m| m["body"] == body) {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(250)).await;
+            }
+            panic!("{session} never received {body:?}");
+        }
+
+        // 1) claude → codex: a ROOT message (no thread_id).
+        c.call(
+            "send_message",
+            serde_json::json!({"recipient": "sess-codex", "message": "can you review this?", "session": "sess-claude", "agent": "claude"}),
+        )
+        .await
+        .expect("send root");
+        wait_for_body(&mut c, "sess-codex", "can you review this?").await;
+
+        // 2) the canonical read model shows exactly one thread with one message.
+        let mut thread_id = String::new();
+        for _ in 0..24 {
+            let threads = c.call("list_threads", serde_json::json!({"project": project})).await.unwrap();
+            if let Some(t) = threads.as_array().unwrap().first() {
+                thread_id = t["thread_id"].as_str().unwrap().to_string();
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+        assert!(!thread_id.is_empty(), "a thread should exist after the root message");
+        let msgs = c.call("messages", serde_json::json!({"thread_id": thread_id})).await.unwrap();
+        assert_eq!(msgs.as_array().unwrap().len(), 1, "root thread has exactly 1 message: {msgs}");
+
+        // 3) codex REPLIES into that thread → claude receives it.
+        c.call(
+            "send_message",
+            serde_json::json!({"recipient": "sess-claude", "message": "looks good, shipping", "session": "sess-codex", "agent": "codex", "thread_id": thread_id}),
+        )
+        .await
+        .expect("send reply");
+        wait_for_body(&mut c, "sess-claude", "looks good, shipping").await;
+
+        // 4) the reply GROUPED into the same thread, and dual-write dedup means the
+        //    shared daemon shows EXACTLY two messages — never four.
+        let mut final_msgs = serde_json::Value::Null;
+        for _ in 0..24 {
+            let m = c.call("messages", serde_json::json!({"thread_id": thread_id})).await.unwrap();
+            if m.as_array().unwrap().len() >= 2 {
+                final_msgs = m;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+        let arr = final_msgs.as_array().expect("messages array");
+        assert_eq!(arr.len(), 2, "reply must join the same thread with no duplication: {final_msgs}");
+        let bodies: Vec<&str> = arr.iter().filter_map(|m| m["body"].as_str()).collect();
+        assert!(
+            bodies.contains(&"can you review this?") && bodies.contains(&"looks good, shipping"),
+            "both messages present in the thread: {bodies:?}"
+        );
+
+        // 5) still exactly one thread for the whole conversation.
+        let threads = c.call("list_threads", serde_json::json!({"project": project})).await.unwrap();
+        assert_eq!(threads.as_array().unwrap().len(), 1, "one thread for the conversation: {threads}");
+    });
+
+    stop_daemon(&home);
+}
+
 #[test]
 fn mention_to_a_does_not_land_in_b_inbox() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());

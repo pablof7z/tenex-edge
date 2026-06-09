@@ -1102,12 +1102,33 @@ impl Store {
         recipient_pubkey: &str,
         target_session: Option<&str>,
     ) -> Result<()> {
-        self.conn.execute(
-            "INSERT OR IGNORE INTO message_recipients
-               (message_id, recipient_pubkey, target_session, delivered_at)
-             VALUES (?1, ?2, ?3, NULL)",
-            params![message_id, recipient_pubkey, target_session],
-        )?;
+        match target_session {
+            Some(ts) => {
+                self.conn.execute(
+                    "INSERT OR IGNORE INTO message_recipients
+                       (message_id, recipient_pubkey, target_session, delivered_at)
+                     VALUES (?1, ?2, ?3, NULL)",
+                    params![message_id, recipient_pubkey, ts],
+                )?;
+            }
+            None => {
+                // SQLite treats NULL as DISTINCT in the PK, so INSERT OR IGNORE
+                // does NOT dedup an untargeted (NULL target_session) recipient —
+                // repeated materialization (relay echo + catch-up refetch) would
+                // otherwise accumulate one duplicate row per re-delivery. Guard
+                // with an explicit existence check so it stays idempotent.
+                self.conn.execute(
+                    "INSERT INTO message_recipients
+                       (message_id, recipient_pubkey, target_session, delivered_at)
+                     SELECT ?1, ?2, NULL, NULL
+                     WHERE NOT EXISTS (
+                       SELECT 1 FROM message_recipients
+                       WHERE message_id=?1 AND recipient_pubkey=?2 AND target_session IS NULL
+                     )",
+                    params![message_id, recipient_pubkey],
+                )?;
+            }
+        }
         Ok(())
     }
 
@@ -2544,6 +2565,37 @@ mod tests {
     }
 
     // ── Phase 6 dual-write tests ──────────────────────────────────────────────
+
+    /// Regression (found via live claude<->codex e2e): an UNTARGETED recipient
+    /// (target_session = None) must be idempotent. SQLite treats NULL as distinct
+    /// in the PK, so a naive INSERT OR IGNORE accumulated one duplicate recipient
+    /// row per re-materialization (relay echo + every catch-up refetch).
+    #[test]
+    fn add_message_recipient_is_idempotent_for_null_target_session() {
+        let s = Store::open_memory().unwrap();
+        let tid = s.ensure_thread_origin(
+            &s.ensure_project_origin("kind1-nip29", "pi", "p", "p", 1).unwrap(),
+            "kind1-nip29", "pi", "root", 1,
+        ).unwrap();
+        let mid = s.record_message(&tid, "auth", "b", 1, "inbound", "received", Some("evt")).unwrap();
+        // Untargeted: many re-deliveries → still one row.
+        for _ in 0..5 {
+            s.add_message_recipient(&mid, "rcpt", None).unwrap();
+        }
+        let n: i64 = s.conn.query_row(
+            "SELECT COUNT(*) FROM message_recipients WHERE message_id=?1 AND recipient_pubkey='rcpt' AND target_session IS NULL",
+            params![mid], |r| r.get(0),
+        ).unwrap();
+        assert_eq!(n, 1, "untargeted recipient must not duplicate across re-materialization");
+        // Targeted dedup still works, and is a DISTINCT row from the untargeted one.
+        for _ in 0..3 {
+            s.add_message_recipient(&mid, "rcpt", Some("sess-1")).unwrap();
+        }
+        let total: i64 = s.conn.query_row(
+            "SELECT COUNT(*) FROM message_recipients WHERE message_id=?1", params![mid], |r| r.get(0),
+        ).unwrap();
+        assert_eq!(total, 2, "one untargeted + one targeted recipient row");
+    }
 
     /// Phase 6 outbound dual-write: the canonical row sequence used by
     /// `provider.send()` produces exactly one message with sync_state="published",

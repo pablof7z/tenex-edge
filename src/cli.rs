@@ -326,8 +326,10 @@ async fn threads(project: Option<String>, thread: Option<String>) -> Result<()> 
             let subject = t["subject"].as_str();
             let label = subject.unwrap_or("no subject");
             match last {
-                Some(ts) => println!("  {} ({} msg, last at {}) - {}", short_id(tid), count, ts, label),
-                None => println!("  {} (no messages) - {}", short_id(tid), label),
+                // Print the FULL thread id — it is the argument the user passes
+                // back to `threads --thread <id>`; a short_id() would be unusable.
+                Some(ts) => println!("  {} ({} msg, last at {}) - {}", tid, count, ts, label),
+                None => println!("  {} (no messages) - {}", tid, label),
             }
         }
     }
