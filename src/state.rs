@@ -2403,4 +2403,172 @@ mod tests {
         let mid2 = s.materialize_outbound_message(&tid, "pk-author", "hey (echo)", 10, Some("nat-1")).unwrap();
         assert_eq!(mid, mid2, "same native_event_id → same message_id");
     }
+
+    // ── Phase 6 dual-write tests ──────────────────────────────────────────────
+
+    /// Phase 6 outbound dual-write: the canonical row sequence used by
+    /// `provider.send()` produces exactly one message with sync_state="published",
+    /// one recipient row, and is idempotent on native_event_id (relay echo).
+    #[test]
+    fn phase6_outbound_canonical_dual_write_and_dedup() {
+        let s = Store::open_memory().unwrap();
+        let pi = "test-pi";
+        let now = 1000u64;
+        let eid = "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111";
+
+        // Simulate what provider.send() does after publish succeeds.
+        let project_id = s
+            .ensure_project_origin("kind1-nip29", pi, "my-project", "my-project", now)
+            .unwrap();
+        let thread_id = s
+            .ensure_thread_origin(&project_id, "kind1-nip29", pi, eid, now)
+            .unwrap();
+        let message_id = s
+            .record_message(&thread_id, "pk-sender", "hello world", now, "outbound", "published", Some(eid))
+            .unwrap();
+        s.add_message_recipient(&message_id, "pk-recipient", Some("sess-r1")).unwrap();
+
+        // Verify the canonical message row.
+        let (direction, sync_state, native_eid): (String, String, Option<String>) = s
+            .conn
+            .query_row(
+                "SELECT direction, sync_state, native_event_id FROM messages WHERE message_id=?1",
+                params![message_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(direction, "outbound");
+        assert_eq!(sync_state, "published");
+        assert_eq!(native_eid.as_deref(), Some(eid));
+
+        // Verify exactly one recipient row.
+        let rcpt_count: i64 = s
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM message_recipients WHERE message_id=?1",
+                params![message_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(rcpt_count, 1, "exactly one recipient row");
+
+        // Idempotency: same native_event_id → same message_id, no new row.
+        let mid2 = s
+            .record_message(&thread_id, "pk-sender", "hello world (echo)", now, "outbound", "published", Some(eid))
+            .unwrap();
+        assert_eq!(message_id, mid2, "same native_event_id → same message_id (dedup)");
+
+        // add_message_recipient is INSERT OR IGNORE → still only one row.
+        s.add_message_recipient(&message_id, "pk-recipient", Some("sess-r1")).unwrap();
+        let rcpt_count2: i64 = s
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM message_recipients WHERE message_id=?1",
+                params![message_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(rcpt_count2, 1, "add_message_recipient is idempotent");
+    }
+
+    /// Phase 6 inbound dual-write: materializing the same inbound event twice
+    /// (simulating relay echo) yields exactly one canonical message row, one
+    /// recipient row, and exactly one legacy inbox row.
+    #[test]
+    fn phase6_inbound_canonical_dual_write_and_dedup() {
+        use crate::fabric::kind1::materializer::Kind1Materializer;
+        use nostr_sdk::prelude::{EventBuilder, Keys, Kind};
+
+        let s = Store::open_memory().unwrap();
+        let keys = Keys::generate();
+        let pk_hex = keys.public_key().to_hex();
+
+        // Create a recipient session so the legacy inbox path has somewhere to deliver.
+        let rec = SessionRecord {
+            session_id: "sess-inbound-1".into(),
+            agent_slug: "agent".into(),
+            agent_pubkey: pk_hex.clone(),
+            project: "test-proj".into(),
+            host: "host".into(),
+            child_pid: None,
+            watch_pid: None,
+            created_at: 1,
+            alive: true,
+            rel_cwd: String::new(),
+        };
+        s.upsert_session(&rec).unwrap();
+
+        // Build a signed Event (kind:1) that looks like a mention.
+        // We use a minimal event — the codec is not involved here;
+        // we test the materialize_inbound_message store writes directly.
+        let sender_keys = Keys::generate();
+        let event = EventBuilder::new(Kind::from(1u16), "hi from sender")
+            .sign_with_keys(&sender_keys)
+            .unwrap();
+        let eid = event.id.to_hex();
+
+        let mention = crate::domain::Mention {
+            from: crate::domain::AgentRef::new(sender_keys.public_key().to_hex(), "sender".to_string()),
+            to_pubkey: pk_hex.clone(),
+            project: "test-proj".into(),
+            body: "hi from sender".into(),
+            target_session: Some("sess-inbound-1".into()),
+            from_session: None,
+        };
+        let pi = "test-pi-inbound";
+        let now = 2000u64;
+
+        // First materialization.
+        let routed1 = Kind1Materializer::materialize_inbound_message(
+            &s, &pk_hex, &mention, &event, pi, now,
+        );
+        assert!(routed1, "first delivery must route to session");
+
+        // Second materialization (relay echo) — must be a no-op everywhere.
+        let routed2 = Kind1Materializer::materialize_inbound_message(
+            &s, &pk_hex, &mention, &event, pi, now,
+        );
+        assert!(!routed2, "echo: inbox already has this (mention_event_id, target_session)");
+
+        // Exactly one canonical message row.
+        let msg_count: i64 = s
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM messages WHERE native_event_id=?1",
+                params![eid],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(msg_count, 1, "exactly one canonical message after echo");
+
+        // Exactly one recipient row.
+        let mid: String = s
+            .conn
+            .query_row(
+                "SELECT message_id FROM messages WHERE native_event_id=?1",
+                params![eid],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let rcpt_count: i64 = s
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM message_recipients WHERE message_id=?1",
+                params![mid],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(rcpt_count, 1, "exactly one recipient row after echo");
+
+        // Exactly one legacy inbox row (the dedup the legacy path enforces).
+        let inbox_count: i64 = s
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM inbox WHERE mention_event_id=?1 AND target_session='sess-inbound-1'",
+                params![eid],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(inbox_count, 1, "exactly one legacy inbox row after echo");
+    }
 }

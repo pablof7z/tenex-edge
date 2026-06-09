@@ -8,10 +8,10 @@
 //! - Dynamic per-call data (the hosted "me" set, owners, now) is passed to
 //!   methods, not stored; the provider owns only stable construction-time data.
 //!
-//! Phase 6 will add `send` / `set_status`; stubs are documented in
-//! `FabricProvider` trait (shell, not wired to `Kind1Nip29Provider`).
+//! Phase 6 adds `SendIntent`, `OutboundReceipt`, and `provider.send()` for
+//! canonical dual-write outbound messages alongside the legacy inbox path.
 
-use crate::domain::DomainEvent;
+use crate::domain::{AgentRef, DomainEvent, Mention};
 use crate::fabric::kind1::wire::Kind1WireCodec;
 use crate::fabric::nostr_delivery::NostrDelivery;
 use crate::fabric::{MaterializationOutcome, RawEnvelope, WireCodec};
@@ -20,8 +20,59 @@ use crate::transport::Transport;
 use crate::util::now_secs;
 use anyhow::Result;
 use nostr_sdk::EventBuilder;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
+// Fabric identifier used in all canonical origin rows.
+pub const FABRIC: &str = "kind1-nip29";
+
+// ── Phase 6 send types ────────────────────────────────────────────────────────
+
+/// All inputs needed to publish one outbound message.
+pub struct SendIntent {
+    /// Sender's identity on the fabric.
+    pub from: AgentRef,
+    /// Recipient's pubkey (hex).
+    pub to_pubkey: String,
+    /// Project slug (NIP-29 group name).
+    pub project: String,
+    /// Message body.
+    pub body: String,
+    /// When `Some`, only the matching recipient session should surface it.
+    pub target_session: Option<String>,
+    /// The sender's own session id (return envelope for replies).
+    pub from_session: Option<String>,
+    /// Existing canonical thread id to attach to. `None` → a new thread root
+    /// is created from the published event id (Phase 7 will refine).
+    pub thread_id: Option<String>,
+}
+
+impl SendIntent {
+    /// Convert to the `Mention` domain event used by the wire codec and the
+    /// legacy local-delivery path. Both callers see the same struct.
+    pub fn to_mention(&self) -> Mention {
+        Mention {
+            from: self.from.clone(),
+            to_pubkey: self.to_pubkey.clone(),
+            project: self.project.clone(),
+            body: self.body.clone(),
+            target_session: self.target_session.clone(),
+            from_session: self.from_session.clone(),
+        }
+    }
+}
+
+/// Result of a successful `provider.send()`.
+pub struct OutboundReceipt {
+    /// Hex event id of the published Nostr event.
+    pub native_event_id: String,
+    /// Canonical `message_id` inserted into the read-model `messages` table.
+    pub message_id: String,
+    /// Sync state stored on the canonical message (`"published"` or `"accepted"`).
+    pub sync_state: String,
+}
 
 // ── Trait shell (documentation only; daemon calls concrete inherent methods) ───
 
@@ -57,9 +108,10 @@ pub struct Kind1Nip29Provider {
     /// Operator nsec for NIP-29 group management. Optional: if unset, group
     /// management is skipped and sessions still start (best-effort).
     pub user_nsec: Option<String>,
-    // NOTE: `owners` and `host` are intentionally OMITTED here for Phase 5 —
-    // they are passed as method arguments where needed, avoiding dead-field
-    // warnings. Phase 6 will add them when send/set_status need them.
+    /// Stable hash of the sorted relay URL set. Used as the `provider_instance`
+    /// column in canonical origin rows, making them deterministic across daemon
+    /// restarts. Derived once at construction from `cfg.relays`.
+    pub provider_instance: String,
 }
 
 impl Kind1Nip29Provider {
@@ -67,15 +119,18 @@ impl Kind1Nip29Provider {
         transport: Arc<Transport>,
         store: Arc<Mutex<Store>>,
         user_nsec: Option<String>,
+        relays: &[String],
     ) -> Self {
         let delivery = NostrDelivery::new(transport.clone());
         let wire = Kind1WireCodec;
+        let provider_instance = derive_provider_instance(relays);
         Self {
             delivery,
             wire,
             store,
             transport,
             user_nsec,
+            provider_instance,
         }
     }
 
@@ -194,6 +249,80 @@ impl Kind1Nip29Provider {
         self.delivery.subscribe(scope).await
     }
 
+    // ── send ──────────────────────────────────────────────────────────────────
+
+    /// Publish one outbound message and dual-write canonical read-model rows.
+    ///
+    /// Behavior:
+    /// 1. Encode the intent as a Mention DomainEvent and publish it.
+    ///    On publish error the error propagates unchanged (same as today).
+    /// 2. On success, lock the store ONCE and write:
+    ///    - `projects` / `project_origins` (idempotent)
+    ///    - `threads` / `thread_origins` (idempotent, keyed by event id)
+    ///    - `messages` with `sync_state="published"` (idempotent on native_event_id)
+    ///    - `message_recipients`
+    /// 3. Return `OutboundReceipt` carrying the published event id and the new
+    ///    canonical `message_id`.
+    ///
+    /// The legacy inbox path is NOT touched here — local delivery is the
+    /// caller's responsibility (rpc_send_message keeps route_mention_into_with_id).
+    pub async fn send(
+        &self,
+        intent: SendIntent,
+        agent_keys: &nostr_sdk::Keys,
+    ) -> Result<OutboundReceipt> {
+        // Build the wire event from the intent's Mention.
+        let mention = intent.to_mention();
+        let builder = self.wire.encode(&DomainEvent::Mention(mention))?;
+
+        // Publish. On error, propagate immediately — no canonical row written.
+        let event_id = self
+            .transport
+            .publish_signed(builder, agent_keys)
+            .await?;
+        let eid_hex = event_id.to_hex();
+
+        // Dual-write canonical rows (single lock, no await inside).
+        let now = now_secs();
+        let pi = self.provider_instance.clone();
+        let (message_id,) = self.with_store(|s| -> Result<(String,)> {
+            let project_id = s.ensure_project_origin(
+                FABRIC,
+                &pi,
+                &intent.project,
+                &intent.project,
+                now,
+            )?;
+            let thread_id = if let Some(tid) = intent.thread_id.as_deref() {
+                tid.to_string()
+            } else {
+                // Each outbound root is its own thread for now; Phase 7 refines.
+                s.ensure_thread_origin(&project_id, FABRIC, &pi, &eid_hex, now)?
+            };
+            let message_id = s.record_message(
+                &thread_id,
+                &intent.from.pubkey,
+                &intent.body,
+                now,
+                "outbound",
+                "published",
+                Some(&eid_hex),
+            )?;
+            s.add_message_recipient(
+                &message_id,
+                &intent.to_pubkey,
+                intent.target_session.as_deref(),
+            )?;
+            Ok((message_id,))
+        })?;
+
+        Ok(OutboundReceipt {
+            native_event_id: eid_hex,
+            message_id,
+            sync_state: "published".into(),
+        })
+    }
+
     // ── catch_up_mentions ─────────────────────────────────────────────────────
 
     /// Fetch kind:1 events p-tagged to `rec.agent_pubkey` from the relay and
@@ -221,10 +350,12 @@ impl Kind1Nip29Provider {
         {
             let hosted = vec![me.clone()];
             let now = now_secs();
+            let pi = self.provider_instance.clone();
             for ev in events {
                 let env = RawEnvelope::Nostr(ev);
-                let outcome =
-                    self.with_store(|s| crate::fabric::materialize(&env, &hosted, owners, now, s));
+                let outcome = self.with_store(|s| {
+                    crate::fabric::materialize(&env, &hosted, owners, now, &pi, s)
+                });
                 // NOTE: do NOT send outcome.tail here — fetch is startup catchup only;
                 // historical mentions must not be replayed onto the tail channel.
                 if outcome.wake_mentions {
@@ -250,7 +381,7 @@ impl Kind1Nip29Provider {
         now: u64,
         store: &Store,
     ) -> MaterializationOutcome {
-        crate::fabric::materialize(env, hosted, owners, now, store)
+        crate::fabric::materialize(env, hosted, owners, now, &self.provider_instance, store)
     }
 
     // ── private helpers ───────────────────────────────────────────────────────
@@ -259,4 +390,22 @@ impl Kind1Nip29Provider {
         let g = self.store.lock().expect("store mutex poisoned");
         f(&g)
     }
+}
+
+// ── module-level helpers ──────────────────────────────────────────────────────
+
+/// Derive a stable `provider_instance` string from the relay URL set.
+///
+/// Sorts + deduplicates the relay URLs, joins them with `|`, hashes with
+/// `DefaultHasher` (fixed seed = 0 at the point the hasher is reset), and
+/// formats the result as 16 hex digits.  The value is deterministic for the
+/// same relay set across daemon restarts on the same machine.
+fn derive_provider_instance(relays: &[String]) -> String {
+    let mut sorted: Vec<&str> = relays.iter().map(String::as_str).collect();
+    sorted.sort_unstable();
+    sorted.dedup();
+    let joined = sorted.join("|");
+    let mut h = DefaultHasher::new();
+    joined.hash(&mut h);
+    format!("{:016x}", h.finish())
 }

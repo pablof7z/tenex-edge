@@ -82,13 +82,14 @@ pub struct MaterializationOutcome {
 ///
 /// ACL note: today every hosted-addressed mention is routed with no membership
 /// gate — keep it that way.
-/// TODO(phase 5/6): membership-gated admission + quarantine once
-/// provider_instance/origins are hydrated.
+/// Phase 6: `provider_instance` is threaded through to `materialize_inbound_message`
+/// so canonical dual-write rows are keyed by the correct origin.
 pub fn materialize(
     env: &RawEnvelope,
     hosted: &[String],
     owners: &[String],
     now: u64,
+    provider_instance: &str,
     store: &crate::state::Store,
 ) -> MaterializationOutcome {
     use crate::domain::DomainEvent;
@@ -147,7 +148,14 @@ pub fn materialize(
 
         DomainEvent::Mention(ref m) if hosted.contains(&m.to_pubkey) => {
             let to = m.to_pubkey.clone();
-            let routed = Kind1Materializer::materialize_inbound_message(store, &to, m, event);
+            let routed = Kind1Materializer::materialize_inbound_message(
+                store,
+                &to,
+                m,
+                event,
+                provider_instance,
+                now,
+            );
             if routed {
                 outcome.wake_mentions = true;
             }

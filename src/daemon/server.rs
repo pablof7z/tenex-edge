@@ -116,8 +116,12 @@ pub async fn run() -> Result<()> {
     );
 
     let store = Arc::new(Mutex::new(Store::open(&store_path())?));
-    let provider =
-        Kind1Nip29Provider::new(transport.clone(), store.clone(), cfg.user_nsec.clone());
+    let provider = Kind1Nip29Provider::new(
+        transport.clone(),
+        store.clone(),
+        cfg.user_nsec.clone(),
+        &cfg.relays,
+    );
     let state = Arc::new(DaemonState {
         store,
         transport,
@@ -512,6 +516,8 @@ async fn rpc_send_message(
     state: &Arc<DaemonState>,
     params: &serde_json::Value,
 ) -> Result<serde_json::Value> {
+    use crate::fabric::provider::SendIntent;
+
     let p: SendMessageParams =
         serde_json::from_value(params.clone()).context("parsing send_message params")?;
     let rec = resolve_session(
@@ -525,19 +531,23 @@ async fn rpc_send_message(
 
     let recipient = state.with_store(|s| resolve_recipient(s, &rec.project, &p.recipient))?;
 
-    let mention = Mention {
+    // Keep the message body accessible after the intent is built.
+    let body = p.message.clone();
+
+    // Build the intent. project comes from the resolved recipient (matching the
+    // Mention field today), not from rec.project.
+    let intent = SendIntent {
         from: crate::domain::AgentRef::new(id.pubkey_hex(), rec.agent_slug.clone()),
         to_pubkey: recipient.pubkey.clone(),
         project: recipient.project.clone(),
         body: p.message,
         target_session: recipient.target_session.clone(),
-        // Stamp the sender's own session so the recipient can reply to it precisely.
         from_session: Some(rec.session_id.clone()),
+        thread_id: None,
     };
-    let builder = state.provider.encode(&DomainEvent::Mention(mention.clone()))?;
-    // Publish over the shared relay; the returned EventId is the canonical id of
-    // the just-signed event.
-    let event_id = state.transport.publish_signed(builder, &id.keys).await?;
+
+    // Publish + canonical dual-write. On error the error propagates unchanged.
+    let receipt = state.provider.send(intent, &id.keys).await?;
 
     // LOCAL DELIVERY (the same-machine fix). When the recipient is an agent this
     // daemon hosts (e.g. a SIBLING claude session sharing the sender's pubkey),
@@ -550,8 +560,23 @@ async fn rpc_send_message(
     // delivers only to the TARGET session (or all of the recipient agent's
     // sessions when untargeted) — never back to the authoring session.
     if state.hosted_pubkeys().iter().any(|h| h == &recipient.pubkey) {
+        // Reconstruct the Mention for the legacy local-delivery path. Fields
+        // must be byte-identical to what provider.send encoded and published.
+        let mention = Mention {
+            from: crate::domain::AgentRef::new(id.pubkey_hex(), rec.agent_slug.clone()),
+            to_pubkey: recipient.pubkey.clone(),
+            project: recipient.project.clone(),
+            body,
+            target_session: recipient.target_session.clone(),
+            from_session: Some(rec.session_id.clone()),
+        };
         let routed = state.with_store(|s| {
-            route_mention_into_with_id(s, &recipient.pubkey, &mention, &event_id.to_hex())
+            route_mention_into_with_id(
+                s,
+                &recipient.pubkey,
+                &mention,
+                &receipt.native_event_id,
+            )
         });
         if routed {
             state.mention_notify.notify_waiters();
