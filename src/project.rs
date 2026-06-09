@@ -2,8 +2,8 @@
 //!
 //! Order:
 //!   1. `.tenex/project.json` `slug`, searched from cwd upward to the git root.
-//!   2. else the git repo name (toplevel basename) — so all worktrees of a repo
-//!      share one slug.
+//!   2. else the git repo name (derived from git-common-dir) — so all worktrees
+//!      of a repo share one slug.
 //!   3. else the basename of cwd.
 
 use serde::Deserialize;
@@ -41,7 +41,7 @@ pub fn resolve(cwd: &Path) -> String {
 /// from. Used to compute the project-relative cwd (`rel_cwd`) advertised on
 /// presence/status. Mirrors `resolve`'s search order:
 ///   1. the dir holding the nearest `.tenex/project.json` (cwd → git_root|fs root),
-///   2. else the git toplevel,
+///   2. else the git repo root (derived from git-common-dir, shared across worktrees),
 ///   3. else None (caller falls back to the cwd basename).
 pub fn project_root(cwd: &Path) -> Option<PathBuf> {
     let git_root = git_toplevel(cwd);
@@ -108,10 +108,13 @@ fn read_slug(path: &Path) -> Option<String> {
 }
 
 fn git_toplevel(cwd: &Path) -> Option<PathBuf> {
+    // Use --git-common-dir to get the shared git directory across worktrees.
+    // For the main repo, this is .git; for worktrees, it's the main .git.
+    // Then get its parent to find the actual repo root.
     let out = Command::new("git")
         .arg("-C")
         .arg(cwd)
-        .args(["rev-parse", "--show-toplevel"])
+        .args(["rev-parse", "--git-common-dir"])
         .output()
         .ok()?;
     if !out.status.success() {
@@ -120,10 +123,17 @@ fn git_toplevel(cwd: &Path) -> Option<PathBuf> {
     let s = String::from_utf8(out.stdout).ok()?;
     let trimmed = s.trim();
     if trimmed.is_empty() {
-        None
-    } else {
-        Some(PathBuf::from(trimmed))
+        return None;
     }
+    let git_dir = PathBuf::from(trimmed);
+    // If it's relative, resolve it relative to cwd
+    let git_dir = if git_dir.is_absolute() {
+        git_dir
+    } else {
+        cwd.join(&git_dir)
+    };
+    // The repo root is the parent of the .git directory
+    git_dir.parent().map(|p| p.to_path_buf())
 }
 
 fn basename(p: &Path) -> Option<String> {
