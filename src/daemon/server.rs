@@ -14,9 +14,9 @@ use super::protocol::{
     protocol_version, Hello, PleaseExit, Request, Response, Welcome, ERR_PROTOCOL_SKEW,
 };
 use super::{lock_path, socket_path, store_path};
-use crate::codec::{Codec, Kind1Codec};
 use crate::config::{self, Config};
 use crate::domain::{DomainEvent, Mention};
+use crate::fabric::provider::Kind1Nip29Provider;
 use crate::identity::{self, AgentIdentity};
 use crate::runtime::{self, route_mention_into_with_id, EngineParams};
 use crate::state::{InboxRow, Store};
@@ -52,8 +52,7 @@ struct SessionHandle {
 pub struct DaemonState {
     store: Arc<Mutex<Store>>,
     transport: Arc<Transport>,
-    delivery: crate::fabric::nostr_delivery::NostrDelivery,
-    codec: Kind1Codec,
+    provider: Kind1Nip29Provider,
     cfg: Config,
     host: String,
     owners: Vec<String>,
@@ -116,12 +115,13 @@ pub async fn run() -> Result<()> {
             .context("daemon relay connect")?,
     );
 
-    let delivery = crate::fabric::nostr_delivery::NostrDelivery::new(transport.clone());
+    let store = Arc::new(Mutex::new(Store::open(&store_path())?));
+    let provider =
+        Kind1Nip29Provider::new(transport.clone(), store.clone(), cfg.user_nsec.clone());
     let state = Arc::new(DaemonState {
-        store: Arc::new(Mutex::new(Store::open(&store_path())?)),
+        store,
         transport,
-        delivery,
-        codec: Kind1Codec,
+        provider,
         cfg,
         host,
         owners,
@@ -450,7 +450,14 @@ async fn rpc_session_start(
     // Make sure the project's NIP-29 group exists and this agent is a member
     // BEFORE the engine starts publishing, so its presence lands in a group it
     // already belongs to. Best-effort: never block a session from starting.
-    ensure_group_and_membership(state, &project, &id.pubkey_hex()).await;
+    state.provider.open_project(&project, &id.pubkey_hex()).await;
+    // Keep the relay-authored group state (39000/39001/39002) subscribed so the
+    // membership cache stays current — "check which groups we own at all times".
+    if let Err(e) = ensure_subscription(state, &project).await {
+        if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
+            eprintln!("[daemon] ensure_subscription({project}) failed: {e:#}");
+        }
+    }
 
     let ep = engine_params_for(&state.cfg, &id, &p.agent, &session_id, &project, &rel_cwd, p.watch_pid);
     spawn_session(state, ep).await?;
@@ -458,106 +465,6 @@ async fn rpc_session_start(
     Ok(serde_json::json!({ "session_id": session_id }))
 }
 
-/// Ensure the operator owns a closed NIP-29 group for `project` and that
-/// `agent_pubkey` is a member — all signed by the operator's `userNsec`. Every
-/// step is best-effort: a missing `userNsec` or a flaky relay must NOT prevent a
-/// session from starting (unlike `rpc_user_prompt`, which bails). The relay rules
-/// here are validated by `tests/nip29_probe.rs`.
-async fn ensure_group_and_membership(state: &Arc<DaemonState>, project: &str, agent_pubkey: &str) {
-    use nostr_sdk::prelude::Keys;
-    let nsec = match &state.cfg.user_nsec {
-        Some(n) => n.clone(),
-        None => {
-            // No operator key → can't manage groups. Sessions still run; the
-            // relay just won't enforce membership for this project.
-            if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
-                eprintln!("[daemon] userNsec unset; skipping NIP-29 group management for {project}");
-            }
-            return;
-        }
-    };
-    let user_keys = match Keys::parse(&nsec) {
-        Ok(k) => k,
-        Err(e) => {
-            eprintln!("[daemon] userNsec parse failed; skipping group management: {e}");
-            return;
-        }
-    };
-
-    // Publish a group-management event, returning whether the relay now reflects
-    // it. `publish_signed_checked` errors on relay rejection (rate-limited,
-    // blocked, …); we treat an "already exists" rejection as success so a daemon
-    // restart over an already-created group still converges. Anything else
-    // (rate-limit, network, not-admin) is a genuine failure: we must NOT record
-    // success, or a transient blip would permanently poison the cache (mark a
-    // nonexistent group "owned"/agent "member" and never retry → presence writes
-    // blocked forever). On failure we leave the cache untouched and the next
-    // session_start retries.
-    let publish = |builder, label: &'static str| {
-        let transport = state.transport.clone();
-        let keys = user_keys.clone();
-        async move {
-            match transport.publish_signed_checked(builder, &keys).await {
-                Ok(()) => true,
-                Err(e) => {
-                    let benign = {
-                        let s = e.to_string();
-                        s.contains("already exists") || s.contains("duplicate")
-                    };
-                    if !benign && std::env::var("TENEX_EDGE_DEBUG").is_ok() {
-                        eprintln!("[daemon] NIP-29 {label} publish failed (will retry next session): {e:#}");
-                    }
-                    benign
-                }
-            }
-        }
-    };
-
-    // 1. Create + lock the group the first time we touch this project. Only mark
-    //    it owned if BOTH create and the closed-lock actually landed — otherwise
-    //    we'd leave an open/nonexistent group cached as owned and never re-lock.
-    if !state.with_store(|s| s.is_group_owned(project).unwrap_or(false)) {
-        let created = match crate::codec::kind1::group_create(project) {
-            Ok(b) => publish(b, "9007 create-group").await,
-            Err(_) => false,
-        };
-        let locked = if created {
-            match crate::codec::kind1::group_lock_closed(project) {
-                Ok(b) => publish(b, "9002 lock-closed").await,
-                Err(_) => false,
-            }
-        } else {
-            false
-        };
-        if created && locked {
-            state.with_store(|s| {
-                s.mark_group_owned(project, now_secs()).ok();
-            });
-        }
-    }
-
-    // 2. Add this agent as a member if it isn't one already — but only cache the
-    //    membership once the relay accepts the put-user, so a failed add retries.
-    if !state.with_store(|s| s.is_group_member(project, agent_pubkey).unwrap_or(false)) {
-        let added = match crate::codec::kind1::group_put_user(project, agent_pubkey) {
-            Ok(b) => publish(b, "9000 put-user").await,
-            Err(_) => false,
-        };
-        if added {
-            state.with_store(|s| {
-                s.upsert_group_member(project, agent_pubkey, "member", now_secs()).ok();
-            });
-        }
-    }
-
-    // Keep the relay-authored group state (39000/39001/39002) subscribed so the
-    // membership cache stays current — "check which groups we own at all times".
-    if let Err(e) = ensure_subscription(state, project).await {
-        if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
-            eprintln!("[daemon] ensure_subscription({project}) failed: {e:#}");
-        }
-    }
-}
 
 #[derive(serde::Deserialize)]
 struct SessionEndParams {
@@ -627,7 +534,7 @@ async fn rpc_send_message(
         // Stamp the sender's own session so the recipient can reply to it precisely.
         from_session: Some(rec.session_id.clone()),
     };
-    let builder = state.codec.encode(&DomainEvent::Mention(mention.clone()))?;
+    let builder = state.provider.encode(&DomainEvent::Mention(mention.clone()))?;
     // Publish over the shared relay; the returned EventId is the canonical id of
     // the just-signed event.
     let event_id = state.transport.publish_signed(builder, &id.keys).await?;
@@ -1267,13 +1174,13 @@ fn spawn_demux(state: Arc<DaemonState>) {
 /// Decode one event and apply it. Multi-agent aware: "me" is the SET of hosted
 /// local pubkeys; a mention routes by `to_pubkey` to that agent's sessions only.
 ///
-/// Thin dispatch to `crate::fabric::materialize` (Phase 4).
+/// Thin dispatch to `provider.materialize` (Phase 5).
 fn handle_incoming(state: &Arc<DaemonState>, event: &Event) {
     let env = crate::fabric::RawEnvelope::Nostr(event.clone());
     let hosted = state.hosted_pubkeys();
     let owners = state.owners.clone();
     let now = now_secs();
-    let outcome = state.with_store(|s| crate::fabric::materialize(&env, &hosted, &owners, now, s));
+    let outcome = state.with_store(|s| state.provider.materialize(&env, &hosted, &owners, now, s));
     if let Some(de) = outcome.tail {
         let _ = state.tail_tx_send(de);
     }
@@ -1296,25 +1203,10 @@ fn event_tag<'a>(event: &'a Event, name: &str) -> Option<&'a str> {
 // ── startup fetch of stored mentions (offline delivery) ──────────────────────
 
 async fn fetch_mentions_into_inbox(state: &Arc<DaemonState>, rec: &crate::state::SessionRecord) -> Result<()> {
-    use nostr_sdk::prelude::{Filter, Kind, PublicKey};
-    let me = rec.agent_pubkey.clone();
-    let pk = PublicKey::from_hex(&me)?;
-    let filter = Filter::new().kind(Kind::from(1u16)).pubkey(pk).limit(50);
-    if let Ok(events) = state.transport.fetch(filter, Duration::from_secs(3)).await {
-        // Use a single-element slice so the Mention guard in materialize checks
-        // `m.to_pubkey == me` exactly (relay filter already restricts to p-tagged me).
-        let hosted = vec![me.clone()];
-        let owners = state.owners.clone();
-        let now = now_secs();
-        for ev in events {
-            let env = crate::fabric::RawEnvelope::Nostr(ev);
-            let outcome = state.with_store(|s| crate::fabric::materialize(&env, &hosted, &owners, now, s));
-            // NOTE: do NOT send outcome.tail here — fetch is startup catchup only;
-            // historical mentions must not be replayed onto the tail channel.
-            if outcome.wake_mentions {
-                state.mention_notify.notify_waiters();
-            }
-        }
+    let owners = state.owners.clone();
+    let wake_count = state.provider.catch_up_mentions(rec, &owners).await?;
+    if wake_count > 0 {
+        state.mention_notify.notify_waiters();
     }
     Ok(())
 }
@@ -1449,7 +1341,7 @@ async fn resubscribe(state: &Arc<DaemonState>) -> Result<()> {
                 owners: owners.clone(),
                 thread: None,
             };
-            state.delivery.subscribe(scope).await?;
+            state.provider.subscribe(scope).await?;
         } else {
             for me in &hosted {
                 let scope = crate::fabric::Scope {
@@ -1459,7 +1351,7 @@ async fn resubscribe(state: &Arc<DaemonState>) -> Result<()> {
                     owners: owners.clone(),
                     thread: None,
                 };
-                state.delivery.subscribe(scope).await?;
+                state.provider.subscribe(scope).await?;
             }
         }
     }
@@ -1486,7 +1378,12 @@ async fn reconcile_sessions(state: &Arc<DaemonState>) {
         // Re-establish ownership/membership + the group-state subscription for
         // revived sessions. Idempotent: the owned_groups/group_members cache
         // persists across restarts, so already-owned groups skip republishing.
-        ensure_group_and_membership(state, &rec.project, &id.pubkey_hex()).await;
+        state.provider.open_project(&rec.project, &id.pubkey_hex()).await;
+        if let Err(e) = ensure_subscription(state, &rec.project).await {
+            if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
+                eprintln!("[daemon] ensure_subscription({}) failed: {e:#}", rec.project);
+            }
+        }
         let ep = engine_params_for(&state.cfg, &id, &rec.agent_slug, &rec.session_id, &rec.project, &rec.rel_cwd, rec.watch_pid);
         let _ = spawn_session(state, ep).await;
     }
