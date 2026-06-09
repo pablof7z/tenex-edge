@@ -54,7 +54,7 @@ ProjectMeta must be modeled as a provider-owned source capability, exposed as a 
 
 ## Agent List Enumeration
 
-Agent list enumeration follows the same pattern as project list: uniform shape, provider-owned source, with derived/Option fallback for kind1 (observed event authors with agent tag ∪ local whitelist). <!-- [^d208c-22] -->
+Agent list enumeration follows the same pattern as project list: uniform shape, provider-owned source, with derived/Option fallback for kind1 (derived from kind:0 profiles + group membership, not from observed `agent`-tagged authors). <!-- [^d208c-22] -->
 
 ## Read-Model Entities
 

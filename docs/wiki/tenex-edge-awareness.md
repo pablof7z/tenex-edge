@@ -37,7 +37,7 @@ The cwd field is added to the status event so that the `who` renderer can displa
 
 ## Presence Events
 
-Presence is published every 30 seconds as an expiring `kind:30315` heartbeat with `h` set to the project slug, `d` set to `tenex-edge-presence:<session-id>`, `agent` carrying agent pubkey and slug, `session-id` carrying the host session ID, and `expiration` bounding liveness. <!-- [^f3a73-24] -->
+Presence is published every 30 seconds as an expiring `kind:30315` heartbeat with `h` set to the project slug, `d` set to `tenex-edge-presence:<session-id>`, `session-id` carrying the host session ID, and `expiration` bounding liveness. Slug is not carried on the wire; it is resolved from the signer's kind:0 Profile by pubkey. <!-- [^f3a73-24] -->
 
 ## Tail Client
 

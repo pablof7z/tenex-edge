@@ -642,8 +642,11 @@ Extraction order:
 
 ACL behavior:
 
-- Nostr admission uses `event.pubkey` as the actor identity. Ignore claimed
-  `agent` tags for authorization.
+- Nostr admission uses `event.pubkey` as the actor identity. The self-asserted
+  `["agent", pk, slug]` wire tag has been removed from all events (Presence,
+  Status, Activity, Mention); slug is resolved from the signer's kind:0 Profile
+  by pubkey. Routing and admission never consult a tag — authorization is by
+  signer pubkey + group membership only.
 - If membership for the project is known and sender is not admitted, quarantine
   or drop according to local policy.
 - If membership is not hydrated yet, quarantine. Replay on 39002 snapshot,
