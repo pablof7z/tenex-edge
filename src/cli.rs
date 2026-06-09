@@ -601,19 +601,15 @@ fn render_who_once(snapshot: &WhoSnapshot) -> String {
     }
 
     if snapshot.project != "*" && !snapshot.other_projects.is_empty() {
-        let total: usize = snapshot.other_projects.iter().map(|o| o.agent_count).sum();
         let _ = writeln!(out);
-        let _ = writeln!(out, "{} other agent(s) in other projects:", total);
+        let _ = writeln!(out, "{} other agent(s) in other projects:", snapshot.other_projects.len());
         for op in &snapshot.other_projects {
-            for agent in &op.agents {
-                let name = format!("{agent}@{}", op.project);
-                match &op.about {
-                    Some(about) if !about.is_empty() => {
-                        let _ = writeln!(out, "  * {} - {}", name, about);
-                    }
-                    _ => {
-                        let _ = writeln!(out, "  * {}", name);
-                    }
+            match &op.about {
+                Some(about) if !about.is_empty() => {
+                    let _ = writeln!(out, "  * {} - {}", op.project, about);
+                }
+                _ => {
+                    let _ = writeln!(out, "  * {}", op.project);
                 }
             }
         }
@@ -897,7 +893,7 @@ mod who_tests {
 
         assert!(once.contains("a [session s1] - idle"));
         assert!(once.contains("1 other agent(s) in other projects:"));
-        assert!(once.contains("  * b@other - Other work"));
+        assert!(once.contains("  * other - Other work"));
     }
 
     #[test]
