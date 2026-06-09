@@ -2,7 +2,7 @@
 
 use crate::domain::DomainEvent;
 use crate::state::Store;
-use crate::util::{now_secs, short_id, slugify_host};
+use crate::util::{now_secs, session_short_code, short_id, slugify_host};
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use crossterm::{
@@ -643,7 +643,7 @@ fn render_who_row(out: &mut String, row: &WhoRow, include_project: bool) {
         out,
         "{} [session {}]{}{}{} - {}",
         name,
-        short_id(&row.session_id).yellow(),
+        session_short_code(&row.session_id).yellow(),
         dir,
         remote,
         stale,

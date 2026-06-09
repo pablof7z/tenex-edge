@@ -15,6 +15,20 @@ pub fn short_id(id: &str) -> String {
     id.chars().take(8).collect()
 }
 
+/// Hash a session ID to a unique, stable 6-character code.
+/// Deterministic hash ensures the same session_id always gets the same code.
+pub fn session_short_code(session_id: &str) -> String {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let mut hasher = DefaultHasher::new();
+    session_id.hash(&mut hasher);
+    let hash = hasher.finish();
+
+    // Format as 6-char hex for visual distinction and stable output
+    format!("{:06x}", hash % 0x1_000_000)
+}
+
 /// Convert a human-readable host label (e.g. "pablos' laptop") into a
 /// URL-safe slug (e.g. "pablos-laptop") suitable for use in `agent@host`
 /// addressing.
