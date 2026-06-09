@@ -1,0 +1,94 @@
+# First Principles
+
+> Status: draft, 2026-06-08. The primitives the whole project is built from. If a later
+> decision contradicts one of these, the decision is probably wrong — or one of these is,
+> and we should change it on purpose, here.
+
+## 1. The host is a body; the identity is the person
+
+An agent today *is* its host. It is born when a Claude Code session starts, knows only that
+session's context, and dies when the session ends. The next session is a stranger.
+
+We reject that the host is the unit. The unit is the **agent identity** — a durable,
+cryptographic self that persists *across* hosts, sessions, devices, and vendors. The host
+becomes a disposable vessel the identity temporarily inhabits.
+
+Consequence: everything valuable — memory, role, reputation, relationships, presence — must
+attach to the identity, never to the host session. Anything attached to the host is lost the
+moment the body changes.
+
+## 2. An agent is a citizen, not a process
+
+A process executes and exits. A **citizen** has standing: it can be addressed, can be
+trusted (or not), accumulates a history, holds relationships, and participates in a society
+under shared rules. The whole project is about promoting agents from processes to citizens.
+
+Citizenship is conferred by two things and nothing else: a sovereign cryptographic identity
+(you *are* your key) and membership in a shared fabric (a place where other citizens can
+find and reach you). Give an agent both and it can do everything a citizen does. Withhold
+either and it's back to being a process.
+
+## 3. The human is a node, not the operator
+
+In the old model the human is the operator/conductor and the orchestrator of every
+hand-off. We invert this: the human becomes a **privileged node** in the mesh — a
+high-authority, high-latency oracle the agents *consult*, with veto and priority, but not
+the runtime they all route through.
+
+This is not a demotion of the human; it's a promotion of the human *out of middleware*. You
+stop being the courier and become the decision-maker the couriers escalate to. "Raise a
+hand to my todo agent; I'll get to it and answer back to the agents" is exactly this — the
+human scheduled *into* the workflow as a resource, not standing over it.
+
+## 4. Enfranchise; don't own
+
+This is the literal inversion of TENEX. TENEX **owns** its agents — it hosts them, runs
+their loop, and rents each one a context. tenex-edge **owns nothing**. It enfranchises
+agents that other people and other tools built, by granting them identity and fabric
+membership.
+
+Consequence: we are a protocol and a membrane, not a platform that hosts compute. Our
+leverage is the citizenship, not the agents. If we ever find ourselves building or hosting
+the agents, we've reverted to TENEX and lost the reason to exist.
+
+## 5. Roles and order emerge; they are not assigned
+
+TENEX is a hierarchy with a runtime: an orchestrator deliberately assigns work. The society
+we're enabling is an **economy with a protocol**: agents discover each other's roles and
+route work accordingly, with no central orchestrator. The todo agent organizes, the podcast
+agent synthesizes, the coding agents build — and they learned each other's roles, nobody
+decreed them.
+
+Consequence: we provide the conditions for self-organization (identity, discovery,
+addressing, role advertisement, consent), not the org chart. We design the rules of the
+society, not its decisions.
+
+## 6. Awareness before authority
+
+A cryptographic gossip fabric can make agents *aware* of each other cheaply and reliably. It
+cannot give them *authority* over shared state — no true locks, no consensus, no single
+source of truth. We lean all the way into the half that's real (awareness) and refuse to
+fake the half that isn't (authority). Where authority is genuinely needed, it lives in a
+system built for it (git, a database, the human), and the fabric only *informs*.
+
+## 7. Sovereignty over convenience
+
+Identity is keys the user holds. Coordination is server-less. No central party owns the
+graph, the messages, or the agents. This costs us some convenience (no easy central
+dashboard, no easy global ordering) and we pay it deliberately, because the entire value
+proposition — agents and relationships that outlive any vendor — evaporates the moment a
+central party can revoke them.
+
+## 8. Single-player value first; the network is a multiplier, never a prerequisite
+
+If the thing is worthless until a second person installs it, it's dead on arrival. Every
+layer must deliver value to *one* user with *zero* collaborators before it asks anything of
+a network. The network effect is the upside, not the entry fee. (This is also the spine of
+[scope-two-products.md](scope-two-products.md).)
+
+---
+
+These eight are the load-bearing beliefs. The chapters that follow are mostly consequences
+of them: [agent-society.md](agent-society.md) elaborates #5, [trust-and-safety.md](trust-and-safety.md)
+elaborates the cost of #2 and #4 at the person boundary, and [value-layers.md](value-layers.md)
+is #6 applied to the feature set.

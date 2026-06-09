@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [{ "type": "command", "command": "python3 __HOOK__ session-start" }] }
+    ],
+    "SessionEnd": [
+      { "hooks": [{ "type": "command", "command": "python3 __HOOK__ session-end" }] }
+    ],
+    "UserPromptSubmit": [
+      { "hooks": [{ "type": "command", "command": "python3 __HOOK__ user-prompt-submit" }] }
+    ],
+    "Stop": [
+      { "hooks": [{ "type": "command", "command": "python3 __HOOK__ stop" }] }
+    ]
+  }
+}
