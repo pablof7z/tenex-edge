@@ -329,6 +329,7 @@ async fn dispatch(state: &Arc<DaemonState>, req: &Request) -> Response {
         "session_start" => rpc_session_start(state, &req.params).await,
         "session_end" => rpc_session_end(state, &req.params),
         "send_message" => rpc_send_message(state, &req.params).await,
+        "propose" => rpc_propose(state, &req.params).await,
         "inbox" => rpc_inbox(state, &req.params).await,
         "turn_start" => rpc_turn_start(state, &req.params).await,
         "turn_check" => rpc_turn_check(state, &req.params),
@@ -672,6 +673,144 @@ async fn rpc_send_message(
     }
 
     Ok(serde_json::json!({ "to_pubkey": recipient.pubkey, "target_session": recipient.target_session }))
+}
+
+// ── propose ───────────────────────────────────────────────────────────────────
+
+#[derive(serde::Deserialize, Default)]
+struct ProposeParams {
+    title: String,
+    body: String,
+    #[serde(default)]
+    session: Option<String>,
+    #[serde(default)]
+    env_session: Option<String>,
+    #[serde(default)]
+    cwd: Option<String>,
+    #[serde(default)]
+    agent: Option<String>,
+    #[serde(default)]
+    thread_id: Option<String>,
+}
+
+/// Publish a kind:30023 (NIP-23 long-form) proposal signed by the agent's identity.
+///
+/// Tags:
+///   ["d", <short-id>]           — addressable identifier (NIP-33)
+///   ["title", <title>]          — human-readable title
+///   ["h", <project>]            — NIP-29 group
+///   ["p", <owner>]              — per owner in cfg.owners, surfaces to the human
+///   ["e", <root>, "", "root"]   — only when --thread given; links to work-thread
+///   ["session-id", <session>]   — authoring session, lets a note route back
+///   ["agent", <pubkey>, <slug>] — author identity (consistent with other events)
+///
+/// Dual-writes a canonical row: project_origin → thread_origin (thread_id or
+/// the proposal's own event id as a new root) → message (direction=outbound,
+/// sync_state=published, body=title).
+async fn rpc_propose(
+    state: &Arc<DaemonState>,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value> {
+    use crate::fabric::provider::FABRIC;
+    use nostr_sdk::prelude::{EventBuilder, Kind, Tag};
+
+    let p: ProposeParams =
+        serde_json::from_value(params.clone()).context("parsing propose params")?;
+    if p.title.is_empty() {
+        anyhow::bail!("title must not be empty");
+    }
+
+    let rec = resolve_session(
+        state,
+        p.session.as_deref(),
+        p.env_session.as_deref(),
+        p.cwd.as_deref(),
+        p.agent.as_deref(),
+    )?;
+    let id = identity::load_or_create(&config::edge_home(), &rec.agent_slug, now_secs())?;
+
+    // Generate a short addressable `d` identifier for this proposal.
+    let d_tag = format!(
+        "prop-{:x}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0)
+    );
+
+    // Resolve the thread root native key if --thread given.
+    let root_native_key: Option<String> = p.thread_id.as_deref().and_then(|tid| {
+        state.with_store(|s| {
+            s.thread_root_native_key(tid, FABRIC, &state.provider.provider_instance)
+        })
+    });
+
+    // Build the kind:30023 EventBuilder.
+    let mut tags: Vec<Tag> = vec![
+        Tag::parse(["d", &d_tag]).context("d tag")?,
+        Tag::parse(["title", &p.title]).context("title tag")?,
+        Tag::parse(["h", &rec.project]).context("h tag")?,
+        Tag::parse(["session-id", &rec.session_id]).context("session-id tag")?,
+        Tag::parse(["agent", &id.pubkey_hex(), &rec.agent_slug]).context("agent tag")?,
+    ];
+    // p-tag each owner so the proposal surfaces in their inbox.
+    for owner in &state.owners {
+        tags.push(Tag::parse(["p", owner]).context("p tag")?);
+    }
+    // Thread root e-tag (NIP-10 root marker) — only when --thread given.
+    if let Some(ref root_key) = root_native_key {
+        tags.push(Tag::parse(["e", root_key, "", "root"]).context("e root tag")?);
+    }
+
+    let builder = EventBuilder::new(Kind::from(crate::codec::kind1::KIND_LONGFORM), p.body.clone())
+        .tags(tags);
+
+    // Publish signed by the agent's keys.
+    let event_id = state
+        .transport
+        .publish_signed(builder, &id.keys)
+        .await
+        .context("publishing proposal")?;
+    let eid_hex = event_id.to_hex();
+
+    // Dual-write canonical read-model rows.
+    let now = now_secs();
+    let pi = state.provider.provider_instance.clone();
+    let thread_id = state.with_store(|s| -> Result<String> {
+        let project_id = s.ensure_project_origin(FABRIC, &pi, &rec.project, &rec.project, now)?;
+        let thread_id = if let Some(tid) = p.thread_id.as_deref() {
+            // Attach to an existing thread.
+            // ensure_thread_origin is idempotent; use the proposal's event id as
+            // native key for this message within the thread.
+            s.ensure_thread_origin(&project_id, FABRIC, &pi, tid, now)?;
+            tid.to_string()
+        } else {
+            // New standalone thread rooted at the proposal's event id.
+            s.ensure_thread_origin(&project_id, FABRIC, &pi, &eid_hex, now)?
+        };
+        // Record the proposal as an outbound message; body = title (full body is on relay).
+        let msg_id = s.record_message(
+            &thread_id,
+            &id.pubkey_hex(),
+            &p.title,
+            now,
+            "outbound",
+            "published",
+            Some(&eid_hex),
+        )?;
+        // Owner as recipient (so they see it in threads).
+        for owner in &state.owners {
+            s.add_message_recipient(&msg_id, owner, None)?;
+        }
+        Ok(thread_id)
+    })?;
+
+    Ok(serde_json::json!({
+        "event_id": eid_hex,
+        "d_tag": d_tag,
+        "thread_id": thread_id,
+        "title": p.title,
+    }))
 }
 
 struct ResolvedRecipient {

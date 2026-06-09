@@ -2987,4 +2987,109 @@ mod tests {
         assert_eq!(msgs[1].direction, "inbound");
         assert_eq!(msgs[1].body, "reply body");
     }
+
+    /// Proposal dual-write: record_message + thread origin produce a canonical
+    /// proposal row; idempotent on the kind:30023 event id.
+    #[test]
+    fn propose_dual_write_produces_canonical_row() {
+        let s = Store::open_memory().unwrap();
+        let pi = "test-pi-prop";
+        let now = 3_000u64;
+        let agent_pk = "cc".repeat(32);
+        let owner_pk = "dd".repeat(32);
+        let event_id = "abcd1234".repeat(8); // 64-char hex
+
+        // Simulate rpc_propose's dual-write path.
+        let project_id = s
+            .ensure_project_origin("kind1-nip29", pi, "workspace", "workspace", now)
+            .unwrap();
+        // New standalone thread rooted at the proposal's event id.
+        let thread_id = s
+            .ensure_thread_origin(&project_id, "kind1-nip29", pi, &event_id, now)
+            .unwrap();
+        let msg_id = s
+            .record_message(
+                &thread_id,
+                &agent_pk,
+                "My Big Proposal",  // title is the body in the canonical row
+                now,
+                "outbound",
+                "published",
+                Some(&event_id),
+            )
+            .unwrap();
+        s.add_message_recipient(&msg_id, &owner_pk, None).unwrap();
+
+        // Verify the canonical row.
+        let msgs = s.messages_for_thread(&thread_id).unwrap();
+        assert_eq!(msgs.len(), 1, "one message row for the proposal");
+        let row = &msgs[0];
+        assert_eq!(row.direction, "outbound");
+        assert_eq!(row.sync_state, "published");
+        assert_eq!(row.body, "My Big Proposal");
+        assert_eq!(row.native_event_id.as_deref(), Some(event_id.as_str()));
+        assert_eq!(row.author_pubkey, agent_pk);
+
+        // Idempotency: the same event_id must not create a second message row.
+        let mid2 = s
+            .record_message(
+                &thread_id,
+                &agent_pk,
+                "My Big Proposal (echo)",
+                now,
+                "outbound",
+                "published",
+                Some(&event_id),
+            )
+            .unwrap();
+        assert_eq!(msg_id, mid2, "same native_event_id → same message_id (dedup)");
+        let msgs2 = s.messages_for_thread(&thread_id).unwrap();
+        assert_eq!(msgs2.len(), 1, "still one message row after idempotent write");
+    }
+
+    /// Proposal attached to an existing thread: when --thread is given rpc_propose
+    /// uses the thread_id directly as the target thread; the proposal message lands
+    /// in that thread without creating a new one.
+    #[test]
+    fn propose_into_existing_thread() {
+        let s = Store::open_memory().unwrap();
+        let pi = "test-pi-prop2";
+        let now = 4_000u64;
+        let agent_pk = "ee".repeat(32);
+        let thread_root_event_id = "1111aaaa".repeat(8);
+        let proposal_event_id = "2222bbbb".repeat(8);
+
+        // Pre-existing thread (e.g. created by a send-message earlier).
+        let project_id = s
+            .ensure_project_origin("kind1-nip29", pi, "workspace2", "workspace2", now)
+            .unwrap();
+        let existing_thread_id = s
+            .ensure_thread_origin(&project_id, "kind1-nip29", pi, &thread_root_event_id, now)
+            .unwrap();
+
+        // rpc_propose with --thread: use the thread_id directly (no new ensure_thread_origin).
+        // Mirror the dual-write code path in rpc_propose.
+        let thread_id_for_proposal = existing_thread_id.clone();
+        let msg_id = s
+            .record_message(
+                &thread_id_for_proposal,
+                &agent_pk,
+                "Proposal Title",
+                now,
+                "outbound",
+                "published",
+                Some(&proposal_event_id),
+            )
+            .unwrap();
+        s.add_message_recipient(&msg_id, &agent_pk, None).unwrap();
+
+        // Only one thread for this project.
+        let threads = s.list_threads(&project_id).unwrap();
+        assert_eq!(threads.len(), 1, "proposal must join existing thread");
+
+        let msgs = s.messages_for_thread(&existing_thread_id).unwrap();
+        assert_eq!(msgs.len(), 1, "one proposal message in the thread");
+        assert_eq!(msgs[0].body, "Proposal Title");
+        assert_eq!(msgs[0].native_event_id.as_deref(), Some(proposal_event_id.as_str()));
+    }
 }

@@ -29,6 +29,9 @@ pub const KIND_GROUP_METADATA: u16 = 39000;
 pub const KIND_GROUP_ADMINS: u16 = 39001;
 pub const KIND_GROUP_MEMBERS: u16 = 39002;
 
+// NIP-23 long-form article — used for agent-authored proposals.
+pub const KIND_LONGFORM: u16 = 30023;
+
 const PRESENCE_D_PREFIX: &str = "tenex-edge-presence:";
 
 pub struct Kind1Codec;
@@ -245,12 +248,11 @@ impl Codec for Kind1Codec {
             }
             KIND_NOTE => {
                 let project = project_from_tags(event)?;
-                let agent = AgentRef::new(pubkey, agent_slug(event));
-                // Require an `agent` tag to classify as Mention. User-posted OPs
-                // carry a `p` tag (targeting the agent) but no `agent` tag, so
-                // they must not be re-injected as intra-agent messages.
                 let has_agent = first_tag(event, "agent").is_some();
+
+                // Agent-tagged mention (existing behavior — unchanged).
                 if has_agent {
+                    let agent = AgentRef::new(pubkey, agent_slug(event));
                     if let Some(to) = first_tag(event, "p") {
                         return Some(DomainEvent::Mention(Mention {
                             from: agent,
@@ -261,7 +263,34 @@ impl Codec for Kind1Codec {
                             from_session: first_tag(event, "from-session").map(String::from),
                         }));
                     }
+                    // agent-tagged but no p → Activity fallthrough below.
+                    return Some(DomainEvent::Activity(Activity {
+                        agent,
+                        project,
+                        text: event.content.clone(),
+                    }));
                 }
+
+                // Owner-note path: p + session-id + no agent tag.
+                // A kind:1 the human publishes from their phone: it has a `p` targeting
+                // the agent and a `session-id` routing it to a specific session.
+                // Decode as Mention so the materializer can admit it via the ownership gate.
+                // A p-note WITHOUT session-id (user OP / broadcast) still decodes as Activity.
+                let to = first_tag(event, "p");
+                let target_session = first_tag(event, "session-id").map(String::from);
+                if let (Some(to), Some(sess)) = (to, target_session) {
+                    return Some(DomainEvent::Mention(Mention {
+                        from: AgentRef::new(pubkey, String::new()),
+                        to_pubkey: to.to_string(),
+                        project,
+                        body: event.content.clone(),
+                        target_session: Some(sess),
+                        from_session: first_tag(event, "from-session").map(String::from),
+                    }));
+                }
+
+                // User OP / broadcast (p tag only, no session-id) → Activity (unchanged).
+                let agent = AgentRef::new(pubkey, String::new());
                 Some(DomainEvent::Activity(Activity {
                     agent,
                     project,
@@ -582,6 +611,82 @@ mod tests {
             .sign_with_keys(&keys)
             .unwrap();
         assert!(Kind1Codec.decode(&event).is_none());
+    }
+
+    // ── Owner-note decode rules ───────────────────────────────────────────────
+
+    #[test]
+    fn owner_note_with_p_and_session_id_decodes_as_mention() {
+        // A human-signed kind:1 with `p` + `session-id` + NO `agent` tag must
+        // decode as a Mention so the materializer can route it via the owner gate.
+        let owner_keys = Keys::generate();
+        let agent_pk = "aa".repeat(32);
+        let session = "sess-owner-1";
+
+        let event = EventBuilder::new(Kind::from(KIND_NOTE), "looks good, ship it")
+            .tags([
+                tag(&["h", "myproject"]).unwrap(),
+                tag(&["p", &agent_pk]).unwrap(),
+                tag(&["session-id", session]).unwrap(),
+            ])
+            .sign_with_keys(&owner_keys)
+            .unwrap();
+
+        match Kind1Codec.decode(&event) {
+            Some(DomainEvent::Mention(m)) => {
+                assert_eq!(m.to_pubkey, agent_pk, "to_pubkey must be the p tag");
+                assert_eq!(
+                    m.target_session,
+                    Some(session.to_string()),
+                    "target_session must be the session-id tag"
+                );
+                assert_eq!(
+                    m.from.pubkey,
+                    owner_keys.public_key().to_hex(),
+                    "from.pubkey must be the event author"
+                );
+                assert_eq!(m.project, "myproject");
+                assert_eq!(m.body, "looks good, ship it");
+            }
+            other => panic!("expected Mention, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn owner_note_p_only_no_session_id_decodes_as_activity() {
+        // A user OP (broadcast p-note without session-id) must still decode as
+        // Activity — the decode rule is p + session-id + no-agent → Mention.
+        let owner_keys = Keys::generate();
+        let agent_pk = "bb".repeat(32);
+
+        let event = EventBuilder::new(Kind::from(KIND_NOTE), "just doing something")
+            .tags([
+                tag(&["h", "myproject"]).unwrap(),
+                tag(&["p", &agent_pk]).unwrap(),
+                // deliberately no session-id
+            ])
+            .sign_with_keys(&owner_keys)
+            .unwrap();
+
+        match Kind1Codec.decode(&event) {
+            Some(DomainEvent::Activity(_)) => {}
+            other => panic!("expected Activity for p-only note, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn agent_tagged_mention_unchanged_by_owner_note_rule() {
+        // An agent-tagged p-note (normal Mention) must still decode as Mention.
+        let keys = Keys::generate();
+        let ev = DomainEvent::Mention(Mention {
+            from: agent(&keys, "coder"),
+            to_pubkey: "cc".repeat(32),
+            project: "myproject".into(),
+            body: "review this".into(),
+            target_session: Some("target-sess".into()),
+            from_session: None,
+        });
+        assert!(matches!(roundtrip(ev, &keys), DomainEvent::Mention(_)));
     }
 
 }

@@ -176,6 +176,21 @@ enum Cmd {
         #[arg(long = "type")]
         hook_type: String,
     },
+    /// Publish a long-form proposal (kind:30023) from this agent's session.
+    Propose {
+        /// Proposal title.
+        #[arg(long)]
+        title: String,
+        /// Proposal body (Markdown). Use "-" or omit to read from stdin.
+        #[arg(long = "message", value_name = "BODY")]
+        message: Option<String>,
+        /// Optional canonical thread id to attach this proposal to.
+        #[arg(long = "thread", value_name = "THREAD_ID")]
+        thread_id: Option<String>,
+        /// My session id; if omitted, resolved from the current directory.
+        #[arg(long)]
+        session: Option<String>,
+    },
     /// Internal: the per-machine daemon. Spawned automatically; not for direct use.
     /// (Replaces the old detached per-session engine, which now runs as an async
     /// task inside this one daemon — the sole writer of state.db.)
@@ -223,6 +238,10 @@ pub async fn run(cli: Cli) -> Result<()> {
                 .context("missing recipient; use `tenex-edge send-message --recipient <target> --message \"...\"`")?;
             let message = resolve_send_message_body(message_flag.or(message))?;
             send_message(recipient, message, session, thread_id).await
+        }
+        Cmd::Propose { title, message, thread_id, session } => {
+            let body = resolve_send_message_body(message)?;
+            propose(title, body, thread_id, session).await
         }
         Cmd::Threads { project, thread } => threads(project, thread).await,
         Cmd::Who {
@@ -329,6 +348,30 @@ async fn send_message(
         Some(s) => println!("mentioned {} (session {})", short_id(&to_pubkey), short_id(&s)),
         None => println!("mentioned {}", short_id(&to_pubkey)),
     }
+    Ok(())
+}
+
+// ── propose ───────────────────────────────────────────────────────────────────
+
+async fn propose(
+    title: String,
+    body: String,
+    thread_id: Option<String>,
+    session: Option<String>,
+) -> Result<()> {
+    let params = serde_json::json!({
+        "title": title,
+        "body": body,
+        "session": session,
+        "env_session": std::env::var("TENEX_EDGE_SESSION").ok(),
+        "agent": std::env::var("TENEX_EDGE_AGENT").ok(),
+        "cwd": std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()),
+        "thread_id": thread_id,
+    });
+    let v = daemon_call_async("propose", params).await?;
+    let title_echo = v["title"].as_str().unwrap_or(&title);
+    let d_tag = v["d_tag"].as_str().unwrap_or("?");
+    println!("published proposal {} ({})", title_echo, d_tag);
     Ok(())
 }
 
