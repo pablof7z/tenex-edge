@@ -410,7 +410,7 @@ impl Store {
             "SELECT session_id, agent_slug, agent_pubkey, project, host, child_pid, watch_pid, created_at, alive, rel_cwd
              FROM sessions WHERE alive=1 ORDER BY created_at",
         )?;
-        let rows = stmt.query_map([], |row| row_to_session(row))?;
+        let rows = stmt.query_map([], row_to_session)?;
         Ok(rows.filter_map(|r| r.ok()).collect())
     }
 
@@ -507,7 +507,7 @@ impl Store {
             "SELECT session_id, agent_slug, agent_pubkey, project, host, child_pid, watch_pid, created_at, alive, rel_cwd
              FROM sessions WHERE alive=1 AND last_seen>=?1 ORDER BY created_at DESC",
         )?;
-        let rows = stmt.query_map(params![since], |row| row_to_session(row))?;
+        let rows = stmt.query_map(params![since], row_to_session)?;
         Ok(rows.filter_map(|r| r.ok()).collect())
     }
 
@@ -560,14 +560,13 @@ impl Store {
                 .ok());
         }
 
-        if let Some(pk) = self
+        if let Ok(pk) = self
             .conn
             .query_row(
                 "SELECT pubkey FROM profiles WHERE slug=?1 ORDER BY updated_at DESC LIMIT 1",
                 params![slug],
                 |r| r.get::<_, String>(0),
             )
-            .ok()
         {
             return Ok(Some(pk));
         }
@@ -1021,7 +1020,7 @@ impl Store {
         native_thread_key: &str,
         now: u64,
     ) -> Result<String> {
-        if let Some(tid) = self
+        if let Ok(tid) = self
             .conn
             .query_row(
                 "SELECT thread_id FROM thread_origins
@@ -1029,7 +1028,6 @@ impl Store {
                 params![fabric, provider_instance, native_thread_key],
                 |r| r.get::<_, String>(0),
             )
-            .ok()
         {
             return Ok(tid);
         }
@@ -1050,6 +1048,7 @@ impl Store {
     /// Insert a canonical message, returning its `message_id`. When
     /// `native_event_id` is `Some` this is idempotent: a message already carrying
     /// that native id is returned rather than duplicated (relay echo / refetch).
+    #[allow(clippy::too_many_arguments)] // one param per messages column; a struct would only move the noise
     pub fn record_message(
         &self,
         thread_id: &str,
@@ -1061,14 +1060,13 @@ impl Store {
         native_event_id: Option<&str>,
     ) -> Result<String> {
         if let Some(eid) = native_event_id {
-            if let Some(mid) = self
+            if let Ok(mid) = self
                 .conn
                 .query_row(
                     "SELECT message_id FROM messages WHERE native_event_id=?1",
                     params![eid],
                     |r| r.get::<_, String>(0),
                 )
-                .ok()
             {
                 return Ok(mid);
             }
@@ -1317,7 +1315,7 @@ impl Store {
             "SELECT session_id, agent_slug, agent_pubkey, project, host, child_pid, watch_pid, created_at, alive, rel_cwd
              FROM sessions WHERE alive=1 AND last_seen>=?1 AND (?2 IS NULL OR project=?2) ORDER BY created_at DESC",
         )?;
-        let rows = stmt.query_map(params![since, project], |row| row_to_session(row))?;
+        let rows = stmt.query_map(params![since, project], row_to_session)?;
         Ok(rows.filter_map(|r| r.ok()).collect())
     }
 
@@ -1507,6 +1505,7 @@ impl Store {
 
     /// Record / refresh a peer presence session (kind:0 + relay presence).
     /// Wraps `upsert_peer_session`.
+    #[allow(clippy::too_many_arguments)] // mirrors upsert_peer_session's column set
     pub fn materialize_presence(
         &self,
         session_id: &str,

@@ -324,7 +324,7 @@ async fn threads(project: Option<String>, thread: Option<String>) -> Result<()> 
             let count = t["message_count"].as_u64().unwrap_or(0);
             let last = t["last_message_at"].as_u64();
             let subject = t["subject"].as_str();
-            let label = subject.unwrap_or_else(|| "no subject");
+            let label = subject.unwrap_or("no subject");
             match last {
                 Some(ts) => println!("  {} ({} msg, last at {}) - {}", short_id(tid), count, ts, label),
                 None => println!("  {} (no messages) - {}", short_id(tid), label),
@@ -424,10 +424,8 @@ fn who_live(project: Option<String>, all: bool, all_projects: bool, refresh: Dur
         let wait = next_draw
             .saturating_duration_since(Instant::now())
             .min(Duration::from_millis(100));
-        if event::poll(wait)? {
-            if should_quit_live(event::read()?) {
-                break;
-            }
+        if event::poll(wait)? && should_quit_live(event::read()?) {
+            break;
         }
     }
 
