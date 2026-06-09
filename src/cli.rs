@@ -811,7 +811,10 @@ mod who_tests {
 
         let once = strip_ansi(&render_who_once(&snapshot));
         assert!(once.starts_with("proj\n\n"));
-        assert!(once.contains("coder [session local-se] - idle"));
+        assert!(once.contains(&format!(
+            "coder [session {}] - idle",
+            session_short_code("local-session")
+        )));
         assert!(once.contains("coder"));
         // The remote tag appears only for the genuine remote.
         assert!(once.contains("(remote)"));
@@ -891,7 +894,7 @@ mod who_tests {
         let snap = load_who_snapshot(&store, Some("proj"), false, 1_000, "laptop").unwrap();
         let once = strip_ansi(&render_who_once(&snap));
 
-        assert!(once.contains("a [session s1] - idle"));
+        assert!(once.contains(&format!("a [session {}] - idle", session_short_code("s1"))));
         assert!(once.contains("1 other agent(s) in other projects:"));
         assert!(once.contains("  * other - Other work"));
     }
@@ -919,7 +922,10 @@ mod who_tests {
 
         let once = strip_ansi(&render_who_once(&snapshot));
         assert!(once.starts_with("all projects\n\n"));
-        assert!(once.contains("reviewer@other [session remote-s] - idle"));
+        assert!(once.contains(&format!(
+            "reviewer@other [session {}] - idle",
+            session_short_code("remote-session")
+        )));
     }
 
 }
