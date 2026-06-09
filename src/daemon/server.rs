@@ -13,6 +13,7 @@ use super::client::StartupLock;
 use super::protocol::{
     protocol_version, Hello, PleaseExit, Request, Response, Welcome, ERR_PROTOCOL_SKEW,
 };
+use super::tail_event::TailEvent;
 use super::{lock_path, socket_path, store_path};
 use crate::config::{self, Config};
 use crate::domain::{DomainEvent, Mention};
@@ -21,7 +22,7 @@ use crate::identity::{self, AgentIdentity};
 use crate::runtime::{self, route_mention_into_with_id, EngineParams};
 use crate::state::{InboxRow, Store};
 use crate::transport::Transport;
-use crate::util::{now_secs, session_short_code};
+use crate::util::{now_secs, session_short_code, short_id};
 use anyhow::{Context, Result};
 use nostr_sdk::prelude::{Event, Keys, RelayMessage, RelayPoolNotification};
 use std::collections::HashMap;
@@ -46,6 +47,15 @@ struct SessionHandle {
     cancel: Arc<Notify>,
 }
 
+/// Metadata tracked per live peer session for join/leave derivation.
+#[derive(Clone)]
+struct PeerTracked {
+    first_seen: u64,
+    project: String,
+    slug: String,
+    host: String,
+}
+
 /// Shared daemon state. The `Store` is behind an `Arc<Mutex<…>>` shared with
 /// session tasks; the guard is held only across synchronous rusqlite calls,
 /// NEVER across `.await`. One process + one connection = the single writer.
@@ -61,11 +71,18 @@ pub struct DaemonState {
     sessions: Mutex<HashMap<String, SessionHandle>>,
     subscribed_projects: Mutex<Vec<String>>,
     mention_notify: Notify,
-    /// Broadcast of decoded fabric events to live `tail` clients.
-    tail_tx: tokio::sync::broadcast::Sender<DomainEvent>,
+    /// Structured tail event broadcast replacing the old DomainEvent bus.
+    tail_tx: tokio::sync::broadcast::Sender<TailEvent>,
     open_clients: Mutex<u64>,
     liveness_changed: Notify,
     shutdown: Notify,
+    /// In-memory peer-session tracking for join/leave derivation.
+    /// key = session_id. Populated on first-seen presence; cleared on leave.
+    peer_sessions: Mutex<HashMap<String, PeerTracked>>,
+    /// Pubkeys for which a Profile event has already been emitted, for first-seen dedup.
+    seen_profiles: Mutex<std::collections::HashSet<String>>,
+    /// Last-seen status text per (pubkey, project) for dedup.
+    last_status: Mutex<HashMap<(String, String), String>>,
 }
 
 impl DaemonState {
@@ -133,10 +150,13 @@ pub async fn run() -> Result<()> {
         sessions: Mutex::new(HashMap::new()),
         subscribed_projects: Mutex::new(Vec::new()),
         mention_notify: Notify::new(),
-        tail_tx: tokio::sync::broadcast::channel(256).0,
+        tail_tx: tokio::sync::broadcast::channel(512).0,
         open_clients: Mutex::new(0),
         liveness_changed: Notify::new(),
         shutdown: Notify::new(),
+        peer_sessions: Mutex::new(HashMap::new()),
+        seen_profiles: Mutex::new(std::collections::HashSet::new()),
+        last_status: Mutex::new(HashMap::new()),
     });
 
     // Idempotent read-model backfill: populate canonical `projects` + `membership`
@@ -479,6 +499,15 @@ async fn rpc_session_start(
     let ep = engine_params_for(&state.cfg, &id, &p.agent, &session_id, &project, &rel_cwd, p.watch_pid);
     spawn_session(state, ep).await?;
 
+    state.emit_tail(TailEvent::Sess {
+        ts: now_secs(),
+        project: project.clone(),
+        agent: p.agent.clone(),
+        session: session_id.clone(),
+        state: "start".into(),
+        rel_cwd: rel_cwd.clone(),
+    });
+
     Ok(serde_json::json!({ "session_id": session_id }))
 }
 
@@ -491,11 +520,20 @@ struct SessionEndParams {
 fn rpc_session_end(state: &Arc<DaemonState>, params: &serde_json::Value) -> Result<serde_json::Value> {
     let p: SessionEndParams =
         serde_json::from_value(params.clone()).context("parsing session_end params")?;
-    let existed = state.with_store(|s| s.get_session(&p.session).ok().flatten().is_some());
-    if existed {
+    let rec = state.with_store(|s| s.get_session(&p.session).ok().flatten());
+    let existed = rec.is_some();
+    if let Some(ref rec) = rec {
         cancel_session(state, &p.session);
         state.with_store(|s| {
             s.mark_session_dead(&p.session).ok();
+        });
+        state.emit_tail(TailEvent::Sess {
+            ts: now_secs(),
+            project: rec.project.clone(),
+            agent: rec.agent_slug.clone(),
+            session: rec.session_id.clone(),
+            state: "end".into(),
+            rel_cwd: rec.rel_cwd.clone(),
         });
     }
     Ok(serde_json::json!({ "ended": existed }))
@@ -578,7 +616,38 @@ async fn rpc_send_message(
     // if the relay does echo it later, no duplicate is created. `compute_targets`
     // delivers only to the TARGET session (or all of the recipient agent's
     // sessions when untargeted) — never back to the authoring session.
-    if state.hosted_pubkeys().iter().any(|h| h == &recipient.pubkey) {
+    // Emit Msg event for the outbound send.
+    let thread_short = short_id(&receipt.thread_id);
+    let to_slug = state
+        .with_store(|s| s.resolve_slug_for_pubkey(&recipient.pubkey))
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| short_id(&recipient.pubkey));
+    state.emit_tail(TailEvent::Msg {
+        ts: now_secs(),
+        project: recipient.project.clone(),
+        from: rec.agent_slug.clone(),
+        from_session: Some(rec.session_id.clone()),
+        to: to_slug,
+        to_session: recipient.target_session.clone(),
+        thread: Some(thread_short.clone()),
+        body: body.chars().take(200).collect(),
+    });
+
+    // Emit Sync: local delivery = delivered; remote = accepted.
+    let is_local = state.hosted_pubkeys().iter().any(|h| h == &recipient.pubkey);
+    let sync_state = if is_local { "delivered" } else { "accepted" };
+    state.emit_tail(TailEvent::Sync {
+        ts: now_secs(),
+        project: recipient.project.clone(),
+        from: rec.agent_slug.clone(),
+        to: short_id(&recipient.pubkey),
+        thread: Some(thread_short),
+        state: sync_state.into(),
+        detail: None,
+    });
+
+    if is_local {
         // Reconstruct the Mention for the legacy local-delivery path. Fields
         // must be byte-identical to what provider.send encoded and published.
         let mention = Mention {
@@ -774,6 +843,17 @@ async fn rpc_turn_start(
         Some(r) => r,
         None => return Ok(serde_json::json!({ "context": serde_json::Value::Null })),
     };
+
+    // Emit Turn{working} for the live tail feed.
+    state.emit_tail(TailEvent::Turn {
+        ts: now_secs(),
+        project: rec.project.clone(),
+        agent: rec.agent_slug.clone(),
+        session: rec.session_id.clone(),
+        state: "working".into(),
+        elapsed_s: None,
+    });
+
     // Self-fetch stored mentions (relay), then assemble via the SHARED cli.rs
     // function so the injected text is byte-identical to the pre-daemon CLI and
     // cannot drift.
@@ -814,9 +894,30 @@ fn rpc_turn_end(state: &Arc<DaemonState>, params: &serde_json::Value) -> Result<
     let p: TurnEndParams =
         serde_json::from_value(params.clone()).context("parsing turn_end params")?;
     if !p.session.is_empty() {
+        // Read turn_started_at BEFORE marking end, so we can compute elapsed.
+        let (was_working, turn_started_at) = state
+            .with_store(|s| s.get_turn_state(&p.session).unwrap_or((false, 0)));
         state.with_store(|s| {
             s.mark_turn_end(&p.session).ok();
         });
+        if was_working {
+            let now = now_secs();
+            let elapsed_s = if turn_started_at > 0 {
+                Some(now.saturating_sub(turn_started_at))
+            } else {
+                None
+            };
+            if let Some(rec) = state.with_store(|s| s.get_session(&p.session).ok().flatten()) {
+                state.emit_tail(TailEvent::Turn {
+                    ts: now,
+                    project: rec.project.clone(),
+                    agent: rec.agent_slug.clone(),
+                    session: rec.session_id.clone(),
+                    state: "idle".into(),
+                    elapsed_s,
+                });
+            }
+        }
     }
     Ok(serde_json::json!({ "ok": true }))
 }
@@ -837,20 +938,48 @@ async fn rpc_acl(state: &Arc<DaemonState>, params: &serde_json::Value) -> Result
         Some("allow") => {
             let target = p.target.context("acl allow needs a target")?;
             let (pk, slug) = state.with_store(|s| resolve_acl_target(s, &target))?;
+            let host = state.with_store(|s| {
+                s.list_pending_agents().ok()
+                    .and_then(|v| v.into_iter().find(|a| a.pubkey == pk))
+                    .map(|a| a.host)
+                    .unwrap_or_default()
+            });
             crate::acl::allow(&pk, &slug)?;
             state.with_store(|s| {
                 s.remove_pending_agent(&pk).ok();
             });
             // Newly-trusted author: refresh the union subscription.
             resubscribe(state).await.ok();
+            state.emit_tail(TailEvent::Acl {
+                ts: now_secs(),
+                action: "admitted".into(),
+                agent: slug.clone(),
+                host,
+                pubkey: pk.clone(),
+                role: None,
+            });
             Ok(serde_json::json!({ "slug": slug, "pubkey": pk }))
         }
         Some("block") => {
             let target = p.target.context("acl block needs a target")?;
             let (pk, slug) = state.with_store(|s| resolve_acl_target(s, &target))?;
+            let host = state.with_store(|s| {
+                s.list_pending_agents().ok()
+                    .and_then(|v| v.into_iter().find(|a| a.pubkey == pk))
+                    .map(|a| a.host)
+                    .unwrap_or_default()
+            });
             crate::acl::block(&pk, &slug)?;
             state.with_store(|s| {
                 s.remove_pending_agent(&pk).ok();
+            });
+            state.emit_tail(TailEvent::Acl {
+                ts: now_secs(),
+                action: "blocked".into(),
+                agent: slug.clone(),
+                host,
+                pubkey: pk.clone(),
+                role: None,
             });
             Ok(serde_json::json!({ "slug": slug, "pubkey": pk }))
         }
@@ -1176,31 +1305,65 @@ async fn handle_wait_for_mention(state: &Arc<DaemonState>, req: &Request) -> Res
 
 // ── tail (streaming) ──────────────────────────────────────────────────────────
 
+/// Parameters for the `tail` RPC.
+#[derive(serde::Deserialize, Default)]
+struct TailParams {
+    #[serde(default)]
+    project: Option<String>,
+    /// Number of backfill events (recent messages + roster snapshot), default 20.
+    #[serde(default)]
+    backfill: Option<u64>,
+    /// Return only events after this unix timestamp.
+    #[serde(default)]
+    since: Option<u64>,
+}
+
 async fn handle_tail<W: AsyncWriteExt + Unpin>(
     state: &Arc<DaemonState>,
     id: u64,
     params: &serde_json::Value,
     writer: &mut W,
 ) -> Result<()> {
-    let project = params.get("project").and_then(|v| v.as_str()).map(str::to_string);
-    // Ensure the requested project is in the union subscription so its events
-    // flow through the shared connection.
+    let p: TailParams = serde_json::from_value(params.clone()).unwrap_or_default();
+    let project = p.project.clone();
+    let backfill_n = p.backfill.unwrap_or(20);
+    let since = p.since.unwrap_or(0);
+
+    // Ensure the requested project is in the union subscription.
     if let Some(pr) = &project {
         let _ = ensure_subscription(state, pr).await;
     }
+
+    // Subscribe BEFORE backfill so we don't miss events that arrive during query.
     let mut rx = state.tail_subscribe();
+
     {
         *state.open_clients.lock().unwrap() += 1;
         state.liveness_changed.notify_waiters();
     }
     let _guard = ClientGuard(state.clone());
 
+    // ── Backfill ────────────────────────────────────────────────────────────
+    if backfill_n > 0 {
+        let backfill_events = build_backfill(state, project.as_deref(), backfill_n, since);
+        for ev in backfill_events {
+            if write_json(writer, &Response::item(id, serde_json::to_value(&ev)?)).await.is_err() {
+                let _ = write_json(writer, &Response::end(id)).await;
+                return Ok(());
+            }
+        }
+    }
+
+    // ── Live stream ─────────────────────────────────────────────────────────
     loop {
         match rx.recv().await {
-            Ok(de) => {
-                if let Some(line) = render_fabric_line(&de, project.as_deref()) {
-                    if write_json(writer, &Response::item(id, serde_json::json!({ "line": line }))).await.is_err() {
-                        break; // client disconnected
+            Ok(ev) => {
+                if tail_event_matches_project(&ev, project.as_deref()) && ev.ts() >= since {
+                    if write_json(writer, &Response::item(id, serde_json::to_value(&ev)?))
+                        .await
+                        .is_err()
+                    {
+                        break;
                     }
                 }
             }
@@ -1212,22 +1375,123 @@ async fn handle_tail<W: AsyncWriteExt + Unpin>(
     Ok(())
 }
 
-/// Render a fabric event for `tail`, scoped to `project` if given. Mirrors the
-/// old CLI `render()` output so `tail` looks identical.
-fn render_fabric_line(de: &DomainEvent, project: Option<&str>) -> Option<String> {
-    if let Some(pr) = project {
-        let matches = match de {
-            DomainEvent::Presence(p) => p.project == pr,
-            DomainEvent::Activity(a) => a.project == pr,
-            DomainEvent::Status(s) => s.project == pr,
-            DomainEvent::Mention(m) => m.project == pr,
-            DomainEvent::Profile(_) => true,
-        };
-        if !matches {
-            return None;
+/// True when the event belongs to the requested project scope (or no filter).
+fn tail_event_matches_project(ev: &TailEvent, project: Option<&str>) -> bool {
+    let Some(pr) = project else { return true; };
+    let ev_project = match ev {
+        TailEvent::Msg { project, .. } => project.as_str(),
+        TailEvent::Sync { project, .. } => project.as_str(),
+        TailEvent::Turn { project, .. } => project.as_str(),
+        TailEvent::Status { project, .. } => project.as_str(),
+        TailEvent::Join { project, .. } => project.as_str(),
+        TailEvent::Leave { project, .. } => project.as_str(),
+        TailEvent::Sess { project, .. } => project.as_str(),
+        TailEvent::Proj { project, .. } => project.as_str(),
+        // Acl and Profile are cross-project; always include.
+        TailEvent::Acl { .. } | TailEvent::Profile { .. } => return true,
+    };
+    ev_project == pr
+}
+
+/// Build the backfill event list from the canonical read model.
+///
+/// Returns recent messages as `Msg` events + a roster snapshot of live sessions
+/// as synthetic `Join`/`Turn`/`Status` events, sorted by timestamp ascending.
+fn build_backfill(
+    state: &Arc<DaemonState>,
+    project: Option<&str>,
+    limit: u64,
+    since: u64,
+) -> Vec<TailEvent> {
+    let mut events: Vec<TailEvent> = Vec::new();
+
+    // ── Recent messages from the canonical messages table ───────────────────
+    let raw_msgs: Vec<(u64, String, String, String, String, Option<String>)> =
+        state.with_store(|s| {
+            s.recent_messages_for_backfill(project, since, limit).unwrap_or_default()
+        });
+
+    for (ts, body, author_pubkey, proj, thread_id, author_session) in raw_msgs {
+        // Resolve slug from pubkey.
+        let from_slug = state
+            .with_store(|s| s.resolve_slug_for_pubkey(&author_pubkey))
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| short_id(&author_pubkey));
+        let thread_short = short_id(&thread_id);
+        events.push(TailEvent::Msg {
+            ts,
+            project: proj,
+            from: from_slug,
+            from_session: author_session,
+            to: String::new(), // backfill: recipient not stored inline
+            to_session: None,
+            thread: Some(thread_short),
+            body: body.chars().take(200).collect(),
+        });
+    }
+
+    // ── Roster snapshot: live sessions ──────────────────────────────────────
+    let now = now_secs();
+    let since_peer = now.saturating_sub(PRUNE_PEER_AFTER_SECS);
+
+    // Peer sessions as synthetic Join events.
+    let peers = state
+        .with_store(|s| s.list_peer_sessions(project, since_peer).unwrap_or_default());
+    for p in peers {
+        events.push(TailEvent::Join {
+            ts: p.last_seen,
+            project: p.project.clone(),
+            agent: p.slug.clone(),
+            host: p.host.clone(),
+            session: p.session_id.clone(),
+            rel_cwd: p.rel_cwd.clone(),
+        });
+        // Add current status if known.
+        if let Some(text) = state
+            .with_store(|s| s.get_agent_status(&p.pubkey, &p.project).unwrap_or(None))
+        {
+            events.push(TailEvent::Status {
+                ts: p.last_seen,
+                project: p.project,
+                agent: p.slug,
+                text,
+            });
         }
     }
-    Some(crate::cli::render_fabric(de))
+
+    // Own sessions as synthetic Sess events.
+    let mine = state
+        .with_store(|s| s.list_alive_sessions().unwrap_or_default());
+    for s in mine {
+        if project.is_none() || project == Some(s.project.as_str()) {
+            events.push(TailEvent::Sess {
+                ts: s.created_at,
+                project: s.project.clone(),
+                agent: s.agent_slug.clone(),
+                session: s.session_id.clone(),
+                state: "start".into(),
+                rel_cwd: s.rel_cwd.clone(),
+            });
+            // Add working/idle state from turn_state.
+            let (working, turn_started_at) = state
+                .with_store(|st| st.get_turn_state(&s.session_id).unwrap_or((false, 0)));
+            if working {
+                events.push(TailEvent::Turn {
+                    ts: turn_started_at,
+                    project: s.project.clone(),
+                    agent: s.agent_slug.clone(),
+                    session: s.session_id.clone(),
+                    state: "working".into(),
+                    elapsed_s: None,
+                });
+            }
+        }
+    }
+
+    // Sort ascending by timestamp.
+    events.sort_by_key(|e| e.ts());
+    events
 }
 
 // ── relay demux: one subscription, route to all hosted agents ────────────────
@@ -1256,7 +1520,8 @@ fn spawn_demux(state: Arc<DaemonState>) {
 /// Decode one event and apply it. Multi-agent aware: "me" is the SET of hosted
 /// local pubkeys; a mention routes by `to_pubkey` to that agent's sessions only.
 ///
-/// Thin dispatch to `provider.materialize` (Phase 5).
+/// Thin dispatch to `provider.materialize` (Phase 5), then derives TailEvents
+/// from the domain event using the in-memory tracking maps.
 fn handle_incoming(state: &Arc<DaemonState>, event: &Event) {
     let env = crate::fabric::RawEnvelope::Nostr(event.clone());
     let hosted = state.hosted_pubkeys();
@@ -1264,10 +1529,131 @@ fn handle_incoming(state: &Arc<DaemonState>, event: &Event) {
     let now = now_secs();
     let outcome = state.with_store(|s| state.provider.materialize(&env, &hosted, &owners, now, s));
     if let Some(de) = outcome.tail {
-        let _ = state.tail_tx_send(de);
+        derive_and_emit_tail_events(state, &de, &hosted, now);
     }
     if outcome.wake_mentions {
         state.mention_notify.notify_waiters();
+    }
+}
+
+/// Convert a decoded `DomainEvent` into zero or more `TailEvent`s and emit them.
+/// Skip is_self events for presence/status (local lifecycle handled by RPC emitters).
+fn derive_and_emit_tail_events(
+    state: &Arc<DaemonState>,
+    de: &DomainEvent,
+    hosted: &[String],
+    now: u64,
+) {
+    match de {
+        DomainEvent::Presence(p) => {
+            // Skip own sessions — local join/leave tracked by Sess events.
+            if hosted.contains(&p.agent.pubkey) {
+                return;
+            }
+            let session_id = p.session_id.clone();
+            let is_new = {
+                let mut map = state.peer_sessions.lock().unwrap();
+                if !map.contains_key(&session_id) {
+                    map.insert(session_id.clone(), PeerTracked {
+                        first_seen: now,
+                        project: p.project.clone(),
+                        slug: p.agent.slug.clone(),
+                        host: p.host.clone(),
+                    });
+                    true
+                } else {
+                    false
+                }
+            };
+            if is_new {
+                state.emit_tail(TailEvent::Join {
+                    ts: now,
+                    project: p.project.clone(),
+                    agent: p.agent.slug.clone(),
+                    host: p.host.clone(),
+                    session: session_id,
+                    rel_cwd: p.rel_cwd.clone(),
+                });
+            }
+        }
+
+        DomainEvent::Status(s) => {
+            // Skip own status — local turn/status is tracked by Turn RPC events.
+            if hosted.contains(&s.agent.pubkey) {
+                return;
+            }
+            let key = (s.agent.pubkey.clone(), s.project.clone());
+            let should_emit = {
+                let mut map = state.last_status.lock().unwrap();
+                let prev = map.get(&key).cloned();
+                if prev.as_deref() != Some(&s.text) {
+                    map.insert(key, s.text.clone());
+                    true
+                } else {
+                    false
+                }
+            };
+            if should_emit {
+                state.emit_tail(TailEvent::Status {
+                    ts: now,
+                    project: s.project.clone(),
+                    agent: s.agent.slug.clone(),
+                    text: s.text.clone(),
+                });
+            }
+        }
+
+        DomainEvent::Profile(pf) => {
+            let is_new = {
+                let mut set = state.seen_profiles.lock().unwrap();
+                set.insert(pf.agent.pubkey.clone())
+            };
+            if is_new {
+                state.emit_tail(TailEvent::Profile {
+                    ts: now,
+                    agent: pf.agent.slug.clone(),
+                    host: pf.host.clone(),
+                    pubkey: pf.agent.pubkey.clone(),
+                });
+            }
+        }
+
+        DomainEvent::Mention(m) => {
+            // Only emit for inbound messages (to hosted agents); outbound is
+            // handled by rpc_send_message. hosted check ensures we only emit
+            // for messages addressed to us.
+            if !hosted.contains(&m.to_pubkey) {
+                return;
+            }
+            // Derive a thread short code from the sender's from_session or the
+            // from pubkey — since we don't have the native event id here, use a
+            // store lookup to find the latest thread.
+            // The best we can do inbound is use the mention event id for grouping.
+            // Thread grouping from the read model:
+            let thread_short = state.with_store(|s| {
+                // Find the most recent message in the canonical store by this sender
+                // to this project to get the thread id.
+                s.latest_thread_for_inbound(&m.from.pubkey, &m.project)
+                    .ok()
+                    .flatten()
+                    .map(|tid| short_id(&tid))
+            });
+            state.emit_tail(TailEvent::Msg {
+                ts: now,
+                project: m.project.clone(),
+                from: m.from.slug.clone(),
+                from_session: m.from_session.clone(),
+                to: short_id(&m.to_pubkey),
+                to_session: m.target_session.clone(),
+                thread: thread_short,
+                body: m.body.chars().take(200).collect(),
+            });
+        }
+
+        DomainEvent::Activity(_) => {
+            // Activity events are not emitted on the tail (they're durable
+            // narrative, not real-time transitions).
+        }
     }
 }
 
@@ -1289,10 +1675,56 @@ fn spawn_pruner(state: Arc<DaemonState>) {
         let mut tick = tokio::time::interval(Duration::from_secs(30));
         loop {
             tick.tick().await;
-            let before = now_secs().saturating_sub(PRUNE_PEER_AFTER_SECS);
+            let now = now_secs();
+            let before = now.saturating_sub(PRUNE_PEER_AFTER_SECS);
+
+            // Identify which peer sessions will be pruned by checking the map
+            // against sessions that are about to expire.
+            let expired_sessions: Vec<String> = {
+                let map = state.peer_sessions.lock().unwrap();
+                // We'll emit Leave for sessions in our map whose last_seen is
+                // older than `before`. We need to cross-reference with the store.
+                map.keys().cloned().collect()
+            };
+
+            // Query which of those are actually expired in the store.
+            let still_alive: std::collections::HashSet<String> = state
+                .with_store(|s| s.list_peer_sessions(None, before).unwrap_or_default())
+                .into_iter()
+                .map(|p| p.session_id)
+                .collect();
+
+            // Prune from DB.
             state.with_store(|s| {
                 let _ = s.prune_peer_sessions(before);
             });
+
+            // Emit Leave for sessions that were in our map but are now expired.
+            let to_leave: Vec<(String, PeerTracked)> = {
+                let mut map = state.peer_sessions.lock().unwrap();
+                let expired: Vec<String> = expired_sessions
+                    .into_iter()
+                    .filter(|sid| !still_alive.contains(sid))
+                    .collect();
+                let mut leaves = Vec::new();
+                for sid in expired {
+                    if let Some(tracked) = map.remove(&sid) {
+                        leaves.push((sid, tracked));
+                    }
+                }
+                leaves
+            };
+            for (sid, tracked) in to_leave {
+                let online_s = now.saturating_sub(tracked.first_seen);
+                state.emit_tail(TailEvent::Leave {
+                    ts: now,
+                    project: tracked.project,
+                    agent: tracked.slug,
+                    host: tracked.host,
+                    session: sid,
+                    online_s,
+                });
+            }
         }
     });
 }
@@ -1496,11 +1928,11 @@ fn pid_alive(pid: i32) -> bool {
 // ── small helpers ─────────────────────────────────────────────────────────────
 
 impl DaemonState {
-    fn tail_subscribe(&self) -> tokio::sync::broadcast::Receiver<DomainEvent> {
+    fn tail_subscribe(&self) -> tokio::sync::broadcast::Receiver<TailEvent> {
         self.tail_tx.subscribe()
     }
-    fn tail_tx_send(&self, de: DomainEvent) -> Result<usize, tokio::sync::broadcast::error::SendError<DomainEvent>> {
-        self.tail_tx.send(de)
+    fn emit_tail(&self, ev: TailEvent) {
+        let _ = self.tail_tx.send(ev);
     }
 }
 

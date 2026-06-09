@@ -72,6 +72,8 @@ pub struct OutboundReceipt {
     pub message_id: String,
     /// Sync state stored on the canonical message (`"published"` or `"accepted"`).
     pub sync_state: String,
+    /// The canonical thread_id the message was filed under (new or existing).
+    pub thread_id: String,
 }
 
 // ── Trait shell (documentation only; daemon calls concrete inherent methods) ───
@@ -315,7 +317,7 @@ impl Kind1Nip29Provider {
         // Step 4: Dual-write canonical rows (single lock, no await inside).
         let now = now_secs();
         let pi = self.provider_instance.clone();
-        let (message_id,) = self.with_store(|s| -> Result<(String,)> {
+        let (message_id, thread_id) = self.with_store(|s| -> Result<(String, String)> {
             let project_id = s.ensure_project_origin(
                 FABRIC,
                 &pi,
@@ -345,13 +347,14 @@ impl Kind1Nip29Provider {
                 &intent.to_pubkey,
                 intent.target_session.as_deref(),
             )?;
-            Ok((message_id,))
+            Ok((message_id, thread_id))
         })?;
 
         Ok(OutboundReceipt {
             native_event_id: eid_hex,
             message_id,
             sync_state: "published".into(),
+            thread_id,
         })
     }
 

@@ -11,6 +11,7 @@ pub mod blocking;
 pub mod client;
 pub mod protocol;
 pub mod server;
+pub mod tail_event;
 
 use crate::config;
 use std::path::PathBuf;

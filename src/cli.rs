@@ -89,10 +89,56 @@ enum Cmd {
         #[command(subcommand)]
         action: Option<AclAction>,
     },
-    /// Stream all fabric activity, colorized.
+    /// Stream all fabric activity as structured events, colorized.
     Tail {
+        /// Filter to a single project (default: all projects).
         #[arg(long)]
         project: Option<String>,
+        /// Filter to a specific agent slug.
+        #[arg(long)]
+        agent: Option<String>,
+        /// Filter to a specific host.
+        #[arg(long)]
+        host: Option<String>,
+        /// Only show events after this time (unix timestamp or duration like "1h").
+        #[arg(long)]
+        since: Option<String>,
+        /// Number of backfill events from history (default 20; 0 = live only).
+        #[arg(long)]
+        backfill: Option<u64>,
+        /// Show only these categories (comma-separated: msg,sync,turn,stat,join,leave,sess,acl,proj,profile).
+        #[arg(long)]
+        only: Option<String>,
+        /// Hide these categories (comma-separated).
+        #[arg(long)]
+        exclude: Option<String>,
+        /// Also show normally-hidden categories (e.g. profile).
+        #[arg(long)]
+        include: Option<String>,
+        /// Show everything including noise (profile, heartbeats).
+        #[arg(long, short = 'v')]
+        all: bool,
+        /// Compact mode: minimal output.
+        #[arg(long, short = 'q')]
+        compact: bool,
+        /// Use relative timestamps ("12s ago") instead of wall-clock.
+        #[arg(long)]
+        relative: bool,
+        /// Disable Unicode glyphs, use ASCII fallbacks.
+        #[arg(long)]
+        no_emoji: bool,
+        /// Disable ANSI colors.
+        #[arg(long)]
+        no_color: bool,
+        /// Output raw NDJSON instead of human-readable lines.
+        #[arg(long)]
+        json: bool,
+        /// Stop after history dump (do not follow live events).
+        #[arg(long)]
+        no_follow: bool,
+        /// Full-screen live TUI dashboard (follow-up feature, not yet implemented).
+        #[arg(long)]
+        live: bool,
     },
     /// Print + drain pending mentions for a session. Used by the opencode
     /// injection path and as a manual "check my messages" command. (Claude Code
@@ -193,7 +239,15 @@ pub async fn run(cli: Cli) -> Result<()> {
             }
         }
         Cmd::Acl { action } => acl(action).await,
-        Cmd::Tail { project } => tail(project).await,
+        Cmd::Tail {
+            project, agent, host, since, backfill,
+            only, exclude, include, all, compact,
+            relative, no_emoji, no_color, json, no_follow, live,
+        } => tail(TailOpts {
+            project, agent, host, since, backfill,
+            only, exclude, include, all, compact,
+            relative, no_emoji, no_color, json, no_follow, live,
+        }).await,
         Cmd::Inbox { session } => inbox(session).await,
         Cmd::WaitForMention { session, timeout } => wait_for_mention(session, timeout).await,
         Cmd::Project { action } => project(action).await,
@@ -1408,30 +1462,388 @@ async fn doctor() -> Result<()> {
 
 // ── tail ─────────────────────────────────────────────────────────────────────
 
-async fn tail(project: Option<String>) -> Result<()> {
-    // The daemon owns the single relay connection and streams decoded, rendered
-    // fabric lines over the UDS until we disconnect (Ctrl-C). The rendering uses
-    // the SAME `render()` daemon-side, so output is identical.
-    let scope_label = project.as_deref().unwrap_or("*");
-    eprintln!(
-        "{} tailing project {} … (Ctrl-C to stop)",
-        "tenex-edge".bold(),
-        scope_label.cyan()
-    );
+/// Options for the `tail` command.
+struct TailOpts {
+    project: Option<String>,
+    agent: Option<String>,
+    host: Option<String>,
+    since: Option<String>,
+    backfill: Option<u64>,
+    only: Option<String>,
+    exclude: Option<String>,
+    include: Option<String>,
+    all: bool,
+    compact: bool,
+    relative: bool,
+    no_emoji: bool,
+    no_color: bool,
+    json: bool,
+    no_follow: bool,
+    live: bool,
+}
+
+async fn tail(opts: TailOpts) -> Result<()> {
+    if opts.live {
+        eprintln!(
+            "tenex-edge tail --live: the full-screen TUI dashboard is not yet implemented. \
+             Use bare `tenex-edge tail` for the live scrolling feed."
+        );
+        return Ok(());
+    }
+
+    // Resolve color + emoji settings: explicit flags override env/TTY.
+    let use_color = !opts.no_color
+        && std::env::var("NO_COLOR").is_err()
+        && std::io::stdout().is_terminal();
+    let use_emoji = !opts.no_emoji;
+
+    // Parse --since into a unix timestamp.
+    let since_ts: u64 = opts.since.as_deref().map(parse_since).unwrap_or(0);
+
+    let scope_label = opts.project.as_deref().unwrap_or("*");
+    if !opts.json {
+        eprintln!(
+            "{} tailing project {} … (Ctrl-C to stop)",
+            if use_color { "tenex-edge".bold().to_string() } else { "tenex-edge".to_string() },
+            if use_color { scope_label.cyan().to_string() } else { scope_label.to_string() },
+        );
+    }
+
+    // Build the category filter set.
+    let cats_only: Option<std::collections::HashSet<String>> = opts.only.as_deref().map(|s| {
+        s.split(',').map(|c| c.trim().to_lowercase()).collect()
+    });
+    let cats_exclude: std::collections::HashSet<String> = opts.exclude.as_deref().map(|s| {
+        s.split(',').map(|c| c.trim().to_lowercase()).collect()
+    }).unwrap_or_default();
+    let cats_include: std::collections::HashSet<String> = opts.include.as_deref().map(|s| {
+        s.split(',').map(|c| c.trim().to_lowercase()).collect()
+    }).unwrap_or_default();
+
+    // Minimum tier: default hides tier 0 (profile); --all includes all; --v same.
+    let min_tier: u8 = if opts.all { 0 } else { 1 };
+
+    let params = serde_json::json!({
+        "project": opts.project,
+        "backfill": opts.backfill.unwrap_or(20),
+        "since": since_ts,
+    });
 
     let mut client = crate::daemon::client::Client::connect_or_spawn().await?;
-    let stream = client.stream(
-        "tail",
-        serde_json::json!({ "project": project }),
-        |item| {
-            if let Some(line) = item.get("line").and_then(|l| l.as_str()) {
-                println!("{line}");
+
+    let agent_filter = opts.agent.clone();
+    let host_filter = opts.host.clone();
+    let is_json = opts.json;
+    let no_follow = opts.no_follow;
+    let compact = opts.compact;
+    let relative = opts.relative;
+
+    let stream = client.stream("tail", params, move |item| {
+        // Deserialize TailEvent.
+        let ev: crate::daemon::tail_event::TailEvent = match serde_json::from_value(item.clone()) {
+            Ok(e) => e,
+            Err(_) => {
+                // Fallback: if we get an old {line} format, print it.
+                if let Some(line) = item.get("line").and_then(|l| l.as_str()) {
+                    println!("{line}");
+                }
+                return;
             }
-        },
-    );
-    tokio::select! {
-        _ = tokio::signal::ctrl_c() => Ok(()),
-        r = stream => r,
+        };
+
+        // Apply agent/host filters.
+        if let Some(ref ag) = agent_filter {
+            let ev_agent = match &ev {
+                crate::daemon::tail_event::TailEvent::Msg { from, .. } => from.as_str(),
+                crate::daemon::tail_event::TailEvent::Turn { agent, .. } => agent.as_str(),
+                crate::daemon::tail_event::TailEvent::Status { agent, .. } => agent.as_str(),
+                crate::daemon::tail_event::TailEvent::Join { agent, .. } => agent.as_str(),
+                crate::daemon::tail_event::TailEvent::Leave { agent, .. } => agent.as_str(),
+                crate::daemon::tail_event::TailEvent::Sess { agent, .. } => agent.as_str(),
+                crate::daemon::tail_event::TailEvent::Acl { agent, .. } => agent.as_str(),
+                crate::daemon::tail_event::TailEvent::Profile { agent, .. } => agent.as_str(),
+                _ => "",
+            };
+            if !ev_agent.is_empty() && ev_agent != ag.as_str() {
+                return;
+            }
+        }
+        if let Some(ref h) = host_filter {
+            let ev_host = match &ev {
+                crate::daemon::tail_event::TailEvent::Join { host, .. } => host.as_str(),
+                crate::daemon::tail_event::TailEvent::Leave { host, .. } => host.as_str(),
+                crate::daemon::tail_event::TailEvent::Acl { host, .. } => host.as_str(),
+                crate::daemon::tail_event::TailEvent::Profile { host, .. } => host.as_str(),
+                _ => "",
+            };
+            if !ev_host.is_empty() && ev_host != h.as_str() {
+                return;
+            }
+        }
+
+        // Tier filter.
+        if ev.tier() < min_tier && !cats_include.contains(ev.category()) {
+            return;
+        }
+
+        // Category filters.
+        let cat = ev.category();
+        if let Some(ref only) = cats_only {
+            if !only.contains(cat) {
+                return;
+            }
+        }
+        if cats_exclude.contains(cat) && !cats_include.contains(cat) {
+            return;
+        }
+
+        // Render.
+        if is_json {
+            if let Ok(s) = serde_json::to_string(&ev) {
+                println!("{s}");
+            }
+        } else {
+            let line = render_tail_event(&ev, use_color, use_emoji, relative, compact);
+            println!("{line}");
+        }
+    });
+
+    if no_follow {
+        // For no-follow: run with a short timeout to get just the backfill.
+        // The daemon will keep streaming; we disconnect after receiving the
+        // initial batch. Since we can't easily detect "backfill done", we
+        // use a small sleep approach: connect, get backfill, disconnect.
+        tokio::select! {
+            r = stream => r,
+            _ = tokio::time::sleep(Duration::from_millis(500)) => Ok(()),
+        }
+    } else {
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => Ok(()),
+            r = stream => r,
+        }
+    }
+}
+
+/// Parse a --since value into a unix timestamp.
+/// Accepts: unix seconds ("1700000000"), or durations ("1h", "30m", "2d").
+fn parse_since(s: &str) -> u64 {
+    let now = now_secs();
+    if let Ok(ts) = s.parse::<u64>() {
+        return ts;
+    }
+    // Simple duration parsing: Nh, Nm, Nd, Ns.
+    let s = s.trim();
+    let (num_str, unit) = s.split_at(s.len().saturating_sub(1));
+    if let Ok(n) = num_str.trim().parse::<u64>() {
+        let secs = match unit {
+            "h" | "H" => n * 3600,
+            "m" | "M" => n * 60,
+            "d" | "D" => n * 86400,
+            "s" | "S" | _ => n,
+        };
+        return now.saturating_sub(secs);
+    }
+    0
+}
+
+/// Render a `TailEvent` to a human-readable string.
+///
+/// `use_color` and `use_emoji` are passed explicitly so this fn is testable
+/// without side-effects from TTY detection or NO_COLOR.
+pub fn render_tail_event(
+    ev: &crate::daemon::tail_event::TailEvent,
+    use_color: bool,
+    use_emoji: bool,
+    relative: bool,
+    compact: bool,
+) -> String {
+    use crate::daemon::tail_event::TailEvent;
+    use crate::util::session_short_code;
+
+    let ts = ev.ts();
+    let ts_str = if relative {
+        let age = now_secs().saturating_sub(ts);
+        if age < 60 {
+            format!("{age}s ago")
+        } else if age < 3600 {
+            format!("{}m ago", age / 60)
+        } else {
+            format!("{}h ago", age / 3600)
+        }
+    } else {
+        // Wall-clock HH:MM:SS.
+        let h = (ts % 86400) / 3600;
+        let m = (ts % 3600) / 60;
+        let s = ts % 60;
+        format!("{h:02}:{m:02}:{s:02}")
+    };
+
+    // Helper: colorize if color enabled.
+    macro_rules! col {
+        ($text:expr, $color:ident) => {
+            if use_color {
+                $text.$color().to_string()
+            } else {
+                $text.to_string()
+            }
+        };
+    }
+
+    // Session short code helper.
+    let sess_code = |sid: &str| session_short_code(sid);
+
+    match ev {
+        TailEvent::Msg { project, from, from_session, to, to_session, thread, body, .. } => {
+            let cat = col!("msg  ", yellow);
+            let arrow = if use_emoji { "→" } else { "->" };
+            let sess = from_session.as_deref().map(|s| format!("[{}]", sess_code(s))).unwrap_or_default();
+            let to_sess = to_session.as_deref().map(|s| format!("[{}]", sess_code(s))).unwrap_or_default();
+            let thread_tag = thread.as_deref().map(|t| format!(" #{}", &t[..t.len().min(8)])).unwrap_or_default();
+            let snippet = if compact {
+                String::new()
+            } else {
+                let body_clean: String = body.chars().take(72).collect();
+                let body_clean = body_clean.replace('\n', " ");
+                let ellipsis = if body.len() > 72 { "…" } else { "" };
+                format!(" \"{}{}\"", body_clean, ellipsis)
+            };
+            format!(
+                "{ts_str}  {cat}  {}@{project}{sess}  {arrow} {}{to_sess}{thread_tag}{snippet}",
+                col!(from, cyan),
+                col!(to, cyan),
+            )
+        }
+
+        TailEvent::Sync { from, to, thread, state, .. } => {
+            let (cat, color_fn): (&str, fn(&str) -> String) = match state.as_str() {
+                "failed" => ("sync ", |s| {
+                    if true { s.red().to_string() } else { s.to_string() }
+                }),
+                _ => ("sync ", |s| s.cyan().to_string()),
+            };
+            let cat_str = if use_color {
+                match state.as_str() {
+                    "failed" => col!(cat, red),
+                    _ => col!(cat, cyan),
+                }
+            } else {
+                cat.to_string()
+            };
+            let _ = color_fn; // suppress unused warning
+            let thread_tag = thread.as_deref().map(|t| format!(" #{}", &t[..t.len().min(8)])).unwrap_or_default();
+            let glyph = if use_emoji {
+                match state.as_str() { "delivered" => "✓", "failed" => "✗", _ => "~" }
+            } else {
+                match state.as_str() { "delivered" => "[ok]", "failed" => "[x]", _ => "~" }
+            };
+            format!("{ts_str}  {cat_str}  {from} → {to}{thread_tag}  {glyph} {state}")
+        }
+
+        TailEvent::Turn { project, agent, session, state, elapsed_s, .. } => {
+            let cat = col!("turn ", green);
+            let sess = format!("[{}]", sess_code(session));
+            let (glyph, detail) = if state == "working" {
+                let g = if use_emoji { "▶" } else { ">" };
+                (g, " started working".to_string())
+            } else {
+                let g = if use_emoji { "⏸" } else { "||" };
+                let dur = elapsed_s.map(|e| format!(" ({})", fmt_duration(e))).unwrap_or_default();
+                (g, format!(" idle{dur}"))
+            };
+            format!(
+                "{ts_str}  {cat}  {}@{project}{sess}  {glyph}{detail}",
+                col!(agent, cyan),
+            )
+        }
+
+        TailEvent::Status { project, agent, text, .. } => {
+            let cat = col!("stat ", magenta);
+            let label = if text.is_empty() { "idle" } else { text.as_str() };
+            format!("{ts_str}  {cat}  {}@{project}  {label}", col!(agent, cyan))
+        }
+
+        TailEvent::Join { project, agent, host, session, rel_cwd, .. } => {
+            let cat = col!("join ", green);
+            let sess = format!("[{}]", sess_code(session));
+            let cwd_info = if rel_cwd.is_empty() || rel_cwd == "." {
+                String::new()
+            } else {
+                format!(" ({})", rel_cwd)
+            };
+            format!(
+                "{ts_str}  {cat}  {}@{host}{sess}  online ({project}{cwd_info})",
+                col!(agent, cyan),
+            )
+        }
+
+        TailEvent::Leave { project, agent, host, session, online_s, .. } => {
+            let cat = col!("leave", dimmed);
+            let sess = format!("[{}]", sess_code(session));
+            let dur = fmt_duration(*online_s);
+            format!(
+                "{ts_str}  {cat}  {}@{host}{sess}  offline (was online {dur}, {project})",
+                col!(agent, cyan),
+            )
+        }
+
+        TailEvent::Sess { project, agent, session, state, rel_cwd, .. } => {
+            let cat = col!("sess ", blue);
+            let sess = format!("[{}]", sess_code(session));
+            let cwd_info = if rel_cwd.is_empty() || rel_cwd == "." {
+                String::new()
+            } else {
+                format!(" (rel_cwd: {rel_cwd})")
+            };
+            format!(
+                "{ts_str}  {cat}  {}@{project}{sess}  session {state}{cwd_info}",
+                col!(agent, cyan),
+            )
+        }
+
+        TailEvent::Acl { action, agent, host, pubkey, role, .. } => {
+            let cat = match action.as_str() {
+                "pending" => {
+                    if use_color { "acl  ".bold().yellow().to_string() } else { "acl  ".to_string() }
+                }
+                "admitted" => col!("acl  ", green),
+                _ => col!("acl  ", red),
+            };
+            let glyph = if use_emoji {
+                match action.as_str() { "admitted" => "✓", "pending" => "⚠", _ => "✗" }
+            } else {
+                match action.as_str() { "admitted" => "[ok]", "pending" => "[!]", _ => "[x]" }
+            };
+            let role_str = role.as_deref().map(|r| format!(" ({r})")).unwrap_or_default();
+            let pk_short = &pubkey[..pubkey.len().min(8)];
+            format!(
+                "{ts_str}  {cat}  {}@{host}  {glyph} {action}{role_str} ({})",
+                col!(agent, cyan),
+                pk_short,
+            )
+        }
+
+        TailEvent::Proj { project, about, .. } => {
+            let cat = col!("proj ", dimmed);
+            let snippet: String = about.chars().take(60).collect();
+            format!("{ts_str}  {cat}  {project}  {snippet}")
+        }
+
+        TailEvent::Profile { agent, host, pubkey, .. } => {
+            let cat = col!("id   ", dimmed);
+            let pk_short = &pubkey[..pubkey.len().min(8)];
+            format!("{ts_str}  {cat}  {}@{host}  ({pk_short})", col!(agent, cyan))
+        }
+    }
+}
+
+fn fmt_duration(secs: u64) -> String {
+    if secs < 60 {
+        format!("{secs}s")
+    } else if secs < 3600 {
+        format!("{}m{}s", secs / 60, secs % 60)
+    } else {
+        format!("{}h{}m", secs / 3600, (secs % 3600) / 60)
     }
 }
 
@@ -1915,5 +2327,188 @@ mod turn_context_tests {
             handle, "sender-session-id",
             "FREEZE: resolvable from_session must be used as reply-to handle"
         );
+    }
+}
+
+// ── tail render tests ────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tail_render_tests {
+    use super::*;
+    use crate::daemon::tail_event::TailEvent;
+
+    const TS: u64 = 1_700_000_000; // 2023-11-14 22:13:20 UTC  → 22:13:20 wall-clock
+
+    fn ts_str() -> String {
+        let h = (TS % 86400) / 3600;
+        let m = (TS % 3600) / 60;
+        let s = TS % 60;
+        format!("{h:02}:{m:02}:{s:02}")
+    }
+
+    // ── Msg ─────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn render_msg_no_color_no_emoji() {
+        let ev = TailEvent::Msg {
+            ts: TS,
+            project: "proj".into(),
+            from: "claude".into(),
+            from_session: Some("te-abc-111".into()),
+            to: "codex".into(),
+            to_session: None,
+            thread: Some("b8e2".into()),
+            body: "can you review the codec?".into(),
+        };
+        let line = render_tail_event(&ev, false, false, false, false);
+        assert!(line.starts_with(&ts_str()), "should start with timestamp");
+        assert!(line.contains("msg"), "should contain category");
+        assert!(line.contains("claude@proj"), "should contain agent@project");
+        assert!(line.contains("->"), "ASCII arrow when no_emoji");
+        assert!(line.contains("codex"), "should contain recipient");
+        assert!(line.contains("#b8e2"), "should contain thread");
+        assert!(line.contains("review the codec"), "should contain body");
+    }
+
+    #[test]
+    fn render_msg_with_emoji() {
+        let ev = TailEvent::Msg {
+            ts: TS,
+            project: "proj".into(),
+            from: "claude".into(),
+            from_session: None,
+            to: "codex".into(),
+            to_session: None,
+            thread: None,
+            body: "hello".into(),
+        };
+        let line = render_tail_event(&ev, false, true, false, false);
+        assert!(line.contains("→"), "Unicode arrow when emoji enabled");
+    }
+
+    // ── Turn ─────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn render_turn_working_no_color() {
+        let ev = TailEvent::Turn {
+            ts: TS,
+            project: "proj".into(),
+            agent: "claude".into(),
+            session: "te-session-1".into(),
+            state: "working".into(),
+            elapsed_s: None,
+        };
+        let line = render_tail_event(&ev, false, false, false, false);
+        assert!(line.contains("turn"), "category");
+        assert!(line.contains("claude@proj"), "agent@project");
+        assert!(line.contains("started working"), "state label");
+        assert!(line.contains(">"), "ASCII glyph when no emoji");
+    }
+
+    #[test]
+    fn render_turn_idle_with_elapsed() {
+        let ev = TailEvent::Turn {
+            ts: TS,
+            project: "proj".into(),
+            agent: "claude".into(),
+            session: "te-session-1".into(),
+            state: "idle".into(),
+            elapsed_s: Some(91),
+        };
+        let line = render_tail_event(&ev, false, false, false, false);
+        assert!(line.contains("idle"), "should contain idle label");
+        assert!(line.contains("1m31s"), "should contain formatted duration");
+    }
+
+    // ── Join / Leave ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn render_join_no_color() {
+        let ev = TailEvent::Join {
+            ts: TS,
+            project: "tenex-edge".into(),
+            agent: "codex".into(),
+            host: "tower".into(),
+            session: "te-peer-abc".into(),
+            rel_cwd: ".".into(),
+        };
+        let line = render_tail_event(&ev, false, false, false, false);
+        assert!(line.contains("join"), "category");
+        assert!(line.contains("codex@tower"), "agent@host");
+        assert!(line.contains("online"), "verb");
+        assert!(line.contains("tenex-edge"), "project");
+    }
+
+    #[test]
+    fn render_leave_formats_duration() {
+        let ev = TailEvent::Leave {
+            ts: TS,
+            project: "proj".into(),
+            agent: "opencode".into(),
+            host: "tower".into(),
+            session: "te-peer-def".into(),
+            online_s: 1020,
+        };
+        let line = render_tail_event(&ev, false, false, false, false);
+        assert!(line.contains("leave"), "category");
+        assert!(line.contains("offline"), "verb");
+        assert!(line.contains("17m0s"), "duration 1020s = 17m0s");
+    }
+
+    // ── Acl ──────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn render_acl_pending_no_color() {
+        let ev = TailEvent::Acl {
+            ts: TS,
+            action: "pending".into(),
+            agent: "stranger".into(),
+            host: "unknown".into(),
+            pubkey: "abcdef1234567890".into(),
+            role: None,
+        };
+        let line = render_tail_event(&ev, false, false, false, false);
+        assert!(line.contains("acl"), "category");
+        assert!(line.contains("[!]"), "ASCII pending glyph");
+        assert!(line.contains("stranger@unknown"), "agent@host");
+        assert!(line.contains("abcdef12"), "pubkey prefix");
+    }
+
+    // ── Sess ─────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn render_sess_start_no_color() {
+        let ev = TailEvent::Sess {
+            ts: TS,
+            project: "proj".into(),
+            agent: "claude".into(),
+            session: "te-abc-999".into(),
+            state: "start".into(),
+            rel_cwd: ".".into(),
+        };
+        let line = render_tail_event(&ev, false, false, false, false);
+        assert!(line.contains("sess"), "category");
+        assert!(line.contains("session start"), "state label");
+    }
+
+    // ── parse_since ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_since_unix_passthrough() {
+        assert_eq!(parse_since("1700000000"), 1_700_000_000);
+    }
+
+    #[test]
+    fn parse_since_duration_h() {
+        let now = now_secs();
+        let result = parse_since("1h");
+        let expected = now.saturating_sub(3600);
+        // Allow ±2s for timing.
+        assert!((result as i64 - expected as i64).abs() <= 2, "1h parse");
+    }
+
+    #[test]
+    fn parse_since_zero_for_garbage() {
+        assert_eq!(parse_since("not-a-time"), 0);
     }
 }

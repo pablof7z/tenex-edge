@@ -580,6 +580,33 @@ impl Store {
             .ok())
     }
 
+    /// Reverse-lookup: given a pubkey, return the slug this agent is known by
+    /// (from own sessions, peer_sessions, or profiles). Returns None if completely unknown.
+    pub fn resolve_slug_for_pubkey(&self, pubkey: &str) -> Result<Option<String>> {
+        // Check own sessions first (most authoritative for local agents).
+        if let Ok(slug) = self.conn.query_row(
+            "SELECT agent_slug FROM sessions WHERE agent_pubkey=?1 ORDER BY created_at DESC LIMIT 1",
+            params![pubkey],
+            |r| r.get::<_, String>(0),
+        ) {
+            return Ok(Some(slug));
+        }
+        // Then peer_sessions (remote agents seen recently).
+        if let Ok(slug) = self.conn.query_row(
+            "SELECT slug FROM peer_sessions WHERE pubkey=?1 ORDER BY last_seen DESC LIMIT 1",
+            params![pubkey],
+            |r| r.get::<_, String>(0),
+        ) {
+            return Ok(Some(slug));
+        }
+        // Fall back to profiles table.
+        Ok(self.conn.query_row(
+            "SELECT slug FROM profiles WHERE pubkey=?1 LIMIT 1",
+            params![pubkey],
+            |r| r.get::<_, String>(0),
+        ).ok())
+    }
+
     /// Find one of MY sessions by session-id prefix (for messaging a sibling
     /// session of the same agent on this machine).
     pub fn find_session_by_prefix(&self, prefix: &str) -> Result<Option<SessionRecord>> {
@@ -1461,6 +1488,56 @@ impl Store {
         } else {
             Ok(None)
         }
+    }
+
+    /// Return the most recent thread_id for inbound messages from a given sender
+    /// in a project. Used by the tail emitter to attach a thread short-code to
+    /// inbound Msg events. Returns None if no messages exist from this sender.
+    pub fn latest_thread_for_inbound(&self, author_pubkey: &str, project: &str) -> Result<Option<String>> {
+        // Join messages -> threads -> projects to find the most recent thread
+        // for this author in the given project.
+        Ok(self.conn.query_row(
+            "SELECT m.thread_id FROM messages m
+             JOIN threads t ON t.thread_id = m.thread_id
+             JOIN projects p ON p.project_id = t.project_id
+             WHERE m.author_pubkey = ?1 AND p.display_slug = ?2
+             ORDER BY m.created_at DESC LIMIT 1",
+            params![author_pubkey, project],
+            |r| r.get::<_, String>(0),
+        ).ok())
+    }
+
+    /// Query for tail backfill: returns recent messages with author/project/thread info.
+    ///
+    /// Each row: (created_at, body, author_pubkey, project_slug, thread_id, author_session)
+    pub fn recent_messages_for_backfill(
+        &self,
+        project: Option<&str>,
+        since: u64,
+        limit: u64,
+    ) -> Result<Vec<(u64, String, String, String, String, Option<String>)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT m.created_at, m.body, m.author_pubkey, p.display_slug, m.thread_id, m.author_session
+             FROM messages m
+             JOIN threads t ON t.thread_id = m.thread_id
+             JOIN projects p ON p.project_id = t.project_id
+             WHERE (?1 IS NULL OR p.display_slug = ?1) AND m.created_at >= ?2
+             ORDER BY m.created_at DESC LIMIT ?3",
+        )?;
+        let rows: Vec<(u64, String, String, String, String, Option<String>)> = stmt
+            .query_map(params![project, since, limit], |r| {
+                Ok((
+                    r.get::<_, u64>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, String>(4)?,
+                    r.get::<_, Option<String>>(5)?,
+                ))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rows)
     }
 
     /// Resolve the native relay key for a thread's root message.
