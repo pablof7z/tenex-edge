@@ -139,6 +139,16 @@ pub async fn run() -> Result<()> {
         shutdown: Notify::new(),
     });
 
+    // Idempotent read-model backfill: populate canonical `projects` + `membership`
+    // tables from legacy data so readers have a consistent origin on every start.
+    // Best-effort: a backfill error must not prevent startup.
+    {
+        let pi = state.provider.provider_instance.clone();
+        state.with_store(|s| {
+            s.backfill_kind1_nip29_origins(&pi, now_secs()).ok();
+        });
+    }
+
     reconcile_sessions(&state).await;
     spawn_demux(state.clone());
     spawn_pruner(state.clone());
@@ -954,54 +964,22 @@ async fn rpc_user_prompt(state: &Arc<DaemonState>, params: &serde_json::Value) -
 
 // ── project_list ─────────────────────────────────────────────────────────────
 
-/// List NIP-29 groups: fetch all kind:39000 events from the relay (the relay
-/// authors these events, so no author filter is used) and return the slug +
-/// description for each. Results are also cached locally.
+/// List NIP-29 groups: refresh the local cache via the provider (which fetches
+/// kind:39000 from the relay), then return the read-model list.
 async fn rpc_project_list(state: &Arc<DaemonState>) -> Result<serde_json::Value> {
-    use nostr_sdk::prelude::{Filter, Kind};
+    // Provider fetches kind:39000 from the relay and upserts project_meta.
+    // Best-effort: a relay timeout must not prevent returning cached results.
+    state.provider.refresh_project_list().await.ok();
 
-    // Phase 2: prefer local read-model rows when present (avoids a relay round-
-    // trip on every call). Always attempt a relay refresh so the cache stays warm;
-    // the relay result is the materialization source, not the return value.
-    //
-    // TODO(phase 8): when the canonical `projects` table is the write target,
-    // drop the relay-fetch entirely and read only from list_projects_read_model.
+    // Read the current read-model (backed by project_meta — retained storage).
     let local = state
         .with_store(|s| s.list_projects_read_model())
         .unwrap_or_default();
 
-    // Kick off relay fetch for materialization regardless of local cache state.
-    let filter = Filter::new().kind(Kind::from(39000u16)).limit(200);
-    let events = state
-        .transport
-        .fetch(filter, Duration::from_secs(5))
-        .await
-        .unwrap_or_default();
-
-    let now = now_secs();
-    let mut from_relay: Vec<serde_json::Value> = Vec::new();
-    for ev in &events {
-        let Some(slug) = event_tag(ev, "d") else {
-            continue;
-        };
-        let about = event_tag(ev, "about").unwrap_or("").to_string();
-        state.with_store(|s| {
-            // Materialization refresh: update legacy project_meta cache.
-            s.upsert_project_meta(slug, &about, now).ok();
-        });
-        from_relay.push(serde_json::json!({ "slug": slug, "about": about }));
-    }
-
-    // Prefer relay-derived list (freshest); fall back to local cache when the
-    // relay returns nothing (offline / timeout / empty relay).
-    let mut projects = if !from_relay.is_empty() {
-        from_relay
-    } else {
-        local
-            .into_iter()
-            .map(|(slug, about)| serde_json::json!({ "slug": slug, "about": about }))
-            .collect()
-    };
+    let mut projects: Vec<serde_json::Value> = local
+        .into_iter()
+        .map(|(slug, about)| serde_json::json!({ "slug": slug, "about": about }))
+        .collect();
     projects.sort_by(|a, b| {
         a["slug"].as_str().unwrap_or("").cmp(b["slug"].as_str().unwrap_or(""))
     });
@@ -1284,17 +1262,6 @@ fn handle_incoming(state: &Arc<DaemonState>, event: &Event) {
     if outcome.wake_mentions {
         state.mention_notify.notify_waiters();
     }
-}
-
-fn event_tag<'a>(event: &'a Event, name: &str) -> Option<&'a str> {
-    event.tags.iter().find_map(|t| {
-        let s = t.as_slice();
-        if s.first().map(String::as_str) == Some(name) {
-            s.get(1).map(String::as_str)
-        } else {
-            None
-        }
-    })
 }
 
 // ── startup fetch of stored mentions (offline delivery) ──────────────────────

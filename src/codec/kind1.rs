@@ -11,7 +11,7 @@
 //! Activity vs Mention (both kind:1) is disambiguated on decode by the presence
 //! of a `p` tag.
 
-use crate::codec::{Codec, SubScope};
+use crate::codec::Codec;
 use crate::domain::{Activity, AgentRef, DomainEvent, Mention, Presence, Profile, Status};
 use anyhow::Result;
 use nostr_sdk::prelude::*;
@@ -47,40 +47,6 @@ pub(crate) fn h_filter(f: Filter, project: &str) -> Filter {
 
 fn project_tag(project: &str) -> Result<Tag> {
     tag(&["h", project])
-}
-
-// ── NIP-29 group management builders (signed by the operator's userNsec) ──────
-//
-// These sit outside the DomainEvent flow: they manage the relay's group, they
-// aren't fabric domain events. The relay rules these encode were validated by
-// `tests/nip29_probe.rs` against nip29.f7z.io. Recipe for an owned closed group:
-//   group_create -> group_lock_closed -> group_put_user (per agent).
-
-/// kind:9007 create-group with a client-chosen id (`h` == project slug). The
-/// signer becomes the group admin. NOTE: a fresh group is OPEN until locked.
-pub fn group_create(project: &str) -> Result<EventBuilder> {
-    Ok(EventBuilder::new(kind(KIND_GROUP_CREATE), "").tags([project_tag(project)?]))
-}
-
-/// kind:9002 edit-metadata that locks the group `closed` (only members may write)
-/// while keeping it `public` (anyone may read — required so the non-member daemon
-/// connection still receives group events). Names the group after the slug.
-pub fn group_lock_closed(project: &str) -> Result<EventBuilder> {
-    Ok(EventBuilder::new(kind(KIND_GROUP_EDIT_METADATA), "").tags([
-        project_tag(project)?,
-        tag(&["name", project])?,
-        tag(&["closed"])?,
-        tag(&["public"])?,
-    ]))
-}
-
-/// kind:9000 put-user adding `pubkey` to the group as a member, so it can publish
-/// presence/activity/mentions into the now-closed group.
-pub fn group_put_user(project: &str, pubkey: &str) -> Result<EventBuilder> {
-    Ok(EventBuilder::new(kind(KIND_GROUP_PUT_USER), "").tags([
-        project_tag(project)?,
-        tag(&["p", pubkey, "member"])?,
-    ]))
 }
 
 fn presence_d(session_id: &str) -> String {
@@ -306,12 +272,6 @@ impl Codec for Kind1Codec {
         }
     }
 
-    fn filters(&self, scope: &SubScope) -> Vec<Filter> {
-        // Delegate to the relocated implementation so filter logic has a single
-        // source of truth. The test `filters_cover_all_kinds_and_mentions`
-        // exercises this path and transitively covers `scope_filters`.
-        crate::fabric::nostr_delivery::scope_filters(&crate::fabric::Scope::from(scope))
-    }
 }
 
 #[cfg(test)]
@@ -624,61 +584,4 @@ mod tests {
         assert!(Kind1Codec.decode(&event).is_none());
     }
 
-    #[test]
-    fn filters_cover_all_kinds_and_mentions() {
-        let me = Keys::generate().public_key().to_hex();
-        let scope = SubScope {
-            authors: vec![Keys::generate().public_key().to_hex()],
-            project: Some("tenex-edge".into()),
-            mentions_to: Some(me),
-            owners: vec![Keys::generate().public_key().to_hex()],
-        };
-        let filters = Kind1Codec.filters(&scope);
-        // profiles, presence/status, notes, mentions-to-me, owner-discovery,
-        // NIP-29 group-state (39000/39001/39002 by #d).
-        assert_eq!(filters.len(), 6);
-        let json = serde_json::to_string(&filters).unwrap();
-        assert!(json.contains("\"#h\""));
-        assert!(!json.contains("\"#t\""));
-        // group-state filter present: addressable kinds scoped by #d=slug.
-        assert!(json.contains("\"#d\""));
-        assert!(json.contains("39002"));
-    }
-
-    #[test]
-    fn group_create_has_h_tag() {
-        let b = group_create("tenex-edge").unwrap();
-        let ev = b.sign_with_keys(&Keys::generate()).unwrap();
-        assert_eq!(ev.kind.as_u16(), KIND_GROUP_CREATE);
-        assert!(has_tag(&ev, "h", "tenex-edge"));
-    }
-
-    #[test]
-    fn group_lock_closed_is_closed_and_public() {
-        let b = group_lock_closed("tenex-edge").unwrap();
-        let ev = b.sign_with_keys(&Keys::generate()).unwrap();
-        assert_eq!(ev.kind.as_u16(), KIND_GROUP_EDIT_METADATA);
-        assert!(has_tag(&ev, "h", "tenex-edge"));
-        assert!(has_tag(&ev, "name", "tenex-edge"));
-        assert!(has_tag_name(&ev, "closed"));
-        assert!(has_tag_name(&ev, "public"));
-        // Must NOT be private — would blind the non-member daemon connection.
-        assert!(!has_tag_name(&ev, "private"));
-    }
-
-    #[test]
-    fn group_put_user_tags_member() {
-        let member = Keys::generate().public_key().to_hex();
-        let b = group_put_user("tenex-edge", &member).unwrap();
-        let ev = b.sign_with_keys(&Keys::generate()).unwrap();
-        assert_eq!(ev.kind.as_u16(), KIND_GROUP_PUT_USER);
-        assert!(has_tag(&ev, "h", "tenex-edge"));
-        // p tag carries the member pubkey with the "member" role.
-        assert!(ev.tags.iter().any(|t| {
-            let s = t.as_slice();
-            s.first().map(String::as_str) == Some("p")
-                && s.get(1).map(String::as_str) == Some(member.as_str())
-                && s.get(2).map(String::as_str) == Some("member")
-        }));
-    }
 }

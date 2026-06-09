@@ -36,9 +36,8 @@ impl Delivery for NostrDelivery {
 /// Build relay subscription filters for a given `Scope`.
 ///
 /// This is the EXACT logic relocated verbatim from `Kind1Codec::filters`
-/// (src/codec/kind1.rs:309-376). `Kind1Codec::filters` now delegates to this
-/// function (via `Scope::from(&scope)`), so the test
-/// `filters_cover_all_kinds_and_mentions` transitively verifies this path.
+/// (src/codec/kind1.rs prior to Phase 8). The test
+/// `filters_cover_all_kinds_and_mentions` directly exercises this function.
 pub fn scope_filters(scope: &Scope) -> Vec<Filter> {
     let authors: Vec<PublicKey> = scope
         .authors
@@ -106,4 +105,32 @@ pub fn scope_filters(scope: &Scope) -> Vec<Filter> {
     }
 
     filters
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nostr_sdk::prelude::Keys;
+
+    #[test]
+    fn filters_cover_all_kinds_and_mentions() {
+        let me = Keys::generate().public_key().to_hex();
+        let scope = crate::fabric::Scope {
+            authors: vec![Keys::generate().public_key().to_hex()],
+            project: Some("tenex-edge".into()),
+            mentions_to: Some(me),
+            owners: vec![Keys::generate().public_key().to_hex()],
+            thread: None,
+        };
+        let filters = scope_filters(&scope);
+        // profiles, presence/status, notes, mentions-to-me, owner-discovery,
+        // NIP-29 group-state (39000/39001/39002 by #d).
+        assert_eq!(filters.len(), 6);
+        let json = serde_json::to_string(&filters).unwrap();
+        assert!(json.contains("\"#h\""));
+        assert!(!json.contains("\"#t\""));
+        // group-state filter present: addressable kinds scoped by #d=slug.
+        assert!(json.contains("\"#d\""));
+        assert!(json.contains("39002"));
+    }
 }

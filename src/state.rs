@@ -1294,21 +1294,24 @@ impl Store {
     /// project list we have before dual-write is active).  Falls back to an
     /// empty vec when the table has no rows.
     ///
-    // TODO(phase 8): read from canonical `projects` table instead of legacy `project_meta`
+    // Retained storage (Phase 8): project_meta is the deliberately-retained canonical home for
+    // project slug+about; readers query it directly per fabric-architecture.md §6.
     pub fn list_projects_read_model(&self) -> Result<Vec<(String, String)>> {
         self.list_project_meta()
     }
 
     /// About-text for a single project by its legacy slug.
     ///
-    // TODO(phase 8): read from canonical `projects` table (join via `project_origins`) instead of legacy `project_meta`
+    // Retained storage (Phase 8): project_meta is the deliberately-retained canonical home for
+    // project slug+about; readers query it directly per fabric-architecture.md §6.
     pub fn project_meta_read_model(&self, slug: &str) -> Result<Option<String>> {
         self.get_project_meta(slug)
     }
 
     /// Own (local) sessions that are still alive and recently heartbeated.
     ///
-    // TODO(phase 8): read from canonical `membership` / `projects` instead of legacy `sessions`
+    // Retained storage (Phase 8): sessions is the deliberately-retained canonical home for
+    // local agent sessions; readers query it directly per fabric-architecture.md §6.
     pub fn list_agents_read_model(&self, project: Option<&str>, since: u64) -> Result<Vec<SessionRecord>> {
         let mut stmt = self.conn.prepare(
             "SELECT session_id, agent_slug, agent_pubkey, project, host, child_pid, watch_pid, created_at, alive, rel_cwd
@@ -1320,7 +1323,8 @@ impl Store {
 
     /// Peer presence rows, ordered by recency.
     ///
-    // TODO(phase 8): read from canonical presence table instead of legacy `peer_sessions`
+    // Retained storage (Phase 8): peer_sessions is the deliberately-retained canonical home for
+    // peer presence; readers query it directly per fabric-architecture.md §6.
     pub fn list_presence_read_model(
         &self,
         project: Option<&str>,
@@ -1332,7 +1336,8 @@ impl Store {
     /// Agent status for all agents in a project (or all projects when `project` is None).
     /// Returns `(pubkey, project, text)` tuples.
     ///
-    // TODO(phase 8): read from canonical status table instead of legacy `agent_status`
+    // Retained storage (Phase 8): agent_status is the deliberately-retained canonical home for
+    // agent status; readers query it directly per fabric-architecture.md §6.
     pub fn list_status_read_model(
         &self,
         project: Option<&str>,
@@ -1483,7 +1488,8 @@ impl Store {
     /// query; routing it through this method would change the peek/drain
     /// semantics that freeze tests pin.
     ///
-    // TODO(phase 8): read from canonical `messages` table instead of legacy `inbox`
+    // Retained storage (Phase 8): inbox is the deliberately-retained canonical home for
+    // per-session delivered/seen messages; readers query it directly per fabric-architecture.md §6.
     pub fn undelivered_messages_for_session(&self, session_id: &str) -> Result<Vec<InboxRow>> {
         self.peek_inbox(session_id)
     }

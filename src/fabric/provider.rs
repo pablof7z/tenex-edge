@@ -207,12 +207,12 @@ impl Kind1Nip29Provider {
 
         // 1. Create + lock the group the first time we touch this project.
         if !self.with_store(|s| s.is_group_owned(project).unwrap_or(false)) {
-            let created = match crate::codec::kind1::group_create(project) {
+            let created = match crate::fabric::nip29::lifecycle::group_create(project) {
                 Ok(b) => publish(b, "9007 create-group").await,
                 Err(_) => false,
             };
             let locked = if created {
-                match crate::codec::kind1::group_lock_closed(project) {
+                match crate::fabric::nip29::lifecycle::group_lock_closed(project) {
                     Ok(b) => publish(b, "9002 lock-closed").await,
                     Err(_) => false,
                 }
@@ -228,7 +228,7 @@ impl Kind1Nip29Provider {
 
         // 2. Add this agent as a member if it isn't one already.
         if !self.with_store(|s| s.is_group_member(project, agent_pubkey).unwrap_or(false)) {
-            let added = match crate::codec::kind1::group_put_user(project, agent_pubkey) {
+            let added = match crate::fabric::nip29::lifecycle::group_put_user(project, agent_pubkey) {
                 Ok(b) => publish(b, "9000 put-user").await,
                 Err(_) => false,
             };
@@ -353,6 +353,41 @@ impl Kind1Nip29Provider {
             message_id,
             sync_state: "published".into(),
         })
+    }
+
+    // ── refresh_project_list ──────────────────────────────────────────────────
+
+    /// Fetch all kind:39000 events from the relay, parse `d` + `about`, and
+    /// upsert into `project_meta` (and canonical `projects` via backfill).
+    ///
+    /// This is the EXACT logic relocated verbatim from `rpc_project_list` in
+    /// `daemon/server.rs`. The function is best-effort; callers use `.ok()`.
+    pub async fn refresh_project_list(&self) -> Result<()> {
+        use nostr_sdk::prelude::{Filter, Kind};
+        let filter = Filter::new().kind(Kind::from(39000u16)).limit(200);
+        let events = self
+            .transport
+            .fetch(filter, Duration::from_secs(5))
+            .await
+            .unwrap_or_default();
+        let now = now_secs();
+        let pi = self.provider_instance.clone();
+        for ev in &events {
+            let Some(slug) = crate::fabric::nip29::nostr_tag(ev, "d") else {
+                continue;
+            };
+            let slug = slug.to_string();
+            let about = crate::fabric::nip29::nostr_tag(ev, "about")
+                .unwrap_or("")
+                .to_string();
+            self.with_store(|s| {
+                // Materialization refresh: update legacy project_meta cache.
+                s.upsert_project_meta(&slug, &about, now).ok();
+                // Canonical origin row (idempotent).
+                s.ensure_project_origin(FABRIC, &pi, &slug, &slug, now).ok();
+            });
+        }
+        Ok(())
     }
 
     // ── catch_up_mentions ─────────────────────────────────────────────────────

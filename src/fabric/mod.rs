@@ -6,8 +6,6 @@
 //!   Materializer (store writes)       ← materialize()
 //!   Transport                         ← (private detail of NostrDelivery)
 
-use crate::codec::SubScope;
-
 pub mod kind1;
 pub mod nip29;
 pub mod nostr_delivery;
@@ -20,8 +18,8 @@ pub enum RawEnvelope {
 }
 
 /// Subscription scope that Delivery implementations convert into wire-level
-/// filters. Mirrors `codec::SubScope` but is transport-agnostic and will grow
-/// (e.g. `thread`) without touching the legacy codec shim.
+/// filters. Transport-agnostic; will grow (e.g. `thread`) without touching
+/// the legacy codec layer.
 #[derive(Debug, Clone, Default)]
 pub struct Scope {
     pub authors: Vec<String>,
@@ -30,18 +28,6 @@ pub struct Scope {
     pub owners: Vec<String>,
     /// Forward-looking: thread/conversation scope (unused this phase).
     pub thread: Option<String>,
-}
-
-impl From<&SubScope> for Scope {
-    fn from(s: &SubScope) -> Self {
-        Self {
-            authors: s.authors.clone(),
-            project: s.project.clone(),
-            mentions_to: s.mentions_to.clone(),
-            owners: s.owners.clone(),
-            thread: None,
-        }
-    }
 }
 
 /// Encode/decode between `DomainEvent` and `RawEnvelope`. Transport-agnostic.

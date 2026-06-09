@@ -1,5 +1,6 @@
 //! NIP-29 fabric adapter — group metadata and membership materializer.
 
+pub mod lifecycle;
 pub mod materializer;
 
 /// Read a single tag value by name from a Nostr event.

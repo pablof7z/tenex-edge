@@ -7,8 +7,10 @@ mod common;
 use common::TestRelay;
 use nostr_sdk::prelude::{Keys, RelayPoolNotification};
 use std::time::Duration;
-use tenex_edge::codec::{Codec, Kind1Codec, SubScope};
+use tenex_edge::codec::{Codec, Kind1Codec};
 use tenex_edge::domain::*;
+use tenex_edge::fabric::nostr_delivery::scope_filters;
+use tenex_edge::fabric::Scope;
 use tenex_edge::transport::Transport;
 
 #[tokio::test]
@@ -26,14 +28,15 @@ async fn publishes_and_decodes_all_event_types() {
     let reader = Transport::connect(&[relay.url.clone()], reader_keys)
         .await
         .expect("reader connects");
-    let scope = SubScope {
+    let scope = Scope {
         authors: vec![agent_pk.clone()],
         project: Some(project.clone()),
         mentions_to: Some(reader_pk.clone()),
         owners: Vec::new(),
+        thread: None,
     };
     reader
-        .subscribe(codec.filters(&scope))
+        .subscribe(scope_filters(&scope))
         .await
         .expect("subscribe");
     let mut notifications = reader.notifications();

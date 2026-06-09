@@ -1,0 +1,102 @@
+//! NIP-29 group lifecycle builders (operator-signed management events).
+//!
+//! These sit outside the DomainEvent flow: they manage the relay's group, they
+//! aren't fabric domain events. The relay rules these encode were validated by
+//! `tests/nip29_probe.rs` against nip29.f7z.io. Recipe for an owned closed group:
+//!   group_create -> group_lock_closed -> group_put_user (per agent).
+
+use crate::codec::kind1::{kind, KIND_GROUP_CREATE, KIND_GROUP_EDIT_METADATA, KIND_GROUP_PUT_USER};
+use anyhow::Result;
+use nostr_sdk::prelude::*;
+
+fn tag(parts: &[&str]) -> Result<Tag> {
+    Ok(Tag::parse(parts.iter().copied())?)
+}
+
+fn project_tag(project: &str) -> Result<Tag> {
+    tag(&["h", project])
+}
+
+/// kind:9007 create-group with a client-chosen id (`h` == project slug). The
+/// signer becomes the group admin. NOTE: a fresh group is OPEN until locked.
+pub fn group_create(project: &str) -> Result<EventBuilder> {
+    Ok(EventBuilder::new(kind(KIND_GROUP_CREATE), "").tags([project_tag(project)?]))
+}
+
+/// kind:9002 edit-metadata that locks the group `closed` (only members may write)
+/// while keeping it `public` (anyone may read — required so the non-member daemon
+/// connection still receives group events). Names the group after the slug.
+pub fn group_lock_closed(project: &str) -> Result<EventBuilder> {
+    Ok(EventBuilder::new(kind(KIND_GROUP_EDIT_METADATA), "").tags([
+        project_tag(project)?,
+        tag(&["name", project])?,
+        tag(&["closed"])?,
+        tag(&["public"])?,
+    ]))
+}
+
+/// kind:9000 put-user adding `pubkey` to the group as a member, so it can publish
+/// presence/activity/mentions into the now-closed group.
+pub fn group_put_user(project: &str, pubkey: &str) -> Result<EventBuilder> {
+    Ok(EventBuilder::new(kind(KIND_GROUP_PUT_USER), "").tags([
+        project_tag(project)?,
+        tag(&["p", pubkey, "member"])?,
+    ]))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn has_tag(event: &Event, name: &str, value: &str) -> bool {
+        event.tags.iter().any(|t| {
+            let s = t.as_slice();
+            s.first().map(String::as_str) == Some(name)
+                && s.get(1).map(String::as_str) == Some(value)
+        })
+    }
+
+    fn has_tag_name(event: &Event, name: &str) -> bool {
+        event
+            .tags
+            .iter()
+            .any(|t| t.as_slice().first().map(String::as_str) == Some(name))
+    }
+
+    #[test]
+    fn group_create_has_h_tag() {
+        let b = group_create("tenex-edge").unwrap();
+        let ev = b.sign_with_keys(&Keys::generate()).unwrap();
+        assert_eq!(ev.kind.as_u16(), KIND_GROUP_CREATE);
+        assert!(has_tag(&ev, "h", "tenex-edge"));
+    }
+
+    #[test]
+    fn group_lock_closed_is_closed_and_public() {
+        let b = group_lock_closed("tenex-edge").unwrap();
+        let ev = b.sign_with_keys(&Keys::generate()).unwrap();
+        assert_eq!(ev.kind.as_u16(), KIND_GROUP_EDIT_METADATA);
+        assert!(has_tag(&ev, "h", "tenex-edge"));
+        assert!(has_tag(&ev, "name", "tenex-edge"));
+        assert!(has_tag_name(&ev, "closed"));
+        assert!(has_tag_name(&ev, "public"));
+        // Must NOT be private — would blind the non-member daemon connection.
+        assert!(!has_tag_name(&ev, "private"));
+    }
+
+    #[test]
+    fn group_put_user_tags_member() {
+        let member = Keys::generate().public_key().to_hex();
+        let b = group_put_user("tenex-edge", &member).unwrap();
+        let ev = b.sign_with_keys(&Keys::generate()).unwrap();
+        assert_eq!(ev.kind.as_u16(), KIND_GROUP_PUT_USER);
+        assert!(has_tag(&ev, "h", "tenex-edge"));
+        // p tag carries the member pubkey with the "member" role.
+        assert!(ev.tags.iter().any(|t| {
+            let s = t.as_slice();
+            s.first().map(String::as_str) == Some("p")
+                && s.get(1).map(String::as_str) == Some(member.as_str())
+                && s.get(2).map(String::as_str) == Some("member")
+        }));
+    }
+}
