@@ -22,7 +22,7 @@ use crate::identity::{self, AgentIdentity};
 use crate::runtime::{self, route_mention_into_with_id, EngineParams};
 use crate::state::{InboxRow, Store};
 use crate::transport::Transport;
-use crate::util::{now_secs, session_short_code, short_id};
+use crate::util::{now_secs, pubkey_short, session_short_code, SessionId};
 use anyhow::{Context, Result};
 use nostr_sdk::prelude::{Event, Keys, RelayMessage, RelayPoolNotification};
 use std::collections::HashMap;
@@ -333,7 +333,7 @@ async fn dispatch(state: &Arc<DaemonState>, req: &Request) -> Response {
         "inbox" => rpc_inbox(state, &req.params).await,
         "turn_start" => rpc_turn_start(state, &req.params).await,
         "turn_check" => rpc_turn_check(state, &req.params),
-        "turn_end" => rpc_turn_end(state, &req.params),
+        "turn_end" => rpc_turn_end(state, &req.params).await,
         "acl" => rpc_acl(state, &req.params).await,
         "doctor" => rpc_doctor(state).await,
         "user_prompt" => rpc_user_prompt(state, &req.params).await,
@@ -618,12 +618,12 @@ async fn rpc_send_message(
     // delivers only to the TARGET session (or all of the recipient agent's
     // sessions when untargeted) — never back to the authoring session.
     // Emit Msg event for the outbound send.
-    let thread_short = short_id(&receipt.thread_id);
+    let thread_short = pubkey_short(&receipt.thread_id);
     let to_slug = state
         .with_store(|s| s.resolve_slug_for_pubkey(&recipient.pubkey))
         .ok()
         .flatten()
-        .unwrap_or_else(|| short_id(&recipient.pubkey));
+        .unwrap_or_else(|| pubkey_short(&recipient.pubkey));
     state.emit_tail(TailEvent::Msg {
         ts: now_secs(),
         project: recipient.project.clone(),
@@ -642,7 +642,7 @@ async fn rpc_send_message(
         ts: now_secs(),
         project: recipient.project.clone(),
         from: rec.agent_slug.clone(),
-        to: short_id(&recipient.pubkey),
+        to: pubkey_short(&recipient.pubkey),
         thread: Some(thread_short),
         state: sync_state.into(),
         detail: None,
@@ -656,8 +656,8 @@ async fn rpc_send_message(
             to_pubkey: recipient.pubkey.clone(),
             project: recipient.project.clone(),
             body,
-            target_session: recipient.target_session.clone(),
-            from_session: Some(rec.session_id.clone()),
+            target_session: recipient.target_session.clone().map(SessionId::from),
+            from_session: Some(SessionId::from(rec.session_id.clone())),
         };
         let routed = state.with_store(|s| {
             route_mention_into_with_id(
@@ -981,6 +981,13 @@ async fn rpc_turn_start(
         s.mark_turn_start(&p.session, now_secs()).ok();
         if let Some(path) = p.transcript.as_deref().filter(|x| !x.is_empty()) {
             s.set_session_transcript(&p.session, path).ok();
+            // Snapshot the last assistant text so rpc_turn_end can poll until a
+            // *new* (different) response appears — Claude Code writes the
+            // transcript after the stop hook fires, so reading at stop time often
+            // returns the previous turn's content.
+            let baseline = crate::transcript::read_last_assistant_text(std::path::Path::new(path))
+                .unwrap_or_default();
+            s.set_last_assistant_text_at_turn_start(&p.session, &baseline).ok();
         }
         prev
     });
@@ -1036,16 +1043,72 @@ struct TurnEndParams {
     session: String,
 }
 
-fn rpc_turn_end(state: &Arc<DaemonState>, params: &serde_json::Value) -> Result<serde_json::Value> {
+async fn rpc_turn_end(state: &Arc<DaemonState>, params: &serde_json::Value) -> Result<serde_json::Value> {
     let p: TurnEndParams =
         serde_json::from_value(params.clone()).context("parsing turn_end params")?;
     if !p.session.is_empty() {
         // Read turn_started_at BEFORE marking end, so we can compute elapsed.
+        // Thread IDs are captured NOW so a concurrent user_prompt for the next
+        // turn cannot overwrite last_prompt_event_id before we publish.
         let (was_working, turn_started_at) = state
             .with_store(|s| s.get_turn_state(&p.session).unwrap_or((false, 0)));
-        state.with_store(|s| {
-            s.mark_turn_end(&p.session).ok();
-        });
+        let (root_event_id, last_prompt_event_id, transcript_path, baseline_text) =
+            state.with_store(|s| {
+                s.mark_turn_end(&p.session).ok();
+                let (root, prompt) = s.get_thread_event_ids(&p.session);
+                let transcript = s.get_session_transcript(&p.session).ok().flatten();
+                let baseline = s.get_last_assistant_text_at_turn_start(&p.session);
+                (root, prompt, transcript, baseline)
+            });
+
+        // Publish the NIP-10 TurnReply when we have full threading context.
+        if !root_event_id.is_empty() && !last_prompt_event_id.is_empty() {
+            if let Some(rec) = state.with_store(|s| s.get_session(&p.session).ok().flatten()) {
+                // Claude Code writes the transcript *after* the stop hook fires, so
+                // the response may not be on disk yet. Poll (up to ~2 s) until the
+                // last assistant text differs from what we snapshotted at turn_start.
+                let body = if let Some(path) = transcript_path.as_deref() {
+                    let mut result = String::new();
+                    for _ in 0..20u8 {
+                        if let Some(text) =
+                            crate::transcript::read_last_assistant_text(std::path::Path::new(path))
+                        {
+                            if !text.is_empty() && text != baseline_text {
+                                result = text;
+                                break;
+                            }
+                        }
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                    }
+                    result
+                } else {
+                    String::new()
+                };
+
+                if !body.is_empty() {
+                    use crate::codec::Codec as _;
+                    let ev = DomainEvent::TurnReply(crate::domain::TurnReply {
+                        agent: crate::domain::AgentRef::new(
+                            rec.agent_pubkey.clone(),
+                            rec.agent_slug.clone(),
+                        ),
+                        project: rec.project.clone(),
+                        body,
+                        root_event_id,
+                        reply_event_id: last_prompt_event_id,
+                    });
+                    let edge = crate::config::edge_home();
+                    if let Ok(id) =
+                        crate::identity::load_or_create(&edge, &rec.agent_slug, now_secs())
+                    {
+                        if let Ok(builder) = crate::codec::Kind1Codec.encode(&ev) {
+                            state.transport.publish_signed(builder, &id.keys).await.ok();
+                        }
+                    }
+                }
+            }
+        }
+
         if was_working {
             let now = now_secs();
             let elapsed_s = if turn_started_at > 0 {
@@ -1175,7 +1238,7 @@ async fn rpc_doctor(state: &Arc<DaemonState>) -> Result<serde_json::Value> {
         .tags([Tag::parse(["h", &t])?]);
     // Sign with the daemon's connection key (any key works for the probe).
     let publish = match state.transport.publish_builder(builder).await {
-        Ok(id) => format!("OK ({})", crate::util::short_id(&id.to_hex())),
+        Ok(id) => format!("OK ({})", crate::util::pubkey_short(&id.to_hex())),
         Err(e) => format!("ERR {e:#}"),
     };
     tokio::time::sleep(Duration::from_secs(1)).await;
@@ -1234,7 +1297,17 @@ async fn rpc_user_prompt(state: &Arc<DaemonState>, params: &serde_json::Value) -
         ]);
     let event_id = state.transport.publish_signed(builder, &user_keys).await?;
 
-    Ok(serde_json::json!({ "event_id": event_id.to_hex() }))
+    // NIP-10 thread tracking: first prompt becomes the root; every prompt is
+    // the "last trigger" the next TurnReply will reply to.
+    let eid = event_id.to_hex();
+    let sid = rec.session_id.clone();
+    state.with_store(|s| {
+        let (root, _) = s.get_thread_event_ids(&sid);
+        let new_root = if root.is_empty() { eid.clone() } else { root };
+        s.set_thread_event_ids(&sid, &new_root, &eid).ok();
+    });
+
+    Ok(serde_json::json!({ "event_id": eid }))
 }
 
 // ── project_list ─────────────────────────────────────────────────────────────
@@ -1563,8 +1636,8 @@ fn build_backfill(
             .with_store(|s| s.resolve_slug_for_pubkey(&author_pubkey))
             .ok()
             .flatten()
-            .unwrap_or_else(|| short_id(&author_pubkey));
-        let thread_short = short_id(&thread_id);
+            .unwrap_or_else(|| pubkey_short(&author_pubkey));
+        let thread_short = pubkey_short(&thread_id);
         events.push(TailEvent::Msg {
             ts,
             project: proj,
@@ -1691,12 +1764,18 @@ fn derive_and_emit_tail_events(
     now: u64,
 ) {
     match de {
+        DomainEvent::TurnReply(_) => {
+            // A peer's completed turn response (NIP-10 threaded kind:1). Not
+            // surfaced on the tail: local turn state is emitted by the RPC
+            // lifecycle (Turn working/idle), and peer replies carry no
+            // session/turn state we can attribute reliably.
+        }
         DomainEvent::Presence(p) => {
             // Skip own sessions — local join/leave tracked by Sess events.
             if hosted.contains(&p.agent.pubkey) {
                 return;
             }
-            let session_id = p.session_id.clone();
+            let session_id = p.session_id.as_str().to_owned();
             let is_new = {
                 let mut map = state.peer_sessions.lock().unwrap();
                 if !map.contains_key(&session_id) {
@@ -1782,15 +1861,15 @@ fn derive_and_emit_tail_events(
                 s.latest_thread_for_inbound(&m.from.pubkey, &m.project)
                     .ok()
                     .flatten()
-                    .map(|tid| short_id(&tid))
+                    .map(|tid| pubkey_short(&tid))
             });
             state.emit_tail(TailEvent::Msg {
                 ts: now,
                 project: m.project.clone(),
                 from: m.from.slug.clone(),
-                from_session: m.from_session.clone(),
-                to: short_id(&m.to_pubkey),
-                to_session: m.target_session.clone(),
+                from_session: m.from_session.as_ref().map(|s| s.as_str().to_owned()),
+                to: pubkey_short(&m.to_pubkey),
+                to_session: m.target_session.as_ref().map(|s| s.as_str().to_owned()),
                 thread: thread_short,
                 body: m.body.chars().take(200).collect(),
             });

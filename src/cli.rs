@@ -2,7 +2,7 @@
 
 use crate::domain::DomainEvent;
 use crate::state::Store;
-use crate::util::{now_secs, session_short_code, short_id, slugify_host};
+use crate::util::{now_secs, pubkey_short, session_short_code, slugify_host, SessionId};
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use crossterm::{
@@ -350,8 +350,8 @@ async fn send_message(
     let to_pubkey = v["to_pubkey"].as_str().unwrap_or_default().to_string();
     let target_session = v["target_session"].as_str().map(str::to_string);
     match target_session {
-        Some(s) => println!("mentioned {} (session {})", short_id(&to_pubkey), short_id(&s)),
-        None => println!("mentioned {}", short_id(&to_pubkey)),
+        Some(s) => println!("mentioned {} (session {})", pubkey_short(&to_pubkey), pubkey_short(&s)),
+        None => println!("mentioned {}", pubkey_short(&to_pubkey)),
     }
     Ok(())
 }
@@ -397,7 +397,7 @@ async fn threads(project: Option<String>, thread: Option<String>) -> Result<()> 
         if let Some(subject) = meta_v.get("subject").and_then(|v| v.as_str()) {
             println!("Thread: {}", subject);
         } else {
-            println!("Thread: {}", short_id(&tid));
+            println!("Thread: {}", pubkey_short(&tid));
         }
         if let Some(msgs) = v.as_array() {
             for msg in msgs {
@@ -406,7 +406,7 @@ async fn threads(project: Option<String>, thread: Option<String>) -> Result<()> 
                 let body = msg["body"].as_str().unwrap_or("");
                 let ts = msg["created_at"].as_u64().unwrap_or(0);
                 let arrow = if dir == "outbound" { "->" } else { "<-" };
-                println!("[{}] {} {} {}: {}", ts, short_id(author), arrow, dir, body);
+                println!("[{}] {} {} {}: {}", ts, pubkey_short(author), arrow, dir, body);
             }
         }
         return Ok(());
@@ -431,7 +431,7 @@ async fn threads(project: Option<String>, thread: Option<String>) -> Result<()> 
             let label = subject.unwrap_or("no subject");
             match last {
                 // Print the FULL thread id — it is the argument the user passes
-                // back to `threads --thread <id>`; a short_id() would be unusable.
+                // back to `threads --thread <id>`; a pubkey_short() would be unusable.
                 Some(ts) => println!("  {} ({} msg, last at {}) - {}", tid, count, ts, label),
                 None => println!("  {} (no messages) - {}", tid, label),
             }
@@ -739,7 +739,7 @@ pub fn push_turn_fabric_block(
                 p.slug,
                 slugify_host(&p.host),
                 p.project,
-                short_id(&p.session_id),
+                pubkey_short(&p.session_id),
             ));
         }
         for (slug, proj, text) in &status_changes {
@@ -1124,7 +1124,7 @@ async fn acl(action: Option<AclAction>) -> Result<()> {
             println!(
                 "authorized {} ({})",
                 v["slug"].as_str().unwrap_or("").cyan(),
-                short_id(v["pubkey"].as_str().unwrap_or(""))
+                pubkey_short(v["pubkey"].as_str().unwrap_or(""))
             );
         }
         Some(AclAction::Block { target }) => {
@@ -1132,7 +1132,7 @@ async fn acl(action: Option<AclAction>) -> Result<()> {
             println!(
                 "blocked {} ({})",
                 v["slug"].as_str().unwrap_or(""),
-                short_id(v["pubkey"].as_str().unwrap_or(""))
+                pubkey_short(v["pubkey"].as_str().unwrap_or(""))
             );
         }
         Some(AclAction::List) | None => {
@@ -1150,7 +1150,7 @@ async fn acl(action: Option<AclAction>) -> Result<()> {
                         "  {} {}  ({})  host {}",
                         "?".yellow(),
                         p["slug"].as_str().unwrap_or("").cyan(),
-                        short_id(p["pubkey"].as_str().unwrap_or("")),
+                        pubkey_short(p["pubkey"].as_str().unwrap_or("")),
                         p["host"].as_str().unwrap_or("").dimmed()
                     );
                 }
@@ -1230,7 +1230,7 @@ async fn inbox(session: Option<String>) -> Result<()> {
                 format!(
                     "{} ({})",
                     p["slug"].as_str().unwrap_or(""),
-                    short_id(p["pubkey"].as_str().unwrap_or(""))
+                    pubkey_short(p["pubkey"].as_str().unwrap_or(""))
                 )
             })
             .collect();
@@ -1350,7 +1350,7 @@ pub fn assemble_turn_start_context(
     if !pending.is_empty() {
         let names: Vec<String> = pending
             .iter()
-            .map(|p| format!("{} ({})", p.slug, short_id(&p.pubkey)))
+            .map(|p| format!("{} ({})", p.slug, pubkey_short(&p.pubkey)))
             .collect();
         blocks.push(format!(
             "[tenex-edge] {} unauthorized agent(s) claim your owner: {}. \
@@ -1423,7 +1423,7 @@ fn render_who_plain(snapshot: &WhoSnapshot) -> String {
             "  {}@{} [session {}]{}{}{}",
             row.slug,
             row.project,
-            short_id(&row.session_id),
+            pubkey_short(&row.session_id),
             dir,
             remote,
             stale,
@@ -1918,7 +1918,7 @@ fn render(de: &DomainEvent) -> String {
             "live".green(),
             p.agent.slug.cyan(),
             slugify_host(&p.host),
-            short_id(&p.session_id).yellow(),
+            format!("{}", p.session_id).yellow(),
             p.project.dimmed()
         ),
         DomainEvent::Activity(a) => {
@@ -1934,13 +1934,16 @@ fn render(de: &DomainEvent) -> String {
             "{} {} -> {}{}: {}",
             "msg ".yellow(),
             m.from.slug.cyan(),
-            short_id(&m.to_pubkey),
+            pubkey_short(&m.to_pubkey),
             m.target_session
-                .as_deref()
-                .map(|s| format!(" ({})", short_id(s)))
+                .as_ref()
+                .map(|s| format!(" ({s})"))
                 .unwrap_or_default(),
             m.body
         ),
+        DomainEvent::TurnReply(r) => {
+            format!("{} {}: {}", "turn".blue(), r.agent.slug.cyan(), r.body)
+        }
     }
 }
 

@@ -357,6 +357,23 @@ impl Store {
             "ALTER TABLE inbox ADD COLUMN from_session TEXT NOT NULL DEFAULT ''",
             [],
         );
+        // NIP-10 thread tracking: root event (first user prompt in the session
+        // thread) and most recent user prompt (triggers TurnReply at stop-hook).
+        let _ = conn.execute(
+            "ALTER TABLE sessions ADD COLUMN thread_root_event_id TEXT NOT NULL DEFAULT ''",
+            [],
+        );
+        let _ = conn.execute(
+            "ALTER TABLE sessions ADD COLUMN last_prompt_event_id TEXT NOT NULL DEFAULT ''",
+            [],
+        );
+        // Snapshot of the last assistant text at the beginning of each turn.
+        // Used by rpc_turn_end to poll until a *new* response appears in the
+        // transcript (Claude Code writes the transcript after the stop hook fires).
+        let _ = conn.execute(
+            "ALTER TABLE sessions ADD COLUMN last_assistant_text_at_turn_start TEXT NOT NULL DEFAULT ''",
+            [],
+        );
         Ok(Self { conn })
     }
 
@@ -479,6 +496,50 @@ impl Store {
             )
             .ok()
             .flatten())
+    }
+
+    /// Returns `(thread_root_event_id, last_prompt_event_id)` for a session.
+    /// Both are empty strings until the first user prompt is published.
+    pub fn get_thread_event_ids(&self, session_id: &str) -> (String, String) {
+        self.conn
+            .query_row(
+                "SELECT thread_root_event_id, last_prompt_event_id FROM sessions WHERE session_id=?1",
+                params![session_id],
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+            )
+            .unwrap_or_default()
+    }
+
+    /// Update the NIP-10 thread tracking for a session.
+    /// `root_id` is the first user prompt event; `prompt_id` is the most recent.
+    pub fn set_thread_event_ids(&self, session_id: &str, root_id: &str, prompt_id: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE sessions SET thread_root_event_id=?2, last_prompt_event_id=?3 WHERE session_id=?1",
+            params![session_id, root_id, prompt_id],
+        )?;
+        Ok(())
+    }
+
+    /// Snapshot the last assistant text at the start of a turn. `rpc_turn_end`
+    /// polls until the transcript returns something *different* from this value,
+    /// so it reliably reads the current turn's response even when Claude Code
+    /// writes the transcript after the stop hook fires.
+    pub fn set_last_assistant_text_at_turn_start(&self, session_id: &str, text: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE sessions SET last_assistant_text_at_turn_start=?2 WHERE session_id=?1",
+            params![session_id, text],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_last_assistant_text_at_turn_start(&self, session_id: &str) -> String {
+        self.conn
+            .query_row(
+                "SELECT last_assistant_text_at_turn_start FROM sessions WHERE session_id=?1",
+                params![session_id],
+                |r| r.get::<_, String>(0),
+            )
+            .unwrap_or_default()
     }
 
     /// Heartbeat: keep a live session's `last_seen` fresh (called each engine tick).

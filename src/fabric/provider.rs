@@ -58,8 +58,8 @@ impl SendIntent {
             to_pubkey: self.to_pubkey.clone(),
             project: self.project.clone(),
             body: self.body.clone(),
-            target_session: self.target_session.clone(),
-            from_session: self.from_session.clone(),
+            target_session: self.target_session.clone().map(crate::util::SessionId::from),
+            from_session: self.from_session.clone().map(crate::util::SessionId::from),
         }
     }
 }

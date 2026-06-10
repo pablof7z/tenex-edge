@@ -54,7 +54,7 @@ impl Kind1Materializer {
             .unwrap_or_default();
         store
             .upsert_peer_session(
-                &pr.session_id,
+                pr.session_id.as_str(),
                 &pr.agent.pubkey,
                 &slug,
                 &pr.project,
@@ -162,7 +162,7 @@ impl Kind1Materializer {
                 "received",
                 Some(&eid_hex),
             )?;
-            store.add_message_recipient(&message_id, to_pubkey, m.target_session.as_deref())?;
+            store.add_message_recipient(&message_id, to_pubkey, m.target_session.as_ref().map(|s| s.as_str()))?;
             Ok(())
         })()
         .ok(); // best-effort; never fail the legacy inbox path
