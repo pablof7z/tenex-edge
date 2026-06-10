@@ -367,6 +367,12 @@ impl Store {
             "ALTER TABLE sessions ADD COLUMN last_prompt_event_id TEXT NOT NULL DEFAULT ''",
             [],
         );
+        // Track the most recent TurnReply event ID so the next user prompt can
+        // carry the correct NIP-10 reply marker threading back to the agent reply.
+        let _ = conn.execute(
+            "ALTER TABLE sessions ADD COLUMN last_agent_reply_event_id TEXT NOT NULL DEFAULT ''",
+            [],
+        );
         // Snapshot of the last assistant text at the beginning of each turn.
         // Used by rpc_turn_end to poll until a *new* response appears in the
         // transcript (Claude Code writes the transcript after the stop hook fires).

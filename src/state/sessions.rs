@@ -130,6 +130,26 @@ impl Store {
         Ok(())
     }
 
+    /// Store the event ID of the most recently published TurnReply, so the next
+    /// user prompt can reply to it with a NIP-10 reply marker.
+    pub fn set_last_agent_reply_event_id(&self, session_id: &str, event_id: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE sessions SET last_agent_reply_event_id=?2 WHERE session_id=?1",
+            params![session_id, event_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_last_agent_reply_event_id(&self, session_id: &str) -> String {
+        self.conn
+            .query_row(
+                "SELECT last_agent_reply_event_id FROM sessions WHERE session_id=?1",
+                params![session_id],
+                |r| r.get::<_, String>(0),
+            )
+            .unwrap_or_default()
+    }
+
     /// Snapshot the last assistant text at the start of a turn. `rpc_turn_end`
     /// polls until the transcript returns something *different* from this value,
     /// so it reliably reads the current turn's response even when Claude Code
