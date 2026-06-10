@@ -185,7 +185,13 @@ pub(super) async fn rpc_turn_end(
                 let edge = crate::config::edge_home();
                 if let Ok(id) = crate::identity::load_or_create(&edge, &rec.agent_slug, crate::util::now_secs()) {
                     if let Ok(builder) = state.codec.encode(&ev) {
-                        state.transport.publish_signed(builder, &id.keys).await.ok();
+                        if let Ok(reply_eid) = state.transport.publish_signed(builder, &id.keys).await {
+                            let sid = p.session.clone();
+                            let eid_hex = reply_eid.to_hex();
+                            state.with_store(|s| {
+                                s.set_last_agent_reply_event_id(&sid, &eid_hex).ok();
+                            });
+                        }
                     }
                 }
             }
@@ -236,15 +242,36 @@ pub(super) async fn rpc_user_prompt(
     )?;
     let body = p.prompt.unwrap_or_default();
 
+    // Read NIP-10 thread state before publishing so we can tag this prompt.
+    let (thread_root, last_agent_reply) = state.with_store(|s| {
+        let (root, _) = s.get_thread_event_ids(&rec.session_id);
+        let agent_reply = s.get_last_agent_reply_event_id(&rec.session_id);
+        (root, agent_reply)
+    });
+
     // Include `session-id` so the event is session-scoped on the wire.  Without
     // it, any inbox-routing path (live subscription or fetch) would fan out this
     // event to ALL sessions of the agent, leaking one session's user prompt into
     // a sibling session's inbox.
-    let builder = EventBuilder::new(Kind::from(1u16), body).tags([
-        Tag::parse(["h", &rec.project])?,
-        Tag::parse(["p", &rec.agent_pubkey])?,
-        Tag::parse(["session-id", &rec.session_id])?,
-    ]);
+    //
+    // For non-root prompts also carry NIP-10 threading so clients can display
+    // the full conversation thread. The first prompt is the root (no e-tags);
+    // subsequent prompts reply to the last agent TurnReply.
+    let builder = if !thread_root.is_empty() && !last_agent_reply.is_empty() {
+        EventBuilder::new(Kind::from(1u16), body).tags([
+            Tag::parse(["h", &rec.project])?,
+            Tag::parse(["p", &rec.agent_pubkey])?,
+            Tag::parse(["session-id", &rec.session_id])?,
+            Tag::parse(["e", &thread_root, "", "root"])?,
+            Tag::parse(["e", &last_agent_reply, "", "reply"])?,
+        ])
+    } else {
+        EventBuilder::new(Kind::from(1u16), body).tags([
+            Tag::parse(["h", &rec.project])?,
+            Tag::parse(["p", &rec.agent_pubkey])?,
+            Tag::parse(["session-id", &rec.session_id])?,
+        ])
+    };
     let event_id = state.transport.publish_signed(builder, &user_keys).await?;
 
     let eid = event_id.to_hex();
