@@ -724,14 +724,31 @@ async fn rpc_propose(
         anyhow::bail!("title must not be empty");
     }
 
-    let rec = resolve_session(
+    // Resolve session if one is live; fall back to cwd-based project + env agent.
+    // propose doesn't require a live session — it just needs a project and a key.
+    let session_rec = resolve_session(
         state,
         p.session.as_deref(),
         p.env_session.as_deref(),
         p.cwd.as_deref(),
         p.agent.as_deref(),
-    )?;
-    let id = identity::load_or_create(&config::edge_home(), &rec.agent_slug, now_secs())?;
+    )
+    .ok();
+    let cwd = p
+        .cwd
+        .as_deref()
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+    let project = session_rec
+        .as_ref()
+        .map(|r| r.project.clone())
+        .unwrap_or_else(|| crate::project::resolve(&cwd));
+    let agent_slug = session_rec
+        .as_ref()
+        .map(|r| r.agent_slug.clone())
+        .or_else(|| p.agent.clone().filter(|a| !a.is_empty()))
+        .unwrap_or_else(|| "agent".to_string());
+    let id = identity::load_or_create(&config::edge_home(), &agent_slug, now_secs())?;
 
     // Addressable `d` identifier. A caller-supplied `d` makes this a REVISION
     // that supersedes the prior (author, d) at the same naddr; otherwise mint one.
@@ -756,10 +773,13 @@ async fn rpc_propose(
     let mut tags: Vec<Tag> = vec![
         Tag::parse(["d", &d_tag]).context("d tag")?,
         Tag::parse(["title", &p.title]).context("title tag")?,
-        Tag::parse(["h", &rec.project]).context("h tag")?,
-        Tag::parse(["session-id", &rec.session_id]).context("session-id tag")?,
+        Tag::parse(["h", &project]).context("h tag")?,
         // No agent tag: author identity is the event signer (pubkey); slug is in kind:0.
     ];
+    // Authoring session tag — only when a live session exists.
+    if let Some(ref rec) = session_rec {
+        tags.push(Tag::parse(["session-id", &rec.session_id]).context("session-id tag")?);
+    }
     // p-tag each owner so the proposal surfaces in their inbox.
     for owner in &state.owners {
         tags.push(Tag::parse(["p", owner]).context("p tag")?);
@@ -784,7 +804,7 @@ async fn rpc_propose(
     let now = now_secs();
     let pi = state.provider.provider_instance.clone();
     let thread_id = state.with_store(|s| -> Result<String> {
-        let project_id = s.ensure_project_origin(FABRIC, &pi, &rec.project, &rec.project, now)?;
+        let project_id = s.ensure_project_origin(FABRIC, &pi, &project, &project, now)?;
         let thread_id = if let Some(tid) = p.thread_id.as_deref() {
             // Attach to an existing thread.
             // ensure_thread_origin is idempotent; use the proposal's event id as
