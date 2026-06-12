@@ -537,8 +537,8 @@ fn resolve_send_message_body(raw: Option<String>) -> Result<String> {
         None => {
             if io::stdin().is_terminal() {
                 bail!(
-                    "missing message; use `tenex-edge send-message --recipient <target> --message \"...\"` \
-                     or pipe/heredoc the message on stdin"
+                    "missing message; pass it positionally, via --message, \
+                     or pipe/heredoc it on stdin"
                 );
             }
             read_stdin_message()
@@ -814,7 +814,7 @@ pub fn push_turn_fabric_block(
                 let who_text = render_who_plain(&snapshot);
                 blocks.push(format!(
                 "tenex-edge fabric — agents you can message. To send, run \
-                 `tenex-edge send-message --recipient <agent@project|session-id> --message \"...\"`:\n{}",
+                 `tenex-edge inbox send --to <agent@project|session-id> --subject \"...\" --message \"...\"`:\n{}",
                 who_text.trim_end()
             ));
         }

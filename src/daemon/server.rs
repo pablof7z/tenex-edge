@@ -2229,6 +2229,13 @@ fn derive_and_emit_tail_events(
             if !hosted.contains(&m.to_pubkey) {
                 return;
             }
+            // Self-authored events never derive a tail line: the publishing RPC
+            // already emitted the (slug-resolved) outbound line, and the relay
+            // may or may not echo our own events back — suppressing here is the
+            // only deterministic way to avoid double-counting.
+            if hosted.contains(&m.from.pubkey) {
+                return;
+            }
             // Exact thread attribution: the materializer reports the canonical
             // thread it filed this message under.
             let thread_short = thread_id.map(pubkey_short);
