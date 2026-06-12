@@ -47,6 +47,9 @@ pub struct SendIntent {
     /// Existing canonical thread id to attach to. `None` → a new thread root
     /// is created from the published event id (Phase 7 will refine).
     pub thread_id: Option<String>,
+    /// Envelope metadata (subject + sender workspace snapshot + reply-to).
+    /// Rides the wire as tags; rendered as an email-like header on receipt.
+    pub meta: crate::domain::MentionMeta,
 }
 
 impl SendIntent {
@@ -60,6 +63,7 @@ impl SendIntent {
             body: self.body.clone(),
             target_session: self.target_session.clone().map(crate::util::SessionId::from),
             from_session: self.from_session.clone().map(crate::util::SessionId::from),
+            meta: self.meta.clone(),
         }
     }
 }
@@ -507,6 +511,7 @@ mod tests {
             body: "hello reply".into(),
             target_session: None,
             from_session: None,
+            meta: crate::domain::MentionMeta::default(),
         };
 
         let builder = wire

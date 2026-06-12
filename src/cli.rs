@@ -2,7 +2,10 @@
 
 use crate::domain::DomainEvent;
 use crate::state::Store;
-use crate::util::{now_secs, pubkey_short, session_short_code, slugify_host, SessionId};
+use crate::util::{
+    dirty_label, format_local_datetime, now_secs, pubkey_short, relative_time, session_short_code,
+    slugify_host, SessionId,
+};
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use crossterm::{
@@ -35,29 +38,6 @@ enum Cmd {
     // corresponding private fn (session_start_inner / session_end / turn_start /
     // turn_check / turn_end). There is no host-facing way — or need — to invoke
     // them by hand.
-    /// Mention another agent or a specific session.
-    SendMessage {
-        /// session-id (or prefix), agent slug, slug@project, or hex pubkey.
-        #[arg(value_name = "RECIPIENT")]
-        recipient: Option<String>,
-        /// Message body.
-        #[arg(value_name = "MESSAGE")]
-        message: Option<String>,
-        /// session-id (or prefix), agent slug, slug@project, or hex pubkey.
-        #[arg(long = "recipient", value_name = "RECIPIENT")]
-        recipient_flag: Option<String>,
-        /// Message body.
-        #[arg(long = "message", value_name = "MESSAGE")]
-        message_flag: Option<String>,
-        /// My session id; if omitted, resolved from the current directory.
-        #[arg(long)]
-        session: Option<String>,
-        /// Canonical thread id to reply into (encodes NIP-10 root e-tag on the
-        /// published event so the recipient groups the reply into the same thread).
-        /// Omit for a new root message (default Phase 6 behavior).
-        #[arg(long = "thread", value_name = "THREAD_ID")]
-        thread_id: Option<String>,
-    },
     /// List threads and messages for a project (Phase 7 Communications plane).
     Threads {
         /// Project slug (defaults to the project resolved from the current directory).
@@ -140,12 +120,16 @@ enum Cmd {
         #[arg(long)]
         live: bool,
     },
-    /// Print + drain pending mentions for a session. Used by the opencode
-    /// injection path and as a manual "check my messages" command. (Claude Code
-    /// and Codex drain via the `hook --type user-prompt-submit` path instead.)
+    /// Read your messages (bare `inbox`), or `send` / `reply` to other agents.
+    ///
+    /// Bare `inbox` prints + drains pending mentions for a session — used by the
+    /// opencode injection path and as a manual "check my messages" command.
+    /// (Claude Code and Codex drain via the `hook --type user-prompt-submit` path.)
     Inbox {
+        #[command(subcommand)]
+        action: Option<InboxAction>,
         /// Session id; if omitted, resolved from the current directory.
-        #[arg(long)]
+        #[arg(long, global = true)]
         session: Option<String>,
     },
     /// Block until a mention arrives for this session, then print it and exit.
@@ -204,6 +188,43 @@ enum Cmd {
 }
 
 #[derive(Subcommand)]
+enum InboxAction {
+    /// Send a message to another agent or a specific session.
+    Send {
+        /// Recipient: session-id (or prefix), agent slug, slug@project, or hex pubkey.
+        #[arg(long = "to", value_name = "RECIPIENT")]
+        to: String,
+        /// One-line subject ("what this is about").
+        #[arg(long)]
+        subject: Option<String>,
+        /// Message body. Positional, or via --message, or piped on stdin.
+        #[arg(value_name = "MESSAGE")]
+        message: Option<String>,
+        #[arg(long = "message", value_name = "MESSAGE")]
+        message_flag: Option<String>,
+        /// Canonical thread id to reply into (encodes NIP-10 root e-tag on the
+        /// published event so the recipient groups the reply into the same thread).
+        /// Omit for a new root message.
+        #[arg(long = "thread", value_name = "THREAD_ID")]
+        thread_id: Option<String>,
+    },
+    /// Reply to a message by its ID (the `ID:` shown on each message you receive).
+    Reply {
+        /// The ID shown on the message you're replying to.
+        #[arg(long)]
+        id: String,
+        /// Subject; defaults to "Re: <original subject>".
+        #[arg(long)]
+        subject: Option<String>,
+        /// Reply body. Positional, or via --message, or piped on stdin.
+        #[arg(value_name = "MESSAGE")]
+        message: Option<String>,
+        #[arg(long = "message", value_name = "MESSAGE")]
+        message_flag: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
 enum AclAction {
     /// List pending (unauthorized) + authorized + blocked agents.
     List,
@@ -239,20 +260,6 @@ enum ProjectAction {
 
 pub async fn run(cli: Cli) -> Result<()> {
     match cli.cmd {
-        Cmd::SendMessage {
-            recipient,
-            message,
-            recipient_flag,
-            message_flag,
-            session,
-            thread_id,
-        } => {
-            let recipient = recipient_flag
-                .or(recipient)
-                .context("missing recipient; use `tenex-edge send-message --recipient <target> --message \"...\"`")?;
-            let message = resolve_send_message_body(message_flag.or(message))?;
-            send_message(recipient, message, session, thread_id).await
-        }
         Cmd::Propose { title, message, thread_id, d, session } => {
             let body = resolve_send_message_body(message)?;
             propose(title, body, thread_id, d, session).await
@@ -281,7 +288,28 @@ pub async fn run(cli: Cli) -> Result<()> {
             only, exclude, include, all, compact,
             relative, no_emoji, no_color, json, no_follow, live,
         }).await,
-        Cmd::Inbox { session } => inbox(session).await,
+        Cmd::Inbox { action, session } => match action {
+            None => inbox(session).await,
+            Some(InboxAction::Send {
+                to,
+                subject,
+                message,
+                message_flag,
+                thread_id,
+            }) => {
+                let message = resolve_send_message_body(message_flag.or(message))?;
+                inbox_send(to, subject, message, session, thread_id).await
+            }
+            Some(InboxAction::Reply {
+                id,
+                subject,
+                message,
+                message_flag,
+            }) => {
+                let message = resolve_send_message_body(message_flag.or(message))?;
+                inbox_reply(id, subject, message, session).await
+            }
+        },
         Cmd::WaitForMention { session, timeout } => wait_for_mention(session, timeout).await,
         Cmd::Project { action } => project(action).await,
         Cmd::Doctor => doctor().await,
@@ -340,14 +368,16 @@ fn session_end(session: String) -> Result<()> {
 
 // ── send-message ─────────────────────────────────────────────────────────────
 
-async fn send_message(
+async fn inbox_send(
     recipient: String,
+    subject: Option<String>,
     message: String,
     session: Option<String>,
     thread_id: Option<String>,
 ) -> Result<()> {
     let params = serde_json::json!({
         "recipient": recipient,
+        "subject": subject,
         "message": message,
         "session": session,
         "env_session": std::env::var("TENEX_EDGE_SESSION").ok(),
@@ -356,13 +386,44 @@ async fn send_message(
         "thread_id": thread_id,
     });
     let v = daemon_call_async("send_message", params).await?;
+    print_send_ack(&v);
+    Ok(())
+}
+
+async fn inbox_reply(
+    id: String,
+    subject: Option<String>,
+    message: String,
+    session: Option<String>,
+) -> Result<()> {
+    let params = serde_json::json!({
+        "id": id,
+        "subject": subject,
+        "message": message,
+        "session": session,
+        "env_session": std::env::var("TENEX_EDGE_SESSION").ok(),
+        "agent": std::env::var("TENEX_EDGE_AGENT").ok(),
+        "cwd": std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()),
+    });
+    let v = daemon_call_async("inbox_reply", params).await?;
+    print_send_ack(&v);
+    Ok(())
+}
+
+fn print_send_ack(v: &serde_json::Value) {
     let to_pubkey = v["to_pubkey"].as_str().unwrap_or_default().to_string();
-    let target_session = v["target_session"].as_str().map(str::to_string);
+    let target_session = v["target_session"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
     match target_session {
-        Some(s) => println!("mentioned {} (session {})", pubkey_short(&to_pubkey), pubkey_short(&s)),
+        Some(s) => println!(
+            "mentioned {} (session {})",
+            pubkey_short(&to_pubkey),
+            SessionId::from(s)
+        ),
         None => println!("mentioned {}", pubkey_short(&to_pubkey)),
     }
-    Ok(())
 }
 
 // ── propose ───────────────────────────────────────────────────────────────────
@@ -1261,29 +1322,125 @@ async fn acl(action: Option<AclAction>) -> Result<()> {
 /// the sender's exact session id — so a reply reaches the precise sibling session
 /// that wrote this — but only when that session actually resolves on our side;
 /// otherwise fall back to `slug@project`, which always routes to the agent.
-pub fn mention_reply_handle(store: &Store, row: &crate::state::InboxRow) -> String {
-    if !row.from_session.is_empty() {
-        let resolves = store
-            .find_peer_session_by_prefix(&row.from_session)
-            .ok()
-            .flatten()
-            .is_some()
-            || store
-                .find_session_by_prefix(&row.from_session)
-                .ok()
-                .flatten()
-                .is_some();
-        if resolves {
-            return row.from_session.clone();
-        }
-    }
-    format!("{}@{}", row.from_slug, row.project)
+/// Render an `InboxRow` as an email-like envelope (the daemon-side path; the CLI
+/// path renders from JSON). `self_host` decides the `[remote: …]` annotation.
+fn row_envelope(r: &crate::state::InboxRow, self_host: &str, now: u64) -> String {
+    let id = mention_short_id(&r.mention_event_id);
+    format_envelope(&EnvelopeView {
+        from_slug: &r.from_slug,
+        project: &r.project,
+        from_session: &r.from_session,
+        host: &r.host,
+        self_host,
+        subject: &r.subject,
+        branch: &r.branch,
+        commit: &r.commit,
+        dirty: r.dirty,
+        id: &id,
+        sent_at: r.created_at,
+        now,
+        body: &r.body,
+    })
 }
 
-/// One injected line for an inbound mention. `reply_to` is the literal value to
-/// pass to `tenex-edge send-message --recipient <reply_to>`.
-pub fn format_mention_line(from_slug: &str, project: &str, reply_to: &str, body: &str) -> String {
-    format!("[mention from {from_slug}@{project} · reply-to {reply_to}] {body}")
+// ── envelope rendering (one place; reused by inbox / wait / turn injection) ───
+
+/// The short `ID` shown on an envelope — the first 8 hex chars of the mention's
+/// event id. The receiver passes it to `tenex-edge inbox reply --id <ID>`, which
+/// matches it back to the full event by prefix.
+pub fn mention_short_id(event_id: &str) -> String {
+    event_id.chars().take(8).collect()
+}
+
+/// Everything needed to render one inbound message as an email-like envelope.
+/// Built either daemon-side from an `InboxRow` (turn injection) or client-side
+/// from the daemon's JSON (the `inbox` / `wait-for-mention` commands).
+pub struct EnvelopeView<'a> {
+    pub from_slug: &'a str,
+    pub project: &'a str,
+    /// Sender's session id (raw; rendered as a stable short code). Empty → omitted.
+    pub from_session: &'a str,
+    /// Sender's host label. Empty, or equal to `self_host`, → no remote annotation.
+    pub host: &'a str,
+    /// The viewer's own host, to decide whether the sender is `[remote: …]`.
+    pub self_host: &'a str,
+    pub subject: &'a str,
+    pub branch: &'a str,
+    pub commit: &'a str,
+    pub dirty: u32,
+    /// Short reply id (see `mention_short_id`).
+    pub id: &'a str,
+    /// When the sender published (unix secs); rendered absolute + relative.
+    pub sent_at: u64,
+    pub now: u64,
+    pub body: &'a str,
+}
+
+/// Render an inbound message as an email-like envelope:
+///
+/// ```text
+/// From: codex@tenex-edge [session ca0ff4]
+/// Date: 2026-06-12 14:23 (3 min ago)
+/// Subject: NIP-29 group creation failing
+/// Branch: features/oauth (a1b2c3d) [1 file dirty]
+/// ID: 01234567
+/// --
+/// <body>
+/// ```
+///
+/// The Subject and Branch lines are omitted when absent; a remote sender adds
+/// `[remote: <host>]` to the From line.
+pub fn format_envelope(e: &EnvelopeView) -> String {
+    let mut from = format!("{}@{}", e.from_slug, e.project);
+    if !e.from_session.is_empty() {
+        let _ = write!(from, " [session {}]", session_short_code(e.from_session));
+    }
+    if !e.host.is_empty() && slugify_host(e.host) != slugify_host(e.self_host) {
+        let _ = write!(from, " [remote: {}]", e.host);
+    }
+
+    let mut s = String::new();
+    let _ = write!(s, "From: {from}");
+    let _ = write!(
+        s,
+        "\nDate: {} ({})",
+        format_local_datetime(e.sent_at),
+        relative_time(e.sent_at, e.now)
+    );
+    if !e.subject.is_empty() {
+        let _ = write!(s, "\nSubject: {}", e.subject);
+    }
+    if !e.branch.is_empty() {
+        let commit = if e.commit.is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", e.commit)
+        };
+        let _ = write!(s, "\nBranch: {}{}{}", e.branch, commit, dirty_label(e.dirty));
+    }
+    let _ = write!(s, "\nID: {}", e.id);
+    let _ = write!(s, "\n--\n{}", e.body);
+    s
+}
+
+/// Render a `serde_json` row (as produced by the daemon's `rows_to_json`) into an
+/// envelope. Used by the `inbox` and `wait-for-mention` CLI commands.
+fn format_envelope_json(r: &serde_json::Value, now: u64) -> String {
+    format_envelope(&EnvelopeView {
+        from_slug: r["from_slug"].as_str().unwrap_or(""),
+        project: r["project"].as_str().unwrap_or(""),
+        from_session: r["from_session"].as_str().unwrap_or(""),
+        host: r["host"].as_str().unwrap_or(""),
+        self_host: r["self_host"].as_str().unwrap_or(""),
+        subject: r["subject"].as_str().unwrap_or(""),
+        branch: r["branch"].as_str().unwrap_or(""),
+        commit: r["commit"].as_str().unwrap_or(""),
+        dirty: r["dirty"].as_u64().unwrap_or(0) as u32,
+        id: r["id"].as_str().unwrap_or(""),
+        sent_at: r["created_at"].as_u64().unwrap_or(0),
+        now,
+        body: r["body"].as_str().unwrap_or(""),
+    })
 }
 
 // ── inbox ────────────────────────────────────────────────────────────────────
@@ -1297,16 +1454,12 @@ async fn inbox(session: Option<String>) -> Result<()> {
     });
     let v = daemon_call_async("inbox", params).await?;
     if let Some(rows) = v["rows"].as_array() {
-        for r in rows {
-            println!(
-                "{}",
-                format_mention_line(
-                    r["from_slug"].as_str().unwrap_or(""),
-                    r["project"].as_str().unwrap_or(""),
-                    r["reply_to"].as_str().unwrap_or(""),
-                    r["body"].as_str().unwrap_or(""),
-                )
-            );
+        let now = now_secs();
+        for (i, r) in rows.iter().enumerate() {
+            if i > 0 {
+                println!();
+            }
+            println!("{}", format_envelope_json(r, now));
         }
     }
     if let Some(pending) = v["pending_agents"].as_array().filter(|p| !p.is_empty()) {
@@ -1344,18 +1497,14 @@ async fn wait_for_mention(session: Option<String>, timeout: u64) -> Result<()> {
     });
     let v = daemon_call_async("wait_for_mention", params).await?;
     if let Some(rows) = v["rows"].as_array().filter(|r| !r.is_empty()) {
-        for r in rows {
-            println!(
-                "{}",
-                format_mention_line(
-                    r["from_slug"].as_str().unwrap_or(""),
-                    r["project"].as_str().unwrap_or(""),
-                    r["reply_to"].as_str().unwrap_or(""),
-                    r["body"].as_str().unwrap_or(""),
-                )
-            );
+        let now = now_secs();
+        for (i, r) in rows.iter().enumerate() {
+            if i > 0 {
+                println!();
+            }
+            println!("{}", format_envelope_json(r, now));
         }
-        println!("[tenex-edge] Run `tenex-edge wait-for-mention` with run_in_background=true to receive the next mention.");
+        println!("\n[tenex-edge] Run `tenex-edge wait-for-mention` with run_in_background=true to receive the next mention.");
     }
     Ok(())
 }
@@ -1396,8 +1545,9 @@ pub fn assemble_turn_start_context(
         blocks.push(
             "[tenex-edge] You are connected to the tenex-edge agent fabric. \
              You can run `tenex-edge who`, `tenex-edge inbox`, and \
-             `tenex-edge send-message --recipient <agent@project|session-id> --message \"...\"`. \
-             If the user asks you to message/contact/tell another agent, run `tenex-edge send-message`; \
+             `tenex-edge inbox send --to <agent@project|session-id> --subject \"...\" --message \"...\"`. \
+             Reply to a message you received with `tenex-edge inbox reply --id <ID> \"...\"`. \
+             If the user asks you to message/contact/tell another agent, run `tenex-edge inbox send`; \
              do not say you cannot send messages from here. Run `tenex-edge wait-for-mention` \
              with run_in_background=true so you are woken when a mention arrives. \
              Re-run it each time one is received."
@@ -1429,24 +1579,22 @@ pub fn assemble_turn_start_context(
     }
 
     // Drain inbox (authoritative delivery; turn_check only peeks).
-    let inbox_lines = {
+    let inbox_envelopes = {
         let s = store.lock().expect("store mutex poisoned");
         let rows = s.drain_inbox(&rec.session_id).unwrap_or_default();
-        // Render each line (incl. its reply-to handle) while we hold the lock —
-        // the handle resolution needs the store.
-        rows.iter()
-            .map(|r| {
-                s.mark_mention_seen(&rec.agent_pubkey, &r.mention_event_id, now_secs())
-                    .ok();
-                let handle = mention_reply_handle(&s, r);
-                format_mention_line(&r.from_slug, &r.project, &handle, &r.body)
-            })
-            .collect::<Vec<_>>()
+        for r in &rows {
+            s.mark_mention_seen(&rec.agent_pubkey, &r.mention_event_id, now_secs())
+                .ok();
+        }
+        rows
     };
-    if !inbox_lines.is_empty() {
-        let mut text = String::from("Messages from other agents (tenex-edge):");
-        for line in &inbox_lines {
-            let _ = write!(text, "\n{line}");
+    if !inbox_envelopes.is_empty() {
+        let now = now_secs();
+        let mut text = String::from(
+            "Messages from other agents (tenex-edge) — reply with `tenex-edge inbox reply --id <ID> \"...\"`:",
+        );
+        for r in &inbox_envelopes {
+            let _ = write!(text, "\n\n{}", row_envelope(r, &rec.host, now));
         }
         blocks.push(text);
     }
@@ -1481,24 +1629,24 @@ pub fn assemble_turn_start_context(
 }
 
 /// Mid-turn inbox PEEK (read-only) shared by the daemon's `turn_check` RPC.
-pub fn assemble_turn_check_context(store: &std::sync::Mutex<Store>, session_id: &str) -> Option<String> {
-    let lines = {
+/// `self_host` is the viewer's own host (used to flag remote senders).
+pub fn assemble_turn_check_context(
+    store: &std::sync::Mutex<Store>,
+    session_id: &str,
+    self_host: &str,
+) -> Option<String> {
+    let rows = {
         let s = store.lock().expect("store mutex poisoned");
         // Route through the read-model method (peek semantics preserved).
-        let rows = s.undelivered_messages_for_session(session_id).unwrap_or_default();
-        rows.iter()
-            .map(|r| {
-                let handle = mention_reply_handle(&s, r);
-                format_mention_line(&r.from_slug, &r.project, &handle, &r.body)
-            })
-            .collect::<Vec<_>>()
+        s.undelivered_messages_for_session(session_id).unwrap_or_default()
     };
-    if lines.is_empty() {
+    if rows.is_empty() {
         return None;
     }
+    let now = now_secs();
     let mut text = String::from("[tenex-edge] Message(s) arrived while you were working:");
-    for line in &lines {
-        let _ = write!(text, "\n{line}");
+    for r in &rows {
+        let _ = write!(text, "\n\n{}", row_envelope(r, self_host, now));
     }
     Some(text)
 }
@@ -2368,6 +2516,11 @@ mod turn_context_tests {
             body: "hello from sender".to_string(),
             created_at: 100,
             from_session: String::new(),
+            subject: String::new(),
+            branch: String::new(),
+            commit: String::new(),
+            dirty: 0,
+            host: String::new(),
         }
     }
 
@@ -2393,12 +2546,12 @@ mod turn_context_tests {
         let text = ctx.expect("FREEZE: turn_start must return Some when inbox has rows");
 
         assert!(
-            text.contains("Messages from other agents (tenex-edge):"),
+            text.contains("Messages from other agents (tenex-edge)"),
             "FREEZE: mention section header must be present; got: {text:?}"
         );
         assert!(
-            text.contains("[mention from sender@proj"),
-            "FREEZE: mention line must contain [mention from sender@proj; got: {text:?}"
+            text.contains("From: sender@proj"),
+            "envelope From line must be present; got: {text:?}"
         );
         assert!(
             text.contains("hello from sender"),
@@ -2441,15 +2594,19 @@ mod turn_context_tests {
         let m = Mutex::new(store);
 
         // turn_check peeks: returns Some with the mention line.
-        let ctx = assemble_turn_check_context(&m, "sess-freeze-3");
+        let ctx = assemble_turn_check_context(&m, "sess-freeze-3", "laptop");
         let text = ctx.expect("FREEZE: turn_check must return Some when inbox has undelivered rows");
         assert!(
             text.contains("[tenex-edge] Message(s) arrived while you were working:"),
             "FREEZE: turn_check header must be present; got: {text:?}"
         );
         assert!(
-            text.contains("[mention from sender@proj"),
-            "FREEZE: turn_check must render the mention line; got: {text:?}"
+            text.contains("From: sender@proj"),
+            "turn_check must render the envelope From line; got: {text:?}"
+        );
+        assert!(
+            text.contains("ID: evt-c3"),
+            "turn_check envelope must carry the reply ID; got: {text:?}"
         );
 
         // The row is still in the store (peek, not drain): drain_inbox now consumes it.
@@ -2466,60 +2623,72 @@ mod turn_context_tests {
     fn freeze_turn_check_context_returns_none_when_inbox_empty() {
         let store = Store::open_memory().unwrap();
         let m = Mutex::new(store);
-        let ctx = assemble_turn_check_context(&m, "sess-no-rows");
+        let ctx = assemble_turn_check_context(&m, "sess-no-rows", "laptop");
         assert!(
             ctx.is_none(),
             "FREEZE: turn_check with empty inbox must return None"
         );
     }
 
-    /// FREEZE C5: reply-to handle falls back to slug@project when from_session
-    /// is empty (the sender's session id is unknown — old peers / untargeted).
-    #[test]
-    fn freeze_mention_reply_handle_falls_back_to_slug_at_project() {
-        let store = Store::open_memory().unwrap();
-        let row = InboxRow {
-            mention_event_id: "evt-handle".to_string(),
-            target_session: "sess-x".to_string(),
-            from_pubkey: "pk-s".to_string(),
-            from_slug: "reviewer".to_string(),
-            project: "myproj".to_string(),
-            body: "yo".to_string(),
-            created_at: 1,
-            from_session: String::new(), // unknown session id
-        };
-        let handle = mention_reply_handle(&store, &row);
-        assert_eq!(
-            handle, "reviewer@myproj",
-            "FREEZE: empty from_session must fall back to slug@project"
-        );
+    fn view<'a>() -> EnvelopeView<'a> {
+        EnvelopeView {
+            from_slug: "codex",
+            project: "tenex-edge",
+            from_session: "sender-session-id",
+            host: "",
+            self_host: "my-box",
+            subject: "NIP-29 group creation failing",
+            branch: "features/oauth",
+            commit: "a1b2c3d",
+            dirty: 0,
+            id: "01234567",
+            sent_at: 1_000,
+            now: 1_180, // +3 min
+            body: "can you take a look?",
+        }
     }
 
-    /// FREEZE C6: reply-to handle uses from_session when it resolves in the store
-    /// (peer session prefix lookup succeeds → exact session id is returned).
     #[test]
-    fn freeze_mention_reply_handle_uses_session_when_resolvable() {
-        let store = Store::open_memory().unwrap();
-        // Register the sender's session in peer_sessions so prefix lookup resolves.
-        store
-            .upsert_peer_session("sender-session-id", "pk-s", "reviewer", "myproj", "host", "", 1000)
-            .unwrap();
-
-        let row = InboxRow {
-            mention_event_id: "evt-handle-2".to_string(),
-            target_session: "sess-x".to_string(),
-            from_pubkey: "pk-s".to_string(),
-            from_slug: "reviewer".to_string(),
-            project: "myproj".to_string(),
-            body: "yo".to_string(),
-            created_at: 1,
-            from_session: "sender-session-id".to_string(),
-        };
-        let handle = mention_reply_handle(&store, &row);
+    fn envelope_has_email_like_headers_then_body() {
+        let out = format_envelope(&view());
+        let lines: Vec<&str> = out.lines().collect();
         assert_eq!(
-            handle, "sender-session-id",
-            "FREEZE: resolvable from_session must be used as reply-to handle"
+            lines[0],
+            format!(
+                "From: codex@tenex-edge [session {}]",
+                session_short_code("sender-session-id")
+            )
         );
+        assert!(lines[1].starts_with("Date: ") && lines[1].ends_with("(3 min ago)"));
+        assert_eq!(lines[2], "Subject: NIP-29 group creation failing");
+        assert_eq!(lines[3], "Branch: features/oauth (a1b2c3d)");
+        assert_eq!(lines[4], "ID: 01234567");
+        assert_eq!(lines[5], "--");
+        assert_eq!(lines[6], "can you take a look?");
+    }
+
+    #[test]
+    fn dirty_count_and_remote_host_annotate() {
+        let mut v = view();
+        v.dirty = 1;
+        v.host = "prod-01.example.com";
+        let out = format_envelope(&v);
+        assert!(out.contains("[remote: prod-01.example.com]"));
+        assert!(out.contains("Branch: features/oauth (a1b2c3d) [1 file dirty]"));
+        v.dirty = 3;
+        assert!(format_envelope(&v).contains("[3 files dirty]"));
+    }
+
+    #[test]
+    fn subject_and_branch_lines_omitted_when_empty() {
+        let mut v = view();
+        v.subject = "";
+        v.branch = "";
+        let out = format_envelope(&v);
+        assert!(!out.contains("Subject:"));
+        assert!(!out.contains("Branch:"));
+        // Same-host sender → no remote annotation.
+        assert!(!out.contains("remote:"));
     }
 }
 

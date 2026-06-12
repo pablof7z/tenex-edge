@@ -59,10 +59,22 @@ pub struct InboxRow {
     pub from_slug: String,
     pub project: String,
     pub body: String,
+    /// When the sender published this mention (the kind:1 event timestamp), so the
+    /// envelope's Date reflects send time, not local receipt/route time.
     pub created_at: u64,
     /// The sender's session id (empty when unknown — old peers / untargeted).
     /// Lets the recipient reply to the exact sibling session that wrote this.
     pub from_session: String,
+    /// Envelope: one-line subject ("" when unset).
+    pub subject: String,
+    /// Envelope: sender's git branch at send time ("" outside a repo).
+    pub branch: String,
+    /// Envelope: sender's short commit hash at send time ("" outside a repo).
+    pub commit: String,
+    /// Envelope: count of dirty, non-gitignored files in the sender's tree.
+    pub dirty: u32,
+    /// Envelope: sender's host label (drives the `[remote: <host>]` annotation).
+    pub host: String,
 }
 
 // ── Phase 7 read-model types ─────────────────────────────────────────────────
@@ -180,6 +192,11 @@ CREATE TABLE IF NOT EXISTS inbox (
     created_at       INTEGER NOT NULL,
     delivered        INTEGER NOT NULL DEFAULT 0,
     from_session     TEXT NOT NULL DEFAULT '',
+    subject          TEXT NOT NULL DEFAULT '',
+    branch           TEXT NOT NULL DEFAULT '',
+    commit_hash      TEXT NOT NULL DEFAULT '',
+    dirty            INTEGER NOT NULL DEFAULT 0,
+    host             TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (mention_event_id, target_session)
 );
 -- Per-session turn state: flipped by the host's turn-start/turn-end hooks. The
@@ -369,6 +386,16 @@ impl Store {
             "ALTER TABLE inbox ADD COLUMN from_session TEXT NOT NULL DEFAULT ''",
             [],
         );
+        // Envelope columns: subject + the sender's workspace snapshot at send time.
+        for col in [
+            "subject TEXT NOT NULL DEFAULT ''",
+            "branch TEXT NOT NULL DEFAULT ''",
+            "commit_hash TEXT NOT NULL DEFAULT ''",
+            "dirty INTEGER NOT NULL DEFAULT 0",
+            "host TEXT NOT NULL DEFAULT ''",
+        ] {
+            let _ = conn.execute(&format!("ALTER TABLE inbox ADD COLUMN {col}"), []);
+        }
         // NIP-10 thread tracking: root event (first user prompt in the session
         // thread) and most recent user prompt (triggers TurnReply at stop-hook).
         let _ = conn.execute(
@@ -802,11 +829,12 @@ impl Store {
     pub fn enqueue_mention(&self, m: &InboxRow) -> Result<bool> {
         let changed = self.conn.execute(
             "INSERT OR IGNORE INTO inbox
-               (mention_event_id, target_session, from_pubkey, from_slug, project, body, created_at, delivered, from_session)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,0,?8)",
+               (mention_event_id, target_session, from_pubkey, from_slug, project, body, created_at, delivered, from_session, subject, branch, commit_hash, dirty, host)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,0,?8,?9,?10,?11,?12,?13)",
             params![
                 m.mention_event_id, m.target_session, m.from_pubkey, m.from_slug,
-                m.project, m.body, m.created_at, m.from_session
+                m.project, m.body, m.created_at, m.from_session,
+                m.subject, m.branch, m.commit, m.dirty, m.host
             ],
         )?;
         Ok(changed > 0)
@@ -816,22 +844,11 @@ impl Store {
     /// mid-turn checks (turn_check) — no writes to state.db.
     pub fn peek_inbox(&self, session_id: &str) -> Result<Vec<InboxRow>> {
         let mut stmt = self.conn.prepare(
-            "SELECT mention_event_id, target_session, from_pubkey, from_slug, project, body, created_at, from_session
+            "SELECT mention_event_id, target_session, from_pubkey, from_slug, project, body, created_at, from_session, subject, branch, commit_hash, dirty, host
              FROM inbox WHERE target_session=?1 AND delivered=0 ORDER BY created_at",
         )?;
         let rows: Vec<InboxRow> = stmt
-            .query_map(params![session_id], |row| {
-                Ok(InboxRow {
-                    mention_event_id: row.get(0)?,
-                    target_session: row.get(1)?,
-                    from_pubkey: row.get(2)?,
-                    from_slug: row.get(3)?,
-                    project: row.get(4)?,
-                    body: row.get(5)?,
-                    created_at: row.get(6)?,
-                    from_session: row.get(7)?,
-                })
-            })?
+            .query_map(params![session_id], row_to_inbox)?
             .filter_map(|r| r.ok())
             .collect();
         Ok(rows)
@@ -1093,22 +1110,11 @@ impl Store {
     /// Return undelivered mentions for a session and mark them delivered.
     pub fn drain_inbox(&self, session_id: &str) -> Result<Vec<InboxRow>> {
         let mut stmt = self.conn.prepare(
-            "SELECT mention_event_id, target_session, from_pubkey, from_slug, project, body, created_at, from_session
+            "SELECT mention_event_id, target_session, from_pubkey, from_slug, project, body, created_at, from_session, subject, branch, commit_hash, dirty, host
              FROM inbox WHERE target_session=?1 AND delivered=0 ORDER BY created_at",
         )?;
         let rows: Vec<InboxRow> = stmt
-            .query_map(params![session_id], |row| {
-                Ok(InboxRow {
-                    mention_event_id: row.get(0)?,
-                    target_session: row.get(1)?,
-                    from_pubkey: row.get(2)?,
-                    from_slug: row.get(3)?,
-                    project: row.get(4)?,
-                    body: row.get(5)?,
-                    created_at: row.get(6)?,
-                    from_session: row.get(7)?,
-                })
-            })?
+            .query_map(params![session_id], row_to_inbox)?
             .filter_map(|r| r.ok())
             .collect();
         self.conn.execute(
@@ -1237,6 +1243,18 @@ impl Store {
             params![mid, thread_id, author_pubkey, body, created_at, direction, sync_state, native_event_id],
         )?;
         Ok(mid)
+    }
+
+    /// Canonical thread that contains the message published as `native_event_id`.
+    /// Used by `inbox reply` to file the reply into the original's thread.
+    pub fn thread_for_native_event(&self, native_event_id: &str) -> Option<String> {
+        self.conn
+            .query_row(
+                "SELECT thread_id FROM messages WHERE native_event_id=?1",
+                params![native_event_id],
+                |r| r.get::<_, String>(0),
+            )
+            .ok()
     }
 
     pub fn mark_message_sync_state(
@@ -1721,6 +1739,23 @@ impl Store {
         self.peek_inbox(session_id)
     }
 
+    /// Find any inbox row whose `mention_event_id` starts with `prefix` (the short
+    /// `ID` shown in an envelope). Used by `inbox reply --id` to recover the
+    /// original sender + event to thread the reply against. Returns the first
+    /// match ordered by recency; `None` if nothing matches.
+    pub fn find_inbox_by_event_prefix(&self, prefix: &str) -> Result<Option<InboxRow>> {
+        let pattern = format!("{prefix}%");
+        let mut stmt = self.conn.prepare(
+            "SELECT mention_event_id, target_session, from_pubkey, from_slug, project, body, created_at, from_session, subject, branch, commit_hash, dirty, host
+             FROM inbox WHERE mention_event_id LIKE ?1 ORDER BY created_at DESC LIMIT 1",
+        )?;
+        let row = stmt
+            .query_map(params![pattern], row_to_inbox)?
+            .filter_map(|r| r.ok())
+            .next();
+        Ok(row)
+    }
+
     // ── Phase 2: write-facing materializer methods ───────────────────────────
     //
     // These are the write surface the Phase 4 materializer will call.  Nothing
@@ -1850,6 +1885,28 @@ fn row_to_peer(row: &rusqlite::Row) -> rusqlite::Result<PeerSession> {
     })
 }
 
+
+/// Column order: mention_event_id, target_session, from_pubkey, from_slug,
+/// project, body, created_at, from_session, subject, branch, commit_hash, dirty,
+/// host. Shared by `peek_inbox`, `drain_inbox`, and `find_inbox_by_event_prefix`.
+fn row_to_inbox(row: &rusqlite::Row) -> rusqlite::Result<InboxRow> {
+    Ok(InboxRow {
+        mention_event_id: row.get(0)?,
+        target_session: row.get(1)?,
+        from_pubkey: row.get(2)?,
+        from_slug: row.get(3)?,
+        project: row.get(4)?,
+        body: row.get(5)?,
+        created_at: row.get(6)?,
+        from_session: row.get(7)?,
+        subject: row.get(8)?,
+        branch: row.get(9)?,
+        commit: row.get(10)?,
+        dirty: row.get::<_, i64>(11)? as u32,
+        host: row.get(12)?,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1895,6 +1952,11 @@ mod tests {
             body: "look here".into(),
             created_at: 5,
             from_session: "sender-A".into(),
+            subject: String::new(),
+            branch: String::new(),
+            commit: String::new(),
+            dirty: 0,
+            host: String::new(),
         };
         assert!(s.enqueue_mention(&row).unwrap()); // new
         assert!(!s.enqueue_mention(&row).unwrap()); // duplicate ignored
@@ -2173,6 +2235,11 @@ mod tests {
             body: "hello".into(),
             created_at: 100,
             from_session: "".into(),
+            subject: String::new(),
+            branch: String::new(),
+            commit: String::new(),
+            dirty: 0,
+            host: String::new(),
         };
 
         // First insert: new row → true.
@@ -2320,6 +2387,11 @@ mod tests {
             body: "peek me".into(),
             created_at: 1,
             from_session: "".into(),
+            subject: String::new(),
+            branch: String::new(),
+            commit: String::new(),
+            dirty: 0,
+            host: String::new(),
         };
         s.enqueue_mention(&row).unwrap();
 
@@ -2639,6 +2711,11 @@ mod tests {
             body: "hello rdm".into(),
             created_at: 1,
             from_session: "".into(),
+            subject: String::new(),
+            branch: String::new(),
+            commit: String::new(),
+            dirty: 0,
+            host: String::new(),
         };
         s.enqueue_mention(&row).unwrap();
         // Call twice — rows survive (non-destructive).
@@ -2732,6 +2809,11 @@ mod tests {
             body: "inbound".into(),
             created_at: 1,
             from_session: "".into(),
+            subject: String::new(),
+            branch: String::new(),
+            commit: String::new(),
+            dirty: 0,
+            host: String::new(),
         };
         assert!(s.materialize_inbound_message(&row).unwrap(), "first insert → true");
         assert!(!s.materialize_inbound_message(&row).unwrap(), "duplicate → false (idempotent)");
@@ -2920,6 +3002,7 @@ mod tests {
             body: "hi from sender".into(),
             target_session: Some("sess-inbound-1".into()),
             from_session: None,
+            meta: crate::domain::MentionMeta::default(),
         };
         let pi = "test-pi-inbound";
         let now = 2000u64;
@@ -3101,6 +3184,7 @@ mod tests {
             body: "reply body".into(),
             target_session: Some("sess-reply-rg".into()),
             from_session: None,
+            meta: crate::domain::MentionMeta::default(),
         };
 
         Kind1Materializer::materialize_inbound_message(

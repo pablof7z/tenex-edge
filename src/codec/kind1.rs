@@ -7,7 +7,7 @@
 //! | Activity   | kind:1,    `["h", project]` |
 //! | TurnReply  | kind:1,    `["h", project]`, `["e", root_id, "", "root"]`, `["e", reply_id, "", "reply"]` |
 //! | Status     | kind:30315 (NIP-38), `["h", project]`, `["d", project]`, optional `["session-id", id]`, optional `["rel-cwd", rel]`, `["expiration", ts]` |
-//! | Mention    | kind:1,    `["h", project]`, `["p", to]`, optional `["session-id", target]`, optional `["from-session", sender]` |
+//! | Mention    | kind:1,    `["h", project]`, `["p", to]`, optional `["session-id", target]`, `["from-session", sender]`, `["subject", s]`, `["git-branch", b]`, `["git-commit", c]`, `["git-dirty", n]`, `["from-host", h]`, `["e", reply_to, "", "reply"]` |
 //!
 //! kind:1 disambiguation on decode (in priority order):
 //!   1. Has `["p", ...]` tag                    → Mention
@@ -25,7 +25,7 @@
 
 use crate::codec::Codec;
 use crate::domain::{
-    Activity, AgentRef, DomainEvent, Mention, Presence, Profile, Status, TurnReply,
+    Activity, AgentRef, DomainEvent, Mention, MentionMeta, Presence, Profile, Status, TurnReply,
 };
 use crate::util::SessionId;
 use anyhow::Result;
@@ -209,6 +209,7 @@ impl Codec for Kind1Codec {
                 body,
                 target_session,
                 from_session,
+                meta,
             }) => {
                 let mut tags = vec![
                     project_tag(project)?,
@@ -219,6 +220,26 @@ impl Codec for Kind1Codec {
                 }
                 if let Some(sess) = from_session {
                     tags.push(tag(&["from-session", sess.as_str()])?);
+                }
+                if !meta.subject.is_empty() {
+                    tags.push(tag(&["subject", &meta.subject])?);
+                }
+                if !meta.branch.is_empty() {
+                    tags.push(tag(&["git-branch", &meta.branch])?);
+                }
+                if !meta.commit.is_empty() {
+                    tags.push(tag(&["git-commit", &meta.commit])?);
+                }
+                if meta.dirty > 0 {
+                    tags.push(tag(&["git-dirty", &meta.dirty.to_string()])?);
+                }
+                if !meta.host.is_empty() {
+                    tags.push(tag(&["from-host", &meta.host])?);
+                }
+                if let Some(reply_to) = &meta.reply_to_event_id {
+                    // NIP-10 reply marker back to the original mention; the `p`
+                    // tag above still makes this decode as a Mention (priority 1).
+                    tags.push(tag(&["e", reply_to, "", "reply"])?);
                 }
                 // allow_self_tagging: a mention to a sibling session of the SAME
                 // agent has p == author; nostr would otherwise strip that p tag.
@@ -294,6 +315,17 @@ impl Codec for Kind1Codec {
                         body: event.content.clone(),
                         target_session: first_tag(event, "session-id").map(SessionId::from),
                         from_session: first_tag(event, "from-session").map(SessionId::from),
+                        meta: MentionMeta {
+                            subject: first_tag(event, "subject").unwrap_or_default().to_string(),
+                            branch: first_tag(event, "git-branch").unwrap_or_default().to_string(),
+                            commit: first_tag(event, "git-commit").unwrap_or_default().to_string(),
+                            dirty: first_tag(event, "git-dirty")
+                                .and_then(|s| s.parse().ok())
+                                .unwrap_or(0),
+                            host: first_tag(event, "from-host").unwrap_or_default().to_string(),
+                            reply_to_event_id: e_tag_with_marker(event, "reply")
+                                .map(|s| s.to_string()),
+                        },
                     }));
                 }
                 if let (Some(root_id), Some(reply_id)) = (
@@ -502,6 +534,7 @@ mod tests {
             target_session: Some("sess-xyz".into()),
             // Distinct from target_session so the roundtrip proves they don't swap.
             from_session: Some("sender-sess-1".into()),
+            meta: MentionMeta::default(),
         });
         assert_eq!(roundtrip(ev.clone(), &keys), ev);
         // Wire event must have NO agent tag.
@@ -520,6 +553,7 @@ mod tests {
             body: "ping".into(),
             target_session: None,
             from_session: Some("sender-9".into()),
+            meta: MentionMeta::default(),
         });
         let signed = Kind1Codec.encode(&ev).unwrap().sign_with_keys(&keys).unwrap();
         assert!(has_tag(&signed, "from-session", "sender-9"));
@@ -550,6 +584,7 @@ mod tests {
             body: "can you review?".into(),
             target_session: Some("sess-xyz".into()),
             from_session: None,
+            meta: MentionMeta::default(),
         });
         let signed = Kind1Codec
             .encode(&ev)
@@ -574,6 +609,7 @@ mod tests {
             body: "hi".into(),
             target_session: Some("s2".into()),
             from_session: Some("s1".into()),
+            meta: MentionMeta::default(),
         });
         let signed = Kind1Codec
             .encode(&ev)
@@ -723,6 +759,7 @@ mod tests {
             body: "review this".into(),
             target_session: Some("target-sess".into()),
             from_session: None,
+            meta: MentionMeta::default(),
         });
         assert!(matches!(roundtrip(ev, &keys), DomainEvent::Mention(_)));
     }

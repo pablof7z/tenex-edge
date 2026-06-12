@@ -228,7 +228,9 @@ pub async fn run_session_in_daemon(
 /// lands in agent B's inbox, and `codex@project-a` never wakes a `codex`
 /// session in `project-b` on the same machine.
 pub fn route_mention_into(store: &Store, me: &str, m: &Mention, event: &Event) -> bool {
-    route_mention_into_with_id(store, me, m, &event.id.to_hex())
+    // Use the event's own timestamp as the send time so the envelope Date reflects
+    // when the sender published, not when we fetched/routed it.
+    route_mention_into_with_id(store, me, m, &event.id.to_hex(), event.created_at.as_secs())
 }
 
 /// Like [`route_mention_into`], but takes the mention's event id directly instead
@@ -238,7 +240,13 @@ pub fn route_mention_into(store: &Store, me: &str, m: &Mention, event: &Event) -
 /// `EventId` is identical to what the relay would echo, so the inbox PK
 /// `(mention_event_id, target_session)` keeps delivery idempotent across both
 /// paths.
-pub fn route_mention_into_with_id(store: &Store, me: &str, m: &Mention, eid: &str) -> bool {
+pub fn route_mention_into_with_id(
+    store: &Store,
+    me: &str,
+    m: &Mention,
+    eid: &str,
+    sent_at: u64,
+) -> bool {
     // Already delivered to this agent in some session? Don't re-enqueue it in a
     // new session (mentions persist on the relay as stored kind:1 events).
     // Per-agent dedup applies ONLY to agent-wide (untargeted) mentions, so an
@@ -269,12 +277,17 @@ pub fn route_mention_into_with_id(store: &Store, me: &str, m: &Mention, eid: &st
                 from_slug: m.from.slug.clone(),
                 project: m.project.clone(),
                 body: m.body.clone(),
-                created_at: now_secs(),
+                created_at: sent_at,
                 from_session: m
                     .from_session
                     .as_ref()
                     .map(|s| s.as_str().to_owned())
                     .unwrap_or_default(),
+                subject: m.meta.subject.clone(),
+                branch: m.meta.branch.clone(),
+                commit: m.meta.commit.clone(),
+                dirty: m.meta.dirty,
+                host: m.meta.host.clone(),
             })
             .unwrap_or(false);
         routed = routed || newly;
@@ -340,6 +353,7 @@ mod tests {
             body: "hi sibling".to_string(),
             target_session: target_session.map(crate::util::SessionId::from),
             from_session: None,
+            meta: crate::domain::MentionMeta::default(),
         };
         let event = Kind1Codec
             .encode(&DomainEvent::Mention(m.clone()))
@@ -407,9 +421,9 @@ mod tests {
         let eid = event.id.to_hex();
 
         // Local delivery (send_message path).
-        assert!(route_mention_into_with_id(&s, &pubkey, &m, &eid));
+        assert!(route_mention_into_with_id(&s, &pubkey, &m, &eid, 12345));
         // A later relay echo of the SAME event id (handle_incoming path).
-        assert!(!route_mention_into_with_id(&s, &pubkey, &m, &eid), "echo must not double-deliver");
+        assert!(!route_mention_into_with_id(&s, &pubkey, &m, &eid, 12345), "echo must not double-deliver");
 
         assert_eq!(s.drain_inbox("sess-B").unwrap().len(), 1, "exactly one delivery to B");
         assert!(s.drain_inbox("sess-A").unwrap().is_empty(), "sender A must not receive");
@@ -428,7 +442,7 @@ mod tests {
         let mut m = signed_mention(&keys, &pubkey, None).0;
         m.project = "current".to_string();
 
-        assert!(route_mention_into_with_id(&s, &pubkey, &m, "event-project-current"));
+        assert!(route_mention_into_with_id(&s, &pubkey, &m, "event-project-current", 12345));
         assert_eq!(s.drain_inbox("sess-current").unwrap().len(), 1);
         assert!(s.drain_inbox("sess-other").unwrap().is_empty());
     }
@@ -543,13 +557,13 @@ mod tests {
         let eid = event.id.to_hex();
 
         // First route: both sessions get the mention.
-        let first = route_mention_into_with_id(&s, &pk, &m, &eid);
+        let first = route_mention_into_with_id(&s, &pk, &m, &eid, 12345);
         assert!(first, "FREEZE: first route must be newly enqueued");
 
         // Second route (same eid, same sessions, no mark_mention_seen in between):
         // inbox PK (eid, sess-1) and (eid, sess-2) already exist → both INSERT OR
         // IGNORE fire → nothing new, returns false.
-        let second = route_mention_into_with_id(&s, &pk, &m, &eid);
+        let second = route_mention_into_with_id(&s, &pk, &m, &eid, 12345);
         assert!(!second, "FREEZE: second route of same eid must be idempotent (no new rows)");
 
         // Each session has exactly one undelivered row — no duplicates.
@@ -574,7 +588,7 @@ mod tests {
         s.upsert_session(&alive_session("sess-A", &pk)).unwrap();
 
         let (m, _event) = signed_mention(&keys, &pk, Some("nonexistent-session"));
-        let routed = route_mention_into_with_id(&s, &pk, &m, "eid-unknown");
+        let routed = route_mention_into_with_id(&s, &pk, &m, "eid-unknown", 12345);
 
         assert!(!routed, "FREEZE: mention targeting unknown session must not route");
         assert!(

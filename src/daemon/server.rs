@@ -340,6 +340,7 @@ async fn dispatch(state: &Arc<DaemonState>, req: &Request) -> Response {
         "project_list" => rpc_project_list(state).await,
         "project_edit" => rpc_project_edit(state, &req.params).await,
         "project_add" => rpc_project_add(state, &req.params).await,
+        "inbox_reply" => rpc_inbox_reply(state, &req.params).await,
         "list_threads" => rpc_list_threads(state, &req.params).await,
         "messages" => rpc_messages(state, &req.params),
         "thread_meta" => rpc_thread_meta(state, &req.params),
@@ -585,6 +586,8 @@ struct SendMessageParams {
     recipient: String,
     message: String,
     #[serde(default)]
+    subject: Option<String>,
+    #[serde(default)]
     session: Option<String>,
     #[serde(default)]
     env_session: Option<String>,
@@ -624,6 +627,7 @@ async fn rpc_send_message(
 
     // Build the intent. project comes from the resolved recipient (matching the
     // Mention field today), not from rec.project.
+    let meta = workspace_meta(state, p.cwd.as_deref(), p.subject.unwrap_or_default(), None);
     let intent = SendIntent {
         from: crate::domain::AgentRef::new(id.pubkey_hex(), rec.agent_slug.clone()),
         to_pubkey: recipient.pubkey.clone(),
@@ -632,6 +636,7 @@ async fn rpc_send_message(
         target_session: recipient.target_session.clone(),
         from_session: Some(rec.session_id.clone()),
         thread_id: p.thread_id.clone(),
+        meta: meta.clone(),
     };
 
     // Publish + canonical dual-write. On error the error propagates unchanged.
@@ -688,6 +693,7 @@ async fn rpc_send_message(
             body,
             target_session: recipient.target_session.clone().map(SessionId::from),
             from_session: Some(SessionId::from(rec.session_id.clone())),
+            meta,
         };
         let routed = state.with_store(|s| {
             route_mention_into_with_id(
@@ -695,6 +701,7 @@ async fn rpc_send_message(
                 &recipient.pubkey,
                 &mention,
                 &receipt.native_event_id,
+                now_secs(),
             )
         });
         if routed {
@@ -1001,7 +1008,7 @@ async fn rpc_inbox(state: &Arc<DaemonState>, params: &serde_json::Value) -> Resu
         rows
     });
     let pending = state.with_store(|s| s.list_pending_agents().unwrap_or_default());
-    let rows_json = state.with_store(|s| rows_to_json(s, &rows));
+    let rows_json = rows_to_json(&rows, &state.host);
 
     Ok(serde_json::json!({
         "rows": rows_json,
@@ -1082,7 +1089,7 @@ struct TurnCheckParams {
 fn rpc_turn_check(state: &Arc<DaemonState>, params: &serde_json::Value) -> Result<serde_json::Value> {
     let p: TurnCheckParams = serde_json::from_value(params.clone()).unwrap_or_default();
     let rec = resolve_session(state, p.session.as_deref(), p.env_session.as_deref(), p.cwd.as_deref(), p.agent.as_deref())?;
-    let context = crate::cli::assemble_turn_check_context(&state.store, &rec.session_id)
+    let context = crate::cli::assemble_turn_check_context(&state.store, &rec.session_id, &state.host)
         .map(serde_json::Value::String)
         .unwrap_or(serde_json::Value::Null);
     Ok(serde_json::json!({ "context": context }))
@@ -1430,6 +1437,188 @@ async fn rpc_project_edit(state: &Arc<DaemonState>, params: &serde_json::Value) 
     }))
 }
 
+// ── inbox reply (reply by mention ID) ─────────────────────────────────────────
+
+#[derive(serde::Deserialize, Default)]
+struct InboxReplyParams {
+    /// Short `ID` from an envelope (prefix of the original mention's event id).
+    id: String,
+    message: String,
+    #[serde(default)]
+    subject: Option<String>,
+    #[serde(default)]
+    session: Option<String>,
+    #[serde(default)]
+    env_session: Option<String>,
+    #[serde(default)]
+    cwd: Option<String>,
+    #[serde(default)]
+    agent: Option<String>,
+}
+
+/// Reply to a mention by its short `ID`. Looks up the original inbox row, then
+/// sends through the provider a Mention that `p`-tags the original sender and
+/// `e`-tags (NIP-10 reply) the original event — threading the reply back to
+/// exactly the sender session that wrote it. The reply is filed into the
+/// original's canonical thread, so both sides' read models agree. Subject
+/// defaults to `Re: <original subject>`.
+async fn rpc_inbox_reply(
+    state: &Arc<DaemonState>,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value> {
+    use crate::fabric::provider::SendIntent;
+
+    let p: InboxReplyParams =
+        serde_json::from_value(params.clone()).context("parsing inbox_reply params")?;
+    if p.id.is_empty() {
+        anyhow::bail!("missing --id (the ID shown on the message you're replying to)");
+    }
+    let rec = resolve_session(
+        state,
+        p.session.as_deref(),
+        p.env_session.as_deref(),
+        p.cwd.as_deref(),
+        p.agent.as_deref(),
+    )?;
+    let id = identity::load_or_create(&config::edge_home(), &rec.agent_slug, now_secs())?;
+
+    let original = state
+        .with_store(|s| s.find_inbox_by_event_prefix(&p.id))?
+        .with_context(|| format!("no message in this inbox with ID {:?}", p.id))?;
+
+    // Default the subject to `Re: <original>` (don't double-prefix on a reply chain).
+    let subject = match p.subject {
+        Some(s) if !s.is_empty() => s,
+        _ if original.subject.is_empty() => String::new(),
+        _ if original.subject.to_lowercase().starts_with("re:") => original.subject.clone(),
+        _ => format!("Re: {}", original.subject),
+    };
+
+    let mut meta = workspace_meta(state, p.cwd.as_deref(), subject, None);
+    meta.reply_to_event_id = Some(original.mention_event_id.clone());
+
+    // File the reply into the original's canonical thread when we know it.
+    let thread_id = state.with_store(|s| s.thread_for_native_event(&original.mention_event_id));
+
+    let intent = SendIntent {
+        from: crate::domain::AgentRef::new(id.pubkey_hex(), rec.agent_slug.clone()),
+        to_pubkey: original.from_pubkey.clone(),
+        project: original.project.clone(),
+        body: p.message.clone(),
+        // Route back to the precise sender session when we captured one.
+        target_session: Some(original.from_session.clone()).filter(|s| !s.is_empty()),
+        from_session: Some(rec.session_id.clone()),
+        thread_id,
+        meta: meta.clone(),
+    };
+    let receipt = state.provider.send(intent, &id.keys).await?;
+
+    // Tail: outbound msg + sync, mirroring rpc_send_message.
+    let thread_short = pubkey_short(&receipt.thread_id);
+    let to_slug = state
+        .with_store(|s| s.resolve_slug_for_pubkey(&original.from_pubkey))
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| pubkey_short(&original.from_pubkey));
+    state.emit_tail(TailEvent::Msg {
+        ts: now_secs(),
+        project: original.project.clone(),
+        from: rec.agent_slug.clone(),
+        from_session: Some(rec.session_id.clone()),
+        to: to_slug,
+        to_session: Some(original.from_session.clone()).filter(|s| !s.is_empty()),
+        thread: Some(thread_short.clone()),
+        body: p.message.chars().take(200).collect(),
+    });
+    let is_local = state.hosted_pubkeys().iter().any(|h| h == &original.from_pubkey);
+    state.emit_tail(TailEvent::Sync {
+        ts: now_secs(),
+        project: original.project.clone(),
+        from: rec.agent_slug.clone(),
+        to: pubkey_short(&original.from_pubkey),
+        thread: Some(thread_short),
+        state: (if is_local { "delivered" } else { "accepted" }).into(),
+        detail: None,
+    });
+
+    // Local delivery to a same-machine sibling session (see rpc_send_message).
+    if is_local {
+        let mention = Mention {
+            from: crate::domain::AgentRef::new(id.pubkey_hex(), rec.agent_slug.clone()),
+            to_pubkey: original.from_pubkey.clone(),
+            project: original.project.clone(),
+            body: p.message,
+            target_session: Some(original.from_session.clone())
+                .filter(|s| !s.is_empty())
+                .map(SessionId::from),
+            from_session: Some(SessionId::from(rec.session_id.clone())),
+            meta,
+        };
+        let routed = state.with_store(|s| {
+            route_mention_into_with_id(
+                s,
+                &original.from_pubkey,
+                &mention,
+                &receipt.native_event_id,
+                now_secs(),
+            )
+        });
+        if routed {
+            state.mention_notify.notify_waiters();
+        }
+    }
+
+    Ok(serde_json::json!({
+        "to_pubkey": original.from_pubkey,
+        "target_session": original.from_session,
+        "in_reply_to": original.mention_event_id,
+    }))
+}
+
+/// Capture the sender's envelope metadata: `subject` plus a snapshot of the git
+/// workspace at `cwd` (branch, short commit, dirty-file count) and this daemon's
+/// host. `reply_to` is left `None` here; callers set it for replies.
+fn workspace_meta(
+    state: &Arc<DaemonState>,
+    cwd: Option<&str>,
+    subject: String,
+    reply_to: Option<String>,
+) -> crate::domain::MentionMeta {
+    let (branch, commit, dirty) = git_snapshot(cwd);
+    crate::domain::MentionMeta {
+        subject,
+        branch,
+        commit,
+        dirty,
+        host: state.host.clone(),
+        reply_to_event_id: reply_to,
+    }
+}
+
+/// `(branch, short_commit, dirty_count)` for the git repo at `cwd` (or the
+/// daemon's cwd when `None`). All-empty / zero when `cwd` isn't a git repo.
+/// `dirty_count` is `git status --porcelain` line count, which already excludes
+/// gitignored files.
+fn git_snapshot(cwd: Option<&str>) -> (String, String, u32) {
+    use std::process::Command;
+    let dir = cwd
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+    let git = |args: &[&str]| -> Option<String> {
+        let out = Command::new("git").arg("-C").arg(&dir).args(args).output().ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    };
+    let branch = git(&["rev-parse", "--abbrev-ref", "HEAD"]).unwrap_or_default();
+    let commit = git(&["rev-parse", "--short", "HEAD"]).unwrap_or_default();
+    let dirty = git(&["status", "--porcelain"])
+        .map(|s| s.lines().filter(|l| !l.trim().is_empty()).count() as u32)
+        .unwrap_or(0);
+    (branch, commit, dirty)
+}
+
 // ── project_add ──────────────────────────────────────────────────────────────
 
 /// Publish a NIP-29 kind:9000 (put-user) event to add a pubkey to the group.
@@ -1615,7 +1804,7 @@ async fn handle_wait_for_mention(state: &Arc<DaemonState>, req: &Request) -> Res
             rows
         });
         if !rows.is_empty() {
-            let rows_json = state.with_store(|s| rows_to_json(s, &rows));
+            let rows_json = rows_to_json(&rows, &state.host);
             return Response::ok(req.id, serde_json::json!({ "rows": rows_json }));
         }
         // Park until a mention is routed or a short timeout for re-check.
@@ -2286,17 +2475,27 @@ impl DaemonState {
     }
 }
 
-fn rows_to_json(store: &Store, rows: &[InboxRow]) -> Vec<serde_json::Value> {
+/// Serialize inbox rows for the CLI, which renders the email-like envelope via
+/// `cli::format_envelope`. `self_host` is the daemon's own host, so the client
+/// can decide whether the sender is `[remote: …]` without re-deriving it. `id`
+/// is the short prefix the receiver passes to `inbox reply --id`.
+fn rows_to_json(rows: &[InboxRow], self_host: &str) -> Vec<serde_json::Value> {
     rows.iter()
         .map(|r| {
             serde_json::json!({
                 "from_slug": r.from_slug,
                 "project": r.project,
-                "body": r.body,
-                "mention_event_id": r.mention_event_id,
                 "from_session": r.from_session,
-                // Fully-qualified handle the receiver passes to `--recipient`.
-                "reply_to": crate::cli::mention_reply_handle(store, r),
+                "host": r.host,
+                "self_host": self_host,
+                "subject": r.subject,
+                "branch": r.branch,
+                "commit": r.commit,
+                "dirty": r.dirty,
+                "created_at": r.created_at,
+                "id": crate::cli::mention_short_id(&r.mention_event_id),
+                "mention_event_id": r.mention_event_id,
+                "body": r.body,
             })
         })
         .collect()
