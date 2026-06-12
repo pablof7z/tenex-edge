@@ -2,7 +2,7 @@
 title: Tenex-Edge
 slug: tenex-edge
 topic: tenex-edge
-summary: tenex-edge grafts a shared Nostr-based nervous system onto agents that remain in their native hosts (Claude Code, Codex, OpenCode, mobile apps) rather than host
+summary: "tenex-edge is an inversion of TENEX: instead of hosting agents, it grafts a shared coordination fabric onto agents that stay in their native hosts (Claude Code,"
 tags:
   - capture
 volatility: warm
@@ -21,9 +21,9 @@ sources:
 
 ## Overview
 
-tenex-edge is a completely upside-down implementation of TENEX: the agents stay in their native host tools rather than being hosted by TENEX, and a shared nervous system (via Nostr) is grafted on top. It provides TENEX properties within any system via a plugin, hook, or similar integration that gathers what an agent session is doing, embeddable in tools like Claude Code, Codex, OpenCode, or a mobile app. The one-liner framing: citizenship for your agents — a durable identity and a shared world, no matter which tool they're running in. tenex-edge owns identity and awareness as its own independent substrate; pc is only a context-injection straw that will have its awareness board removed once tenex-edge drives awareness. It exposes a generic, host-agnostic boundary expressed in its own vocabulary (agents, identities, presence, intents) for reporting activity and subscribing to awareness; tenex-edge contains no concept of `pc`, `Claude Code`, or any specific host. The dependency arrow between `pc` and tenex-edge points one direction only: `pc` depends on tenex-edge, never the reverse. Host adapters (pc, Codex, MCP) are dumb, carry no identity or fabric logic, and fail open so that host work proceeds unimpeded if the daemon is unhealthy. pc is strictly a context-injection adapter, limited to putting text into host sessions and reporting host events. Searching the tenex-edge codebase for the string 'pc' must yield zero results, serving as the test for a correct host-agnostic boundary. Once tenex-edge's awareness board is live, pc's legacy awareness module will be deleted and pc will point its injection at tenex-edge's output. tenex-edge is built in Rust using the NMP (nostr-multi-platform) library from ~/Work/nostr-multi-platform.
+tenex-edge is an inversion of TENEX: instead of hosting agents, it grafts a shared coordination fabric onto agents that stay in their native hosts (Claude Code, Codex, OpenCode, mobile apps). It provides TENEX properties within any system via a plugin, hook, or similar integration that gathers what an agent session is doing, embeddable in tools like Claude Code, Codex, OpenCode, or a mobile app. The one-liner framing: citizenship for your agents — a durable identity and a shared world, no matter which tool they're running in. tenex-edge owns identity and awareness as its own independent substrate; pc is only a context-injection straw that will have its awareness board removed once tenex-edge drives awareness. It exposes a generic, host-agnostic boundary expressed in its own vocabulary (agents, identities, presence, intents) for reporting activity and subscribing to awareness; tenex-edge contains no concept of `pc`, `Claude Code`, or any specific host. The dependency arrow between `pc` and tenex-edge points one direction only: `pc` depends on tenex-edge, never the reverse. MCP is the natural shape of this host-agnostic boundary — a standard interface any external component integrates against with zero bilateral knowledge. Host adapters (pc, Codex, MCP) are dumb, carry no identity or fabric logic, and fail open so that host work proceeds unimpeded if the daemon is unhealthy. pc is strictly a context-injection adapter, limited to putting text into host sessions and reporting host events. Searching the tenex-edge codebase for the string 'pc' must yield zero results, serving as the test for a correct host-agnostic boundary. Once tenex-edge's awareness board is live, pc's legacy awareness module will be deleted and pc will point its injection at tenex-edge's output. tenex-edge is built in Rust using the NMP (nostr-multi-platform) library from ~/Work/nostr-multi-platform.
 
-<!-- citations: [^f3a73-2] [^8a3eb-1] [^8a3eb-8] [^f3a73-1] [^f3a73-6] [^f3a73-14] [^f3a73-22] [^f3a73-98] -->
+<!-- citations: [^f3a73-2] [^8a3eb-1] [^8a3eb-8] [^f3a73-1] [^f3a73-6] [^f3a73-14] [^f3a73-22] [^f3a73-98] [^8a3eb-21] [^f3a73-109] -->
 ## Identity and Sessions
 
 tenex-edge provides a durable Nostr cryptographic identity for an agent, with session awareness. It gives an agent a sovereign identity and a shared world-model that are independent of the host tool it is running inside; the host is just an interchangeable body, while identity, memory, presence, and relationships persist across hosts, devices, and time. A session starts via the command `tenex-edge session-start --agent <agent-slug>`, which creates a session ID for tracking activity and targeting injections. The command forks a background process that publishes a presence heartbeat every 30 seconds using expiring Nostr kind 30315 events scoped by a NIP-29 `h` tag whose value is the project slug; this process is bidirectional, also subscribing to live relay events to build a local directory (slug-to-pubkey mappings) and maintain an inbox, enabling short-lived commands like `send-message` to resolve addressing. On session end, the background heartbeat process stops; it captures the parent host process PID before daemonizing, polls it each tick, and self-terminates if the parent is gone to prevent stale presence. On death, it publishes an already-expired presence heartbeat plus an empty NIP-38 status, and NIP-40 expiration tags clear stale stored state.
@@ -41,16 +41,14 @@ tenex-edge provides awareness of shared active work, goals, and access to resour
 <!-- citations: [^8a3eb-4] [^8a3eb-11] -->
 ## Cross-Agent Collaboration
 
-tenex-edge enables cross-agent collaboration, including heterogeneous agents (e.g., Codex and Claude Code) running in different sessions being aware of each other's work on the same project, collaborating on bug fixes, determining ownership, and coordinating by waiting for another agent to finish working on a shared directory path.
+tenex-edge enables cross-agent collaboration, including heterogeneous agents (e.g., Codex and Claude Code) running in different sessions being aware of each other's work on the same project, collaborating on bug fixes, determining ownership, and coordinating by waiting for another agent to finish working on a shared directory path. Real agent end-to-end testing with Claude Code, Codex, and OpenCode across all three adapters is verified — a 3-agent threaded conversation through the refactored daemon grouped correctly via NIP-10 root tags.
 
-tenex-edge enables cross-agent collaboration, including heterogeneous agents (e.g., Codex and Claude Code) running in different sessions being aware of each other's work on the same project, collaborating on bug fixes, determining ownership, and coordinating by waiting for another agent to finish working on a shared directory path. Real agent end-to-end testing with Claude Code, Codex, and OpenCode across all three adapters is verified — a 3-agent threaded conversation through the refactored daemon grouped correctly via NIP-10 root tags. <!-- [^ab999-65] -->
-
-<!-- citations: [^8a3eb-5] [^8a3eb-12] -->
+<!-- citations: [^ab999-65] [^8a3eb-5] [^8a3eb-12] [^8a3eb-22] -->
 ## Cross-Person Collaboration
 
-tenex-edge enables cross-person collaboration, where an agent in one person's system can ask a question to an agent in another person's system about how something was done in a project.
+tenex-edge enables cross-person collaboration, where an agent in one person's system can ask a question to an agent in another person's system about how something was done in a project, and agents can query across projects for shared knowledge.
 
-<!-- citations: [^8a3eb-6] [^8a3eb-13] -->
+<!-- citations: [^8a3eb-6] [^8a3eb-13] [^8a3eb-23] -->
 ## Design Discussion Scope
 
 The design discussion for tenex-edge operates at the design-space level — what it is, what shape it should take, what is worth wanting, and where tensions lie — not at the level of implementation mechanics like event kinds, lock algorithms, or daemon diagrams. <!-- [^8a3eb-7] -->
@@ -72,8 +70,9 @@ Adding rig-core pulled a second rustls crypto provider (aws-lc-rs) alongside nos
 <!-- citations: [^8a3eb-16] [^f3a73-3] [^f3a73-7] [^f3a73-99] -->
 ## Defensible Core
 
-The defensible core of tenex-edge is vendor-independent agent identity — reputation, memory, and relationships outliving any single session, host, or vendor — and provenance, where every piece of work is cryptographically signed with which agent, under which human's key, in which host produced it. <!-- [^8a3eb-17] -->
+The defensible core of tenex-edge is vendor-independent agent identity — reputation, memory, and relationships outliving any single session, host, or vendor — and provenance, where every piece of work is cryptographically signed with which agent, under which human's key, in which host produced it. tenex-edge is the citizenship protocol for an agent society spanning every app in one's life — not merely a coordination tool for a dev fleet. It grants an agent a sovereign identity and a shared world-model independent of the tool it's running inside; the host is just a body, while identity, memory, presence, and relationships float above and persist across hosts, devices, and time.
 
+<!-- citations: [^8a3eb-17] [^8a3eb-24] -->
 ## Ecosystem Examples
 
 A todo list app with a TENEX-capable agent can participate in the agent system: software-building agents know the todo agent's role and can raise product plans or decisions to it for human review; the todo agent also coordinates with another person's todo list agent for shared tasks. Agents with knowledge of the user's high-level interests communicate with agents in other apps (e.g., a podcast app agent) to provide relevant content from sources the user doesn't follow, and those app agents can generate new content (e.g., podcast episodes) — trending toward self-organizing agents pushing information from complex, different systems. <!-- [^8a3eb-18] -->

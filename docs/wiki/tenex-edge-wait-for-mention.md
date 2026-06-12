@@ -2,7 +2,7 @@
 title: Tenex-Edge Wait-for-Mention
 slug: tenex-edge-wait-for-mention
 topic: tenex-edge
-summary: The `wait-for-mention` command polls the SQLite inbox every ~500ms until a mention arrives
+summary: The `wait-for-mention` command polls the SQLite inbox every 500ms, performs the same relay self-fetch as `inbox` on startup to handle the engine warmup race, an
 tags:
   - capture
 volatility: warm
@@ -20,6 +20,10 @@ sources:
 
 ## Polling and Inbox Behavior
 
-The `wait-for-mention` command is replaced by a channels-based approach for injecting async work. Tenex-Edge uses channels (notifications/claude/channel) instead of the wait-for-mention hack. (Previously: The `wait-for-mention` command polled the SQLite inbox every ~500ms until a mention arrived.)
+The `wait-for-mention` command polls the SQLite inbox every 500ms, performs the same relay self-fetch as `inbox` on startup to handle the engine warmup race, and on receiving a mention it drains the inbox, prints all pending mentions, prints a reminder to re-run the command, and exits 0. It supports an optional `--timeout` flag, defaulting to 5 minutes, so that a forgotten background process does not linger forever. The reminder printed on completion instructs the agent to re-run `tenex-edge wait-for-mention` with `run_in_background=true` (not shell `&`).
 
-<!-- citations: [^3da7f-6] [^3da7f-7] [^3da7f-8] [^162f9-21] [^162f9-28] -->
+<!-- citations: [^3da7f-6] [^3da7f-7] [^3da7f-8] [^162f9-21] [^162f9-28] [^3da7f-13] -->
+
+## Agent Harness and Hook Integration
+
+When an agent runs a shell command in the background (e.g. via `run_in_background=true`), the agent harness wakes the idle agent upon command completion. The agent must be instructed to run `wait-for-mention` itself (e.g. via `run_in_background=true`); a process spawned by the session-start hook as a background child is not tracked by the harness. The `wait-for-mention` instruction must be injected via the `UserPromptSubmit` hook (not `SessionStart`), firing exactly once per session on the first user prompt, because the agent is idle and cannot execute commands until a user prompt triggers an active turn. The `UserPromptSubmit` hook uses a temp flag file keyed by `sid` to ensure the `wait-for-mention` instruction is injected exactly once per session. <!-- [^3da7f-14] -->

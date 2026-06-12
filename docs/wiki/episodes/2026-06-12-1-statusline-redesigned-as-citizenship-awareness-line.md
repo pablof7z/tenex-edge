@@ -4,7 +4,7 @@ date: 2026-06-12
 session: e42f09d7-5fb0-438b-a356-216870390540
 transcript: /Users/pablofernandez/.claude/projects/-Users-pablofernandez-src-tenex-edge/e42f09d7-5fb0-438b-a356-216870390540.jsonl
 salience: product
-status: active
+status: superseded
 subjects:
   - tenex-edge-statusline
   - claude-code-host-adapter

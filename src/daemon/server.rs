@@ -341,6 +341,7 @@ async fn dispatch(state: &Arc<DaemonState>, req: &Request) -> Response {
         "project_edit" => rpc_project_edit(state, &req.params).await,
         "project_add" => rpc_project_add(state, &req.params).await,
         "inbox_reply" => rpc_inbox_reply(state, &req.params).await,
+        "statusline" => rpc_statusline(state, &req.params),
         "list_threads" => rpc_list_threads(state, &req.params).await,
         "messages" => rpc_messages(state, &req.params),
         "thread_meta" => rpc_thread_meta(state, &req.params),
@@ -1435,6 +1436,78 @@ async fn rpc_project_edit(state: &Arc<DaemonState>, params: &serde_json::Value) 
         "event_id": event_id.to_hex(),
         "project": p.project,
     }))
+}
+
+// ── statusline ───────────────────────────────────────────────────────────────
+
+/// How long a drained mention keeps showing on the statusline as "recently
+/// consumed" before disappearing.
+const STATUSLINE_RECENT_SECS: u64 = 30;
+
+#[derive(serde::Deserialize, Default)]
+struct StatuslineParams {
+    #[serde(default)]
+    session: Option<String>,
+    #[serde(default)]
+    env_session: Option<String>,
+    #[serde(default)]
+    cwd: Option<String>,
+    #[serde(default)]
+    agent: Option<String>,
+}
+
+/// `statusline`: everything the host's status bar renders, in one pure-read RPC.
+/// Like `turn_check`, this is called constantly by the harness, so it must
+/// NEVER write to state.db (no drains, no touches) — peeks only.
+fn rpc_statusline(
+    state: &Arc<DaemonState>,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value> {
+    let p: StatuslineParams = serde_json::from_value(params.clone()).unwrap_or_default();
+    let rec = resolve_session(
+        state,
+        p.session.as_deref(),
+        p.env_session.as_deref(),
+        p.cwd.as_deref(),
+        p.agent.as_deref(),
+    )?;
+    let now = now_secs();
+    let host = state.host.clone();
+    state.with_store(|s| {
+        let session_count = crate::cli::load_who_snapshot(s, Some(&rec.project), false, now, &host)
+            .map(|snap| snap.session_count())
+            .unwrap_or(0);
+        let member_count = s.count_group_members(&rec.project).unwrap_or(0);
+        let is_member = s
+            .is_group_member(&rec.project, &rec.agent_pubkey)
+            .unwrap_or(true);
+        let (working, _) = s.get_turn_state(&rec.session_id).unwrap_or((false, 0));
+        let status = s
+            .get_agent_status(&rec.agent_pubkey, &rec.project, Some(&rec.session_id))
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        let pending = s.peek_inbox(&rec.session_id).unwrap_or_default();
+        let recent = s
+            .list_recently_delivered(
+                &rec.session_id,
+                now.saturating_sub(STATUSLINE_RECENT_SECS),
+            )
+            .unwrap_or_default();
+        Ok(serde_json::json!({
+            "agent": rec.agent_slug,
+            "host": host,
+            "session_id": rec.session_id,
+            "project": rec.project,
+            "member_count": member_count,
+            "session_count": session_count,
+            "is_member": is_member,
+            "working": working,
+            "status": status,
+            "pending": rows_to_json(&pending, &host),
+            "recent": rows_to_json(&recent, &host),
+        }))
+    })
 }
 
 // ── inbox reply (reply by mention ID) ─────────────────────────────────────────

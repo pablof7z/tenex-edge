@@ -2,13 +2,13 @@
 title: Tenex-Edge Tail Design
 slug: tenex-edge-tail-design
 topic: tenex-edge
-summary: The tail v2 design (docs/tail-v2-design.md) specifies a structured TailEvent stream, heartbeat-to-join/leave collapse, tiers, read-model backfill, and --json ou
+summary: The tail v2 command provides a structured TailEvent stream with 10 variants (Msg, Sync, Turn, Join, Leave, Acl, Sess, Status, Proj, Profile), heartbeatâjoin/l
 tags:
   - capture
 volatility: warm
 confidence: medium
 created: 2026-06-09
-updated: 2026-06-09
+updated: 2026-06-12
 verified: 2026-06-09
 compiled-from: conversation
 sources:
@@ -19,4 +19,6 @@ sources:
 
 ## Tail v2 Design
 
-The tail v2 design (docs/tail-v2-design.md) specifies a structured TailEvent stream, heartbeat-to-join/leave collapse, tiers, read-model backfill, and --json output. <!-- [^ab999-14] -->
+The tail v2 command provides a structured TailEvent stream with 10 variants (Msg, Sync, Turn, Join, Leave, Acl, Sess, Status, Proj, Profile), heartbeat→join/leave derivation, dedup for Profile and Status, read-model backfill, and 17 CLI flags including --project, --since, --only, --exclude, --json, --compact.
+
+<!-- citations: [^ab999-14] [^ab999-92] -->

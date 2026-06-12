@@ -15,6 +15,8 @@ sources:
   - session:98f9939c-f42b-43dd-baba-d9a176d4b2d7
   - session:d208c058-7b2b-4ff8-bb82-d63623d51097
   - session:081ec521-c99b-42fb-9aa7-4a109519a62f
+  - session:240ffb86-8827-4741-932b-29fb1824c0c7
+  - session:435ec383-d607-459b-a712-a00ed4decaa7
 ---
 
 # Tenex-Edge Project Management
@@ -22,6 +24,8 @@ sources:
 ## Project List
 
 tenex-edge project list fetches all kind:39000 events from the relay (no author filter) and renders them as a left-aligned table of slug and description.
+
+The `who` command groups agents by project and shows only project name and metadata (one line per project) instead of listing each agent individually in the 'other projects' section. <!-- [^435ec-4] -->
 
 <!-- citations: [^d208c-8] [^98f99-3] [^98f99-4] [^98f99-5] [^98f99-6] [^98f99-12] [^98f99-21] [^98f99-27] -->
 ## Project Edit
@@ -44,3 +48,7 @@ All domain events except Profile carry an h tag with the project slug: Presence 
 No explicit NIP-29 group creation (kind:9000) or membership management is wired yet; the relay accepts events either because groups are implicitly open or because the user's key has admin rights. <!-- [^98f99-16] -->
 
 The CLI command to add a pubkey to a project group is `tenex-edge project add <project> <pubkey-or-npub-or-nip05>`, which accepts hex, npub/bech32, or NIP-05 identifiers, resolving NIP-05 via HTTP fetch. <!-- [^081ec-9] -->
+
+## Project Meta Cache
+
+A project_meta SQLite table stores project descriptions with columns (project TEXT PRIMARY KEY, about TEXT NOT NULL, updated_at INTEGER NOT NULL). On engine startup, the runtime fetches kind 39000 events with d tag matching the current project and caches the about text via upsert_project_meta; incoming kind 39000 events are also handled during the session. <!-- [^240ff-12] -->

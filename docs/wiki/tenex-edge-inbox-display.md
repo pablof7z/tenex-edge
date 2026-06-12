@@ -2,7 +2,7 @@
 title: Tenex-Edge Inbox Display
 slug: tenex-edge-inbox-display
 topic: tenex-edge
-summary: Inbox messages display with an envelope format that includes From, Date, Branch, and ID header fields followed by a separator and the message body
+summary: The tenex-edge CLI is the designated tool for checking session inboxes
 tags:
   - capture
 volatility: warm
@@ -13,26 +13,35 @@ verified: 2026-06-12
 compiled-from: conversation
 sources:
   - session:cd74a605-9f83-4e21-a885-4d900e88ce07
+  - session:rollout-2026-06-09T15-35-48-019eac61-c1bb-7391-b237-7378101f099a
 ---
 
 # Tenex-Edge Inbox Display
 
 ## Inbox Message Envelope Format
 
-Inbox messages display with an envelope format that includes From, Date, Branch, and ID header fields followed by a separator and the message body. Both the inbox command and the mid-turn mention injection use a single unified envelope format for displaying messages. Each inbox message includes a unique ID that other agents can reference to reply to that specific message. <!-- [^cd74a-1] -->
+The tenex-edge CLI is the designated tool for checking session inboxes. Inbox messages are displayed as email-like envelopes with From, Date, Branch, ID, and body fields. The same email-like envelope format is used across all message display surfaces, including the `inbox` command, `wait-for-mention`, and mid-turn injection. A single `format_envelope` renderer feeds both the CLI and daemon-side turn injection so what an agent sees mid-turn is byte-identical to `tenex-edge inbox`. Each envelope includes an ID field containing a short identifier that agents can use to reply to the original message using `tenex-edge inbox reply --id <id> "<message>"`. Subject and Branch lines in the envelope are omitted when absent.
 
+<!-- citations: [^cd74a-1] [^cd74a-8] [^rollo-26] -->
 ## From Field
 
-The From field includes the sender's session ID in the format [session $shortId]. If the agent is a remote agent, the From field includes the host in the format [remote: $host]. <!-- [^cd74a-2] -->
+The From field includes the sender's session short code in the format `From: $sender@$project [session $shortCode]`. If the agent is a remote agent, the From field includes the host as `From: $sender@$project [session $shortCode] [remote: $host]`.
 
+<!-- citations: [^cd74a-2] [^cd74a-9] -->
 ## Date Field
 
-The Date field displays both absolute time (yyyy-mm-dd HH:MM) and relative time in parentheses. The relative time shows 'just now' when under 1 minute. <!-- [^cd74a-3] -->
+The Date field shows the send timestamp in the format `$yyyy-$mm-$dd $HH:$MM (relative time)`, using the event's publish timestamp rather than receipt time. A relative time label of 'just now' applies to times under 1 minute.
 
+<!-- citations: [^cd74a-3] [^cd74a-10] -->
 ## Branch Field
 
-The Branch field includes the sender's workspace state: branch name, short commit hash, and dirty file count at the time the message was sent. The dirty file count is omitted entirely when there are zero dirty non-gitignored files. The dirty file count displays singular '1 file dirty' and plural 'N files dirty'. Branch, commit, and dirty file count are captured from the sender's git state at send time and stored as new columns on the inbox table, requiring a schema migration. Dirty files are counted as modified or untracked files excluding gitignored files (git status --porcelain minus ignored). <!-- [^cd74a-4] -->
+The Branch line captures the sender's workspace state at send time, including branch name and short commit hash. The dirty file count is included only when there are dirty, non-gitignored files, using singular '1 file dirty' and plural 'N files dirty'. Sender workspace metadata (branch, commit, dirty file count) is captured at send time, stored as new columns on the `inbox` table (requiring a schema migration), and rendered on the receiver's side.
 
+<!-- citations: [^cd74a-4] [^cd74a-11] -->
 ## Header-Body Separator
 
 The separator between headers and the message body is a fixed two dashes. <!-- [^cd74a-5] -->
+
+## Reply Mechanics
+
+The `inbox reply --id` command matches against the short form of the sender's mention_event_id, looks up the original message by event-id prefix, and derives both the `e`-tag (original event) and `p`-tag (sender pubkey). In the NIP-29 codec, the reply publishes a kind:1 event that `e`-tags the original mention event and `p`-tags the sender agent. The messaging command surface is unified under `inbox` with subcommands `inbox send` and `inbox reply`, replacing the former `send-message` command. <!-- [^cd74a-12] -->

@@ -1,5 +1,5 @@
 use super::admin::{rpc_acl, rpc_doctor, rpc_project_add, rpc_project_edit, rpc_project_list};
-use super::awareness::rpc_who;
+use super::awareness::{rpc_statusline, rpc_who};
 use super::inbox::{
     fetch_mentions_into_inbox, rows_to_json, rpc_inbox, rpc_turn_check, rpc_turn_end,
     rpc_turn_start, rpc_user_prompt,
@@ -112,6 +112,7 @@ async fn dispatch(state: &Arc<DaemonState>, req: &Request) -> Response {
     let result = match req.method.as_str() {
         "ping" => Ok(serde_json::json!({"pong": true})),
         "who" => rpc_who(state, &req.params),
+        "statusline" => rpc_statusline(state, &req.params),
         "session_start" => rpc_session_start(state, &req.params).await,
         "session_end" => rpc_session_end(state, &req.params),
         "send_message" => rpc_send_message(state, &req.params).await,

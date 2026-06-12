@@ -38,6 +38,17 @@ pub fn call(method: &str, params: serde_json::Value) -> Result<serde_json::Value
     bail!("could not complete daemon call {method}")
 }
 
+/// One-shot call that NEVER spawns the daemon. For high-frequency fail-open
+/// surfaces (the statusline) that must render nothing when no daemon is running
+/// rather than booting one just to draw a line.
+pub fn call_no_spawn(method: &str, params: serde_json::Value) -> Result<serde_json::Value> {
+    match try_call(method, &params)? {
+        Outcome::Ok(v) => Ok(v),
+        Outcome::Err(code, msg) => bail!("daemon error [{code}]: {msg}"),
+        Outcome::SkewExit => bail!("daemon protocol skew; awaiting respawn"),
+    }
+}
+
 enum Outcome {
     Ok(serde_json::Value),
     Err(String, String),

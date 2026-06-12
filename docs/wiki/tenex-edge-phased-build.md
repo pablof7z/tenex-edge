@@ -2,13 +2,13 @@
 title: Tenex-Edge Phased Build
 slug: tenex-edge-phased-build
 topic: tenex-edge
-summary: Phase 0 through Phase 8 are executed as a hard sequential dependency chain, with each phase gated by a validation ladder and a commit before proceeding.
+summary: The fabric-architecture refactor is implemented across 9 sequential phases (0â8) in a git worktree at /Users/pablofernandez/src/tenex-edge-fabric on branch 'f
 tags:
   - capture
 volatility: warm
 confidence: medium
 created: 2026-06-09
-updated: 2026-06-10
+updated: 2026-06-12
 verified: 2026-06-09
 compiled-from: conversation
 sources:
@@ -34,6 +34,6 @@ Phase 5 introduces Kind1Nip29Provider bundling delivery/codec/materializer/lifec
 <!-- citations: [^ab999-8] [^ab999-35] [^ab999-51] -->
 ## Validation & Edge Cases
 
-Startup backfill on a populated database runs correctly, carrying over project_origins, membership (with source=nip29-39002 and roles preserved), and about fields, with zero spurious rows on an empty db. The final verification is 120 lib + 4 mechanics + 14 integration + 1 e2e, 0 rustc warnings, 0 net-new clippy lints. The 39000/39002 inbound materialization is frozen only at the store-primitive level because the nak harness cannot emit relay-authored group events; the relay→materializer dispatch (rewritten in Phase 4) is covered by moved unit tests and the e2e group-create test. The --thread reply is verified at the component level (tag-encode + inbound grouping), not as one live send→receive→group round-trip within the automated test suite (though the live e2e run did exercise it). Live e2e verification is done with real claude, codex, and opencode agents running through the refactored daemon via an isolated home (TENEX_EDGE_HOME) and local relay, not mocks. The live e2e test with these agents found and fixed three bugs that unit tests missed: (A) add_message_recipient was not idempotent for NULL target_session (9 duplicate rows), (B) threads --project printed a truncated thread id unusable with --thread, (C) rpc_thread_meta returned bare JSON null for a missing thread causing 'neither ok nor error'. Live e2e testing with real opencode agent verified all three host adapters (claude-code hooks, codex te-hook.py, opencode TS plugin) carry real conversations through the refactored daemon.
+Startup backfill on a populated database runs correctly, carrying over project_origins, membership (with source=nip29-39002 and roles preserved), and about fields, with zero spurious rows on an empty db. The final verification is 164 tests (144 lib + 4 mechanics + 15 integration + 1 e2e), 0 failures, 0 rustc warnings, 0 net-new clippy lints beyond the pre-existing master baseline. The 39000/39002 inbound materialization is frozen only at the store-primitive level because the nak harness cannot emit relay-authored group events; the relay→materializer dispatch (rewritten in Phase 4) is covered by moved unit tests and the e2e group-create test. The --thread reply is verified at the component level (tag-encode + inbound grouping), not as one live send→receive→group round-trip within the automated test suite (though the live e2e run did exercise it). Live e2e verification is done with real claude, codex, and opencode agents running through the refactored daemon via an isolated home (TENEX_EDGE_HOME) and local relay, not mocks. The live e2e test with these agents found and fixed three bugs that unit tests missed: (A) add_message_recipient was not idempotent for NULL target_session (9 duplicate rows), (B) threads --project printed a truncated thread id unusable with --thread, (C) rpc_thread_meta returned bare JSON null for a missing thread causing 'neither ok nor error'. Live e2e testing with real opencode agent verified all three host adapters (claude-code hooks, codex te-hook.py, opencode TS plugin) carry real conversations through the refactored daemon.
 
-<!-- citations: [^ab999-9] [^ab999-18] [^ab999-52] [^ab999-60] [^ab999-80] -->
+<!-- citations: [^ab999-9] [^ab999-18] [^ab999-52] [^ab999-60] [^ab999-80] [^ab999-88] -->

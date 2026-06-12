@@ -15,6 +15,7 @@ sources:
   - session:96aedf14-df2c-425b-b548-0fa7d1c1ba63
   - session:956595fb-fa6a-45f8-869c-b53cae16124f
   - session:ab9998c4-6e65-410e-b298-122a2072171c
+  - session:72c1c649-6826-4219-a8d4-b507abc78310
 ---
 
 # OpenCode Configuration
@@ -28,3 +29,7 @@ The @opencode-ai/plugin dependency version must match the opencode binary versio
 ## Session Hooks
 
 OpenCode's `session.idle` hook must be verified to fire per-turn rather than mid-loop to prevent premature idle states during long turns. In headless `opencode run` mode, the plugin's fire-and-forget session-start races the single turn, so the session must be pre-registered deterministically via the hook. <!-- [^ab999-26] -->
+
+## Stale Database Recovery
+
+When opencode's local SQLite database has an outdated schema missing a required column, the database files (including WAL and shared memory) are backed up with a .bak suffix and removed, allowing opencode to recreate them with the correct schema on restart. This backup-and-remove process results in the loss of local conversation history. <!-- [^72c1c-2] -->

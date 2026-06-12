@@ -126,6 +126,17 @@ impl Store {
         Ok(())
     }
 
+    /// Cached NIP-29 roster size for a project (0 when membership is unknown,
+    /// e.g. no userNsec → no group management → empty cache).
+    pub fn count_group_members(&self, project: &str) -> Result<u64> {
+        let n: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM group_members WHERE project=?1",
+            params![project],
+            |r| r.get(0),
+        )?;
+        Ok(n as u64)
+    }
+
     pub fn is_group_member(&self, project: &str, pubkey: &str) -> Result<bool> {
         let n: i64 = self.conn.query_row(
             "SELECT COUNT(*) FROM group_members WHERE project=?1 AND pubkey=?2",

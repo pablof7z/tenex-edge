@@ -2,7 +2,7 @@
 title: Tenex-Edge Awareness
 slug: tenex-edge-awareness
 topic: tenex-edge
-summary: The awareness board's state model lives behind a transport interface, so that switching from local storage to network sync is a transport swap rather than a rew
+summary: Tenex-edge provides awareness of shared active work, goals, and access to resources
 tags:
   - capture
 volatility: warm
@@ -14,15 +14,17 @@ compiled-from: conversation
 sources:
   - session:f3a730bf-9a3b-4952-b687-c93ade5fd7ec
   - session:162f9965-82ca-420b-aa24-99faa15cb59a
+  - session:8a3eb1b2-7bbf-4761-ad1a-411a0a1fa666
+  - session:rollout-2026-06-09T10-55-30-019eab61-23ae-7163-8d06-9a3965847e4f
 ---
 
 # Tenex-Edge Awareness
 
 ## Transport Architecture
 
-The board's state model lives behind a transport interface so that lifting the same state onto the network fabric is a transport swap rather than a rewrite. Envelope shapes are decoupled from business logic via a modularized encoder/decoder (codec set), allowing alternative transports (e.g., NIP-29, Marmot/MLS) to be added as separate shape adapters without modifying domain logic. Rung 0 transport uses local SQLite; Rung 1 swaps to the proven Nostr kernel.
+Tenex-edge provides awareness of shared active work, goals, and access to resources. The board's state model lives behind a transport interface so that lifting the same state onto the network fabric is a transport swap rather than a rewrite. Envelope shapes are decoupled from business logic via a modularized encoder/decoder (codec set), allowing alternative transports (e.g., NIP-29, Marmot/MLS) to be added as separate shape adapters without modifying domain logic. Rung 0 transport uses local SQLite; Rung 1 swaps to the proven Nostr kernel.
 
-<!-- citations: [^f3a73-4] [^f3a73-8] [^f3a73-17] -->
+<!-- citations: [^f3a73-4] [^f3a73-8] [^f3a73-17] [^8a3eb-25] -->
 ## Collision Logging
 
 Q1 collision logging lives entirely inside tenex-edge's awareness model as the substrate observing activity reported across its boundary, independent of any specific host. The passive collision logger records (agent, path, timestamp) with no coordination logic to gather data for Rung 2 decisions. <!-- [^f3a73-9] -->
@@ -45,10 +47,11 @@ A `tenex-edge tail -f <optional-project-slug>` command provides a colorized stre
 
 ## Legacy Migration
 
-Once tenex-edge's awareness board is live, pc's legacy awareness module will be removed and pc will become a thin adapter that injects context and captures host events, consuming awareness deltas from tenex-edge instead.
+Once tenex-edge's awareness board is live, pc's legacy awareness module will be removed. PC's awareness hooks and session-start are deleted, and pc keeps only inject + capture, consuming awareness deltas from tenex-edge instead.
 
-<!-- citations: [^f3a73-26] [^f3a73-87] -->
-
+<!-- citations: [^f3a73-26] [^f3a73-87] [^f3a73-111] -->
 ## `who` Command
 
-The `who` command displays agents as: agent@hostname [session $id] [$relativePwd] followed by their current status, where relativePwd is relative to the project root (showing `.` for the root). Agents on the same machine show no host annotation; agents on a different host are annotated with (remote). <!-- [^162f9-11] -->
+The `who` command displays agents as: agent@hostname [session $id] [$relativePwd] followed by their current status, where relativePwd is relative to the project root (showing `.` for the root). Agents on the same machine show no host annotation; agents on a different host are annotated with (remote). The one-shot who output shows agent@project (not agent@host). The `who --live` command opens a full-screen refreshing terminal board over the local awareness snapshot. The `--live` board shows columns for AGENT@HOST, project, status, session, and seen age. The `--live` board exits cleanly on q, Esc, or Ctrl-C. The `--all` flag combined with `--live` keeps stale sessions visible. The `--refresh-ms` flag controls the refresh speed of the live board.
+
+<!-- citations: [^162f9-11] [^rollo-5] -->

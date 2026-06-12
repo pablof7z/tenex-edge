@@ -4,7 +4,7 @@ date: 2026-06-12
 session: 081ec521-c99b-42fb-9aa7-4a109519a62f
 transcript: /Users/pablofernandez/.claude/projects/-Users-pablofernandez-src-tenex-edge/081ec521-c99b-42fb-9aa7-4a109519a62f.jsonl
 salience: root-cause
-status: active
+status: superseded
 subjects:
   - tenex-edge-daemon
   - nip29-groups

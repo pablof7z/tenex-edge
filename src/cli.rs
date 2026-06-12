@@ -20,6 +20,8 @@ use std::io::{self, IsTerminal as _, Read as _, Write as _};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+mod statusline;
+
 #[derive(Parser)]
 #[command(
     name = "tenex-edge",
@@ -146,6 +148,15 @@ enum Cmd {
     Project {
         #[command(subcommand)]
         action: ProjectAction,
+    },
+    /// Render the one-line fabric statusline for a host's status bar.
+    /// Reads the harness's statusline JSON payload on stdin (for `session_id`),
+    /// prints one line, and always exits 0 — fails open when the daemon is down
+    /// (and never spawns one).
+    Statusline {
+        /// Session id; if omitted, taken from the stdin payload or resolved from cwd.
+        #[arg(long)]
+        session: Option<String>,
     },
     /// Connectivity check: publish a test note to the configured relays and read it back.
     Doctor,
@@ -311,6 +322,7 @@ pub async fn run(cli: Cli) -> Result<()> {
             }
         },
         Cmd::WaitForMention { session, timeout } => wait_for_mention(session, timeout).await,
+        Cmd::Statusline { session } => statusline::statusline(session),
         Cmd::Project { action } => project(action).await,
         Cmd::Doctor => doctor().await,
         Cmd::Hook { host, hook_type } => hook_run(host, hook_type).await,
@@ -765,6 +777,13 @@ pub fn load_who_snapshot(
         rows,
         other_projects,
     })
+}
+
+impl WhoSnapshot {
+    /// Number of visible sessions (local + peer, including idle) in scope.
+    pub fn session_count(&self) -> usize {
+        self.rows.len()
+    }
 }
 
 fn status_for(store: &Store, pubkey: &str, project: &str, session_id: Option<&str>) -> String {

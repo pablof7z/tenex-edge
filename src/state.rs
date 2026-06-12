@@ -191,6 +191,7 @@ CREATE TABLE IF NOT EXISTS inbox (
     body             TEXT NOT NULL,
     created_at       INTEGER NOT NULL,
     delivered        INTEGER NOT NULL DEFAULT 0,
+    delivered_at     INTEGER NOT NULL DEFAULT 0,
     from_session     TEXT NOT NULL DEFAULT '',
     subject          TEXT NOT NULL DEFAULT '',
     branch           TEXT NOT NULL DEFAULT '',
@@ -396,6 +397,12 @@ impl Store {
         ] {
             let _ = conn.execute(&format!("ALTER TABLE inbox ADD COLUMN {col}"), []);
         }
+        // When a mention was drained to its session — drives the statusline's
+        // "recently consumed" inbox segment.
+        let _ = conn.execute(
+            "ALTER TABLE inbox ADD COLUMN delivered_at INTEGER NOT NULL DEFAULT 0",
+            [],
+        );
         // NIP-10 thread tracking: root event (first user prompt in the session
         // thread) and most recent user prompt (triggers TurnReply at stop-hook).
         let _ = conn.execute(
@@ -1065,6 +1072,17 @@ impl Store {
         Ok(n > 0)
     }
 
+    /// Cached NIP-29 roster size for a project (0 when membership is unknown,
+    /// e.g. no userNsec → no group management → empty cache).
+    pub fn count_group_members(&self, project: &str) -> Result<u64> {
+        let n: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM group_members WHERE project=?1",
+            params![project],
+            |r| r.get(0),
+        )?;
+        Ok(n as u64)
+    }
+
     pub fn upsert_group_member(&self, project: &str, pubkey: &str, role: &str, ts: u64) -> Result<()> {
         self.conn.execute(
             "INSERT INTO group_members (project, pubkey, role, updated_at) VALUES (?1, ?2, ?3, ?4)
@@ -1118,8 +1136,8 @@ impl Store {
             .filter_map(|r| r.ok())
             .collect();
         self.conn.execute(
-            "UPDATE inbox SET delivered=1 WHERE target_session=?1 AND delivered=0",
-            params![session_id],
+            "UPDATE inbox SET delivered=1, delivered_at=?2 WHERE target_session=?1 AND delivered=0",
+            params![session_id, crate::util::now_secs()],
         )?;
         Ok(rows)
     }
@@ -1743,6 +1761,20 @@ impl Store {
     /// `ID` shown in an envelope). Used by `inbox reply --id` to recover the
     /// original sender + event to thread the reply against. Returns the first
     /// match ordered by recency; `None` if nothing matches.
+    /// Mentions already drained to `session_id` at or after `since`. Read-only —
+    /// drives the statusline's "recently consumed" inbox segment.
+    pub fn list_recently_delivered(&self, session_id: &str, since: u64) -> Result<Vec<InboxRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT mention_event_id, target_session, from_pubkey, from_slug, project, body, created_at, from_session, subject, branch, commit_hash, dirty, host
+             FROM inbox WHERE target_session=?1 AND delivered=1 AND delivered_at>=?2 AND from_pubkey<>'' ORDER BY created_at",
+        )?;
+        let rows: Vec<InboxRow> = stmt
+            .query_map(params![session_id, since], row_to_inbox)?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rows)
+    }
+
     pub fn find_inbox_by_event_prefix(&self, prefix: &str) -> Result<Option<InboxRow>> {
         let pattern = format!("{prefix}%");
         let mut stmt = self.conn.prepare(

@@ -82,6 +82,13 @@ pub struct WhoSnapshot {
     other_projects: Vec<OtherProjectSummary>,
 }
 
+impl WhoSnapshot {
+    /// Number of visible sessions (local + peer, including idle) in scope.
+    pub fn session_count(&self) -> usize {
+        self.rows.len()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 struct WhoRow {
     source: WhoSource,

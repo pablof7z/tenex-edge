@@ -176,9 +176,23 @@ impl Store {
             .filter_map(|r| r.ok())
             .collect();
         self.conn.execute(
-            "UPDATE inbox SET delivered=1 WHERE target_session=?1 AND delivered=0",
-            params![session_id],
+            "UPDATE inbox SET delivered=1, delivered_at=?2 WHERE target_session=?1 AND delivered=0",
+            params![session_id, crate::util::now_secs()],
         )?;
+        Ok(rows)
+    }
+
+    /// Mentions already drained to `session_id` at or after `since`. Read-only —
+    /// drives the statusline's "recently consumed" inbox segment.
+    pub fn list_recently_delivered(&self, session_id: &str, since: u64) -> Result<Vec<InboxRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT mention_event_id, target_session, from_pubkey, from_slug, project, body, created_at, from_session, subject, branch, commit_hash, dirty, host
+             FROM inbox WHERE target_session=?1 AND delivered=1 AND delivered_at>=?2 AND from_pubkey<>'' ORDER BY created_at",
+        )?;
+        let rows: Vec<InboxRow> = stmt
+            .query_map(params![session_id, since], row_to_inbox)?
+            .filter_map(|r| r.ok())
+            .collect();
         Ok(rows)
     }
 }

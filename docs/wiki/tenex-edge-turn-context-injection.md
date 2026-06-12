@@ -18,6 +18,10 @@ sources:
   - session:ab9998c4-6e65-410e-b298-122a2072171c
   - session:40a4d401-2520-4781-b747-b0ef19594bed
   - session:081ec521-c99b-42fb-9aa7-4a109519a62f
+  - session:f3a730bf-9a3b-4952-b687-c93ade5fd7ec
+  - session:956595fb-fa6a-45f8-869c-b53cae16124f
+  - session:rollout-2026-06-09T12-56-40-019eabd0-1205-77a3-88b8-e07b0d948f1d
+  - session:rollout-2026-06-09T12-58-38-019eabd1-dde2-76c2-84e3-9edc3e78e48f
 ---
 
 # Tenex-Edge Turn Context Injection
@@ -33,22 +37,26 @@ A mid-run check (turn-check) fires on PostToolUse hooks to surface incoming mess
 
 ## Turn-Start Behavior
 
-On the first turn (detected via get_turn_state returning turn_started_at == 0), turn-start emits the full peer roster. If the agent is not a member of the NIP-29 group, a warning is injected into the agent's context telling the user to run tenex-edge project add <project> <pubkey>. (Previously: turn-start emitted the wait-for-mention hint plus the full peer roster; Channels (MCP notifications) now replace the wait-for-mention hack as the mechanism for injecting async work into Claude Code sessions, closing the cold-start gap where a freshly-launched, never-prompted idle agent is deaf to mentions until its first UserPromptSubmit.) On subsequent turns, turn-start emits only deltas: inbox drains, new peers (first_seen >= prev_turn_started_at), and status changes (updated_at >= prev_turn_started_at). turn_start is async and outputs context as either plain text or JSON (with --json flag for Codex), marking the session working in one shot.
+On the first turn (detected via get_turn_state returning turn_started_at == 0), turn-start emits the full peer roster. The UserPromptSubmit hook injects the available agents list (who) and their current activity into the agent's context each turn, so agents know who they can message without running a command. If the agent is not a member of the NIP-29 group, a warning is injected into the agent's context telling the user to run tenex-edge project add <project> <pubkey>. (Previously: turn-start emitted the wait-for-mention hint plus the full peer roster; Channels (MCP notifications) now replace the wait-for-mention hack as the mechanism for injecting async work into Claude Code sessions, closing the cold-start gap where a freshly-launched, never-prompted idle agent is deaf to mentions until its first UserPromptSubmit.) On subsequent turns, turn-start emits only deltas scoped to the current session's project (updates from other projects do not leak into unrelated sessions): inbox drains, new peers (first_seen >= prev_turn_started_at), and status changes (updated_at >= prev_turn_started_at). turn_start passes the current session's rec.project into peer/status delta queries (list_new_peer_sessions and list_status_changes_since accept an optional project filter). turn-start flips a per-session working state to true with the turn start timestamp. turn_start is async and outputs context as either plain text or JSON (with --json flag for Codex), marking the session working in one shot.
 
-<!-- citations: [^2cee1-5] [^162f9-16] [^2cee1-12] [^081ec-6] -->
+<!-- citations: [^2cee1-5] [^162f9-16] [^2cee1-12] [^081ec-6] [^f3a73-126] [^95659-10] [^rollo-16] -->
 ## Output Format
 
-turn-start supports a --json flag for Codex that wraps output as {"systemMessage": content}; without --json it outputs plain text for Claude Code. A render_who_plain function produces the peer roster without ANSI escape codes, for use in context injection. <!-- [^2cee1-6] -->
+turn-start supports a --json flag for Codex that wraps output as {"systemMessage": content}; without --json it outputs plain text for Claude Code. A render_who_plain function produces the peer roster without ANSI escape codes, for use in context injection. The Codex-injected context explicitly instructs Codex to run send-message when asked to message a peer, rather than claiming it cannot.
 
+<!-- citations: [^2cee1-6] [^rollo-14] -->
 ## Peer Session Tracking
 
 The peer_sessions table has a first_seen column populated only on INSERT (not on conflict/heartbeat updates), so it accurately marks when a peer appeared. The daemon must not self-skip a sibling-session mention that is session-targeted to a different session than the author; it must route it to the target's inbox.
 
+Regression tests exist that insert same-time deltas in two projects and assert only the current project is returned, verifying no cross-project leakage. <!-- [^rollo-17] -->
+
 <!-- citations: [^2cee1-7] [^162f9-20] -->
 ## Hook Integration
 
-The Codex hook script's user-prompt-submit handler calls turn-start --json and prints its stdout; its post-tool-use handler calls turn-check --json and prints stdout if non-empty. PostToolUse hook entry is added to the Codex config template. The Claude Code hook script's user-prompt-submit handler calls turn-start and prints its stdout; PostToolUse is not wired for Claude Code because its hook stdout format for PostToolUse is unverified. <!-- [^2cee1-8] -->
+The CLI exposes two verbs — turn-start and turn-end — replacing the removed observe verb. The Codex hook script's user-prompt-submit handler calls turn-start --json and prints its stdout; its post-tool-use handler calls turn-check --json and prints stdout if non-empty. PostToolUse hook entry is added to the Codex config template. The Claude Code hook script's user-prompt-submit handler calls turn-start and prints its stdout; the Stop hook is mapped to turn-end, flipping the per-session working state back to false. PostToolUse is not wired for Claude Code because its hook stdout format for PostToolUse is unverified.
 
+<!-- citations: [^2cee1-8] [^95659-11] -->
 ## Open Items
 
 In the one-shot scenario (sender's session ended before recipient comes online), tenex-edge inbox shows empty for the untargeted/restart variant of same-daemon mention catch-up, distinct from the canonical path which worked. <!-- [^ab999-22] -->
@@ -59,6 +67,6 @@ The note/do-it transport is already there: phone → relay → daemon subscripti
 
 ## Turn-Reply Event
 
-When an agent finishes producing text (stop hook), it must publish a kind:1 TurnReply event signed by the agent's key with NIP-10 e-tags: root pointing to the first user prompt of the session and reply pointing to the user prompt that triggered the current turn. Each session must track thread_root_event_id (first user prompt, immutable) and last_prompt_event_id (most recent user prompt, updated each turn) in the database. At turn_start the current last assistant text from the transcript must be snapshotted as a baseline, and at turn_end the system must poll until the transcript contains assistant text different from that baseline. The root_event_id and last_prompt_event_id must be captured atomically at the start of turn_end processing, before the async transcript poll, to prevent a concurrent user_prompt from overwriting them.
+When an agent finishes producing text (stop hook mapped to turn-end), it must publish a kind:1 TurnReply event signed by the agent's key with NIP-10 e-tags: root pointing to the first user prompt of the session and reply pointing to the user prompt that triggered the current turn. Each session must track thread_root_event_id (first user prompt, immutable) and last_prompt_event_id (most recent user prompt, updated each turn) in the database. At turn_start the current last assistant text from the transcript must be snapshotted as a baseline, and at turn_end the system must poll up to 2 seconds for the transcript to contain assistant text different from that baseline. The root_event_id and last_prompt_event_id must be captured atomically at the start of turn_end processing, before the async transcript poll, to prevent a concurrent user_prompt from overwriting them. After publishing, the TurnReply event ID must be persisted so subsequent user prompts can reference it as the reply target. turn-end flips the per-session working state back to false.
 
-<!-- citations: [^40a4d-9] [^40a4d-12] [^40a4d-16] -->
+<!-- citations: [^40a4d-9] [^40a4d-12] [^40a4d-16] [^95659-12] [^40a4d-20] -->
