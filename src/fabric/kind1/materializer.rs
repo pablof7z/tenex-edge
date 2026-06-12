@@ -76,7 +76,13 @@ impl Kind1Materializer {
             return;
         }
         store
-            .set_agent_status(&st.agent.pubkey, &st.project, &st.text, now)
+            .set_agent_status(
+                &st.agent.pubkey,
+                &st.project,
+                st.session_id.as_ref().map(|s| s.as_str()),
+                &st.text,
+                now,
+            )
             .ok();
     }
 

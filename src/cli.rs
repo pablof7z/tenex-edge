@@ -614,10 +614,18 @@ pub fn load_who_snapshot(
     let mine = store.list_agents_read_model(None, since)?;
     let my_ids: std::collections::HashSet<String> =
         mine.iter().map(|s| s.session_id.clone()).collect();
+    let local_agent_pubkeys: std::collections::HashSet<String> = store
+        .list_local_agent_pubkeys()
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
     let all_peers: Vec<_> = store
         .list_presence_read_model(None, since)?
         .into_iter()
         .filter(|p| !my_ids.contains(&p.session_id))
+        .filter(|p| {
+            !(slugify_host(&p.host) == local_host && local_agent_pubkeys.contains(&p.pubkey))
+        })
         .collect();
 
     let mut rows = Vec::new();
@@ -636,7 +644,7 @@ pub fn load_who_snapshot(
                 fresh: age_secs.map(|a| a <= PEER_FRESH_SECS).unwrap_or(true),
                 slug: s.agent_slug.clone(),
                 project: s.project.clone(),
-                status: status_for(store, &s.agent_pubkey, &s.project),
+                status: status_for(store, &s.agent_pubkey, &s.project, Some(&s.session_id)),
                 host: s.host.clone(),
                 session_id: s.session_id.clone(),
                 age_secs,
@@ -659,7 +667,7 @@ pub fn load_who_snapshot(
                 fresh: age <= PEER_FRESH_SECS,
                 slug: p.slug.clone(),
                 project: p.project.clone(),
-                status: status_for(store, &p.pubkey, &p.project),
+                status: status_for(store, &p.pubkey, &p.project, Some(&p.session_id)),
                 host: p.host.clone(),
                 session_id: p.session_id.clone(),
                 age_secs: Some(age),
@@ -698,9 +706,9 @@ pub fn load_who_snapshot(
     })
 }
 
-fn status_for(store: &Store, pubkey: &str, project: &str) -> String {
+fn status_for(store: &Store, pubkey: &str, project: &str, session_id: Option<&str>) -> String {
     store
-        .get_agent_status(pubkey, project)
+        .get_agent_status(pubkey, project, session_id)
         .ok()
         .flatten()
         .unwrap_or_default()
@@ -946,6 +954,69 @@ mod who_tests {
     }
 
     #[test]
+    fn who_snapshot_uses_session_scoped_status_for_sibling_sessions() {
+        let store = Store::open_memory().unwrap();
+        let mut a = local_session("session-a");
+        a.agent_slug = "claude".to_string();
+        a.agent_pubkey = "pk-claude".to_string();
+        a.created_at = 1;
+        let mut b = a.clone();
+        b.session_id = "session-b".to_string();
+        b.created_at = 2;
+        store.upsert_session(&a).unwrap();
+        store.upsert_session(&b).unwrap();
+        store.touch_session("session-a", 1_000).unwrap();
+        store.touch_session("session-b", 1_000).unwrap();
+        store
+            .set_agent_status("pk-claude", "proj", Some("session-a"), "reading files", 995)
+            .unwrap();
+        store
+            .set_agent_status("pk-claude", "proj", Some("session-b"), "running tests", 996)
+            .unwrap();
+
+        let snapshot = load_who_snapshot(&store, Some("proj"), false, 1_000, "laptop").unwrap();
+        let row_a = snapshot
+            .rows
+            .iter()
+            .find(|r| r.session_id.as_str() == "session-a")
+            .expect("session-a row");
+        let row_b = snapshot
+            .rows
+            .iter()
+            .find(|r| r.session_id.as_str() == "session-b")
+            .expect("session-b row");
+        assert_eq!(row_a.status, "reading files");
+        assert_eq!(row_b.status, "running tests");
+    }
+
+    #[test]
+    fn who_snapshot_ignores_same_host_peer_echo_for_known_local_agent() {
+        let store = Store::open_memory().unwrap();
+        let mut old = local_session("old-local");
+        old.agent_slug = "claude".to_string();
+        old.agent_pubkey = "pk-claude".to_string();
+        old.alive = false;
+        store.upsert_session(&old).unwrap();
+        store
+            .upsert_peer_session(
+                "old-local",
+                "pk-claude",
+                "claude",
+                "proj",
+                "laptop",
+                "",
+                1_000,
+            )
+            .unwrap();
+
+        let snapshot = load_who_snapshot(&store, Some("proj"), false, 1_000, "laptop").unwrap();
+        assert!(
+            snapshot.rows.is_empty(),
+            "same-host peer echo for our own local identity should be hidden"
+        );
+    }
+
+    #[test]
     fn who_snapshot_merges_local_and_peer_sessions() {
         let store = Store::open_memory().unwrap();
         store
@@ -975,7 +1046,13 @@ mod who_tests {
             )
             .unwrap();
         store
-            .set_agent_status("pk-reviewer", "proj", "reviewing the patch", 995)
+            .set_agent_status(
+                "pk-reviewer",
+                "proj",
+                Some("remote-session"),
+                "reviewing the patch",
+                995,
+            )
             .unwrap();
 
         // Daemon/viewer host is "laptop" → the local coder is same-machine; the
@@ -2039,7 +2116,7 @@ static HOOK_HOSTS: &[HostDef] = &[
         session_id_fields: &["session_id"],
         transcript_field: Some("transcript_path"),
         output_format: HookOutputFormat::PlainText,
-        pid_search: None,
+        pid_search: Some("claude"),
         generates_sid: false,
     },
     HostDef {
@@ -2164,6 +2241,24 @@ async fn hook_run(host_name: String, hook_type: String) -> Result<()> {
                 .and_then(|v| v.as_str())
                 .filter(|s| !s.is_empty())
                 .map(str::to_string);
+            // Reassert the session before the turn starts: if the daemon lost it
+            // (restart, version-skew kill, crash), this re-registers the live
+            // session instead of silently dropping awareness for the whole turn.
+            if !sid.is_empty() {
+                let watch_pid = obj
+                    .and_then(|o| o.get("pid").or_else(|| o.get("watch_pid")))
+                    .and_then(|v| v.as_i64())
+                    .map(|n| n as i32)
+                    .or_else(|| host.pid_search.and_then(find_ancestor_pid));
+                if let Err(e) = session_start_inner(
+                    agent_slug.clone(),
+                    Some(sid.clone()),
+                    Some(cwd.clone()),
+                    watch_pid,
+                ) {
+                    eprintln!("[tenex-edge] session reassert skipped: {e:#}");
+                }
+            }
             turn_start(sid.clone(), transcript, json_out).await?;
             // Publish the user's prompt as a kind:1 OP on the Nostr fabric.
             // Fail open: if userNsec is absent or the relay is unreachable, the

@@ -1189,3 +1189,101 @@ fn freeze_startup_mention_catchup_no_duplicate() {
 
     stop_daemon(&home);
 }
+
+#[test]
+fn session_start_replaces_prior_session_for_same_host_pid() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let home = Home::new();
+    let pid = std::process::id() as i32;
+
+    rt().block_on(async {
+        let mut c = Client::connect_or_spawn().await.expect("connect");
+        c.call(
+            "session_start",
+            serde_json::json!({
+                "agent": "claude",
+                "session_id": "old-session",
+                "cwd": "/tmp",
+                "watch_pid": pid
+            }),
+        )
+        .await
+        .expect("first session_start");
+        c.call(
+            "session_start",
+            serde_json::json!({
+                "agent": "claude",
+                "session_id": "new-session",
+                "cwd": "/tmp",
+                "watch_pid": pid
+            }),
+        )
+        .await
+        .expect("second session_start");
+    });
+
+    let store = Store::open(&home.store_path()).unwrap();
+    assert!(
+        !store.get_session("old-session").unwrap().unwrap().alive,
+        "old session should be marked dead"
+    );
+    assert!(
+        store.get_session("new-session").unwrap().unwrap().alive,
+        "new session should remain alive"
+    );
+
+    rt().block_on(async {
+        let mut c = Client::connect_or_spawn().await.unwrap();
+        let v = c
+            .call(
+                "who",
+                serde_json::json!({"all": true, "all_projects": true}),
+            )
+            .await
+            .unwrap();
+        let rows = v["rows"].as_array().unwrap();
+        assert!(
+            !rows.iter().any(|r| r["session_id"] == "old-session"),
+            "old session leaked into who rows: {rows:?}"
+        );
+        assert!(
+            rows.iter().any(|r| r["session_id"] == "new-session"),
+            "new session missing from who rows: {rows:?}"
+        );
+    });
+
+    stop_daemon(&home);
+}
+
+#[test]
+fn claude_user_prompt_submit_reasserts_missing_session() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let home = Home::new();
+
+    let out = run_cli_stdin(
+        &home,
+        &[
+            "hook",
+            "--host",
+            "claude-code",
+            "--type",
+            "user-prompt-submit",
+        ],
+        r#"{"session_id":"revive-claude","cwd":"/tmp","prompt":"hello"}"#,
+    );
+    assert!(
+        out.status.success(),
+        "user-prompt-submit failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let store = Store::open(&home.store_path()).unwrap();
+    let rec = store
+        .get_session("revive-claude")
+        .unwrap()
+        .expect("revived session row");
+    assert!(rec.alive);
+    assert_eq!(rec.agent_slug, "claude");
+
+    stop_daemon(&home);
+}

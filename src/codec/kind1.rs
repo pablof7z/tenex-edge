@@ -6,7 +6,7 @@
 //! | Presence  | kind:30315 (NIP-38-style heartbeat), `["h", project]`, `["d", "tenex-edge-presence:<session>"]`, `["p", peer]…`, `["session-id", id]`, `["host", host]`, optional `["rel-cwd", rel]`, `["expiration", ts]` |
 //! | Activity   | kind:1,    `["h", project]` |
 //! | TurnReply  | kind:1,    `["h", project]`, `["e", root_id, "", "root"]`, `["e", reply_id, "", "reply"]` |
-//! | Status     | kind:30315 (NIP-38), `["h", project]`, `["d", project]`, optional `["rel-cwd", rel]`, `["expiration", ts]` |
+//! | Status     | kind:30315 (NIP-38), `["h", project]`, `["d", project]`, optional `["session-id", id]`, optional `["rel-cwd", rel]`, `["expiration", ts]` |
 //! | Mention    | kind:1,    `["h", project]`, `["p", to]`, optional `["session-id", target]`, optional `["from-session", sender]` |
 //!
 //! kind:1 disambiguation on decode (in priority order):
@@ -24,7 +24,9 @@
 //! article can be linked back to the conversation that produced it.
 
 use crate::codec::Codec;
-use crate::domain::{Activity, AgentRef, DomainEvent, Mention, Presence, Profile, Status, TurnReply};
+use crate::domain::{
+    Activity, AgentRef, DomainEvent, Mention, Presence, Profile, Status, TurnReply,
+};
 use crate::util::SessionId;
 use anyhow::Result;
 use nostr_sdk::prelude::*;
@@ -180,6 +182,7 @@ impl Codec for Kind1Codec {
             DomainEvent::Status(Status {
                 agent: _agent,
                 project,
+                session_id,
                 text,
                 rel_cwd,
                 expires_at,
@@ -188,6 +191,9 @@ impl Codec for Kind1Codec {
                     project_tag(project)?,
                     tag(&["d", project])?,
                 ];
+                if let Some(session_id) = session_id {
+                    tags.push(tag(&["session-id", session_id.as_str()])?);
+                }
                 if !rel_cwd.is_empty() {
                     tags.push(tag(&["rel-cwd", rel_cwd])?);
                 }
@@ -245,7 +251,9 @@ impl Codec for Kind1Codec {
             })),
             KIND_STATUS => {
                 let expires_at = first_tag(event, "expiration").and_then(|s| s.parse().ok());
-                if let Some(session_id) = first_tag(event, "session-id") {
+                let d = first_tag(event, "d").unwrap_or_default();
+                if d.starts_with(PRESENCE_D_PREFIX) {
+                    let session_id = first_tag(event, "session-id")?;
                     Some(DomainEvent::Presence(Presence {
                         // Slug is NOT on the wire; resolved downstream from kind:0 profile.
                         agent: AgentRef::new(pubkey, String::new()),
@@ -261,6 +269,7 @@ impl Codec for Kind1Codec {
                         // Slug is NOT on the wire; resolved downstream from kind:0 profile.
                         agent: AgentRef::new(pubkey, String::new()),
                         project: project_from_tags(event)?,
+                        session_id: first_tag(event, "session-id").map(SessionId::from),
                         text: event.content.clone(),
                         rel_cwd: first_tag(event, "rel-cwd").unwrap_or_default().to_string(),
                         expires_at,
@@ -473,6 +482,7 @@ mod tests {
         let ev = DomainEvent::Status(Status {
             agent: AgentRef::new(keys.public_key().to_hex(), String::new()),
             project: "tenex-edge".into(),
+            session_id: Some(SessionId::from("sess-status")),
             text: "reviewing PR".into(),
             rel_cwd: String::new(),
             expires_at: Some(1_900_000_000),
