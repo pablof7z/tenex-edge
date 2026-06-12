@@ -1653,22 +1653,6 @@ impl Store {
         }
     }
 
-    /// Return the most recent thread_id for inbound messages from a given sender
-    /// in a project. Used by the tail emitter to attach a thread short-code to
-    /// inbound Msg events. Returns None if no messages exist from this sender.
-    pub fn latest_thread_for_inbound(&self, author_pubkey: &str, project: &str) -> Result<Option<String>> {
-        // Join messages -> threads -> projects to find the most recent thread
-        // for this author in the given project.
-        Ok(self.conn.query_row(
-            "SELECT m.thread_id FROM messages m
-             JOIN threads t ON t.thread_id = m.thread_id
-             JOIN projects p ON p.project_id = t.project_id
-             WHERE m.author_pubkey = ?1 AND p.display_slug = ?2
-             ORDER BY m.created_at DESC LIMIT 1",
-            params![author_pubkey, project],
-            |r| r.get::<_, String>(0),
-        ).ok())
-    }
 
     /// Query for tail backfill: returns recent messages with author/project/thread info.
     ///
@@ -3036,13 +3020,14 @@ mod tests {
         let now = 2000u64;
 
         // First materialization.
-        let routed1 = Kind1Materializer::materialize_inbound_message(
+        let (routed1, thread1) = Kind1Materializer::materialize_inbound_message(
             &s, &pk_hex, &mention, &event, pi, now,
         );
         assert!(routed1, "first delivery must route to session");
+        assert!(thread1.is_some(), "canonical write must report the thread id");
 
         // Second materialization (relay echo) — must be a no-op everywhere.
-        let routed2 = Kind1Materializer::materialize_inbound_message(
+        let (routed2, _) = Kind1Materializer::materialize_inbound_message(
             &s, &pk_hex, &mention, &event, pi, now,
         );
         assert!(!routed2, "echo: inbox already has this (mention_event_id, target_session)");

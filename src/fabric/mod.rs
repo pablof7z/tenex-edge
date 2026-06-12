@@ -53,10 +53,15 @@ pub trait Delivery {
 #[derive(Default)]
 pub struct MaterializationOutcome {
     /// The decoded domain event to forward onto the tail channel, if any.
-    /// Emitted for every successfully decoded event, including is_self.
+    /// Emitted for every successfully decoded event, including is_self. For
+    /// routed mentions this is the ENRICHED event (sender slug resolved from
+    /// the store), so tail consumers never see an empty slug.
     pub tail: Option<crate::domain::DomainEvent>,
     /// True when a mention was actually routed and waiters should be woken.
     pub wake_mentions: bool,
+    /// Canonical thread id an inbound message was filed under, when known.
+    /// Tail consumers use this for exact thread attribution.
+    pub thread_id: Option<String>,
 }
 
 // ── Top-level dispatcher ──────────────────────────────────────────────────────
@@ -112,6 +117,7 @@ pub fn materialize(
     let mut outcome = MaterializationOutcome {
         tail: Some(de.clone()),
         wake_mentions: false,
+        thread_id: None,
     };
 
     let is_self = hosted.contains(&event.pubkey.to_hex());
@@ -166,7 +172,7 @@ pub fn materialize(
                         ..m.clone()
                     })
                 };
-                let routed = Kind1Materializer::materialize_inbound_message(
+                let (routed, thread_id) = Kind1Materializer::materialize_inbound_message(
                     store,
                     &to,
                     &enriched,
@@ -177,6 +183,9 @@ pub fn materialize(
                 if routed {
                     outcome.wake_mentions = true;
                 }
+                outcome.thread_id = thread_id;
+                // Tail carries the enriched event so consumers see the slug.
+                outcome.tail = Some(DomainEvent::Mention(enriched.into_owned()));
             }
         }
 

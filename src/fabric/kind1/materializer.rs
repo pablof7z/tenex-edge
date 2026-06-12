@@ -105,6 +105,9 @@ impl Kind1Materializer {
     /// session inbox (i.e. the mention wake signal should fire). The canonical
     /// dual-write is unconditional — it does not depend on whether any sessions
     /// were alive when the event arrived.
+    /// Returns `(routed, thread_id)`: whether the mention was newly routed to a
+    /// local inbox, and the canonical thread the message was filed under (None
+    /// when the canonical dual-write failed).
     pub fn materialize_inbound_message(
         store: &Store,
         to_pubkey: &str,
@@ -112,7 +115,7 @@ impl Kind1Materializer {
         event: &Event,
         provider_instance: &str,
         now: u64,
-    ) -> bool {
+    ) -> (bool, Option<String>) {
         // ── Legacy path (AUTHORITATIVE — DO NOT CHANGE) ──────────────────────
         let routed = crate::runtime::route_mention_into(store, to_pubkey, m, event);
 
@@ -149,7 +152,7 @@ impl Kind1Materializer {
 
         let created_at = event.created_at.as_secs();
 
-        (|| -> anyhow::Result<()> {
+        let thread_id = (|| -> anyhow::Result<String> {
             let project_id =
                 store.ensure_project_origin(FABRIC, provider_instance, &m.project, &m.project, now)?;
             let thread_id = store.ensure_thread_origin(
@@ -169,10 +172,10 @@ impl Kind1Materializer {
                 Some(&eid_hex),
             )?;
             store.add_message_recipient(&message_id, to_pubkey, m.target_session.as_ref().map(|s| s.as_str()))?;
-            Ok(())
+            Ok(thread_id)
         })()
         .ok(); // best-effort; never fail the legacy inbox path
 
-        routed
+        (routed, thread_id)
     }
 }

@@ -79,6 +79,10 @@ pub struct DaemonState {
     /// In-memory peer-session tracking for join/leave derivation.
     /// key = session_id. Populated on first-seen presence; cleared on leave.
     peer_sessions: Mutex<HashMap<String, PeerTracked>>,
+    /// Bounded first-sight tracking of native event ids: the relay pool
+    /// notifies once per matching subscription, so the same event arrives many
+    /// times. Set + insertion-order queue, capped at SEEN_EVENTS_CAP.
+    seen_events: Mutex<(std::collections::HashSet<String>, std::collections::VecDeque<String>)>,
     /// Pubkeys for which a Profile event has already been emitted, for first-seen dedup.
     seen_profiles: Mutex<std::collections::HashSet<String>>,
     /// Last-seen status text per (pubkey, project) for dedup.
@@ -155,6 +159,7 @@ pub async fn run() -> Result<()> {
         liveness_changed: Notify::new(),
         shutdown: Notify::new(),
         peer_sessions: Mutex::new(HashMap::new()),
+        seen_events: Mutex::new((std::collections::HashSet::new(), std::collections::VecDeque::new())),
         seen_profiles: Mutex::new(std::collections::HashSet::new()),
         last_status: Mutex::new(HashMap::new()),
     });
@@ -2106,9 +2111,17 @@ fn handle_incoming(state: &Arc<DaemonState>, event: &Event) {
     let hosted = state.hosted_pubkeys();
     let owners = state.owners.clone();
     let now = now_secs();
+    // ALWAYS materialize: store writes are idempotent, and re-deliveries are
+    // load-bearing — a refreshed subscription replays stored events, which is
+    // how a NEW session receives mentions that predate it.
     let outcome = state.with_store(|s| state.provider.materialize(&env, &hosted, &owners, now, s));
+    // The relay pool notifies once PER MATCHING SUBSCRIPTION (scope filters ×
+    // live sessions), so the same event reaches here many times. The tail
+    // broadcast is NOT idempotent — emit only on first sight of the event id.
     if let Some(de) = outcome.tail {
-        derive_and_emit_tail_events(state, &de, &hosted, now);
+        if state.first_sight(&event.id.to_hex()) {
+            derive_and_emit_tail_events(state, &de, outcome.thread_id.as_deref(), &hosted, now);
+        }
     }
     if outcome.wake_mentions {
         state.mention_notify.notify_waiters();
@@ -2120,6 +2133,7 @@ fn handle_incoming(state: &Arc<DaemonState>, event: &Event) {
 fn derive_and_emit_tail_events(
     state: &Arc<DaemonState>,
     de: &DomainEvent,
+    thread_id: Option<&str>,
     hosted: &[String],
     now: u64,
 ) {
@@ -2215,23 +2229,21 @@ fn derive_and_emit_tail_events(
             if !hosted.contains(&m.to_pubkey) {
                 return;
             }
-            // Derive a thread short code from the sender's from_session or the
-            // from pubkey — since we don't have the native event id here, use a
-            // store lookup to find the latest thread.
-            // The best we can do inbound is use the mention event id for grouping.
-            // Thread grouping from the read model:
-            let thread_short = state.with_store(|s| {
-                // Find the most recent message in the canonical store by this sender
-                // to this project to get the thread id.
-                s.latest_thread_for_inbound(&m.from.pubkey, &m.project)
-                    .ok()
-                    .flatten()
-                    .map(|tid| pubkey_short(&tid))
-            });
+            // Exact thread attribution: the materializer reports the canonical
+            // thread it filed this message under.
+            let thread_short = thread_id.map(pubkey_short);
+            // The materializer enriches the slug from the store; if it could
+            // not (unknown sender), fall back to the pubkey short code rather
+            // than an empty name.
+            let from_slug = if m.from.slug.is_empty() {
+                pubkey_short(&m.from.pubkey)
+            } else {
+                m.from.slug.clone()
+            };
             state.emit_tail(TailEvent::Msg {
                 ts: now,
                 project: m.project.clone(),
-                from: m.from.slug.clone(),
+                from: from_slug,
                 from_session: m.from_session.as_ref().map(|s| s.as_str().to_owned()),
                 to: pubkey_short(&m.to_pubkey),
                 to_session: m.target_session.as_ref().map(|s| s.as_str().to_owned()),
@@ -2517,7 +2529,31 @@ fn pid_alive(pid: i32) -> bool {
 
 // ── small helpers ─────────────────────────────────────────────────────────────
 
+/// Cap on the first-sight event-id memory (events, not bytes). Relay
+/// re-notifications arrive within milliseconds of each other, so even a small
+/// window suffices; 4096 also absorbs startup catch-up bursts.
+const SEEN_EVENTS_CAP: usize = 4096;
+
 impl DaemonState {
+    /// True exactly once per native event id (bounded memory). Subsequent
+    /// sightings — the relay pool notifying for every matching subscription —
+    /// return false and must be ignored.
+    fn first_sight(&self, event_id: &str) -> bool {
+        let mut g = self.seen_events.lock().unwrap();
+        let (set, order) = &mut *g;
+        if set.contains(event_id) {
+            return false;
+        }
+        set.insert(event_id.to_owned());
+        order.push_back(event_id.to_owned());
+        if order.len() > SEEN_EVENTS_CAP {
+            if let Some(old) = order.pop_front() {
+                set.remove(&old);
+            }
+        }
+        true
+    }
+
     fn tail_subscribe(&self) -> tokio::sync::broadcast::Receiver<TailEvent> {
         self.tail_tx.subscribe()
     }
