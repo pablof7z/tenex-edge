@@ -62,7 +62,7 @@ struct PeerTracked {
 pub struct DaemonState {
     store: Arc<Mutex<Store>>,
     transport: Arc<Transport>,
-    provider: Kind1Nip29Provider,
+    provider: Arc<Kind1Nip29Provider>,
     cfg: Config,
     host: String,
     owners: Vec<String>,
@@ -133,12 +133,12 @@ pub async fn run() -> Result<()> {
     );
 
     let store = Arc::new(Mutex::new(Store::open(&store_path())?));
-    let provider = Kind1Nip29Provider::new(
+    let provider = Arc::new(Kind1Nip29Provider::new(
         transport.clone(),
         store.clone(),
         cfg.user_nsec.clone(),
         &cfg.relays,
-    );
+    ));
     let state = Arc::new(DaemonState {
         store,
         transport,
@@ -754,7 +754,6 @@ async fn rpc_propose(
     params: &serde_json::Value,
 ) -> Result<serde_json::Value> {
     use crate::fabric::provider::FABRIC;
-    use nostr_sdk::prelude::{EventBuilder, Kind, Tag};
 
     let p: ProposeParams =
         serde_json::from_value(params.clone()).context("parsing propose params")?;
@@ -807,33 +806,24 @@ async fn rpc_propose(
         })
     });
 
-    // Build the kind:30023 EventBuilder.
-    let mut tags: Vec<Tag> = vec![
-        Tag::parse(["d", &d_tag]).context("d tag")?,
-        Tag::parse(["title", &p.title]).context("title tag")?,
-        Tag::parse(["h", &project]).context("h tag")?,
-        // No agent tag: author identity is the event signer (pubkey); slug is in kind:0.
-    ];
-    // Authoring session tag — only when a live session exists.
-    if let Some(ref rec) = session_rec {
-        tags.push(Tag::parse(["session-id", &rec.session_id]).context("session-id tag")?);
-    }
-    // p-tag each owner so the proposal surfaces in their inbox.
-    for owner in &state.owners {
-        tags.push(Tag::parse(["p", owner]).context("p tag")?);
-    }
-    // Thread root e-tag (NIP-10 root marker) — only when --thread given.
-    if let Some(ref root_key) = root_native_key {
-        tags.push(Tag::parse(["e", root_key, "", "root"]).context("e root tag")?);
-    }
-
-    let builder = EventBuilder::new(Kind::from(crate::codec::kind1::KIND_LONGFORM), p.body.clone())
-        .tags(tags);
-
-    // Publish signed by the agent's keys.
+    // Build the Proposal domain event; the wire shape lives in the codec.
+    let ev = DomainEvent::Proposal(crate::domain::Proposal {
+        agent: crate::domain::AgentRef::new(id.pubkey_hex(), agent_slug.clone()),
+        project: project.clone(),
+        title: p.title.clone(),
+        body: p.body.clone(),
+        d: d_tag.clone(),
+        // Authoring session — only when a live session exists.
+        session_id: session_rec
+            .as_ref()
+            .map(|rec| crate::util::SessionId::from(rec.session_id.clone())),
+        // Surface to each owner.
+        audience: state.owners.clone(),
+        thread_root_key: root_native_key,
+    });
     let event_id = state
-        .transport
-        .publish_signed(builder, &id.keys)
+        .provider
+        .publish(&ev, &id.keys)
         .await
         .context("publishing proposal")?;
     let eid_hex = event_id.to_hex();
@@ -1144,7 +1134,6 @@ async fn rpc_turn_end(state: &Arc<DaemonState>, params: &serde_json::Value) -> R
                 };
 
                 if !body.is_empty() {
-                    use crate::codec::Codec as _;
                     let ev = DomainEvent::TurnReply(crate::domain::TurnReply {
                         agent: crate::domain::AgentRef::new(
                             rec.agent_pubkey.clone(),
@@ -1159,9 +1148,7 @@ async fn rpc_turn_end(state: &Arc<DaemonState>, params: &serde_json::Value) -> R
                     if let Ok(id) =
                         crate::identity::load_or_create(&edge, &rec.agent_slug, now_secs())
                     {
-                        if let Ok(builder) = crate::codec::Kind1Codec.encode(&ev) {
-                            state.transport.publish_signed(builder, &id.keys).await.ok();
-                        }
+                        state.provider.publish(&ev, &id.keys).await.ok();
                     }
                 }
             }
@@ -1286,28 +1273,12 @@ fn resolve_acl_target(store: &Store, target: &str) -> Result<(String, String)> {
 // ── doctor ───────────────────────────────────────────────────────────────────
 
 async fn rpc_doctor(state: &Arc<DaemonState>) -> Result<serde_json::Value> {
-    use nostr_sdk::prelude::{Alphabet, EventBuilder, Filter, Kind, SingleLetterTag, Tag};
     let relays = state.cfg.relays.clone();
     let probe = state
         .keys_for(&state.hosted_pubkeys().first().cloned().unwrap_or_default())
         .map(|k| k.public_key().to_hex());
-    let t = format!("te-doctor-{}", now_secs());
-    let builder = EventBuilder::new(Kind::from(1u16), format!("tenex-edge doctor {t}"))
-        .tags([Tag::parse(["h", &t])?]);
-    // Sign with the daemon's connection key (any key works for the probe).
-    let publish = match state.transport.publish_builder(builder).await {
-        Ok(id) => format!("OK ({})", crate::util::pubkey_short(&id.to_hex())),
-        Err(e) => format!("ERR {e:#}"),
-    };
-    tokio::time::sleep(Duration::from_secs(1)).await;
-    let f = Filter::new()
-        .kind(Kind::from(1u16))
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::H), &t)
-        .limit(5);
-    let readback = match state.transport.fetch(f, Duration::from_secs(5)).await {
-        Ok(evs) => format!("{} event(s) with #h={t}", evs.len()),
-        Err(e) => format!("ERR {e:#}"),
-    };
+    // The probe's wire shape lives in the provider; readers only see strings.
+    let (publish, readback) = state.provider.doctor_probe().await;
     Ok(serde_json::json!({
         "relays": relays,
         "probe_pubkey": probe,
@@ -1322,7 +1293,7 @@ async fn rpc_doctor(state: &Arc<DaemonState>) -> Result<serde_json::Value> {
 /// user's prompt on the Nostr fabric as a root note (no `e` tag) in the NIP-29
 /// group, p-tagging the agent that will process it.
 async fn rpc_user_prompt(state: &Arc<DaemonState>, params: &serde_json::Value) -> Result<serde_json::Value> {
-    use nostr_sdk::prelude::{EventBuilder, Keys, Kind, Tag};
+    use nostr_sdk::prelude::Keys;
 
     #[derive(serde::Deserialize, Default)]
     struct P {
@@ -1348,12 +1319,18 @@ async fn rpc_user_prompt(state: &Arc<DaemonState>, params: &serde_json::Value) -
     let rec = resolve_session(state, p.session.as_deref(), p.env_session.as_deref(), p.cwd.as_deref(), p.agent.as_deref())?;
     let body = p.prompt.unwrap_or_default();
 
-    let builder = EventBuilder::new(Kind::from(1u16), body)
-        .tags([
-            Tag::parse(["h", &rec.project])?,
-            Tag::parse(["p", &rec.agent_pubkey])?,
-        ]);
-    let event_id = state.transport.publish_signed(builder, &user_keys).await?;
+    // The user's prompt is a Mention from the owner to the agent — same domain
+    // event, same codec; only the signing key differs.
+    let ev = DomainEvent::Mention(Mention {
+        from: crate::domain::AgentRef::new(user_keys.public_key().to_hex(), String::new()),
+        to_pubkey: rec.agent_pubkey.clone(),
+        project: rec.project.clone(),
+        body,
+        target_session: None,
+        from_session: None,
+        meta: crate::domain::MentionMeta::default(),
+    });
+    let event_id = state.provider.publish(&ev, &user_keys).await?;
 
     // NIP-10 thread tracking: first prompt becomes the root; every prompt is
     // the "last trigger" the next TurnReply will reply to.
@@ -1398,7 +1375,7 @@ async fn rpc_project_list(state: &Arc<DaemonState>) -> Result<serde_json::Value>
 /// Publish a NIP-29 kind:9002 (edit-metadata) event signed by the human user's
 /// nsec. The relay validates admin rights and updates its kind:39000 accordingly.
 async fn rpc_project_edit(state: &Arc<DaemonState>, params: &serde_json::Value) -> Result<serde_json::Value> {
-    use nostr_sdk::prelude::{EventBuilder, Keys, Kind, Tag};
+    use nostr_sdk::prelude::Keys;
 
     #[derive(serde::Deserialize)]
     struct P {
@@ -1414,13 +1391,9 @@ async fn rpc_project_edit(state: &Arc<DaemonState>, params: &serde_json::Value) 
         .ok_or_else(|| anyhow::anyhow!("userNsec not set in ~/.tenex/config.json"))?;
     let user_keys = Keys::parse(nsec).context("parsing userNsec")?;
 
-    // kind:9002 = NIP-29 edit-metadata. The relay validates admin rights and
-    // re-publishes kind:39000 signed by the relay key.
-    let builder = EventBuilder::new(Kind::from(9002u16), "")
-        .tags([
-            Tag::parse(["d", &p.project])?,
-            Tag::parse(["about", &p.description])?,
-        ]);
+    // NIP-29 edit-metadata: the wire shape lives in the nip29 lifecycle module.
+    // The relay validates admin rights and re-publishes kind:39000.
+    let builder = crate::fabric::nip29::lifecycle::group_edit_metadata(&p.project, &p.description)?;
     let event_id = state
         .transport
         .publish_signed(builder, &user_keys)
@@ -2151,6 +2124,11 @@ fn derive_and_emit_tail_events(
     now: u64,
 ) {
     match de {
+        DomainEvent::Proposal(_) => {
+            // Proposals are surfaced through the threads read model (the rpc
+            // records them as canonical messages); no tail line is derived from
+            // the raw inbound event.
+        }
         DomainEvent::TurnReply(_) => {
             // A peer's completed turn response (NIP-10 threaded kind:1). Not
             // surfaced on the tail: local turn state is emitted by the RPC
@@ -2392,10 +2370,10 @@ async fn spawn_session(state: &Arc<DaemonState>, params: EngineParams) -> Result
 
     let st = state.clone();
     let sid = session_id.clone();
-    let transport = state.transport.clone();
+    let provider = state.provider.clone();
     let store = state.store.clone();
     tokio::spawn(async move {
-        let res = runtime::run_session_in_daemon(params, transport, store, cancel).await;
+        let res = runtime::run_session_in_daemon(params, provider, store, cancel).await;
         if let Err(e) = res {
             if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
                 eprintln!("[daemon] session {sid} task error: {e:#}");

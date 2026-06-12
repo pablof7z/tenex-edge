@@ -2233,6 +2233,9 @@ fn render(de: &DomainEvent) -> String {
         DomainEvent::TurnReply(r) => {
             format!("{} {}: {}", "turn".blue(), r.agent.slug.cyan(), r.body)
         }
+        DomainEvent::Proposal(p) => {
+            format!("{} {}: {} ({})", "prop".magenta(), p.agent.slug.cyan(), p.title, p.d)
+        }
     }
 }
 

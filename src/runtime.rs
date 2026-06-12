@@ -9,11 +9,10 @@
 //!   - watches the host PID and stops cleanly (idle status) when it dies or on
 //!     SIGTERM (the `session-end` path).
 
-use crate::codec::{Codec, Kind1Codec};
 use crate::distill;
+use crate::fabric::provider::Kind1Nip29Provider;
 use crate::domain::{Activity, AgentRef, DomainEvent, Mention, Presence, Profile, Status};
 use crate::state::{InboxRow, Store};
-use crate::transport::Transport;
 use crate::util::{now_secs, SessionId};
 use anyhow::Result;
 use nostr_sdk::prelude::Event;
@@ -79,11 +78,10 @@ pub fn compute_targets(target_session: Option<&str>, my_alive_sessions: &[String
 /// only across the synchronous rusqlite calls, NEVER across `.await`.
 pub async fn run_session_in_daemon(
     p: EngineParams,
-    transport: std::sync::Arc<Transport>,
+    provider: std::sync::Arc<Kind1Nip29Provider>,
     store: std::sync::Arc<std::sync::Mutex<Store>>,
     cancel: std::sync::Arc<tokio::sync::Notify>,
 ) -> Result<()> {
-    let codec = Kind1Codec;
     let me = p.agent_pubkey.clone();
     let keys = p.keys.clone();
     let aref = AgentRef::new(me.clone(), p.agent_slug.clone());
@@ -99,13 +97,10 @@ pub async fn run_session_in_daemon(
     }
 
     let publish_de = |ev: DomainEvent| {
-        let transport = transport.clone();
-        let codec = &codec;
+        let provider = provider.clone();
         let keys = keys.clone();
         async move {
-            if let Ok(b) = codec.encode(&ev) {
-                let _ = transport.publish_signed(b, &keys).await;
-            }
+            let _ = provider.publish(&ev, &keys).await;
         }
     };
     let presence = |expires_at| {
@@ -355,7 +350,8 @@ mod tests {
             from_session: None,
             meta: crate::domain::MentionMeta::default(),
         };
-        let event = Kind1Codec
+        use crate::codec::Codec as _;
+        let event = crate::codec::Kind1Codec
             .encode(&DomainEvent::Mention(m.clone()))
             .unwrap()
             .sign_with_keys(from_keys)

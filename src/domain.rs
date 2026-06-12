@@ -79,6 +79,25 @@ pub struct TurnReply {
     pub reply_event_id: String,
 }
 
+/// A long-form proposal authored by an agent (rendered as an article by any
+/// Nostr client). Addressable: republishing with the same `d` supersedes the
+/// prior revision at the same (author, d) address.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Proposal {
+    pub agent: AgentRef,
+    pub project: String,
+    pub title: String,
+    pub body: String,
+    /// Stable addressable identifier; reuse to publish a superseding revision.
+    pub d: String,
+    /// Authoring session, when one is live.
+    pub session_id: Option<SessionId>,
+    /// Owner pubkeys the proposal is surfaced to.
+    pub audience: Vec<String>,
+    /// Native key of the conversation thread root this proposal belongs to.
+    pub thread_root_key: Option<String>,
+}
+
 /// The agent's live, replaceable status for a project. Empty text = idle.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Status {
@@ -153,6 +172,7 @@ pub enum DomainEvent {
     Status(Status),
     Mention(Mention),
     TurnReply(TurnReply),
+    Proposal(Proposal),
 }
 
 #[cfg(test)]

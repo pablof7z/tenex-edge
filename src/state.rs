@@ -996,16 +996,12 @@ impl Store {
         session_id: Option<&str>,
     ) -> Result<Option<String>> {
         if let Some(session_id) = session_id.filter(|s| !s.is_empty()) {
-            if let Some(text) = self
-                .conn
-                .query_row(
-                    "SELECT text FROM session_status
+            if let Ok(text) = self.conn.query_row(
+                "SELECT text FROM session_status
                      WHERE pubkey=?1 AND project=?2 AND session_id=?3",
-                    params![pubkey, project, session_id],
-                    |r| r.get::<_, String>(0),
-                )
-                .ok()
-            {
+                params![pubkey, project, session_id],
+                |r| r.get::<_, String>(0),
+            ) {
                 return Ok(Some(text));
             }
         }

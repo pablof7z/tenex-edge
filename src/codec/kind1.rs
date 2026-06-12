@@ -25,7 +25,8 @@
 
 use crate::codec::Codec;
 use crate::domain::{
-    Activity, AgentRef, DomainEvent, Mention, MentionMeta, Presence, Profile, Status, TurnReply,
+    Activity, AgentRef, DomainEvent, Mention, MentionMeta, Presence, Profile, Proposal, Status,
+    TurnReply,
 };
 use crate::util::SessionId;
 use anyhow::Result;
@@ -258,6 +259,36 @@ impl Codec for Kind1Codec {
                 tag(&["e", root_event_id, "", "root"])?,
                 tag(&["e", reply_event_id, "", "reply"])?,
             ]),
+            DomainEvent::Proposal(Proposal {
+                agent: _,
+                project,
+                title,
+                body,
+                d,
+                session_id,
+                audience,
+                thread_root_key,
+            }) => {
+                let mut tags = vec![
+                    tag(&["d", d])?,
+                    tag(&["title", title])?,
+                    project_tag(project)?,
+                    // No agent tag: author identity is the event signer; slug is in kind:0.
+                ];
+                // Authoring session tag — only when a live session exists.
+                if let Some(sess) = session_id {
+                    tags.push(tag(&["session-id", sess.as_str()])?);
+                }
+                // p-tag each owner so the proposal surfaces to the human.
+                for owner in audience {
+                    tags.push(tag(&["p", owner])?);
+                }
+                // Thread root e-tag (NIP-10 root marker) — links to the conversation.
+                if let Some(root) = thread_root_key {
+                    tags.push(tag(&["e", root, "", "root"])?);
+                }
+                EventBuilder::new(kind(KIND_LONGFORM), body.clone()).tags(tags)
+            }
         };
         Ok(b)
     }
@@ -348,6 +379,17 @@ impl Codec for Kind1Codec {
                     text: event.content.clone(),
                 }))
             }
+            KIND_LONGFORM => Some(DomainEvent::Proposal(Proposal {
+                // Slug is NOT on the wire; resolved downstream from kind:0 profile.
+                agent: AgentRef::new(pubkey, String::new()),
+                project: project_from_tags(event)?,
+                title: first_tag(event, "title").unwrap_or_default().to_string(),
+                body: event.content.clone(),
+                d: first_tag(event, "d").unwrap_or_default().to_string(),
+                session_id: first_tag(event, "session-id").map(SessionId::from),
+                audience: all_tag_values(event, "p"),
+                thread_root_key: e_tag_with_marker(event, "root").map(str::to_string),
+            })),
             _ => None,
         }
     }

@@ -44,6 +44,15 @@ pub fn group_put_user(project: &str, pubkey: &str) -> Result<EventBuilder> {
     ]))
 }
 
+/// kind:9002 edit-metadata: set the group's `about` text. The relay validates
+/// admin rights and re-publishes kind:39000 signed by the relay key.
+pub fn group_edit_metadata(project: &str, about: &str) -> Result<EventBuilder> {
+    Ok(EventBuilder::new(kind(KIND_GROUP_EDIT_METADATA), "").tags([
+        tag(&["d", project])?,
+        tag(&["about", about])?,
+    ]))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

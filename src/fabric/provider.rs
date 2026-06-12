@@ -158,6 +158,43 @@ impl Kind1Nip29Provider {
         self.wire.decode(env)
     }
 
+    /// Encode + sign + publish ONE domain event. The single wire-publish entry
+    /// for everything above the seam (session engine liveness, turn replies,
+    /// user prompts, proposals). Nothing above the provider builds an event.
+    pub async fn publish(&self, ev: &DomainEvent, keys: &nostr_sdk::prelude::Keys) -> Result<nostr_sdk::prelude::EventId> {
+        let builder = self.wire.encode(ev)?;
+        self.transport.publish_signed(builder, keys).await
+    }
+
+    /// Connectivity probe: publish a uniquely-tagged throwaway note on the
+    /// daemon's connection key and read it back. Returns
+    /// `(publish_result, readback_result)` as display strings — the wire shape
+    /// of the probe is a provider detail.
+    pub async fn doctor_probe(&self) -> (String, String) {
+        use nostr_sdk::prelude::{Alphabet, EventBuilder, Filter, Kind, SingleLetterTag, Tag};
+        let t = format!("te-doctor-{}", crate::util::now_secs());
+        let publish = async {
+            let builder = EventBuilder::new(Kind::from(1u16), format!("tenex-edge doctor {t}"))
+                .tags([Tag::parse(["h", &t])?]);
+            self.transport.publish_builder(builder).await
+        }
+        .await;
+        let publish = match publish {
+            Ok(id) => format!("OK ({})", crate::util::pubkey_short(&id.to_hex())),
+            Err(e) => format!("ERR {e:#}"),
+        };
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        let f = Filter::new()
+            .kind(Kind::from(1u16))
+            .custom_tag(SingleLetterTag::lowercase(Alphabet::H), &t)
+            .limit(5);
+        let readback = match self.transport.fetch(f, std::time::Duration::from_secs(5)).await {
+            Ok(evs) => format!("{} event(s) with #h={t}", evs.len()),
+            Err(e) => format!("ERR {e:#}"),
+        };
+        (publish, readback)
+    }
+
     // ── open_project ─────────────────────────────────────────────────────────
 
     /// Ensure the operator owns a closed NIP-29 group for `project` and that
