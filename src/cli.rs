@@ -177,6 +177,15 @@ enum ProjectAction {
         #[arg(long)]
         project: Option<String>,
     },
+    /// Add a pubkey to a project's NIP-29 group (kind:9000 put-user).
+    /// Accepts hex pubkey, npub (bech32), or a NIP-05 address (user@domain.com).
+    Add {
+        /// Project slug.
+        project: String,
+        /// Hex pubkey, npub, or NIP-05 address.
+        #[arg(value_name = "PUBKEY")]
+        pubkey: String,
+    },
 }
 
 pub async fn run(cli: Cli) -> Result<()> {
@@ -212,7 +221,13 @@ pub async fn run(cli: Cli) -> Result<()> {
                 who::who(project, all, all_projects)
             }
         }
-        Cmd::Propose { title, message, thread_id, d, session } => {
+        Cmd::Propose {
+            title,
+            message,
+            thread_id,
+            d,
+            session,
+        } => {
             let body = messaging::resolve_send_message_body(message)?;
             messaging::propose(title, body, thread_id, d, session).await
         }
