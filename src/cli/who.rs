@@ -68,7 +68,7 @@ pub struct OtherProjectSummary {
     about: Option<String>,
 }
 
-/// An agent that has no live session but can be spawned on this machine via tmux.
+/// An agent that can be spawned on this machine via tmux.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(super) struct SpawnableRow {
     pub(super) slug: String,
@@ -86,7 +86,8 @@ pub struct WhoSnapshot {
     now: u64,
     rows: Vec<WhoRow>,
     other_projects: Vec<OtherProjectSummary>,
-    /// Agents that are locally spawnable but have no live session in this project.
+    /// Agents that can be spawned on this machine via tmux. These represent a
+    /// standing capability and appear even when live sessions already exist.
     #[serde(default)]
     spawnable: Vec<SpawnableRow>,
 }
@@ -220,14 +221,11 @@ pub fn load_who_snapshot(
         })
         .collect();
 
-    // Spawnable: agents available locally via tmux that have no live session in
-    // the current project scope. We collect the set of live slugs first, then
-    // filter out any spawnable whose slug is already represented.
-    let live_slugs: std::collections::HashSet<String> =
-        rows.iter().map(|r| r.slug.clone()).collect();
+    // Spawnable: agents available locally via tmux. These represent a standing
+    // capability of the local machine — you can always start a new session with
+    // this agent — so they appear even when live sessions already exist.
     let spawnable: Vec<SpawnableRow> = crate::tmux::spawnable_agents()
         .into_iter()
-        .filter(|(slug, _)| !live_slugs.contains(slug))
         .map(|(slug, command)| SpawnableRow {
             host: local_host.clone(),
             slug,

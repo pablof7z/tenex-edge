@@ -160,40 +160,57 @@ fn handle_incoming(state: &Arc<DaemonState>, event: &Event) {
             if hosted.contains(&m.to_pubkey)
                 && !state.owners.contains(&event.pubkey.to_hex()) =>
         {
-            let to = m.to_pubkey.clone();
-            let routed = state.with_store(|s| route_mention_into(s, &to, &m, event));
-            if routed {
-                state.mention_notify.notify_waiters();
-                crate::tmux::ring_doorbells(state.clone());
-            } else {
-                // `route_mention_into` enqueues nothing when there are no
-                // alive sessions.  If the recipient is locally owned and has
-                // zero alive sessions, spawn a new tmux window so it can
-                // pick up the mention once it starts.
+            if m.target_session.is_none() {
+                // Untargeted (slug@project) → always spawn a new session.
+                // Don't route to existing sessions; the PendingMention pre-loads
+                // the spawned session's inbox before its first prompt.
                 let to_pk = m.to_pubkey.clone();
                 let project2 = m.project.clone();
                 let slug_opt =
                     state.with_store(|s| s.get_local_agent_slug_by_pubkey(&to_pk));
                 if let Some(slug) = slug_opt {
-                    let alive_count = state.with_store(|s| {
-                        s.list_alive_sessions()
-                            .unwrap_or_default()
-                            .into_iter()
-                            .filter(|r| r.agent_pubkey == to_pk && r.project == project2)
-                            .count()
-                    });
-                    if alive_count == 0 {
-                        let state2 = Arc::clone(state);
-                        tokio::spawn(async move {
-                            if let Err(e) =
-                                crate::tmux::spawn_agent(&state2, &slug, &project2).await
-                            {
+                    let from_slug = if m.from.slug.is_empty() {
+                        state.with_store(|s| s.slug_for_pubkey(&m.from.pubkey))
+                    } else {
+                        m.from.slug.clone()
+                    };
+                    let pending_mention = crate::tmux::PendingMention {
+                        event_id: event.id.to_hex(),
+                        from_pubkey: m.from.pubkey.clone(),
+                        from_slug,
+                        from_session: m
+                            .from_session
+                            .as_ref()
+                            .map(|s| s.as_str().to_owned())
+                            .unwrap_or_default(),
+                        project: project2.clone(),
+                        body: m.body.clone(),
+                        created_at: event.created_at.as_secs(),
+                    };
+                    let state2 = Arc::clone(state);
+                    tokio::spawn(async move {
+                        match crate::tmux::spawn_agent(&state2, &slug, &project2).await {
+                            Ok(pane_id) => {
+                                crate::tmux::register_pending_spawn_with_mention(
+                                    &pane_id,
+                                    pending_mention,
+                                );
+                            }
+                            Err(e) => {
                                 eprintln!(
                                     "[tmux] spawn failed for {slug}@{project2}: {e:#}"
                                 );
                             }
-                        });
-                    }
+                        }
+                    });
+                }
+            } else {
+                // Session-targeted → route to that specific session and ring doorbell.
+                let to = m.to_pubkey.clone();
+                let routed = state.with_store(|s| route_mention_into(s, &to, &m, event));
+                if routed {
+                    state.mention_notify.notify_waiters();
+                    crate::tmux::ring_doorbells(state.clone());
                 }
             }
         }

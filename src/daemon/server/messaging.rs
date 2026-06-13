@@ -60,12 +60,16 @@ pub(super) async fn rpc_send_message(
     // keyed by the SAME EventId we just published. `route_mention_into` →
     // `enqueue_mention` is idempotent on `(mention_event_id, target_session)`, so
     // if the relay does echo it later, no duplicate is created. `compute_targets`
-    // delivers only to the TARGET session (or all of the recipient agent's
-    // sessions when untargeted) — never back to the authoring session.
-    if state
-        .hosted_pubkeys()
-        .iter()
-        .any(|h| h == &recipient.pubkey)
+    // delivers only to the TARGET session — never back to the authoring session.
+    //
+    // Only applies when the recipient has a specific target_session. When routing
+    // by slug@project (target_session == None), we always spawn a new session
+    // instead of delivering to existing ones.
+    if recipient.target_session.is_some()
+        && state
+            .hosted_pubkeys()
+            .iter()
+            .any(|h| h == &recipient.pubkey)
     {
         let routed = state.with_store(|s| {
             route_mention_into_with_id(
@@ -82,56 +86,48 @@ pub(super) async fn rpc_send_message(
         }
     }
 
-    // TMUX SPAWN: if the recipient is a locally-owned agent with no alive
-    // sessions, spawn a new tmux window so it can pick up the message.  The
-    // spawn is gated on the local `sessions` table (not `hosted_pubkeys()`) so
-    // it fires even in a fresh daemon where `hosted` is still empty.
-    {
+    // TMUX SPAWN: when the recipient is addressed by slug@project (target_session
+    // is None), always spawn a new session regardless of whether live sessions
+    // exist.  The spawn is gated on the local `sessions` table (not
+    // `hosted_pubkeys()`) so it fires even in a fresh daemon where `hosted` is
+    // still empty.
+    if recipient.target_session.is_none() {
         let to_pk = recipient.pubkey.clone();
         let project2 = recipient.project.clone();
         let slug_opt = state.with_store(|s| s.get_local_agent_slug_by_pubkey(&to_pk));
         if let Some(slug) = slug_opt {
-            let alive_count = state.with_store(|s| {
-                s.list_alive_sessions()
-                    .unwrap_or_default()
-                    .into_iter()
-                    .filter(|r| r.agent_pubkey == to_pk && r.project == project2)
-                    .count()
-            });
-            if alive_count == 0 {
-                let state2 = Arc::clone(state);
-                // Capture the triggering mention so the spawned session's inbox
-                // is pre-loaded before the harness receives its first prompt.
-                let pending_mention = crate::tmux::PendingMention {
-                    event_id: event_id.to_hex(),
-                    from_pubkey: mention.from.pubkey.clone(),
-                    from_slug: mention.from.slug.clone(),
-                    from_session: mention
-                        .from_session
-                        .as_ref()
-                        .map(|s| s.as_str().to_owned())
-                        .unwrap_or_default(),
-                    project: recipient.project.clone(),
-                    body: mention.body.clone(),
-                    created_at: crate::util::now_secs(),
-                };
-                tokio::spawn(async move {
-                    match crate::tmux::spawn_agent(&state2, &slug, &project2).await {
-                        Ok(pane_id) => {
-                            // Attach the mention to the pending-spawn entry so
-                            // `rpc_session_start` can write it into the new
-                            // session's inbox before injecting the first prompt.
-                            crate::tmux::register_pending_spawn_with_mention(
-                                &pane_id,
-                                pending_mention,
-                            );
-                        }
-                        Err(e) => {
-                            eprintln!("[tmux] spawn failed for {slug}@{project2}: {e:#}");
-                        }
+            let state2 = Arc::clone(state);
+            // Capture the triggering mention so the spawned session's inbox
+            // is pre-loaded before the harness receives its first prompt.
+            let pending_mention = crate::tmux::PendingMention {
+                event_id: event_id.to_hex(),
+                from_pubkey: mention.from.pubkey.clone(),
+                from_slug: mention.from.slug.clone(),
+                from_session: mention
+                    .from_session
+                    .as_ref()
+                    .map(|s| s.as_str().to_owned())
+                    .unwrap_or_default(),
+                project: recipient.project.clone(),
+                body: mention.body.clone(),
+                created_at: crate::util::now_secs(),
+            };
+            tokio::spawn(async move {
+                match crate::tmux::spawn_agent(&state2, &slug, &project2).await {
+                    Ok(pane_id) => {
+                        // Attach the mention to the pending-spawn entry so
+                        // `rpc_session_start` can write it into the new
+                        // session's inbox before injecting the first prompt.
+                        crate::tmux::register_pending_spawn_with_mention(
+                            &pane_id,
+                            pending_mention,
+                        );
                     }
-                });
-            }
+                    Err(e) => {
+                        eprintln!("[tmux] spawn failed for {slug}@{project2}: {e:#}");
+                    }
+                }
+            });
         }
     }
 

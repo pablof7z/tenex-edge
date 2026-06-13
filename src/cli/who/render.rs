@@ -54,7 +54,7 @@ pub(super) fn render_who_once(snapshot: &WhoSnapshot) -> String {
         let _ = writeln!(out);
         for row in &snapshot.spawnable {
             let label = format!("{}@{}", row.slug, row.host);
-            let tag = format!("[no session · spawnable via {}]", row.command);
+            let tag = format!("[spawnable via {}]", row.command);
             let _ = writeln!(out, "{}  {}", label.dimmed(), tag.dimmed());
         }
     }
@@ -182,7 +182,7 @@ pub(super) fn render_who_plain(snapshot: &WhoSnapshot) -> String {
     for row in &snapshot.spawnable {
         let _ = writeln!(
             out,
-            "  {}@{} [no session · spawnable via {}]",
+            "  {}@{} [spawnable via {}]",
             row.slug, row.host, row.command,
         );
     }
