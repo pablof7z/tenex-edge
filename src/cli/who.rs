@@ -51,10 +51,8 @@ pub(super) fn who_live(
         let wait = next_draw
             .saturating_duration_since(Instant::now())
             .min(Duration::from_millis(100));
-        if event::poll(wait)? {
-            if render::should_quit_live(event::read()?) {
-                break;
-            }
+        if event::poll(wait)? && render::should_quit_live(event::read()?) {
+            break;
         }
     }
 
@@ -70,6 +68,14 @@ pub struct OtherProjectSummary {
     about: Option<String>,
 }
 
+/// An agent that can be spawned on this machine via tmux.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(super) struct SpawnableRow {
+    pub(super) slug: String,
+    pub(super) command: String,
+    pub(super) host: String,
+}
+
 // The daemon serializes a WhoSnapshot and the thin `who` client renders it with
 // the EXACT renderers below — so output is byte-identical by construction and
 // can never drift from a separate copy.
@@ -80,6 +86,10 @@ pub struct WhoSnapshot {
     now: u64,
     rows: Vec<WhoRow>,
     other_projects: Vec<OtherProjectSummary>,
+    /// Agents that can be spawned on this machine via tmux. These represent a
+    /// standing capability and appear even when live sessions already exist.
+    #[serde(default)]
+    spawnable: Vec<SpawnableRow>,
 }
 
 impl WhoSnapshot {
@@ -218,12 +228,25 @@ pub fn load_who_snapshot(
         })
         .collect();
 
+    // Spawnable: agents available locally via tmux. These represent a standing
+    // capability of the local machine — you can always start a new session with
+    // this agent — so they appear even when live sessions already exist.
+    let spawnable: Vec<SpawnableRow> = crate::tmux::spawnable_agents()
+        .into_iter()
+        .map(|(slug, command)| SpawnableRow {
+            host: local_host.clone(),
+            slug,
+            command,
+        })
+        .collect();
+
     Ok(WhoSnapshot {
         project: current_project.unwrap_or("*").to_string(),
         all,
         now,
         rows,
         other_projects,
+        spawnable,
     })
 }
 
@@ -251,7 +274,7 @@ pub(super) fn push_turn_fabric_block(
     let store = store.lock().expect("store mutex poisoned");
     if first_turn {
         if let Ok(snapshot) = load_who_snapshot(&store, Some(project), false, now, daemon_host) {
-            if !snapshot.rows.is_empty() {
+            if !snapshot.rows.is_empty() || !snapshot.spawnable.is_empty() {
                 let who_text = render::render_who_plain(&snapshot);
                 blocks.push(format!(
                 "tenex-edge fabric — agents you can message. To send, run \

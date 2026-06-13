@@ -7,6 +7,7 @@ use super::inbox::{
 use super::lifecycle::ensure_subscription;
 use super::messaging::{rpc_inbox_reply, rpc_propose, rpc_send_message};
 use super::session::{resolve_session, rpc_session_end, rpc_session_start};
+use super::tmux_rpc::{rpc_tmux_attach, rpc_tmux_send, rpc_tmux_spawn, rpc_tmux_status};
 use super::*;
 
 // ── connection handling ──────────────────────────────────────────────────────
@@ -128,6 +129,10 @@ async fn dispatch(state: &Arc<DaemonState>, req: &Request) -> Response {
         "project_list" => rpc_project_list(state).await,
         "project_edit" => rpc_project_edit(state, &req.params).await,
         "project_add" => rpc_project_add(state, &req.params).await,
+        "tmux_status" => rpc_tmux_status(state),
+        "tmux_send" => rpc_tmux_send(state, &req.params).await,
+        "tmux_spawn" => rpc_tmux_spawn(state, &req.params).await,
+        "tmux_attach" => rpc_tmux_attach(state, &req.params),
         other => Err(anyhow::anyhow!("unknown method {other}")),
     };
     match result {
@@ -173,6 +178,17 @@ async fn handle_wait_for_mention(state: &Arc<DaemonState>, req: &Request) -> Res
     } else {
         None
     };
+
+    // Arm the waiter so the doorbell dispatcher skips this session while it's
+    // parked here. The disarm on return covers all exit paths (rows found,
+    // timed-out, early-return).
+    let sid_for_arm = rec.session_id.clone();
+    crate::tmux::arm_waiter(&sid_for_arm);
+    struct DisarmGuard(String);
+    impl Drop for DisarmGuard {
+        fn drop(&mut self) { crate::tmux::disarm_waiter(&self.0); }
+    }
+    let _disarm = DisarmGuard(sid_for_arm);
 
     loop {
         let rows = state.with_store(|s| {

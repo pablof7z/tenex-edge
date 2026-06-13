@@ -8,7 +8,7 @@ tags:
 volatility: warm
 confidence: medium
 created: 2026-06-09
-updated: 2026-06-10
+updated: 2026-06-13
 verified: 2026-06-09
 compiled-from: conversation
 sources:
@@ -21,15 +21,16 @@ sources:
   - session:56f9fe89-5ff7-4e5b-b202-334cd7629d42
   - session:f3a730bf-9a3b-4952-b687-c93ade5fd7ec
   - session:rollout-2026-06-09T15-01-20-019eac42-32f0-7ff0-bda2-da2de3b78ed7
+  - session:1562957b-67e8-4ac1-a48b-84e8ec1696bb
 ---
 
 # Tenex-Edge Daemon
 
 ## Architecture
 
-The process model is per-session (not a shared daemon). (Previously: the direction was a single-writer daemon — the multi-writer design where N per-session processes write to a single state.db was a confirmed failure mode that recurs without architectural changes.) The persistence architecture must be fixed before it bites mid-session again; this decision shapes what the Claude Code plugin bootstraps (a per-session engine). The architecture extends state.db rather than replacing it; threads is the one genuinely new table. The build uses Rust and the nostr-sdk crate (not NMP); NMP was evaluated but found to be a full app kernel unsuitable for a headless CLI daemon — transport lives behind the codec seam so an NMP-backed transport remains a clean future swap-in. Debug-vs-release binaries and differing TENEX_EDGE_HOME values can evade the flock/socket lock and spawn parallel daemons; this robustness gap should be hardened. The daemon protocol version is bumped on response-shape changes to force stale daemons to respawn with the new snapshot shape. Deserialization of daemon responses is backward-compatible so that encountering a stale daemon response without the new fields does not crash the client. The isolated live e2e environment uses a separate TENEX_EDGE_HOME, a local nak relay, and PATH/TENEX_EDGE_* pointing at the worktree binary so it does not disturb the production ~/.tenex/edge daemon. Startup backfill on a populated database must work correctly — it migrates legacy data (projects, members, origins) into canonical tables without corruption. The production daemon cutover was completed: the refactored binary replaced the live daemon, the real state.db was migrated (40 projects, 40 origins, 15 members backfilled), and propose + threads are live verbs. The refactored daemon adds zero net clippy lints and zero rustc warnings compared to the master baseline.
+The process model is per-session (not a shared daemon). (Previously: the direction was a single-machine single-writer daemon that solely owns state.db, with all CLI calls and session engines becoming thin IPC clients over a Unix domain socket — the multi-writer design where N per-session processes write to a single state.db was a confirmed failure mode that recurs without architectural changes; that daemon spawned on first tenex-edge invocation if absent (double-fork/setsid), bound to a Unix domain socket at $TENEX_EDGE_HOME/daemon.sock, used flock on daemon.lock for race-safe startup with stale-socket reclaim, served as the long-lived relay subscriber collapsing per-session relay connections, and idle-exited when no sessions were alive.) The persistence architecture must be fixed before it bites mid-session again; this decision shapes what the Claude Code plugin bootstraps (a per-session engine). The architecture extends state.db rather than replacing it; threads is the one genuinely new table. The build uses Rust and the nostr-sdk crate (not NMP); NMP was evaluated but found to be a full app kernel unsuitable for a headless CLI daemon — transport lives behind the codec seam so an NMP-backed transport remains a clean future swap-in. Debug-vs-release binaries and differing TENEX_EDGE_HOME values can evade the flock/socket lock and spawn parallel daemons; this robustness gap should be hardened. When multiple machines run the daemon and both see a mention for an agent, an ownership signal (from owned_groups or agent config) is needed so that only the machine that owns spawning for that agent actually spawns, preventing duplicate spawns across daemons. The daemon protocol version is bumped on response-shape changes to force stale daemons to respawn with the new snapshot shape. Deserialization of daemon responses is backward-compatible so that encountering a stale daemon response without the new fields does not crash the client. The isolated live e2e environment uses a separate TENEX_EDGE_HOME, a local nak relay, and PATH/TENEX_EDGE_* pointing at the worktree binary so it does not disturb the production ~/.tenex/edge daemon. Startup backfill on a populated database must work correctly — it migrates legacy data (projects, members, origins) into canonical tables without corruption. The production daemon cutover was completed: the refactored binary replaced the live daemon, the real state.db was migrated (40 projects, 40 origins, 15 members backfilled), and propose + threads are live verbs. The refactored daemon adds zero net clippy lints and zero rustc warnings compared to the master baseline.
 
-<!-- citations: [^162f9-1] [^162f9-2] [^162f9-3] [^162f9-4] [^05b89-2] [^162f9-12] [^162f9-27] [^d208c-36] [^ab999-28] [^ab999-66] [^ab999-76] [^f3a73-112] [^rollo-18] -->
+<!-- citations: [^162f9-1] [^162f9-2] [^162f9-3] [^162f9-4] [^05b89-2] [^162f9-12] [^162f9-27] [^d208c-36] [^ab999-28] [^ab999-66] [^ab999-76] [^f3a73-112] [^rollo-18] [^15629-57] -->
 
 ## IPC Protocol
 

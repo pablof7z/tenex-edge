@@ -341,6 +341,26 @@ CREATE TABLE IF NOT EXISTS membership (
     updated_at  INTEGER NOT NULL,
     PRIMARY KEY(project_id, pubkey)
 );
+-- TMUX control-plane: one row per (session, kind='tmux') endpoint. Written by
+-- rpc_session_start when the hook env supplies TMUX_PANE; read by the doorbell
+-- dispatcher. `target` is the stable tmux pane id (e.g. '%5'). `meta` is a JSON
+-- object that may carry {"socket":"...", "pane_command":"claude"}.
+CREATE TABLE IF NOT EXISTS session_endpoints (
+    session_id    TEXT NOT NULL,
+    kind          TEXT NOT NULL,
+    target        TEXT NOT NULL,
+    meta          TEXT NOT NULL DEFAULT '',
+    registered_at INTEGER NOT NULL,
+    last_verified INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (session_id, kind)
+);
+-- Absolute project path indexed by project slug. Populated by session_start so
+-- the tmux spawn command knows where to cd.
+CREATE TABLE IF NOT EXISTS project_paths (
+    project    TEXT PRIMARY KEY,
+    abs_path   TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+);
 "#;
 
 impl Store {
@@ -703,6 +723,20 @@ impl Store {
 
     /// Reverse-lookup: given a pubkey, return the slug this agent is known by
     /// (from own sessions, peer_sessions, or profiles). Returns None if completely unknown.
+    /// Look up the agent slug for a locally-owned pubkey from the `sessions`
+    /// table (including `alive=0` rows). Returns `None` for remote-only pubkeys
+    /// that have no local session record — callers use this as the "is locally
+    /// owned?" gate before attempting a tmux spawn.
+    pub fn get_local_agent_slug_by_pubkey(&self, pubkey: &str) -> Option<String> {
+        self.conn
+            .query_row(
+                "SELECT agent_slug FROM sessions WHERE agent_pubkey=?1 ORDER BY created_at DESC LIMIT 1",
+                params![pubkey],
+                |r| r.get::<_, String>(0),
+            )
+            .ok()
+    }
+
     pub fn resolve_slug_for_pubkey(&self, pubkey: &str) -> Result<Option<String>> {
         // Check own sessions first (most authoritative for local agents).
         if let Ok(slug) = self.conn.query_row(
@@ -950,6 +984,30 @@ impl Store {
                 |r| Ok((r.get::<_, i64>(0)? != 0, r.get::<_, i64>(1)? as u64)),
             )
             .unwrap_or((false, 0)))
+    }
+
+    /// Returns `true` if the session is currently mid-turn (`working = 1`).
+    /// Defaults to `false` (not working) when no row exists — fail-open so
+    /// the doorbell is allowed when a session has never started a turn.
+    pub fn is_session_working(&self, session_id: &str) -> bool {
+        self.conn
+            .query_row(
+                "SELECT working FROM turn_state WHERE session_id=?1",
+                params![session_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap_or(0)
+            != 0
+    }
+
+    /// Count undelivered mentions for a session without consuming them.
+    pub fn count_unread_inbox(&self, session_id: &str) -> Result<usize> {
+        let n: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM inbox WHERE target_session=?1 AND delivered=0",
+            params![session_id],
+            |r| r.get(0),
+        )?;
+        Ok(n as usize)
     }
 
     // ── per-agent mention dedup (across sessions) ────────────────────────
@@ -1868,6 +1926,9 @@ impl Store {
         self.mark_message_sync_state(message_id, "failed", Some(error))
     }
 }
+
+mod endpoints;
+pub use endpoints::SessionEndpoint;
 
 fn row_to_session(row: &rusqlite::Row) -> rusqlite::Result<SessionRecord> {
     Ok(SessionRecord {

@@ -35,7 +35,7 @@ impl Store {
         session_id: Option<&str>,
     ) -> Result<Option<String>> {
         if let Some(session_id) = session_id.filter(|s| !s.is_empty()) {
-            if let Some(text) = self
+            if let Ok(text) = self
                 .conn
                 .query_row(
                     "SELECT text FROM session_status
@@ -43,7 +43,6 @@ impl Store {
                     params![pubkey, project, session_id],
                     |r| r.get::<_, String>(0),
                 )
-                .ok()
             {
                 return Ok(Some(text));
             }

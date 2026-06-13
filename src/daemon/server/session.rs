@@ -61,6 +61,13 @@ struct SessionStartParams {
     cwd: Option<String>,
     #[serde(default)]
     watch_pid: Option<i32>,
+    /// Stable tmux pane id from $TMUX_PANE (e.g. "%5"). Present only when the
+    /// hook fires inside a tmux session.
+    #[serde(default)]
+    tmux_pane: Option<String>,
+    /// Value of $TMUX (socket path, session id, pane id). Used in meta JSON.
+    #[serde(default)]
+    tmux_socket: Option<String>,
 }
 
 pub(super) async fn rpc_session_start(
@@ -101,6 +108,7 @@ pub(super) async fn rpc_session_start(
         }
     }
 
+    let ts = now_secs();
     state.with_store(|s| {
         s.upsert_session(&crate::state::SessionRecord {
             session_id: session_id.clone(),
@@ -110,12 +118,26 @@ pub(super) async fn rpc_session_start(
             host: state.host.clone(),
             child_pid: None,
             watch_pid: p.watch_pid,
-            created_at: now_secs(),
+            created_at: ts,
             alive: true,
             rel_cwd: rel_cwd.clone(),
         })
         .ok();
-        s.touch_session(&session_id, now_secs()).ok();
+        s.touch_session(&session_id, ts).ok();
+        // Record the absolute path for this project so the tmux spawn command
+        // can cd to it.
+        s.upsert_project_path(&project, &cwd.to_string_lossy(), ts).ok();
+        // Register the tmux endpoint if the hook env supplied TMUX_PANE.
+        if let Some(ref pane) = p.tmux_pane {
+            if !pane.is_empty() {
+                let meta = serde_json::json!({
+                    "socket": p.tmux_socket.as_deref().unwrap_or(""),
+                    "pane_command": p.agent,
+                })
+                .to_string();
+                s.upsert_session_endpoint(&session_id, "tmux", pane, &meta, ts).ok();
+            }
+        }
     });
     if state.sessions.lock().unwrap().contains_key(&session_id) {
         return Ok(serde_json::json!({ "session_id": session_id }));
@@ -136,6 +158,60 @@ pub(super) async fn rpc_session_start(
         p.watch_pid,
     );
     spawn_session(state, ep).await?;
+
+    // If this pane was created via `tmux_spawn` (registered as a pending spawn),
+    // inject the first prompt into it once the harness is ready rather than
+    // waiting for `ring_doorbells` to fire a generic nudge.
+    //
+    // The entry is only present when `spawn_agent` created this window; ordinary
+    // harness starts (and repeated `session_start` reasserts from
+    // `user-prompt-submit`) never match.  Consuming here ensures injection fires
+    // exactly once regardless of how many times `rpc_session_start` is called.
+    let pending_spawn = p
+        .tmux_pane
+        .as_deref()
+        .filter(|pane| !pane.is_empty())
+        .and_then(crate::tmux::consume_pending_spawn);
+
+    // If the spawn carried a triggering mention, write it to this session's
+    // inbox NOW — before the harness runs `tenex-edge inbox` — so the agent
+    // finds the message on its very first turn.
+    if let Some(ref ps) = pending_spawn {
+        if let Some(ref m) = ps.mention {
+            state.with_store(|s| {
+                s.enqueue_mention(&crate::state::InboxRow {
+                    mention_event_id: m.event_id.clone(),
+                    target_session: session_id.clone(),
+                    from_pubkey: m.from_pubkey.clone(),
+                    from_slug: m.from_slug.clone(),
+                    project: m.project.clone(),
+                    body: m.body.clone(),
+                    created_at: m.created_at,
+                    from_session: m.from_session.clone(),
+                    subject: String::new(),
+                    branch: String::new(),
+                    commit: String::new(),
+                    dirty: 0,
+                    host: String::new(),
+                })
+                .ok()
+            });
+            state.mention_notify.notify_waiters();
+        }
+    }
+
+    if let (Some(ps), Some(pane)) = (pending_spawn, p.tmux_pane.clone()) {
+        let prompt = ps.prompt.clone();
+        tokio::spawn(async move {
+            if let Err(e) = crate::tmux::inject_spawn_prompt(&pane, &prompt).await {
+                if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
+                    eprintln!("[tmux] spawn prompt inject failed for pane {pane}: {e:#}");
+                }
+            } else if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
+                eprintln!("[tmux] spawn prompt {prompt:?} injected into pane {pane}");
+            }
+        });
+    }
 
     Ok(serde_json::json!({ "session_id": session_id }))
 }

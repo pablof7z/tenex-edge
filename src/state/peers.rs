@@ -22,6 +22,7 @@ impl Store {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn upsert_peer_session(
         &self,
         session_id: &str,
@@ -44,41 +45,80 @@ impl Store {
     /// Resolve an agent slug to a pubkey. With a project scope, this behaves
     /// like `slug@project`: prefer presence in that project, and do not let a
     /// global profile from another project hijack the route.
+    ///
+    /// Falls back to the local `sessions` table (including `alive=0` rows) so
+    /// that own agents without active relay presence can still be messaged.
     pub fn resolve_agent_pubkey(
         &self,
         slug: &str,
         project: Option<&str>,
     ) -> Result<Option<String>> {
         if let Some(project) = project {
-            return Ok(self
+            // Try relay-announced peer sessions first.
+            if let Ok(pk) = self
                 .conn
                 .query_row(
                     "SELECT pubkey FROM peer_sessions WHERE slug=?1 AND project=?2 ORDER BY last_seen DESC LIMIT 1",
                     params![slug, project],
                     |r| r.get::<_, String>(0),
                 )
+            {
+                return Ok(Some(pk));
+            }
+            // Fall back to local sessions table (own agents, even dead sessions).
+            return Ok(self
+                .conn
+                .query_row(
+                    "SELECT agent_pubkey FROM sessions WHERE agent_slug=?1 AND project=?2 ORDER BY created_at DESC LIMIT 1",
+                    params![slug, project],
+                    |r| r.get::<_, String>(0),
+                )
                 .ok());
         }
 
-        if let Some(pk) = self
+        if let Ok(pk) = self
             .conn
             .query_row(
                 "SELECT pubkey FROM profiles WHERE slug=?1 ORDER BY updated_at DESC LIMIT 1",
                 params![slug],
                 |r| r.get::<_, String>(0),
             )
-            .ok()
         {
             return Ok(Some(pk));
         }
-        Ok(self
+        if let Ok(pk) = self
             .conn
             .query_row(
                 "SELECT pubkey FROM peer_sessions WHERE slug=?1 ORDER BY last_seen DESC LIMIT 1",
                 params![slug],
                 |r| r.get::<_, String>(0),
             )
+        {
+            return Ok(Some(pk));
+        }
+        // Fall back to local sessions table (own agents, even dead sessions).
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT agent_pubkey FROM sessions WHERE agent_slug=?1 ORDER BY created_at DESC LIMIT 1",
+                params![slug],
+                |r| r.get::<_, String>(0),
+            )
             .ok())
+    }
+
+    /// Look up the agent slug for a locally-owned pubkey from the `sessions`
+    /// table (including `alive=0` rows). Returns `None` for remote-only pubkeys
+    /// that have no local session record — callers use this as the "is locally
+    /// owned?" gate before attempting a tmux spawn.
+    pub fn get_local_agent_slug_by_pubkey(&self, pubkey: &str) -> Option<String> {
+        self.conn
+            .query_row(
+                "SELECT agent_slug FROM sessions WHERE agent_pubkey=?1 ORDER BY created_at DESC LIMIT 1",
+                params![pubkey],
+                |r| r.get::<_, String>(0),
+            )
+            .ok()
     }
 
     /// Find one of MY sessions by session-id prefix (for messaging a sibling

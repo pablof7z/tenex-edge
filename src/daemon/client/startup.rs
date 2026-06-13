@@ -85,6 +85,7 @@ fn open_lock_file() -> Result<std::fs::File> {
     std::fs::OpenOptions::new()
         .create(true)
         .write(true)
+        .truncate(false)
         .open(lock_path())
         .context("opening daemon.lock")
 }

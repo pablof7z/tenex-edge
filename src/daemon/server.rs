@@ -32,6 +32,8 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::Notify;
 
+mod tmux_rpc;
+
 const PRUNE_PEER_AFTER_SECS: u64 = 600;
 
 fn grace() -> Duration {
@@ -90,7 +92,7 @@ pub struct DaemonState {
 }
 
 impl DaemonState {
-    fn with_store<R>(&self, f: impl FnOnce(&Store) -> R) -> R {
+    pub(crate) fn with_store<R>(&self, f: impl FnOnce(&Store) -> R) -> R {
         let g = self.store.lock().expect("store mutex poisoned");
         f(&g)
     }
@@ -350,6 +352,10 @@ async fn dispatch(state: &Arc<DaemonState>, req: &Request) -> Response {
         "list_threads" => rpc_list_threads(state, &req.params).await,
         "messages" => rpc_messages(state, &req.params),
         "thread_meta" => rpc_thread_meta(state, &req.params),
+        "tmux_status" => tmux_rpc::rpc_tmux_status(state),
+        "tmux_send" => tmux_rpc::rpc_tmux_send(state, &req.params).await,
+        "tmux_spawn" => tmux_rpc::rpc_tmux_spawn(state, &req.params).await,
+        "tmux_attach" => tmux_rpc::rpc_tmux_attach(state, &req.params),
         other => Err(anyhow::anyhow!("unknown method {other}")),
     };
     match result {
@@ -456,6 +462,13 @@ struct SessionStartParams {
     cwd: Option<String>,
     #[serde(default)]
     watch_pid: Option<i32>,
+    /// Stable tmux pane id from $TMUX_PANE (e.g. "%5"). Present only when the
+    /// hook fires inside a tmux session.
+    #[serde(default)]
+    tmux_pane: Option<String>,
+    /// Value of $TMUX (socket path, session id, pane id). Used in meta JSON.
+    #[serde(default)]
+    tmux_socket: Option<String>,
 }
 
 async fn rpc_session_start(
@@ -515,6 +528,20 @@ async fn rpc_session_start(
         })
         .ok();
         s.touch_session(&session_id, now_secs()).ok();
+        // Record the absolute path for this project so the tmux spawn command
+        // can cd to it.
+        s.upsert_project_path(&project, &cwd.to_string_lossy(), now_secs()).ok();
+        // Register the tmux endpoint if the hook env supplied TMUX_PANE.
+        if let Some(ref pane) = p.tmux_pane {
+            if !pane.is_empty() {
+                let meta = serde_json::json!({
+                    "socket": p.tmux_socket.as_deref().unwrap_or(""),
+                    "pane_command": p.agent,
+                })
+                .to_string();
+                s.upsert_session_endpoint(&session_id, "tmux", pane, &meta, now_secs()).ok();
+            }
+        }
     });
 
     // Idempotent re-start (session reassert): the engine task already runs.
@@ -545,6 +572,58 @@ async fn rpc_session_start(
         state: "start".into(),
         rel_cwd: rel_cwd.clone(),
     });
+
+    // If this pane was created via `tmux_spawn` (registered as a pending spawn),
+    // inject the first prompt into it once the harness is ready rather than
+    // waiting for `ring_doorbells` to fire a generic nudge. The entry is only
+    // present when `spawn_agent` created this window; ordinary harness starts
+    // (and repeated `session_start` reasserts) never match. Consuming here
+    // ensures injection fires exactly once regardless of call count.
+    let pending_spawn = p
+        .tmux_pane
+        .as_deref()
+        .filter(|pane| !pane.is_empty())
+        .and_then(crate::tmux::consume_pending_spawn);
+
+    // If the spawn carried a triggering mention, write it to this session's
+    // inbox NOW — before the harness runs `tenex-edge inbox` — so the agent
+    // finds the message on its very first turn.
+    if let Some(ref ps) = pending_spawn {
+        if let Some(ref m) = ps.mention {
+            state.with_store(|s| {
+                s.enqueue_mention(&crate::state::InboxRow {
+                    mention_event_id: m.event_id.clone(),
+                    target_session: session_id.clone(),
+                    from_pubkey: m.from_pubkey.clone(),
+                    from_slug: m.from_slug.clone(),
+                    project: m.project.clone(),
+                    body: m.body.clone(),
+                    created_at: m.created_at,
+                    from_session: m.from_session.clone(),
+                    subject: String::new(),
+                    branch: String::new(),
+                    commit: String::new(),
+                    dirty: 0,
+                    host: String::new(),
+                })
+                .ok()
+            });
+            state.mention_notify.notify_waiters();
+        }
+    }
+
+    if let (Some(ps), Some(pane)) = (pending_spawn, p.tmux_pane.clone()) {
+        let prompt = ps.prompt.clone();
+        tokio::spawn(async move {
+            if let Err(e) = crate::tmux::inject_spawn_prompt(&pane, &prompt).await {
+                if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
+                    eprintln!("[tmux] spawn prompt inject failed for pane {pane}: {e:#}");
+                }
+            } else if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
+                eprintln!("[tmux] spawn prompt {prompt:?} injected into pane {pane}");
+            }
+        });
+    }
 
     Ok(serde_json::json!({ "session_id": session_id }))
 }
@@ -696,7 +775,7 @@ async fn rpc_send_message(
             from: crate::domain::AgentRef::new(id.pubkey_hex(), rec.agent_slug.clone()),
             to_pubkey: recipient.pubkey.clone(),
             project: recipient.project.clone(),
-            body,
+            body: body.clone(),
             target_session: recipient.target_session.clone().map(SessionId::from),
             from_session: Some(SessionId::from(rec.session_id.clone())),
             meta,
@@ -712,6 +791,47 @@ async fn rpc_send_message(
         });
         if routed {
             state.mention_notify.notify_waiters();
+            crate::tmux::ring_doorbells(state.clone());
+        }
+    }
+
+    // SPAWN-ON-SEND: when the recipient is addressed as `slug@project` (no
+    // specific target session), and the recipient is one of OUR locally-owned
+    // agents, spawn a fresh tmux window for it so the message is actually seen.
+    // Gated on `get_local_agent_slug_by_pubkey` (the "is locally owned?"
+    // predicate) so we never try to spawn a remote agent.
+    if recipient.target_session.is_none() {
+        let to_pk = recipient.pubkey.clone();
+        let project2 = recipient.project.clone();
+        let slug_opt = state.with_store(|s| s.get_local_agent_slug_by_pubkey(&to_pk));
+        if let Some(slug) = slug_opt {
+            let state2 = Arc::clone(state);
+            // Capture the triggering mention so the spawned session's inbox is
+            // pre-loaded before the harness receives its first prompt.
+            let pending_mention = crate::tmux::PendingMention {
+                event_id: receipt.native_event_id.clone(),
+                from_pubkey: id.pubkey_hex(),
+                from_slug: rec.agent_slug.clone(),
+                from_session: rec.session_id.clone(),
+                project: recipient.project.clone(),
+                body: body.clone(),
+                created_at: now_secs(),
+            };
+            tokio::spawn(async move {
+                match crate::tmux::spawn_agent(&state2, &slug, &project2).await {
+                    Ok(pane_id) => {
+                        crate::tmux::register_pending_spawn_with_mention(
+                            &pane_id,
+                            pending_mention,
+                        );
+                    }
+                    Err(e) => {
+                        if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
+                            eprintln!("[tmux] spawn failed for {slug}@{project2}: {e:#}");
+                        }
+                    }
+                }
+            });
         }
     }
 
@@ -1616,6 +1736,7 @@ async fn rpc_inbox_reply(
         });
         if routed {
             state.mention_notify.notify_waiters();
+            crate::tmux::ring_doorbells(state.clone());
         }
     }
 
@@ -1837,6 +1958,19 @@ async fn handle_wait_for_mention(state: &Arc<DaemonState>, req: &Request) -> Res
         Ok(r) => r,
         Err(e) => return Response::err(req.id, "rpc_error", format!("{e:#}")),
     };
+
+    // Arm the waiter so the tmux doorbell dispatcher skips this session while it
+    // is actively blocked here — the agent is already listening, so there is no
+    // need to type a nudge into its pane. The guard disarms on every return path.
+    crate::tmux::arm_waiter(&rec.session_id);
+    struct WaiterGuard(String);
+    impl Drop for WaiterGuard {
+        fn drop(&mut self) {
+            crate::tmux::disarm_waiter(&self.0);
+        }
+    }
+    let _waiter_guard = WaiterGuard(rec.session_id.clone());
+
     let _ = fetch_mentions_into_inbox(state, &rec).await;
 
     let deadline = if p.timeout > 0 {
@@ -2125,6 +2259,7 @@ fn handle_incoming(state: &Arc<DaemonState>, event: &Event) {
     }
     if outcome.wake_mentions {
         state.mention_notify.notify_waiters();
+        crate::tmux::ring_doorbells(state.clone());
     }
 }
 
@@ -2273,6 +2408,7 @@ async fn fetch_mentions_into_inbox(state: &Arc<DaemonState>, rec: &crate::state:
     let wake_count = state.provider.catch_up_mentions(rec, &owners).await?;
     if wake_count > 0 {
         state.mention_notify.notify_waiters();
+        crate::tmux::ring_doorbells(state.clone());
     }
     Ok(())
 }
