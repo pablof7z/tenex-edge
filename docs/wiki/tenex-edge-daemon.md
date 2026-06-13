@@ -8,7 +8,7 @@ tags:
 volatility: warm
 confidence: medium
 created: 2026-06-09
-updated: 2026-06-10
+updated: 2026-06-13
 verified: 2026-06-09
 compiled-from: conversation
 sources:
@@ -19,6 +19,7 @@ sources:
   - session:d208c058-7b2b-4ff8-bb82-d63623d51097
   - session:ab9998c4-6e65-410e-b298-122a2072171c
   - session:56f9fe89-5ff7-4e5b-b202-334cd7629d42
+  - session:1562957b-67e8-4ac1-a48b-84e8ec1696bb
 ---
 
 # Tenex-Edge Daemon
@@ -30,12 +31,13 @@ tenex-edge adopts a single-machine-daemon architecture that solely owns state.db
 The architecture extends state.db rather than replacing it; threads is the one genuinely new table; the single-writer daemon is the direct fix for the multi-writer corruption already encountered.
 The daemon spawns on first tenex-edge invocation if absent (double-fork/setsid), binds to a Unix domain socket at $TENEX_EDGE_HOME/daemon.sock, and uses flock on daemon.lock for race-safe startup with stale-socket reclaim.
 Debug-vs-release binaries and differing TENEX_EDGE_HOME values can evade the flock/socket lock and spawn parallel daemons; this robustness gap should be hardened. The isolated live e2e environment uses a separate TENEX_EDGE_HOME, a local nak relay, and PATH/TENEX_EDGE_* pointing at the worktree binary so it does not disturb the production ~/.tenex/edge daemon.
+When multiple machines run the daemon and both see a mention for an agent, an ownership signal (from owned_groups or agent config) is needed so that only the machine that owns spawning for that agent actually spawns, preventing duplicate spawns across daemons.
 The daemon idle-exits when no sessions are alive, tracked via session liveness/heartbeats.
 Startup backfill on a populated database must work correctly — it migrates legacy data (projects, members, origins) into canonical tables without corruption.
 The production daemon cutover was completed: the refactored binary replaced the live daemon, the real state.db was migrated (40 projects, 40 origins, 15 members backfilled), and propose + threads are live verbs.
 The refactored daemon adds zero net clippy lints and zero rustc warnings compared to the master baseline.
 
-<!-- citations: [^162f9-1] [^162f9-2] [^162f9-3] [^162f9-4] [^05b89-2] [^162f9-12] [^162f9-27] [^d208c-36] [^ab999-28] [^ab999-66] [^ab999-76] -->
+<!-- citations: [^162f9-1] [^162f9-2] [^162f9-3] [^162f9-4] [^05b89-2] [^162f9-12] [^162f9-27] [^d208c-36] [^ab999-28] [^ab999-66] [^ab999-76] [^15629-57] -->
 ## IPC Protocol
 
 The IPC protocol is JSON-RPC over the Unix domain socket, with CLI verbs (who, inbox, send-message, turn-start/end) becoming RPCs. CLI calls daemon_call_async(method, params) via UDS JSON-RPC, dispatch() matches the method name, and a handler function processes it.

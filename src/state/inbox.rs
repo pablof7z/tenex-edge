@@ -142,6 +142,20 @@ impl Store {
         Ok(())
     }
 
+    /// Returns `true` if the session is currently mid-turn (`working = 1`).
+    /// Defaults to `false` (not working) when no row exists — fail-open so
+    /// the doorbell is allowed when a session has never started a turn.
+    pub fn is_session_working(&self, session_id: &str) -> bool {
+        self.conn
+            .query_row(
+                "SELECT working FROM turn_state WHERE session_id=?1",
+                params![session_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap_or(0)
+            != 0
+    }
+
     /// `(working, turn_started_at)` for a session. Defaults to `(false, 0)` when
     /// no turn has started yet, so the engine simply stays idle.
     pub fn get_turn_state(&self, session_id: &str) -> Result<(bool, u64)> {
@@ -163,6 +177,16 @@ impl Store {
             params![agent_pubkey, event_id, ts],
         )?;
         Ok(())
+    }
+
+    /// Count undelivered mentions for a session without consuming them.
+    pub fn count_unread_inbox(&self, session_id: &str) -> Result<usize> {
+        let n: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM inbox WHERE target_session=?1 AND delivered=0",
+            params![session_id],
+            |r| r.get(0),
+        )?;
+        Ok(n as usize)
     }
 
     /// Return undelivered mentions for a session and mark them delivered.

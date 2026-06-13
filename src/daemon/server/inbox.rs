@@ -204,6 +204,10 @@ pub(super) async fn rpc_turn_end(
         }
     }
 
+    // If any inbox messages arrived while the agent was working, ring the
+    // doorbell now that working=0 — this is the "restart after idle" path.
+    crate::tmux::ring_doorbells(Arc::clone(state));
+
     Ok(serde_json::json!({ "ok": true }))
 }
 
@@ -320,6 +324,7 @@ pub(super) async fn fetch_mentions_into_inbox(
                 let routed = state.with_store(|s| route_mention_into(s, &to, &m, &ev));
                 if routed {
                     state.mention_notify.notify_waiters();
+                    crate::tmux::ring_doorbells(state.clone());
                 }
             }
         }

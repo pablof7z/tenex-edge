@@ -14,6 +14,7 @@ compiled-from: conversation
 sources:
   - session:9ac666e5-b468-4af2-be5e-83e5c8f2d1d2
   - session:081ec521-c99b-42fb-9aa7-4a109519a62f
+  - session:1562957b-67e8-4ac1-a48b-84e8ec1696bb
 ---
 
 # Tenex-Edge Hook Subcommand
@@ -34,7 +35,7 @@ The standalone verbs `session-start`, `session-end`, `turn-start`, `turn-check`,
 <!-- citations: [^9ac66-2] [^9ac66-9] -->
 ## Commands Outside Hook Scope
 
-The commands `who`, `tail`, `doctor`, `project`, `acl`, and `send-message` are not superseded by `hook` because they are interactive queries, owner config, or agent-initiated actions. The `inbox`, `who`, `send-message`, and `wait-for-mention` commands remain on the CLI as manual/agent-facing commands. The `inbox` command specifically serves the opencode injection path and manual message-checking use; Claude Code and Codex drain via the hook path.
+The commands `who`, `tail`, `doctor`, `project`, and `acl` are not superseded by `hook` because they are interactive queries or owner config. The `inbox` (including `inbox send`), `who`, and `wait-for-mention` commands remain on the CLI as manual/agent-facing commands. The `inbox` command specifically serves the opencode injection path and manual message-checking use; Claude Code and Codex drain via the hook path. (`send-message` was renamed to `inbox send --to`.)
 
 <!-- citations: [^9ac66-3] [^9ac66-11] -->
 ## Help Text Updates
@@ -50,3 +51,9 @@ The `hook` session-start path generates and prints a new SID to stdout when the 
 ## Testing
 
 The daemon integration smoke test drives the `hook` path via stdin and exercises the generate-and-print-SID branch. <!-- [^9ac66-13] -->
+
+## Hook Output Ordering and Phrasing
+
+Actionable instructions in hook output directed at the user must be relayed to the user rather than omitted. Hook output containing direct instructions (e.g., 'Tell the user to run the following command') must be surfaced to the user before the assistant responds, not silently absorbed. Blocking warnings should be framed with prerequisite language (e.g., 'Before responding:', 'BLOCKING:') rather than advisory labels (e.g., 'WARNING:') to ensure they are surfaced to the user.
+
+<!-- citations: [^15629-1] [^15629-2] [^15629-20] [^15629-32] -->

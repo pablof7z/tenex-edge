@@ -2,7 +2,7 @@
 
 > Derived cache — do not hand-edit. Rebuilt by proactive-context after each capture.
 
-Last updated: 2026-06-12
+Last updated: 2026-06-13
 
 ## data-synchronization (1 guide)
 
@@ -10,13 +10,14 @@ Last updated: 2026-06-12
 |------|-------|---------|------|------------|----------|-------|
 | [tenex-edge-data-synchronization](tenex-edge-data-synchronization.md) | Tenex-Edge Data Synchronization | The Syncthing-synced directory must only synchronize markdown documents and exclude all other file types including git, code, and build artifacts | capture | warm | 2026-06-09 | data-synchronization |
 
-## general (1 guide)
+## general (2 guides)
 
 | Slug | Title | Summary | Tags | Volatility | Verified | Topic |
 |------|-------|---------|------|------------|----------|-------|
+| [development-workflow](development-workflow.md) | Development Workflow | The work must be rebased onto upstream after 30 minutes | capture | warm | 2026-06-13 | general |
 | [the-sessionstarthookspecificoutputwire-struct-contains-two-f](the-sessionstarthookspecificoutputwire-struct-contains-two-f.md) | the sessionstarthookspecificoutputwire struct contains two f | The SessionStartHookSpecificOutputWire struct contains two fields: suppressOutput and systemMessage. | capture | warm | 2026-06-09 | general |
 
-## tenex-edge (36 guides)
+## tenex-edge (38 guides)
 
 | Slug | Title | Summary | Tags | Volatility | Verified | Topic |
 |------|-------|---------|------|------------|----------|-------|
@@ -32,6 +33,7 @@ Last updated: 2026-06-12
 | [tenex-edge-design-philosophy](tenex-edge-design-philosophy.md) | Tenex-Edge Design Philosophy | The design discussion operates at a higher, design-space level—what the thing is, what shape it should take, what is worth wanting, and where tensions and bets | capture | warm | 2026-06-07 | tenex-edge |
 | [tenex-edge-domain-acl](tenex-edge-domain-acl.md) | Tenex-Edge Domain ACL | The domain has two verb planes plus one ACL: Project-State (open_project, roster, presence, status, project_meta, list_projects) and Communications (send, inbox | capture | warm | 2026-06-09 | tenex-edge |
 | [tenex-edge-fabric-architecture](tenex-edge-fabric-architecture.md) | Tenex-Edge Fabric Architecture | A FabricProvider bundles four single-responsibility capabilities: Lifecycle reactor (project spin-up side-effects), Membership source (hydrates and streams the | capture | warm | 2026-06-09 | tenex-edge |
+| [tenex-edge-hook-output-rendering](tenex-edge-hook-output-rendering.md) | Tenex-Edge Hook Output Rendering | Hook warnings marked as BLOCKING should be framed as prerequisites to answering, making them harder for the assistant to skip | capture | warm | 2026-06-12 | tenex-edge |
 | [tenex-edge-hook-subcommand](tenex-edge-hook-subcommand.md) | Tenex-Edge Hook Subcommand | The `hook` subcommand is the only host-facing entry point for harness integrations, dispatching to the same inner functions as the standalone verbs while adding | capture | warm | 2026-06-09 | tenex-edge |
 | [tenex-edge-host-adapter](tenex-edge-host-adapter.md) | Tenex-Edge Host Adapter | Host adapters must carry no identity logic or fabric logic and must never block the editor on the daemon being healthy (fail open) | capture | warm | 2026-06-09 | tenex-edge |
 | [tenex-edge-identity](tenex-edge-identity.md) | Tenex-Edge Identity | Agent identity is a sovereign keypair, durable per-agent, anchored to a person | capture | warm | 2026-06-08 | tenex-edge |
@@ -51,31 +53,10 @@ Last updated: 2026-06-12
 | [tenex-edge-statusline](tenex-edge-statusline.md) | Tenex-Edge Statusline | The statusline is a one-line awareness board representing the floor product (identity + awareness + passive collision signal) in the host terminal | capture | warm | 2026-06-12 | tenex-edge |
 | [tenex-edge-tail-design](tenex-edge-tail-design.md) | Tenex-Edge Tail Design | The tail v2 design (docs/tail-v2-design.md) specifies a structured TailEvent stream, heartbeat-to-join/leave collapse, tiers, read-model backfill, and --json ou | capture | warm | 2026-06-09 | tenex-edge |
 | [tenex-edge-thread-storage](tenex-edge-thread-storage.md) | Tenex-Edge Thread Storage | The thread dual-write infrastructure (local SQLite read-model of relay conversations via `projects`, `threads`, `messages`, `message_recipients` tables) was rem | capture | warm | 2026-06-10 | tenex-edge |
+| [tenex-edge-tmux-adapter](tenex-edge-tmux-adapter.md) | Tenex-Edge TMUX Adapter | The TMUX adapter injects into and controls the agent loop via TMUX, enabling creation of new sessions and supporting harnesses that do not support channels. | capture | warm | 2026-06-12 | tenex-edge |
 | [tenex-edge-transport-codec](tenex-edge-transport-codec.md) | Tenex-Edge Transport Codec | Envelope encoding and decoding is modularized as a codec set providing per-event encode, decode, and subscribe operations | capture | warm | 2026-06-08 | tenex-edge |
 | [tenex-edge-turn-context-injection](tenex-edge-turn-context-injection.md) | Tenex-Edge Turn Context Injection | The turn-start command itself emits the context the agent should see (inbox messages, peer presence/status changes since last update), rather than delegating th | capture | warm | 2026-06-09 | tenex-edge |
 | [tenex-edge-user-prompt-submit](tenex-edge-user-prompt-submit.md) | Tenex-Edge User Prompt Submit | The user-prompt-submit hook creates a kind:1 Nostr note that is a root event (OP) with no e-tag | capture | warm | 2026-06-09 | tenex-edge |
 | [tenex-edge-wait-for-mention](tenex-edge-wait-for-mention.md) | Tenex-Edge Wait-for-Mention | The `wait-for-mention` command polls the SQLite inbox every ~500ms until a mention arrives | capture | warm | 2026-06-09 | tenex-edge |
 | [tenex-off-publishing](tenex-off-publishing.md) | Tenex-Off Publishing | Tenex-off is a direct Nostr publisher: it signs and publishes kind:1 notes with the human's nsec and routing tags straight to relays, not via a send-message too | capture | warm | 2026-06-09 | tenex-edge |
-
-## Episode Cards (17 cards)
-
-| Card | Date | Title | Salience |
-|------|------|-------|----------|
-| [2026-06-12-1-add-tenex-edge-project-add-cli](episodes/2026-06-12-1-add-tenex-edge-project-add-cli.md) | 2026-06-12 | Add `tenex-edge project add` CLI command for NIP-29 group membership | product |
-| [2026-06-12-1-inbox-messages-redesigned-from-one-liner](episodes/2026-06-12-1-inbox-messages-redesigned-from-one-liner.md) | 2026-06-12 | Inbox messages redesigned from one-liner to email-like envelope with reply | product |
-| [2026-06-12-1-integration-mechanism-correction-mcp-server-hooks](episodes/2026-06-12-1-integration-mechanism-correction-mcp-server-hooks.md) | 2026-06-12 | Integration mechanism correction: MCP server → hooks | reversal |
-| [2026-06-12-1-nip-29-group-membership-management-gap](episodes/2026-06-12-1-nip-29-group-membership-management-gap.md) | 2026-06-12 | NIP-29 group membership management gap — no manual add, no visibility | product |
-| [2026-06-12-1-remote-agent-display-changed-from-generic](episodes/2026-06-12-1-remote-agent-display-changed-from-generic.md) | 2026-06-12 | Remote agent display changed from generic label to hostname | product |
-| [2026-06-12-1-secret-scrubbing-layer-before-nostr-event](episodes/2026-06-12-1-secret-scrubbing-layer-before-nostr-event.md) | 2026-06-12 | Secret-scrubbing layer before Nostr event signing | product |
-| [2026-06-12-1-statusline-redesigned-as-citizenship-awareness-line](episodes/2026-06-12-1-statusline-redesigned-as-citizenship-awareness-line.md) | 2026-06-12 | Statusline redesigned as citizenship awareness line | product |
-| [2026-06-12-1-tenex-edge-claude-code-integration-is](episodes/2026-06-12-1-tenex-edge-claude-code-integration-is.md) | 2026-06-12 | tenex-edge Claude Code integration is hooks, not MCP server | architecture |
-| [2026-06-12-1-who-command-shows-hostname-instead-of](episodes/2026-06-12-1-who-command-shows-hostname-instead-of.md) | 2026-06-12 | who command shows hostname instead of generic (remote) label | product |
-| [2026-06-12-2-add-tenex-edge-project-add-cli](episodes/2026-06-12-2-add-tenex-edge-project-add-cli.md) | 2026-06-12 | Add `tenex-edge project add` CLI command for manual group membership | product |
-| [2026-06-12-2-new-tenex-edge-project-add-command](episodes/2026-06-12-2-new-tenex-edge-project-add-command.md) | 2026-06-12 | New `tenex-edge project add` command for NIP-29 group membership | product |
-| [2026-06-12-2-ollama-key-pattern-added-to-scrubber](episodes/2026-06-12-2-ollama-key-pattern-added-to-scrubber.md) | 2026-06-12 | Ollama key pattern added to scrubber | product |
-| [2026-06-12-2-strengthen-nip-29-membership-warning-to](episodes/2026-06-12-2-strengthen-nip-29-membership-warning-to.md) | 2026-06-12 | Strengthen NIP-29 membership warning to force LLM agent action | product |
-| [2026-06-12-2-warning-wording-strengthened-from-informational-to](episodes/2026-06-12-2-warning-wording-strengthened-from-informational-to.md) | 2026-06-12 | Warning wording strengthened from informational to mandatory after LLM ignored it | product |
-| [2026-06-12-3-first-turn-nip-29-membership-warning](episodes/2026-06-12-3-first-turn-nip-29-membership-warning.md) | 2026-06-12 | First-turn NIP-29 membership warning for unauthorized agents | product |
-| [2026-06-12-3-keyhog-secretscan-rejected-as-unsuitable-for](episodes/2026-06-12-3-keyhog-secretscan-rejected-as-unsuitable-for.md) | 2026-06-12 | Keyhog/secretscan rejected as unsuitable for in-flight redaction | root-cause |
-| [2026-06-12-4-membership-warning-false-positive-from-stale](episodes/2026-06-12-4-membership-warning-false-positive-from-stale.md) | 2026-06-12 | Membership warning false positive from stale local cache | root-cause |
 

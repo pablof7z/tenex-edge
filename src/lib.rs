@@ -22,5 +22,6 @@ pub mod daemon;
 pub mod distill;
 pub mod runtime;
 pub mod state;
+pub mod tmux;
 pub mod transcript;
 pub mod transport;

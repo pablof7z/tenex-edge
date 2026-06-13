@@ -39,6 +39,7 @@ mod inbox;
 mod lifecycle;
 mod messaging;
 mod session;
+mod tmux_rpc;
 
 const PRUNE_PEER_AFTER_SECS: u64 = 600;
 
@@ -81,7 +82,7 @@ pub struct DaemonState {
 }
 
 impl DaemonState {
-    fn with_store<R>(&self, f: impl FnOnce(&Store) -> R) -> R {
+    pub(crate) fn with_store<R>(&self, f: impl FnOnce(&Store) -> R) -> R {
         let g = self.store.lock().expect("store mutex poisoned");
         f(&g)
     }
@@ -209,6 +210,7 @@ impl DaemonState {
     fn tail_subscribe(&self) -> tokio::sync::broadcast::Receiver<DomainEvent> {
         self.tail_tx.subscribe()
     }
+    #[allow(clippy::result_large_err)]
     fn tail_tx_send(
         &self,
         de: DomainEvent,

@@ -23,6 +23,7 @@ use std::time::{Duration, Instant};
 mod admin;
 mod hooks;
 mod messaging;
+mod tmux_cli;
 mod turn;
 mod who;
 
@@ -136,6 +137,12 @@ enum Cmd {
         #[arg(long = "type")]
         hook_type: String,
     },
+    /// TMUX control-plane commands: status, send doorbell, spawn agent, attach.
+    /// With no subcommand, opens an interactive TUI.
+    Tmux {
+        #[command(subcommand)]
+        action: Option<TmuxAction>,
+    },
     /// Internal: the per-machine daemon. Spawned automatically; not for direct use.
     /// (Replaces the old detached per-session engine, which now runs as an async
     /// task inside this one daemon — the sole writer of state.db.)
@@ -172,6 +179,33 @@ enum InboxAction {
         message: Option<String>,
         #[arg(long = "message", value_name = "MESSAGE")]
         message_flag: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum TmuxAction {
+    /// List registered tmux endpoints with liveness info.
+    Status,
+    /// Manually fire the doorbell into a session's pane (debug).
+    Send {
+        /// Session id (or prefix) to ring.
+        #[arg(long)]
+        session: String,
+    },
+    /// Spawn a new tmux window running the given agent harness.
+    Spawn {
+        /// Agent slug: "claude", "codex", "opencode", …
+        #[arg(long)]
+        agent: String,
+        /// Project slug; defaults to project resolved from current directory.
+        #[arg(long)]
+        project: Option<String>,
+    },
+    /// Exec into the tmux pane registered for a session.
+    Attach {
+        /// Session id (or prefix).
+        #[arg(long)]
+        session: String,
     },
 }
 
@@ -268,6 +302,10 @@ pub async fn run(cli: Cli) -> Result<()> {
         Cmd::Project { action } => admin::project(action).await,
         Cmd::Doctor => admin::doctor().await,
         Cmd::Hook { host, hook_type } => hooks::hook_run(host, hook_type).await,
+        Cmd::Tmux { action } => match action {
+            Some(action) => tmux_cli::tmux_run(action).await,
+            None => tmux_cli::tmux_tui(),
+        },
         Cmd::Daemon => crate::daemon::server::run().await,
     }
 }
@@ -294,11 +332,17 @@ fn session_start_inner(
     watch_pid: Option<i32>,
 ) -> Result<String> {
     let cwd = cwd.unwrap_or(std::env::current_dir()?);
+    // Capture TMUX_PANE / TMUX from the hook env so the daemon can register a
+    // tmux endpoint for this session. Both are optional; absent means no tmux.
+    let tmux_pane = std::env::var("TMUX_PANE").ok().filter(|s| !s.is_empty());
+    let tmux_socket = std::env::var("TMUX").ok().filter(|s| !s.is_empty());
     let params = serde_json::json!({
         "agent": agent,
         "session_id": session_id,
         "cwd": cwd.to_string_lossy(),
         "watch_pid": watch_pid,
+        "tmux_pane": tmux_pane,
+        "tmux_socket": tmux_socket,
     });
     let v = crate::daemon::blocking::call("session_start", params)?;
     let sid = v["session_id"]

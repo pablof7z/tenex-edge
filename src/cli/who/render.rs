@@ -50,6 +50,15 @@ pub(super) fn render_who_once(snapshot: &WhoSnapshot) -> String {
         }
     }
 
+    if !snapshot.spawnable.is_empty() {
+        let _ = writeln!(out);
+        for row in &snapshot.spawnable {
+            let label = format!("{}@{}", row.slug, row.host);
+            let tag = format!("[no session · spawnable via {}]", row.command);
+            let _ = writeln!(out, "{}  {}", label.dimmed(), tag.dimmed());
+        }
+    }
+
     out
 }
 
@@ -169,6 +178,13 @@ pub(super) fn render_who_plain(snapshot: &WhoSnapshot) -> String {
             row.slug, row.project, row.session_id, dir, remote, stale,
         );
         let _ = writeln!(out, "      {}", status_plain(&row.status));
+    }
+    for row in &snapshot.spawnable {
+        let _ = writeln!(
+            out,
+            "  {}@{} [no session · spawnable via {}]",
+            row.slug, row.host, row.command,
+        );
     }
     out
 }

@@ -8,7 +8,7 @@ tags:
 volatility: warm
 confidence: medium
 created: 2026-06-08
-updated: 2026-06-10
+updated: 2026-06-12
 verified: 2026-06-08
 compiled-from: conversation
 sources:
@@ -24,6 +24,7 @@ sources:
   - session:ab9998c4-6e65-410e-b298-122a2072171c
   - session:56f9fe89-5ff7-4e5b-b202-334cd7629d42
   - session:40a4d401-2520-4781-b747-b0ef19594bed
+  - session:1562957b-67e8-4ac1-a48b-84e8ec1696bb
 ---
 
 # Tenex-Edge Session Management
@@ -53,7 +54,7 @@ Agent activity is published as kind:1 events with NIP-29 `h` tags for the projec
 
 ## Discovering Peers
 
-The `who` command shows agents whose heartbeat is still fresh (default 90 seconds = 3× the 30-second tick) and prunes stale peer rows older than 10 minutes each tick. It shows your own live agents (marked as `this machine`) merged with fresh foreign peers. The engine captures peers' NIP-38 status and stores its own; `who` renders the format: `agent@hostname [session $id] [$relativePwd]` on the first line, then `$currentStatus` on the next. Same-machine entries have no host annotation; different-host entries show `(remote)`. The relative working directory displayed is relative to the project root (not absolute $PWD), so worktrees render as `worktree1/worktree2` and the root shows as `.`. The peer_sessions table has a first_seen column populated on INSERT only, never on heartbeat updates, so it accurately marks when a peer appeared. `who --live` opens a full-screen terminal board that refreshes the same local awareness snapshot until q, Esc, or Ctrl-C exits; `--all --live` keeps stale sessions visible.
+The `who` command shows agents whose heartbeat is still fresh (default 90 seconds = 3× the 30-second tick) and prunes stale peer rows older than 10 minutes each tick. It shows your own live agents (marked as `this machine`) merged with fresh foreign peers. Agents available for spawning (configured but idle, without live heartbeats) are also announced so they are visible without a session tag. The engine captures peers' NIP-38 status and stores its own; `who` renders the format: `agent@hostname [session $id] [$relativePwd]` on the first line, then `$currentStatus` on the next. Same-machine entries have no host annotation; different-host entries show `(remote)`. The relative working directory displayed is relative to the project root (not absolute $PWD), so worktrees render as `worktree1/worktree2` and the root shows as `.`. The peer_sessions table has a first_seen column populated on INSERT only, never on heartbeat updates, so it accurately marks when a peer appeared. `who --live` opens a full-screen terminal board that refreshes the same local awareness snapshot until q, Esc, or Ctrl-C exits; `--all --live` keeps stale sessions visible.
 
 The `tail` command's presence event display uses the `slug@host` pattern instead of `slug@project`.
 
@@ -62,6 +63,9 @@ The cwd/working-directory field broadcast in status events must be the project-r
 The `threads --project` command must print the full thread id (not a truncated short_id) so it can be passed back to `--thread`. <!-- [^ab999-73] -->
 
 <!-- citations: [^f3a73-74] [^f3a73-84] [^240ff-2] [^2cee1-11] [^162f9-19] -->
+For multi-machine deployments, only one machine should spawn a given agent; a signal (such as owned_groups or agent config) must prevent both daemons from spawning the same agent on a mention.
+
+<!-- citations: [^f3a73-74] [^f3a73-84] [^240ff-2] [^2cee1-11] [^162f9-19] [^15629-40] -->
 ## macOS Binary Reinstalls
 
 Binary reinstalls on macOS require `xattr -cr` and `codesign --force --sign -` to prevent macOS SIGKILL on the fork/re-exec path. <!-- [^f3a73-78] -->

@@ -1,0 +1,73 @@
+---
+title: Tenex-Edge TMUX Adapter
+slug: tenex-edge-tmux-adapter
+topic: tenex-edge
+summary: The TMUX adapter injects into and controls the agent loop via TMUX, enabling creation of new sessions and supporting harnesses that do not support channels.
+tags:
+  - capture
+volatility: warm
+confidence: medium
+created: 2026-06-12
+updated: 2026-06-13
+verified: 2026-06-12
+compiled-from: conversation
+sources:
+  - session:1562957b-67e8-4ac1-a48b-84e8ec1696bb
+---
+
+# Tenex-Edge TMUX Adapter
+
+## Purpose
+
+A Fable agent is used to plan the TMUX adapter product for tenex-edge. The TMUX adapter injects into and controls the agent loop for harnesses that do not support channels, enabling creation of new sessions and message delivery, analogous to the channel-based approach used for Cloud Code. It integrates with TMUX to control Open Code, Cloud Code (CLI), or Codex so that it can create new sessions. Notifications use a 'doorbell' pattern: the adapter types a short notification string (such as 'You have new tenex-edge mentions. Run tenex-edge inbox to read and reply.') followed by Enter into the pane, not the full message body, avoiding quoting and multiline transport problems; the mention content stays in the inbox to flow through the normal hook injection path.
+
+<!-- citations: [^15629-19] [^15629-4] [^15629-5] [^15629-12] [^15629-16] [^15629-21] [^15629-25] [^15629-33] [^15629-52] -->
+## CLI Interface
+
+The TMUX adapter exposes four CLI verbs: `tmux status`, `tmux send`, `tmux spawn`, and `tmux attach`. The `tmux attach` command exec's `tmux` locally rather than calling a daemon RPC, allowing a user to attach from tenex-edge tmux to a remote tmux pane running an agent to view and interact with it directly.
+
+<!-- citations: [^15629-6] [^15629-26] -->
+## Session Tracking
+
+Session-start hooks capture `$TMUX_PANE` and `$TMUX` from the environment for free and write them to a `session_endpoints` table, requiring no new host wiring.
+
+<!-- citations: [^15629-7] [^15629-27] -->
+## Spawning
+
+Spawning is data-driven via a `SpawnDef` table (similar to `HostDef`), creates a `tmux new-window`, and waits for the SessionStart hook to self-register via the pane id, requiring only config changes to add new harnesses. SpawnDef includes an optional `spawn_prompt` field (defaulting to `tenex-edge inbox`) that dictates what initial command is typed into a newly spawned session. A `PENDING_SPAWN_PROMPTS` map tracks the pane-to-prompt association between the `spawn_agent` call and the `session_start` RPC arrival, consumed one-shot via `consume_pending_spawn` so it only fires on genuine new sessions. After a `session_start` RPC, a grace delay (`SPAWN_PROMPT_DELAY_MS`, set to 2000ms) is observed before typing the spawn prompt to accommodate cold-start timing where the input box may not yet be interactive. The triggering message is carried through to the pending spawn and written to the new session's inbox before the spawn prompt fires, so the agent reads it on first turn. Which harness (claude, codex, opencode) to use for a given agent is configured in agent.json, not hardcoded in SpawnDef. When spawning a new agent session, the harness is started with the actual user-sent message as the initial prompt, not just a generic doorbell; for spawn specifically, the message content is written to a tempfile and passed as stdin or a CLI argument to the harness, requiring a harness-specific solution per harness. `spawn_agent` is called in both `rpc_send_message` and `demux::handle_incoming` when a mention targets a locally-owned agent with zero alive sessions, using the local sessions table as the gate. `resolve_agent_pubkey` falls back to the `sessions` table (including dead rows) when `peer_sessions` has no entry, so it can resolve own agents with no live sessions. `tenex-edge inbox` must be added to the Bash allowlist in the Claude Code adapter's `settings.json` template so that the reply loop can run unattended (this covers both bare `inbox` and `inbox send`). A live end-to-end spawn test (send message → no live session → new harness spawned → agent reads it) is required before the spawn flow is considered complete.
+
+<!-- citations: [^15629-43] [^15629-8] [^15629-28] [^15629-34] [^15629-41] [^15629-47] [^15629-54] -->
+## Cloud Code Resume
+
+Cloud Code refers to Claude Code in the CLI/TUI, not a browser-based web UI. For an idle Cloud Code session, a mention spawns a local terminal continuation using `claude --resume <id>` rather than injecting into the browser.
+
+<!-- citations: [^15629-9] [^15629-17] -->
+## Rollout Stages
+
+The TMUX adapter rolls out in four independent stages: (1) observe-only capture, (2) injection, (3) spawn+routing, (4) Cloud Code resume templating. <!-- [^15629-10] -->
+
+## Code Location
+
+TMUX adapter implementation lives in `src/tmux.rs` (doorbell dispatch, spawn logic, SpawnDef registry), `src/state/endpoints.rs` (session_endpoints + project_paths CRUD), `src/cli/tmux_cli.rs` (tmux subcommands), `src/daemon/server/tmux_rpc.rs` (daemon RPC handlers), and `src/daemon/server/deliver.rs`, all inside the main binary, with config and docs in `integrations/tmux/`. The implementation uses `DisarmGuard` RAII in connection.rs to ensure armed-waiter suppression works on all exit paths. `tmux has-session` uses exact session name matching to avoid prefix collisions (e.g., tenex matching tenex-test).
+
+<!-- citations: [^15629-11] [^15629-23] [^15629-35] [^15629-53] -->
+## Message Routing
+
+The routing ladder for mentions without a session tag resolves to the local agent: (1) armed wait-for-mention/channel waiter → let it deliver, (2) live tmux endpoint → inbox + doorbell, (3) no endpoint → spawn or inbox-persist. Sending a message to an agent without a session/e-tag triggers spawning a new tmux session with that agent, with the specific harness (claude, codex, opencode) determined via the agent.json config. When a message arrives for a running agent (mid-loop), the existing hook injection mechanism handles it without TMUX intervention. When a message arrives for an idle agent (one that has already emitted stop via the `--hook stop` event), the TMUX adapter injects the message so the agent resumes processing. Injection into an idle agent is gated on `turn_state.working = 0` to prevent double-prompting if the agent is mid-turn. The `--hook stop` event detects when an agent has finished a run, triggering the `turn_end` path that sets `working=0`. After an agent stops (`turn_end` fires and `working` is set to 0), the doorbell injects into the pane within approximately 1 second. A message arriving while an agent is mid-turn (`working=1`) is suppressed and auto-delivered via doorbell immediately after the agent stops. `ring_doorbells` is edge-triggered, not level-triggered — a raw SQLite insert does not trigger injection; messages must go through `inbox send` or another live RPC path. Live doorbell injection into a Claude Code pane works cleanly: text appears at the `❯` prompt without backtick expansion or visual artefacts, and the agent starts a turn within ~1s, running `tenex-edge inbox` autonomously. Idle session injection works end-to-end: `inbox send` triggers a doorbell within ~2s, the agent reads the inbox via the UserPromptSubmit hook, and the `working=0` guard prevents injection into mid-turn sessions. An end-to-end test must verify that sending a message to an idle session causes the agent to continue with that user message injected via the tmux doorbell.
+
+<!-- citations: [^15629-44] [^15629-13] [^15629-29] [^15629-36] [^15629-42] [^15629-48] -->
+## Harness Compatibility
+
+All three target harnesses — Claude Code CLI, Codex, and OpenCode — are terminal TUIs running in TMUX panes, and the doorbell approach works for all of them since they all sit at an input prompt when idle. `tmux send-keys -l` lands correctly in all three TUIs — Claude Code (readline), Codex (ratatui), and OpenCode — requiring no harness-specific key sequences.
+
+<!-- citations: [^15629-14] [^15629-18] [^15629-22] -->
+
+## Multi-Machine Operation
+
+The TMUX daemon can run on one or two computers simultaneously, with the relay routing mentions across machines and each machine running its own tmux dispatcher. Only one machine should spawn a new session for a given agent; a signal (from owned_groups or agent config) determines which machine owns spawning for that agent to prevent duplicate spawns. <!-- [^15629-30] -->
+
+## Agent Visibility
+
+`tenex-edge who` displays spawnable agents (configured but idle, with no live session) alongside live agents, and the same list is injected into the first-turn context via `push_turn_fabric_block`. The `tenex-edge tmux` command (bare, no subcommand) opens an interactive TUI built with crossterm, showing live sessions with CPU usage and status, spawnable agents, and keybindings for attach (a), new session (n), and quit (q), with 2-second auto-refresh and RAII terminal restore on exit. From the TUI the user can attach to a remote tmux pane to view and interact with the running agent, or spawn a new session with any local agent.
+
+<!-- citations: [^15629-49] [^15629-55] -->

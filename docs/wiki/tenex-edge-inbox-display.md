@@ -8,19 +8,21 @@ tags:
 volatility: warm
 confidence: medium
 created: 2026-06-12
-updated: 2026-06-12
+updated: 2026-06-13
 verified: 2026-06-12
 compiled-from: conversation
 sources:
   - session:cd74a605-9f83-4e21-a885-4d900e88ce07
+  - session:1562957b-67e8-4ac1-a48b-84e8ec1696bb
 ---
 
 # Tenex-Edge Inbox Display
 
 ## Inbox Message Envelope Format
 
-Inbox messages display with an envelope format that includes From, Date, Branch, and ID header fields followed by a separator and the message body. Both the inbox command and the mid-turn mention injection use a single unified envelope format for displaying messages. Each inbox message includes a unique ID that other agents can reference to reply to that specific message. <!-- [^cd74a-1] -->
+Inbox messages display with an envelope format that includes From, Date, Branch, and ID header fields followed by a separator and the message body. Both the inbox command and the mid-turn mention injection use a single unified envelope format for displaying messages. Each inbox message includes a unique ID that other agents can reference to reply to that specific message. InboxRow spawned during message delivery gets empty-string/zero defaults for subject, branch, commit, dirty, and host fields that were added by upstream, since that context is unavailable at spawn time.
 
+<!-- citations: [^cd74a-1] [^15629-59] -->
 ## From Field
 
 The From field includes the sender's session ID in the format [session $shortId]. If the agent is a remote agent, the From field includes the host in the format [remote: $host]. <!-- [^cd74a-2] -->

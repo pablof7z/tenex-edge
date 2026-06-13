@@ -237,6 +237,7 @@ fn live_renderer_same_as_once_with_hint() {
             remote: false,
         }],
         other_projects: vec![],
+        spawnable: vec![],
     };
 
     // --live uses render_who_once: same content, plus a dim quit-hint footer.
@@ -288,6 +289,7 @@ fn who_all_projects_includes_project_in_agent_names() {
             remote: false,
         }],
         other_projects: vec![],
+        spawnable: vec![],
     };
 
     let once = strip_ansi(&render_who_once(&snapshot));

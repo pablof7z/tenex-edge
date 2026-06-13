@@ -37,7 +37,7 @@ impl Store {
             "SELECT session_id, agent_slug, agent_pubkey, project, host, child_pid, watch_pid, created_at, alive, rel_cwd
              FROM sessions WHERE alive=1 ORDER BY created_at",
         )?;
-        let rows = stmt.query_map([], |row| row_to_session(row))?;
+        let rows = stmt.query_map([], row_to_session)?;
         Ok(rows.filter_map(|r| r.ok()).collect())
     }
 
@@ -215,7 +215,7 @@ impl Store {
             "SELECT session_id, agent_slug, agent_pubkey, project, host, child_pid, watch_pid, created_at, alive, rel_cwd
              FROM sessions WHERE alive=1 AND last_seen>=?1 ORDER BY created_at DESC",
         )?;
-        let rows = stmt.query_map(params![since], |row| row_to_session(row))?;
+        let rows = stmt.query_map(params![since], row_to_session)?;
         Ok(rows.filter_map(|r| r.ok()).collect())
     }
 }

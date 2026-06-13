@@ -78,6 +78,60 @@ pub(super) async fn rpc_send_message(
         });
         if routed {
             state.mention_notify.notify_waiters();
+            crate::tmux::ring_doorbells(state.clone());
+        }
+    }
+
+    // TMUX SPAWN: if the recipient is a locally-owned agent with no alive
+    // sessions, spawn a new tmux window so it can pick up the message.  The
+    // spawn is gated on the local `sessions` table (not `hosted_pubkeys()`) so
+    // it fires even in a fresh daemon where `hosted` is still empty.
+    {
+        let to_pk = recipient.pubkey.clone();
+        let project2 = recipient.project.clone();
+        let slug_opt = state.with_store(|s| s.get_local_agent_slug_by_pubkey(&to_pk));
+        if let Some(slug) = slug_opt {
+            let alive_count = state.with_store(|s| {
+                s.list_alive_sessions()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|r| r.agent_pubkey == to_pk && r.project == project2)
+                    .count()
+            });
+            if alive_count == 0 {
+                let state2 = Arc::clone(state);
+                // Capture the triggering mention so the spawned session's inbox
+                // is pre-loaded before the harness receives its first prompt.
+                let pending_mention = crate::tmux::PendingMention {
+                    event_id: event_id.to_hex(),
+                    from_pubkey: mention.from.pubkey.clone(),
+                    from_slug: mention.from.slug.clone(),
+                    from_session: mention
+                        .from_session
+                        .as_ref()
+                        .map(|s| s.as_str().to_owned())
+                        .unwrap_or_default(),
+                    project: recipient.project.clone(),
+                    body: mention.body.clone(),
+                    created_at: crate::util::now_secs(),
+                };
+                tokio::spawn(async move {
+                    match crate::tmux::spawn_agent(&state2, &slug, &project2).await {
+                        Ok(pane_id) => {
+                            // Attach the mention to the pending-spawn entry so
+                            // `rpc_session_start` can write it into the new
+                            // session's inbox before injecting the first prompt.
+                            crate::tmux::register_pending_spawn_with_mention(
+                                &pane_id,
+                                pending_mention,
+                            );
+                        }
+                        Err(e) => {
+                            eprintln!("[tmux] spawn failed for {slug}@{project2}: {e:#}");
+                        }
+                    }
+                });
+            }
         }
     }
 

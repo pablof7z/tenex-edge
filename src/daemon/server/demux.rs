@@ -155,13 +155,45 @@ fn handle_incoming(state: &Arc<DaemonState>, event: &Event) {
                 .ok();
             });
         }
-        DomainEvent::Mention(m) if hosted.contains(&m.to_pubkey) => {
-            // User-prompt events (operator-signed) must not enter the inbox.
-            if !state.owners.contains(&event.pubkey.to_hex()) {
-                let to = m.to_pubkey.clone();
-                let routed = state.with_store(|s| route_mention_into(s, &to, &m, event));
-                if routed {
-                    state.mention_notify.notify_waiters();
+        // User-prompt events (operator-signed) must not enter the inbox.
+        DomainEvent::Mention(m)
+            if hosted.contains(&m.to_pubkey)
+                && !state.owners.contains(&event.pubkey.to_hex()) =>
+        {
+            let to = m.to_pubkey.clone();
+            let routed = state.with_store(|s| route_mention_into(s, &to, &m, event));
+            if routed {
+                state.mention_notify.notify_waiters();
+                crate::tmux::ring_doorbells(state.clone());
+            } else {
+                // `route_mention_into` enqueues nothing when there are no
+                // alive sessions.  If the recipient is locally owned and has
+                // zero alive sessions, spawn a new tmux window so it can
+                // pick up the mention once it starts.
+                let to_pk = m.to_pubkey.clone();
+                let project2 = m.project.clone();
+                let slug_opt =
+                    state.with_store(|s| s.get_local_agent_slug_by_pubkey(&to_pk));
+                if let Some(slug) = slug_opt {
+                    let alive_count = state.with_store(|s| {
+                        s.list_alive_sessions()
+                            .unwrap_or_default()
+                            .into_iter()
+                            .filter(|r| r.agent_pubkey == to_pk && r.project == project2)
+                            .count()
+                    });
+                    if alive_count == 0 {
+                        let state2 = Arc::clone(state);
+                        tokio::spawn(async move {
+                            if let Err(e) =
+                                crate::tmux::spawn_agent(&state2, &slug, &project2).await
+                            {
+                                eprintln!(
+                                    "[tmux] spawn failed for {slug}@{project2}: {e:#}"
+                                );
+                            }
+                        });
+                    }
                 }
             }
         }
