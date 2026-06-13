@@ -2,7 +2,7 @@
 
 > Derived cache — do not hand-edit. Rebuilt by proactive-context after each capture.
 
-Last updated: 2026-06-12
+Last updated: 2026-06-13
 
 ## code-standards (1 guide)
 
@@ -22,7 +22,7 @@ Last updated: 2026-06-12
 |------|-------|---------|------|------------|----------|-------|
 | [the-sessionstarthookspecificoutputwire-struct-contains-two-f](the-sessionstarthookspecificoutputwire-struct-contains-two-f.md) | the sessionstarthookspecificoutputwire struct contains two f | The SessionStartHookSpecificOutputWire struct contains two fields: suppressOutput and systemMessage. | capture | warm | 2026-06-09 | general |
 
-## tenex-edge (40 guides)
+## tenex-edge (37 guides)
 
 | Slug | Title | Summary | Tags | Volatility | Verified | Topic |
 |------|-------|---------|------|------------|----------|-------|
@@ -37,7 +37,7 @@ Last updated: 2026-06-12
 | [tenex-edge-debug-transcript](tenex-edge-debug-transcript.md) | Tenex-Edge Debug Transcript | The `pc debug transcript` command colorizes its output when run on a TTY | capture | warm | 2026-06-09 | tenex-edge |
 | [tenex-edge-design-philosophy](tenex-edge-design-philosophy.md) | Tenex-Edge Design Philosophy | The design discussion operates at a higher, design-space levelâwhat the thing is, what shape it should take, what is worth wanting, and where tensions and bet | capture | warm | 2026-06-07 | tenex-edge |
 | [tenex-edge-domain-acl](tenex-edge-domain-acl.md) | Tenex-Edge Domain ACL | The domain has two verb planes: Project-State (open_project, roster, presence, status, project_meta, list_projects) and Communications (send, inbox, threads, th | capture | warm | 2026-06-09 | tenex-edge |
-| [tenex-edge-fabric-architecture](tenex-edge-fabric-architecture.md) | Tenex-Edge Fabric Architecture | A FabricProvider bundles four single-responsibility capabilities: Lifecycle reactor (side-effects like group creation), Materializer (admits, derives, upserts i | capture | warm | 2026-06-09 | tenex-edge |
+| [tenex-edge-fabric-architecture](tenex-edge-fabric-architecture.md) | Tenex-Edge Fabric Architecture | A FabricProvider bundles four single-responsibility capabilities: Lifecycle reactor (project spin-up side-effects), Membership source (hydrates and streams the | capture | warm | 2026-06-09 | tenex-edge |
 | [tenex-edge-hook-subcommand](tenex-edge-hook-subcommand.md) | Tenex-Edge Hook Subcommand | `tenex-edge hook --host <name> --type <hook-type>` is the sole host-facing entry point for session and turn lifecycle operations | capture | warm | 2026-06-09 | tenex-edge |
 | [tenex-edge-host-adapter](tenex-edge-host-adapter.md) | Tenex-Edge Host Adapter | Host adapters must carry no identity logic or fabric logic and must never block the editor on the daemon being healthy (fail open) | capture | warm | 2026-06-09 | tenex-edge |
 | [tenex-edge-identity](tenex-edge-identity.md) | Tenex-Edge Identity | Tenex-Edge provides a durable (Nostr) cryptographic identity per agent with session awareness | capture | warm | 2026-06-08 | tenex-edge |
@@ -51,15 +51,12 @@ Last updated: 2026-06-12
 | [tenex-edge-read-model](tenex-edge-read-model.md) | Tenex-Edge Read Model | The read model is the contract; the provider is a write-side materializer | capture | warm | 2026-06-09 | tenex-edge |
 | [tenex-edge-relay-configuration](tenex-edge-relay-configuration.md) | Tenex-Edge Relay Configuration | Presence, activity, status, and mention events all use the NIP-29 h tag with the project slug as a namespace filter, replacing the previous T tag | capture | warm | 2026-06-09 | tenex-edge |
 | [tenex-edge-relay-ingest](tenex-edge-relay-ingest.md) | Tenex-Edge Relay Ingest | The `handle_incoming` function deduplicates relay events by event ID using a 512-slot ring buffer (`seen_events`) in `DaemonState` to prevent fanout duplication | capture | warm | 2026-06-10 | tenex-edge |
-| [tenex-edge-remote-deployment](tenex-edge-remote-deployment.md) | Tenex-Edge Remote Deployment | The remote machine at pablo@157.180.102.242 must be rebuilt/redeployed after local code changes to get the updated binary. | capture | warm | 2026-06-12 | tenex-edge |
-| [tenex-edge-session-display](tenex-edge-session-display.md) | Tenex-Edge Session Display | Session display IDs use a hash-based short code derived from the full UUID rather than truncating the UUID prefix. | capture | warm | 2026-06-09 | tenex-edge |
-| [tenex-edge-session-management](tenex-edge-session-management.md) | Tenex-Edge Session Management | MVP1 session start is invoked as `tenex-edge session-start --agent <agent-slug>`, which forks a background process and begins publishing a presence heartbeat | capture | warm | 2026-06-08 | tenex-edge |
-| [tenex-edge-tail-stream](tenex-edge-tail-stream.md) | Tenex-Edge Tail Stream | The canonical store deduplicates writes on event id, but the tail v2 broadcast emits duplicate messages because one message produces identical tail events for e | capture | warm | 2026-06-12 | tenex-edge |
 | [tenex-edge-remote-deployment](tenex-edge-remote-deployment.md) | Tenex-Edge Remote Deployment | The tenex-edge project must be cloned on pablo@157.180.102.242 at ~/Work/tenex-edge/ and configured for use with Claude Code | capture | warm | 2026-06-12 | tenex-edge |
 | [tenex-edge-session-display](tenex-edge-session-display.md) | Tenex-Edge Session Display | Session IDs displayed in the `tenex tail` command use the hash-based `session_short_code`, matching the display format used by `who` and `send-message` | capture | warm | 2026-06-09 | tenex-edge |
 | [tenex-edge-session-management](tenex-edge-session-management.md) | Tenex-Edge Session Management | The MVP (M1) launches a session via `tenex-edge session-start --agent <agent-slug>`, which forks a background process, creates a session ID, and publishes a pre | capture | warm | 2026-06-08 | tenex-edge |
 | [tenex-edge-statusline](tenex-edge-statusline.md) | Tenex-Edge Statusline | The statusline is a one-line awareness board representing the floor product (identity + awareness + passive collision signal) in the host terminal | capture | warm | 2026-06-12 | tenex-edge |
 | [tenex-edge-tail-design](tenex-edge-tail-design.md) | Tenex-Edge Tail Design | The tail v2 command provides a structured TailEvent stream with 10 variants (Msg, Sync, Turn, Join, Leave, Acl, Sess, Status, Proj, Profile), heartbeatâjoin/l | capture | warm | 2026-06-09 | tenex-edge |
+| [tenex-edge-tail-stream](tenex-edge-tail-stream.md) | Tenex-Edge Tail Stream | The canonical store deduplicates writes on event id, but the tail v2 broadcast emits duplicate messages because one message produces identical tail events for e | capture | warm | 2026-06-12 | tenex-edge |
 | [tenex-edge-thread-storage](tenex-edge-thread-storage.md) | Tenex-Edge Thread Storage | The thread dual-write infrastructure (local SQLite read-model of relay conversations via `projects`, `threads`, `messages`, `message_recipients` tables) was rem | capture | warm | 2026-06-10 | tenex-edge |
 | [tenex-edge-transport-codec](tenex-edge-transport-codec.md) | Tenex-Edge Transport Codec | Envelope encoding and decoding is modularized as a codec set providing per-event encode, decode, and subscribe operations, decoupling envelope shapes from busin | capture | warm | 2026-06-08 | tenex-edge |
 | [tenex-edge-turn-context-injection](tenex-edge-turn-context-injection.md) | Tenex-Edge Turn Context Injection | The turn-start command itself emits the context the agent should see (inbox messages, peer presence/status changes since last update), rather than delegating th | capture | warm | 2026-06-09 | tenex-edge |
@@ -67,13 +64,19 @@ Last updated: 2026-06-12
 | [tenex-edge-wait-for-mention](tenex-edge-wait-for-mention.md) | Tenex-Edge Wait-for-Mention | The `wait-for-mention` command polls the SQLite inbox every 500ms, performs the same relay self-fetch as `inbox` on startup to handle the engine warmup race, an | capture | warm | 2026-06-09 | tenex-edge |
 | [tenex-off-publishing](tenex-off-publishing.md) | Tenex-Off Publishing | Tenex-off is a direct Nostr client that publishes kind:1 events signed with the owner's nsec straight to relays; it does not call a send-message tool or route t | capture | warm | 2026-06-09 | tenex-edge |
 
+## version-control (1 guide)
+
+| Slug | Title | Summary | Tags | Volatility | Verified | Topic |
+|------|-------|---------|------|------------|----------|-------|
+| [tenex-branch-management](tenex-branch-management.md) | Branch Management | Divergent branches must be resolved through a proper merge that preserves all work from both sides, not via a force-push. | capture | warm | 2026-06-13 | version-control |
+
 ## Research Records (1 record)
 
 | Record | Date | Finding | Agent |
 |--------|------|---------|-------|
 | [2026-06-12-1-review-of-fabric-architecture-branch-verdict](research/2026-06-12-1-review-of-fabric-architecture-branch-verdict.md) | 2026-06-12 | Review of fabric-architecture branch: verdict is refactor is complete, working, and well-tested but no longer cleanly mergeable due to master divergence (~29 conflict hunks) | main |
 
-## Episode Cards (54 cards)
+## Episode Cards (55 cards)
 
 | Card | Date | Title | Salience | Status |
 |------|------|-------|----------|--------|
@@ -115,6 +118,7 @@ Last updated: 2026-06-12
 | [2026-06-12-1-inbox-messages-redesigned-from-one-liner](episodes/2026-06-12-1-inbox-messages-redesigned-from-one-liner.md) | 2026-06-12 | Inbox messages redesigned from one-liner to email-like envelope with reply | product | active |
 | [2026-06-12-1-integration-mechanism-correction-mcp-server-hooks](episodes/2026-06-12-1-integration-mechanism-correction-mcp-server-hooks.md) | 2026-06-12 | Integration mechanism correction: MCP server → hooks | reversal | active |
 | [2026-06-12-1-nip-29-group-membership-management-gap](episodes/2026-06-12-1-nip-29-group-membership-management-gap.md) | 2026-06-12 | NIP-29 group membership management gap — no manual add, no visibility | product | active |
+| [2026-06-12-1-provider-seam-closure-must-happen-in](episodes/2026-06-12-1-provider-seam-closure-must-happen-in.md) | 2026-06-12 | Provider seam closure must happen in this task — no deferred wire-shape leaks | architecture | active |
 | [2026-06-12-1-remote-agent-display-changed-from-generic](episodes/2026-06-12-1-remote-agent-display-changed-from-generic.md) | 2026-06-12 | Remote agent display changed from generic label to hostname | product | active |
 | [2026-06-12-1-secret-scrubbing-layer-before-nostr-event](episodes/2026-06-12-1-secret-scrubbing-layer-before-nostr-event.md) | 2026-06-12 | Secret-scrubbing layer before Nostr event signing | product | active |
 | [2026-06-12-1-statusline-as-citizenship-line-not-generic](episodes/2026-06-12-1-statusline-as-citizenship-line-not-generic.md) | 2026-06-12 | Statusline as citizenship line, not generic model bar | product | active |
@@ -131,10 +135,4 @@ Last updated: 2026-06-12
 | [2026-06-12-3-first-turn-nip-29-membership-warning](episodes/2026-06-12-3-first-turn-nip-29-membership-warning.md) | 2026-06-12 | First-turn NIP-29 membership warning for unauthorized agents | product | active |
 | [2026-06-12-3-keyhog-secretscan-rejected-as-unsuitable-for](episodes/2026-06-12-3-keyhog-secretscan-rejected-as-unsuitable-for.md) | 2026-06-12 | Keyhog/secretscan rejected as unsuitable for in-flight redaction | root-cause | active |
 | [2026-06-12-4-membership-warning-false-positive-from-stale](episodes/2026-06-12-4-membership-warning-false-positive-from-stale.md) | 2026-06-12 | Membership warning false positive from stale local cache | root-cause | superseded |
-
-## Episode Cards (1 card)
-
-| Card | Date | Title | Salience | Status |
-|------|------|-------|----------|--------|
-| [2026-06-12-1-provider-seam-closure-must-happen-in](episodes/2026-06-12-1-provider-seam-closure-must-happen-in.md) | 2026-06-12 | Provider seam closure must happen in this task — no deferred wire-shape leaks | architecture | active |
 
