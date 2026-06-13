@@ -34,6 +34,9 @@ struct RawConfig {
     backend_name: Option<String>,
     #[serde(default, rename = "userNsec")]
     user_nsec: Option<String>,
+    /// Fallback signing key for NIP-29 group management when userNsec is absent.
+    #[serde(default, rename = "tenexPrivateKey")]
+    tenex_private_key: Option<String>,
 }
 
 impl Config {
@@ -53,7 +56,7 @@ impl Config {
             whitelisted_pubkeys: raw.whitelisted_pubkeys,
             relays,
             host,
-            user_nsec: raw.user_nsec,
+            user_nsec: raw.user_nsec.or(raw.tenex_private_key),
         })
     }
 
