@@ -47,6 +47,6 @@ On engine startup, the runtime performs a one-shot fetch of kind 39000 events wi
 
 ## Key Compromise and Rotation
 
-The owner nsec (09d48a…) was compromised — it was accidentally typed into the emulator's Google search box during blind adb sign-in automation, sending it to Google as a search query — and must be rotated.
+The owner nsec (09d48a…) was compromised — it was accidentally typed into the emulator's Google search box during blind adb sign-in / UI automation, sending it to Google as a search query — and must be rotated.
 
 <!-- citations: [^ab999-68] [^ab999-84] -->

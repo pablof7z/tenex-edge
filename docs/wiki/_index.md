@@ -22,8 +22,7 @@ Last updated: 2026-06-12
 |------|-------|---------|------|------------|----------|-------|
 | [the-sessionstarthookspecificoutputwire-struct-contains-two-f](the-sessionstarthookspecificoutputwire-struct-contains-two-f.md) | the sessionstarthookspecificoutputwire struct contains two f | The SessionStartHookSpecificOutputWire struct contains two fields: suppressOutput and systemMessage. | capture | warm | 2026-06-09 | general |
 
-## tenex-edge (24 guides)
-## tenex-edge (36 guides)
+## tenex-edge (40 guides)
 
 | Slug | Title | Summary | Tags | Volatility | Verified | Topic |
 |------|-------|---------|------|------------|----------|-------|
@@ -56,7 +55,6 @@ Last updated: 2026-06-12
 | [tenex-edge-session-display](tenex-edge-session-display.md) | Tenex-Edge Session Display | Session display IDs use a hash-based short code derived from the full UUID rather than truncating the UUID prefix. | capture | warm | 2026-06-09 | tenex-edge |
 | [tenex-edge-session-management](tenex-edge-session-management.md) | Tenex-Edge Session Management | MVP1 session start is invoked as `tenex-edge session-start --agent <agent-slug>`, which forks a background process and begins publishing a presence heartbeat | capture | warm | 2026-06-08 | tenex-edge |
 | [tenex-edge-tail-stream](tenex-edge-tail-stream.md) | Tenex-Edge Tail Stream | The canonical store deduplicates writes on event id, but the tail v2 broadcast emits duplicate messages because one message produces identical tail events for e | capture | warm | 2026-06-12 | tenex-edge |
-| [tenex-edge-transport-codec](tenex-edge-transport-codec.md) | Tenex-Edge Transport Codec | Envelope encoding and decoding is modularized as a codec set providing per-event encode, decode, and subscribe operations, decoupling envelope shapes from busin | capture | warm | 2026-06-08 | tenex-edge |
 | [tenex-edge-remote-deployment](tenex-edge-remote-deployment.md) | Tenex-Edge Remote Deployment | The tenex-edge project must be cloned on pablo@157.180.102.242 at ~/Work/tenex-edge/ and configured for use with Claude Code | capture | warm | 2026-06-12 | tenex-edge |
 | [tenex-edge-session-display](tenex-edge-session-display.md) | Tenex-Edge Session Display | Session IDs displayed in the `tenex tail` command use the hash-based `session_short_code`, matching the display format used by `who` and `send-message` | capture | warm | 2026-06-09 | tenex-edge |
 | [tenex-edge-session-management](tenex-edge-session-management.md) | Tenex-Edge Session Management | The MVP (M1) launches a session via `tenex-edge session-start --agent <agent-slug>`, which forks a background process, creates a session ID, and publishes a pre | capture | warm | 2026-06-08 | tenex-edge |
