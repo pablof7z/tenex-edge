@@ -114,6 +114,10 @@ pub struct Kind1Nip29Provider {
     /// Operator nsec for NIP-29 group management. Optional: if unset, group
     /// management is skipped and sessions still start (best-effort).
     pub user_nsec: Option<String>,
+    /// Whitelisted human pubkeys (hex) from config. Every owned NIP-29 group
+    /// grants each of these the `admin` role, backfilled on every `open_project`
+    /// by diffing against the relay's live admin set.
+    pub whitelisted_pubkeys: Vec<String>,
     /// Stable hash of the sorted relay URL set. Used as the `provider_instance`
     /// column in canonical origin rows, making them deterministic across daemon
     /// restarts. Derived once at construction from `cfg.relays`.
@@ -125,6 +129,7 @@ impl Kind1Nip29Provider {
         transport: Arc<Transport>,
         store: Arc<Mutex<Store>>,
         user_nsec: Option<String>,
+        whitelisted_pubkeys: Vec<String>,
         relays: &[String],
     ) -> Self {
         let delivery = NostrDelivery::new(transport.clone());
@@ -136,6 +141,7 @@ impl Kind1Nip29Provider {
             store,
             transport,
             user_nsec,
+            whitelisted_pubkeys,
             provider_instance,
         }
     }
@@ -197,15 +203,18 @@ impl Kind1Nip29Provider {
 
     // ── open_project ─────────────────────────────────────────────────────────
 
-    /// Ensure the operator owns a closed NIP-29 group for `project` and that
-    /// `agent_pubkey` is a member. Best-effort: never blocks session start.
+    /// Ensure a closed NIP-29 group exists for `project`, that every whitelisted
+    /// human pubkey holds the `admin` role, and that `agent_pubkey` is a member.
+    /// Best-effort: never blocks session start.
     ///
-    /// This is the EXACT body of the former `ensure_group_and_membership` free
-    /// function (server.rs ~466-551), minus the trailing `ensure_subscription`
-    /// call which remains at the call site (rpc_session_start / reconcile_sessions)
-    /// to preserve the existing double-subscribe behavior.
+    /// Decisions are driven by the relay's LIVE group state (kinds 39000/39001/
+    /// 39002 fetched by `#d == project`), not the local cache — so a re-run
+    /// auto-detects a missing group or a whitelisted pubkey that isn't yet an
+    /// admin and repairs it (the "backfill" property). The trailing
+    /// `ensure_subscription` call remains at the call site (rpc_session_start /
+    /// reconcile_sessions) to preserve the existing double-subscribe behavior.
     pub async fn open_project(&self, project: &str, agent_pubkey: &str) {
-        use nostr_sdk::prelude::Keys;
+        use nostr_sdk::prelude::{Filter, Keys};
         let nsec = match &self.user_nsec {
             Some(n) => n.clone(),
             None => {
@@ -248,8 +257,66 @@ impl Kind1Nip29Provider {
             }
         };
 
-        // 1. Create + lock the group the first time we touch this project.
-        if !self.with_store(|s| s.is_group_owned(project).unwrap_or(false)) {
+        // Query the RELAY (not the local cache) for the group's live state:
+        // 39000 metadata, 39001 admins+roles, 39002 members — all keyed by
+        // `#d == project`. Bounded fetch; on failure we fall through with empty
+        // state and rely on the relay treating "already exists" as benign, so we
+        // fail toward attempt-create rather than skip-assuming-it-exists.
+        use crate::codec::kind1::{KIND_GROUP_ADMINS, KIND_GROUP_MEMBERS, KIND_GROUP_METADATA};
+        let filter = Filter::new()
+            .kinds([
+                crate::codec::kind1::kind(KIND_GROUP_METADATA),
+                crate::codec::kind1::kind(KIND_GROUP_ADMINS),
+                crate::codec::kind1::kind(KIND_GROUP_MEMBERS),
+            ])
+            .identifier(project);
+        let state_evs = self
+            .transport
+            .fetch(filter, Duration::from_secs(5))
+            .await
+            .unwrap_or_default();
+
+        // Newest event per kind (addressable replaceables; pick max created_at).
+        let newest = |k: u16| {
+            state_evs
+                .iter()
+                .filter(|e| e.kind.as_u16() == k)
+                .max_by_key(|e| e.created_at.as_secs())
+        };
+        let group_exists = newest(KIND_GROUP_METADATA).is_some()
+            || newest(KIND_GROUP_ADMINS).is_some()
+            || newest(KIND_GROUP_MEMBERS).is_some();
+
+        // Role map from 39001 p-tags: ["p", pubkey, role].
+        let mut roles: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        if let Some(ev) = newest(KIND_GROUP_ADMINS) {
+            for t in ev.tags.iter() {
+                let s = t.as_slice();
+                if s.first().map(String::as_str) == Some("p") {
+                    if let Some(pk) = s.get(1) {
+                        roles.insert(
+                            pk.clone(),
+                            s.get(2).cloned().unwrap_or_else(|| "member".to_string()),
+                        );
+                    }
+                }
+            }
+        }
+        // Member set from 39002 p-tags: ["p", pubkey].
+        let mut members: std::collections::HashSet<String> = std::collections::HashSet::new();
+        if let Some(ev) = newest(KIND_GROUP_MEMBERS) {
+            for t in ev.tags.iter() {
+                let s = t.as_slice();
+                if s.first().map(String::as_str) == Some("p") {
+                    if let Some(pk) = s.get(1) {
+                        members.insert(pk.clone());
+                    }
+                }
+            }
+        }
+
+        // 1. Create + lock the group if the relay has no record of it.
+        if !group_exists {
             let created = match crate::fabric::nip29::lifecycle::group_create(project) {
                 Ok(b) => publish(b, "9007 create-group").await,
                 Err(_) => false,
@@ -269,8 +336,34 @@ impl Kind1Nip29Provider {
             }
         }
 
-        // 2. Add this agent as a member if it isn't one already.
-        if !self.with_store(|s| s.is_group_member(project, agent_pubkey).unwrap_or(false)) {
+        // 2. Backfill admins: every whitelisted human pubkey MUST hold the admin
+        //    role. Diff against the relay's live 39001 set (above) so a re-run
+        //    repairs any pubkey that is missing or only a plain member.
+        for pk in &self.whitelisted_pubkeys {
+            if roles.get(pk).map(String::as_str) == Some("admin") {
+                continue;
+            }
+            let granted = match crate::fabric::nip29::lifecycle::group_put_admin(project, pk) {
+                Ok(b) => publish(b, "9000 put-user (admin)").await,
+                Err(_) => false,
+            };
+            if granted {
+                self.with_store(|s| {
+                    s.upsert_group_member(project, pk, "admin", now_secs()).ok();
+                });
+            } else {
+                // The admin backfill is otherwise invisible; surface a rejection
+                // unconditionally so a bad role/permission can't masquerade as
+                // success (an empty/unauthorized result would silently no-op).
+                eprintln!(
+                    "[daemon] NIP-29 admin grant for {} in group {project} was NOT accepted by the relay",
+                    crate::util::pubkey_short(pk)
+                );
+            }
+        }
+
+        // 3. Add this agent as a member if the relay's live roster lacks it.
+        if !members.contains(agent_pubkey) && !roles.contains_key(agent_pubkey) {
             let added = match crate::fabric::nip29::lifecycle::group_put_user(project, agent_pubkey) {
                 Ok(b) => publish(b, "9000 put-user").await,
                 Err(_) => false,

@@ -143,6 +143,7 @@ pub async fn run() -> Result<()> {
         transport.clone(),
         store.clone(),
         cfg.user_nsec.clone(),
+        cfg.whitelisted_pubkeys.clone(),
         &cfg.relays,
     ));
     let state = Arc::new(DaemonState {

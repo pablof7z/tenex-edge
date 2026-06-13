@@ -44,6 +44,18 @@ pub fn group_put_user(project: &str, pubkey: &str) -> Result<EventBuilder> {
     ]))
 }
 
+/// kind:9000 put-user adding `pubkey` with the `admin` role, granting it admin
+/// permissions over the group (the relay lists it in kind:39001 with role=admin).
+/// Same wire shape as [`group_put_user`] but with the role label set to "admin".
+/// relay29 advertises the `admin`/`moderator` roles it accepts via kind:39003;
+/// "admin" is the role tenex-edge grants to every whitelisted human pubkey.
+pub fn group_put_admin(project: &str, pubkey: &str) -> Result<EventBuilder> {
+    Ok(EventBuilder::new(kind(KIND_GROUP_PUT_USER), "").tags([
+        project_tag(project)?,
+        tag(&["p", pubkey, "admin"])?,
+    ]))
+}
+
 /// kind:9002 edit-metadata: set the group's `about` text. The relay validates
 /// admin rights and re-publishes kind:39000 signed by the relay key.
 pub fn group_edit_metadata(project: &str, about: &str) -> Result<EventBuilder> {
@@ -106,6 +118,22 @@ mod tests {
             s.first().map(String::as_str) == Some("p")
                 && s.get(1).map(String::as_str) == Some(member.as_str())
                 && s.get(2).map(String::as_str) == Some("member")
+        }));
+    }
+
+    #[test]
+    fn group_put_admin_tags_admin_role() {
+        let pk = Keys::generate().public_key().to_hex();
+        let b = group_put_admin("tenex-edge", &pk).unwrap();
+        let ev = b.sign_with_keys(&Keys::generate()).unwrap();
+        assert_eq!(ev.kind.as_u16(), KIND_GROUP_PUT_USER);
+        assert!(has_tag(&ev, "h", "tenex-edge"));
+        // p tag carries the pubkey with the "admin" role (not "member").
+        assert!(ev.tags.iter().any(|t| {
+            let s = t.as_slice();
+            s.first().map(String::as_str) == Some("p")
+                && s.get(1).map(String::as_str) == Some(pk.as_str())
+                && s.get(2).map(String::as_str) == Some("admin")
         }));
     }
 }
