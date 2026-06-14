@@ -8,7 +8,7 @@ tags:
 volatility: warm
 confidence: medium
 created: 2026-06-09
-updated: 2026-06-13
+updated: 2026-06-14
 verified: 2026-06-09
 compiled-from: conversation
 sources:
@@ -23,6 +23,7 @@ sources:
   - session:rollout-2026-06-09T12-56-40-019eabd0-1205-77a3-88b8-e07b0d948f1d
   - session:rollout-2026-06-09T12-58-38-019eabd1-dde2-76c2-84e3-9edc3e78e48f
   - session:1562957b-67e8-4ac1-a48b-84e8ec1696bb
+  - session:0afc3cf4-3465-4b37-a7ec-63b798d78621
 ---
 
 # Tenex-Edge Turn Context Injection
@@ -38,9 +39,9 @@ A mid-run check (turn-check) fires on PostToolUse hooks to surface incoming mess
 
 ## Turn-Start Behavior
 
-On the first turn (detected via get_turn_state returning turn_started_at == 0), turn-start emits the full peer roster, including spawnable agents (configured but idle, with no live session). The UserPromptSubmit hook injects the available agents list (who) and their current activity into the agent's context each turn, so agents know who they can message without running a command. If the agent is not a member of the NIP-29 group, a warning is injected into the agent's context telling the user to run tenex-edge project add <project> <pubkey>. (Previously: turn-start emitted the wait-for-mention hint plus the full peer roster; Channels (MCP notifications) now replace the wait-for-mention hack as the mechanism for injecting async work into Claude Code sessions, closing the cold-start gap where a freshly-launched, never-prompted idle agent is deaf to mentions until its first UserPromptSubmit.) On subsequent turns, turn-start emits only deltas scoped to the current session's project (updates from other projects do not leak into unrelated sessions): inbox drains, new peers (first_seen >= prev_turn_started_at), and status changes (updated_at >= prev_turn_started_at). turn_start passes the current session's rec.project into peer/status delta queries (list_new_peer_sessions and list_status_changes_since accept an optional project filter). turn-start flips a per-session working state to true with the turn start timestamp. turn_start is async and outputs context as either plain text or JSON (with --json flag for Codex), marking the session working in one shot.
+On the first turn (detected via get_turn_state returning turn_started_at == 0), turn-start emits the full peer roster, including spawnable agents (configured but idle, with no live session). The UserPromptSubmit hook injects the available agents list (who) and their current activity into the agent's context each turn, so agents know who they can message without running a command. If the agent is not a member of the NIP-29 group, a warning is injected into the agent's context telling the user to run tenex-edge project add <project> <pubkey>. (Previously: turn-start emitted the wait-for-mention hint plus the full peer roster; Channels (MCP notifications) now replace the wait-for-mention hack as the mechanism for injecting async work into Claude Code sessions, closing the cold-start gap where a freshly-launched, never-prompted idle agent is deaf to mentions until its first UserPromptSubmit.) When a session is spawned because a new thread p-tags an agent, the injected prompt must be the content of the received message, not a default command like 'tenex-edge inbox'. On subsequent turns, turn-start emits only deltas scoped to the current session's project (updates from other projects do not leak into unrelated sessions): inbox drains, new peers (first_seen >= prev_turn_started_at), and status changes (updated_at >= prev_turn_started_at). turn_start passes the current session's rec.project into peer/status delta queries (list_new_peer_sessions and list_status_changes_since accept an optional project filter). turn-start flips a per-session working state to true with the turn start timestamp. turn_start is async and outputs context as either plain text or JSON (with --json flag for Codex), marking the session working in one shot.
 
-<!-- citations: [^2cee1-5] [^162f9-16] [^2cee1-12] [^081ec-6] [^f3a73-126] [^95659-10] [^rollo-16] [^15629-56] -->
+<!-- citations: [^2cee1-5] [^162f9-16] [^2cee1-12] [^081ec-6] [^f3a73-126] [^95659-10] [^rollo-16] [^15629-56] [^0afc3-1] -->
 ## Output Format
 
 turn-start supports a --json flag for Codex that wraps output as {"systemMessage": content}; without --json it outputs plain text for Claude Code. A render_who_plain function produces the peer roster without ANSI escape codes, for use in context injection. The Codex-injected context explicitly instructs Codex to run send-message when asked to message a peer, rather than claiming it cannot.

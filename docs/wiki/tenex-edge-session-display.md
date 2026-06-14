@@ -8,7 +8,7 @@ tags:
 volatility: warm
 confidence: medium
 created: 2026-06-09
-updated: 2026-06-10
+updated: 2026-06-14
 verified: 2026-06-09
 compiled-from: conversation
 sources:
@@ -17,6 +17,7 @@ sources:
   - session:56f9fe89-5ff7-4e5b-b202-334cd7629d42
   - session:rollout-2026-06-09T12-56-40-019eabd0-1205-77a3-88b8-e07b0d948f1d
   - session:rollout-2026-06-09T15-01-20-019eac42-32f0-7ff0-bda2-da2de3b78ed7
+  - session:215d979a-a054-4e2b-b349-851e0d874d6d
 ---
 
 # Tenex-Edge Session Display
@@ -46,3 +47,7 @@ Injected/tooling instructions for agents use the format `<agent@project|session-
 ## Who Live Renderer Line Endings
 
 The `who --live` renderer writes `\r\n` instead of `\n` in raw terminal mode so each line returns to column 0. <!-- [^rollo-13] -->
+
+## Exited Sessions Panel
+
+The exited sessions panel filters and displays past sessions from the past X hours. The default time filter is 4 hours. Users can change the number of hours using the + and - keys. The [e] key toggles the exited sessions panel on and off. The [+] or [=] keys increase the hours filter in steps of +1h up to 12h, +6h up to 48h, and +24h beyond that. The [-] key decreases the hours filter in the reverse step pattern, with a minimum of 1h. The section header displays the active time window, e.g. 'Exited sessions (past 4h)'. The help line displays '[e] hide exited  [-/+] 4h' when the exited panel is visible, and '[e] show exited' when hidden. <!-- [^215d9-1] -->

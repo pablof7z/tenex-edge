@@ -14,6 +14,7 @@ compiled-from: conversation
 sources:
   - session:1562957b-67e8-4ac1-a48b-84e8ec1696bb
   - session:9f7f245f-0fad-4211-a86b-95ea3cbb532e
+  - session:656e1e6b-2569-42da-8844-768a5e74788e
 ---
 
 # Tenex-Edge TMUX Adapter
@@ -69,6 +70,6 @@ The TMUX daemon can run on one or two computers simultaneously, with the relay r
 
 ## Agent Visibility
 
-`tenex-edge who` displays spawnable agents (configured but idle, with no live session) alongside live agents, and the same list is injected into the first-turn context via `push_turn_fabric_block`. The `tenex-edge tmux` command (bare, no subcommand) opens an interactive TUI built with crossterm, showing live sessions with CPU usage and status, spawnable agents, and keybindings for attach (a), new session (n), and quit (q), with 2-second auto-refresh and RAII terminal restore on exit. From the TUI the user can attach to a remote tmux pane to view and interact with the running agent, or spawn a new session with any local agent.
+`tenex-edge who` displays spawnable agents (configured but idle, with no live session) alongside live agents, and the same list is injected into the first-turn context via `push_turn_fabric_block`. The `tenex-edge tmux` command (bare, no subcommand) opens an interactive TUI built with crossterm, showing live sessions with CPU usage and status, spawnable agents, and keybindings for attach (a), new session (n), and quit (q), with 2-second auto-refresh and RAII terminal restore on exit. From the TUI the user can attach to a remote tmux pane to view and interact with the running agent, or spawn a new session with any local agent. Sessions are grouped by project, displayed in switchable tabs (Left/Right arrows) including an 'All' tab as the default. In the 'All' tab, session labels use the format 'slug@project' so the project of each session is identifiable. Exited sessions are hidden by default and require pressing 'e' to toggle visibility. The label 'Spawnable (no session)' is renamed to 'Agents', and per-harness labels like '[spawnable via claude]' are shortened to '[claude]'. Agents appear in all project tabs since they are cross-project.
 
-<!-- citations: [^15629-49] [^15629-55] -->
+<!-- citations: [^15629-49] [^15629-55] [^656e1-1] -->
