@@ -26,9 +26,9 @@ Last updated: 2026-06-14
 
 | Slug | Title | Summary | Tags | Volatility | Verified | Topic |
 |------|-------|---------|------|------------|----------|-------|
-| [tenex-edge-session-resumption](tenex-edge-session-resumption.md) | Tenex-Edge Session Resumption | Session resumption is limited to sessions on the current machine; no remote/SSH resumption is supported | capture | warm | 2026-06-14 | session-resumption |
+| [tenex-edge-session-resumption](tenex-edge-session-resumption.md) | Tenex-Edge Session Resumption | Session resume is local-only â a session can only be resumed on the same machine where it ran, not on a remote machine | capture | warm | 2026-06-14 | session-resumption |
 
-## tenex-edge (39 guides)
+## tenex-edge (40 guides)
 
 | Slug | Title | Summary | Tags | Volatility | Verified | Topic |
 |------|-------|---------|------|------------|----------|-------|
@@ -67,6 +67,7 @@ Last updated: 2026-06-14
 | [tenex-edge-thread-storage](tenex-edge-thread-storage.md) | Tenex-Edge Thread Storage | The thread dual-write infrastructure (local SQLite read-model of relay conversations via `projects`, `threads`, `messages`, `message_recipients` tables) was rem | capture | warm | 2026-06-10 | tenex-edge |
 | [tenex-edge-tmux-adapter](tenex-edge-tmux-adapter.md) | Tenex-Edge TMUX Adapter | A Fable agent is used to plan the TMUX adapter product for tenex-edge | capture | warm | 2026-06-12 | tenex-edge |
 | [tenex-edge-transport-codec](tenex-edge-transport-codec.md) | Tenex-Edge Transport Codec | Envelope encoding and decoding is modularized as a codec set providing per-event encode, decode, and subscribe operations, decoupling envelope shapes from busin | capture | warm | 2026-06-08 | tenex-edge |
+| [tenex-edge-tui](tenex-edge-tui.md) | Tenex-Edge TUI | The TUI list scrolls â draw_tui renders only lines that fit the terminal height, keeps the selected row in view, and shows âN more above / âN more below i | capture | warm | 2026-06-14 | tenex-edge |
 | [tenex-edge-turn-context-injection](tenex-edge-turn-context-injection.md) | Tenex-Edge Turn Context Injection | The turn-start command itself emits the context the agent should see (inbox messages, peer presence/status changes since last update), rather than delegating th | capture | warm | 2026-06-09 | tenex-edge |
 | [tenex-edge-user-prompt-submit](tenex-edge-user-prompt-submit.md) | Tenex-Edge User Prompt Submit | The UserPromptSubmit hook creates a kind:1 OP (root event with no e-tag) signed by the userNsec from ~/.tenex/config.json, published to the NIP-29 group via an | capture | warm | 2026-06-09 | tenex-edge |
 | [tenex-edge-wait-for-mention](tenex-edge-wait-for-mention.md) | Tenex-Edge Wait-for-Mention | The `wait-for-mention` command polls the SQLite inbox every 500ms, performs the same relay self-fetch as `inbox` on startup to handle the engine warmup race, an | capture | warm | 2026-06-09 | tenex-edge |
@@ -84,7 +85,7 @@ Last updated: 2026-06-14
 |--------|------|---------|-------|
 | [2026-06-12-1-review-of-fabric-architecture-branch-verdict](research/2026-06-12-1-review-of-fabric-architecture-branch-verdict.md) | 2026-06-12 | Review of fabric-architecture branch: verdict is refactor is complete, working, and well-tested but no longer cleanly mergeable due to master divergence (~29 conflict hunks) | main |
 
-## Episode Cards (59 cards)
+## Episode Cards (65 cards)
 
 | Card | Date | Title | Salience | Status |
 |------|------|-------|----------|--------|
@@ -143,8 +144,14 @@ Last updated: 2026-06-14
 | [2026-06-12-3-first-turn-nip-29-membership-warning](episodes/2026-06-12-3-first-turn-nip-29-membership-warning.md) | 2026-06-12 | First-turn NIP-29 membership warning for unauthorized agents | product | active |
 | [2026-06-12-3-keyhog-secretscan-rejected-as-unsuitable-for](episodes/2026-06-12-3-keyhog-secretscan-rejected-as-unsuitable-for.md) | 2026-06-12 | Keyhog/secretscan rejected as unsuitable for in-flight redaction | root-cause | active |
 | [2026-06-12-4-membership-warning-false-positive-from-stale](episodes/2026-06-12-4-membership-warning-false-positive-from-stale.md) | 2026-06-12 | Membership warning false positive from stale local cache | root-cause | superseded |
+| [2026-06-14-1-combined-session-label-distillation-replaces-narrow](episodes/2026-06-14-1-combined-session-label-distillation-replaces-narrow.md) | 2026-06-14 | Combined session-label distillation replaces narrow title-only prompt | product | active |
 | [2026-06-14-1-resume-spawn-path-for-dead-agent](episodes/2026-06-14-1-resume-spawn-path-for-dead-agent.md) | 2026-06-14 | Resume-spawn path for dead agent sessions | product | superseded |
-| [2026-06-14-1-session-resume-any-local-session-resumable](episodes/2026-06-14-1-session-resume-any-local-session-resumable.md) | 2026-06-14 | Session resume: any local session resumable via harness-native token | product | active |
+| [2026-06-14-1-session-resume-any-local-session-resumable](episodes/2026-06-14-1-session-resume-any-local-session-resumable.md) | 2026-06-14 | Session resume: any local session resumable via harness-native token | product | superseded |
+| [2026-06-14-1-session-resume-for-any-local-harness](episodes/2026-06-14-1-session-resume-for-any-local-harness.md) | 2026-06-14 | Session resume for any local harness session | product | active |
+| [2026-06-14-1-session-resume-for-local-harness-sessions](episodes/2026-06-14-1-session-resume-for-local-harness-sessions.md) | 2026-06-14 | Session Resume for Local Harness Sessions | product | superseded |
 | [2026-06-14-1-session-resume-per-harness-resume-commands](episodes/2026-06-14-1-session-resume-per-harness-resume-commands.md) | 2026-06-14 | Session resume: per-harness resume commands and separate resume_id storage | architecture | superseded |
-| [2026-06-14-2-claude-code-session-id-env-leak](episodes/2026-06-14-2-claude-code-session-id-env-leak.md) | 2026-06-14 | CLAUDE_CODE_SESSION_ID env leak corrupts spawned session identity | root-cause | active |
+| [2026-06-14-2-claude-code-session-id-env-leak](episodes/2026-06-14-2-claude-code-session-id-env-leak.md) | 2026-06-14 | CLAUDE_CODE_SESSION_ID env leak corrupts spawned session identity | root-cause | superseded |
+| [2026-06-14-2-claude-code-session-id-environment-leak](episodes/2026-06-14-2-claude-code-session-id-environment-leak.md) | 2026-06-14 | CLAUDE_CODE_SESSION_ID Environment Leak Corrupting All Spawns | root-cause | active |
+| [2026-06-14-2-per-agent-independent-tmux-sessions-replace](episodes/2026-06-14-2-per-agent-independent-tmux-sessions-replace.md) | 2026-06-14 | Per-agent independent tmux sessions replace shared window model | architecture | active |
+| [2026-06-14-3-tui-attach-view-session-reaping-race](episodes/2026-06-14-3-tui-attach-view-session-reaping-race.md) | 2026-06-14 | TUI Attach View Session Reaping Race | root-cause | active |
 

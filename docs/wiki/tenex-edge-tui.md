@@ -2,7 +2,7 @@
 title: Tenex-Edge TUI
 slug: tenex-edge-tui
 topic: tenex-edge
-summary: The TUI list scrolls to fit the terminal height, keeping the selected row in view and indicating overflow with `âN more above` / `âN more below`.
+summary: The TUI list scrolls â draw_tui renders only lines that fit the terminal height, keeps the selected row in view, and shows âN more above / âN more below i
 tags:
   - capture
 volatility: warm
@@ -19,4 +19,6 @@ sources:
 
 ## Scrolling Behavior
 
-The TUI list scrolls to fit the terminal height, keeping the selected row in view and indicating overflow with `↑N more above` / `↓N more below`. <!-- [^9f7f2-15] -->
+The TUI list scrolls — draw_tui renders only lines that fit the terminal height, keeps the selected row in view, and shows ↑N more above / ↓N more below indicators.
+
+<!-- citations: [^9f7f2-15] [^9f7f2-21] [^9f7f2-25] -->

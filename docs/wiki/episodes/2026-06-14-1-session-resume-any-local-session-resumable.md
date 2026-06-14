@@ -4,7 +4,7 @@ date: 2026-06-14
 session: 9f7f245f-0fad-4211-a86b-95ea3cbb532e
 transcript: /Users/pablofernandez/.claude/projects/-Users-pablofernandez-src-tenex-edge/9f7f245f-0fad-4211-a86b-95ea3cbb532e.jsonl
 salience: product
-status: active
+status: superseded
 subjects:
   - session-resume
   - spawn-def

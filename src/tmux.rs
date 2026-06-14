@@ -529,51 +529,62 @@ fn project_abs_path(state: &Arc<DaemonState>, project: &str) -> String {
         })
 }
 
-/// Create a detached tmux window in the shared `tenex` session running `command`
-/// in `abs_path`, tagged with the agent's identity env. Returns the new pane id.
-/// Shared by `spawn_agent` (cold start) and `resume_agent` (replay).
-async fn open_agent_window(
+/// Pick a tmux session name `te-<slug>[-N]` that is not currently in use.
+/// Uses an exact-match scan of `list-sessions` (not `has-session`, whose `-t`
+/// does prefix matching and would treat `te-claude-2` as a hit for `te-claude`).
+fn unique_session_name(slug: &str) -> String {
+    let base = format!("te-{slug}");
+    let existing: std::collections::HashSet<String> = std::process::Command::new("tmux")
+        .args(["list-sessions", "-F", "#{session_name}"])
+        .output()
+        .ok()
+        .map(|o| {
+            String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    if !existing.contains(&base) {
+        return base;
+    }
+    for n in 2..10_000 {
+        let name = format!("{base}-{n}");
+        if !existing.contains(&name) {
+            return name;
+        }
+    }
+    format!("{base}-{}", std::process::id())
+}
+
+/// Spawn `command` in a NEW, dedicated tmux session (one session per agent, so
+/// attaching to one never drags in the others) named `te-<slug>[-N]`, with a
+/// single window `window_name` in `abs_path`, tagged with the agent's identity
+/// env. Returns the new pane id. Shared by `spawn_agent` and `resume_agent`.
+async fn open_agent_session(
     slug: &str,
     window_name: &str,
     abs_path: &str,
     command: &[String],
 ) -> Result<String> {
-    // Ensure a "tenex" session exists (detached); create if absent.
-    // Use list-sessions + exact string match to avoid tmux's prefix-matching
-    // semantics for `-t`, which would treat "tenex-test" as a match for "tenex".
-    let session_exists = std::process::Command::new("tmux")
-        .args(["list-sessions", "-F", "#{session_name}"])
-        .output()
-        .map(|o| {
-            o.status.success()
-                && String::from_utf8_lossy(&o.stdout)
-                    .lines()
-                    .any(|l| l == "tenex")
-        })
-        .unwrap_or(false);
+    let session_name = unique_session_name(slug);
 
-    if !session_exists {
-        let _ = std::process::Command::new("tmux")
-            .args(["new-session", "-d", "-s", "tenex", "-c", abs_path])
-            .status();
-    }
-
-    // Build the new-window command.
+    // Build the new-session command.
     //
     // The spawned agent's slug MUST travel into the pane's environment via tmux's
     // `-e` flag, NOT via `.env()` on the tmux client below: tmux builds a new
     // pane's environment from the server's environment plus `-e` overrides, so a
-    // var set only on the client process that issues `new-window` is dropped and
+    // var set only on the client process that issues `new-session` is dropped and
     // never reaches the pane. The session-start hook prefers `TENEX_EDGE_AGENT`
     // over the harness's own default slug (see cli/hooks.rs), so without this the
     // spawn's known identity is lost and a `codex` (or any custom) agent registers
     // under the harness default (e.g. `claude`) — the wrong name in `who`/`tmux`.
     let agent_env = format!("TENEX_EDGE_AGENT={slug}");
     let mut cmd_args: Vec<&str> = vec![
-        "new-window",
+        "new-session",
         "-d",
-        "-t",
-        "tenex",
+        "-s",
+        &session_name,
         "-n",
         window_name,
         "-c",
@@ -607,15 +618,15 @@ async fn open_agent_window(
         .args(&cmd_args)
         .output()
         .await
-        .context("tmux new-window")?;
+        .context("tmux new-session")?;
 
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr);
-        anyhow::bail!("tmux new-window failed: {stderr}");
+        anyhow::bail!("tmux new-session failed: {stderr}");
     }
 
     Ok(String::from_utf8(out.stdout)
-        .context("tmux new-window output")?
+        .context("tmux new-session output")?
         .trim()
         .to_string())
 }
@@ -639,7 +650,7 @@ pub async fn spawn_agent(state: &Arc<DaemonState>, slug: &str, project: &str) ->
     };
 
     let abs_path = project_abs_path(state, project);
-    let pane_id = open_agent_window(slug, window_name, &abs_path, &agent_command).await?;
+    let pane_id = open_agent_session(slug, window_name, &abs_path, &agent_command).await?;
 
     // Register as a pending spawn so that when the harness fires its
     // `session-start` hook, `rpc_session_start` injects the actual prompt
@@ -682,7 +693,7 @@ pub async fn resume_agent(
 
     let window_name = format!("{slug}·resume");
     let abs_path = project_abs_path(state, project);
-    open_agent_window(slug, &window_name, &abs_path, &resume_command).await
+    open_agent_session(slug, &window_name, &abs_path, &resume_command).await
 }
 
 // ── status query ──────────────────────────────────────────────────────────────

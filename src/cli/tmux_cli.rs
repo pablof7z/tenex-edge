@@ -148,6 +148,13 @@ fn resume_to_pane(session: &str) -> Result<Option<String>> {
 
 // ── shared attach logic ───────────────────────────────────────────────────────
 
+/// Resolve a session id to its live tmux pane id via the daemon, or `None`.
+fn pane_for_session(session_id: &str) -> Option<String> {
+    let v = crate::daemon::blocking::call("tmux_attach", serde_json::json!({ "session": session_id }))
+        .ok()?;
+    v["pane_id"].as_str().map(str::to_string)
+}
+
 fn attach_session(session_id: &str) -> Result<()> {
     let v =
         crate::daemon::blocking::call("tmux_attach", serde_json::json!({ "session": session_id }))
@@ -174,6 +181,19 @@ impl TuiTerminal {
         terminal::enable_raw_mode()?;
         execute!(io::stdout(), EnterAlternateScreen, Hide)?;
         Ok(Self)
+    }
+
+    /// Temporarily restore the normal terminal so a child process (e.g. a tmux
+    /// client) can own the tty, without dropping our guard. Pair with `resume`.
+    fn suspend() {
+        let _ = terminal::disable_raw_mode();
+        let _ = execute!(io::stdout(), Show, LeaveAlternateScreen);
+    }
+
+    /// Re-enter the alternate-screen raw-mode TUI after a `suspend`.
+    fn resume() {
+        let _ = terminal::enable_raw_mode();
+        let _ = execute!(io::stdout(), EnterAlternateScreen, Hide);
     }
 }
 
@@ -281,12 +301,6 @@ fn fetch_tui_data() -> Result<TuiData> {
         spawnable,
         resumable,
     })
-}
-
-enum TuiExit {
-    Quit,
-    Attach(String),     // full session_id
-    AttachPane(String), // direct pane_id (used after spawn)
 }
 
 fn draw_tui(data: &TuiData, selected: usize, status: &str, scroll: &mut usize) -> Result<()> {
@@ -477,10 +491,9 @@ pub(super) fn tmux_tui() -> Result<()> {
     // Initial fetch before entering raw mode: fail fast if daemon is down.
     let mut data = fetch_tui_data()?;
 
-    let exit_action = {
+    {
         let _terminal = TuiTerminal::enter()?;
         let mut next_refresh = Instant::now() + refresh;
-        let mut result = TuiExit::Quit;
         let mut scroll: usize = 0;
 
         loop {
@@ -497,6 +510,10 @@ pub(super) fn tmux_tui() -> Result<()> {
 
             if event::poll(wait)? {
                 if let TermEvent::Key(key) = event::read()? {
+                    // A pane to attach to this iteration. We attach as a blocking
+                    // child (suspending the TUI) and resume the TUI afterward, so
+                    // detaching (Ctrl-b d) returns here instead of exiting.
+                    let mut pending_attach: Option<String> = None;
                     match key.code {
                         KeyCode::Char('q') | KeyCode::Esc => break,
                         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -517,29 +534,23 @@ pub(super) fn tmux_tui() -> Result<()> {
                         // still replayable). Spawnables hint to use 'n'.
                         KeyCode::Enter | KeyCode::Char('a') => {
                             if selected < data.live.len() && data.live[selected].attachable {
-                                result = TuiExit::Attach(data.live[selected].session_id.clone());
-                                break;
-                            }
-                            match selected_resume_sid(&data, selected) {
-                                Some(sid) => {
-                                    status_msg = "Resuming...".to_string();
-                                    draw_tui(&data, selected, &status_msg, &mut scroll)?;
-                                    match resume_in_tui(&sid) {
-                                        Ok(pane) => {
-                                            result = TuiExit::AttachPane(pane);
-                                            break;
-                                        }
-                                        Err(msg) => {
-                                            status_msg = msg;
-                                            if let Ok(fresh) = fetch_tui_data() {
-                                                data = fresh;
-                                            }
-                                            next_refresh = Instant::now() + refresh;
+                                match pane_for_session(&data.live[selected].session_id) {
+                                    Some(p) => pending_attach = Some(p),
+                                    None => status_msg = "Session pane not found.".to_string(),
+                                }
+                            } else {
+                                match selected_resume_sid(&data, selected) {
+                                    Some(sid) => {
+                                        status_msg = "Resuming...".to_string();
+                                        draw_tui(&data, selected, &status_msg, &mut scroll)?;
+                                        match resume_in_tui(&sid) {
+                                            Ok(pane) => pending_attach = Some(pane),
+                                            Err(msg) => status_msg = msg,
                                         }
                                     }
-                                }
-                                None => {
-                                    status_msg = "Press [n] to spawn this agent.".to_string();
+                                    None => {
+                                        status_msg = "Press [n] to spawn this agent.".to_string();
+                                    }
                                 }
                             }
                         }
@@ -550,17 +561,8 @@ pub(super) fn tmux_tui() -> Result<()> {
                                 status_msg = "Resuming...".to_string();
                                 draw_tui(&data, selected, &status_msg, &mut scroll)?;
                                 match resume_in_tui(&sid) {
-                                    Ok(pane) => {
-                                        result = TuiExit::AttachPane(pane);
-                                        break;
-                                    }
-                                    Err(msg) => {
-                                        status_msg = msg;
-                                        if let Ok(fresh) = fetch_tui_data() {
-                                            data = fresh;
-                                        }
-                                        next_refresh = Instant::now() + refresh;
-                                    }
+                                    Ok(pane) => pending_attach = Some(pane),
+                                    Err(msg) => status_msg = msg,
                                 }
                             }
                         }
@@ -581,23 +583,31 @@ pub(super) fn tmux_tui() -> Result<()> {
                                     }),
                                 ) {
                                     Ok(v) => {
-                                        let pane = v["pane_id"].as_str().unwrap_or("?").to_string();
-                                        // Switch directly to the new pane.
-                                        result = TuiExit::AttachPane(pane);
-                                        break;
+                                        pending_attach =
+                                            v["pane_id"].as_str().map(str::to_string);
                                     }
-                                    Err(e) => {
-                                        status_msg = format!("Spawn failed: {e}");
-                                        // Refresh immediately after failed spawn attempt.
-                                        if let Ok(fresh) = fetch_tui_data() {
-                                            data = fresh;
-                                        }
-                                        next_refresh = Instant::now() + refresh;
-                                    }
+                                    Err(e) => status_msg = format!("Spawn failed: {e}"),
                                 }
                             }
                         }
                         _ => {}
+                    }
+
+                    // Attach (blocking) then return to the TUI. Suspend the
+                    // alternate-screen/raw-mode so the tmux client owns the tty;
+                    // re-enter when it detaches.
+                    if let Some(pane) = pending_attach {
+                        TuiTerminal::suspend();
+                        let res = attach_pane_blocking(&pane);
+                        TuiTerminal::resume();
+                        status_msg = match res {
+                            Ok(()) => String::new(),
+                            Err(e) => format!("Attach failed: {e:#}"),
+                        };
+                        if let Ok(fresh) = fetch_tui_data() {
+                            data = fresh;
+                        }
+                        next_refresh = Instant::now() + refresh;
                     }
                 }
             }
@@ -610,15 +620,9 @@ pub(super) fn tmux_tui() -> Result<()> {
                 next_refresh = Instant::now() + refresh;
             }
         }
-
-        result
     }; // _terminal dropped here — raw mode disabled, alternate screen exited
 
-    match exit_action {
-        TuiExit::Attach(session_id) => attach_session(&session_id),
-        TuiExit::AttachPane(pane_id) => attach_pane(&pane_id),
-        TuiExit::Quit => Ok(()),
-    }
+    Ok(())
 }
 
 /// Resolve a pane id (e.g. "%7") to `(session_name, window_index)` by scanning
@@ -647,110 +651,54 @@ fn resolve_pane_location(pane_id: &str) -> Option<(String, String)> {
     })
 }
 
-/// Create (or reuse) a per-client grouped "view" session that shares the base
-/// session's windows but keeps its OWN current-window pointer, then point it at
-/// `window`. Returns the view session name, or `None` if creation failed.
-///
-/// Why: tmux clients attached to the *same* session mirror each other's current
-/// window — a single window pointer is shared. Spawned agents all live as
-/// windows inside one shared `tenex` session, so two terminals attaching to it
-/// would snap to whichever window was selected last. A grouped session
-/// (`new-session -t <base>`) shares the window set but selects independently, so
-/// each client sees its own agent. `destroy-unattached` reaps the view when the
-/// client detaches so they don't accumulate.
-fn ensure_view_session(base: &str, window: &str) -> Option<String> {
-    let view = format!("{base}-view-{}", std::process::id());
-
-    // Create the grouped view session if it doesn't already exist (idempotent
-    // across attach/detach cycles within one client process). Silence stderr:
-    // `has-session` prints "can't find session: <view>" on the (expected) miss,
-    // which otherwise leaks alarming noise to the user's terminal.
-    let exists = std::process::Command::new("tmux")
-        .args(["has-session", "-t", &view])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    if !exists {
-        let created = std::process::Command::new("tmux")
-            .args(["new-session", "-d", "-t", base, "-s", &view])
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
-        if !created {
-            return None;
-        }
-        // Self-destruct the view once its client detaches. We use a
-        // client-detached hook rather than `destroy-unattached on`: the latter
-        // reaps the session the instant it exists (it is created DETACHED, i.e.
-        // zero clients), so the subsequent select-window / attach would race and
-        // fail with "can't find session". The hook only fires on a real detach,
-        // so the view survives until we attach and is cleaned up afterward.
-        let _ = std::process::Command::new("tmux")
-            .args([
-                "set-hook",
-                "-t",
-                &view,
-                "client-detached",
-                &format!("kill-session -t {view}"),
-            ])
-            .status();
-    }
-
-    // Select the target window within THIS view (independent of other clients).
-    let _ = std::process::Command::new("tmux")
-        .args(["select-window", "-t", &format!("{view}:{window}")])
-        .status();
-
-    Some(view)
+/// The tmux session that owns `pane_id` (one session per agent now), or `None`
+/// if the pane is gone.
+fn session_of_pane(pane_id: &str) -> Option<String> {
+    resolve_pane_location(pane_id).map(|(session, _window)| session)
 }
 
+/// Attach to the session owning `pane_id` as a BLOCKING child, returning when the
+/// user detaches (Ctrl-b d) or the session ends. `$TMUX` is stripped from the
+/// child so it works even when the caller is itself inside tmux (nested attach) —
+/// this is what lets the `tenex-edge tmux` TUI stay running underneath and be
+/// returned to afterward. No grouped "view" session is needed: each agent is its
+/// own single-window session, so there is no current-window pointer to mirror.
+fn attach_pane_blocking(pane_id: &str) -> Result<()> {
+    let Some(session) = session_of_pane(pane_id) else {
+        anyhow::bail!("pane {pane_id} not found in any tmux session");
+    };
+    std::process::Command::new("tmux")
+        .args(["attach-session", "-t", &session])
+        .env_remove("TMUX")
+        .status()
+        .context("tmux attach-session")?;
+    Ok(())
+}
+
+/// Attach by replacing this process (for the one-shot CLI verbs, where returning
+/// to a shell on detach is the right behavior). Inside tmux it switches the
+/// current client; outside it execs `attach-session`.
 fn attach_pane(pane_id: &str) -> Result<()> {
-    // Resolve the pane to its owning session + window so we can build a
-    // per-client grouped view (see `ensure_view_session`). Falls back to the
-    // raw pane id if resolution fails (e.g. tmux listing changed underneath us).
-    let location = resolve_pane_location(pane_id);
+    let Some(session) = session_of_pane(pane_id) else {
+        eprintln!("Pane {pane_id} not found in any tmux session.");
+        return Ok(());
+    };
 
     let in_tmux = std::env::var("TMUX").map(|v| !v.is_empty()).unwrap_or(false);
     if in_tmux {
-        // Point THIS client at its own grouped view of the target window, so it
-        // doesn't mirror (or get mirrored by) other clients viewing the same
-        // base session.
-        let target = match &location {
-            Some((base, window)) => match ensure_view_session(base, window) {
-                Some(view) => view,
-                None => pane_id.to_string(),
-            },
-            None => pane_id.to_string(),
-        };
         let status = std::process::Command::new("tmux")
-            .args(["switch-client", "-t", &target])
+            .args(["switch-client", "-t", &session])
             .status()
             .context("tmux switch-client")?;
-        if status.success() {
-            return Ok(());
+        if !status.success() {
+            eprintln!("tmux switch-client failed for session {session}");
         }
-        eprintln!("tmux switch-client failed for target {target}");
         return Ok(());
     }
 
-    // Not inside tmux: attach to a per-client grouped view session and exec so
-    // this process is replaced by the tmux client.
-    let target = match &location {
-        Some((base, window)) => ensure_view_session(base, window)
-            .unwrap_or_else(|| format!("{base}:{window}")),
-        None => {
-            eprintln!(
-                "Pane {pane_id} not found in any tmux session. Run: tmux attach-session -t tenex"
-            );
-            return Ok(());
-        }
-    };
-
     use std::os::unix::process::CommandExt;
     let err = std::process::Command::new("tmux")
-        .args(["attach-session", "-t", &target])
+        .args(["attach-session", "-t", &session])
         .exec(); // replaces this process; only returns on error
     anyhow::bail!("exec tmux attach-session: {err}");
 }
