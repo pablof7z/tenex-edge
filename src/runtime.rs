@@ -38,11 +38,13 @@ pub struct EngineParams {
     /// How often the engine polls turn state to decide whether to distill.
     pub obs_interval: Duration,
     pub status_ttl: Duration,
-    /// Delay from turn-start to the first activity distillation (default 30s) —
-    /// short turns that finish before this never cost an LLM call.
+    /// Delay from turn-start to the first title distillation (default 30s) —
+    /// short turns that finish before this never cost an LLM call. The title is
+    /// re-distilled at each new turn (new user message) with the current title
+    /// fed back, so it stays stable unless the work substantively changes.
     pub turn_first: Duration,
-    /// Interval between subsequent distillations while a turn keeps running
-    /// (default 5m), to refresh intent on long turns without spamming the LLM.
+    /// Safety re-distillation interval WITHIN a single long-running turn that has
+    /// no new user message (default 0 = disabled). Cheap thanks to nudge-to-keep.
     pub turn_repeat: Duration,
 }
 
@@ -114,12 +116,13 @@ pub async fn run_session_in_daemon(
             expires_at,
         })
     };
-    let status_de = |text: &str| {
+    let status_de = |text: &str, active: bool| {
         DomainEvent::Status(Status {
             agent: aref.clone(),
             project: p.project.clone(),
             session_id: Some(SessionId::from(p.session_id.clone())),
             text: text.to_string(),
+            active,
             rel_cwd: p.rel_cwd.clone(),
             expires_at: Some(now_secs() + ttl),
         })
@@ -133,18 +136,32 @@ pub async fn run_session_in_daemon(
     }))
     .await;
     publish_de(presence(now_secs() + ttl)).await;
-    publish_de(status_de("")).await;
-    st!(|s: &Store| {
-        s.set_agent_status(&me, &p.project, Some(&p.session_id), "", now_secs())
-            .ok();
-        s.touch_session(&p.session_id, now_secs()).ok();
-    });
 
+    // The session TITLE persists across idle turns and feeds back into the
+    // distiller. On a daemon restart for an existing session, recover the prior
+    // title from the store so re-distillation nudges-to-keep it.
     let turn_first = p.turn_first.as_secs();
     let turn_repeat = p.turn_repeat.as_secs();
     let mut cur_turn_start: u64 = 0;
     let mut last_distill: u64 = 0;
-    let mut cur_line: Option<String> = None;
+    let mut prev_working = false;
+    let mut cur_title: Option<String> = st!(|s: &Store| {
+        s.get_agent_status(&me, &p.project, Some(&p.session_id))
+            .ok()
+            .flatten()
+            .map(|(t, _)| t)
+    })
+    .filter(|t| !t.trim().is_empty());
+
+    // Publish initial status: retain any recovered title, but go idle until a
+    // turn starts.
+    let init_title = cur_title.clone().unwrap_or_default();
+    publish_de(status_de(&init_title, false)).await;
+    st!(|s: &Store| {
+        s.set_agent_status(&me, &p.project, Some(&p.session_id), &init_title, false, now_secs())
+            .ok();
+        s.touch_session(&p.session_id, now_secs()).ok();
+    });
 
     let mut hb = tokio::time::interval(p.heartbeat);
     let mut obs = tokio::time::interval(p.obs_interval);
@@ -157,60 +174,77 @@ pub async fn run_session_in_daemon(
                 }
                 st!(|s: &Store| { s.touch_session(&p.session_id, now_secs()).ok(); });
                 publish_de(presence(now_secs() + ttl)).await;
-                if let Some(line) = cur_line.clone() {
-                    publish_de(status_de(&line)).await;
-                    st!(|s: &Store| { s.set_agent_status(&me, &p.project, Some(&p.session_id), &line, now_secs()).ok(); });
+                // Refresh the title's TTL with the live active flag so an idle
+                // session keeps its title alive on the relay (until it exits).
+                if let Some(title) = cur_title.clone() {
+                    let (working, _) = st!(|s: &Store| s.get_turn_state(&p.session_id).unwrap_or((false, 0)));
+                    publish_de(status_de(&title, working)).await;
+                    st!(|s: &Store| { s.set_agent_status(&me, &p.project, Some(&p.session_id), &title, working, now_secs()).ok(); });
                 }
             }
             _ = obs.tick() => {
                 let (working, turn_started_at) = st!(|s: &Store| s.get_turn_state(&p.session_id).unwrap_or((false, 0)));
                 let now = now_secs();
                 if working {
+                    // Rising edge / new user message: mark active immediately
+                    // (retaining the current title) and arm a re-distillation.
                     if turn_started_at != cur_turn_start {
                         cur_turn_start = turn_started_at;
                         last_distill = 0;
+                        let title = cur_title.clone().unwrap_or_default();
+                        publish_de(status_de(&title, true)).await;
+                        st!(|s: &Store| { s.set_agent_status(&me, &p.project, Some(&p.session_id), &title, true, now).ok(); });
                     }
+                    // Distill the title shortly after turn start, then optionally
+                    // re-check on very long turns (turn_repeat == 0 disables that).
                     let due = if last_distill == 0 {
                         now.saturating_sub(cur_turn_start) >= turn_first
                     } else {
-                        now.saturating_sub(last_distill) >= turn_repeat
+                        turn_repeat > 0 && now.saturating_sub(last_distill) >= turn_repeat
                     };
                     if due {
                         let ctx = st!(|s: &Store| s.get_session_transcript(&p.session_id).ok().flatten())
                             .and_then(|path| crate::transcript::read_recent(std::path::Path::new(&path), 14, 2500));
                         if let Some(ctx) = ctx {
-                            if let Some(line) = distill::distill_activity(&ctx).await {
-                                publish_de(DomainEvent::Activity(Activity {
-                                    agent: aref.clone(),
-                                    project: p.project.clone(),
-                                    text: format!("{line} #{}", p.project),
-                                })).await;
-                                publish_de(status_de(&line)).await;
-                                st!(|s: &Store| { s.set_agent_status(&me, &p.project, Some(&p.session_id), &line, now).ok(); });
-                                cur_line = Some(line);
+                            if let Some(title) = distill::distill_title(&ctx, cur_title.as_deref()).await {
+                                // Only announce an Activity note when the title actually changes.
+                                let changed = cur_title.as_deref() != Some(title.as_str());
+                                cur_title = Some(title.clone());
+                                if changed {
+                                    publish_de(DomainEvent::Activity(Activity {
+                                        agent: aref.clone(),
+                                        project: p.project.clone(),
+                                        text: format!("{title} #{}", p.project),
+                                    })).await;
+                                }
+                                publish_de(status_de(&title, true)).await;
+                                st!(|s: &Store| { s.set_agent_status(&me, &p.project, Some(&p.session_id), &title, true, now).ok(); });
                             }
                         }
                         last_distill = now;
                     }
-                } else if cur_line.is_some() {
-                    publish_de(status_de("")).await;
-                    st!(|s: &Store| { s.set_agent_status(&me, &p.project, Some(&p.session_id), "", now).ok(); });
-                    cur_line = None;
-                    cur_turn_start = 0;
-                    last_distill = 0;
-                } else {
+                } else if prev_working {
+                    // Falling edge: turn ended → go idle but KEEP the title.
+                    let title = cur_title.clone().unwrap_or_default();
+                    publish_de(status_de(&title, false)).await;
+                    st!(|s: &Store| { s.set_agent_status(&me, &p.project, Some(&p.session_id), &title, false, now).ok(); });
                     cur_turn_start = 0;
                     last_distill = 0;
                 }
+                prev_working = working;
             }
             _ = cancel.notified() => { break; }
         }
     }
 
-    // Clean exit: expire presence, go idle, mark the session dead.
+    // Clean exit: expire presence, clear the title (the ONLY place a live title
+    // is dropped), and mark the session dead.
     publish_de(presence(now_secs())).await;
-    publish_de(status_de("")).await;
-    st!(|s: &Store| { s.mark_session_dead(&p.session_id).ok(); });
+    publish_de(status_de("", false)).await;
+    st!(|s: &Store| {
+        s.set_agent_status(&me, &p.project, Some(&p.session_id), "", false, now_secs()).ok();
+        s.mark_session_dead(&p.session_id).ok();
+    });
     Ok(())
 }
 

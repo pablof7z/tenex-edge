@@ -229,6 +229,7 @@ CREATE TABLE IF NOT EXISTS agent_status (
     pubkey     TEXT NOT NULL,
     project    TEXT NOT NULL,
     text       TEXT NOT NULL,
+    active     INTEGER NOT NULL DEFAULT 0,
     updated_at INTEGER NOT NULL,
     PRIMARY KEY (pubkey, project)
 );
@@ -241,6 +242,7 @@ CREATE TABLE IF NOT EXISTS session_status (
     project    TEXT NOT NULL,
     session_id TEXT NOT NULL,
     text       TEXT NOT NULL,
+    active     INTEGER NOT NULL DEFAULT 0,
     updated_at INTEGER NOT NULL,
     PRIMARY KEY (pubkey, project, session_id)
 );
@@ -444,6 +446,16 @@ impl Store {
         // transcript (Claude Code writes the transcript after the stop hook fires).
         let _ = conn.execute(
             "ALTER TABLE sessions ADD COLUMN last_assistant_text_at_turn_start TEXT NOT NULL DEFAULT ''",
+            [],
+        );
+        // Persistent session title now carries a separate mid-turn flag; the title
+        // (text) survives idle turns and `active` drives the idle marker.
+        let _ = conn.execute(
+            "ALTER TABLE session_status ADD COLUMN active INTEGER NOT NULL DEFAULT 0",
+            [],
+        );
+        let _ = conn.execute(
+            "ALTER TABLE agent_status ADD COLUMN active INTEGER NOT NULL DEFAULT 0",
             [],
         );
         Ok(Self { conn })
@@ -914,20 +926,21 @@ impl Store {
         Ok(rows)
     }
 
-    /// Agent status rows updated at or after `since`. Returns (slug, project, text, session_id).
+    /// Agent status rows updated at or after `since`. Returns (slug, project, title, session_id, active).
     /// `session_id` is `None` for legacy `agent_status` rows and `Some(id)` for `session_status` rows.
+    /// `active` is the mid-turn flag (idle = !active); the title persists across idle turns.
     /// Resolves slug from profiles then peer_sessions, falling back to "unknown".
     pub fn list_status_changes_since(
         &self,
         since: u64,
         project: Option<&str>,
-    ) -> Result<Vec<(String, String, String, Option<String>)>> {
+    ) -> Result<Vec<(String, String, String, Option<String>, bool)>> {
         let mut stmt = self.conn.prepare(
             "SELECT COALESCE(
                  (SELECT slug FROM profiles WHERE pubkey=ast.pubkey LIMIT 1),
                  (SELECT slug FROM peer_sessions WHERE pubkey=ast.pubkey ORDER BY last_seen DESC LIMIT 1),
                  'unknown'
-             ), ast.project, ast.text, NULL, ast.updated_at
+             ), ast.project, ast.text, NULL, ast.active, ast.updated_at
              FROM agent_status ast
              WHERE ast.updated_at>=?1 AND (?2 IS NULL OR ast.project=?2)
              UNION ALL
@@ -936,14 +949,20 @@ impl Store {
                  (SELECT slug FROM peer_sessions WHERE session_id=sst.session_id LIMIT 1),
                  (SELECT slug FROM profiles WHERE pubkey=sst.pubkey LIMIT 1),
                  'unknown'
-             ), sst.project, sst.text, sst.session_id, sst.updated_at
+             ), sst.project, sst.text, sst.session_id, sst.active, sst.updated_at
              FROM session_status sst
              WHERE sst.updated_at>=?1 AND (?2 IS NULL OR sst.project=?2)
-             ORDER BY 5",
+             ORDER BY 6",
         )?;
-        let rows: Vec<(String, String, String, Option<String>)> = stmt
+        let rows: Vec<(String, String, String, Option<String>, bool)> = stmt
             .query_map(params![since, project], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get::<_, i64>(4)? != 0,
+                ))
             })?
             .filter_map(|r| r.ok())
             .collect();
@@ -1029,47 +1048,52 @@ impl Store {
         project: &str,
         session_id: Option<&str>,
         text: &str,
+        active: bool,
         ts: u64,
     ) -> Result<()> {
+        let active = active as i64;
         if let Some(session_id) = session_id.filter(|s| !s.is_empty()) {
             self.conn.execute(
-                "INSERT INTO session_status (pubkey, project, session_id, text, updated_at)
-                 VALUES (?1,?2,?3,?4,?5)
-                 ON CONFLICT(pubkey, project, session_id) DO UPDATE SET text=?4, updated_at=?5",
-                params![pubkey, project, session_id, text, ts],
+                "INSERT INTO session_status (pubkey, project, session_id, text, active, updated_at)
+                 VALUES (?1,?2,?3,?4,?5,?6)
+                 ON CONFLICT(pubkey, project, session_id) DO UPDATE SET text=?4, active=?5, updated_at=?6",
+                params![pubkey, project, session_id, text, active, ts],
             )?;
         } else {
             self.conn.execute(
-                "INSERT INTO agent_status (pubkey, project, text, updated_at) VALUES (?1,?2,?3,?4)
-                 ON CONFLICT(pubkey, project) DO UPDATE SET text=?3, updated_at=?4",
-                params![pubkey, project, text, ts],
+                "INSERT INTO agent_status (pubkey, project, text, active, updated_at) VALUES (?1,?2,?3,?4,?5)
+                 ON CONFLICT(pubkey, project) DO UPDATE SET text=?3, active=?4, updated_at=?5",
+                params![pubkey, project, text, active, ts],
             )?;
         }
         Ok(())
     }
 
+    /// Current (title, active) for an agent/session. Session-scoped row first,
+    /// agent-level fallback. The title persists across idle turns; `active` is
+    /// the live mid-turn flag.
     pub fn get_agent_status(
         &self,
         pubkey: &str,
         project: &str,
         session_id: Option<&str>,
-    ) -> Result<Option<String>> {
+    ) -> Result<Option<(String, bool)>> {
         if let Some(session_id) = session_id.filter(|s| !s.is_empty()) {
-            if let Ok(text) = self.conn.query_row(
-                "SELECT text FROM session_status
+            if let Ok(row) = self.conn.query_row(
+                "SELECT text, active FROM session_status
                      WHERE pubkey=?1 AND project=?2 AND session_id=?3",
                 params![pubkey, project, session_id],
-                |r| r.get::<_, String>(0),
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? != 0)),
             ) {
-                return Ok(Some(text));
+                return Ok(Some(row));
             }
         }
         Ok(self
             .conn
             .query_row(
-                "SELECT text FROM agent_status WHERE pubkey=?1 AND project=?2",
+                "SELECT text, active FROM agent_status WHERE pubkey=?1 AND project=?2",
                 params![pubkey, project],
-                |r| r.get::<_, String>(0),
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? != 0)),
             )
             .ok())
     }
@@ -1861,9 +1885,10 @@ impl Store {
         project: &str,
         session_id: Option<&str>,
         text: &str,
+        active: bool,
         ts: u64,
     ) -> Result<()> {
-        self.set_agent_status(pubkey, project, session_id, text, ts)
+        self.set_agent_status(pubkey, project, session_id, text, active, ts)
     }
 
     /// Apply a relay-authoritative NIP-29 39002 membership snapshot:
@@ -2225,9 +2250,9 @@ mod tests {
         let s = Store::open_memory().unwrap();
         s.upsert_profile("pk-a", "alpha", "host", 1).unwrap();
         s.upsert_profile("pk-b", "bravo", "host", 1).unwrap();
-        s.set_agent_status("pk-a", "current", None, "working here", 100)
+        s.set_agent_status("pk-a", "current", None, "working here", true, 100)
             .unwrap();
-        s.set_agent_status("pk-b", "elsewhere", None, "working there", 100)
+        s.set_agent_status("pk-b", "elsewhere", None, "working there", true, 100)
             .unwrap();
 
         let scoped = s.list_status_changes_since(50, Some("current")).unwrap();
@@ -2237,7 +2262,8 @@ mod tests {
                 "alpha".to_string(),
                 "current".to_string(),
                 "working here".to_string(),
-                None
+                None,
+                true
             )]
         );
 
@@ -2733,8 +2759,8 @@ mod tests {
     #[test]
     fn phase2_list_status_read_model() {
         let s = Store::open_memory().unwrap();
-        s.set_agent_status("pk-a", "proj", None, "working", 100).unwrap();
-        s.set_agent_status("pk-b", "other", None, "idle", 200).unwrap();
+        s.set_agent_status("pk-a", "proj", None, "working", true, 100).unwrap();
+        s.set_agent_status("pk-b", "other", None, "idle", false, 200).unwrap();
         let all = s.list_status_read_model(None).unwrap();
         assert_eq!(all.len(), 2);
         let scoped = s.list_status_read_model(Some("proj")).unwrap();
@@ -2825,8 +2851,11 @@ mod tests {
     #[test]
     fn phase2_materialize_status() {
         let s = Store::open_memory().unwrap();
-        s.materialize_status("pk-ms", "proj", None, "reviewing", 100).unwrap();
-        assert_eq!(s.get_agent_status("pk-ms", "proj", None).unwrap().as_deref(), Some("reviewing"));
+        s.materialize_status("pk-ms", "proj", None, "reviewing", true, 100).unwrap();
+        assert_eq!(
+            s.get_agent_status("pk-ms", "proj", None).unwrap(),
+            Some(("reviewing".to_string(), true))
+        );
     }
 
     /// materialize_membership_snapshot replaces legacy group_members AND mirrors

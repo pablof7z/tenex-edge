@@ -150,6 +150,7 @@ fn handle_incoming(state: &Arc<DaemonState>, event: &Event) {
                     &st.project,
                     st.session_id.as_ref().map(|s| s.as_str()),
                     &st.text,
+                    st.active,
                     now,
                 )
                 .ok();

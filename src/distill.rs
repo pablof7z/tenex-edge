@@ -69,8 +69,13 @@ impl CommandDistiller {
     }
 }
 
-/// System prompt for the native rig distiller.
+/// System prompt for the native rig distiller (live activity line).
 const RIG_SYSTEM_PROMPT: &str = "Summarize what a coding agent is currently doing, in at most 8 words, present tense, intent not mechanics, no trailing punctuation. Output only the phrase.";
+
+/// System prompt for the session TITLE distiller. Stable by design: the model is
+/// nudged to keep an accurate current title rather than reword it, so the title
+/// only changes when the session's work substantively changes.
+const TITLE_SYSTEM_PROMPT: &str = "You write a short, stable TITLE for a coding session: at most 8 words, present tense, intent not mechanics, no trailing punctuation. You may be given the CURRENT title. If the current title still accurately describes the work, return it UNCHANGED, verbatim. Only produce a new title when the work has SUBSTANTIVELY changed — never reword, rephrase, or re-punctuate an accurate title. Output only the title.";
 
 /// Summarize a context string into a one-line intent using rig (rig.rs), via
 /// either openrouter or ollama per `resolved.provider`. Returns `None` on any
@@ -78,6 +83,16 @@ const RIG_SYSTEM_PROMPT: &str = "Summarize what a coding agent is currently doin
 pub async fn summarize_via_rig(
     resolved: &crate::llmconfig::ResolvedModel,
     context: &str,
+) -> Option<String> {
+    summarize_via_rig_with_preamble(resolved, context, RIG_SYSTEM_PROMPT).await
+}
+
+/// Like [`summarize_via_rig`] but with a caller-supplied system preamble, so the
+/// same provider plumbing serves both the activity line and the session title.
+pub async fn summarize_via_rig_with_preamble(
+    resolved: &crate::llmconfig::ResolvedModel,
+    context: &str,
+    preamble: &str,
 ) -> Option<String> {
     use rig::client::CompletionClient;
     use rig::completion::Prompt;
@@ -87,7 +102,7 @@ pub async fn summarize_via_rig(
             let client = rig::providers::openrouter::Client::new(&resolved.api_key).ok()?;
             let agent = client
                 .agent(&resolved.model)
-                .preamble(RIG_SYSTEM_PROMPT)
+                .preamble(preamble)
                 .temperature(0.2)
                 .max_tokens(64)
                 .build();
@@ -107,7 +122,7 @@ pub async fn summarize_via_rig(
             let client = builder.build().ok()?;
             let agent = client
                 .agent(&resolved.model)
-                .preamble(RIG_SYSTEM_PROMPT)
+                .preamble(preamble)
                 .temperature(0.2)
                 .max_tokens(64)
                 .build();
@@ -153,6 +168,39 @@ pub async fn distill_activity(transcript: &str) -> Option<String> {
     None
 }
 
+/// Distill a PERSISTENT session title from the recent transcript, feeding back
+/// the `current_title` (if any) so the model keeps a still-accurate title rather
+/// than rewording it (see [`TITLE_SYSTEM_PROMPT`]). Ordering mirrors
+/// [`distill_activity`], except the fallback is **nudge-to-keep**: when no model
+/// is configured (or it yields nothing), the current title is retained.
+pub async fn distill_title(transcript: &str, current_title: Option<&str>) -> Option<String> {
+    let ctx = transcript.trim();
+    if ctx.is_empty() {
+        return current_title.map(str::to_string);
+    }
+    // Give the model the current title as context so it can choose to keep it.
+    let input = match current_title.map(str::trim).filter(|t| !t.is_empty()) {
+        Some(t) => format!("CURRENT TITLE: {t}\n\nTRANSCRIPT:\n{ctx}"),
+        None => ctx.to_string(),
+    };
+    // (a) explicit external-command override.
+    if let Some(cmd) = CommandDistiller::resolve() {
+        if let Some(line) = cmd.summarize(&input) {
+            return Some(line);
+        }
+    }
+    // (b) native rig via the edge-distillation role, with the TITLE preamble.
+    if let Some(resolved) = crate::llmconfig::resolve_role("edge-distillation") {
+        if let Some(line) =
+            summarize_via_rig_with_preamble(&resolved, &input, TITLE_SYSTEM_PROMPT).await
+        {
+            return Some(line);
+        }
+    }
+    // (c) no model / empty output → keep the existing title (nudge-to-keep).
+    current_title.map(str::to_string)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -182,5 +230,26 @@ mod tests {
             command: "cat >/dev/null; true".into(),
         };
         assert!(d.summarize("anything").is_none());
+    }
+
+    /// With a distiller that echoes back the `CURRENT TITLE:` line from stdin,
+    /// `distill_title` keeps an existing title unchanged (nudge-to-keep).
+    #[tokio::test]
+    async fn distill_title_keeps_existing_title_via_command() {
+        std::env::set_var(
+            "TENEX_EDGE_DISTILL_CMD",
+            // Echo only the value after "CURRENT TITLE: " on the first line.
+            "sed -n 's/^CURRENT TITLE: //p' | head -n1",
+        );
+        let got = distill_title("TRANSCRIPT:\nuser: keep going", Some("refactoring the auth flow")).await;
+        std::env::remove_var("TENEX_EDGE_DISTILL_CMD");
+        assert_eq!(got.as_deref(), Some("refactoring the auth flow"));
+    }
+
+    /// Empty transcript returns the current title rather than re-distilling.
+    #[tokio::test]
+    async fn distill_title_empty_transcript_returns_current() {
+        let got = distill_title("   ", Some("writing the parser")).await;
+        assert_eq!(got.as_deref(), Some("writing the parser"));
     }
 }

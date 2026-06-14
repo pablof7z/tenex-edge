@@ -45,12 +45,15 @@ pub enum TailEvent {
         /// Elapsed seconds since the turn started (meaningful on idle).
         elapsed_s: Option<u64>,
     },
-    /// NIP-38 status text changed.
+    /// NIP-38 status changed: the persistent session title (`text`) and/or the
+    /// mid-turn flag (`active`).
     Status {
         ts: u64,
         project: String,
         agent: String,
         text: String,
+        /// Whether the session is mid-turn (idle = !active).
+        active: bool,
     },
     /// Peer session came online (first-seen heartbeat).
     Join {
@@ -193,6 +196,7 @@ mod tests {
             project: "proj".into(),
             agent: "a".into(),
             text: "working".into(),
+            active: true,
         };
         let profile = TailEvent::Profile {
             ts: 0,

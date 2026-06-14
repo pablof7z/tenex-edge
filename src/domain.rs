@@ -98,7 +98,9 @@ pub struct Proposal {
     pub thread_root_key: Option<String>,
 }
 
-/// The agent's live, replaceable status for a project. Empty text = idle.
+/// The agent's live, replaceable status for a project. `text` is a PERSISTENT
+/// session title (what the session is about) that survives idle turns; `active`
+/// is the separate "mid-turn" flag. Idle = `!active`, independent of the title.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Status {
     pub agent: AgentRef,
@@ -106,7 +108,12 @@ pub struct Status {
     /// Session this status belongs to. `None` is legacy agent-level status from
     /// older peers; local runtime publishes session-scoped status.
     pub session_id: Option<SessionId>,
+    /// The session title: a short, stable description of what the session is
+    /// about. Retained across idle turns; only cleared when the session exits.
     pub text: String,
+    /// Whether the session is mid-turn (busy). Decoupled from `text` so an idle
+    /// session keeps showing its title with a separate idle marker.
+    pub active: bool,
     /// Project-relative working directory (see `Presence::rel_cwd`). Carried on
     /// status too so a mid-turn `who` reflects where the agent is working.
     pub rel_cwd: String,
@@ -116,8 +123,10 @@ pub struct Status {
 }
 
 impl Status {
+    /// Idle = not mid-turn. The title (`text`) persists across idle turns, so
+    /// idle is no longer "empty text".
     pub fn is_idle(&self) -> bool {
-        self.text.trim().is_empty()
+        !self.active
     }
 }
 
@@ -182,11 +191,13 @@ mod tests {
     #[test]
     fn status_idle_detection() {
         let agent = AgentRef::new("pk", "coder");
+        // A title is retained while idle: idle tracks `active`, not the text.
         let idle = Status {
             agent: agent.clone(),
             project: "p".into(),
             session_id: None,
-            text: "   ".into(),
+            text: "fixing auth".into(),
+            active: false,
             rel_cwd: String::new(),
             expires_at: None,
         };
@@ -195,6 +206,7 @@ mod tests {
             project: "p".into(),
             session_id: None,
             text: "fixing auth".into(),
+            active: true,
             rel_cwd: String::new(),
             expires_at: Some(10),
         };

@@ -159,6 +159,7 @@ fn status_roundtrip_with_expiry() {
         project: "tenex-edge".into(),
         session_id: Some("sess-123".into()),
         text: "reviewing PR".into(),
+        active: false,
         rel_cwd: String::new(),
         expires_at: Some(1_900_000_000),
     });

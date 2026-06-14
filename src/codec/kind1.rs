@@ -6,7 +6,7 @@
 //! | Presence  | kind:30315 (NIP-38-style heartbeat), `["h", project]`, `["d", "tenex-edge-presence:<session>"]`, `["p", peer]…`, `["session-id", id]`, `["host", host]`, optional `["rel-cwd", rel]`, `["expiration", ts]` |
 //! | Activity   | kind:1,    `["h", project]` |
 //! | TurnReply  | kind:1,    `["h", project]`, `["e", root_id, "", "root"]`, `["e", reply_id, "", "reply"]` |
-//! | Status     | kind:30315 (NIP-38), `["h", project]`, `["d", project]`, optional `["session-id", id]`, optional `["rel-cwd", rel]`, `["expiration", ts]` |
+//! | Status     | kind:30315 (NIP-38), `["h", project]`, `["d", project]`, optional `["session-id", id]`, optional `["rel-cwd", rel]`, `["active", "0"|"1"]`, `["expiration", ts]` |
 //! | Mention    | kind:1,    `["h", project]`, `["p", to]`, optional `["session-id", target]`, `["from-session", sender]`, `["subject", s]`, `["git-branch", b]`, `["git-commit", c]`, `["git-dirty", n]`, `["from-host", h]`, `["e", reply_to, "", "reply"]` |
 //!
 //! kind:1 disambiguation on decode (in priority order):
@@ -185,6 +185,7 @@ impl Codec for Kind1Codec {
                 project,
                 session_id,
                 text,
+                active,
                 rel_cwd,
                 expires_at,
             }) => {
@@ -198,6 +199,7 @@ impl Codec for Kind1Codec {
                 if !rel_cwd.is_empty() {
                     tags.push(tag(&["rel-cwd", rel_cwd])?);
                 }
+                tags.push(tag(&["active", if *active { "1" } else { "0" }])?);
                 if let Some(exp) = expires_at {
                     tags.push(tag(&["expiration", &exp.to_string()])?);
                 }
@@ -323,6 +325,7 @@ impl Codec for Kind1Codec {
                         project: project_from_tags(event)?,
                         session_id: first_tag(event, "session-id").map(SessionId::from),
                         text: event.content.clone(),
+                        active: first_tag(event, "active") == Some("1"),
                         rel_cwd: first_tag(event, "rel-cwd").unwrap_or_default().to_string(),
                         expires_at,
                     }))
@@ -558,6 +561,7 @@ mod tests {
             project: "tenex-edge".into(),
             session_id: Some(SessionId::from("sess-status")),
             text: "reviewing PR".into(),
+            active: true,
             rel_cwd: String::new(),
             expires_at: Some(1_900_000_000),
         });

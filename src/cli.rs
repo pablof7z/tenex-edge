@@ -702,7 +702,12 @@ struct WhoRow {
     fresh: bool,
     slug: String,
     project: String,
+    /// Persistent session title (what the session is about); survives idle turns.
     status: String,
+    /// Whether the session is mid-turn. Drives the idle marker independently of
+    /// the title, which is retained while idle.
+    #[serde(default)]
+    active: bool,
     host: String,
     session_id: String,
     age_secs: Option<u64>,
@@ -766,12 +771,19 @@ pub fn load_who_snapshot(
             .flatten()
             .map(|ls| now.saturating_sub(ls));
         if current_project.map(|p| p == s.project).unwrap_or(true) {
+            let (title, st_active) = status_for(store, &s.agent_pubkey, &s.project, Some(&s.session_id));
+            // Local rows: prefer the live turn state so the idle marker is instant.
+            let active = store
+                .get_turn_state(&s.session_id)
+                .map(|(w, _)| w)
+                .unwrap_or(st_active);
             rows.push(WhoRow {
                 source: WhoSource::Local,
                 fresh: age_secs.map(|a| a <= PEER_FRESH_SECS).unwrap_or(true),
                 slug: s.agent_slug.clone(),
                 project: s.project.clone(),
-                status: status_for(store, &s.agent_pubkey, &s.project, Some(&s.session_id)),
+                status: title,
+                active,
                 host: s.host.clone(),
                 session_id: s.session_id.clone(),
                 age_secs,
@@ -789,12 +801,15 @@ pub fn load_who_snapshot(
     for p in &all_peers {
         let age = now.saturating_sub(p.last_seen);
         if current_project.map(|cp| cp == p.project).unwrap_or(true) {
+            // Peer rows: the active flag arrives over the wire and is persisted.
+            let (title, active) = status_for(store, &p.pubkey, &p.project, Some(&p.session_id));
             rows.push(WhoRow {
                 source: WhoSource::Peer,
                 fresh: age <= PEER_FRESH_SECS,
                 slug: p.slug.clone(),
                 project: p.project.clone(),
-                status: status_for(store, &p.pubkey, &p.project, Some(&p.session_id)),
+                status: title,
+                active,
                 host: p.host.clone(),
                 session_id: p.session_id.clone(),
                 age_secs: Some(age),
@@ -850,12 +865,13 @@ impl WhoSnapshot {
     }
 }
 
-fn status_for(store: &Store, pubkey: &str, project: &str, session_id: Option<&str>) -> String {
+/// Current (title, active) for a row. The title persists across idle turns;
+/// `active` drives the idle marker. Defaults to ("", false) when unknown.
+fn status_for(store: &Store, pubkey: &str, project: &str, session_id: Option<&str>) -> (String, bool) {
     store
         .get_agent_status(pubkey, project, session_id)
         .ok()
         .flatten()
-        .map(|(text, _active)| text)
         .unwrap_or_default()
 }
 
@@ -904,11 +920,12 @@ pub fn push_turn_fabric_block(
                 pubkey_short(&p.session_id),
             ));
         }
-        for (slug, proj, text, session_id, _active) in &status_changes {
+        for (slug, proj, text, session_id, active) in &status_changes {
+            let label = status_plain(text, *active);
             if let Some(sid) = session_id {
-                delta.push(format!("  ↻ {slug}@{proj} [session {sid}] — {text}"));
+                delta.push(format!("  ↻ {slug}@{proj} [session {sid}] — {label}"));
             } else {
-                delta.push(format!("  ↻ {slug}@{proj} — {text}"));
+                delta.push(format!("  ↻ {slug}@{proj} — {label}"));
             }
         }
         if !delta.is_empty() {
@@ -1007,7 +1024,7 @@ fn render_who_row(out: &mut String, row: &WhoRow, include_project: bool) {
         dir,
         remote,
         stale,
-        status_plain(&row.status),
+        status_colored(&row.status, row.active),
     );
 }
 
@@ -1039,11 +1056,27 @@ fn draw_who_live(snapshot: &WhoSnapshot, refresh: Duration) -> Result<()> {
     Ok(())
 }
 
-fn status_plain(status: &str) -> String {
-    if status.trim().is_empty() {
-        "idle".to_string()
-    } else {
-        status.trim().to_string()
+/// Plain (no-ANSI) status label: the persistent title plus an idle marker when
+/// the session is not mid-turn. Used for injected context blocks where ANSI must
+/// not leak. Empty title falls back to a bare "working"/"idle" word.
+fn status_plain(title: &str, active: bool) -> String {
+    let t = title.trim();
+    match (t.is_empty(), active) {
+        (true, true) => "working".to_string(),
+        (true, false) => "idle".to_string(),
+        (false, true) => t.to_string(),
+        (false, false) => format!("{t} · idle"),
+    }
+}
+
+/// Terminal status label: like [`status_plain`] but dims the idle marker.
+fn status_colored(title: &str, active: bool) -> String {
+    let t = title.trim();
+    match (t.is_empty(), active) {
+        (true, true) => "working".dimmed().to_string(),
+        (true, false) => "idle".dimmed().to_string(),
+        (false, true) => t.to_string(),
+        (false, false) => format!("{} {}", t, "· idle".dimmed()),
     }
 }
 
@@ -1126,10 +1159,10 @@ mod who_tests {
         store.touch_session("session-a", 1_000).unwrap();
         store.touch_session("session-b", 1_000).unwrap();
         store
-            .set_agent_status("pk-claude", "proj", Some("session-a"), "reading files", 995)
+            .set_agent_status("pk-claude", "proj", Some("session-a"), "reading files", true, 995)
             .unwrap();
         store
-            .set_agent_status("pk-claude", "proj", Some("session-b"), "running tests", 996)
+            .set_agent_status("pk-claude", "proj", Some("session-b"), "running tests", true, 996)
             .unwrap();
 
         let snapshot = load_who_snapshot(&store, Some("proj"), false, 1_000, "laptop").unwrap();
@@ -1209,6 +1242,7 @@ mod who_tests {
                 "proj",
                 Some("remote-session"),
                 "reviewing the patch",
+                true,
                 995,
             )
             .unwrap();
@@ -1291,6 +1325,7 @@ mod who_tests {
                 slug: "reviewer".to_string(),
                 project: "proj".to_string(),
                 status: "reviewing the patch".to_string(),
+                active: true,
                 host: "tower".to_string(),
                 session_id: "remote-session".to_string(),
                 age_secs: Some(5),
@@ -1298,6 +1333,7 @@ mod who_tests {
                 remote: false,
             }],
             other_projects: vec![],
+            spawnable: vec![],
         };
 
         // --live uses render_who_once: same content, plus a dim quit-hint footer.
@@ -1340,6 +1376,7 @@ mod who_tests {
                 slug: "reviewer".to_string(),
                 project: "other".to_string(),
                 status: String::new(),
+                active: false,
                 host: "tower".to_string(),
                 session_id: "remote-session".to_string(),
                 age_secs: Some(5),
@@ -1347,6 +1384,7 @@ mod who_tests {
                 remote: false,
             }],
             other_projects: vec![],
+            spawnable: vec![],
         };
 
         let once = strip_ansi(&render_who_once(&snapshot));
@@ -1782,7 +1820,7 @@ fn render_who_plain(snapshot: &WhoSnapshot) -> String {
             remote,
             stale,
         );
-        let _ = writeln!(out, "      {}", status_plain(&row.status));
+        let _ = writeln!(out, "      {}", status_plain(&row.status, row.active));
     }
     for row in &snapshot.spawnable {
         let _ = writeln!(
@@ -2181,9 +2219,14 @@ pub fn render_tail_event(
             )
         }
 
-        TailEvent::Status { project, agent, text, .. } => {
+        TailEvent::Status { project, agent, text, active, .. } => {
             let cat = col!("stat ", magenta);
-            let label = if text.is_empty() { "idle" } else { text.as_str() };
+            let label = match (text.is_empty(), *active) {
+                (true, true) => "working".to_string(),
+                (true, false) => "idle".to_string(),
+                (false, true) => text.clone(),
+                (false, false) => format!("{text} · idle"),
+            };
             format!("{ts_str}  {cat}  {}@{project}  {label}", col!(agent, cyan))
         }
 
@@ -2299,7 +2342,12 @@ fn render(de: &DomainEvent) -> String {
             format!("{} {}: {}", "act ".blue(), a.agent.slug.cyan(), a.text)
         }
         DomainEvent::Status(s) if s.is_idle() => {
-            format!("{} {} idle", "stat".dimmed(), s.agent.slug.cyan())
+            let label = if s.text.trim().is_empty() {
+                "idle".to_string()
+            } else {
+                format!("{} · idle", s.text)
+            };
+            format!("{} {} {}", "stat".dimmed(), s.agent.slug.cyan(), label)
         }
         DomainEvent::Status(s) => {
             format!("{} {}: {}", "stat".magenta(), s.agent.slug.cyan(), s.text)

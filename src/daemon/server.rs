@@ -87,8 +87,10 @@ pub struct DaemonState {
     seen_events: Mutex<(std::collections::HashSet<String>, std::collections::VecDeque<String>)>,
     /// Pubkeys for which a Profile event has already been emitted, for first-seen dedup.
     seen_profiles: Mutex<std::collections::HashSet<String>>,
-    /// Last-seen status text per (pubkey, project) for dedup.
-    last_status: Mutex<HashMap<(String, String), String>>,
+    /// Last-seen (title, active) per (pubkey, project) for dedup. Tracking
+    /// `active` too means an active→idle flip emits a tail event even though the
+    /// persistent title text is unchanged.
+    last_status: Mutex<HashMap<(String, String), (String, bool)>>,
 }
 
 impl DaemonState {
@@ -1597,6 +1599,7 @@ fn rpc_statusline(
             .get_agent_status(&rec.agent_pubkey, &rec.project, Some(&rec.session_id))
             .ok()
             .flatten()
+            .map(|(text, _active)| text)
             .unwrap_or_default();
         let pending = s.peek_inbox(&rec.session_id).unwrap_or_default();
         let recent = s
@@ -2177,7 +2180,7 @@ fn build_backfill(
             rel_cwd: p.rel_cwd.clone(),
         });
         // Add current status if known (session-scoped first, agent-level fallback).
-        if let Some((text, _active)) = state.with_store(|s| {
+        if let Some((text, active)) = state.with_store(|s| {
             s.get_agent_status(&p.pubkey, &p.project, Some(&p.session_id))
                 .unwrap_or(None)
         })
@@ -2187,6 +2190,7 @@ fn build_backfill(
                 project: p.project,
                 agent: p.slug,
                 text,
+                active,
             });
         }
     }
@@ -2335,11 +2339,11 @@ fn derive_and_emit_tail_events(
                 return;
             }
             let key = (s.agent.pubkey.clone(), s.project.clone());
+            let cur = (s.text.clone(), s.active);
             let should_emit = {
                 let mut map = state.last_status.lock().unwrap();
-                let prev = map.get(&key).cloned();
-                if prev.as_deref() != Some(&s.text) {
-                    map.insert(key, s.text.clone());
+                if map.get(&key) != Some(&cur) {
+                    map.insert(key, cur);
                     true
                 } else {
                     false
@@ -2351,6 +2355,7 @@ fn derive_and_emit_tail_events(
                     project: s.project.clone(),
                     agent: s.agent.slug.clone(),
                     text: s.text.clone(),
+                    active: s.active,
                 });
             }
         }
@@ -2675,7 +2680,9 @@ fn engine_params_for(
         obs_interval: env_duration("TENEX_EDGE_OBS_MS", Duration::from_secs(5)),
         status_ttl: Duration::from_secs(env_u64("TENEX_EDGE_STATUS_TTL_S", 90)),
         turn_first: Duration::from_secs(env_u64("TENEX_EDGE_TURN_FIRST_S", 30)),
-        turn_repeat: Duration::from_secs(env_u64("TENEX_EDGE_TURN_REPEAT_S", 300)),
+        // 0 = disabled: the title re-distills on each new user message, so an
+        // in-turn safety re-distill is opt-in (set TENEX_EDGE_TURN_REPEAT_S > 0).
+        turn_repeat: Duration::from_secs(env_u64("TENEX_EDGE_TURN_REPEAT_S", 0)),
     }
 }
 

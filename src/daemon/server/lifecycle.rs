@@ -173,7 +173,9 @@ pub(super) fn engine_params_for(
         obs_interval: env_duration("TENEX_EDGE_OBS_MS", Duration::from_secs(5)),
         status_ttl: Duration::from_secs(env_u64("TENEX_EDGE_STATUS_TTL_S", 90)),
         turn_first: Duration::from_secs(env_u64("TENEX_EDGE_TURN_FIRST_S", 30)),
-        turn_repeat: Duration::from_secs(env_u64("TENEX_EDGE_TURN_REPEAT_S", 300)),
+        // 0 = disabled: the title re-distills on each new user message, so an
+        // in-turn safety re-distill is opt-in (set TENEX_EDGE_TURN_REPEAT_S > 0).
+        turn_repeat: Duration::from_secs(env_u64("TENEX_EDGE_TURN_REPEAT_S", 0)),
     }
 }
 
