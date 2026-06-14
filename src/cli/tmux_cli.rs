@@ -404,56 +404,121 @@ pub(super) fn tmux_tui() -> Result<()> {
     }
 }
 
-fn attach_pane(pane_id: &str) -> Result<()> {
-    let in_tmux = std::env::var("TMUX").is_ok();
-    if in_tmux {
-        // switch-client can jump to any pane in any window/session, unlike
-        // select-pane which only works within the currently focused window.
-        let status = std::process::Command::new("tmux")
-            .args(["switch-client", "-t", pane_id])
-            .status()
-            .context("tmux switch-client")?;
-        if status.success() {
-            return Ok(());
-        }
-        eprintln!("tmux switch-client failed for pane {pane_id}");
-        return Ok(());
-    }
-
-    // Not inside tmux: find which session:window owns this pane, then exec
-    // attach-session so this process is replaced by the tmux client.
+/// Resolve a pane id (e.g. "%7") to `(session_name, window_index)` by scanning
+/// every pane in every session. Returns `None` if the pane is gone.
+fn resolve_pane_location(pane_id: &str) -> Option<(String, String)> {
     let out = std::process::Command::new("tmux")
         .args([
             "list-panes",
             "-a",
             "-F",
-            "#{pane_id} #{session_name}:#{window_index}",
+            "#{pane_id} #{session_name} #{window_index}",
         ])
         .output()
-        .context("tmux list-panes")?;
+        .ok()?;
     let stdout = String::from_utf8_lossy(&out.stdout);
-    let target = stdout.lines().find_map(|line| {
-        let (pid, rest) = line.split_once(' ')?;
+    stdout.lines().find_map(|line| {
+        let mut parts = line.splitn(3, ' ');
+        let pid = parts.next()?;
+        let session = parts.next()?;
+        let window = parts.next()?;
         if pid == pane_id {
-            Some(rest.to_string())
+            Some((session.to_string(), window.to_string()))
         } else {
             None
         }
-    });
+    })
+}
 
-    match target {
-        Some(t) => {
-            use std::os::unix::process::CommandExt;
-            let err = std::process::Command::new("tmux")
-                .args(["attach-session", "-t", &t])
-                .exec(); // replaces this process; only returns on error
-            anyhow::bail!("exec tmux attach-session: {err}");
+/// Create (or reuse) a per-client grouped "view" session that shares the base
+/// session's windows but keeps its OWN current-window pointer, then point it at
+/// `window`. Returns the view session name, or `None` if creation failed.
+///
+/// Why: tmux clients attached to the *same* session mirror each other's current
+/// window — a single window pointer is shared. Spawned agents all live as
+/// windows inside one shared `tenex` session, so two terminals attaching to it
+/// would snap to whichever window was selected last. A grouped session
+/// (`new-session -t <base>`) shares the window set but selects independently, so
+/// each client sees its own agent. `destroy-unattached` reaps the view when the
+/// client detaches so they don't accumulate.
+fn ensure_view_session(base: &str, window: &str) -> Option<String> {
+    let view = format!("{base}-view-{}", std::process::id());
+
+    // Create the grouped view session if it doesn't already exist (idempotent
+    // across attach/detach cycles within one client process).
+    let exists = std::process::Command::new("tmux")
+        .args(["has-session", "-t", &view])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !exists {
+        let created = std::process::Command::new("tmux")
+            .args(["new-session", "-d", "-t", base, "-s", &view])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !created {
+            return None;
         }
+        // Self-destruct the view once its client detaches.
+        let _ = std::process::Command::new("tmux")
+            .args(["set-option", "-t", &view, "destroy-unattached", "on"])
+            .status();
+    }
+
+    // Select the target window within THIS view (independent of other clients).
+    let _ = std::process::Command::new("tmux")
+        .args(["select-window", "-t", &format!("{view}:{window}")])
+        .status();
+
+    Some(view)
+}
+
+fn attach_pane(pane_id: &str) -> Result<()> {
+    // Resolve the pane to its owning session + window so we can build a
+    // per-client grouped view (see `ensure_view_session`). Falls back to the
+    // raw pane id if resolution fails (e.g. tmux listing changed underneath us).
+    let location = resolve_pane_location(pane_id);
+
+    let in_tmux = std::env::var("TMUX").is_ok();
+    if in_tmux {
+        // Point THIS client at its own grouped view of the target window, so it
+        // doesn't mirror (or get mirrored by) other clients viewing the same
+        // base session.
+        let target = match &location {
+            Some((base, window)) => match ensure_view_session(base, window) {
+                Some(view) => view,
+                None => pane_id.to_string(),
+            },
+            None => pane_id.to_string(),
+        };
+        let status = std::process::Command::new("tmux")
+            .args(["switch-client", "-t", &target])
+            .status()
+            .context("tmux switch-client")?;
+        if status.success() {
+            return Ok(());
+        }
+        eprintln!("tmux switch-client failed for target {target}");
+        return Ok(());
+    }
+
+    // Not inside tmux: attach to a per-client grouped view session and exec so
+    // this process is replaced by the tmux client.
+    let target = match &location {
+        Some((base, window)) => ensure_view_session(base, window)
+            .unwrap_or_else(|| format!("{base}:{window}")),
         None => {
             eprintln!(
                 "Pane {pane_id} not found in any tmux session. Run: tmux attach-session -t tenex"
             );
-            Ok(())
+            return Ok(());
         }
-    }
+    };
+
+    use std::os::unix::process::CommandExt;
+    let err = std::process::Command::new("tmux")
+        .args(["attach-session", "-t", &target])
+        .exec(); // replaces this process; only returns on error
+    anyhow::bail!("exec tmux attach-session: {err}");
 }
