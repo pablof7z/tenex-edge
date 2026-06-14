@@ -68,12 +68,13 @@ fn render_who_row(out: &mut String, row: &WhoRow, include_project: bool) {
     } else {
         format!(" {}", "(stale)".dimmed())
     };
-    // §8e: same-machine agents get NO annotation; a true remote (peer on
-    // a different host than the daemon) gets ` (hostname)`.
-    let remote = if row.remote {
-        format!(" {}", format!("({})", row.host).dimmed())
+    // Always show which host the agent runs on. Same-machine agents get a plain
+    // `(hostname)`; a true remote (peer on a different host than the daemon) gets
+    // `(hostname, remote)` so cross-machine sessions stay distinguishable.
+    let host = if row.remote {
+        format!(" {}", format!("({}, remote)", row.host).dimmed())
     } else {
-        String::new()
+        format!(" {}", format!("({})", row.host).dimmed())
     };
     let dir = rel_cwd_bracket(&row.rel_cwd)
         .map(|d| format!(" {}", format!("[{d}]").dimmed()))
@@ -89,7 +90,7 @@ fn render_who_row(out: &mut String, row: &WhoRow, include_project: bool) {
         name,
         row.session_id.to_string().yellow(),
         dir,
-        remote,
+        host,
         stale,
         status_plain(&row.status),
     );
@@ -162,12 +163,11 @@ pub(super) fn render_who_plain(snapshot: &WhoSnapshot) -> String {
     let _ = writeln!(out, "agents:");
     for row in &snapshot.rows {
         let stale = if row.fresh { "" } else { " (stale)" };
-        let remote_ann;
-        let remote = if row.remote {
-            remote_ann = format!(" ({})", row.host);
-            &*remote_ann
+        // Always show the host; flag cross-machine peers with `, remote`.
+        let host = if row.remote {
+            format!(" ({}, remote)", row.host)
         } else {
-            ""
+            format!(" ({})", row.host)
         };
         let dir = rel_cwd_bracket(&row.rel_cwd)
             .map(|d| format!(" [{d}]"))
@@ -175,7 +175,7 @@ pub(super) fn render_who_plain(snapshot: &WhoSnapshot) -> String {
         let _ = writeln!(
             out,
             "  {}@{} [session {}]{}{}{}",
-            row.slug, row.project, row.session_id, dir, remote, stale,
+            row.slug, row.project, row.session_id, dir, host, stale,
         );
         let _ = writeln!(out, "      {}", status_plain(&row.status));
     }

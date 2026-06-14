@@ -134,8 +134,18 @@ pub async fn run() -> Result<()> {
     let auth_keys = identity::load_or_create(&config::edge_home(), "tenex-edge-daemon", now_secs())
         .map(|i| i.keys)
         .unwrap_or_else(|_| Keys::generate());
+    // Include the indexer relay in the transport pool so kind:0 publishes reach
+    // it and kind:0 subscriptions also query it for profile discovery. Deduped
+    // in case someone lists purplepag.es in their main relays too.
+    let transport_relays: Vec<String> = {
+        let mut v = cfg.relays.clone();
+        if !v.iter().any(|r| r == &cfg.indexer_relay) {
+            v.push(cfg.indexer_relay.clone());
+        }
+        v
+    };
     let transport = Arc::new(
-        Transport::connect(&cfg.relays, auth_keys)
+        Transport::connect(&transport_relays, auth_keys)
             .await
             .context("daemon relay connect")?,
     );
@@ -146,7 +156,7 @@ pub async fn run() -> Result<()> {
         store.clone(),
         cfg.user_nsec.clone(),
         cfg.whitelisted_pubkeys.clone(),
-        &cfg.relays,
+        &cfg.relays,  // provider_instance hashes main relays only, not indexer
     ));
     let state = Arc::new(DaemonState {
         store,
@@ -949,12 +959,26 @@ async fn rpc_propose(
         audience: state.owners.clone(),
         thread_root_key: root_native_key,
     });
+    // Checked publish: a NIP-29 relay rejecting the kind:30023 (e.g. the author
+    // isn't a member of the project group) used to resolve Ok and report a false
+    // "published" — silent data loss. `publish_checked` fails on relay rejection
+    // so the CLI exits nonzero with the relay's stated reason.
     let event_id = state
         .provider
-        .publish(&ev, &id.keys)
+        .publish_checked(&ev, &id.keys)
         .await
         .context("publishing proposal")?;
     let eid_hex = event_id.to_hex();
+
+    // Internal read-back: confirm the event is actually retrievable from the
+    // relay, not merely accepted. Surfaces a relay that ACKs writes but silently
+    // drops them. Best-effort and non-fatal — reported to the caller so it can
+    // warn loudly without failing a publish the relay genuinely accepted.
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let retrievable = state
+        .provider
+        .is_retrievable(event_id, Duration::from_secs(5))
+        .await;
 
     // Dual-write canonical read-model rows.
     let now = now_secs();
@@ -993,6 +1017,7 @@ async fn rpc_propose(
         "d_tag": d_tag,
         "thread_id": thread_id,
         "title": p.title,
+        "retrievable": retrievable,
     }))
 }
 

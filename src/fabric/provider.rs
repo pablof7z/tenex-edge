@@ -172,6 +172,37 @@ impl Kind1Nip29Provider {
         self.transport.publish_signed(builder, keys).await
     }
 
+    /// Like [`publish`], but FAILS when no relay accepted the event. Use for
+    /// artifacts where a "published" report must mean the event is actually on
+    /// the relay (e.g. kind:30023 proposals) — the bare [`publish`] reports an
+    /// optimistic write-side ack and would hide a NIP-29 `blocked` rejection.
+    pub async fn publish_checked(
+        &self,
+        ev: &DomainEvent,
+        keys: &nostr_sdk::prelude::Keys,
+    ) -> Result<nostr_sdk::prelude::EventId> {
+        let builder = self.wire.encode(ev)?;
+        self.transport.publish_signed_checked(builder, keys).await
+    }
+
+    /// Read an event back by id to confirm it is actually retrievable from the
+    /// relay (reads on relay29's `closed`+`public` groups are open, so this works
+    /// on the daemon's non-member connection). Returns `true` iff the relay
+    /// returned the event within `timeout`.
+    pub async fn is_retrievable(
+        &self,
+        id: nostr_sdk::prelude::EventId,
+        timeout: std::time::Duration,
+    ) -> bool {
+        use nostr_sdk::prelude::Filter;
+        let f = Filter::new().id(id).limit(1);
+        self.transport
+            .fetch(f, timeout)
+            .await
+            .map(|evs| !evs.is_empty())
+            .unwrap_or(false)
+    }
+
     /// Publish a mention that the daemon is emitting on behalf of `suppress_for`'s
     /// OWN session (a local user-prompt), pre-recording it as seen for that agent
     /// BEFORE the wire send so its relay echo is never routed back into that
@@ -201,7 +232,11 @@ impl Kind1Nip29Provider {
         let publish = async {
             let builder = EventBuilder::new(Kind::from(1u16), format!("tenex-edge doctor {t}"))
                 .tags([Tag::parse(["h", &t])?]);
-            self.transport.publish_builder(builder).await
+            // Checked: assert the relay actually returned OK,true. The bare
+            // publish reported a write-side ack, so a NIP-29 relay rejecting the
+            // throwaway `#h` group still printed "publish: OK" — a false positive
+            // that masked the very failure this probe exists to catch.
+            self.transport.publish_builder_checked(builder).await
         }
         .await;
         let publish = match publish {
@@ -259,7 +294,7 @@ impl Kind1Nip29Provider {
             let keys = user_keys.clone();
             async move {
                 match transport.publish_signed_checked(builder, &keys).await {
-                    Ok(()) => true,
+                    Ok(_) => true,
                     Err(e) => {
                         let benign = {
                             let s = e.to_string();

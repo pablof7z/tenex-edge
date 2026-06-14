@@ -101,13 +101,14 @@ fn who_snapshot_merges_local_and_peer_sessions() {
 
     let once = strip_ansi(&render_who_once(&snapshot));
     assert!(once.starts_with("proj\n\n"));
+    // Host is shown for every agent now, including same-machine sessions.
     assert!(once.contains(&format!(
-        "coder [session {}] - idle",
+        "coder [session {}] (laptop) - idle",
         session_short_code("local-session")
     )));
     assert!(once.contains("coder"));
-    // The remote tag shows the actual hostname only for the genuine remote.
-    assert!(once.contains("(tower)"));
+    // The genuine remote is flagged `, remote` next to its hostname.
+    assert!(once.contains("(tower, remote)"));
 }
 
 #[test]
@@ -199,8 +200,8 @@ fn same_host_peer_is_not_remote() {
     assert_eq!(sib.rel_cwd, "worktree1");
     let once = strip_ansi(&render_who_once(&snap));
     assert!(
-        !once.contains("(laptop)"),
-        "no remote tag for same-host peer"
+        once.contains("(laptop)") && !once.contains("(laptop, remote)"),
+        "same-host peer shows its host with no remote flag"
     );
     assert!(once.contains("[worktree1]"), "rel_cwd shown in bracket");
 }
@@ -215,7 +216,10 @@ fn root_rel_cwd_has_no_bracket() {
     let snap = load_who_snapshot(&store, Some("proj"), false, 1_000, "laptop").unwrap();
     let once = strip_ansi(&render_who_once(&snap));
     assert!(!once.contains("[.]"), "root cwd must not render a bracket");
-    assert!(once.contains("(tower)"), "remote peer shows hostname");
+    assert!(
+        once.contains("(tower, remote)"),
+        "remote peer shows hostname with remote flag"
+    );
 }
 
 #[test]
@@ -265,7 +269,10 @@ fn who_renderer_summarizes_other_projects() {
     let snap = load_who_snapshot(&store, Some("proj"), false, 1_000, "laptop").unwrap();
     let once = strip_ansi(&render_who_once(&snap));
 
-    assert!(once.contains(&format!("a [session {}] - idle", session_short_code("s1"))));
+    assert!(once.contains(&format!(
+        "a [session {}] (laptop) - idle",
+        session_short_code("s1")
+    )));
     assert!(once.contains("1 other agent(s) in other projects:"));
     assert!(once.contains("  * other - Other work"));
 }
@@ -295,7 +302,7 @@ fn who_all_projects_includes_project_in_agent_names() {
     let once = strip_ansi(&render_who_once(&snapshot));
     assert!(once.starts_with("all projects\n\n"));
     assert!(once.contains(&format!(
-        "reviewer@other [session {}] - idle",
+        "reviewer@other [session {}] (tower) - idle",
         session_short_code("remote-session")
     )));
 }

@@ -90,6 +90,31 @@ fn scrub_unsigned(unsigned: &mut UnsignedEvent) {
     }
 }
 
+// ── relay-ack assertion ─────────────────────────────────────────────────────
+
+/// Fail unless at least one relay accepted the publish. `nostr-sdk`'s
+/// `send_event*` resolves `Ok` as long as the message was transmitted; the
+/// actual NIP-01 `["OK", id, true|false, reason]` verdict per relay lives in
+/// `output.success` / `output.failed`. An empty `success` set means every relay
+/// rejected the event (or the connection timed out before any OK arrived), so a
+/// caller reporting "published" off the bare `Ok` would be lying. This converts
+/// that into a hard error carrying the relay's stated reason.
+fn assert_relay_accepted(output: &Output<EventId>) -> Result<()> {
+    if !output.success.is_empty() {
+        return Ok(());
+    }
+    let reasons: Vec<String> = output
+        .failed
+        .values()
+        .filter(|r| !r.is_empty())
+        .cloned()
+        .collect();
+    if reasons.is_empty() {
+        anyhow::bail!("no relay accepted the event (timeout or no OK received)");
+    }
+    anyhow::bail!("relay rejected event: {}", reasons.join("; "));
+}
+
 // ── Transport ─────────────────────────────────────────────────────────────────
 
 impl Transport {
@@ -127,6 +152,22 @@ impl Transport {
         Ok(out.val)
     }
 
+    /// Like [`publish_builder`], but FAILS when no relay accepted the event.
+    /// `send_event_builder` resolves `Ok` even when every relay rejected (the
+    /// per-relay verdict lives in `success`/`failed`), so the bare
+    /// [`publish_builder`] reports an optimistic write-side ack rather than a
+    /// confirmed NIP-01 `OK,true`. Use this whenever a green result must mean the
+    /// relay actually stored the event.
+    pub async fn publish_builder_checked(&self, builder: EventBuilder) -> Result<EventId> {
+        let out = self
+            .client
+            .send_event_builder(builder)
+            .await
+            .context("publishing event")?;
+        assert_relay_accepted(&out)?;
+        Ok(out.val)
+    }
+
     /// Sign with a SPECIFIC agent's keys, then publish over this (shared)
     /// connection. The per-machine daemon hosts several agent identities on one
     /// relay connection; each outgoing event must carry its true author's
@@ -145,13 +186,18 @@ impl Transport {
         Ok(out.val)
     }
 
-    /// Like [`publish_signed`], but FAILS when no relay accepted the event.
-    /// `send_event` resolves `Ok` even when every relay rejected (e.g. NIP-29
-    /// `blocked` / `rate-limited`), reporting per-relay outcomes in `failed`.
-    /// Callers that gate persistent state on a publish actually landing (NIP-29
-    /// group create/membership) need that distinction, so this surfaces the
-    /// relay's rejection reason as an error instead of swallowing it.
-    pub async fn publish_signed_checked(&self, builder: EventBuilder, keys: &Keys) -> Result<()> {
+    /// Like [`publish_signed`], but FAILS when no relay accepted the event and
+    /// returns the published [`EventId`] on success. `send_event` resolves `Ok`
+    /// even when every relay rejected (e.g. NIP-29 `blocked` / `rate-limited`),
+    /// reporting per-relay outcomes in `failed`. Callers that gate persistent
+    /// state on a publish actually landing (NIP-29 group create/membership,
+    /// long-form proposals) need that distinction, so this surfaces the relay's
+    /// rejection reason as an error instead of swallowing it.
+    pub async fn publish_signed_checked(
+        &self,
+        builder: EventBuilder,
+        keys: &Keys,
+    ) -> Result<EventId> {
         let mut unsigned = builder.build(keys.public_key());
         scrub_unsigned(&mut unsigned);
         let signed = keys.sign_event(unsigned).await.context("signing event")?;
@@ -160,11 +206,8 @@ impl Transport {
             .send_event(&signed)
             .await
             .context("publishing signed event")?;
-        if out.success.is_empty() {
-            let reasons: Vec<String> = out.failed.values().cloned().collect();
-            anyhow::bail!("relay rejected event: {}", reasons.join("; "));
-        }
-        Ok(())
+        assert_relay_accepted(&out)?;
+        Ok(out.val)
     }
 
     /// Sign `builder` with `keys` and return the signed event WITHOUT publishing.

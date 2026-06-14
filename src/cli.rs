@@ -505,6 +505,20 @@ async fn propose(
     let title_echo = v["title"].as_str().unwrap_or(&title);
     let d_tag = v["d_tag"].as_str().unwrap_or("?");
     println!("published proposal {} ({})", title_echo, d_tag);
+    // The relay accepted the write (or rpc_propose would have errored), but
+    // confirm it's actually retrievable. A false here means the relay ACKed then
+    // dropped the event — warn loudly so a green publish isn't mistaken for one
+    // that landed.
+    if v.get("retrievable").is_some() && !v["retrievable"].as_bool().unwrap_or(true) {
+        let eid = v["event_id"].as_str().unwrap_or("?");
+        eprintln!(
+            "{} proposal {} accepted by the relay but NOT retrievable on read-back \
+             (event {}). It may not be stored — verify with `tenex-edge doctor`.",
+            "warning:".yellow(),
+            d_tag,
+            &eid[..eid.len().min(8)],
+        );
+    }
     Ok(())
 }
 
@@ -1015,12 +1029,13 @@ fn render_who_row(out: &mut String, row: &WhoRow, include_project: bool) {
     } else {
         format!(" {}", "(stale)".dimmed())
     };
-    // §8e: same-machine agents get NO annotation; a true remote (peer on
-    // a different host than the daemon) gets ` (remote)`.
-    let remote = if row.remote {
-        format!(" {}", "(remote)".dimmed())
+    // Always show which host the agent runs on. Same-machine agents get a plain
+    // `(hostname)`; a true remote (peer on a different host than the daemon) is
+    // flagged `(hostname, remote)` so cross-machine sessions stay distinguishable.
+    let host = if row.remote {
+        format!(" {}", format!("({}, remote)", row.host).dimmed())
     } else {
-        String::new()
+        format!(" {}", format!("({})", row.host).dimmed())
     };
     let dir = rel_cwd_bracket(&row.rel_cwd)
         .map(|d| format!(" {}", format!("[{d}]").dimmed()))
@@ -1036,7 +1051,7 @@ fn render_who_row(out: &mut String, row: &WhoRow, include_project: bool) {
         name,
         session_short_code(&row.session_id).yellow(),
         dir,
-        remote,
+        host,
         stale,
         status_colored(&row.status, row.active),
     );
@@ -1288,13 +1303,14 @@ mod who_tests {
 
         let once = strip_ansi(&render_who_once(&snapshot));
         assert!(once.starts_with("proj\n\n"));
+        // Host is shown for every agent now, including same-machine sessions.
         assert!(once.contains(&format!(
-            "coder [session {}] - idle",
+            "coder [session {}] (laptop) - idle",
             session_short_code("local-session")
         )));
         assert!(once.contains("coder"));
-        // The remote tag appears only for the genuine remote.
-        assert!(once.contains("(remote)"));
+        // The genuine remote is flagged `, remote` next to its hostname.
+        assert!(once.contains("(tower, remote)"));
     }
 
     #[test]
@@ -1310,7 +1326,10 @@ mod who_tests {
         assert!(!sib.remote, "same-host peer must not be remote");
         assert_eq!(sib.rel_cwd, "worktree1");
         let once = strip_ansi(&render_who_once(&snap));
-        assert!(!once.contains("(remote)"), "no remote tag for same-host peer");
+        assert!(
+            once.contains("(laptop)") && !once.contains("(laptop, remote)"),
+            "same-host peer shows its host with no remote flag"
+        );
         assert!(once.contains("[worktree1]"), "rel_cwd shown in bracket");
     }
 
@@ -1324,7 +1343,7 @@ mod who_tests {
         let snap = load_who_snapshot(&store, Some("proj"), false, 1_000, "laptop").unwrap();
         let once = strip_ansi(&render_who_once(&snap));
         assert!(!once.contains("[.]"), "root cwd must not render a bracket");
-        assert!(once.contains("(remote)"));
+        assert!(once.contains("(tower, remote)"));
     }
 
     #[test]
@@ -1373,7 +1392,10 @@ mod who_tests {
         let snap = load_who_snapshot(&store, Some("proj"), false, 1_000, "laptop").unwrap();
         let once = strip_ansi(&render_who_once(&snap));
 
-        assert!(once.contains(&format!("a [session {}] - idle", session_short_code("s1"))));
+        assert!(once.contains(&format!(
+            "a [session {}] (laptop) - idle",
+            session_short_code("s1")
+        )));
         assert!(once.contains("1 other agent(s) in other projects:"));
         assert!(once.contains("  * other - Other work"));
     }
@@ -1404,7 +1426,7 @@ mod who_tests {
         let once = strip_ansi(&render_who_once(&snapshot));
         assert!(once.starts_with("all projects\n\n"));
         assert!(once.contains(&format!(
-            "reviewer@other [session {}] - idle",
+            "reviewer@other [session {}] (tower) - idle",
             session_short_code("remote-session")
         )));
     }
@@ -1820,7 +1842,12 @@ fn render_who_plain(snapshot: &WhoSnapshot) -> String {
     let _ = writeln!(out, "agents:");
     for row in &snapshot.rows {
         let stale = if row.fresh { "" } else { " (stale)" };
-        let remote = if row.remote { " (remote)" } else { "" };
+        // Always show the host; flag cross-machine peers with `, remote`.
+        let host = if row.remote {
+            format!(" ({}, remote)", row.host)
+        } else {
+            format!(" ({})", row.host)
+        };
         let dir = rel_cwd_bracket(&row.rel_cwd)
             .map(|d| format!(" [{d}]"))
             .unwrap_or_default();
@@ -1831,7 +1858,7 @@ fn render_who_plain(snapshot: &WhoSnapshot) -> String {
             row.project,
             pubkey_short(&row.session_id),
             dir,
-            remote,
+            host,
             stale,
         );
         let _ = writeln!(out, "      {}", status_plain(&row.status, row.active));

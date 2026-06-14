@@ -10,11 +10,15 @@ use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
 pub const DEFAULT_RELAY: &str = "wss://nip29.f7z.io";
+pub const DEFAULT_INDEXER_RELAY: &str = "wss://purplepag.es";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
     pub whitelisted_pubkeys: Vec<String>,
     pub relays: Vec<String>,
+    /// Indexer relay for kind:0 profile discovery (default: purplepag.es).
+    /// Receives all kind:0 publishes and is queried for profile lookups.
+    pub indexer_relay: String,
     /// Host label published on the agent's profile (M1 §3 `host` tag).
     pub host: String,
     /// Human user's Nostr secret key (bech32 nsec or hex). Used to publish
@@ -30,6 +34,9 @@ struct RawConfig {
     whitelisted_pubkeys: Vec<String>,
     #[serde(default)]
     relays: Vec<String>,
+    /// Indexer relay for kind:0 profile publishing and lookup. Defaults to purplepag.es.
+    #[serde(default, rename = "indexerRelay")]
+    indexer_relay: Option<String>,
     #[serde(default, rename = "backendName")]
     backend_name: Option<String>,
     #[serde(default, rename = "userNsec")]
@@ -52,9 +59,14 @@ impl Config {
             .backend_name
             .filter(|s| !s.trim().is_empty())
             .unwrap_or_else(|| fallback_host.to_string());
+        let indexer_relay = raw
+            .indexer_relay
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| DEFAULT_INDEXER_RELAY.to_string());
         Ok(Config {
             whitelisted_pubkeys: raw.whitelisted_pubkeys,
             relays,
+            indexer_relay,
             host,
             user_nsec: raw.user_nsec.or(raw.tenex_private_key),
         })
@@ -146,6 +158,7 @@ mod tests {
         assert_eq!(c.whitelisted_pubkeys, vec!["aa", "bb"]);
         assert_eq!(c.host, "pablos' laptop");
         assert_eq!(c.relays, vec![DEFAULT_RELAY]); // defaulted
+        assert_eq!(c.indexer_relay, DEFAULT_INDEXER_RELAY); // defaulted
     }
 
     #[test]
@@ -155,6 +168,14 @@ mod tests {
         assert_eq!(c.relays, vec!["wss://r1", "wss://r2"]);
         assert_eq!(c.host, "fallback-host");
         assert!(c.whitelisted_pubkeys.is_empty());
+        assert_eq!(c.indexer_relay, DEFAULT_INDEXER_RELAY);
+    }
+
+    #[test]
+    fn custom_indexer_relay() {
+        let json = r#"{"indexerRelay":"wss://my-indexer.example"}"#;
+        let c = Config::from_json_str(json, "host").unwrap();
+        assert_eq!(c.indexer_relay, "wss://my-indexer.example");
     }
 
     #[test]
