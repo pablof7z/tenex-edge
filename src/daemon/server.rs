@@ -378,6 +378,8 @@ async fn dispatch(state: &Arc<DaemonState>, req: &Request) -> Response {
         "tmux_send" => tmux_rpc::rpc_tmux_send(state, &req.params).await,
         "tmux_spawn" => tmux_rpc::rpc_tmux_spawn(state, &req.params).await,
         "tmux_attach" => tmux_rpc::rpc_tmux_attach(state, &req.params),
+        "tmux_resume" => tmux_rpc::rpc_tmux_resume(state, &req.params).await,
+        "tmux_resumable" => tmux_rpc::rpc_tmux_resumable(state),
         other => Err(anyhow::anyhow!("unknown method {other}")),
     };
     match result {
@@ -492,6 +494,11 @@ struct SessionStartParams {
     /// Value of $TMUX (socket path, session id, pane id). Used in meta JSON.
     #[serde(default)]
     tmux_socket: Option<String>,
+    /// Harness-native resume token, supplied explicitly by programmatic hosts
+    /// (opencode forwards its `ses_*` id here). For claude-code/codex this is
+    /// absent — their adopted `session_id` IS the resume token (see below).
+    #[serde(default)]
+    resume_id: Option<String>,
 }
 
 async fn rpc_session_start(
@@ -509,7 +516,16 @@ async fn rpc_session_start(
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
     let project = crate::project::resolve(&cwd);
     let rel_cwd = crate::project::rel_cwd(&cwd);
+    // A harness-supplied id IS the resume token (claude-code/codex adopt their
+    // own native id). A generated id (opencode) is our synthetic identity, NOT a
+    // resume token — those hosts forward their real one in `resume_id`.
+    let harness_supplied_id = p.session_id.is_some();
     let session_id = p.session_id.unwrap_or_else(gen_session_id);
+    let resume_token: Option<String> = p
+        .resume_id
+        .clone()
+        .filter(|s| !s.is_empty())
+        .or_else(|| harness_supplied_id.then(|| session_id.clone()));
 
     // A new session arriving on the SAME watched pid (same agent/project/host)
     // means the harness restarted/cleared without a session-end: kill the stale
@@ -550,6 +566,11 @@ async fn rpc_session_start(
         })
         .ok();
         s.touch_session(&session_id, now_secs()).ok();
+        // Persist the resume token (no-op when None/empty). Survives the session
+        // going dead, so a later `tmux resume` can reconstitute the harness.
+        if let Some(ref rt) = resume_token {
+            s.set_session_resume_id(&session_id, rt).ok();
+        }
         // Record the absolute path for this project so the tmux spawn command
         // can cd to it.
         s.upsert_project_path(&project, &cwd.to_string_lossy(), now_secs())

@@ -9,6 +9,7 @@ pub(super) async fn tmux_run(action: TmuxAction) -> Result<()> {
         TmuxAction::Send { session } => tmux_send(session).await,
         TmuxAction::Spawn { agent, project } => tmux_spawn(agent, project).await,
         TmuxAction::Attach { session } => tmux_attach(session).await,
+        TmuxAction::Resume { session } => tmux_resume(session).await,
     }
 }
 
@@ -87,6 +88,64 @@ async fn tmux_attach(session: String) -> Result<()> {
     attach_session(&session)
 }
 
+// ── resume ────────────────────────────────────────────────────────────────────
+
+async fn tmux_resume(session: String) -> Result<()> {
+    let pane = resume_to_pane(&session)?;
+    match pane {
+        Some(pane_id) => attach_pane(&pane_id),
+        None => Ok(()),
+    }
+}
+
+/// Session id of the currently-selected row IF it is resumable — any local Live
+/// row (attachable or not: an in-tmux session can still be replayed) or any
+/// Resumable row. `None` for Spawnable rows. The daemon makes the final call on
+/// whether a token exists; this just maps cursor → session id.
+fn selected_resume_sid(data: &TuiData, selected: usize) -> Option<String> {
+    if selected < data.live.len() {
+        return Some(data.live[selected].session_id.clone());
+    }
+    let resume_base = data.live.len() + data.spawnable.len();
+    if selected >= resume_base {
+        return data
+            .resumable
+            .get(selected - resume_base)
+            .map(|r| r.session_id.clone());
+    }
+    None
+}
+
+/// TUI variant: resume `session`, returning the new pane id or an `Err(message)`
+/// suitable for the status line (never writes to stderr, which raw mode mangles).
+fn resume_in_tui(session: &str) -> std::result::Result<String, String> {
+    let v = crate::daemon::blocking::call("tmux_resume", serde_json::json!({ "session": session }))
+        .map_err(|e| format!("Resume failed: {e}"))?;
+    match v["pane_id"].as_str() {
+        Some(p) => Ok(p.to_string()),
+        None => Err(format!(
+            "Cannot resume: {}",
+            v["error"].as_str().unwrap_or("unknown error")
+        )),
+    }
+}
+
+/// Ask the daemon to resume `session`, returning the new pane id (or `None`,
+/// after printing the error). Shared by the CLI verb and the TUI.
+fn resume_to_pane(session: &str) -> Result<Option<String>> {
+    let v =
+        crate::daemon::blocking::call("tmux_resume", serde_json::json!({ "session": session }))
+            .context("tmux_resume RPC")?;
+    match v["pane_id"].as_str() {
+        Some(p) => Ok(Some(p.to_string())),
+        None => {
+            let err = v["error"].as_str().unwrap_or("unknown error");
+            eprintln!("Cannot resume: {err}");
+            Ok(None)
+        }
+    }
+}
+
 // ── shared attach logic ───────────────────────────────────────────────────────
 
 fn attach_session(session_id: &str) -> Result<()> {
@@ -140,9 +199,18 @@ struct SpawnRow {
     command: String,
 }
 
+struct ResumeRow {
+    slug: String,
+    session_id: String,    // full raw id for RPC calls
+    session_short: String, // short display code (6 chars)
+    title: String,
+    alive: bool,
+}
+
 struct TuiData {
     live: Vec<LiveRow>,
     spawnable: Vec<SpawnRow>,
+    resumable: Vec<ResumeRow>,
 }
 
 fn fetch_tui_data() -> Result<TuiData> {
@@ -188,7 +256,31 @@ fn fetch_tui_data() -> Result<TuiData> {
         })
         .collect();
 
-    Ok(TuiData { live, spawnable })
+    // Resumable (dead, but replayable) sessions come from a dedicated RPC.
+    // Fail soft: an older daemon without it just yields an empty section.
+    let resumable = crate::daemon::blocking::call("tmux_resumable", serde_json::json!({}))
+        .ok()
+        .and_then(|rv| rv["resumable"].as_array().cloned())
+        .unwrap_or_default()
+        .iter()
+        .map(|r| {
+            let raw_id = r["session_id"].as_str().unwrap_or("").to_string();
+            let session_short = SessionId::from(raw_id.as_str()).to_string();
+            ResumeRow {
+                slug: r["slug"].as_str().unwrap_or("").to_string(),
+                session_id: raw_id,
+                session_short,
+                title: r["title"].as_str().unwrap_or("").to_string(),
+                alive: r["alive"].as_bool().unwrap_or(false),
+            }
+        })
+        .collect();
+
+    Ok(TuiData {
+        live,
+        spawnable,
+        resumable,
+    })
 }
 
 enum TuiExit {
@@ -197,20 +289,24 @@ enum TuiExit {
     AttachPane(String), // direct pane_id (used after spawn)
 }
 
-fn draw_tui(data: &TuiData, selected: usize, status: &str) -> Result<()> {
+fn draw_tui(data: &TuiData, selected: usize, status: &str, scroll: &mut usize) -> Result<()> {
     use owo_colors::OwoColorize as _;
 
-    let mut out = String::new();
-    let _ = writeln!(out, "{}", "tenex-edge tmux".bold());
-    let _ = writeln!(out, "{}", "─".repeat(60).dimmed());
-    let _ = writeln!(out);
+    // Build the scrollable body as a flat list of lines, recording which line
+    // holds the selected row so the viewport can keep it visible.
+    let mut body: Vec<String> = Vec::new();
+    let mut sel_line: Option<usize> = None;
 
-    let _ = writeln!(out, "  {}", "Live sessions".bold());
+    body.push(format!("  {}", "Live sessions".bold()));
     if data.live.is_empty() {
-        let _ = writeln!(out, "    {}", "(none)".dimmed());
+        body.push(format!("    {}", "(none)".dimmed()));
     } else {
         for (i, row) in data.live.iter().enumerate() {
-            let cursor = if i == selected { "►" } else { " " };
+            let is_sel = i == selected;
+            if is_sel {
+                sel_line = Some(body.len());
+            }
+            let cursor = if is_sel { "►" } else { " " };
             let label = format!("{}@{}", row.slug, row.host);
             let session_tag = format!("[session {}]", row.session_short);
             let status_str = if row.status.trim().is_empty() {
@@ -219,61 +315,144 @@ fn draw_tui(data: &TuiData, selected: usize, status: &str) -> Result<()> {
                 row.status.trim().to_string()
             };
             if !row.attachable {
-                // Not running in tmux — show dimmed with [no tmux] marker.
-                let _ = writeln!(
-                    out,
+                body.push(format!(
                     "  {} {}  {}  {} {}",
                     cursor,
                     label.dimmed(),
                     session_tag.dimmed(),
                     status_str.dimmed(),
                     "[no tmux]".dimmed(),
-                );
-            } else if i == selected {
-                let _ = writeln!(
-                    out,
+                ));
+            } else if is_sel {
+                body.push(format!(
                     "  {} {}  {}  {}",
                     cursor,
                     label.cyan().bold(),
                     session_tag.yellow(),
                     status_str,
-                );
+                ));
             } else {
-                let _ = writeln!(
-                    out,
+                body.push(format!(
                     "  {} {}  {}  {}",
                     cursor,
                     label.cyan(),
                     session_tag.yellow(),
                     status_str.dimmed(),
-                );
+                ));
             }
         }
     }
 
-    let _ = writeln!(out);
-    let _ = writeln!(out, "  {}", "Spawnable (no session)".bold());
+    body.push(String::new());
+    body.push(format!("  {}", "Spawnable (no session)".bold()));
     if data.spawnable.is_empty() {
-        let _ = writeln!(out, "    {}", "(none)".dimmed());
+        body.push(format!("    {}", "(none)".dimmed()));
     } else {
         for (i, row) in data.spawnable.iter().enumerate() {
             let abs_idx = data.live.len() + i;
-            let cursor = if abs_idx == selected { "►" } else { " " };
+            let is_sel = abs_idx == selected;
+            if is_sel {
+                sel_line = Some(body.len());
+            }
+            let cursor = if is_sel { "►" } else { " " };
             let label = format!("{}@{}", row.slug, row.host);
             let tag = format!("[spawnable via {}]", row.command);
-            if abs_idx == selected {
-                let _ = writeln!(out, "  {} {}  {}", cursor, label.bold(), tag.dimmed(),);
+            if is_sel {
+                body.push(format!("  {} {}  {}", cursor, label.bold(), tag.dimmed()));
             } else {
-                let _ = writeln!(out, "  {} {}  {}", cursor, label.dimmed(), tag.dimmed(),);
+                body.push(format!("  {} {}  {}", cursor, label.dimmed(), tag.dimmed()));
             }
         }
     }
 
+    body.push(String::new());
+    body.push(format!("  {}", "Resumable (no live pane)".bold()));
+    if data.resumable.is_empty() {
+        body.push(format!("    {}", "(none)".dimmed()));
+    } else {
+        for (i, row) in data.resumable.iter().enumerate() {
+            let abs_idx = data.live.len() + data.spawnable.len() + i;
+            let is_sel = abs_idx == selected;
+            if is_sel {
+                sel_line = Some(body.len());
+            }
+            let cursor = if is_sel { "►" } else { " " };
+            let label = row.slug.clone();
+            let session_tag = format!("[session {}]", row.session_short);
+            let state_tag = if row.alive { "[stale pane]" } else { "[exited]" };
+            let title = if row.title.trim().is_empty() {
+                String::new()
+            } else {
+                row.title.trim().to_string()
+            };
+            if is_sel {
+                body.push(format!(
+                    "  {} {}  {}  {} {}",
+                    cursor,
+                    label.magenta().bold(),
+                    session_tag.yellow(),
+                    title,
+                    state_tag.dimmed(),
+                ));
+            } else {
+                body.push(format!(
+                    "  {} {}  {}  {} {}",
+                    cursor,
+                    label.magenta(),
+                    session_tag.dimmed(),
+                    title.dimmed(),
+                    state_tag.dimmed(),
+                ));
+            }
+        }
+    }
+
+    // Viewport math: fixed chrome is title+rule+blank (top, 3 lines) and
+    // blank+help+optional-status (bottom). The body scrolls within the rest.
+    let (_, term_rows) = terminal::size().unwrap_or((80, 24));
+    let top_chrome = 3usize;
+    let bottom_chrome = if status.is_empty() { 2 } else { 3 };
+    let viewport = (term_rows as usize)
+        .saturating_sub(top_chrome + bottom_chrome)
+        .max(1);
+
+    // Keep the selected line in view; clamp the offset to valid range.
+    if let Some(s) = sel_line {
+        if s < *scroll {
+            *scroll = s;
+        } else if s >= *scroll + viewport {
+            *scroll = s + 1 - viewport;
+        }
+    }
+    let max_scroll = body.len().saturating_sub(viewport);
+    if *scroll > max_scroll {
+        *scroll = max_scroll;
+    }
+    let end = (*scroll + viewport).min(body.len());
+
+    // Header line carries scroll affordances so the user knows there's more.
+    let above = *scroll;
+    let below = body.len().saturating_sub(end);
+    let mut more = String::new();
+    if above > 0 {
+        more.push_str(&format!("  ↑{above} more above"));
+    }
+    if below > 0 {
+        more.push_str(&format!("  ↓{below} more below"));
+    }
+
+    let mut out = String::new();
+    let _ = writeln!(out, "{}{}", "tenex-edge tmux".bold(), more.dimmed());
+    let _ = writeln!(out, "{}", "─".repeat(60).dimmed());
+    let _ = writeln!(out);
+    for line in &body[*scroll..end] {
+        let _ = writeln!(out, "{line}");
+    }
     let _ = writeln!(out);
     let _ = writeln!(
         out,
         "  {}",
-        "[↑↓/jk] move   [a/↵] attach   [n] spawn   [q] quit".dimmed()
+        "[↑↓/jk] move   [a/↵] attach   [n] spawn   [r] resume   [q] quit".dimmed()
     );
     if !status.is_empty() {
         let _ = writeln!(out, "  {status}");
@@ -302,14 +481,15 @@ pub(super) fn tmux_tui() -> Result<()> {
         let _terminal = TuiTerminal::enter()?;
         let mut next_refresh = Instant::now() + refresh;
         let mut result = TuiExit::Quit;
+        let mut scroll: usize = 0;
 
         loop {
-            let total = data.live.len() + data.spawnable.len();
+            let total = data.live.len() + data.spawnable.len() + data.resumable.len();
             if total > 0 && selected >= total {
                 selected = total - 1;
             }
 
-            draw_tui(&data, selected, &status_msg)?;
+            draw_tui(&data, selected, &status_msg, &mut scroll)?;
 
             let wait = next_refresh
                 .saturating_duration_since(Instant::now())
@@ -332,19 +512,56 @@ pub(super) fn tmux_tui() -> Result<()> {
                             }
                             status_msg.clear();
                         }
+                        // Enter / a: attach if the row has a live tmux pane,
+                        // otherwise resume it (a local session not in tmux is
+                        // still replayable). Spawnables hint to use 'n'.
                         KeyCode::Enter | KeyCode::Char('a') => {
-                            if selected < data.live.len() {
-                                let row = &data.live[selected];
-                                if row.attachable {
-                                    result = TuiExit::Attach(row.session_id.clone());
-                                    break;
-                                } else {
-                                    status_msg =
-                                        "Session not running in tmux — cannot attach.".to_string();
+                            if selected < data.live.len() && data.live[selected].attachable {
+                                result = TuiExit::Attach(data.live[selected].session_id.clone());
+                                break;
+                            }
+                            match selected_resume_sid(&data, selected) {
+                                Some(sid) => {
+                                    status_msg = "Resuming...".to_string();
+                                    draw_tui(&data, selected, &status_msg, &mut scroll)?;
+                                    match resume_in_tui(&sid) {
+                                        Ok(pane) => {
+                                            result = TuiExit::AttachPane(pane);
+                                            break;
+                                        }
+                                        Err(msg) => {
+                                            status_msg = msg;
+                                            if let Ok(fresh) = fetch_tui_data() {
+                                                data = fresh;
+                                            }
+                                            next_refresh = Instant::now() + refresh;
+                                        }
+                                    }
                                 }
-                            } else {
-                                // Selected item is a spawnable — hint to use 'n'.
-                                status_msg = "Press [n] to spawn this agent.".to_string();
+                                None => {
+                                    status_msg = "Press [n] to spawn this agent.".to_string();
+                                }
+                            }
+                        }
+                        // r: resume the selected session — works on any local
+                        // Live row (incl. [no tmux]) and any Resumable row.
+                        KeyCode::Char('r') => {
+                            if let Some(sid) = selected_resume_sid(&data, selected) {
+                                status_msg = "Resuming...".to_string();
+                                draw_tui(&data, selected, &status_msg, &mut scroll)?;
+                                match resume_in_tui(&sid) {
+                                    Ok(pane) => {
+                                        result = TuiExit::AttachPane(pane);
+                                        break;
+                                    }
+                                    Err(msg) => {
+                                        status_msg = msg;
+                                        if let Ok(fresh) = fetch_tui_data() {
+                                            data = fresh;
+                                        }
+                                        next_refresh = Instant::now() + refresh;
+                                    }
+                                }
                             }
                         }
                         KeyCode::Char('n') if selected >= data.live.len() => {
@@ -355,7 +572,7 @@ pub(super) fn tmux_tui() -> Result<()> {
                                     &std::env::current_dir().unwrap_or_default(),
                                 );
                                 status_msg = format!("Spawning {slug}...");
-                                draw_tui(&data, selected, &status_msg)?;
+                                draw_tui(&data, selected, &status_msg, &mut scroll)?;
                                 match crate::daemon::blocking::call(
                                     "tmux_spawn",
                                     serde_json::json!({
@@ -445,9 +662,13 @@ fn ensure_view_session(base: &str, window: &str) -> Option<String> {
     let view = format!("{base}-view-{}", std::process::id());
 
     // Create the grouped view session if it doesn't already exist (idempotent
-    // across attach/detach cycles within one client process).
+    // across attach/detach cycles within one client process). Silence stderr:
+    // `has-session` prints "can't find session: <view>" on the (expected) miss,
+    // which otherwise leaks alarming noise to the user's terminal.
     let exists = std::process::Command::new("tmux")
         .args(["has-session", "-t", &view])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .status()
         .map(|s| s.success())
         .unwrap_or(false);
@@ -460,9 +681,20 @@ fn ensure_view_session(base: &str, window: &str) -> Option<String> {
         if !created {
             return None;
         }
-        // Self-destruct the view once its client detaches.
+        // Self-destruct the view once its client detaches. We use a
+        // client-detached hook rather than `destroy-unattached on`: the latter
+        // reaps the session the instant it exists (it is created DETACHED, i.e.
+        // zero clients), so the subsequent select-window / attach would race and
+        // fail with "can't find session". The hook only fires on a real detach,
+        // so the view survives until we attach and is cleaned up afterward.
         let _ = std::process::Command::new("tmux")
-            .args(["set-option", "-t", &view, "destroy-unattached", "on"])
+            .args([
+                "set-hook",
+                "-t",
+                &view,
+                "client-detached",
+                &format!("kill-session -t {view}"),
+            ])
             .status();
     }
 
@@ -480,7 +712,7 @@ fn attach_pane(pane_id: &str) -> Result<()> {
     // raw pane id if resolution fails (e.g. tmux listing changed underneath us).
     let location = resolve_pane_location(pane_id);
 
-    let in_tmux = std::env::var("TMUX").is_ok();
+    let in_tmux = std::env::var("TMUX").map(|v| !v.is_empty()).unwrap_or(false);
     if in_tmux {
         // Point THIS client at its own grouped view of the target window, so it
         // doesn't mirror (or get mirrored by) other clients viewing the same

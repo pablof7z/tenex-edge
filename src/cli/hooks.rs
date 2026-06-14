@@ -143,6 +143,15 @@ pub(super) async fn hook_run(host_name: String, hook_type: String) -> Result<()>
             .map(str::to_string)
     });
 
+    // Harness-native resume token, forwarded by programmatic hosts whose
+    // assigned id differs from our identity (opencode → `ses_*`). claude-code /
+    // codex omit it: their adopted `session_id` is already the resume token.
+    let resume_id: Option<String> = obj
+        .and_then(|o| o.get("resume_id"))
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+
     match hook_type.as_str() {
         "session-start" => {
             // PID to watch: an explicit `pid`/`watch_pid` in the payload (set by
@@ -162,11 +171,12 @@ pub(super) async fn hook_run(host_name: String, hook_type: String) -> Result<()>
                 }
                 // Programmatic host with no id of its own: generate one and hand
                 // it back on stdout so the caller can adopt it.
-                let new_sid = session_start_inner(agent_slug, None, Some(cwd), watch_pid)?;
+                let new_sid =
+                    session_start_inner(agent_slug, None, Some(cwd), watch_pid, resume_id)?;
                 println!("{new_sid}");
             } else {
                 // Harness supplied its own id — adopt it, discard the echo.
-                session_start_inner(agent_slug, Some(sid), Some(cwd), watch_pid)?;
+                session_start_inner(agent_slug, Some(sid), Some(cwd), watch_pid, resume_id)?;
             }
         }
         "session-end" => {
@@ -194,6 +204,7 @@ pub(super) async fn hook_run(host_name: String, hook_type: String) -> Result<()>
                     Some(sid.clone()),
                     Some(cwd.clone()),
                     watch_pid,
+                    resume_id.clone(),
                 ) {
                     eprintln!("[tenex-edge] session reassert skipped: {e:#}");
                 }

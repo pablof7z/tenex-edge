@@ -2,17 +2,18 @@
 title: Tenex-Edge TMUX Adapter
 slug: tenex-edge-tmux-adapter
 topic: tenex-edge
-summary: The TMUX adapter injects into and controls the agent loop via TMUX, enabling creation of new sessions and supporting harnesses that do not support channels.
+summary: A Fable agent is used to plan the TMUX adapter product for tenex-edge
 tags:
   - capture
 volatility: warm
 confidence: medium
 created: 2026-06-12
-updated: 2026-06-13
+updated: 2026-06-14
 verified: 2026-06-12
 compiled-from: conversation
 sources:
   - session:1562957b-67e8-4ac1-a48b-84e8ec1696bb
+  - session:9f7f245f-0fad-4211-a86b-95ea3cbb532e
 ---
 
 # Tenex-Edge TMUX Adapter
@@ -24,9 +25,9 @@ A Fable agent is used to plan the TMUX adapter product for tenex-edge. The TMUX 
 <!-- citations: [^15629-19] [^15629-4] [^15629-5] [^15629-12] [^15629-16] [^15629-21] [^15629-25] [^15629-33] [^15629-52] -->
 ## CLI Interface
 
-The TMUX adapter exposes four CLI verbs: `tmux status`, `tmux send`, `tmux spawn`, and `tmux attach`. The `tmux attach` command exec's `tmux` locally rather than calling a daemon RPC, allowing a user to attach from tenex-edge tmux to a remote tmux pane running an agent to view and interact with it directly.
+The TMUX adapter exposes four CLI verbs: `tmux status`, `tmux send`, `tmux spawn`, and `tmux attach`. The `tmux attach` command exec's `tmux` locally rather than calling a daemon RPC, allowing a user to attach from tenex-edge tmux to a remote tmux pane running an agent to view and interact with it directly. The per-client view session for attach uses a `client-detached` hook for cleanup instead of `destroy-unattached on`, preventing tmux from reaping the session before a client can attach.
 
-<!-- citations: [^15629-6] [^15629-26] -->
+<!-- citations: [^15629-6] [^15629-26] [^9f7f2-14] -->
 ## Session Tracking
 
 Session-start hooks capture `$TMUX_PANE` and `$TMUX` from the environment for free and write them to a `session_endpoints` table, requiring no new host wiring.
@@ -39,9 +40,9 @@ Spawning is data-driven via a `SpawnDef` table (similar to `HostDef`), creates a
 <!-- citations: [^15629-43] [^15629-8] [^15629-28] [^15629-34] [^15629-41] [^15629-47] [^15629-54] -->
 ## Cloud Code Resume
 
-Cloud Code refers to Claude Code in the CLI/TUI, not a browser-based web UI. For an idle Cloud Code session, a mention spawns a local terminal continuation using `claude --resume <id>` rather than injecting into the browser.
+Cloud Code refers to Claude Code in the CLI/TUI, not a browser-based web UI. Resuming a session runs the harness's resume command in a new tmux pane/window, preserving whatever harness config flags the session was originally launched with (e.g., `claude --dangerously-skip-permissions --resume <session-id>` or `codex --some-parameter resume <id>`). For an idle Cloud Code session, a mention spawns a local terminal continuation using `claude --resume <id>` rather than injecting into the browser.
 
-<!-- citations: [^15629-9] [^15629-17] -->
+<!-- citations: [^15629-9] [^15629-17] [^9f7f2-4] -->
 ## Rollout Stages
 
 The TMUX adapter rolls out in four independent stages: (1) observe-only capture, (2) injection, (3) spawn+routing, (4) Cloud Code resume templating. <!-- [^15629-10] -->

@@ -57,6 +57,20 @@ struct SpawnDef {
     spawn_prompt: Option<&'static str>,
 }
 
+/// How a harness's launch command is transformed into a *resume* invocation.
+/// The base command is the agent's configured launch command (e.g. `["claude",
+/// "--dangerously-skip-permissions"]`), so the user's own flags are preserved.
+#[derive(Clone, Copy)]
+enum ResumeShape {
+    /// Resume is a flag that composes with the launch flags: append `<flag> <id>`
+    /// to the base command. claude: `--resume`, opencode: `--session`.
+    AppendFlag(&'static str),
+    /// Resume is a subcommand that must follow the binary: insert `<sub> <id>`
+    /// right after argv[0], keeping the remaining launch flags after it. The
+    /// flags ride on the subcommand's own parser. codex: `resume`.
+    Subcommand(&'static str),
+}
+
 static SPAWN_DEFS: &[SpawnDef] = &[
     SpawnDef {
         slug: "claude",
@@ -80,6 +94,51 @@ static SPAWN_DEFS: &[SpawnDef] = &[
 
 fn find_spawn_def(slug: &str) -> Option<&'static SpawnDef> {
     SPAWN_DEFS.iter().find(|d| d.slug == slug)
+}
+
+/// The resume shape for a harness, keyed by the launch command's *binary* (not
+/// the agent slug): resume syntax is a property of the harness, and custom
+/// agents (e.g. `developer` → `claude --dangerously-skip-permissions`) share the
+/// underlying binary's resume convention. `bin` may be a path; the basename is
+/// matched. Returns `None` for binaries we don't know how to resume.
+fn resume_shape_for_bin(bin: &str) -> Option<ResumeShape> {
+    let name = std::path::Path::new(bin)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(bin);
+    match name {
+        "claude" => Some(ResumeShape::AppendFlag("--resume")),
+        "codex" => Some(ResumeShape::Subcommand("resume")),
+        "opencode" => Some(ResumeShape::AppendFlag("--session")),
+        _ => None,
+    }
+}
+
+/// Transform a base launch command into a resume invocation for `shape`.
+/// Pure (no I/O) so it is unit-tested directly.
+///
+///   AppendFlag("--resume"):  [claude, --flag]        → [claude, --flag, --resume, <id>]
+///   Subcommand("resume"):    [codex,  --flag]         → [codex, resume, <id>, --flag]
+fn build_resume_command(base: &[String], shape: ResumeShape, resume_id: &str) -> Vec<String> {
+    match shape {
+        ResumeShape::AppendFlag(flag) => {
+            let mut out = base.to_vec();
+            out.push(flag.to_string());
+            out.push(resume_id.to_string());
+            out
+        }
+        ResumeShape::Subcommand(sub) => {
+            let mut out = Vec::with_capacity(base.len() + 2);
+            let mut it = base.iter();
+            if let Some(bin) = it.next() {
+                out.push(bin.clone());
+            }
+            out.push(sub.to_string());
+            out.push(resume_id.to_string());
+            out.extend(it.cloned());
+            out
+        }
+    }
 }
 
 // ── spawnable-agents query ─────────────────────────────────────────────────
@@ -441,36 +500,25 @@ async fn ring_doorbells_inner(state: &Arc<DaemonState>) -> Result<()> {
 
 // ── spawn ─────────────────────────────────────────────────────────────────────
 
-/// Spawn a new tmux window running `slug`'s harness in `project`'s directory.
-/// Returns the new pane id (e.g. "%7") or an error.
-pub async fn spawn_agent(state: &Arc<DaemonState>, slug: &str, project: &str) -> Result<String> {
-    if !tmux_available() {
-        anyhow::bail!("tmux binary not found");
-    }
-
-    // Resolve the harness command: agent file takes priority, SPAWN_DEFS is the fallback.
+/// Resolve the harness launch command for `slug`: the agent file's `command`
+/// field takes priority, with SPAWN_DEFS as the fallback for agents that predate
+/// it. Errors when neither is available.
+fn resolve_agent_command(slug: &str) -> Result<Vec<String>> {
     let edge_home = crate::config::edge_home();
     let file_cmd = crate::identity::list_local_agents(&edge_home)
         .into_iter()
         .find(|(s, _)| s == slug)
         .and_then(|(_, cmd)| cmd.filter(|c| !c.is_empty()));
-    let agent_command: Vec<String> = file_cmd
+    file_cmd
         .or_else(|| {
             find_spawn_def(slug).map(|d| d.command.iter().map(|s| s.to_string()).collect())
         })
-        .with_context(|| format!("no harness command for agent {slug:?}: add a \"command\" field to ~/.tenex/edge/agents/{slug}.json"))?;
+        .with_context(|| format!("no harness command for agent {slug:?}: add a \"command\" field to ~/.tenex/edge/agents/{slug}.json"))
+}
 
-    let def = find_spawn_def(slug); // optional, for window_name / spawn_prompt defaults
-    let window_name_owned: String;
-    let window_name: &str = match def {
-        Some(d) => d.window_name,
-        None => {
-            window_name_owned = format!("{}·tenex-edge", slug);
-            &window_name_owned
-        }
-    };
-
-    let abs_path = state
+/// The absolute working directory for `project`, falling back to the daemon's cwd.
+fn project_abs_path(state: &Arc<DaemonState>, project: &str) -> String {
+    state
         .with_store(|s| s.get_project_path(project))
         .unwrap_or(None)
         .unwrap_or_else(|| {
@@ -478,8 +526,18 @@ pub async fn spawn_agent(state: &Arc<DaemonState>, slug: &str, project: &str) ->
                 .unwrap_or_default()
                 .to_string_lossy()
                 .to_string()
-        });
+        })
+}
 
+/// Create a detached tmux window in the shared `tenex` session running `command`
+/// in `abs_path`, tagged with the agent's identity env. Returns the new pane id.
+/// Shared by `spawn_agent` (cold start) and `resume_agent` (replay).
+async fn open_agent_window(
+    slug: &str,
+    window_name: &str,
+    abs_path: &str,
+    command: &[String],
+) -> Result<String> {
     // Ensure a "tenex" session exists (detached); create if absent.
     // Use list-sessions + exact string match to avoid tmux's prefix-matching
     // semantics for `-t`, which would treat "tenex-test" as a match for "tenex".
@@ -496,7 +554,7 @@ pub async fn spawn_agent(state: &Arc<DaemonState>, slug: &str, project: &str) ->
 
     if !session_exists {
         let _ = std::process::Command::new("tmux")
-            .args(["new-session", "-d", "-s", "tenex", "-c", &abs_path])
+            .args(["new-session", "-d", "-s", "tenex", "-c", abs_path])
             .status();
     }
 
@@ -519,7 +577,7 @@ pub async fn spawn_agent(state: &Arc<DaemonState>, slug: &str, project: &str) ->
         "-n",
         window_name,
         "-c",
-        &abs_path,
+        abs_path,
         "-e",
         "TENEX_EDGE_SPAWNED=1",
         "-e",
@@ -527,8 +585,22 @@ pub async fn spawn_agent(state: &Arc<DaemonState>, slug: &str, project: &str) ->
         "-PF",
         "#{pane_id}",
         "--",
+        // Sanitize the parent's Claude Code session identity before exec. The
+        // tmux SERVER's global environment can carry CLAUDE_CODE_SESSION_ID /
+        // CLAUDE_CODE_CHILD_SESSION (set whenever a `claude` ran under this
+        // server), and a new pane inherits it. Left intact, a freshly-spawned
+        // `claude` would adopt that foreign id — hijacking another session's
+        // transcript instead of starting its own (so its hook-reported id never
+        // gets a resumable transcript), and a `--resume <id>` launch would
+        // collide with the inherited id. `env -u` strips them; harmless for
+        // codex/opencode, which ignore these vars.
+        "env",
+        "-u",
+        "CLAUDE_CODE_SESSION_ID",
+        "-u",
+        "CLAUDE_CODE_CHILD_SESSION",
     ];
-    let cmd_strs: Vec<&str> = agent_command.iter().map(|s| s.as_str()).collect();
+    let cmd_strs: Vec<&str> = command.iter().map(|s| s.as_str()).collect();
     cmd_args.extend_from_slice(&cmd_strs);
 
     let out = tokio::process::Command::new("tmux")
@@ -542,10 +614,32 @@ pub async fn spawn_agent(state: &Arc<DaemonState>, slug: &str, project: &str) ->
         anyhow::bail!("tmux new-window failed: {stderr}");
     }
 
-    let pane_id = String::from_utf8(out.stdout)
+    Ok(String::from_utf8(out.stdout)
         .context("tmux new-window output")?
         .trim()
-        .to_string();
+        .to_string())
+}
+
+/// Spawn a new tmux window running `slug`'s harness in `project`'s directory.
+/// Returns the new pane id (e.g. "%7") or an error.
+pub async fn spawn_agent(state: &Arc<DaemonState>, slug: &str, project: &str) -> Result<String> {
+    if !tmux_available() {
+        anyhow::bail!("tmux binary not found");
+    }
+
+    let agent_command = resolve_agent_command(slug)?;
+    let def = find_spawn_def(slug); // optional, for window_name / spawn_prompt defaults
+    let window_name_owned: String;
+    let window_name: &str = match def {
+        Some(d) => d.window_name,
+        None => {
+            window_name_owned = format!("{}·tenex-edge", slug);
+            &window_name_owned
+        }
+    };
+
+    let abs_path = project_abs_path(state, project);
+    let pane_id = open_agent_window(slug, window_name, &abs_path, &agent_command).await?;
 
     // Register as a pending spawn so that when the harness fires its
     // `session-start` hook, `rpc_session_start` injects the actual prompt
@@ -559,6 +653,38 @@ pub async fn spawn_agent(state: &Arc<DaemonState>, slug: &str, project: &str) ->
     Ok(pane_id)
 }
 
+/// Resume a prior session by replaying its harness with the native resume token.
+/// Spawns a NEW tmux window running the agent's configured launch command,
+/// transformed into a resume invocation (`claude --resume <id>`, etc.). Unlike
+/// `spawn_agent`, NO first prompt is injected — the harness restores its own
+/// conversation. When the resumed harness fires `session-start` it re-registers
+/// the (same, for claude/codex) session id and a fresh pane endpoint, so the
+/// session comes back alive automatically. Returns the new pane id.
+pub async fn resume_agent(
+    state: &Arc<DaemonState>,
+    slug: &str,
+    project: &str,
+    resume_id: &str,
+) -> Result<String> {
+    if !tmux_available() {
+        anyhow::bail!("tmux binary not found");
+    }
+    if resume_id.is_empty() {
+        anyhow::bail!("session has no resume token (not resumable)");
+    }
+
+    let base = resolve_agent_command(slug)?;
+    let bin = base.first().map(String::as_str).unwrap_or("");
+    let shape = resume_shape_for_bin(bin).with_context(|| {
+        format!("don't know how to resume harness binary {bin:?} (agent {slug:?})")
+    })?;
+    let resume_command = build_resume_command(&base, shape, resume_id);
+
+    let window_name = format!("{slug}·resume");
+    let abs_path = project_abs_path(state, project);
+    open_agent_window(slug, &window_name, &abs_path, &resume_command).await
+}
+
 // ── status query ──────────────────────────────────────────────────────────────
 
 pub struct EndpointStatus {
@@ -568,6 +694,73 @@ pub struct EndpointStatus {
     pub alive: bool,
     pub registered_at: u64,
     pub last_verified: u64,
+}
+
+#[cfg(test)]
+mod resume_command_tests {
+    use super::*;
+
+    fn cmd(parts: &[&str]) -> Vec<String> {
+        parts.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn append_flag_preserves_user_launch_flags() {
+        // developer's real config: `claude --dangerously-skip-permissions`.
+        let base = cmd(&["claude", "--dangerously-skip-permissions"]);
+        let got = build_resume_command(&base, ResumeShape::AppendFlag("--resume"), "abc-123");
+        assert_eq!(
+            got,
+            cmd(&["claude", "--dangerously-skip-permissions", "--resume", "abc-123"])
+        );
+    }
+
+    #[test]
+    fn append_flag_bare_command() {
+        let got = build_resume_command(&cmd(&["opencode"]), ResumeShape::AppendFlag("--session"), "ses_x");
+        assert_eq!(got, cmd(&["opencode", "--session", "ses_x"]));
+    }
+
+    #[test]
+    fn subcommand_inserts_after_binary_and_keeps_flags() {
+        // codex resume is a subcommand: `codex resume <id> <flags>`.
+        let base = cmd(&["codex", "--dangerously-bypass-approvals-and-sandbox"]);
+        let got = build_resume_command(&base, ResumeShape::Subcommand("resume"), "uuid-9");
+        assert_eq!(
+            got,
+            cmd(&["codex", "resume", "uuid-9", "--dangerously-bypass-approvals-and-sandbox"])
+        );
+    }
+
+    #[test]
+    fn subcommand_bare_command() {
+        let got = build_resume_command(&cmd(&["codex"]), ResumeShape::Subcommand("resume"), "uuid-9");
+        assert_eq!(got, cmd(&["codex", "resume", "uuid-9"]));
+    }
+
+    #[test]
+    fn shape_is_keyed_by_binary_not_slug() {
+        // A custom agent slug ("developer") whose binary is claude must resolve
+        // via the binary — this is the bug found by actually resuming.
+        assert!(matches!(
+            resume_shape_for_bin("claude"),
+            Some(ResumeShape::AppendFlag("--resume"))
+        ));
+        assert!(matches!(
+            resume_shape_for_bin("codex"),
+            Some(ResumeShape::Subcommand("resume"))
+        ));
+        assert!(matches!(
+            resume_shape_for_bin("opencode"),
+            Some(ResumeShape::AppendFlag("--session"))
+        ));
+        // Path basename is matched, not the full path.
+        assert!(matches!(
+            resume_shape_for_bin("/opt/homebrew/bin/claude"),
+            Some(ResumeShape::AppendFlag("--resume"))
+        ));
+        assert!(resume_shape_for_bin("npx").is_none());
+    }
 }
 
 /// List all registered tmux endpoints with liveness.

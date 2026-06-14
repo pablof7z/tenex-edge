@@ -455,6 +455,15 @@ impl Store {
             "ALTER TABLE agent_status ADD COLUMN activity TEXT NOT NULL DEFAULT ''",
             [],
         );
+        // Harness-native resume token (e.g. the id `claude --resume <id>` /
+        // `codex resume <id>` / `opencode --session <id>` wants). For claude-code
+        // and codex this equals `session_id` (they assign their own id, which we
+        // adopt); for opencode it is the `ses_*` id the plugin forwards, distinct
+        // from our synthetic `te-*` identity. Empty = not resumable.
+        let _ = conn.execute(
+            "ALTER TABLE sessions ADD COLUMN resume_id TEXT NOT NULL DEFAULT ''",
+            [],
+        );
         Ok(Self { conn })
     }
 
@@ -555,6 +564,54 @@ impl Store {
         } else {
             Ok(None)
         }
+    }
+
+    /// Persist the harness-native resume token for a session. Idempotent; a
+    /// later call with the same token is a no-op. Never clears a known token with
+    /// an empty one (so a stray payload can't wipe a good resume id).
+    pub fn set_session_resume_id(&self, session_id: &str, resume_id: &str) -> Result<()> {
+        if resume_id.is_empty() {
+            return Ok(());
+        }
+        self.conn.execute(
+            "UPDATE sessions SET resume_id=?2 WHERE session_id=?1",
+            params![session_id, resume_id],
+        )?;
+        Ok(())
+    }
+
+    /// The harness-native resume token for a session, or `None` when unset/empty.
+    pub fn get_session_resume_id(&self, session_id: &str) -> Result<Option<String>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT resume_id FROM sessions WHERE session_id=?1",
+                params![session_id],
+                |r| r.get::<_, String>(0),
+            )
+            .ok()
+            .filter(|s| !s.is_empty()))
+    }
+
+    /// Recent sessions on `host`, newest first, with their stored `resume_id`
+    /// (which may be empty — claude/codex sessions use their `session_id` as the
+    /// resume token, so the caller derives the real token rather than filtering
+    /// here). Includes dead (`alive=0`) rows. Returns `(record, resume_id)` pairs.
+    pub fn list_resumable_sessions(
+        &self,
+        host: &str,
+        limit: usize,
+    ) -> Result<Vec<(SessionRecord, String)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT session_id, agent_slug, agent_pubkey, project, host, child_pid, watch_pid, created_at, alive, rel_cwd, resume_id
+             FROM sessions WHERE host=?1 ORDER BY created_at DESC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![host, limit as i64], |row| {
+            let rec = row_to_session(row)?;
+            let resume_id: String = row.get(10)?;
+            Ok((rec, resume_id))
+        })?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
     }
 
     pub fn mark_session_dead(&self, id: &str) -> Result<()> {

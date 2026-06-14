@@ -274,6 +274,13 @@ enum TmuxAction {
         #[arg(long)]
         session: String,
     },
+    /// Resume a (typically dead) session: replay its harness in a new tmux
+    /// window using the captured native resume token, then attach to it.
+    Resume {
+        /// Session id (or prefix) to resume.
+        #[arg(long)]
+        session: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -426,6 +433,7 @@ pub(super) fn session_start_inner(
     session_id: Option<String>,
     cwd: Option<PathBuf>,
     watch_pid: Option<i32>,
+    resume_id: Option<String>,
 ) -> Result<String> {
     let cwd = cwd.unwrap_or(std::env::current_dir()?);
     // Capture TMUX_PANE / TMUX from the hook env so the daemon can register a
@@ -439,6 +447,7 @@ pub(super) fn session_start_inner(
         "watch_pid": watch_pid,
         "tmux_pane": tmux_pane,
         "tmux_socket": tmux_socket,
+        "resume_id": resume_id,
     });
     let v = crate::daemon::blocking::call("session_start", params)?;
     let sid = v["session_id"]

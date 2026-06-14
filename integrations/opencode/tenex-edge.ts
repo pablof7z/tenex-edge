@@ -166,8 +166,12 @@ export const TenexEdge: Plugin = async ({ client, directory }) => {
         // Turn start maps to the user-prompt-submit hook. We deliberately omit
         // `prompt`, so (unlike Claude Code / Codex) the prompt is NOT published
         // as a kind:1 OP — preserving this plugin's existing behavior.
+        // Forward opencode's native session id as the resume token: it is what
+        // `opencode --session <id>` wants, and (unlike claude/codex) it differs
+        // from our synthetic `te-*` SID, so the daemon can't derive it itself.
         await runHook("user-prompt-submit", {
           session_id: SID,
+          resume_id: ocSessionID,
           ...(transcriptPath ? { transcript_path: transcriptPath } : {}),
         })
       }
