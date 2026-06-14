@@ -719,6 +719,10 @@ struct WhoRow {
     /// Local sessions and same-machine peers are never remote (the §8e fix).
     #[serde(default)]
     remote: bool,
+    /// True when this session has a live tmux endpoint registered — i.e. it
+    /// can be attached to via `tenex-edge tmux attach`.
+    #[serde(default)]
+    attachable: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -760,6 +764,14 @@ pub fn load_who_snapshot(
         })
         .collect();
 
+    // Sessions that have a tmux endpoint registered (for attachable flag).
+    let tmux_sessions: std::collections::HashSet<String> = store
+        .list_session_endpoints_of_kind("tmux")
+        .unwrap_or_default()
+        .into_iter()
+        .map(|ep| ep.session_id)
+        .collect();
+
     let mut rows = Vec::new();
     let mut other_agents: std::collections::BTreeMap<String, std::collections::BTreeSet<String>> =
         std::collections::BTreeMap::new();
@@ -789,6 +801,7 @@ pub fn load_who_snapshot(
                 age_secs,
                 rel_cwd: s.rel_cwd.clone(),
                 remote: false,
+                attachable: tmux_sessions.contains(&s.session_id),
             });
         } else {
             other_agents
@@ -815,6 +828,7 @@ pub fn load_who_snapshot(
                 age_secs: Some(age),
                 rel_cwd: p.rel_cwd.clone(),
                 remote: slugify_host(&p.host) != local_host,
+                attachable: false,
             });
         } else {
             other_agents

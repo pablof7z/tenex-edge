@@ -142,6 +142,7 @@ struct LiveRow {
     session_id: String,    // full raw id for RPC calls
     session_short: String, // short display code (6 chars)
     status: String,
+    attachable: bool,      // has a live tmux endpoint
 }
 
 struct SpawnRow {
@@ -181,6 +182,7 @@ fn fetch_tui_data() -> Result<TuiData> {
                 session_id: raw_id,
                 session_short,
                 status: r["status"].as_str().unwrap_or("").to_string(),
+                attachable: r["attachable"].as_bool().unwrap_or(false),
             }
         })
         .collect();
@@ -202,7 +204,8 @@ fn fetch_tui_data() -> Result<TuiData> {
 
 enum TuiExit {
     Quit,
-    Attach(String), // full session_id
+    Attach(String),      // full session_id
+    AttachPane(String),  // direct pane_id (used after spawn)
 }
 
 fn draw_tui(data: &TuiData, selected: usize, status: &str) -> Result<()> {
@@ -226,7 +229,18 @@ fn draw_tui(data: &TuiData, selected: usize, status: &str) -> Result<()> {
             } else {
                 row.status.trim().to_string()
             };
-            if i == selected {
+            if !row.attachable {
+                // Not running in tmux — show dimmed with [no tmux] marker.
+                let _ = writeln!(
+                    out,
+                    "  {} {}  {}  {} {}",
+                    cursor,
+                    label.dimmed(),
+                    session_tag.dimmed(),
+                    status_str.dimmed(),
+                    "[no tmux]".dimmed(),
+                );
+            } else if i == selected {
                 let _ = writeln!(
                     out,
                     "  {} {}  {}  {}",
@@ -345,12 +359,15 @@ pub(super) fn tmux_tui() -> Result<()> {
                         }
                         KeyCode::Enter | KeyCode::Char('a') => {
                             if selected < data.live.len() {
-                                result =
-                                    TuiExit::Attach(data.live[selected].session_id.clone());
-                                break;
-                            }
-                            // Selected item is a spawnable — hint to use 'n'.
-                            if selected >= data.live.len() {
+                                let row = &data.live[selected];
+                                if row.attachable {
+                                    result = TuiExit::Attach(row.session_id.clone());
+                                    break;
+                                } else {
+                                    status_msg = "Session not running in tmux — cannot attach.".to_string();
+                                }
+                            } else {
+                                // Selected item is a spawnable — hint to use 'n'.
                                 status_msg = "Press [n] to spawn this agent.".to_string();
                             }
                         }
@@ -371,19 +388,20 @@ pub(super) fn tmux_tui() -> Result<()> {
                                     }),
                                 ) {
                                     Ok(v) => {
-                                        let pane = v["pane_id"].as_str().unwrap_or("?");
-                                        status_msg =
-                                            format!("Spawned {slug} in pane {pane}.");
+                                        let pane = v["pane_id"].as_str().unwrap_or("?").to_string();
+                                        // Switch directly to the new pane.
+                                        result = TuiExit::AttachPane(pane);
+                                        break;
                                     }
                                     Err(e) => {
                                         status_msg = format!("Spawn failed: {e}");
+                                        // Refresh immediately after failed spawn attempt.
+                                        if let Ok(fresh) = fetch_tui_data() {
+                                            data = fresh;
+                                        }
+                                        next_refresh = Instant::now() + refresh;
                                     }
                                 }
-                                // Refresh immediately after spawn.
-                                if let Ok(fresh) = fetch_tui_data() {
-                                    data = fresh;
-                                }
-                                next_refresh = Instant::now() + refresh;
                             }
                         }
                         _ => {}
@@ -405,6 +423,22 @@ pub(super) fn tmux_tui() -> Result<()> {
 
     match exit_action {
         TuiExit::Attach(session_id) => attach_session(&session_id),
+        TuiExit::AttachPane(pane_id) => attach_pane(&pane_id),
         TuiExit::Quit => Ok(()),
     }
+}
+
+fn attach_pane(pane_id: &str) -> Result<()> {
+    let in_tmux = std::env::var("TMUX").is_ok();
+    if in_tmux {
+        let status = std::process::Command::new("tmux")
+            .args(["select-pane", "-t", pane_id])
+            .status()
+            .context("tmux select-pane")?;
+        if status.success() {
+            return Ok(());
+        }
+    }
+    eprintln!("Not in tmux or select-pane failed. Run: tmux attach-session -t tenex");
+    Ok(())
 }
