@@ -84,20 +84,32 @@ fn find_spawn_def(slug: &str) -> Option<&'static SpawnDef> {
 
 // ── spawnable-agents query ─────────────────────────────────────────────────
 
-/// Returns `(slug, command[0])` pairs for agents tenex-edge has an identity
-/// for, cross-referenced with a known SPAWN_DEFS entry so the TUI knows how
-/// to start them. Returns an empty vec when tmux is absent.
+/// Returns `(slug, display_command)` pairs for agents tenex-edge has an
+/// identity for. The harness command comes from the agent file; SPAWN_DEFS is
+/// the fallback for agents that predate the `command` field. Agents with
+/// neither are omitted. Returns an empty vec when tmux is absent.
 pub fn spawnable_agents() -> Vec<(String, String)> {
     if !tmux_available() {
+        eprintln!("[tenex-edge] spawnable_agents: tmux not available");
         return Vec::new();
     }
     let edge_home = crate::config::edge_home();
-    crate::identity::list_local_slugs(&edge_home)
+    let agents = crate::identity::list_local_agents(&edge_home);
+    eprintln!("[tenex-edge] spawnable_agents: {} agents in store", agents.len());
+    let result: Vec<(String, String)> = agents
         .into_iter()
-        .filter_map(|slug| {
-            find_spawn_def(&slug).map(|d| (slug, d.command[0].to_string()))
+        .filter_map(|(slug, file_cmd)| {
+            let display = file_cmd
+                .as_ref()
+                .filter(|c| !c.is_empty())
+                .map(|c| c.join(" "))
+                .or_else(|| find_spawn_def(&slug).map(|d| d.command.join(" ")));
+            eprintln!("[tenex-edge] spawnable_agents: slug={slug:?} display={display:?}");
+            Some((slug, display?))
         })
-        .collect()
+        .collect();
+    eprintln!("[tenex-edge] spawnable_agents: result={result:?}");
+    result
 }
 
 // ── in-memory debounce + armed-waiter tracking ────────────────────────────────
@@ -431,8 +443,27 @@ pub async fn spawn_agent(
         anyhow::bail!("tmux binary not found");
     }
 
-    let def = find_spawn_def(slug)
-        .with_context(|| format!("no spawn definition for agent slug {slug:?}"))?;
+    // Resolve the harness command: agent file takes priority, SPAWN_DEFS is the fallback.
+    let edge_home = crate::config::edge_home();
+    let file_cmd = crate::identity::list_local_agents(&edge_home)
+        .into_iter()
+        .find(|(s, _)| s == slug)
+        .and_then(|(_, cmd)| cmd.filter(|c| !c.is_empty()));
+    let agent_command: Vec<String> = file_cmd
+        .or_else(|| {
+            find_spawn_def(slug).map(|d| d.command.iter().map(|s| s.to_string()).collect())
+        })
+        .with_context(|| format!("no harness command for agent {slug:?}: add a \"command\" field to ~/.tenex/edge/agents/{slug}.json"))?;
+
+    let def = find_spawn_def(slug); // optional, for window_name / spawn_prompt defaults
+    let window_name_owned: String;
+    let window_name: &str = match def {
+        Some(d) => d.window_name,
+        None => {
+            window_name_owned = format!("{}·tenex-edge", slug);
+            &window_name_owned
+        }
+    };
 
     let abs_path = state
         .with_store(|s| s.get_project_path(project))
@@ -460,13 +491,13 @@ pub async fn spawn_agent(
     }
 
     // Build the new-window command.
-    let mut cmd_args = vec![
+    let mut cmd_args: Vec<&str> = vec![
         "new-window",
         "-d",
         "-t",
         "tenex",
         "-n",
-        def.window_name,
+        window_name,
         "-c",
         &abs_path,
         "-e",
@@ -475,7 +506,8 @@ pub async fn spawn_agent(
         "#{pane_id}",
         "--",
     ];
-    cmd_args.extend_from_slice(def.command);
+    let cmd_strs: Vec<&str> = agent_command.iter().map(|s| s.as_str()).collect();
+    cmd_args.extend_from_slice(&cmd_strs);
 
     let out = tokio::process::Command::new("tmux")
         .args(&cmd_args)
@@ -497,7 +529,10 @@ pub async fn spawn_agent(
     // Register as a pending spawn so that when the harness fires its
     // `session-start` hook, `rpc_session_start` injects the actual prompt
     // instead of waiting for a generic `ring_doorbells` nudge.
-    let prompt = def.spawn_prompt.unwrap_or(SPAWN_PROMPT_DEFAULT).to_string();
+    let prompt = def
+        .and_then(|d| d.spawn_prompt)
+        .unwrap_or(SPAWN_PROMPT_DEFAULT)
+        .to_string();
     register_pending_spawn(pane_id.clone(), prompt);
 
     Ok(pane_id)

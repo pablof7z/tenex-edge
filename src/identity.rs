@@ -18,13 +18,20 @@ struct StoredKey {
     secret_key: String, // hex
     public_key: String, // hex
     created_at: u64,
+    /// Harness command to use when spawning a new tmux session for this agent.
+    /// E.g. `["claude", "--dangerously-skip-permissions"]`.
+    /// When absent, the spawn logic falls back to the built-in SPAWN_DEFS table.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    command: Option<Vec<String>>,
 }
 
-/// A resolved agent identity: its slug + signing keys.
+/// A resolved agent identity: its slug, signing keys, and optional harness command.
 #[derive(Debug, Clone)]
 pub struct AgentIdentity {
     pub slug: String,
     pub keys: Keys,
+    /// Harness command from the agent file, if present.
+    pub command: Option<Vec<String>>,
 }
 
 impl AgentIdentity {
@@ -66,6 +73,7 @@ pub fn load_or_create(edge_home: &Path, slug: &str, now: u64) -> Result<AgentIde
         return Ok(AgentIdentity {
             slug: slug.to_string(),
             keys,
+            command: stored.command,
         });
     }
 
@@ -75,6 +83,7 @@ pub fn load_or_create(edge_home: &Path, slug: &str, now: u64) -> Result<AgentIde
         secret_key: keys.secret_key().to_secret_hex(),
         public_key: keys.public_key().to_hex(),
         created_at: now,
+        command: None,
     };
     std::fs::create_dir_all(agents_dir(edge_home))
         .with_context(|| format!("creating {}", agents_dir(edge_home).display()))?;
@@ -83,6 +92,7 @@ pub fn load_or_create(edge_home: &Path, slug: &str, now: u64) -> Result<AgentIde
     Ok(AgentIdentity {
         slug: slug.to_string(),
         keys,
+        command: None,
     })
 }
 
@@ -107,10 +117,9 @@ pub fn list_local_pubkeys(edge_home: &Path) -> Vec<String> {
     out
 }
 
-/// Slugs of every agent in the local keystore. Used to populate the
-/// "spawnable" list in the TUI — agents tenex-edge already knows about
-/// and can start a new session for.
-pub fn list_local_slugs(edge_home: &Path) -> Vec<String> {
+/// All agents in the local keystore with their configured harness command (if any).
+/// Used by the spawn machinery: command from agent file takes priority over SPAWN_DEFS.
+pub fn list_local_agents(edge_home: &Path) -> Vec<(String, Option<Vec<String>>)> {
     let dir = agents_dir(edge_home);
     let mut out = Vec::new();
     if let Ok(entries) = std::fs::read_dir(&dir) {
@@ -119,12 +128,14 @@ pub fn list_local_slugs(edge_home: &Path) -> Vec<String> {
             if path.extension().and_then(|x| x.to_str()) != Some("json") {
                 continue;
             }
-            if let Some(stem) = path.file_stem().and_then(|x| x.to_str()) {
-                out.push(stem.to_string());
+            if let Ok(s) = std::fs::read_to_string(&path) {
+                if let Ok(k) = serde_json::from_str::<StoredKey>(&s) {
+                    out.push((k.slug, k.command));
+                }
             }
         }
     }
-    out.sort();
+    out.sort_by(|a, b| a.0.cmp(&b.0));
     out
 }
 
@@ -172,5 +183,24 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         load_or_create(dir.path(), "coder", 1).unwrap();
         assert!(dir.path().join("agents").join("coder.json").exists());
+    }
+
+    #[test]
+    fn command_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        // Write a file with a command field manually
+        std::fs::create_dir_all(dir.path().join("agents")).unwrap();
+        std::fs::write(
+            dir.path().join("agents/dev.json"),
+            r#"{"slug":"dev","secret_key":"0000000000000000000000000000000000000000000000000000000000000001","public_key":"","created_at":1,"command":["claude","--dangerously-skip-permissions"]}"#,
+        )
+        .unwrap();
+        let agents = list_local_agents(dir.path());
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0].0, "dev");
+        assert_eq!(
+            agents[0].1.as_deref().unwrap(),
+            &["claude", "--dangerously-skip-permissions"]
+        );
     }
 }

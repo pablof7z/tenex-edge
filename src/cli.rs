@@ -683,6 +683,16 @@ pub struct WhoSnapshot {
     now: u64,
     rows: Vec<WhoRow>,
     other_projects: Vec<OtherProjectSummary>,
+    /// Agents tenex-edge has an identity for that can be spawned via tmux.
+    #[serde(default)]
+    spawnable: Vec<SpawnableRow>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+struct SpawnableRow {
+    host: String,
+    slug: String,
+    command: String,
 }
 
 
@@ -814,12 +824,22 @@ pub fn load_who_snapshot(
         })
         .collect();
 
+    let spawnable: Vec<SpawnableRow> = crate::tmux::spawnable_agents()
+        .into_iter()
+        .map(|(slug, command)| SpawnableRow {
+            host: local_host.clone(),
+            slug,
+            command,
+        })
+        .collect();
+
     Ok(WhoSnapshot {
         project: current_project.unwrap_or("*").to_string(),
         all,
         now,
         rows,
         other_projects,
+        spawnable,
     })
 }
 
@@ -835,6 +855,7 @@ fn status_for(store: &Store, pubkey: &str, project: &str, session_id: Option<&st
         .get_agent_status(pubkey, project, session_id)
         .ok()
         .flatten()
+        .map(|(text, _active)| text)
         .unwrap_or_default()
 }
 
@@ -883,7 +904,7 @@ pub fn push_turn_fabric_block(
                 pubkey_short(&p.session_id),
             ));
         }
-        for (slug, proj, text, session_id) in &status_changes {
+        for (slug, proj, text, session_id, _active) in &status_changes {
             if let Some(sid) = session_id {
                 delta.push(format!("  ↻ {slug}@{proj} [session {sid}] — {text}"));
             } else {
@@ -942,6 +963,15 @@ fn render_who_once(snapshot: &WhoSnapshot) -> String {
                     let _ = writeln!(out, "  * {}", op.project);
                 }
             }
+        }
+    }
+
+    if !snapshot.spawnable.is_empty() {
+        let _ = writeln!(out);
+        for row in &snapshot.spawnable {
+            let label = format!("{}@{}", row.slug, row.host);
+            let tag = format!("[spawnable via {}]", row.command);
+            let _ = writeln!(out, "{}  {}", label.dimmed(), tag.dimmed());
         }
     }
 
@@ -1753,6 +1783,13 @@ fn render_who_plain(snapshot: &WhoSnapshot) -> String {
             stale,
         );
         let _ = writeln!(out, "      {}", status_plain(&row.status));
+    }
+    for row in &snapshot.spawnable {
+        let _ = writeln!(
+            out,
+            "  {}@{} [spawnable via {}]",
+            row.slug, row.host, row.command,
+        );
     }
     out
 }

@@ -2177,7 +2177,7 @@ fn build_backfill(
             rel_cwd: p.rel_cwd.clone(),
         });
         // Add current status if known (session-scoped first, agent-level fallback).
-        if let Some(text) = state.with_store(|s| {
+        if let Some((text, _active)) = state.with_store(|s| {
             s.get_agent_status(&p.pubkey, &p.project, Some(&p.session_id))
                 .unwrap_or(None)
         })
