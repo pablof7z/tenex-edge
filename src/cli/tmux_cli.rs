@@ -102,19 +102,7 @@ fn attach_session(session_id: &str) -> Result<()> {
         }
     };
 
-    // exec into the pane via `tmux switch-client` or `attach-session`.
-    let in_tmux = std::env::var("TMUX").is_ok();
-    if in_tmux {
-        let status = std::process::Command::new("tmux")
-            .args(["select-pane", "-t", &pane_id])
-            .status()
-            .context("tmux select-pane")?;
-        if status.success() {
-            return Ok(());
-        }
-    }
-    eprintln!("Not in tmux or select-pane failed. Run: tmux attach-session -t tenex");
-    Ok(())
+    attach_pane(&pane_id)
 }
 
 // ── TUI ───────────────────────────────────────────────────────────────────────
@@ -431,14 +419,42 @@ pub(super) fn tmux_tui() -> Result<()> {
 fn attach_pane(pane_id: &str) -> Result<()> {
     let in_tmux = std::env::var("TMUX").is_ok();
     if in_tmux {
+        // switch-client can jump to any pane in any window/session, unlike
+        // select-pane which only works within the currently focused window.
         let status = std::process::Command::new("tmux")
-            .args(["select-pane", "-t", pane_id])
+            .args(["switch-client", "-t", pane_id])
             .status()
-            .context("tmux select-pane")?;
+            .context("tmux switch-client")?;
         if status.success() {
             return Ok(());
         }
+        eprintln!("tmux switch-client failed for pane {pane_id}");
+        return Ok(());
     }
-    eprintln!("Not in tmux or select-pane failed. Run: tmux attach-session -t tenex");
-    Ok(())
+
+    // Not inside tmux: find which session:window owns this pane, then exec
+    // attach-session so this process is replaced by the tmux client.
+    let out = std::process::Command::new("tmux")
+        .args(["list-panes", "-a", "-F", "#{pane_id} #{session_name}:#{window_index}"])
+        .output()
+        .context("tmux list-panes")?;
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let target = stdout.lines().find_map(|line| {
+        let (pid, rest) = line.split_once(' ')?;
+        if pid == pane_id { Some(rest.to_string()) } else { None }
+    });
+
+    match target {
+        Some(t) => {
+            use std::os::unix::process::CommandExt;
+            let err = std::process::Command::new("tmux")
+                .args(["attach-session", "-t", &t])
+                .exec(); // replaces this process; only returns on error
+            anyhow::bail!("exec tmux attach-session: {err}");
+        }
+        None => {
+            eprintln!("Pane {pane_id} not found in any tmux session. Run: tmux attach-session -t tenex");
+            Ok(())
+        }
+    }
 }
