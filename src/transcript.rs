@@ -79,6 +79,58 @@ fn extract_text_only(content: Option<&Value>) -> String {
     }
 }
 
+/// The raw text of the last user message that contains actual prompt content
+/// (not a pure tool_result). Used to seed the session title immediately at
+/// turn start before the LLM distiller fires.
+pub fn read_last_user_prompt(path: &Path) -> Option<String> {
+    let mut f = File::open(path).ok()?;
+    let len = f.metadata().ok()?.len();
+    let start = len.saturating_sub(TAIL_BYTES);
+    f.seek(SeekFrom::Start(start)).ok()?;
+    let mut bytes = Vec::new();
+    f.read_to_end(&mut bytes).ok()?;
+    let text = String::from_utf8_lossy(&bytes);
+    let mut lines: Vec<&str> = text.lines().collect();
+    if start > 0 && !lines.is_empty() {
+        lines.remove(0);
+    }
+    let mut last_prompt: Option<String> = None;
+    for line in lines {
+        let Ok(v) = serde_json::from_str::<Value>(line.trim()) else {
+            continue;
+        };
+        let content = if let Some(t) = v.get("type").and_then(|x| x.as_str()) {
+            if t != "user" {
+                continue;
+            }
+            v.get("message").and_then(|m| m.get("content"))
+        } else if let Some(r) = v.get("role").and_then(|x| x.as_str()) {
+            if r != "user" {
+                continue;
+            }
+            v.get("content")
+        } else {
+            continue;
+        };
+        let body = match content {
+            Some(Value::String(s)) => s.trim().to_string(),
+            Some(Value::Array(blocks)) => blocks
+                .iter()
+                .filter(|b| b.get("type").and_then(|x| x.as_str()) != Some("tool_result"))
+                .filter_map(|b| b.get("text").and_then(|x| x.as_str()))
+                .collect::<Vec<_>>()
+                .join(" ")
+                .trim()
+                .to_string(),
+            _ => continue,
+        };
+        if !body.is_empty() {
+            last_prompt = Some(body);
+        }
+    }
+    last_prompt
+}
+
 /// A compact, chronological snippet of the last `max_msgs` user/assistant turns,
 /// capped at `max_chars`. `None` if the file is unreadable/empty.
 pub fn read_recent(path: &Path, max_msgs: usize, max_chars: usize) -> Option<String> {

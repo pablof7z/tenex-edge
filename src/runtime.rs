@@ -143,8 +143,14 @@ pub async fn run_session_in_daemon(
     let turn_first = p.turn_first.as_secs();
     let turn_repeat = p.turn_repeat.as_secs();
     let mut cur_turn_start: u64 = 0;
-    let mut last_distill: u64 = 0;
+    let mut last_distill: u64 = 0;         // when we last SUCCEEDED at distilling
+    let mut last_distill_attempt: u64 = 0; // when we last STARTED a distill task
     let mut prev_working = false;
+    // Background distillation: the task runs outside the select! so it cannot
+    // block heartbeats or presence. distill_task_turn is the cur_turn_start value
+    // when the task was spawned; a result arriving for a stale turn is discarded.
+    let mut distill_task: Option<tokio::task::JoinHandle<Option<distill::SessionLabels>>> = None;
+    let mut distill_task_turn: u64 = 0;
     let mut cur_title: Option<String> = st!(|s: &Store| {
         s.get_agent_status(&me, &p.project, Some(&p.session_id))
             .ok()
@@ -196,50 +202,93 @@ pub async fn run_session_in_daemon(
                 }
             }
             _ = obs.tick() => {
+                // ── collect a finished background distillation ────────────
+                if distill_task.as_ref().is_some_and(|h| h.is_finished()) {
+                    let result = distill_task.take().unwrap().await.ok().flatten();
+                    // Only apply if still in the same turn the task was spawned for.
+                    if distill_task_turn == cur_turn_start {
+                        if let Some(labels) = result {
+                            let now = now_secs();
+                            let changed = cur_title.as_deref() != Some(labels.title.as_str());
+                            cur_title = Some(labels.title.clone());
+                            cur_activity = (!labels.activity.is_empty()).then(|| labels.activity.clone());
+                            if changed {
+                                publish_de(DomainEvent::Activity(Activity {
+                                    agent: aref.clone(),
+                                    project: p.project.clone(),
+                                    text: format!("{} #{}", labels.title, p.project),
+                                })).await;
+                            }
+                            publish_de(status_de(&labels.title, &labels.activity, true)).await;
+                            st!(|s: &Store| { s.set_agent_status(&me, &p.project, Some(&p.session_id), &labels.title, &labels.activity, true, now).ok(); });
+                            last_distill = now; // success: gate subsequent turn_repeat checks
+                        }
+                        // On None (timeout / model error): last_distill stays 0 → retry allowed
+                    }
+                }
+
                 let (working, turn_started_at) = st!(|s: &Store| s.get_turn_state(&p.session_id).unwrap_or((false, 0)));
                 let now = now_secs();
                 if working {
-                    // Rising edge / new user message: mark active immediately
-                    // (retaining the current title) and arm a re-distillation. The
-                    // prior turn's live activity is now stale → clear it.
+                    // ── rising edge / new user message ────────────────────
                     if turn_started_at != cur_turn_start {
                         cur_turn_start = turn_started_at;
                         last_distill = 0;
+                        last_distill_attempt = 0;
+                        distill_task = None; // drop stale task (result discarded)
+                        distill_task_turn = 0;
                         cur_activity = None;
+
+                        // Immediately publish active with whatever title we have.
                         let title = cur_title.clone().unwrap_or_default();
                         publish_de(status_de(&title, "", true)).await;
                         st!(|s: &Store| { s.set_agent_status(&me, &p.project, Some(&p.session_id), &title, "", true, now).ok(); });
+
+                        // If no title yet, seed one from the user's message right now
+                        // so the TUI shows something before the LLM distiller fires.
+                        if cur_title.is_none() {
+                            let quick = st!(|s: &Store| s.get_session_transcript(&p.session_id).ok().flatten())
+                                .and_then(|path| crate::transcript::read_last_user_prompt(std::path::Path::new(&path)))
+                                .and_then(|prompt| {
+                                    let t = titleize_prompt(&prompt);
+                                    if t.is_empty() { None } else { Some(t) }
+                                });
+                            if let Some(qt) = quick {
+                                cur_title = Some(qt.clone());
+                                publish_de(status_de(&qt, "", true)).await;
+                                st!(|s: &Store| { s.set_agent_status(&me, &p.project, Some(&p.session_id), &qt, "", true, now).ok(); });
+                            }
+                        }
                     }
-                    // Distill the title + live activity shortly after turn start,
-                    // then optionally re-check on long turns (turn_repeat == 0 off).
-                    let due = if last_distill == 0 {
+
+                    // ── schedule background distillation ──────────────────
+                    // due = no task running AND (first attempt window OR retry after
+                    // failure OR turn_repeat refresh after success).
+                    let due = distill_task.is_none() && if last_distill_attempt == 0 {
                         now.saturating_sub(cur_turn_start) >= turn_first
-                    } else {
+                    } else if last_distill > 0 {
                         turn_repeat > 0 && now.saturating_sub(last_distill) >= turn_repeat
+                    } else {
+                        // Last attempt failed/timed out: retry after another turn_first window.
+                        now.saturating_sub(last_distill_attempt) >= turn_first
                     };
                     if due {
                         let ctx = st!(|s: &Store| s.get_session_transcript(&p.session_id).ok().flatten())
                             .and_then(|path| crate::transcript::read_recent(std::path::Path::new(&path), 14, 2500));
                         if let Some(ctx) = ctx {
-                            // One model call yields BOTH the stable title and the
-                            // live activity line (see distill::distill_session).
-                            if let Some(labels) = distill::distill_session(&ctx, cur_title.as_deref()).await {
-                                // Only announce an Activity note when the title actually changes.
-                                let changed = cur_title.as_deref() != Some(labels.title.as_str());
-                                cur_title = Some(labels.title.clone());
-                                cur_activity = (!labels.activity.is_empty()).then(|| labels.activity.clone());
-                                if changed {
-                                    publish_de(DomainEvent::Activity(Activity {
-                                        agent: aref.clone(),
-                                        project: p.project.clone(),
-                                        text: format!("{} #{}", labels.title, p.project),
-                                    })).await;
-                                }
-                                publish_de(status_de(&labels.title, &labels.activity, true)).await;
-                                st!(|s: &Store| { s.set_agent_status(&me, &p.project, Some(&p.session_id), &labels.title, &labels.activity, true, now).ok(); });
-                            }
+                            let current = cur_title.clone();
+                            last_distill_attempt = now;
+                            distill_task_turn = cur_turn_start;
+                            distill_task = Some(tokio::spawn(async move {
+                                tokio::time::timeout(
+                                    Duration::from_secs(20),
+                                    distill::distill_session(&ctx, current.as_deref()),
+                                )
+                                .await
+                                .ok()
+                                .flatten()
+                            }));
                         }
-                        last_distill = now;
                     }
                 } else if prev_working {
                     // Falling edge: turn ended → go idle but KEEP the title; the
@@ -250,6 +299,9 @@ pub async fn run_session_in_daemon(
                     st!(|s: &Store| { s.set_agent_status(&me, &p.project, Some(&p.session_id), &title, "", false, now).ok(); });
                     cur_turn_start = 0;
                     last_distill = 0;
+                    last_distill_attempt = 0;
+                    distill_task = None;
+                    distill_task_turn = 0;
                 }
                 prev_working = working;
             }
@@ -351,6 +403,29 @@ pub fn route_mention_into_with_id(
         routed = routed || newly;
     }
     routed
+}
+
+/// Derive a short title from a raw user prompt: take the first non-empty line,
+/// strip leading markdown sigils (#, *, -, >), and cap at 60 chars on a word
+/// boundary. Returns an empty string when nothing meaningful remains.
+fn titleize_prompt(prompt: &str) -> String {
+    let line = prompt
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .unwrap_or("")
+        .trim_start_matches(['#', '*', '-', '>', ' ', '\t'])
+        .trim();
+    if line.is_empty() {
+        return String::new();
+    }
+    if line.len() <= 60 {
+        return line.to_string();
+    }
+    match line[..60].rfind(' ') {
+        Some(i) => line[..i].to_string(),
+        None => line[..60].to_string(),
+    }
 }
 
 fn pid_alive(pid: i32) -> bool {
