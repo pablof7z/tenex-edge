@@ -702,6 +702,16 @@ mod turn_context_tests {
             !text.contains("My own work"),
             "viewer's own status must be excluded; got: {text:?}"
         );
+        // The session must render as the targetable short code (matching `who`),
+        // never the raw id — otherwise it can't be copied into `send --to`.
+        assert!(
+            text.contains(&crate::util::session_short_code("sess-sib")),
+            "session must render as short code; got: {text:?}"
+        );
+        assert!(
+            !text.contains("sess-sib"),
+            "raw session id must not leak; got: {text:?}"
+        );
     }
 
     /// Mid-turn delta: a sibling that went idle renders with the `· idle` marker

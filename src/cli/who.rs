@@ -369,7 +369,7 @@ pub(super) fn build_status_delta(
             p.slug,
             slugify_host(&p.host),
             p.project,
-            pubkey_short(&p.session_id),
+            session_short_code(&p.session_id),
         ));
     }
     for (slug, proj, text, activity, session_id, active) in &status_changes {
@@ -380,7 +380,8 @@ pub(super) fn build_status_delta(
         }
         let label = render::status_plain(text, activity, *active);
         if let Some(sid) = session_id {
-            delta.push(format!("  ↻ {slug}@{proj} [session {sid}] — {label}"));
+            let code = session_short_code(sid);
+            delta.push(format!("  ↻ {slug}@{proj} [session {code}] — {label}"));
         } else {
             delta.push(format!("  ↻ {slug}@{proj} — {label}"));
         }
