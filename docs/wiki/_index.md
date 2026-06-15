@@ -53,7 +53,7 @@ Last updated: 2026-06-15
 
 | Slug | Title | Summary | Tags | Volatility | Verified | Topic |
 |------|-------|---------|------|------------|----------|-------|
-| [opencode-configuration](opencode-configuration.md) | OpenCode Configuration | The @opencode-ai/plugin dependency version must match the opencode binary version (1.16.2) in both ~/.config/opencode/package.json and ~/.opencode/package.json. | capture | warm | 2026-06-08 | tenex-edge |
+| [opencode-configuration](opencode-configuration.md) | OpenCode Configuration | The @opencode-ai/plugin dependency version must match the opencode binary version (1.16.2) in both ~/.config/opencode/package.json and ~/.opencode/package.json | capture | warm | 2026-06-08 | tenex-edge |
 | [tenex-edge](tenex-edge.md) | Tenex-Edge | tenex-edge is an inversion of TENEX: instead of hosting agents, it grafts a shared coordination fabric onto agents that stay in their native hosts (Claude Code, | capture | warm | 2026-06-07 | tenex-edge |
 | [tenex-edge-activity-distillation](tenex-edge-activity-distillation.md) | Tenex-Edge Activity Distillation | Activity distillation is driven by the conversation transcript, not by tool-use events | capture | warm | 2026-06-08 | tenex-edge |
 | [tenex-edge-awareness](tenex-edge-awareness.md) | Tenex-Edge Awareness | Tenex-edge provides awareness of shared active work, goals, and access to resources | capture | warm | 2026-06-08 | tenex-edge |
@@ -63,7 +63,7 @@ Last updated: 2026-06-15
 | [tenex-edge-data-persistence](tenex-edge-data-persistence.md) | Tenex-Edge Data Persistence | All data must be read from a unified local interface (e.g., SQLite); how the data is hydrated into that store should be completely irrelevant to the use of that | capture | warm | 2026-06-08 | tenex-edge |
 | [tenex-edge-debug-transcript](tenex-edge-debug-transcript.md) | Tenex-Edge Debug Transcript | The `pc debug transcript` command colorizes its output when run on a TTY | capture | warm | 2026-06-09 | tenex-edge |
 | [tenex-edge-design-philosophy](tenex-edge-design-philosophy.md) | Tenex-Edge Design Philosophy | The design discussion operates at a higher, design-space levelâwhat the thing is, what shape it should take, what is worth wanting, and where tensions and bet | capture | warm | 2026-06-07 | tenex-edge |
-| [tenex-edge-domain-acl](tenex-edge-domain-acl.md) | Tenex-Edge Domain ACL | The domain has two verb planes: Project-State (open_project, roster, presence, status, project_meta, list_projects) and Communications (send, inbox, threads, th | capture | warm | 2026-06-09 | tenex-edge |
+| [tenex-edge-domain-acl](tenex-edge-domain-acl.md) | Tenex-Edge Domain ACL | The ACL feature remains intentionally removed; any stale ACL references are treated as refactor debris to delete rather than restore | capture | warm | 2026-06-09 | tenex-edge |
 | [tenex-edge-fabric-architecture](tenex-edge-fabric-architecture.md) | Tenex-Edge Fabric Architecture | A FabricProvider bundles four single-responsibility capabilities: Lifecycle reactor (project spin-up side-effects), Membership source (hydrates and streams the | capture | warm | 2026-06-09 | tenex-edge |
 | [tenex-edge-hook-output-rendering](tenex-edge-hook-output-rendering.md) | Tenex-Edge Hook Output Rendering | Hook warnings marked as BLOCKING should be framed as prerequisites to answering, making them harder for the assistant to skip | capture | warm | 2026-06-12 | tenex-edge |
 | [tenex-edge-hook-subcommand](tenex-edge-hook-subcommand.md) | Tenex-Edge Hook Subcommand | `tenex-edge hook --host <name> --type <hook-type>` is the sole host-facing entry point for session and turn lifecycle operations | capture | warm | 2026-06-09 | tenex-edge |
@@ -83,7 +83,7 @@ Last updated: 2026-06-15
 | [tenex-edge-session-display](tenex-edge-session-display.md) | Tenex-Edge Session Display | Session IDs displayed in the `tenex tail` command use the hash-based `session_short_code`, matching the display format used by `who` and `send-message` | capture | warm | 2026-06-09 | tenex-edge |
 | [tenex-edge-session-management](tenex-edge-session-management.md) | Tenex-Edge Session Management | The MVP (M1) launches a session via `tenex-edge session-start --agent <agent-slug>`, which forks a background process, creates a session ID, and publishes a pre | capture | warm | 2026-06-08 | tenex-edge |
 | [tenex-edge-statusline](tenex-edge-statusline.md) | Tenex-Edge Statusline | The statusline is a one-line awareness board representing the floor product (identity + awareness + passive collision signal) in the host terminal | capture | warm | 2026-06-12 | tenex-edge |
-| [tenex-edge-tail-design](tenex-edge-tail-design.md) | Tenex-Edge Tail Design | The tail v2 command provides a structured TailEvent stream with 10 variants (Msg, Sync, Turn, Join, Leave, Acl, Sess, Status, Proj, Profile), heartbeatâjoin/l | capture | warm | 2026-06-09 | tenex-edge |
+| [tenex-edge-tail-design](tenex-edge-tail-design.md) | Tenex-Edge Tail Design | The tail v2 command provides a structured TailEvent stream with 9 variants (Msg, Sync, Turn, Join, Leave, Sess, Status, Proj, Profile), heartbeatâjoin/leave d | capture | warm | 2026-06-09 | tenex-edge |
 | [tenex-edge-tail-stream](tenex-edge-tail-stream.md) | Tenex-Edge Tail Stream | The canonical store deduplicates writes on event id, but the tail v2 broadcast emits duplicate messages because one message produces identical tail events for e | capture | warm | 2026-06-12 | tenex-edge |
 | [tenex-edge-thread-storage](tenex-edge-thread-storage.md) | Tenex-Edge Thread Storage | The thread dual-write infrastructure (local SQLite read-model of relay conversations via `projects`, `threads`, `messages`, `message_recipients` tables) was rem | capture | warm | 2026-06-10 | tenex-edge |
 | [tenex-edge-tmux-adapter](tenex-edge-tmux-adapter.md) | Tenex-Edge TMUX Adapter | A Fable agent is used to plan the TMUX adapter product for tenex-edge | capture | warm | 2026-06-12 | tenex-edge |
@@ -106,7 +106,7 @@ Last updated: 2026-06-15
 |--------|------|---------|-------|
 | [2026-06-12-1-review-of-fabric-architecture-branch-verdict](research/2026-06-12-1-review-of-fabric-architecture-branch-verdict.md) | 2026-06-12 | Review of fabric-architecture branch: verdict is refactor is complete, working, and well-tested but no longer cleanly mergeable due to master divergence (~29 conflict hunks) | main |
 
-## Episode Cards (93 cards)
+## Episode Cards (96 cards)
 
 | Card | Date | Title | Salience | Status |
 |------|------|-------|----------|--------|
@@ -114,6 +114,7 @@ Last updated: 2026-06-15
 | [2026-06-07-2-scope-split-into-two-products-customs](episodes/2026-06-07-2-scope-split-into-two-products-customs.md) | 2026-06-07 | Scope split into two products — customs office before open borders | architecture | active |
 | [2026-06-07-3-not-greenfield-existing-fabric-makes-tenex](episodes/2026-06-07-3-not-greenfield-existing-fabric-makes-tenex.md) | 2026-06-07 | Not greenfield — existing fabric makes tenex-edge an on-ramp, not a new product | root-cause | active |
 | [2026-06-08-1-agent-status-distillation-transcript-first-native](episodes/2026-06-08-1-agent-status-distillation-transcript-first-native.md) | 2026-06-08 | Agent status distillation: transcript-first, native rig, ~/.tenex config | product | superseded |
+| [2026-06-08-1-opencode-plugin-version-mismatch-caused-startup](episodes/2026-06-08-1-opencode-plugin-version-mismatch-caused-startup.md) | 2026-06-08 | opencode plugin version-mismatch caused startup hang | root-cause | active |
 | [2026-06-08-2-dual-rustls-cryptoprovider-panic-resolved-by](episodes/2026-06-08-2-dual-rustls-cryptoprovider-panic-resolved-by.md) | 2026-06-08 | Dual rustls CryptoProvider panic resolved by installing ring default | root-cause | active |
 | [2026-06-09-1-abandon-python-hook-wrapper-harnesses-call](episodes/2026-06-09-1-abandon-python-hook-wrapper-harnesses-call.md) | 2026-06-09 | Abandon Python hook wrapper — harnesses call tenex-edge binary directly | architecture | active |
 | [2026-06-09-1-activity-distillation-from-tool-driven-to](episodes/2026-06-09-1-activity-distillation-from-tool-driven-to.md) | 2026-06-09 | Activity distillation: from tool-driven to turn-driven transcript-only model | reversal | active |
@@ -183,9 +184,11 @@ Last updated: 2026-06-15
 | [2026-06-14-2-per-agent-independent-tmux-sessions-replace](episodes/2026-06-14-2-per-agent-independent-tmux-sessions-replace.md) | 2026-06-14 | Per-agent independent tmux sessions replace shared window model | architecture | active |
 | [2026-06-14-2-title-distillation-engine-stalls-on-slow](episodes/2026-06-14-2-title-distillation-engine-stalls-on-slow.md) | 2026-06-14 | Title distillation engine stalls on slow/failing API calls | root-cause | superseded |
 | [2026-06-14-3-tui-attach-view-session-reaping-race](episodes/2026-06-14-3-tui-attach-view-session-reaping-race.md) | 2026-06-14 | TUI Attach View Session Reaping Race | root-cause | active |
+| [2026-06-15-1-delta-gated-posttooluse-sibling-awareness-replaces](episodes/2026-06-15-1-delta-gated-posttooluse-sibling-awareness-replaces.md) | 2026-06-15 | Delta-gated PostToolUse sibling awareness replaces global firehose | product | active |
 | [2026-06-15-1-manual-tui-spawns-start-clean-no](episodes/2026-06-15-1-manual-tui-spawns-start-clean-no.md) | 2026-06-15 | Manual TUI spawns start clean — no inbox injection | product | active |
 | [2026-06-15-1-narrowed-cleanup-policy-from-aggressive-broad](episodes/2026-06-15-1-narrowed-cleanup-policy-from-aggressive-broad.md) | 2026-06-15 | Narrowed cleanup policy from aggressive broad sweeps to worktree-target-only after near-data-loss | reversal | active |
 | [2026-06-15-1-remove-no-tmux-tag-from-tui](episodes/2026-06-15-1-remove-no-tmux-tag-from-tui.md) | 2026-06-15 | Remove [no tmux] tag from TUI session list | product | active |
+| [2026-06-15-1-replace-posttooluse-firehose-with-delta-gated](episodes/2026-06-15-1-replace-posttooluse-firehose-with-delta-gated.md) | 2026-06-15 | Replace PostToolUse firehose with delta-gated project-scoped awareness | product | superseded |
 | [2026-06-15-1-session-title-distillation-async-immediate-fallback](episodes/2026-06-15-1-session-title-distillation-async-immediate-fallback.md) | 2026-06-15 | Session title distillation: async + immediate fallback + retry-on-failure | root-cause | superseded |
 | [2026-06-15-1-tenex-edge-tui-migrates-from-manual](episodes/2026-06-15-1-tenex-edge-tui-migrates-from-manual.md) | 2026-06-15 | tenex-edge TUI migrates from manual crossterm redraw to ratatui | architecture | superseded |
 | [2026-06-15-1-tmux-tui-exited-sessions-time-window](episodes/2026-06-15-1-tmux-tui-exited-sessions-time-window.md) | 2026-06-15 | Tmux TUI exited-sessions time-window filter replaces boolean toggle | product | active |

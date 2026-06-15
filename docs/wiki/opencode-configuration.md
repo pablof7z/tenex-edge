@@ -2,7 +2,7 @@
 title: OpenCode Configuration
 slug: opencode-configuration
 topic: tenex-edge
-summary: The @opencode-ai/plugin dependency version must match the opencode binary version (1.16.2) in both ~/.config/opencode/package.json and ~/.opencode/package.json.
+summary: The @opencode-ai/plugin dependency version must match the opencode binary version (1.16.2) in both ~/.config/opencode/package.json and ~/.opencode/package.json
 tags:
   - capture
 volatility: warm
@@ -22,10 +22,9 @@ sources:
 
 ## Dependency Version
 
-The @opencode-ai/plugin dependency version must match the opencode binary version (1.16.2) in both ~/.config/opencode/package.json and ~/.opencode/package.json. Testing must also include the opencode agent adapter (TS plugin-based integration) alongside claude-code and codex.
+The @opencode-ai/plugin dependency version must match the opencode binary version (1.16.2) in both ~/.config/opencode/package.json and ~/.opencode/package.json. The opencode binary lives at ~/.opencode/bin/opencode. Testing must also include the opencode agent adapter (TS plugin-based integration) alongside claude-code and codex.
 
-<!-- citations: [^96aed-6] [^96aed-7] [^95659-3] [^ab999-25] -->
-
+<!-- citations: [^96aed-6] [^96aed-7] [^95659-3] [^ab999-25] [^96aed-9] -->
 ## Session Hooks
 
 OpenCode's `session.idle` hook must be verified to fire per-turn rather than mid-loop to prevent premature idle states during long turns. In headless `opencode run` mode, the plugin's fire-and-forget session-start races the single turn, so the session must be pre-registered deterministically via the hook. <!-- [^ab999-26] -->
@@ -33,3 +32,7 @@ OpenCode's `session.idle` hook must be verified to fire per-turn rather than mid
 ## Stale Database Recovery
 
 When opencode's local SQLite database has an outdated schema missing a required column, the database files (including WAL and shared memory) are backed up with a .bak suffix and removed, allowing opencode to recreate them with the correct schema on restart. This backup-and-remove process results in the loss of local conversation history. <!-- [^72c1c-2] -->
+
+## Plugin Files
+
+OpenCode plugin .ts files reside in ~/.config/opencode/plugin/ and are loaded from there on startup. The tenex-edge plugin file (tenex-edge.ts) is installed from ~/src/tenex-edge/integrations/opencode/. The proactive-context plugin file (proactive-context.ts) is installed from ~/src/proactive-context/integrations/opencode/. <!-- [^96aed-10] -->

@@ -13,6 +13,7 @@ verified: 2026-06-15
 compiled-from: conversation
 sources:
   - session:16ac1219-405e-4d37-bcba-f2ad417a7e1e
+  - session:rollout-2026-06-14T13-19-49-019ec5a5-1119-76f0-a7e3-36bc985a31bd
 ---
 
 # Disk Cleanup
@@ -43,6 +44,10 @@ If space drops near 5 GB and no worktrees unlock, the escalation is to delete `~
 
 Figma caches (Code Cache + Cache + GPU, ~1 GB total) are safe to clear. Three stale iOS DeviceSupport versions were deleted to reclaim ~17 GB. <!-- [^16ac1-8] -->
 
+
+Stale, uncompiled split-module files (src/cli/*, src/state/*, src/runtime/tests.rs) are deleted rather than wired into the build, keeping monolithic roots (src/cli.rs, src/state.rs) as the source of truth. <!-- [^rollo-33] -->
+
+Durable design docs are committed separately from source changes; stale generated wiki/scratch files are discarded rather than committed as repo truth. Source commits exclude generated wiki/docs churn and trailing whitespace from docs/wiki/_citations.log. <!-- [^rollo-34] -->
 ## Pending Decisions
 
 Pending user decision on whether to delete `Podcastr-Test` simulator device (951 MB, shutdown) and/or `Current -- Use this for Chirp iOS` simulator device (4.6 GB, shutdown). <!-- [^16ac1-9] -->

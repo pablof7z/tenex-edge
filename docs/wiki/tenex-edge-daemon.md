@@ -8,7 +8,7 @@ tags:
 volatility: warm
 confidence: medium
 created: 2026-06-09
-updated: 2026-06-13
+updated: 2026-06-14
 verified: 2026-06-09
 compiled-from: conversation
 sources:
@@ -22,6 +22,7 @@ sources:
   - session:f3a730bf-9a3b-4952-b687-c93ade5fd7ec
   - session:rollout-2026-06-09T15-01-20-019eac42-32f0-7ff0-bda2-da2de3b78ed7
   - session:1562957b-67e8-4ac1-a48b-84e8ec1696bb
+  - session:rollout-2026-06-14T13-19-49-019ec5a5-1119-76f0-a7e3-36bc985a31bd
 ---
 
 # Tenex-Edge Daemon
@@ -46,6 +47,6 @@ WAL mode is enabled immediately (with busy_timeout and synchronous=NORMAL) as a 
 <!-- citations: [^162f9-6] [^162f9-17] -->
 ## Build & Install
 
-The `just install` command builds the tenex-edge Rust binary in release mode and deploys it to `~/.local/bin/tenex-edge`. It then applies a macOS codesign fix (`xattr -cr` + `codesign --force --sign -`) to the deployed binary, which prevents a SIGKILL on fork/re-exec. After installing a new binary, the daemon must be restarted (pkill -f 'tenex-edge __daemon') so that subsequent hook calls spawn a fresh daemon from the newly installed binary, making new RPCs such as project_list, project_edit, and user_prompt available. rustls CryptoProvider must be explicitly installed at process startup (ring provider) because rig-core's reqwest pulls both ring and aws-lc-rs, causing rustls 0.23 to panic when it can't auto-pick a default.
+The `just install` command builds the tenex-edge Rust binary in release mode and deploys it to `~/.local/bin/tenex-edge`. It then applies a macOS codesign fix (`xattr -cr` + `codesign --force --sign -`) to the deployed binary, which prevents a SIGKILL on fork/re-exec. After installing a new binary, the daemon must be restarted (pkill -f 'tenex-edge __daemon') so that subsequent hook calls spawn a fresh daemon from the newly installed binary, making new RPCs such as project_list, project_edit, and user_prompt available. After source commits and cleanup, the local release binary is reinstalled and the running daemon is restarted to pick up the changes. rustls CryptoProvider must be explicitly installed at process startup (ring provider) because rig-core's reqwest pulls both ring and aws-lc-rs, causing rustls 0.23 to panic when it can't auto-pick a default.
 
-<!-- citations: [^ses_1-5] [^98f99-10] [^98f99-19] [^f3a73-113] -->
+<!-- citations: [^ses_1-5] [^98f99-10] [^98f99-19] [^f3a73-113] [^rollo-37] -->
