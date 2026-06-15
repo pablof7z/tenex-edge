@@ -629,11 +629,10 @@ async fn rpc_session_start(
         rel_cwd: rel_cwd.clone(),
     });
 
-    // If this pane was created via `tmux_spawn` (registered as a pending spawn),
-    // inject the first prompt into it once the harness is ready rather than
-    // waiting for `ring_doorbells` to fire a generic nudge. The entry is only
-    // present when `spawn_agent` created this window; ordinary harness starts
-    // (and repeated `session_start` reasserts) never match. Consuming here
+    // If this pane was created by spawn-on-send, it was tagged with the mention
+    // that triggered it. Type that message straight into the new session as its
+    // first prompt (the whole reason the session exists). Manual spawns from the
+    // TUI tag nothing and so start clean — no prompt injected. Consuming here
     // ensures injection fires exactly once regardless of call count.
     let pending_spawn = p
         .tmux_pane
@@ -641,13 +640,16 @@ async fn rpc_session_start(
         .filter(|pane| !pane.is_empty())
         .and_then(crate::tmux::consume_pending_spawn);
 
-    // If the spawn carried a triggering mention, write it to this session's
-    // inbox NOW — before the harness runs `tenex-edge inbox` — so the agent
-    // finds the message on its very first turn.
-    if let Some(ref ps) = pending_spawn {
-        if let Some(ref m) = ps.mention {
-            state.with_store(|s| {
-                s.enqueue_mention(&crate::state::InboxRow {
+    if let (Some(ps), Some(pane)) = (pending_spawn, p.tmux_pane.clone()) {
+        let m = ps.mention;
+
+        // Persist the mention as already-delivered: the row lets `inbox reply
+        // --id` resolve the original we're about to show, but marking it
+        // delivered keeps the turn-start drain from re-injecting it as
+        // duplicate context (we are typing it in directly).
+        state.with_store(|s| {
+            s.enqueue_mention_delivered(
+                &crate::state::InboxRow {
                     mention_event_id: m.event_id.clone(),
                     target_session: session_id.clone(),
                     from_pubkey: m.from_pubkey.clone(),
@@ -661,22 +663,38 @@ async fn rpc_session_start(
                     commit: String::new(),
                     dirty: 0,
                     host: String::new(),
-                })
-                .ok()
-            });
-            state.mention_notify.notify_waiters();
-        }
-    }
+                },
+                now_secs(),
+            )
+            .ok()
+        });
 
-    if let (Some(ps), Some(pane)) = (pending_spawn, p.tmux_pane.clone()) {
-        let prompt = ps.prompt.clone();
+        // Render the received message exactly as the inbox would (provenance,
+        // reply ID, body) and type it into the pane as the first prompt.
+        let now = now_secs();
+        let prompt = crate::cli::format_envelope(&crate::cli::EnvelopeView {
+            from_slug: &m.from_slug,
+            project: &m.project,
+            from_session: &m.from_session,
+            host: "",
+            self_host: "",
+            subject: "",
+            branch: "",
+            commit: "",
+            dirty: 0,
+            id: &crate::cli::mention_short_id(&m.event_id),
+            sent_at: m.created_at,
+            now,
+            body: &m.body,
+        });
+
         tokio::spawn(async move {
-            if let Err(e) = crate::tmux::inject_spawn_prompt(&pane, &prompt).await {
+            if let Err(e) = crate::tmux::inject_spawn_message(&pane, &prompt).await {
                 if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
-                    eprintln!("[tmux] spawn prompt inject failed for pane {pane}: {e:#}");
+                    eprintln!("[tmux] spawn message inject failed for pane {pane}: {e:#}");
                 }
             } else if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
-                eprintln!("[tmux] spawn prompt {prompt:?} injected into pane {pane}");
+                eprintln!("[tmux] spawn message injected into pane {pane}");
             }
         });
     }

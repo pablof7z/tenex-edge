@@ -120,7 +120,7 @@ fn selected_resume_sid(
     None
 }
 
-const SEVEN_DAYS: u64 = 7 * 24 * 3600;
+const TWELVE_HOURS: u64 = 12 * 3600;
 
 fn compute_project_tabs(data: &TuiData) -> ProjectTabs {
     let now = std::time::SystemTime::now()
@@ -128,17 +128,19 @@ fn compute_project_tabs(data: &TuiData) -> ProjectTabs {
         .unwrap_or_default()
         .as_secs();
 
-    // Projects with at least one live session — always visible, sorted.
-    let live_projects: std::collections::BTreeSet<String> = data
-        .live
-        .iter()
-        .filter(|r| !r.project.is_empty())
-        .map(|r| r.project.clone())
-        .collect();
+    // Count live sessions per project.
+    let mut live_count: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    for row in &data.live {
+        if !row.project.is_empty() {
+            *live_count.entry(row.project.clone()).or_insert(0) += 1;
+        }
+    }
+    let live_projects: std::collections::HashSet<String> = live_count.keys().cloned().collect();
 
     // Track latest created_at per project from resumable sessions.
-    let mut last_active: std::collections::BTreeMap<String, u64> =
-        std::collections::BTreeMap::new();
+    let mut last_active: std::collections::HashMap<String, u64> =
+        std::collections::HashMap::new();
     for row in &data.resumable {
         if !row.project.is_empty() {
             let e = last_active.entry(row.project.clone()).or_insert(0);
@@ -146,14 +148,15 @@ fn compute_project_tabs(data: &TuiData) -> ProjectTabs {
         }
     }
 
+    // Projects without live sessions: show if active within 12h, else hide.
     let mut visible_recent: Vec<String> = Vec::new();
     let mut hidden: Vec<String> = Vec::new();
 
     for (proj, t) in &last_active {
         if live_projects.contains(proj) {
-            continue; // already in live_projects
+            continue;
         }
-        if now.saturating_sub(*t) < SEVEN_DAYS {
+        if now.saturating_sub(*t) < TWELVE_HOURS {
             visible_recent.push(proj.clone());
         } else {
             hidden.push(proj.clone());
@@ -162,12 +165,15 @@ fn compute_project_tabs(data: &TuiData) -> ProjectTabs {
     visible_recent.sort();
     hidden.sort();
 
-    // Also include live projects in last_active so they show up consistently.
-    for proj in &live_projects {
-        last_active.entry(proj.clone()).or_insert(now);
-    }
+    // Sort live projects by session count descending, then alphabetically.
+    let mut live_sorted: Vec<String> = live_projects.into_iter().collect();
+    live_sorted.sort_by(|a, b| {
+        let ca = live_count.get(a).copied().unwrap_or(0);
+        let cb = live_count.get(b).copied().unwrap_or(0);
+        cb.cmp(&ca).then(a.cmp(b))
+    });
 
-    let mut visible: Vec<String> = live_projects.into_iter().collect();
+    let mut visible: Vec<String> = live_sorted;
     visible.extend(visible_recent);
 
     ProjectTabs { visible, hidden }
@@ -579,16 +585,7 @@ fn draw_tui(
             } else {
                 row.status.trim().to_string()
             };
-            if !row.attachable {
-                body.push(format!(
-                    "  {} {}  {}  {} {}",
-                    cursor,
-                    label.dimmed(),
-                    session_tag.dimmed(),
-                    status_str.dimmed(),
-                    "[no tmux]".dimmed(),
-                ));
-            } else if is_sel {
+            if is_sel {
                 body.push(format!(
                     "  {} {}  {}  {}",
                     cursor,
@@ -752,7 +749,7 @@ fn draw_tui(
     let _ = writeln!(
         out,
         "  {}",
-        format!("[↑↓] move  [←→] tab  [/] search  [a/↵] attach  [n] spawn  {exited_hint}  [q] quit")
+        format!("[↑↓] move  [←→] tab  [/] search  [↵] attach/spawn  {exited_hint}  [q] quit")
             .dimmed()
     );
     if !status.is_empty() {
@@ -968,31 +965,61 @@ pub(super) fn tmux_tui() -> Result<()> {
                                                 }
                                             }
                                         } else {
-                                            match selected_resume_sid(
-                                                &fl,
-                                                data.spawnable.len(),
-                                                &fr,
-                                                selected,
-                                            ) {
-                                                Some(sid) => {
-                                                    status_msg = "Resuming...".to_string();
-                                                    draw_tui(
-                                                        &data,
-                                                        selected,
-                                                        &status_msg,
-                                                        &mut scroll,
-                                                        &pt.visible,
-                                                        tab_idx,
-                                                        exited_opt,
-                                                    )?;
-                                                    match resume_in_tui(&sid) {
-                                                        Ok(pane) => pending_attach = Some(pane),
-                                                        Err(msg) => status_msg = msg,
+                                            let si = selected.saturating_sub(fl.len());
+                                            if selected >= fl.len() && si < data.spawnable.len() {
+                                                let slug = data.spawnable[si].slug.clone();
+                                                let project = crate::project::resolve(
+                                                    &std::env::current_dir().unwrap_or_default(),
+                                                );
+                                                status_msg = format!("Spawning {slug}...");
+                                                draw_tui(
+                                                    &data,
+                                                    selected,
+                                                    &status_msg,
+                                                    &mut scroll,
+                                                    &pt.visible,
+                                                    tab_idx,
+                                                    exited_opt,
+                                                )?;
+                                                match crate::daemon::blocking::call(
+                                                    "tmux_spawn",
+                                                    serde_json::json!({
+                                                        "agent": slug,
+                                                        "project": project,
+                                                    }),
+                                                ) {
+                                                    Ok(v) => {
+                                                        pending_attach =
+                                                            v["pane_id"].as_str().map(str::to_string);
+                                                    }
+                                                    Err(e) => {
+                                                        status_msg = format!("Spawn failed: {e}")
                                                     }
                                                 }
-                                                None => {
-                                                    status_msg =
-                                                        "Press [n] to spawn.".to_string();
+                                            } else {
+                                                match selected_resume_sid(
+                                                    &fl,
+                                                    data.spawnable.len(),
+                                                    &fr,
+                                                    selected,
+                                                ) {
+                                                    Some(sid) => {
+                                                        status_msg = "Resuming...".to_string();
+                                                        draw_tui(
+                                                            &data,
+                                                            selected,
+                                                            &status_msg,
+                                                            &mut scroll,
+                                                            &pt.visible,
+                                                            tab_idx,
+                                                            exited_opt,
+                                                        )?;
+                                                        match resume_in_tui(&sid) {
+                                                            Ok(pane) => pending_attach = Some(pane),
+                                                            Err(msg) => status_msg = msg,
+                                                        }
+                                                    }
+                                                    None => {}
                                                 }
                                             }
                                         }
@@ -1017,40 +1044,6 @@ pub(super) fn tmux_tui() -> Result<()> {
                                             match resume_in_tui(&sid) {
                                                 Ok(pane) => pending_attach = Some(pane),
                                                 Err(msg) => status_msg = msg,
-                                            }
-                                        }
-                                    }
-                                    KeyCode::Char('n') if selected >= fl.len() => {
-                                        let si = selected - fl.len();
-                                        if si < data.spawnable.len() {
-                                            let slug = data.spawnable[si].slug.clone();
-                                            let project = crate::project::resolve(
-                                                &std::env::current_dir().unwrap_or_default(),
-                                            );
-                                            status_msg = format!("Spawning {slug}...");
-                                            draw_tui(
-                                                &data,
-                                                selected,
-                                                &status_msg,
-                                                &mut scroll,
-                                                &pt.visible,
-                                                tab_idx,
-                                                exited_opt,
-                                            )?;
-                                            match crate::daemon::blocking::call(
-                                                "tmux_spawn",
-                                                serde_json::json!({
-                                                    "agent": slug,
-                                                    "project": project,
-                                                }),
-                                            ) {
-                                                Ok(v) => {
-                                                    pending_attach =
-                                                        v["pane_id"].as_str().map(str::to_string);
-                                                }
-                                                Err(e) => {
-                                                    status_msg = format!("Spawn failed: {e}")
-                                                }
                                             }
                                         }
                                     }

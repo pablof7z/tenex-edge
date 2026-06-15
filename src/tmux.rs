@@ -7,10 +7,12 @@
 //!     waiter, then injects the nudge text into the pane.
 //!
 //!   • `spawn_agent(state, slug, project)` — spawns a new tmux window running the
-//!     appropriate harness command, and registers the new pane as a "pending spawn"
-//!     so that when the harness fires its `session-start` hook, the daemon can inject
-//!     the actual spawn prompt (`tenex-edge inbox` by default) rather than a generic
-//!     doorbell nudge.
+//!     appropriate harness command. When the spawn was triggered by an inbound
+//!     mention (spawn-on-send), the caller tags the new pane with that mention via
+//!     `register_pending_spawn_with_mention`; when the harness fires its
+//!     `session-start` hook, the daemon types the received message straight into
+//!     the pane as its first prompt. Manual spawns (from the TUI) register nothing
+//!     and start clean — no prompt is injected.
 //!
 //! Fail-open everywhere: if the `tmux` binary is absent, TMUX_PANE was never set,
 //! or any sub-command errors, we log to stderr (debug only) and return Ok(()).
@@ -21,10 +23,6 @@ use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
-
-/// Default first-prompt text injected into a freshly-spawned pane when the
-/// harness reaches its input prompt.
-const SPAWN_PROMPT_DEFAULT: &str = "tenex-edge inbox";
 
 /// How long to wait after `session_start` fires before typing into the pane.
 /// The hook fires early in harness startup; we need to wait until the input
@@ -51,10 +49,6 @@ struct SpawnDef {
     window_name: &'static str,
     /// Command to run (first word of the exec, plus args).
     command: &'static [&'static str],
-    /// First prompt to type once the harness reaches its input box after startup.
-    /// `None` means use `SPAWN_PROMPT_DEFAULT` ("tenex-edge inbox").
-    /// Useful for harnesses that need a different invocation to drain their inbox.
-    spawn_prompt: Option<&'static str>,
 }
 
 /// How a harness's launch command is transformed into a *resume* invocation.
@@ -76,19 +70,16 @@ static SPAWN_DEFS: &[SpawnDef] = &[
         slug: "claude",
         window_name: "claude·tenex-edge",
         command: &["claude"],
-        spawn_prompt: None,
     },
     SpawnDef {
         slug: "codex",
         window_name: "codex·tenex-edge",
         command: &["codex"],
-        spawn_prompt: None,
     },
     SpawnDef {
         slug: "opencode",
         window_name: "opencode·tenex-edge",
         command: &["opencode"],
-        spawn_prompt: None,
     },
 ];
 
@@ -214,54 +205,36 @@ pub struct PendingMention {
     pub created_at: u64,
 }
 
-/// State registered for a pane created via `spawn_agent`.
+/// State registered for a pane created by spawn-on-send: an inbound mention
+/// p-tagging a locally-owned agent spawned this window. Carries the triggering
+/// mention so `rpc_session_start` can type the received message into the new
+/// session as its first prompt. Manual spawns (from the TUI) register NO pending
+/// spawn, so they start clean with no injected prompt.
 pub struct PendingSpawn {
-    /// First prompt to inject once the harness reaches its input box.
-    pub prompt: String,
-    /// If `Some`, write this inbox row before injecting the prompt so the
-    /// agent finds the triggering message when it runs `tenex-edge inbox`.
-    pub mention: Option<PendingMention>,
+    pub mention: PendingMention,
 }
 
-/// Map from pane_id → `PendingSpawn` for panes created via `spawn_agent`
-/// whose harness has not yet called `session_start`.
+/// Map from pane_id → `PendingSpawn` for panes created by spawn-on-send whose
+/// harness has not yet called `session_start`.
 static PENDING_SPAWNS: OnceLock<Mutex<HashMap<String, PendingSpawn>>> = OnceLock::new();
 
 fn pending_spawns() -> &'static Mutex<HashMap<String, PendingSpawn>> {
     PENDING_SPAWNS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// Register `pane_id` as a pending-spawn with the given prompt text (no
-/// triggering mention).  Called by `spawn_agent` immediately after the window
-/// is created.
-pub fn register_pending_spawn(pane_id: String, prompt: String) {
-    pending_spawns().lock().unwrap().insert(
-        pane_id,
-        PendingSpawn {
-            prompt,
-            mention: None,
-        },
-    );
-}
-
-/// Attach a triggering mention to a pane that was already registered via
-/// `register_pending_spawn`.  If no entry exists yet (race), creates one with
-/// the default prompt so the mention is not lost.
-/// Called from `rpc_send_message` after `spawn_agent` returns the pane id.
+/// Tag a freshly-spawned pane with the mention that triggered it, so that when
+/// the harness fires `session-start` the daemon types that message into the
+/// pane. Called from `rpc_send_message` after `spawn_agent` returns the pane id.
 pub fn register_pending_spawn_with_mention(pane_id: &str, mention: PendingMention) {
-    let mut m = pending_spawns().lock().unwrap();
-    let entry = m
-        .entry(pane_id.to_string())
-        .or_insert_with(|| PendingSpawn {
-            prompt: SPAWN_PROMPT_DEFAULT.to_string(),
-            mention: None,
-        });
-    entry.mention = Some(mention);
+    pending_spawns()
+        .lock()
+        .unwrap()
+        .insert(pane_id.to_string(), PendingSpawn { mention });
 }
 
 /// Remove and return the `PendingSpawn` for `pane_id`, or `None` if this pane
-/// was not created by `spawn_agent` (i.e. it is a normal harness start).
-/// Called by `rpc_session_start` when a pane registers its tmux endpoint.
+/// was not created by spawn-on-send (a manual spawn or an ordinary harness
+/// start). Called by `rpc_session_start` when a pane registers its tmux endpoint.
 pub fn consume_pending_spawn(pane_id: &str) -> Option<PendingSpawn> {
     pending_spawns().lock().unwrap().remove(pane_id)
 }
@@ -400,26 +373,62 @@ async fn inject_doorbell(pane_id: &str) -> Result<()> {
     Ok(())
 }
 
-// ── spawn-prompt injection ────────────────────────────────────────────────────
+// ── spawn-message injection ───────────────────────────────────────────────────
 
-/// Inject `text` + Enter into `pane_id` after a startup grace delay, so that
-/// a freshly-spawned harness receives its first prompt once its input box is
-/// interactive.
+/// Paste `text` into `pane_id` via a tmux paste buffer in bracketed-paste mode
+/// (`-p`). Unlike `send-keys -l`, this delivers embedded newlines as input
+/// rather than submitting at each line break — required because the spawn
+/// message is a multi-line envelope. The buffer is loaded over stdin (no
+/// arg-escaping pitfalls) and deleted after the paste (`-d`).
+async fn paste_text(pane_id: &str, text: &str) -> Result<()> {
+    use tokio::io::AsyncWriteExt;
+    const BUF: &str = "te-spawn-msg";
+
+    let mut child = tokio::process::Command::new("tmux")
+        .args(["load-buffer", "-b", BUF, "-"])
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .context("tmux load-buffer spawn")?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(text.as_bytes())
+            .await
+            .context("writing tmux paste buffer")?;
+    }
+    let status = child.wait().await.context("tmux load-buffer wait")?;
+    if !status.success() {
+        anyhow::bail!("tmux load-buffer failed for pane {pane_id}");
+    }
+
+    let status = tokio::process::Command::new("tmux")
+        .args(["paste-buffer", "-p", "-d", "-b", BUF, "-t", pane_id])
+        .status()
+        .await
+        .context("tmux paste-buffer")?;
+    if !status.success() {
+        anyhow::bail!("tmux paste-buffer failed for pane {pane_id}");
+    }
+    Ok(())
+}
+
+/// Type the received message into `pane_id` and submit it, so a freshly-spawned
+/// harness opens on the message that triggered its spawn. Waits a startup grace
+/// delay for the input box to become interactive, pastes the (multi-line)
+/// message with bracketed paste, then sends Enter.
 ///
-/// Called from `rpc_session_start` (in a background task) when it detects that
-/// the registering pane was created via `spawn_agent`.
-pub async fn inject_spawn_prompt(pane_id: &str, text: &str) -> Result<()> {
-    // Wait for the harness to reach its interactive input prompt.  The
-    // `session-start` hook fires early in startup (before the TUI is ready to
-    // accept keystrokes), so we must wait a moment before sending.
+/// Called from `rpc_session_start` (in a background task) when the registering
+/// pane was created by spawn-on-send.
+pub async fn inject_spawn_message(pane_id: &str, text: &str) -> Result<()> {
+    // The `session-start` hook fires early in startup (before the TUI is ready
+    // to accept input), so wait until the input box is interactive.
     tokio::time::sleep(Duration::from_millis(SPAWN_PROMPT_DELAY_MS)).await;
 
     // Abort if the pane has already died (harness crashed during startup).
     if pane_alive(pane_id).is_none() {
-        anyhow::bail!("pane {pane_id} died before spawn prompt could be injected");
+        anyhow::bail!("pane {pane_id} died before spawn message could be injected");
     }
 
-    inject_text(pane_id, text).await?;
+    paste_text(pane_id, text).await?;
     // Short pause so the TUI has time to absorb the paste before Enter lands.
     tokio::time::sleep(Duration::from_millis(200)).await;
     send_enter(pane_id).await?;
@@ -639,7 +648,7 @@ pub async fn spawn_agent(state: &Arc<DaemonState>, slug: &str, project: &str) ->
     }
 
     let agent_command = resolve_agent_command(slug)?;
-    let def = find_spawn_def(slug); // optional, for window_name / spawn_prompt defaults
+    let def = find_spawn_def(slug); // optional, for the window_name default
     let window_name_owned: String;
     let window_name: &str = match def {
         Some(d) => d.window_name,
@@ -652,15 +661,10 @@ pub async fn spawn_agent(state: &Arc<DaemonState>, slug: &str, project: &str) ->
     let abs_path = project_abs_path(state, project);
     let pane_id = open_agent_session(slug, window_name, &abs_path, &agent_command).await?;
 
-    // Register as a pending spawn so that when the harness fires its
-    // `session-start` hook, `rpc_session_start` injects the actual prompt
-    // instead of waiting for a generic `ring_doorbells` nudge.
-    let prompt = def
-        .and_then(|d| d.spawn_prompt)
-        .unwrap_or(SPAWN_PROMPT_DEFAULT)
-        .to_string();
-    register_pending_spawn(pane_id.clone(), prompt);
-
+    // No prompt is injected by spawn alone. A spawn-on-send caller tags this
+    // pane with its triggering mention via `register_pending_spawn_with_mention`,
+    // which is what makes `rpc_session_start` type the message in. A manual spawn
+    // tags nothing and so starts clean.
     Ok(pane_id)
 }
 

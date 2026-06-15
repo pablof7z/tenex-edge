@@ -911,6 +911,25 @@ impl Store {
         Ok(changed > 0)
     }
 
+    /// Enqueue a mention already marked delivered. Used when the message is
+    /// handed to the agent out-of-band — e.g. typed straight into a freshly
+    /// spawned pane as its first prompt: the row must persist so `inbox reply
+    /// --id` can resolve the original, but the turn-start drain must NOT
+    /// re-deliver it as duplicate context.
+    pub fn enqueue_mention_delivered(&self, m: &InboxRow, delivered_at: u64) -> Result<bool> {
+        let changed = self.conn.execute(
+            "INSERT OR IGNORE INTO inbox
+               (mention_event_id, target_session, from_pubkey, from_slug, project, body, created_at, delivered, delivered_at, from_session, subject, branch, commit_hash, dirty, host)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,1,?8,?9,?10,?11,?12,?13,?14)",
+            params![
+                m.mention_event_id, m.target_session, m.from_pubkey, m.from_slug,
+                m.project, m.body, m.created_at, delivered_at, m.from_session,
+                m.subject, m.branch, m.commit, m.dirty, m.host
+            ],
+        )?;
+        Ok(changed > 0)
+    }
+
     /// Read undelivered mentions without marking them delivered. Safe for
     /// mid-turn checks (turn_check) — no writes to state.db.
     pub fn peek_inbox(&self, session_id: &str) -> Result<Vec<InboxRow>> {
