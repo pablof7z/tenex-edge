@@ -71,11 +71,12 @@ pub fn compute_targets(target_session: Option<&str>, my_alive_sessions: &[String
 /// daemon owns one union subscription and demuxes incoming events centrally,
 /// routing mentions to the right agent's inbox. This task only:
 ///   - publishes profile once + an initial Status (signed with the agent's keys),
-///   - heartbeats the per-session Status (refreshing its TTL = the session's
-///     liveness),
+///   - heartbeats the per-session Status (refreshing the store's `last_seen`,
+///     which is what tracks liveness — the event itself never expires),
 ///   - distills turn activity → Activity + Status,
-///   - watches the host pid and exits cleanly (idle, then expired Status) on pid
-///     death or on `cancel` (the `session-end` path).
+///   - watches the host pid and exits cleanly (idle, title RETAINED) on pid
+///     death or on `cancel` (the `session-end` path) — a finished session keeps
+///     its title.
 ///
 /// Store access goes through the shared `Arc<Mutex<Store>>`; the guard is held
 /// only across the synchronous rusqlite calls, NEVER across `.await`.
@@ -88,7 +89,6 @@ pub async fn run_session_in_daemon(
     let me = p.agent_pubkey.clone();
     let keys = p.keys.clone();
     let aref = AgentRef::new(me.clone(), p.agent_slug.clone());
-    let ttl = p.status_ttl.as_secs();
     let owners = p.owners.clone();
 
     macro_rules! st {
@@ -106,9 +106,10 @@ pub async fn run_session_in_daemon(
             let _ = provider.publish(&ev, &keys).await;
         }
     };
-    // The single self-contained per-session signal. `expires_at` (this event's
-    // freshness) IS the session's liveness — there is no separate heartbeat.
-    let status_de = |title: &str, activity: &str, busy: bool, expires_at: u64| {
+    // The single self-contained per-session signal. The event is never expired
+    // (no NIP-40 expiration), so a finished session keeps its title on the relay;
+    // liveness is tracked by the store's `last_seen`, refreshed each heartbeat.
+    let status_de = |title: &str, activity: &str, busy: bool| {
         DomainEvent::Status(Status {
             agent: aref.clone(),
             project: p.project.clone(),
@@ -118,7 +119,6 @@ pub async fn run_session_in_daemon(
             activity: activity.to_string(),
             busy,
             rel_cwd: p.rel_cwd.clone(),
-            expires_at,
         })
     };
 
@@ -158,7 +158,7 @@ pub async fn run_session_in_daemon(
     // Publish initial status (also our immediate liveness): retain any recovered
     // title, but go idle (no live activity) until a turn starts.
     let init_title = cur_title.clone().unwrap_or_default();
-    publish_de(status_de(&init_title, "", false, now_secs() + ttl)).await;
+    publish_de(status_de(&init_title, "", false)).await;
     st!(|s: &Store| {
         s.set_agent_status(
             &me,
@@ -183,14 +183,15 @@ pub async fn run_session_in_daemon(
                     if !pid_alive(pid) { break; }
                 }
                 st!(|s: &Store| { s.touch_session(&p.session_id, now_secs()).ok(); });
-                // The unified per-session status IS the heartbeat: republishing it
-                // refreshes the session's liveness (its `expiration`) on the relay.
+                // The unified per-session status IS the heartbeat: it refreshes the
+                // store's `last_seen` (which tracks liveness) and republishes the
+                // current title. The relay event itself never expires.
                 // Carry the current title (if any) with the live busy flag; the live
                 // activity is only meaningful mid-turn, so clear it when idle.
                 let title = cur_title.clone().unwrap_or_default();
                 let (working, _) = st!(|s: &Store| s.get_turn_state(&p.session_id).unwrap_or((false, 0)));
                 let activity = if working { cur_activity.clone().unwrap_or_default() } else { String::new() };
-                publish_de(status_de(&title, &activity, working, now_secs() + ttl)).await;
+                publish_de(status_de(&title, &activity, working)).await;
                 st!(|s: &Store| { s.set_agent_status(&me, &p.project, Some(&p.session_id), &title, &activity, working, now_secs()).ok(); });
             }
             _ = obs.tick() => {
@@ -211,7 +212,7 @@ pub async fn run_session_in_daemon(
                                     text: format!("{} #{}", labels.title, p.project),
                                 })).await;
                             }
-                            publish_de(status_de(&labels.title, &labels.activity, true, now + ttl)).await;
+                            publish_de(status_de(&labels.title, &labels.activity, true)).await;
                             st!(|s: &Store| { s.set_agent_status(&me, &p.project, Some(&p.session_id), &labels.title, &labels.activity, true, now).ok(); });
                             last_distill = now; // success: gate subsequent turn_repeat checks
                         }
@@ -233,7 +234,7 @@ pub async fn run_session_in_daemon(
 
                         // Immediately publish active with whatever title we have.
                         let title = cur_title.clone().unwrap_or_default();
-                        publish_de(status_de(&title, "", true, now + ttl)).await;
+                        publish_de(status_de(&title, "", true)).await;
                         st!(|s: &Store| { s.set_agent_status(&me, &p.project, Some(&p.session_id), &title, "", true, now).ok(); });
 
                         // If no title yet, seed one from the user's message right now
@@ -247,7 +248,7 @@ pub async fn run_session_in_daemon(
                                 });
                             if let Some(qt) = quick {
                                 cur_title = Some(qt.clone());
-                                publish_de(status_de(&qt, "", true, now + ttl)).await;
+                                publish_de(status_de(&qt, "", true)).await;
                                 st!(|s: &Store| { s.set_agent_status(&me, &p.project, Some(&p.session_id), &qt, "", true, now).ok(); });
                             }
                         }
@@ -287,7 +288,7 @@ pub async fn run_session_in_daemon(
                     // live activity is dropped (only the persistent title survives).
                     cur_activity = None;
                     let title = cur_title.clone().unwrap_or_default();
-                    publish_de(status_de(&title, "", false, now + ttl)).await;
+                    publish_de(status_de(&title, "", false)).await;
                     st!(|s: &Store| { s.set_agent_status(&me, &p.project, Some(&p.session_id), &title, "", false, now).ok(); });
                     cur_turn_start = 0;
                     last_distill = 0;
@@ -301,17 +302,19 @@ pub async fn run_session_in_daemon(
         }
     }
 
-    // Clean exit: publish a final status that expires NOW (the unified event's
-    // freshness is the session's liveness, so this retires presence too) and
-    // clears the title — the ONLY place a live title is dropped — then mark the
-    // session dead.
-    publish_de(status_de("", "", false, now_secs())).await;
+    // Clean exit: publish a final IDLE status that RETAINS the title (a finished
+    // session keeps its title on the fabric — the title is NEVER cleared) and
+    // drops only the live activity. Liveness is tracked by the store: mark the
+    // session dead there (drops it from `who`), while the relay keeps the titled
+    // event (it never expires).
+    let final_title = cur_title.clone().unwrap_or_default();
+    publish_de(status_de(&final_title, "", false)).await;
     st!(|s: &Store| {
         s.set_agent_status(
             &me,
             &p.project,
             Some(&p.session_id),
-            "",
+            &final_title,
             "",
             false,
             now_secs(),

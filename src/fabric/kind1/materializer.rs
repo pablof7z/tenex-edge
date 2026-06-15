@@ -26,22 +26,27 @@ impl Kind1Materializer {
     /// `Status` is the single self-contained per-session signal, so it feeds BOTH
     /// read models: the peer-session liveness row (host/rel-cwd/last-seen — what
     /// the former presence heartbeat fed) AND the agent status (title/activity/
-    /// busy). Expired statuses are silently ignored.
+    /// busy).
+    ///
+    /// The status event NEVER expires (a finished session keeps its title), so
+    /// liveness is derived from WHEN the status was emitted (`seen_at`, the event
+    /// `created_at`) — a live session heartbeats recent timestamps; a finished one
+    /// stops, so its peer row ages out of `who` while the title persists on the
+    /// relay. `now` (ingest time) stamps only the durable agent-status row.
     ///
     /// The slug is NOT on the wire; it is resolved from the `profiles` table
     /// (populated by kind:0 events). Peer/status rows are NEVER seeded with a
     /// self-asserted slug — only kind:0 Profile events are authoritative.
-    pub fn materialize_status(store: &Store, st: &Status, now: u64) {
-        if st.expires_at <= now {
-            return;
-        }
+    pub fn materialize_status(store: &Store, st: &Status, seen_at: u64, now: u64) {
         // Resolve slug from kind:0 profile (authoritative); fall back to empty.
         let slug = store
             .resolve_slug_for_pubkey(&st.agent.pubkey)
             .ok()
             .flatten()
             .unwrap_or_default();
-        // Liveness: this event's freshness is the session's liveness.
+        // Liveness: when the status was EMITTED (event created_at), not ingest
+        // time — so re-fetching a persistent finished-session event does not
+        // resurrect it in `who`.
         store
             .upsert_peer_session(
                 st.session_id.as_str(),
@@ -50,7 +55,7 @@ impl Kind1Materializer {
                 &st.project,
                 &st.host,
                 &st.rel_cwd,
-                now,
+                seen_at,
             )
             .ok();
         // Title / activity / busy state.

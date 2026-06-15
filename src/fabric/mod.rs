@@ -132,7 +132,7 @@ pub fn materialize(
         }
 
         DomainEvent::Status(ref st) => {
-            Kind1Materializer::materialize_status(store, st, now);
+            Kind1Materializer::materialize_status(store, st, event.created_at.as_secs(), now);
         }
 
         DomainEvent::Mention(ref m) if hosted.contains(&m.to_pubkey) => {

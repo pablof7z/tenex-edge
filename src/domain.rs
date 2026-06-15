@@ -86,12 +86,14 @@ pub struct Proposal {
 /// per-session signal on the fabric. From this one value a reader knows
 /// everything: who/where (agent, project, host, session, rel_cwd), what the
 /// session is about (the persistent `title`), what it is doing *right now* (the
-/// live `activity`), whether it is mid-turn (`busy`), and how long to trust it
-/// (`expires_at`). It is replaceable per session, so each session keeps its own
-/// title even while idle.
+/// live `activity`), and whether it is mid-turn (`busy`). It is replaceable per
+/// session, so each session keeps its own title even while idle — and after it
+/// exits.
 ///
-/// This replaces the former separate `Presence` heartbeat: liveness is now this
-/// value's freshness / `expires_at`, not a dedicated event.
+/// This replaces the former separate `Presence` heartbeat: liveness is tracked
+/// by the daemon's store (`last_seen`), not a relay expiration — so the event
+/// (and its title) is NEVER expired off the relay. A finished session keeps its
+/// title on the fabric.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Status {
     pub agent: AgentRef,
@@ -102,7 +104,8 @@ pub struct Status {
     /// The machine this session lives on.
     pub host: String,
     /// The session title: a short, stable description of what the session is
-    /// about. Retained across idle turns; only cleared when the session exits.
+    /// about. Retained across idle turns AND after the session exits — a
+    /// finished session keeps its title on the fabric. Never cleared.
     pub title: String,
     /// The live activity line: what the agent is doing *right now* (the current
     /// step/mechanics). Distilled alongside `title` in one model call and
@@ -116,9 +119,6 @@ pub struct Status {
     /// PUBLIC kind → never the absolute `$HOME/...` path (privacy). Lets a `who`
     /// reflect where the agent is working.
     pub rel_cwd: String,
-    /// Absolute unix seconds after which this status (and the session's liveness)
-    /// should be considered stale (crash safety).
-    pub expires_at: u64,
 }
 
 impl Status {
@@ -199,7 +199,6 @@ mod tests {
             activity: String::new(),
             busy: false,
             rel_cwd: String::new(),
-            expires_at: 10,
         };
         let busy = Status {
             agent,
@@ -210,7 +209,6 @@ mod tests {
             activity: String::new(),
             busy: true,
             rel_cwd: String::new(),
-            expires_at: 10,
         };
         assert!(idle.is_idle());
         assert!(!busy.is_idle());

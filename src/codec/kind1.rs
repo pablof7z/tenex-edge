@@ -5,15 +5,17 @@
 //! | Profile   | kind:0,    content `{"name": slug}`, `["host", host]` |
 //! | Activity   | kind:1,    `["h", project]` |
 //! | TurnReply  | kind:1,    `["h", project]`, `["e", root_id, "", "root"]`, `["e", reply_id, "", "reply"]` |
-//! | Status     | kind:30315, content = live activity (may be empty when idle), `["d", "<project>:<session>"]`, `["h", project]`, `["session-id", id]`, `["title", title]` (always), `["status", "busy"\|"idle"]`, `["host", host]`, optional `["rel-cwd", rel]`, `["expiration", ts]` |
+//! | Status     | kind:30315, content = live activity (may be empty when idle), `["d", "<project>:<session>"]`, `["h", project]`, `["session-id", id]`, `["title", title]` (always), `["status", "busy"\|"idle"]`, `["host", host]`, optional `["rel-cwd", rel]` |
 //! | Mention    | kind:1,    `["h", project]`, `["p", to]`, optional `["session-id", target]`, `["from-session", sender]`, `["subject", s]`, `["git-branch", b]`, `["git-commit", c]`, `["git-dirty", n]`, `["from-host", h]`, `["e", reply_to, "", "reply"]` |
 //!
 //! Status is the single self-contained per-session signal: ONE kind:30315 event
 //! carries the whole live state of a session (busy/idle, the live activity in
 //! the content, the persistent title, host, rel-cwd). It is replaceable PER
 //! SESSION via `d = "<project>:<session>"`, so each session keeps its own title
-//! even when idle, and its freshness / `expiration` IS the session's liveness
-//! (there is no separate presence heartbeat).
+//! even when idle. The event is NEVER expired (no NIP-40 `expiration`), so a
+//! finished session keeps its title on the relay; liveness is tracked by the
+//! daemon's store (`last_seen`), not relay expiration. There is no separate
+//! presence heartbeat.
 //!
 //! kind:1 disambiguation on decode (in priority order):
 //!   1. Has `["p", ...]` tag                    → Mention
@@ -172,11 +174,12 @@ impl Codec for Kind1Codec {
                 activity,
                 busy,
                 rel_cwd,
-                expires_at,
             }) => {
                 // The single self-contained per-session signal. Content is the
                 // live activity (empty when idle); the title always rides as a
-                // tag so it persists across idle turns.
+                // tag so it persists across idle turns AND after exit. No
+                // `expiration` tag: the event (and its title) is never expired
+                // off the relay — liveness lives in the daemon store.
                 let d = status_d(project, session_id.as_str());
                 let mut tags = vec![
                     tag(&["d", &d])?,
@@ -189,7 +192,6 @@ impl Codec for Kind1Codec {
                 if !rel_cwd.is_empty() {
                     tags.push(tag(&["rel-cwd", rel_cwd])?);
                 }
-                tags.push(tag(&["expiration", &expires_at.to_string()])?);
                 EventBuilder::new(kind(KIND_STATUS), activity.clone()).tags(tags)
             }
             DomainEvent::Mention(Mention {
@@ -304,9 +306,6 @@ impl Codec for Kind1Codec {
                     activity: event.content.clone(),
                     busy: first_tag(event, "status") == Some("busy"),
                     rel_cwd: first_tag(event, "rel-cwd").unwrap_or_default().to_string(),
-                    expires_at: first_tag(event, "expiration")
-                        .and_then(|s| s.parse().ok())
-                        .unwrap_or(0),
                 }))
             }
             KIND_NOTE => {
@@ -438,7 +437,6 @@ mod tests {
             },
             busy,
             rel_cwd: rel_cwd.into(),
-            expires_at: 1_900_000_000,
         })
     }
 
@@ -501,7 +499,8 @@ mod tests {
         assert!(has_tag(&signed, "status", "busy"));
         assert!(has_tag(&signed, "host", "laptop"));
         assert!(has_tag(&signed, "rel-cwd", "worktree1"));
-        assert!(has_tag(&signed, "expiration", "1900000000"));
+        // Never expired: no NIP-40 expiration tag, so the title survives forever.
+        assert!(!has_tag_name(&signed, "expiration"));
         // The live activity is the content, not a tag.
         assert_eq!(signed.content, "reading the diff");
         assert!(!has_tag_name(&signed, "activity"));
@@ -542,7 +541,6 @@ mod tests {
                 tag(&["h", "tenex-edge"]).unwrap(),
                 tag(&["d", "tenex-edge:sess-xyz"]).unwrap(),
                 tag(&["status", "idle"]).unwrap(),
-                tag(&["expiration", "1900000000"]).unwrap(),
             ])
             .sign_with_keys(&keys)
             .unwrap();
