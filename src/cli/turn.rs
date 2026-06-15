@@ -1,13 +1,25 @@
 use super::messaging::row_envelope;
-use super::who::push_turn_fabric_block;
+use super::who::{build_status_delta, push_turn_fabric_block};
 use super::*;
+
+/// How a context block is emitted to the harness on stdout. Selected per
+/// (host, hook-type): plain text is injected directly by Claude Code's
+/// UserPromptSubmit and opencode; Codex wraps every hook in `{systemMessage}`;
+/// Claude Code's PostToolUse only reads context from a `hookSpecificOutput`
+/// envelope (plain stdout there is ignored by the harness).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum EmitFormat {
+    PlainText,
+    JsonSystemMessage,
+    ClaudePostToolUse,
+}
 
 // ── turn-start / turn-check / turn-end ───────────────────────────────────────
 
 pub(super) async fn turn_start(
     session: String,
     transcript: Option<String>,
-    json_out: bool,
+    emit: EmitFormat,
 ) -> Result<()> {
     if session.is_empty() {
         return Ok(());
@@ -18,7 +30,7 @@ pub(super) async fn turn_start(
     });
     let v = daemon_call_async("turn_start", params).await?;
     if let Some(ctx) = v["context"].as_str() {
-        emit_context(ctx, json_out);
+        emit_context(ctx, emit);
     }
     Ok(())
 }
@@ -114,32 +126,59 @@ pub fn assemble_turn_start_context(
     }
 }
 
-/// Mid-turn inbox PEEK (read-only) shared by the daemon's `turn_check` RPC.
-/// `self_host` is the viewer's own host (used to flag remote senders).
+/// Mid-turn context for the PostToolUse `turn_check` hook. Two independent
+/// blocks, each shown only when it has content:
+///   1. Inbox PEEK — direct messages that arrived mid-turn (read-only peek;
+///      authoritative delivery still happens at turn_start). Always surfaced.
+///   2. Sibling-session delta — project-scoped title/status changes since the
+///      last check, excluding this session. Only present when `delta_since` is
+///      `Some` (the daemon's 30s floor passed) and something actually changed.
+/// `self_host` flags remote senders; `now` is the shared timestamp.
 pub fn assemble_turn_check_context(
     store: &std::sync::Mutex<Store>,
-    session_id: &str,
+    rec: &crate::state::SessionRecord,
     self_host: &str,
+    delta_since: Option<u64>,
+    now: u64,
 ) -> Option<String> {
+    let mut blocks: Vec<String> = Vec::new();
+
+    // 1. Inbox peek — direct messages addressed to this session.
     let rows = {
         let s = store.lock().expect("store mutex poisoned");
-        // Route through the read-model method (peek semantics preserved).
-        s.undelivered_messages_for_session(session_id)
+        s.undelivered_messages_for_session(&rec.session_id)
             .unwrap_or_default()
     };
-    if rows.is_empty() {
-        return None;
+    if !rows.is_empty() {
+        let mut text = String::from("[tenex-edge] Message(s) arrived while you were working:");
+        for r in &rows {
+            let _ = write!(text, "\n\n{}", row_envelope(r, self_host, now));
+        }
+        blocks.push(text);
     }
-    let now = now_secs();
-    let mut text = String::from("[tenex-edge] Message(s) arrived while you were working:");
-    for r in &rows {
-        let _ = write!(text, "\n\n{}", row_envelope(r, self_host, now));
+
+    // 2. Sibling-session delta — gated by the daemon's rate-limit floor.
+    if let Some(since) = delta_since {
+        let s = store.lock().expect("store mutex poisoned");
+        let delta = build_status_delta(&s, since, &rec.project, now, Some(&rec.session_id));
+        if !delta.is_empty() {
+            blocks.push(format!(
+                "tenex-edge fabric — changes since your last check:\n{}",
+                delta.join("\n")
+            ));
+        }
     }
-    Some(text)
+
+    if blocks.is_empty() {
+        None
+    } else {
+        Some(blocks.join("\n\n"))
+    }
 }
 
-/// Mid-turn inbox check for PostToolUse hooks. Thin client: the daemon peeks.
-pub(super) fn turn_check(session: Option<String>, json_out: bool) -> Result<()> {
+/// Mid-turn check for PostToolUse hooks. Thin client: the daemon peeks the
+/// inbox and computes the rate-limited sibling-session delta.
+pub(super) fn turn_check(session: Option<String>, emit: EmitFormat) -> Result<()> {
     let params = serde_json::json!({
         "session": session,
         "env_session": std::env::var("TENEX_EDGE_SESSION").ok(),
@@ -148,17 +187,29 @@ pub(super) fn turn_check(session: Option<String>, json_out: bool) -> Result<()> 
     });
     let v = crate::daemon::blocking::call("turn_check", params)?;
     if let Some(ctx) = v["context"].as_str() {
-        emit_context(ctx, json_out);
+        emit_context(ctx, emit);
     }
     Ok(())
 }
 
-fn emit_context(content: &str, json_out: bool) {
-    if json_out {
-        let obj = serde_json::json!({"systemMessage": content});
-        println!("{obj}");
-    } else {
-        println!("{content}");
+fn emit_context(content: &str, emit: EmitFormat) {
+    match emit {
+        EmitFormat::PlainText => println!("{content}"),
+        EmitFormat::JsonSystemMessage => {
+            let obj = serde_json::json!({ "systemMessage": content });
+            println!("{obj}");
+        }
+        EmitFormat::ClaudePostToolUse => {
+            // Claude Code only reads PostToolUse context from this envelope;
+            // plain stdout there is ignored by the harness.
+            let obj = serde_json::json!({
+                "hookSpecificOutput": {
+                    "hookEventName": "PostToolUse",
+                    "additionalContext": content,
+                }
+            });
+            println!("{obj}");
+        }
     }
 }
 

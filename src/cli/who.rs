@@ -327,33 +327,7 @@ pub(super) fn push_turn_fabric_block(
             }
         }
     } else {
-        let fresh_since = now.saturating_sub(PEER_FRESH_SECS);
-        let new_peers = store
-            .list_new_peer_sessions(prev_turn_started_at, fresh_since, Some(project))
-            .unwrap_or_default();
-        let status_changes = store
-            .list_status_changes_since(prev_turn_started_at, Some(project))
-            .unwrap_or_default();
-
-        let mut delta: Vec<String> = Vec::new();
-        for p in &new_peers {
-            let age = now.saturating_sub(p.last_seen);
-            delta.push(format!(
-                "  ● {}@{} joined  {}  session {}  ({age}s ago)",
-                p.slug,
-                slugify_host(&p.host),
-                p.project,
-                pubkey_short(&p.session_id),
-            ));
-        }
-        for (slug, proj, text, session_id, active) in &status_changes {
-            let label = render::status_plain(text, "", *active);
-            if let Some(sid) = session_id {
-                delta.push(format!("  ↻ {slug}@{proj} [session {sid}] — {label}"));
-            } else {
-                delta.push(format!("  ↻ {slug}@{proj} — {label}"));
-            }
-        }
+        let delta = build_status_delta(&store, prev_turn_started_at, project, now, None);
         if !delta.is_empty() {
             blocks.push(format!(
                 "tenex-edge fabric — changes since your last turn:\n{}",
@@ -361,6 +335,57 @@ pub(super) fn push_turn_fabric_block(
             ));
         }
     }
+}
+
+/// Build the "changes since X" delta lines — newly-joined peer sessions plus
+/// session/agent status changes — scoped to `project` and updated at or after
+/// `since`. When `exclude_session` is set, that session's own rows are skipped
+/// (so a viewer never sees its own title/activity echoed back). Shared by the
+/// turn-start delta (subsequent turns) and the mid-turn PostToolUse check, so
+/// both render identically.
+pub(super) fn build_status_delta(
+    store: &Store,
+    since: u64,
+    project: &str,
+    now: u64,
+    exclude_session: Option<&str>,
+) -> Vec<String> {
+    let fresh_since = now.saturating_sub(PEER_FRESH_SECS);
+    let new_peers = store
+        .list_new_peer_sessions(since, fresh_since, Some(project))
+        .unwrap_or_default();
+    let status_changes = store
+        .list_status_changes_since(since, Some(project))
+        .unwrap_or_default();
+
+    let mut delta: Vec<String> = Vec::new();
+    for p in &new_peers {
+        if exclude_session == Some(p.session_id.as_str()) {
+            continue;
+        }
+        let age = now.saturating_sub(p.last_seen);
+        delta.push(format!(
+            "  ● {}@{} joined  {}  session {}  ({age}s ago)",
+            p.slug,
+            slugify_host(&p.host),
+            p.project,
+            pubkey_short(&p.session_id),
+        ));
+    }
+    for (slug, proj, text, activity, session_id, active) in &status_changes {
+        if let Some(sid) = session_id {
+            if exclude_session == Some(sid.as_str()) {
+                continue;
+            }
+        }
+        let label = render::status_plain(text, activity, *active);
+        if let Some(sid) = session_id {
+            delta.push(format!("  ↻ {slug}@{proj} [session {sid}] — {label}"));
+        } else {
+            delta.push(format!("  ↻ {slug}@{proj} — {label}"));
+        }
+    }
+    delta
 }
 
 #[cfg(test)]

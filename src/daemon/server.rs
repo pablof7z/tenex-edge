@@ -1313,8 +1313,14 @@ fn rpc_turn_check(
         p.cwd.as_deref(),
         p.agent.as_deref(),
     )?;
+    let now = now_secs();
+    // Rate-limit the sibling-session delta to at most once per 60s per session
+    // (the cursor write is safe: the daemon is the single store writer). `None`
+    // → the floor hasn't passed (or not mid-turn), so only the inbox peek runs.
+    let delta_since =
+        state.with_store(|s| s.turn_check_due(&rec.session_id, now, 60).unwrap_or(None));
     let context =
-        crate::cli::assemble_turn_check_context(&state.store, &rec.session_id, &state.host)
+        crate::cli::assemble_turn_check_context(&state.store, &rec, &state.host, delta_since, now)
             .map(serde_json::Value::String)
             .unwrap_or(serde_json::Value::Null);
     Ok(serde_json::json!({ "context": context }))

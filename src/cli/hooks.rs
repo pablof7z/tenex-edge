@@ -1,4 +1,4 @@
-use super::turn::{turn_check, turn_end, turn_start};
+use super::turn::{turn_check, turn_end, turn_start, EmitFormat};
 use super::*;
 
 // ── hook adapter registry ─────────────────────────────────────────────────────
@@ -107,7 +107,17 @@ pub(super) async fn hook_run(host_name: String, hook_type: String) -> Result<()>
         return Ok(());
     };
 
-    let json_out = host.output_format == HookOutputFormat::JsonSystemMessage;
+    // How context is emitted depends on host AND hook type. Claude Code's
+    // PostToolUse only reads a `hookSpecificOutput` envelope (plain stdout there
+    // is ignored), unlike its UserPromptSubmit which injects plain stdout. Every
+    // other (host, hook) pair follows the host's default output format.
+    let emit = match (host.name, hook_type.as_str()) {
+        ("claude-code", "post-tool-use") => EmitFormat::ClaudePostToolUse,
+        _ => match host.output_format {
+            HookOutputFormat::PlainText => EmitFormat::PlainText,
+            HookOutputFormat::JsonSystemMessage => EmitFormat::JsonSystemMessage,
+        },
+    };
     let agent_slug =
         std::env::var("TENEX_EDGE_AGENT").unwrap_or_else(|_| host.agent_slug.to_string());
 
@@ -209,7 +219,7 @@ pub(super) async fn hook_run(host_name: String, hook_type: String) -> Result<()>
                     eprintln!("[tenex-edge] session reassert skipped: {e:#}");
                 }
             }
-            turn_start(sid.clone(), transcript, json_out).await?;
+            turn_start(sid.clone(), transcript, emit).await?;
             // Publish the user's prompt as a kind:1 OP on the Nostr fabric.
             // Fail open: if userNsec is absent or the relay is unreachable, the
             // hook must not block the editor.
@@ -227,7 +237,7 @@ pub(super) async fn hook_run(host_name: String, hook_type: String) -> Result<()>
         }
         "post-tool-use" => {
             let explicit = if sid.is_empty() { None } else { Some(sid) };
-            turn_check(explicit, json_out)?;
+            turn_check(explicit, emit)?;
         }
         "stop" => {
             if !sid.is_empty() {

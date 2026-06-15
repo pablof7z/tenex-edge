@@ -614,8 +614,10 @@ mod turn_context_tests {
             .unwrap();
         let m = Mutex::new(store);
 
-        // turn_check peeks: returns Some with the mention line.
-        let ctx = assemble_turn_check_context(&m, "sess-freeze-3", "laptop");
+        // turn_check peeks: returns Some with the mention line. delta_since=None
+        // isolates the inbox-peek path (no sibling-delta query).
+        let ctx =
+            assemble_turn_check_context(&m, &test_session("sess-freeze-3"), "laptop", None, 200);
         let text =
             ctx.expect("FREEZE: turn_check must return Some when inbox has undelivered rows");
         assert!(
@@ -646,10 +648,96 @@ mod turn_context_tests {
     fn freeze_turn_check_context_returns_none_when_inbox_empty() {
         let store = Store::open_memory().unwrap();
         let m = Mutex::new(store);
-        let ctx = assemble_turn_check_context(&m, "sess-no-rows", "laptop");
+        let ctx =
+            assemble_turn_check_context(&m, &test_session("sess-no-rows"), "laptop", None, 200);
         assert!(
             ctx.is_none(),
             "FREEZE: turn_check with empty inbox must return None"
+        );
+    }
+
+    /// Mid-turn delta: a sibling session's status change in the same project is
+    /// surfaced with its activity line; the viewer's own row is excluded.
+    #[test]
+    fn turn_check_delta_shows_siblings_with_activity_excludes_self() {
+        let store = Store::open_memory().unwrap();
+        store.upsert_profile("pk-sib", "sib", "laptop", 1).unwrap();
+        // Sibling working, with a live activity line.
+        store
+            .set_agent_status(
+                "pk-sib",
+                "proj",
+                Some("sess-sib"),
+                "Refactor tmux",
+                "editing hooks.rs",
+                true,
+                100,
+            )
+            .unwrap();
+        // The viewer's own session also changed — must NOT echo back.
+        store
+            .set_agent_status(
+                "pk-coder",
+                "proj",
+                Some("sess-me"),
+                "My own work",
+                "typing",
+                true,
+                100,
+            )
+            .unwrap();
+        let m = Mutex::new(store);
+
+        let text = assemble_turn_check_context(&m, &test_session("sess-me"), "laptop", Some(50), 200)
+            .expect("delta block expected when a sibling changed");
+        assert!(
+            text.contains("changes since your last check"),
+            "delta header expected; got: {text:?}"
+        );
+        assert!(
+            text.contains("sib@proj") && text.contains("Refactor tmux — editing hooks.rs"),
+            "sibling title+activity expected; got: {text:?}"
+        );
+        assert!(
+            !text.contains("My own work"),
+            "viewer's own status must be excluded; got: {text:?}"
+        );
+    }
+
+    /// Mid-turn delta: a sibling that went idle renders with the `· idle` marker
+    /// so peers can see when someone stopped working.
+    #[test]
+    fn turn_check_delta_shows_idle_transition() {
+        let store = Store::open_memory().unwrap();
+        store.upsert_profile("pk-sib", "sib", "laptop", 1).unwrap();
+        store
+            .set_agent_status("pk-sib", "proj", Some("sess-sib"), "Refactor tmux", "", false, 100)
+            .unwrap();
+        let m = Mutex::new(store);
+
+        let text = assemble_turn_check_context(&m, &test_session("sess-me"), "laptop", Some(50), 200)
+            .expect("delta block expected for idle transition");
+        assert!(
+            text.contains("Refactor tmux · idle"),
+            "idle marker expected; got: {text:?}"
+        );
+    }
+
+    /// `delta_since = None` (rate-limited / not mid-turn) suppresses the sibling
+    /// delta entirely, even when a sibling just changed.
+    #[test]
+    fn turn_check_delta_suppressed_when_not_due() {
+        let store = Store::open_memory().unwrap();
+        store.upsert_profile("pk-sib", "sib", "laptop", 1).unwrap();
+        store
+            .set_agent_status("pk-sib", "proj", Some("sess-sib"), "Refactor tmux", "", true, 100)
+            .unwrap();
+        let m = Mutex::new(store);
+
+        let ctx = assemble_turn_check_context(&m, &test_session("sess-me"), "laptop", None, 200);
+        assert!(
+            ctx.is_none(),
+            "no delta and no inbox → None when not due; got: {ctx:?}"
         );
     }
 

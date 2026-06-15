@@ -198,7 +198,12 @@ CREATE TABLE IF NOT EXISTS inbox (
 CREATE TABLE IF NOT EXISTS turn_state (
     session_id      TEXT PRIMARY KEY,
     working         INTEGER NOT NULL DEFAULT 0,
-    turn_started_at INTEGER NOT NULL DEFAULT 0
+    turn_started_at INTEGER NOT NULL DEFAULT 0,
+    -- Mid-turn delta cursor: timestamp of the last PostToolUse turn_check.
+    -- Reset to 0 at turn start so each in-turn check reports only sibling
+    -- changes since the previous check (the guarded ALTER below migrates
+    -- pre-existing on-disk databases that predate this column).
+    last_check_at   INTEGER NOT NULL DEFAULT 0
 );
 -- A mention an agent has already received, so it is never re-delivered in a
 -- later session (mentions are stored kind:1 events that persist on the relay).
@@ -462,6 +467,14 @@ impl Store {
         // from our synthetic `te-*` identity. Empty = not resumable.
         let _ = conn.execute(
             "ALTER TABLE sessions ADD COLUMN resume_id TEXT NOT NULL DEFAULT ''",
+            [],
+        );
+        // Mid-turn delta cursor: timestamp of the last PostToolUse `turn_check`
+        // for this session. Lets each in-turn check report only sibling-session
+        // changes since the previous check (gated by deltas), instead of re-
+        // emitting the whole roster on every tool call. Reset to 0 at turn start.
+        let _ = conn.execute(
+            "ALTER TABLE turn_state ADD COLUMN last_check_at INTEGER NOT NULL DEFAULT 0",
             [],
         );
         Ok(Self { conn })
@@ -963,21 +976,23 @@ impl Store {
         Ok(rows)
     }
 
-    /// Agent status rows updated at or after `since`. Returns (slug, project, title, session_id, active).
+    /// Agent status rows updated at or after `since`. Returns
+    /// (slug, project, title, activity, session_id, active).
     /// `session_id` is `None` for legacy `agent_status` rows and `Some(id)` for `session_status` rows.
-    /// `active` is the mid-turn flag (idle = !active); the title persists across idle turns.
+    /// `active` is the mid-turn flag (idle = !active); the title persists across idle turns,
+    /// while `activity` is the live "doing now" line (empty when idle).
     /// Resolves slug from profiles then peer_sessions, falling back to "unknown".
     pub fn list_status_changes_since(
         &self,
         since: u64,
         project: Option<&str>,
-    ) -> Result<Vec<(String, String, String, Option<String>, bool)>> {
+    ) -> Result<Vec<(String, String, String, String, Option<String>, bool)>> {
         let mut stmt = self.conn.prepare(
             "SELECT COALESCE(
                  (SELECT slug FROM profiles WHERE pubkey=ast.pubkey LIMIT 1),
                  (SELECT slug FROM peer_sessions WHERE pubkey=ast.pubkey ORDER BY last_seen DESC LIMIT 1),
                  'unknown'
-             ), ast.project, ast.text, NULL, ast.active, ast.updated_at
+             ), ast.project, ast.text, ast.activity, NULL, ast.active, ast.updated_at
              FROM agent_status ast
              WHERE ast.updated_at>=?1 AND (?2 IS NULL OR ast.project=?2)
              UNION ALL
@@ -986,19 +1001,20 @@ impl Store {
                  (SELECT slug FROM peer_sessions WHERE session_id=sst.session_id LIMIT 1),
                  (SELECT slug FROM profiles WHERE pubkey=sst.pubkey LIMIT 1),
                  'unknown'
-             ), sst.project, sst.text, sst.session_id, sst.active, sst.updated_at
+             ), sst.project, sst.text, sst.activity, sst.session_id, sst.active, sst.updated_at
              FROM session_status sst
              WHERE sst.updated_at>=?1 AND (?2 IS NULL OR sst.project=?2)
-             ORDER BY 6",
+             ORDER BY 7",
         )?;
-        let rows: Vec<(String, String, String, Option<String>, bool)> = stmt
+        let rows: Vec<(String, String, String, String, Option<String>, bool)> = stmt
             .query_map(params![since, project], |row| {
                 Ok((
                     row.get(0)?,
                     row.get(1)?,
                     row.get(2)?,
                     row.get(3)?,
-                    row.get::<_, i64>(4)? != 0,
+                    row.get(4)?,
+                    row.get::<_, i64>(5)? != 0,
                 ))
             })?
             .filter_map(|r| r.ok())
@@ -1011,9 +1027,11 @@ impl Store {
     /// Mark a session as actively working on a turn, stamping its start time.
     /// Idempotent within a turn; a fresh `ts` signals a new turn to the engine.
     pub fn mark_turn_start(&self, session_id: &str, ts: u64) -> Result<()> {
+        // Reset the mid-turn delta cursor (last_check_at=0) so the first
+        // PostToolUse of the new turn reports sibling changes since `ts`.
         self.conn.execute(
-            "INSERT INTO turn_state (session_id, working, turn_started_at) VALUES (?1, 1, ?2)
-             ON CONFLICT(session_id) DO UPDATE SET working=1, turn_started_at=?2",
+            "INSERT INTO turn_state (session_id, working, turn_started_at, last_check_at) VALUES (?1, 1, ?2, 0)
+             ON CONFLICT(session_id) DO UPDATE SET working=1, turn_started_at=?2, last_check_at=0",
             params![session_id, ts],
         )?;
         Ok(())
@@ -1023,11 +1041,60 @@ impl Store {
     /// its next poll.
     pub fn mark_turn_end(&self, session_id: &str) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO turn_state (session_id, working, turn_started_at) VALUES (?1, 0, 0)
-             ON CONFLICT(session_id) DO UPDATE SET working=0",
+            "INSERT INTO turn_state (session_id, working, turn_started_at, last_check_at) VALUES (?1, 0, 0, 0)
+             ON CONFLICT(session_id) DO UPDATE SET working=0, last_check_at=0",
             params![session_id],
         )?;
         Ok(())
+    }
+
+    /// Mid-turn delta gate for PostToolUse `turn_check`. If the session is in a
+    /// turn AND at least `min_interval` seconds have passed since the last check
+    /// (or since turn start, if no check yet this turn), advance the cursor to
+    /// `now` and return `Some(since)` — the timestamp to query sibling-session
+    /// deltas from. Returns `None` when not in a turn or rate-limited, so the
+    /// hook stays silent. The write is safe here: `turn_check` is daemon-
+    /// mediated, so the daemon's single store connection is the only writer.
+    pub fn turn_check_due(
+        &self,
+        session_id: &str,
+        now: u64,
+        min_interval: u64,
+    ) -> Result<Option<u64>> {
+        let (working, turn_started_at, last_check_at) = self
+            .conn
+            .query_row(
+                "SELECT working, turn_started_at, last_check_at FROM turn_state WHERE session_id=?1",
+                params![session_id],
+                |r| {
+                    Ok((
+                        r.get::<_, i64>(0)? != 0,
+                        r.get::<_, i64>(1)? as u64,
+                        r.get::<_, i64>(2)? as u64,
+                    ))
+                },
+            )
+            .unwrap_or((false, 0, 0));
+        // Only mid-turn (turn_end leaves turn_started_at set but clears working).
+        // The turn_started_at guard also avoids querying all history pre-turn.
+        if !working || turn_started_at == 0 {
+            return Ok(None);
+        }
+        let since = if last_check_at > 0 {
+            // Subsequent check this turn: enforce the floor against the last one.
+            if now.saturating_sub(last_check_at) < min_interval {
+                return Ok(None);
+            }
+            last_check_at
+        } else {
+            // First check of the turn → always due; window opens at turn start.
+            turn_started_at
+        };
+        self.conn.execute(
+            "UPDATE turn_state SET last_check_at=?2 WHERE session_id=?1",
+            params![session_id, now],
+        )?;
+        Ok(Some(since))
     }
 
     /// `(working, turn_started_at)` for a session. Defaults to `(false, 0)` when
@@ -2342,6 +2409,7 @@ mod tests {
                 "alpha".to_string(),
                 "current".to_string(),
                 "working here".to_string(),
+                String::new(),
                 None,
                 true
             )]
@@ -2349,6 +2417,33 @@ mod tests {
 
         let all = s.list_status_changes_since(50, None).unwrap();
         assert_eq!(all.len(), 2);
+    }
+
+    #[test]
+    fn turn_check_due_gates_and_advances_cursor() {
+        let s = Store::open_memory().unwrap();
+        // Not in a turn → never due (avoids querying all history).
+        assert_eq!(s.turn_check_due("sess", 1000, 60).unwrap(), None);
+
+        // Turn starts at t=1000; first check at t=1000 is due, since=turn start.
+        s.mark_turn_start("sess", 1000).unwrap();
+        assert_eq!(s.turn_check_due("sess", 1000, 60).unwrap(), Some(1000));
+
+        // Within the 60s floor of the last check → suppressed.
+        assert_eq!(s.turn_check_due("sess", 1059, 60).unwrap(), None);
+
+        // 60s elapsed → due again, since = the previous check time (1000).
+        assert_eq!(s.turn_check_due("sess", 1060, 60).unwrap(), Some(1000));
+        // Cursor advanced to 1060: the next window starts there.
+        assert_eq!(s.turn_check_due("sess", 1130, 60).unwrap(), Some(1060));
+
+        // A new turn resets the cursor → first check is due immediately again.
+        s.mark_turn_start("sess", 2000).unwrap();
+        assert_eq!(s.turn_check_due("sess", 2000, 60).unwrap(), Some(2000));
+
+        // Turn end clears working/cursor → not in a turn → not due.
+        s.mark_turn_end("sess").unwrap();
+        assert_eq!(s.turn_check_due("sess", 3000, 60).unwrap(), None);
     }
 
     #[test]
