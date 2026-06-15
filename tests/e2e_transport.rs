@@ -54,13 +54,15 @@ async fn publishes_and_decodes_all_event_types() {
             host: "test-host".into(),
             owners: vec![reader_pk.clone()],
         }),
-        DomainEvent::Presence(Presence {
+        DomainEvent::Status(Status {
             agent: aref.clone(),
             project: project.clone(),
             session_id: "sess-1".into(),
             host: "test-host".into(),
+            title: "fixing the auth bug".into(),
+            activity: "reading the diff".into(),
+            busy: true,
             rel_cwd: String::new(),
-            audience: vec![reader_pk.clone()],
             expires_at: 1_900_000_000,
         }),
         DomainEvent::Activity(Activity {
@@ -101,9 +103,9 @@ async fn publishes_and_decodes_all_event_types() {
         }
     }
 
-    let has_presence = seen
+    let has_status = seen
         .iter()
-        .any(|e| matches!(e, DomainEvent::Presence(p) if p.session_id.as_str() == "sess-1"));
+        .any(|e| matches!(e, DomainEvent::Status(s) if s.session_id.as_str() == "sess-1"));
     let has_activity = seen
         .iter()
         .any(|e| matches!(e, DomainEvent::Activity(a) if a.text == "fixing the auth bug"));
@@ -112,7 +114,7 @@ async fn publishes_and_decodes_all_event_types() {
         .any(|e| matches!(e, DomainEvent::Profile(p) if p.host == "test-host"));
     let has_mention = seen.iter().any(|e| matches!(e, DomainEvent::Mention(m) if m.to_pubkey == reader_pk && m.target_session.as_ref().map(|s| s.as_str()) == Some("sess-1")));
 
-    assert!(has_presence, "expected presence; saw {seen:#?}");
+    assert!(has_status, "expected status; saw {seen:#?}");
     assert!(has_activity, "expected activity; saw {seen:#?}");
     assert!(has_profile, "expected profile; saw {seen:#?}");
     assert!(has_mention, "expected mention; saw {seen:#?}");

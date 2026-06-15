@@ -123,20 +123,12 @@ pub fn materialize(
     let is_self = hosted.contains(&event.pubkey.to_hex());
 
     match de {
-        // is_self guard: skip store writes for own identity/presence/status.
+        // is_self guard: skip store writes for own identity/status.
         // Activity has no positive handler either (catch-all).
-        DomainEvent::Profile(_)
-        | DomainEvent::Presence(_)
-        | DomainEvent::Activity(_)
-        | DomainEvent::Status(_)
-            if is_self => {}
+        DomainEvent::Profile(_) | DomainEvent::Activity(_) | DomainEvent::Status(_) if is_self => {}
 
         DomainEvent::Profile(ref pf) => {
             Kind1Materializer::materialize_profile(store, pf, now);
-        }
-
-        DomainEvent::Presence(ref pr) => {
-            Kind1Materializer::materialize_presence(store, pr, now);
         }
 
         DomainEvent::Status(ref st) => {

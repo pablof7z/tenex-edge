@@ -558,27 +558,19 @@ fn render(de: &DomainEvent) -> String {
                 p.host.dimmed()
             )
         }
-        DomainEvent::Presence(p) => format!(
-            "{} {}@{} {} ({})",
-            "live".green(),
-            p.agent.slug.cyan(),
-            slugify_host(&p.host),
-            format!("{}", p.session_id).yellow(),
-            p.project.dimmed()
-        ),
         DomainEvent::Activity(a) => {
             format!("{} {}: {}", "act ".blue(), a.agent.slug.cyan(), a.text)
         }
         DomainEvent::Status(s) if s.is_idle() => {
-            let label = if s.text.trim().is_empty() {
+            let label = if s.title.trim().is_empty() {
                 "idle".to_string()
             } else {
-                format!("{} · idle", s.text)
+                format!("{} · idle", s.title)
             };
             format!("{} {} {}", "stat".dimmed(), s.agent.slug.cyan(), label)
         }
         DomainEvent::Status(s) => {
-            format!("{} {}: {}", "stat".magenta(), s.agent.slug.cyan(), s.text)
+            format!("{} {}: {}", "stat".magenta(), s.agent.slug.cyan(), s.title)
         }
         DomainEvent::Mention(m) => format!(
             "{} {} -> {}{}: {}",

@@ -2342,12 +2342,14 @@ fn derive_and_emit_tail_events(
             // lifecycle (Turn working/idle), and peer replies carry no
             // session/turn state we can attribute reliably.
         }
-        DomainEvent::Presence(p) => {
-            // Skip own sessions — local join/leave tracked by Sess events.
-            if hosted.contains(&p.agent.pubkey) {
+        DomainEvent::Status(s) => {
+            // Skip own status — local turn/status is tracked by Turn RPC events.
+            if hosted.contains(&s.agent.pubkey) {
                 return;
             }
-            let session_id = p.session_id.as_str().to_owned();
+            // The unified per-session Status replaces the old presence heartbeat,
+            // so first-sight of a session here is the peer "joined" signal.
+            let session_id = s.session_id.as_str().to_owned();
             let is_new = {
                 let mut map = state.peer_sessions.lock().unwrap();
                 if !map.contains_key(&session_id) {
@@ -2355,9 +2357,9 @@ fn derive_and_emit_tail_events(
                         session_id.clone(),
                         PeerTracked {
                             first_seen: now,
-                            project: p.project.clone(),
-                            slug: p.agent.slug.clone(),
-                            host: p.host.clone(),
+                            project: s.project.clone(),
+                            slug: s.agent.slug.clone(),
+                            host: s.host.clone(),
                         },
                     );
                     true
@@ -2368,22 +2370,16 @@ fn derive_and_emit_tail_events(
             if is_new {
                 state.emit_tail(TailEvent::Join {
                     ts: now,
-                    project: p.project.clone(),
-                    agent: p.agent.slug.clone(),
-                    host: p.host.clone(),
+                    project: s.project.clone(),
+                    agent: s.agent.slug.clone(),
+                    host: s.host.clone(),
                     session: session_id,
-                    rel_cwd: p.rel_cwd.clone(),
+                    rel_cwd: s.rel_cwd.clone(),
                 });
             }
-        }
 
-        DomainEvent::Status(s) => {
-            // Skip own status — local turn/status is tracked by Turn RPC events.
-            if hosted.contains(&s.agent.pubkey) {
-                return;
-            }
             let key = (s.agent.pubkey.clone(), s.project.clone());
-            let cur = (s.text.clone(), s.active);
+            let cur = (s.title.clone(), s.busy);
             let should_emit = {
                 let mut map = state.last_status.lock().unwrap();
                 if map.get(&key) != Some(&cur) {
@@ -2398,8 +2394,8 @@ fn derive_and_emit_tail_events(
                     ts: now,
                     project: s.project.clone(),
                     agent: s.agent.slug.clone(),
-                    text: s.text.clone(),
-                    active: s.active,
+                    text: s.title.clone(),
+                    active: s.busy,
                 });
             }
         }

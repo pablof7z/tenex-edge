@@ -2,7 +2,8 @@
 //!
 //! Runs in the detached background process forked by `session-start`. It:
 //!   - publishes the agent's `kind:0` profile once,
-//!   - heartbeats presence on an interval,
+//!   - heartbeats the single per-session Status on an interval (its freshness IS
+//!     the session's liveness — there is no separate presence event),
 //!   - drains observed tool activity, distills it, publishes Activity + Status,
 //!   - subscribes to the project + mentions-to-me, updating the peer directory
 //!     and routing mentions into the per-session inbox,
@@ -10,7 +11,7 @@
 //!     SIGTERM (the `session-end` path).
 
 use crate::distill;
-use crate::domain::{Activity, AgentRef, DomainEvent, Mention, Presence, Profile, Status};
+use crate::domain::{Activity, AgentRef, DomainEvent, Mention, Profile, Status};
 use crate::fabric::provider::Kind1Nip29Provider;
 use crate::state::{InboxRow, Store};
 use crate::util::{now_secs, SessionId};
@@ -69,10 +70,11 @@ pub fn compute_targets(target_session: Option<&str>, my_alive_sessions: &[String
 /// does NOT open its own store/transport and does NOT subscribe or demux: the
 /// daemon owns one union subscription and demuxes incoming events centrally,
 /// routing mentions to the right agent's inbox. This task only:
-///   - publishes profile + presence once (signed with the agent's own keys),
-///   - heartbeats presence (and refreshes a live status' TTL),
+///   - publishes profile once + an initial Status (signed with the agent's keys),
+///   - heartbeats the per-session Status (refreshing its TTL = the session's
+///     liveness),
 ///   - distills turn activity → Activity + Status,
-///   - watches the host pid and exits cleanly (idle presence/status) on pid
+///   - watches the host pid and exits cleanly (idle, then expired Status) on pid
 ///     death or on `cancel` (the `session-end` path).
 ///
 /// Store access goes through the shared `Arc<Mutex<Store>>`; the guard is held
@@ -104,38 +106,29 @@ pub async fn run_session_in_daemon(
             let _ = provider.publish(&ev, &keys).await;
         }
     };
-    let presence = |expires_at| {
-        DomainEvent::Presence(Presence {
+    // The single self-contained per-session signal. `expires_at` (this event's
+    // freshness) IS the session's liveness — there is no separate heartbeat.
+    let status_de = |title: &str, activity: &str, busy: bool, expires_at: u64| {
+        DomainEvent::Status(Status {
             agent: aref.clone(),
             project: p.project.clone(),
             session_id: SessionId::from(p.session_id.clone()),
             host: p.host.clone(),
+            title: title.to_string(),
+            activity: activity.to_string(),
+            busy,
             rel_cwd: p.rel_cwd.clone(),
-            audience: owners.clone(),
             expires_at,
         })
     };
-    let status_de = |text: &str, activity: &str, active: bool| {
-        DomainEvent::Status(Status {
-            agent: aref.clone(),
-            project: p.project.clone(),
-            session_id: Some(SessionId::from(p.session_id.clone())),
-            text: text.to_string(),
-            activity: activity.to_string(),
-            active,
-            rel_cwd: p.rel_cwd.clone(),
-            expires_at: Some(now_secs() + ttl),
-        })
-    };
 
-    // Identity card + immediate liveness.
+    // Identity card.
     publish_de(DomainEvent::Profile(Profile {
         agent: aref.clone(),
         host: p.host.clone(),
         owners: owners.clone(),
     }))
     .await;
-    publish_de(presence(now_secs() + ttl)).await;
 
     // The session TITLE persists across idle turns and feeds back into the
     // distiller. On a daemon restart for an existing session, recover the prior
@@ -143,7 +136,7 @@ pub async fn run_session_in_daemon(
     let turn_first = p.turn_first.as_secs();
     let turn_repeat = p.turn_repeat.as_secs();
     let mut cur_turn_start: u64 = 0;
-    let mut last_distill: u64 = 0;         // when we last SUCCEEDED at distilling
+    let mut last_distill: u64 = 0; // when we last SUCCEEDED at distilling
     let mut last_distill_attempt: u64 = 0; // when we last STARTED a distill task
     let mut prev_working = false;
     // Background distillation: the task runs outside the select! so it cannot
@@ -162,10 +155,10 @@ pub async fn run_session_in_daemon(
     // (it describes the current step, which is stale by then) and cleared on idle.
     let mut cur_activity: Option<String> = None;
 
-    // Publish initial status: retain any recovered title, but go idle (no live
-    // activity) until a turn starts.
+    // Publish initial status (also our immediate liveness): retain any recovered
+    // title, but go idle (no live activity) until a turn starts.
     let init_title = cur_title.clone().unwrap_or_default();
-    publish_de(status_de(&init_title, "", false)).await;
+    publish_de(status_de(&init_title, "", false, now_secs() + ttl)).await;
     st!(|s: &Store| {
         s.set_agent_status(
             &me,
@@ -190,16 +183,15 @@ pub async fn run_session_in_daemon(
                     if !pid_alive(pid) { break; }
                 }
                 st!(|s: &Store| { s.touch_session(&p.session_id, now_secs()).ok(); });
-                publish_de(presence(now_secs() + ttl)).await;
-                // Refresh the title's TTL with the live active flag so an idle
-                // session keeps its title alive on the relay (until it exits).
-                // The live activity is only meaningful mid-turn; clear it when idle.
-                if let Some(title) = cur_title.clone() {
-                    let (working, _) = st!(|s: &Store| s.get_turn_state(&p.session_id).unwrap_or((false, 0)));
-                    let activity = if working { cur_activity.clone().unwrap_or_default() } else { String::new() };
-                    publish_de(status_de(&title, &activity, working)).await;
-                    st!(|s: &Store| { s.set_agent_status(&me, &p.project, Some(&p.session_id), &title, &activity, working, now_secs()).ok(); });
-                }
+                // The unified per-session status IS the heartbeat: republishing it
+                // refreshes the session's liveness (its `expiration`) on the relay.
+                // Carry the current title (if any) with the live busy flag; the live
+                // activity is only meaningful mid-turn, so clear it when idle.
+                let title = cur_title.clone().unwrap_or_default();
+                let (working, _) = st!(|s: &Store| s.get_turn_state(&p.session_id).unwrap_or((false, 0)));
+                let activity = if working { cur_activity.clone().unwrap_or_default() } else { String::new() };
+                publish_de(status_de(&title, &activity, working, now_secs() + ttl)).await;
+                st!(|s: &Store| { s.set_agent_status(&me, &p.project, Some(&p.session_id), &title, &activity, working, now_secs()).ok(); });
             }
             _ = obs.tick() => {
                 // ── collect a finished background distillation ────────────
@@ -219,7 +211,7 @@ pub async fn run_session_in_daemon(
                                     text: format!("{} #{}", labels.title, p.project),
                                 })).await;
                             }
-                            publish_de(status_de(&labels.title, &labels.activity, true)).await;
+                            publish_de(status_de(&labels.title, &labels.activity, true, now + ttl)).await;
                             st!(|s: &Store| { s.set_agent_status(&me, &p.project, Some(&p.session_id), &labels.title, &labels.activity, true, now).ok(); });
                             last_distill = now; // success: gate subsequent turn_repeat checks
                         }
@@ -241,7 +233,7 @@ pub async fn run_session_in_daemon(
 
                         // Immediately publish active with whatever title we have.
                         let title = cur_title.clone().unwrap_or_default();
-                        publish_de(status_de(&title, "", true)).await;
+                        publish_de(status_de(&title, "", true, now + ttl)).await;
                         st!(|s: &Store| { s.set_agent_status(&me, &p.project, Some(&p.session_id), &title, "", true, now).ok(); });
 
                         // If no title yet, seed one from the user's message right now
@@ -255,7 +247,7 @@ pub async fn run_session_in_daemon(
                                 });
                             if let Some(qt) = quick {
                                 cur_title = Some(qt.clone());
-                                publish_de(status_de(&qt, "", true)).await;
+                                publish_de(status_de(&qt, "", true, now + ttl)).await;
                                 st!(|s: &Store| { s.set_agent_status(&me, &p.project, Some(&p.session_id), &qt, "", true, now).ok(); });
                             }
                         }
@@ -295,7 +287,7 @@ pub async fn run_session_in_daemon(
                     // live activity is dropped (only the persistent title survives).
                     cur_activity = None;
                     let title = cur_title.clone().unwrap_or_default();
-                    publish_de(status_de(&title, "", false)).await;
+                    publish_de(status_de(&title, "", false, now + ttl)).await;
                     st!(|s: &Store| { s.set_agent_status(&me, &p.project, Some(&p.session_id), &title, "", false, now).ok(); });
                     cur_turn_start = 0;
                     last_distill = 0;
@@ -309,10 +301,11 @@ pub async fn run_session_in_daemon(
         }
     }
 
-    // Clean exit: expire presence, clear the title (the ONLY place a live title
-    // is dropped), and mark the session dead.
-    publish_de(presence(now_secs())).await;
-    publish_de(status_de("", "", false)).await;
+    // Clean exit: publish a final status that expires NOW (the unified event's
+    // freshness is the session's liveness, so this retires presence too) and
+    // clears the title — the ONLY place a live title is dropped — then mark the
+    // session dead.
+    publish_de(status_de("", "", false, now_secs())).await;
     st!(|s: &Store| {
         s.set_agent_status(
             &me,

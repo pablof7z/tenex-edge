@@ -4,7 +4,7 @@
 //! is_self guard and tail emission live in the top-level `materialize` dispatcher
 //! in `fabric/mod.rs`, NOT inside these methods.
 
-use crate::domain::{Mention, Presence, Profile, Status};
+use crate::domain::{Mention, Profile, Status};
 use crate::fabric::provider::FABRIC;
 use crate::state::Store;
 use nostr_sdk::Event;
@@ -21,52 +21,47 @@ impl Kind1Materializer {
         store.upsert_profile(pk, &pf.agent.slug, &pf.host, now).ok();
     }
 
-    /// Apply a decoded `Presence` (kind:1 presence variant) to the store.
+    /// Apply a decoded `Status` to the store.
     ///
-    /// Expired events are silently ignored. The slug is NOT on the wire; it is
-    /// resolved from the `profiles` table (populated by kind:0 events). Profile
-    /// rows are NOT seeded from presence — only kind:0 is authoritative for slug.
-    pub fn materialize_presence(store: &Store, pr: &Presence, now: u64) {
-        if pr.expires_at <= now {
+    /// `Status` is the single self-contained per-session signal, so it feeds BOTH
+    /// read models: the peer-session liveness row (host/rel-cwd/last-seen — what
+    /// the former presence heartbeat fed) AND the agent status (title/activity/
+    /// busy). Expired statuses are silently ignored.
+    ///
+    /// The slug is NOT on the wire; it is resolved from the `profiles` table
+    /// (populated by kind:0 events). Peer/status rows are NEVER seeded with a
+    /// self-asserted slug — only kind:0 Profile events are authoritative.
+    pub fn materialize_status(store: &Store, st: &Status, now: u64) {
+        if st.expires_at <= now {
             return;
         }
         // Resolve slug from kind:0 profile (authoritative); fall back to empty.
         let slug = store
-            .resolve_slug_for_pubkey(&pr.agent.pubkey)
+            .resolve_slug_for_pubkey(&st.agent.pubkey)
             .ok()
             .flatten()
             .unwrap_or_default();
+        // Liveness: this event's freshness is the session's liveness.
         store
             .upsert_peer_session(
-                pr.session_id.as_str(),
-                &pr.agent.pubkey,
+                st.session_id.as_str(),
+                &st.agent.pubkey,
                 &slug,
-                &pr.project,
-                &pr.host,
-                &pr.rel_cwd,
+                &st.project,
+                &st.host,
+                &st.rel_cwd,
                 now,
             )
             .ok();
-        // Do NOT upsert_profile from presence — only kind:0 Profile events are
-        // authoritative for the profiles table.
-    }
-
-    /// Apply a decoded `Status` to the store.
-    ///
-    /// Byte-identical to the Status arm in `handle_incoming`: expired statuses
-    /// are silently ignored.
-    pub fn materialize_status(store: &Store, st: &Status, now: u64) {
-        if st.expires_at.map(|e| e <= now).unwrap_or(false) {
-            return;
-        }
+        // Title / activity / busy state.
         store
             .set_agent_status(
                 &st.agent.pubkey,
                 &st.project,
-                st.session_id.as_ref().map(|s| s.as_str()),
-                &st.text,
+                Some(st.session_id.as_str()),
+                &st.title,
                 &st.activity,
-                st.active,
+                st.busy,
                 now,
             )
             .ok();

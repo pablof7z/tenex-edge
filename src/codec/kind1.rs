@@ -3,11 +3,17 @@
 //! | Domain    | Wire |
 //! |-----------|------|
 //! | Profile   | kind:0,    content `{"name": slug}`, `["host", host]` |
-//! | Presence  | kind:30315 (NIP-38-style heartbeat), `["h", project]`, `["d", "tenex-edge-presence:<session>"]`, `["p", peer]…`, `["session-id", id]`, `["host", host]`, optional `["rel-cwd", rel]`, `["expiration", ts]` |
 //! | Activity   | kind:1,    `["h", project]` |
 //! | TurnReply  | kind:1,    `["h", project]`, `["e", root_id, "", "root"]`, `["e", reply_id, "", "reply"]` |
-//! | Status     | kind:30315 (NIP-38), `["h", project]`, `["d", project]`, optional `["session-id", id]`, optional `["rel-cwd", rel]`, optional `["activity", now]`, `["active", "0"|"1"]`, `["expiration", ts]` |
+//! | Status     | kind:30315, content = live activity (may be empty when idle), `["d", "<project>:<session>"]`, `["h", project]`, `["session-id", id]`, `["title", title]` (always), `["status", "busy"\|"idle"]`, `["host", host]`, optional `["rel-cwd", rel]`, `["expiration", ts]` |
 //! | Mention    | kind:1,    `["h", project]`, `["p", to]`, optional `["session-id", target]`, `["from-session", sender]`, `["subject", s]`, `["git-branch", b]`, `["git-commit", c]`, `["git-dirty", n]`, `["from-host", h]`, `["e", reply_to, "", "reply"]` |
+//!
+//! Status is the single self-contained per-session signal: ONE kind:30315 event
+//! carries the whole live state of a session (busy/idle, the live activity in
+//! the content, the persistent title, host, rel-cwd). It is replaceable PER
+//! SESSION via `d = "<project>:<session>"`, so each session keeps its own title
+//! even when idle, and its freshness / `expiration` IS the session's liveness
+//! (there is no separate presence heartbeat).
 //!
 //! kind:1 disambiguation on decode (in priority order):
 //!   1. Has `["p", ...]` tag                    → Mention
@@ -25,15 +31,13 @@
 
 use crate::codec::Codec;
 use crate::domain::{
-    Activity, AgentRef, DomainEvent, Mention, MentionMeta, Presence, Profile, Proposal, Status,
-    TurnReply,
+    Activity, AgentRef, DomainEvent, Mention, MentionMeta, Profile, Proposal, Status, TurnReply,
 };
 use crate::util::SessionId;
 use anyhow::Result;
 use nostr_sdk::prelude::*;
 
 pub const KIND_PROFILE: u16 = 0;
-pub const KIND_PRESENCE: u16 = 30315;
 pub const KIND_NOTE: u16 = 1;
 pub const KIND_STATUS: u16 = 30315;
 
@@ -47,8 +51,6 @@ pub const KIND_GROUP_MEMBERS: u16 = 39002;
 
 // NIP-23 long-form article — used for agent-authored proposals.
 pub const KIND_LONGFORM: u16 = 30023;
-
-const PRESENCE_D_PREFIX: &str = "tenex-edge-presence:";
 
 pub struct Kind1Codec;
 
@@ -68,8 +70,17 @@ fn project_tag(project: &str) -> Result<Tag> {
     tag(&["h", project])
 }
 
-fn presence_d(session_id: &str) -> String {
-    format!("{PRESENCE_D_PREFIX}{session_id}")
+/// Per-session addressable `d` value: `"<project>:<session>"`. Makes the status
+/// event replaceable per session so each session keeps its own title when idle.
+fn status_d(project: &str, session_id: &str) -> String {
+    format!("{project}:{session_id}")
+}
+
+/// Split a `d = "<project>:<session>"` value into its session-id suffix.
+/// The project may itself contain colons; the session id is the part after the
+/// LAST colon. Returns `None` when there is no colon.
+fn session_from_status_d(d: &str) -> Option<&str> {
+    d.rsplit_once(':').map(|(_project, session)| session)
 }
 
 /// First value of the first tag whose name matches `name` (i.e. `slice[1]`).
@@ -147,32 +158,6 @@ impl Codec for Kind1Codec {
                     .tags(tags)
                     .allow_self_tagging()
             }
-            DomainEvent::Presence(Presence {
-                agent: _agent,
-                project,
-                session_id,
-                host,
-                rel_cwd,
-                audience,
-                expires_at,
-            }) => {
-                let mut tags = Vec::new();
-                for p in audience {
-                    tags.push(tag(&["p", p])?);
-                }
-                let d = presence_d(session_id.as_str());
-                tags.push(project_tag(project)?);
-                tags.push(tag(&["d", &d])?);
-                tags.push(tag(&["session-id", session_id.as_str()])?);
-                tags.push(tag(&["host", host])?);
-                if !rel_cwd.is_empty() {
-                    tags.push(tag(&["rel-cwd", rel_cwd])?);
-                }
-                tags.push(tag(&["expiration", &expires_at.to_string()])?);
-                EventBuilder::new(kind(KIND_PRESENCE), "online")
-                    .tags(tags)
-                    .allow_self_tagging()
-            }
             DomainEvent::Activity(Activity {
                 agent: _agent,
                 project,
@@ -182,27 +167,30 @@ impl Codec for Kind1Codec {
                 agent: _agent,
                 project,
                 session_id,
-                text,
+                host,
+                title,
                 activity,
-                active,
+                busy,
                 rel_cwd,
                 expires_at,
             }) => {
-                let mut tags = vec![project_tag(project)?, tag(&["d", project])?];
-                if let Some(session_id) = session_id {
-                    tags.push(tag(&["session-id", session_id.as_str()])?);
-                }
+                // The single self-contained per-session signal. Content is the
+                // live activity (empty when idle); the title always rides as a
+                // tag so it persists across idle turns.
+                let d = status_d(project, session_id.as_str());
+                let mut tags = vec![
+                    tag(&["d", &d])?,
+                    project_tag(project)?,
+                    tag(&["session-id", session_id.as_str()])?,
+                    tag(&["title", title])?,
+                    tag(&["status", if *busy { "busy" } else { "idle" }])?,
+                    tag(&["host", host])?,
+                ];
                 if !rel_cwd.is_empty() {
                     tags.push(tag(&["rel-cwd", rel_cwd])?);
                 }
-                if !activity.is_empty() {
-                    tags.push(tag(&["activity", activity])?);
-                }
-                tags.push(tag(&["active", if *active { "1" } else { "0" }])?);
-                if let Some(exp) = expires_at {
-                    tags.push(tag(&["expiration", &exp.to_string()])?);
-                }
-                EventBuilder::new(kind(KIND_STATUS), text.clone()).tags(tags)
+                tags.push(tag(&["expiration", &expires_at.to_string()])?);
+                EventBuilder::new(kind(KIND_STATUS), activity.clone()).tags(tags)
             }
             DomainEvent::Mention(Mention {
                 from: _from,
@@ -300,33 +288,26 @@ impl Codec for Kind1Codec {
                 owners: all_tag_values(event, "p"),
             })),
             KIND_STATUS => {
-                let expires_at = first_tag(event, "expiration").and_then(|s| s.parse().ok());
-                let d = first_tag(event, "d").unwrap_or_default();
-                if d.starts_with(PRESENCE_D_PREFIX) {
-                    let session_id = first_tag(event, "session-id")?;
-                    Some(DomainEvent::Presence(Presence {
-                        // Slug is NOT on the wire; resolved downstream from kind:0 profile.
-                        agent: AgentRef::new(pubkey, String::new()),
-                        project: project_from_tags(event)?,
-                        session_id: SessionId::from(session_id),
-                        host: first_tag(event, "host").unwrap_or_default().to_string(),
-                        rel_cwd: first_tag(event, "rel-cwd").unwrap_or_default().to_string(),
-                        audience: all_tag_values(event, "p"),
-                        expires_at: expires_at?,
-                    }))
-                } else {
-                    Some(DomainEvent::Status(Status {
-                        // Slug is NOT on the wire; resolved downstream from kind:0 profile.
-                        agent: AgentRef::new(pubkey, String::new()),
-                        project: project_from_tags(event)?,
-                        session_id: first_tag(event, "session-id").map(SessionId::from),
-                        text: event.content.clone(),
-                        activity: first_tag(event, "activity").unwrap_or_default().to_string(),
-                        active: first_tag(event, "active") == Some("1"),
-                        rel_cwd: first_tag(event, "rel-cwd").unwrap_or_default().to_string(),
-                        expires_at,
-                    }))
-                }
+                // Every kind:30315 is a single self-contained per-session status.
+                // The session id comes from the explicit `session-id` tag, else
+                // from the `<project>:<session>` suffix of the `d` tag.
+                let session_id = first_tag(event, "session-id")
+                    .or_else(|| first_tag(event, "d").and_then(session_from_status_d))?;
+                Some(DomainEvent::Status(Status {
+                    // Slug is NOT on the wire; resolved downstream from kind:0 profile.
+                    agent: AgentRef::new(pubkey, String::new()),
+                    project: project_from_tags(event)?,
+                    session_id: SessionId::from(session_id),
+                    host: first_tag(event, "host").unwrap_or_default().to_string(),
+                    title: first_tag(event, "title").unwrap_or_default().to_string(),
+                    // The live activity is the event content (empty when idle).
+                    activity: event.content.clone(),
+                    busy: first_tag(event, "status") == Some("busy"),
+                    rel_cwd: first_tag(event, "rel-cwd").unwrap_or_default().to_string(),
+                    expires_at: first_tag(event, "expiration")
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(0),
+                }))
             }
             KIND_NOTE => {
                 let project = project_from_tags(event)?;
@@ -442,35 +423,36 @@ mod tests {
         assert_eq!(roundtrip(ev.clone(), &keys), ev);
     }
 
-    #[test]
-    fn presence_roundtrip() {
-        // Slug is NOT on the wire; decoded presence always has empty slug.
-        let keys = Keys::generate();
-        let ev = DomainEvent::Presence(Presence {
+    fn status(keys: &Keys, busy: bool, rel_cwd: &str) -> DomainEvent {
+        DomainEvent::Status(Status {
+            // Slug is NOT on the wire; decoded status always has empty slug.
             agent: AgentRef::new(keys.public_key().to_hex(), String::new()),
             project: "tenex-edge".into(),
             session_id: "sess-123".into(),
             host: "laptop".into(),
-            rel_cwd: String::new(),
-            audience: vec!["aa".repeat(32), "bb".repeat(32)],
+            title: "fixing the auth bug".into(),
+            activity: if busy {
+                "reading the diff".into()
+            } else {
+                String::new()
+            },
+            busy,
+            rel_cwd: rel_cwd.into(),
             expires_at: 1_900_000_000,
-        });
+        })
+    }
+
+    #[test]
+    fn status_roundtrip() {
+        let keys = Keys::generate();
+        let ev = status(&keys, true, "");
         assert_eq!(roundtrip(ev.clone(), &keys), ev);
     }
 
     #[test]
-    fn presence_rel_cwd_roundtrips_and_emits_tag() {
-        // Slug is NOT on the wire; decoded presence always has empty slug.
+    fn status_rel_cwd_roundtrips_and_emits_tag() {
         let keys = Keys::generate();
-        let ev = DomainEvent::Presence(Presence {
-            agent: AgentRef::new(keys.public_key().to_hex(), String::new()),
-            project: "tenex-edge".into(),
-            session_id: "sess-123".into(),
-            host: "laptop".into(),
-            rel_cwd: "worktree1".into(),
-            audience: vec!["aa".repeat(32)],
-            expires_at: 1_900_000_000,
-        });
+        let ev = status(&keys, true, "worktree1");
         // The relative dir survives encode→decode …
         assert_eq!(roundtrip(ev.clone(), &keys), ev);
         // … and lands as a `rel-cwd` tag on the wire.
@@ -486,17 +468,8 @@ mod tests {
 
     #[test]
     fn empty_rel_cwd_emits_no_tag_and_decodes_empty() {
-        // Wire compat: events without a rel-cwd tag (old peers) decode to "".
         let keys = Keys::generate();
-        let ev = DomainEvent::Presence(Presence {
-            agent: agent(&keys, "coder"),
-            project: "tenex-edge".into(),
-            session_id: "sess-1".into(),
-            host: "laptop".into(),
-            rel_cwd: String::new(),
-            audience: vec![],
-            expires_at: 1_900_000_000,
-        });
+        let ev = status(&keys, false, "");
         let signed = Kind1Codec
             .encode(&ev)
             .unwrap()
@@ -504,33 +477,82 @@ mod tests {
             .unwrap();
         assert!(!has_tag_name(&signed, "rel-cwd"));
         match Kind1Codec.decode(&signed) {
-            Some(DomainEvent::Presence(p)) => assert_eq!(p.rel_cwd, ""),
-            other => panic!("expected presence, got {other:?}"),
+            Some(DomainEvent::Status(s)) => assert_eq!(s.rel_cwd, ""),
+            other => panic!("expected status, got {other:?}"),
         }
     }
 
     #[test]
-    fn presence_uses_session_scoped_nip38_heartbeat() {
+    fn status_is_per_session_self_contained_signal() {
+        // The single unified shape: a per-session `d`, the full tag set, content =
+        // live activity, and the title persisted as a tag even when busy.
         let keys = Keys::generate();
-        let ev = DomainEvent::Presence(Presence {
-            agent: agent(&keys, "coder"),
-            project: "tenex-edge".into(),
-            session_id: "sess-123".into(),
-            host: "laptop".into(),
-            rel_cwd: String::new(),
-            audience: vec!["aa".repeat(32)],
-            expires_at: 1_900_000_000,
-        });
         let signed = Kind1Codec
-            .encode(&ev)
+            .encode(&status(&keys, true, "worktree1"))
             .unwrap()
             .sign_with_keys(&keys)
             .unwrap();
-        assert_eq!(signed.kind.as_u16(), KIND_PRESENCE);
+        assert_eq!(signed.kind.as_u16(), KIND_STATUS);
+        // Per-SESSION addressable `d = "<project>:<session>"`.
+        assert!(has_tag(&signed, "d", "tenex-edge:sess-123"));
         assert!(has_tag(&signed, "h", "tenex-edge"));
-        assert!(has_tag(&signed, "d", "tenex-edge-presence:sess-123"));
         assert!(has_tag(&signed, "session-id", "sess-123"));
+        assert!(has_tag(&signed, "title", "fixing the auth bug"));
+        assert!(has_tag(&signed, "status", "busy"));
+        assert!(has_tag(&signed, "host", "laptop"));
+        assert!(has_tag(&signed, "rel-cwd", "worktree1"));
         assert!(has_tag(&signed, "expiration", "1900000000"));
+        // The live activity is the content, not a tag.
+        assert_eq!(signed.content, "reading the diff");
+        assert!(!has_tag_name(&signed, "activity"));
+        // No presence-heartbeat artifacts, no self-asserted agent tag.
+        assert!(!has_tag(&signed, "d", "tenex-edge-presence:sess-123"));
+        assert!(!has_tag_name(&signed, "agent"));
+    }
+
+    #[test]
+    fn idle_status_marks_idle_and_keeps_title() {
+        let keys = Keys::generate();
+        let signed = Kind1Codec
+            .encode(&status(&keys, false, ""))
+            .unwrap()
+            .sign_with_keys(&keys)
+            .unwrap();
+        assert!(has_tag(&signed, "status", "idle"));
+        // Title persists across idle; content (live activity) is empty.
+        assert!(has_tag(&signed, "title", "fixing the auth bug"));
+        assert_eq!(signed.content, "");
+        match Kind1Codec.decode(&signed) {
+            Some(DomainEvent::Status(s)) => {
+                assert!(s.is_idle());
+                assert_eq!(s.title, "fixing the auth bug");
+                assert_eq!(s.activity, "");
+            }
+            other => panic!("expected status, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn status_session_recovered_from_d_when_session_id_tag_absent() {
+        // A peer that omits the explicit session-id tag still decodes: the session
+        // id is the suffix of `d = "<project>:<session>"`.
+        let keys = Keys::generate();
+        let event = EventBuilder::new(Kind::from(KIND_STATUS), "")
+            .tags([
+                tag(&["h", "tenex-edge"]).unwrap(),
+                tag(&["d", "tenex-edge:sess-xyz"]).unwrap(),
+                tag(&["status", "idle"]).unwrap(),
+                tag(&["expiration", "1900000000"]).unwrap(),
+            ])
+            .sign_with_keys(&keys)
+            .unwrap();
+        match Kind1Codec.decode(&event) {
+            Some(DomainEvent::Status(s)) => {
+                assert_eq!(s.session_id.as_str(), "sess-xyz");
+                assert_eq!(s.project, "tenex-edge");
+            }
+            other => panic!("expected status, got {other:?}"),
+        }
     }
 
     #[test]
@@ -560,23 +582,6 @@ mod tests {
             .unwrap();
         assert!(has_tag(&signed, "h", "tenex-edge"));
         assert!(!has_tag_name(&signed, "t"));
-    }
-
-    #[test]
-    fn status_roundtrip_with_expiry() {
-        // Slug is NOT on the wire; decoded status always has empty slug.
-        let keys = Keys::generate();
-        let ev = DomainEvent::Status(Status {
-            agent: AgentRef::new(keys.public_key().to_hex(), String::new()),
-            project: "tenex-edge".into(),
-            session_id: Some(SessionId::from("sess-status")),
-            text: "reviewing PR".into(),
-            activity: "reading the diff".into(),
-            active: true,
-            rel_cwd: String::new(),
-            expires_at: Some(1_900_000_000),
-        });
-        assert_eq!(roundtrip(ev.clone(), &keys), ev);
     }
 
     #[test]

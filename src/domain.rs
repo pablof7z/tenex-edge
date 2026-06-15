@@ -35,22 +35,6 @@ pub struct Profile {
     pub owners: Vec<String>,
 }
 
-/// "I am alive, on this project, in this session." The liveness signal.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Presence {
-    pub agent: AgentRef,
-    pub project: String,
-    pub session_id: SessionId,
-    pub host: String,
-    /// Project-relative working directory (e.g. `worktree1`, `sub/dir`, `.`).
-    /// PUBLIC kind → never the absolute `$HOME/...` path (privacy).
-    pub rel_cwd: String,
-    /// Pubkeys this presence is addressed to (the operator's whitelist).
-    pub audience: Vec<String>,
-    /// Absolute unix seconds after which this heartbeat should be ignored.
-    pub expires_at: u64,
-}
-
 /// A durable, append-only line of narrative: what the agent is doing / did.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Activity {
@@ -98,40 +82,50 @@ pub struct Proposal {
     pub thread_root_key: Option<String>,
 }
 
-/// The agent's live, replaceable status for a project. `text` is a PERSISTENT
-/// session title (what the session is about) that survives idle turns; `active`
-/// is the separate "mid-turn" flag. Idle = `!active`, independent of the title.
+/// The agent's complete live state for ONE session — the single self-contained
+/// per-session signal on the fabric. From this one value a reader knows
+/// everything: who/where (agent, project, host, session, rel_cwd), what the
+/// session is about (the persistent `title`), what it is doing *right now* (the
+/// live `activity`), whether it is mid-turn (`busy`), and how long to trust it
+/// (`expires_at`). It is replaceable per session, so each session keeps its own
+/// title even while idle.
+///
+/// This replaces the former separate `Presence` heartbeat: liveness is now this
+/// value's freshness / `expires_at`, not a dedicated event.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Status {
     pub agent: AgentRef,
     pub project: String,
-    /// Session this status belongs to. `None` is legacy agent-level status from
-    /// older peers; local runtime publishes session-scoped status.
-    pub session_id: Option<SessionId>,
+    /// The session this status belongs to. Every status is per-session — this is
+    /// what makes the wire event replaceable per `(project, session)`.
+    pub session_id: SessionId,
+    /// The machine this session lives on.
+    pub host: String,
     /// The session title: a short, stable description of what the session is
     /// about. Retained across idle turns; only cleared when the session exits.
-    pub text: String,
+    pub title: String,
     /// The live activity line: what the agent is doing *right now* (the current
-    /// step/mechanics). Distilled alongside `text` in one model call and refreshed
-    /// every turn; cleared on idle (only the persistent title survives). Empty
-    /// when no live activity is known.
+    /// step/mechanics). Distilled alongside `title` in one model call and
+    /// refreshed every turn; cleared on idle (only the persistent title
+    /// survives). Empty when no live activity is known.
     pub activity: String,
-    /// Whether the session is mid-turn (busy). Decoupled from `text` so an idle
+    /// Whether the session is mid-turn (busy). Decoupled from `title` so an idle
     /// session keeps showing its title with a separate idle marker.
-    pub active: bool,
-    /// Project-relative working directory (see `Presence::rel_cwd`). Carried on
-    /// status too so a mid-turn `who` reflects where the agent is working.
+    pub busy: bool,
+    /// Project-relative working directory (e.g. `worktree1`, `sub/dir`, `.`).
+    /// PUBLIC kind → never the absolute `$HOME/...` path (privacy). Lets a `who`
+    /// reflect where the agent is working.
     pub rel_cwd: String,
-    /// Absolute unix seconds after which this status should be considered
-    /// stale (crash safety). `None` = no expiry.
-    pub expires_at: Option<u64>,
+    /// Absolute unix seconds after which this status (and the session's liveness)
+    /// should be considered stale (crash safety).
+    pub expires_at: u64,
 }
 
 impl Status {
-    /// Idle = not mid-turn. The title (`text`) persists across idle turns, so
-    /// idle is no longer "empty text".
+    /// Idle = not mid-turn. The `title` persists across idle turns, so idle is
+    /// no longer "empty title".
     pub fn is_idle(&self) -> bool {
-        !self.active
+        !self.busy
     }
 }
 
@@ -181,7 +175,6 @@ pub struct MentionMeta {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DomainEvent {
     Profile(Profile),
-    Presence(Presence),
     Activity(Activity),
     Status(Status),
     Mention(Mention),
@@ -196,26 +189,28 @@ mod tests {
     #[test]
     fn status_idle_detection() {
         let agent = AgentRef::new("pk", "coder");
-        // A title is retained while idle: idle tracks `active`, not the text.
+        // A title is retained while idle: idle tracks `busy`, not the title.
         let idle = Status {
             agent: agent.clone(),
             project: "p".into(),
-            session_id: None,
-            text: "fixing auth".into(),
+            session_id: "s1".into(),
+            host: "laptop".into(),
+            title: "fixing auth".into(),
             activity: String::new(),
-            active: false,
+            busy: false,
             rel_cwd: String::new(),
-            expires_at: None,
+            expires_at: 10,
         };
         let busy = Status {
             agent,
             project: "p".into(),
-            session_id: None,
-            text: "fixing auth".into(),
+            session_id: "s1".into(),
+            host: "laptop".into(),
+            title: "fixing auth".into(),
             activity: String::new(),
-            active: true,
+            busy: true,
             rel_cwd: String::new(),
-            expires_at: Some(10),
+            expires_at: 10,
         };
         assert!(idle.is_idle());
         assert!(!busy.is_idle());
