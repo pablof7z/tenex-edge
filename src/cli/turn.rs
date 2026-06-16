@@ -110,6 +110,19 @@ pub fn assemble_turn_start_context(
         blocks.push(text);
     }
 
+    let chat_rows = {
+        let s = store.lock().expect("store mutex poisoned");
+        s.drain_chat(&rec.session_id).unwrap_or_default()
+    };
+    if !chat_rows.is_empty() {
+        blocks.push(render_chat_block(
+            "tenex-edge project chat - write with `tenex-edge chat write < message.txt`; mention a session with `tenex-edge chat write --mention <session-id>`:",
+            &chat_rows,
+            &rec.session_id,
+            now_secs(),
+        ));
+    }
+
     // Peer presence — full roster on the first turn; deltas on subsequent turns.
     push_turn_fabric_block(
         store,
@@ -159,6 +172,19 @@ pub fn assemble_turn_check_context(
         blocks.push(text);
     }
 
+    let chat_rows = {
+        let s = store.lock().expect("store mutex poisoned");
+        s.peek_chat(&rec.session_id).unwrap_or_default()
+    };
+    if !chat_rows.is_empty() {
+        blocks.push(render_chat_block(
+            "[tenex-edge] Project chat while you were working:",
+            &chat_rows,
+            &rec.session_id,
+            now,
+        ));
+    }
+
     // 2. Sibling-session delta — gated by the daemon's rate-limit floor.
     if let Some(since) = delta_since {
         let s = store.lock().expect("store mutex poisoned");
@@ -192,6 +218,44 @@ pub(super) fn turn_check(session: Option<String>, emit: EmitFormat) -> Result<()
         emit_context(ctx, emit);
     }
     Ok(())
+}
+
+fn render_chat_block(
+    header: &str,
+    rows: &[crate::state::ChatInboxRow],
+    self_session: &str,
+    now: u64,
+) -> String {
+    let mut text = String::from(header);
+    for row in rows {
+        let from = if row.from_slug.is_empty() {
+            pubkey_short(&row.from_pubkey)
+        } else {
+            row.from_slug.clone()
+        };
+        let session = if row.from_session.is_empty() {
+            String::new()
+        } else {
+            format!(" [session {}]", session_short_code(&row.from_session))
+        };
+        let mention = if row.mentioned_session == self_session {
+            " mentioned you"
+        } else {
+            ""
+        };
+        let _ = write!(
+            text,
+            "\n\n{} ({})\n{}@{}{}{}:\n{}",
+            format_local_datetime(row.created_at),
+            relative_time(row.created_at, now),
+            from,
+            row.project,
+            session,
+            mention,
+            row.body
+        );
+    }
+    text
 }
 
 fn emit_context(content: &str, emit: EmitFormat) {

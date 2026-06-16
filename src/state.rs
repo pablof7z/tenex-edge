@@ -68,6 +68,19 @@ pub struct InboxRow {
     pub host: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatInboxRow {
+    pub chat_event_id: String,
+    pub target_session: String,
+    pub from_pubkey: String,
+    pub from_slug: String,
+    pub project: String,
+    pub body: String,
+    pub created_at: u64,
+    pub from_session: String,
+    pub mentioned_session: String,
+}
+
 // ── Phase 7 read-model types ─────────────────────────────────────────────────
 
 /// Enriched thread summary returned by `list_threads` and `thread_meta`.
@@ -190,6 +203,20 @@ CREATE TABLE IF NOT EXISTS inbox (
     dirty            INTEGER NOT NULL DEFAULT 0,
     host             TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (mention_event_id, target_session)
+);
+CREATE TABLE IF NOT EXISTS chat_inbox (
+    chat_event_id     TEXT NOT NULL,
+    target_session    TEXT NOT NULL,
+    from_pubkey       TEXT NOT NULL,
+    from_slug         TEXT NOT NULL,
+    project           TEXT NOT NULL,
+    body              TEXT NOT NULL,
+    created_at        INTEGER NOT NULL,
+    delivered         INTEGER NOT NULL DEFAULT 0,
+    delivered_at      INTEGER NOT NULL DEFAULT 0,
+    from_session      TEXT NOT NULL DEFAULT '',
+    mentioned_session TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (chat_event_id, target_session)
 );
 -- Per-session turn state: flipped by the host's turn-start/turn-end hooks. The
 -- engine polls this to decide when to distill activity (30s into a turn, then
@@ -1134,6 +1161,17 @@ impl Store {
         Ok(n as usize)
     }
 
+    /// Count undelivered chat rows that explicitly mention this session.
+    pub fn count_unread_chat_mentions(&self, session_id: &str) -> Result<usize> {
+        let n: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM chat_inbox
+             WHERE target_session=?1 AND mentioned_session=?1 AND delivered=0",
+            params![session_id],
+            |r| r.get(0),
+        )?;
+        Ok(n as usize)
+    }
+
     // ── per-agent mention dedup (across sessions) ────────────────────────
 
     pub fn mark_mention_seen(&self, agent_pubkey: &str, event_id: &str, ts: u64) -> Result<()> {
@@ -1348,6 +1386,53 @@ impl Store {
             .collect();
         self.conn.execute(
             "UPDATE inbox SET delivered=1, delivered_at=?2 WHERE target_session=?1 AND delivered=0",
+            params![session_id, crate::util::now_secs()],
+        )?;
+        Ok(rows)
+    }
+
+    /// Idempotently enqueue a live project chat row for one target session.
+    /// Chat is intentionally per-session/live-only: callers decide the target
+    /// sessions at materialization time and never catch up old chat on startup.
+    pub fn enqueue_chat(&self, row: &ChatInboxRow) -> Result<bool> {
+        let changed = self.conn.execute(
+            "INSERT OR IGNORE INTO chat_inbox
+               (chat_event_id, target_session, from_pubkey, from_slug, project, body, created_at, delivered, from_session, mentioned_session)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,0,?8,?9)",
+            params![
+                row.chat_event_id,
+                row.target_session,
+                row.from_pubkey,
+                row.from_slug,
+                row.project,
+                row.body,
+                row.created_at,
+                row.from_session,
+                row.mentioned_session,
+            ],
+        )?;
+        Ok(changed > 0)
+    }
+
+    /// Read undelivered chat rows without marking them delivered. Used by
+    /// mid-turn hook injection so the next turn-start remains authoritative.
+    pub fn peek_chat(&self, session_id: &str) -> Result<Vec<ChatInboxRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT chat_event_id, target_session, from_pubkey, from_slug, project, body, created_at, from_session, mentioned_session
+             FROM chat_inbox WHERE target_session=?1 AND delivered=0 ORDER BY created_at",
+        )?;
+        let rows: Vec<ChatInboxRow> = stmt
+            .query_map(params![session_id], row_to_chat)?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rows)
+    }
+
+    /// Return undelivered chat rows for a session and mark them delivered.
+    pub fn drain_chat(&self, session_id: &str) -> Result<Vec<ChatInboxRow>> {
+        let rows = self.peek_chat(session_id)?;
+        self.conn.execute(
+            "UPDATE chat_inbox SET delivered=1, delivered_at=?2 WHERE target_session=?1 AND delivered=0",
             params![session_id, crate::util::now_secs()],
         )?;
         Ok(rows)
@@ -2152,6 +2237,20 @@ fn row_to_inbox(row: &rusqlite::Row) -> rusqlite::Result<InboxRow> {
         commit: row.get(10)?,
         dirty: row.get::<_, i64>(11)? as u32,
         host: row.get(12)?,
+    })
+}
+
+fn row_to_chat(row: &rusqlite::Row) -> rusqlite::Result<ChatInboxRow> {
+    Ok(ChatInboxRow {
+        chat_event_id: row.get(0)?,
+        target_session: row.get(1)?,
+        from_pubkey: row.get(2)?,
+        from_slug: row.get(3)?,
+        project: row.get(4)?,
+        body: row.get(5)?,
+        created_at: row.get(6)?,
+        from_session: row.get(7)?,
+        mentioned_session: row.get(8)?,
     })
 }
 

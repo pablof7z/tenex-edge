@@ -583,6 +583,17 @@ fn render(de: &DomainEvent) -> String {
                 .unwrap_or_default(),
             m.body
         ),
+        DomainEvent::ChatMessage(c) => format!(
+            "{} {}@{}{}: {}",
+            "chat".green(),
+            c.from.slug.cyan(),
+            c.project,
+            c.mentioned_session
+                .as_ref()
+                .map(|s| format!(" mentions {s}"))
+                .unwrap_or_default(),
+            c.body
+        ),
         DomainEvent::TurnReply(r) => {
             format!("{} {}: {}", "turn".blue(), r.agent.slug.cyan(), r.body)
         }

@@ -4,7 +4,7 @@
 //! fabric-layer boundary that `resubscribe` in the daemon talks to.
 
 use crate::codec::kind1::{
-    h_filter, kind, KIND_GROUP_ADMINS, KIND_GROUP_MEMBERS, KIND_GROUP_METADATA, KIND_NOTE,
+    h_filter, kind, KIND_CHAT, KIND_GROUP_ADMINS, KIND_GROUP_MEMBERS, KIND_GROUP_METADATA, KIND_NOTE,
     KIND_PROFILE, KIND_STATUS,
 };
 use crate::fabric::{Delivery, Scope};
@@ -66,8 +66,8 @@ pub fn scope_filters(scope: &Scope) -> Vec<Filter> {
     // membership for groups this daemon owns (created closed via userNsec).
     filters.push(presence_status);
 
-    // Notes (kind:1) — activity + mentions.
-    let mut notes = Filter::new().kind(kind(KIND_NOTE));
+    // Notes (kind:1) + chat (kind:9) — activity, mentions, and NIP-29 group chat.
+    let mut notes = Filter::new().kinds([kind(KIND_NOTE), kind(KIND_CHAT)]);
     if let Some(p) = &scope.project {
         notes = h_filter(notes, p);
     }

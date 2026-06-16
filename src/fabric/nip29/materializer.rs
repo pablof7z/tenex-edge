@@ -3,7 +3,8 @@
 //! These are relay-authored state events; materialize them into the local store
 //! without touching the tail channel or mention routing.
 
-use crate::state::Store;
+use crate::domain::ChatMessage;
+use crate::state::{ChatInboxRow, Store};
 use nostr_sdk::Event;
 
 pub struct Nip29Materializer;
@@ -53,5 +54,61 @@ impl Nip29Materializer {
                 .replace_group_members(project, &members, event.created_at.as_secs())
                 .ok();
         }
+    }
+
+    /// Route one NIP-29 group chat message into the live chat queue for sessions
+    /// that were already alive when the event was created. This is deliberately
+    /// not a historical catch-up path: sessions started after the chat line was
+    /// published do not receive it.
+    pub fn materialize_chat_message(store: &Store, chat: &ChatMessage, event: &Event) -> bool {
+        let created_at = event.created_at.as_secs();
+        let from_pubkey = event.pubkey.to_hex();
+        let from_slug = if chat.from.slug.is_empty() {
+            store
+                .resolve_slug_for_pubkey(&from_pubkey)
+                .ok()
+                .flatten()
+                .unwrap_or_default()
+        } else {
+            chat.from.slug.clone()
+        };
+        let from_session = chat
+            .from_session
+            .as_ref()
+            .map(|s| s.as_str().to_owned())
+            .unwrap_or_default();
+        let mentioned_session = chat
+            .mentioned_session
+            .as_ref()
+            .map(|s| s.as_str().to_owned())
+            .unwrap_or_default();
+
+        let mut routed = false;
+        for rec in store.list_alive_sessions().unwrap_or_default() {
+            if rec.project != chat.project {
+                continue;
+            }
+            if rec.created_at > created_at {
+                continue;
+            }
+            if !from_session.is_empty() && rec.session_id == from_session {
+                continue;
+            }
+            let row = ChatInboxRow {
+                chat_event_id: event.id.to_hex(),
+                target_session: rec.session_id,
+                from_pubkey: from_pubkey.clone(),
+                from_slug: from_slug.clone(),
+                project: chat.project.clone(),
+                body: chat.body.clone(),
+                created_at,
+                from_session: from_session.clone(),
+                mentioned_session: mentioned_session.clone(),
+            };
+            if store.enqueue_chat(&row).unwrap_or(false) {
+                routed = true;
+            }
+        }
+        routed
     }
 }

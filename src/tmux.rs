@@ -456,14 +456,16 @@ async fn ring_doorbells_inner(state: &Arc<DaemonState>) -> Result<()> {
         return Ok(());
     }
 
-    // Collect sessions that have unread inbox rows AND are currently idle.
+    // Collect sessions that have unread direct inbox rows or explicit chat
+    // mentions AND are currently idle.
     // Skip any session where working=1 to avoid injecting a doorbell mid-turn.
     let sessions_with_inbox: Vec<String> = state.with_store(|s| {
         s.list_alive_sessions()
             .unwrap_or_default()
             .into_iter()
             .filter(|rec| {
-                s.count_unread_inbox(&rec.session_id).unwrap_or(0) > 0
+                (s.count_unread_inbox(&rec.session_id).unwrap_or(0) > 0
+                    || s.count_unread_chat_mentions(&rec.session_id).unwrap_or(0) > 0)
                     && !s.is_session_working(&rec.session_id)
             })
             .map(|rec| rec.session_id)

@@ -7,6 +7,7 @@
 //! | TurnReply  | kind:1,    `["h", project]`, `["e", root_id, "", "root"]`, `["e", reply_id, "", "reply"]` |
 //! | Status     | kind:30315, content = live activity (may be empty when idle), `["d", "<project>:<session>"]`, `["h", project]`, `["session-id", id]`, `["title", title]` (always), `["status", "busy"\|"idle"]`, `["host", host]`, optional `["rel-cwd", rel]` |
 //! | Mention    | kind:1,    `["h", project]`, `["p", to]`, optional `["session-id", target]`, `["from-session", sender]`, `["subject", s]`, `["git-branch", b]`, `["git-commit", c]`, `["git-dirty", n]`, `["from-host", h]`, `["e", reply_to, "", "reply"]` |
+//! | Chat       | kind:9,    `["h", project]`, optional `["from-session", sender]`, optional `["p", mentioned_pubkey]`, optional `["session-id", mentioned_session]` |
 //!
 //! Status is the single self-contained per-session signal: ONE kind:30315 event
 //! carries the whole live state of a session (busy/idle, the live activity in
@@ -33,7 +34,8 @@
 
 use crate::codec::Codec;
 use crate::domain::{
-    Activity, AgentRef, DomainEvent, Mention, MentionMeta, Profile, Proposal, Status, TurnReply,
+    Activity, AgentRef, ChatMessage, DomainEvent, Mention, MentionMeta, Profile, Proposal, Status,
+    TurnReply,
 };
 use crate::util::SessionId;
 use anyhow::Result;
@@ -41,6 +43,7 @@ use nostr_sdk::prelude::*;
 
 pub const KIND_PROFILE: u16 = 0;
 pub const KIND_NOTE: u16 = 1;
+pub const KIND_CHAT: u16 = 9;
 pub const KIND_STATUS: u16 = 30315;
 
 // NIP-29 group management (operator/userNsec-signed) + relay-authored state.
@@ -236,6 +239,28 @@ impl Codec for Kind1Codec {
                     .tags(tags)
                     .allow_self_tagging()
             }
+            DomainEvent::ChatMessage(ChatMessage {
+                from: _from,
+                project,
+                body,
+                from_session,
+                mentioned_session,
+                mentioned_pubkey,
+            }) => {
+                let mut tags = vec![project_tag(project)?];
+                if let Some(sess) = from_session {
+                    tags.push(tag(&["from-session", sess.as_str()])?);
+                }
+                if let Some(pk) = mentioned_pubkey {
+                    tags.push(tag(&["p", pk])?);
+                }
+                if let Some(sess) = mentioned_session {
+                    tags.push(tag(&["session-id", sess.as_str()])?);
+                }
+                EventBuilder::new(kind(KIND_CHAT), body.clone())
+                    .tags(tags)
+                    .allow_self_tagging()
+            }
             DomainEvent::TurnReply(TurnReply {
                 agent: _,
                 project,
@@ -308,6 +333,15 @@ impl Codec for Kind1Codec {
                     rel_cwd: first_tag(event, "rel-cwd").unwrap_or_default().to_string(),
                 }))
             }
+            KIND_CHAT => Some(DomainEvent::ChatMessage(ChatMessage {
+                // Slug is NOT on the wire; resolved by the materializer.
+                from: AgentRef::new(pubkey, String::new()),
+                project: project_from_tags(event)?,
+                body: event.content.clone(),
+                from_session: first_tag(event, "from-session").map(SessionId::from),
+                mentioned_session: first_tag(event, "session-id").map(SessionId::from),
+                mentioned_pubkey: first_tag(event, "p").map(str::to_string),
+            })),
             KIND_NOTE => {
                 let project = project_from_tags(event)?;
 
@@ -828,5 +862,39 @@ mod tests {
             meta: MentionMeta::default(),
         });
         assert!(matches!(roundtrip(ev, &keys), DomainEvent::Mention(_)));
+    }
+
+    #[test]
+    fn chat_message_encodes_as_kind9_with_group_and_mention_tags() {
+        let keys = Keys::generate();
+        let mentioned_pk = "dd".repeat(32);
+        let ev = DomainEvent::ChatMessage(ChatMessage {
+            from: agent(&keys, "codex"),
+            project: "myproject".into(),
+            body: "status: tests are green".into(),
+            from_session: Some("sender-sess".into()),
+            mentioned_session: Some("target-sess".into()),
+            mentioned_pubkey: Some(mentioned_pk.clone()),
+        });
+        let codec = Kind1Codec;
+        let builder = codec.encode(&ev).expect("encode");
+        let signed = builder.sign_with_keys(&keys).expect("sign");
+
+        assert_eq!(signed.kind.as_u16(), KIND_CHAT);
+        assert!(has_tag(&signed, "h", "myproject"));
+        assert!(has_tag(&signed, "from-session", "sender-sess"));
+        assert!(has_tag(&signed, "session-id", "target-sess"));
+        assert!(has_tag(&signed, "p", &mentioned_pk));
+
+        match codec.decode(&signed) {
+            Some(DomainEvent::ChatMessage(chat)) => {
+                assert_eq!(chat.project, "myproject");
+                assert_eq!(chat.body, "status: tests are green");
+                assert_eq!(chat.from_session, Some(SessionId::from("sender-sess")));
+                assert_eq!(chat.mentioned_session, Some(SessionId::from("target-sess")));
+                assert_eq!(chat.mentioned_pubkey, Some(mentioned_pk));
+            }
+            other => panic!("expected ChatMessage, got {other:?}"),
+        }
     }
 }

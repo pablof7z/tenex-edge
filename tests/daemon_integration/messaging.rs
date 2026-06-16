@@ -160,6 +160,72 @@ fn send_message_then_inbox_roundtrip_same_machine() {
 }
 
 #[test]
+fn chat_write_stdin_enqueues_live_project_chat_for_receiver() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let home = Home::new();
+
+    rt().block_on(async {
+        let mut c = Client::connect_or_spawn().await.expect("connect");
+        c.call(
+            "session_start",
+            serde_json::json!({"agent": "chat-sender", "session_id": "chat-sender-session", "cwd": "/tmp"}),
+        )
+        .await
+        .unwrap();
+        c.call(
+            "session_start",
+            serde_json::json!({"agent": "chat-receiver", "session_id": "chat-receiver-session", "cwd": "/tmp"}),
+        )
+        .await
+        .unwrap();
+    });
+
+    let out = run_cli_stdin(
+        &home,
+        &[
+            "chat",
+            "write",
+            "--session",
+            "chat-sender-session",
+            "--mention",
+            "chat-receiver-session",
+        ],
+        "hello from redirected stdin\n",
+    );
+    assert!(
+        out.status.success(),
+        "chat write failed\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let mut received = false;
+    for _ in 0..12 {
+        let store = Store::open(&home.store_path()).unwrap();
+        let rows = store.peek_chat("chat-receiver-session").unwrap();
+        if let Some(row) = rows
+            .iter()
+            .find(|row| row.body == "hello from redirected stdin")
+        {
+            assert_eq!(row.mentioned_session, "chat-receiver-session");
+            assert_eq!(row.from_session, "chat-sender-session");
+            received = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert!(received, "receiver did not get live chat row");
+
+    let store = Store::open(&home.store_path()).unwrap();
+    assert!(
+        store.peek_chat("chat-sender-session").unwrap().is_empty(),
+        "sender should not receive its own chat row"
+    );
+
+    stop_daemon(&home);
+}
+
+#[test]
 fn mention_to_a_does_not_land_in_b_inbox() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let home = Home::new();

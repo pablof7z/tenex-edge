@@ -16,11 +16,11 @@ use super::protocol::{
 use super::tail_event::TailEvent;
 use super::{lock_path, socket_path, store_path};
 use crate::config::{self, Config};
-use crate::domain::{DomainEvent, Mention};
+use crate::domain::{ChatMessage, DomainEvent, Mention};
 use crate::fabric::provider::Kind1Nip29Provider;
 use crate::identity::{self, AgentIdentity};
 use crate::runtime::{self, route_mention_into_with_id, EngineParams};
-use crate::state::{InboxRow, Store};
+use crate::state::{ChatInboxRow, InboxRow, Store};
 use crate::transport::Transport;
 use crate::util::{now_secs, pubkey_short, session_short_code, SessionId};
 use anyhow::{Context, Result};
@@ -359,6 +359,7 @@ async fn dispatch(state: &Arc<DaemonState>, req: &Request) -> Response {
         "session_start" => rpc_session_start(state, &req.params).await,
         "session_end" => rpc_session_end(state, &req.params),
         "send_message" => rpc_send_message(state, &req.params).await,
+        "chat_write" => rpc_chat_write(state, &req.params).await,
         "propose" => rpc_propose(state, &req.params).await,
         "inbox" => rpc_inbox(state, &req.params).await,
         "turn_start" => rpc_turn_start(state, &req.params).await,
@@ -920,6 +921,131 @@ async fn rpc_send_message(
     Ok(
         serde_json::json!({ "to_pubkey": recipient.pubkey, "target_session": recipient.target_session }),
     )
+}
+
+// ── chat_write ───────────────────────────────────────────────────────────────
+
+#[derive(serde::Deserialize, Default)]
+struct ChatWriteParams {
+    message: String,
+    #[serde(default)]
+    mention: Option<String>,
+    #[serde(default)]
+    session: Option<String>,
+    #[serde(default)]
+    env_session: Option<String>,
+    #[serde(default)]
+    cwd: Option<String>,
+    #[serde(default)]
+    agent: Option<String>,
+}
+
+async fn rpc_chat_write(
+    state: &Arc<DaemonState>,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value> {
+    let p: ChatWriteParams =
+        serde_json::from_value(params.clone()).context("parsing chat_write params")?;
+    let rec = resolve_session(
+        state,
+        p.session.as_deref(),
+        p.env_session.as_deref(),
+        p.cwd.as_deref(),
+        p.agent.as_deref(),
+    )?;
+    let id = identity::load_or_create(&config::edge_home(), &rec.agent_slug, now_secs())?;
+
+    let mention = if let Some(raw) = p.mention.as_deref().filter(|m| !m.is_empty()) {
+        let target = state.with_store(|s| resolve_recipient(s, &rec.project, raw))?;
+        let Some(session_id) = target.target_session else {
+            anyhow::bail!("--mention must name a concrete session id/code from `tenex-edge who`");
+        };
+        if target.project != rec.project {
+            anyhow::bail!(
+                "--mention target is in project {:?}, but this chat is for project {:?}",
+                target.project,
+                rec.project
+            );
+        }
+        Some((target.pubkey, session_id))
+    } else {
+        None
+    };
+    let mentioned_pubkey = mention.as_ref().map(|(pk, _)| pk.clone());
+    let mentioned_session = mention.as_ref().map(|(_, sid)| sid.clone());
+
+    let chat = ChatMessage {
+        from: crate::domain::AgentRef::new(id.pubkey_hex(), rec.agent_slug.clone()),
+        project: rec.project.clone(),
+        body: p.message.clone(),
+        from_session: Some(SessionId::from(rec.session_id.clone())),
+        mentioned_session: mentioned_session.clone().map(SessionId::from),
+        mentioned_pubkey: mentioned_pubkey.clone(),
+    };
+    let event_id = state
+        .provider
+        .publish_checked(&DomainEvent::ChatMessage(chat), &id.keys)
+        .await?;
+    let event_id = event_id.to_hex();
+    let created_at = now_secs();
+
+    // Local live delivery: relays often don't echo an event back to the same
+    // connection that published it, and chat intentionally does not catch up old
+    // history. Route now to sessions already alive in the same project.
+    let routed = state.with_store(|s| {
+        let mut routed = false;
+        for target in s.list_alive_sessions().unwrap_or_default() {
+            if target.project != rec.project {
+                continue;
+            }
+            if target.created_at > created_at {
+                continue;
+            }
+            if target.session_id == rec.session_id {
+                continue;
+            }
+            let row = ChatInboxRow {
+                chat_event_id: event_id.clone(),
+                target_session: target.session_id,
+                from_pubkey: id.pubkey_hex(),
+                from_slug: rec.agent_slug.clone(),
+                project: rec.project.clone(),
+                body: p.message.clone(),
+                created_at,
+                from_session: rec.session_id.clone(),
+                mentioned_session: mentioned_session.clone().unwrap_or_default(),
+            };
+            if s.enqueue_chat(&row).unwrap_or(false) {
+                routed = true;
+            }
+        }
+        routed
+    });
+    if routed {
+        state.mention_notify.notify_waiters();
+        crate::tmux::ring_doorbells(state.clone());
+    }
+
+    state.emit_tail(TailEvent::Msg {
+        ts: created_at,
+        project: rec.project.clone(),
+        from: rec.agent_slug,
+        from_session: Some(rec.session_id),
+        to: mentioned_pubkey
+            .as_deref()
+            .map(pubkey_short)
+            .unwrap_or_else(|| "project-chat".to_string()),
+        to_session: mentioned_session.clone(),
+        thread: None,
+        body: p.message.chars().take(200).collect(),
+    });
+
+    Ok(serde_json::json!({
+        "event_id": event_id,
+        "project": rec.project,
+        "mentioned_pubkey": mentioned_pubkey,
+        "mentioned_session": mentioned_session,
+    }))
 }
 
 // ── propose ───────────────────────────────────────────────────────────────────
@@ -2461,6 +2587,36 @@ fn derive_and_emit_tail_events(
                 to_session: m.target_session.as_ref().map(|s| s.as_str().to_owned()),
                 thread: thread_short,
                 body: m.body.chars().take(200).collect(),
+            });
+        }
+
+        DomainEvent::ChatMessage(chat) => {
+            // Local publishes emit their own outbound tail line in rpc_chat_write.
+            if hosted.contains(&chat.from.pubkey) {
+                return;
+            }
+            let from_slug = if chat.from.slug.is_empty() {
+                pubkey_short(&chat.from.pubkey)
+            } else {
+                chat.from.slug.clone()
+            };
+            let to = chat
+                .mentioned_pubkey
+                .as_deref()
+                .map(pubkey_short)
+                .unwrap_or_else(|| "project-chat".to_string());
+            state.emit_tail(TailEvent::Msg {
+                ts: now,
+                project: chat.project.clone(),
+                from: from_slug,
+                from_session: chat.from_session.as_ref().map(|s| s.as_str().to_owned()),
+                to,
+                to_session: chat
+                    .mentioned_session
+                    .as_ref()
+                    .map(|s| s.as_str().to_owned()),
+                thread: None,
+                body: chat.body.chars().take(200).collect(),
             });
         }
 

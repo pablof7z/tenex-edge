@@ -170,6 +170,22 @@ pub struct MentionMeta {
     pub reply_to_event_id: Option<String>,
 }
 
+/// A NIP-29 project chat line. On the wire this is a NIP-C7 `kind:9` event
+/// scoped to the project group by its `h` tag. It is ambient project context,
+/// not a durable direct inbox item; live sessions see it going forward only.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatMessage {
+    pub from: AgentRef,
+    pub project: String,
+    pub body: String,
+    /// The sender's session id, when known.
+    pub from_session: Option<SessionId>,
+    /// Optional session explicitly mentioned in the chat line.
+    pub mentioned_session: Option<SessionId>,
+    /// Optional pubkey for the mentioned session, carried as a Nostr `p` tag.
+    pub mentioned_pubkey: Option<String>,
+}
+
 /// The closed set of things that travel on the fabric. A codec encodes each of
 /// these to a wire envelope and decodes wire envelopes back into these.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -178,6 +194,7 @@ pub enum DomainEvent {
     Activity(Activity),
     Status(Status),
     Mention(Mention),
+    ChatMessage(ChatMessage),
     TurnReply(TurnReply),
     Proposal(Proposal),
 }

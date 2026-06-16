@@ -44,6 +44,33 @@ pub(super) async fn inbox_reply(
     Ok(())
 }
 
+pub(super) async fn chat_write(
+    message: String,
+    mention: Option<String>,
+    session: Option<String>,
+) -> Result<()> {
+    let params = serde_json::json!({
+        "message": message,
+        "mention": mention,
+        "session": session,
+        "env_session": std::env::var("TENEX_EDGE_SESSION").ok(),
+        "agent": std::env::var("TENEX_EDGE_AGENT").ok(),
+        "cwd": std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()),
+    });
+    let v = daemon_call_async("chat_write", params).await?;
+    let event_id = v["event_id"].as_str().unwrap_or("?");
+    if let Some(session) = v["mentioned_session"].as_str().filter(|s| !s.is_empty()) {
+        println!(
+            "sent chat {} mentioning session {}",
+            pubkey_short(event_id),
+            SessionId::from(session.to_string())
+        );
+    } else {
+        println!("sent chat {}", pubkey_short(event_id));
+    }
+    Ok(())
+}
+
 fn print_send_ack(v: &serde_json::Value) {
     let to_pubkey = v["to_pubkey"].as_str().unwrap_or_default().to_string();
     let target_session = v["target_session"]

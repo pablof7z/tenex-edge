@@ -181,6 +181,27 @@ pub fn materialize(
             }
         }
 
+        DomainEvent::ChatMessage(ref chat) => {
+            let sender_pk = event.pubkey.to_hex();
+            let resolved_slug = store
+                .resolve_slug_for_pubkey(&sender_pk)
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+            let enriched = if resolved_slug.is_empty() {
+                std::borrow::Cow::Borrowed(chat)
+            } else {
+                std::borrow::Cow::Owned(crate::domain::ChatMessage {
+                    from: crate::domain::AgentRef::new(sender_pk, resolved_slug),
+                    ..chat.clone()
+                })
+            };
+            if Nip29Materializer::materialize_chat_message(store, &enriched, event) {
+                outcome.wake_mentions = true;
+            }
+            outcome.tail = Some(DomainEvent::ChatMessage(enriched.into_owned()));
+        }
+
         // Activity (always) and non-hosted Mention → no-op, matching original.
         _ => {}
     }
@@ -362,6 +383,69 @@ mod tests {
         let inbox = store.drain_inbox(session_id).unwrap();
         assert_eq!(inbox.len(), 1);
         assert_eq!(inbox[0].body, "hey review this");
+    }
+
+    #[test]
+    fn chat_message_routes_only_to_sessions_alive_at_event_time() {
+        let store = Store::open_memory().unwrap();
+        let sender_keys = Keys::generate();
+        let receiver_keys = Keys::generate();
+        let future_keys = Keys::generate();
+        let sender_pk = sender_keys.public_key().to_hex();
+        let receiver_pk = receiver_keys.public_key().to_hex();
+        let future_pk = future_keys.public_key().to_hex();
+
+        let event = build_event(
+            &sender_keys,
+            9,
+            "heads up: I pushed the parser fix",
+            vec![
+                make_tag(&["h", "myproject"]),
+                make_tag(&["from-session", "sender-sess"]),
+                make_tag(&["p", &receiver_pk]),
+                make_tag(&["session-id", "receiver-sess"]),
+            ],
+        );
+        let event_ts = event.created_at.as_secs();
+
+        for (session_id, slug, pubkey, created_at) in [
+            ("sender-sess", "sender", sender_pk.clone(), 1),
+            ("receiver-sess", "receiver", receiver_pk.clone(), 1),
+            ("future-sess", "future", future_pk.clone(), event_ts + 1),
+        ] {
+            store
+                .upsert_session(&crate::state::SessionRecord {
+                    session_id: session_id.to_string(),
+                    agent_slug: slug.to_string(),
+                    agent_pubkey: pubkey,
+                    project: "myproject".to_string(),
+                    host: "laptop".to_string(),
+                    child_pid: None,
+                    watch_pid: None,
+                    created_at,
+                    alive: true,
+                    rel_cwd: String::new(),
+                })
+                .unwrap();
+        }
+
+        let hosted = vec![sender_pk, receiver_pk, future_pk];
+        let env = RawEnvelope::Nostr(event);
+        let outcome = materialize(&env, &hosted, &[], event_ts, "test-pi", &store);
+
+        assert!(outcome.wake_mentions, "live receiver should wake");
+        assert!(
+            store.drain_chat("sender-sess").unwrap().is_empty(),
+            "sender session should not receive its own chat line"
+        );
+        let receiver_rows = store.drain_chat("receiver-sess").unwrap();
+        assert_eq!(receiver_rows.len(), 1);
+        assert_eq!(receiver_rows[0].body, "heads up: I pushed the parser fix");
+        assert_eq!(receiver_rows[0].mentioned_session, "receiver-sess");
+        assert!(
+            store.drain_chat("future-sess").unwrap().is_empty(),
+            "sessions created after the event must not receive chat backfill"
+        );
     }
 
     /// Group-member sender mention routes (signer ∈ is_group_member).
