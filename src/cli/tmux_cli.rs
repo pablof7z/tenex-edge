@@ -315,6 +315,11 @@ fn live_row_line(row: &LiveRow, is_sel: bool, project_filter: Option<&str>) -> L
     } else {
         row.status.trim().to_string()
     };
+    let unread_tag = if row.unread > 0 {
+        format!(" ◉{}", row.unread)
+    } else {
+        String::new()
+    };
 
     if !row.attachable {
         Line::from(vec![
@@ -322,6 +327,7 @@ fn live_row_line(row: &LiveRow, is_sel: bool, project_filter: Option<&str>) -> L
             Span::styled(label, style_dim()),
             Span::styled(session_tag, style_dim()),
             Span::styled(format!("  {}", status_str), style_dim()),
+            Span::styled(unread_tag, style_yellow()),
         ])
     } else if is_sel {
         Line::from(vec![
@@ -329,6 +335,7 @@ fn live_row_line(row: &LiveRow, is_sel: bool, project_filter: Option<&str>) -> L
             Span::styled(label, style_cyan_bold()),
             Span::styled(session_tag, style_yellow()),
             Span::raw(format!("  {}", status_str)),
+            Span::styled(unread_tag, style_yellow()),
         ])
     } else {
         Line::from(vec![
@@ -336,6 +343,7 @@ fn live_row_line(row: &LiveRow, is_sel: bool, project_filter: Option<&str>) -> L
             Span::styled(label, style_cyan()),
             Span::styled(session_tag, style_yellow()),
             Span::styled(format!("  {}", status_str), style_dim()),
+            Span::styled(unread_tag, style_yellow()),
         ])
     }
 }
@@ -823,6 +831,7 @@ struct LiveRow {
     session_short: String, // short display code (6 chars)
     status: String,
     attachable: bool, // has a live tmux endpoint
+    unread: usize,    // unread inbox mentions
 }
 
 struct SpawnRow {
@@ -895,6 +904,7 @@ fn fetch_tui_data() -> Result<TuiData> {
                 session_short,
                 status: r["status"].as_str().unwrap_or("").to_string(),
                 attachable: r["attachable"].as_bool().unwrap_or(false),
+                unread: r["unread"].as_u64().unwrap_or(0) as usize,
             }
         })
         .collect();

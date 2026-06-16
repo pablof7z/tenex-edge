@@ -121,6 +121,9 @@ struct WhoRow {
     /// can be attached to via `tenex-edge tmux attach`.
     #[serde(default)]
     attachable: bool,
+    /// Number of unread inbox mentions for this session.
+    #[serde(default)]
+    unread: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -192,6 +195,9 @@ pub fn load_who_snapshot(
                 .get_turn_state(&s.session_id)
                 .map(|(w, _)| w)
                 .unwrap_or(st_active);
+            let unread = store
+                .count_unread_inbox(&s.session_id)
+                .unwrap_or(0);
             rows.push(WhoRow {
                 source: WhoSource::Local,
                 fresh: age_secs.map(|a| a <= PEER_FRESH_SECS).unwrap_or(true),
@@ -206,6 +212,7 @@ pub fn load_who_snapshot(
                 rel_cwd: s.rel_cwd.clone(),
                 remote: false,
                 attachable: tmux_sessions.contains(&s.session_id),
+                unread,
             });
         } else {
             other_agents
@@ -235,6 +242,7 @@ pub fn load_who_snapshot(
                 rel_cwd: p.rel_cwd.clone(),
                 remote: slugify_host(&p.host) != local_host,
                 attachable: false,
+                unread: 0,
             });
         } else {
             other_agents

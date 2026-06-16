@@ -83,6 +83,11 @@ fn render_who_row(out: &mut String, row: &WhoRow, include_project: bool) {
     let dir = rel_cwd_bracket(&row.rel_cwd)
         .map(|d| format!(" {}", format!("[{d}]").dimmed()))
         .unwrap_or_default();
+    let unread = if row.unread > 0 {
+        format!(" {}", format!("◉{}", row.unread).yellow())
+    } else {
+        String::new()
+    };
     let name = if include_project {
         format!("{}@{}", row.slug, row.project).cyan().to_string()
     } else {
@@ -90,12 +95,13 @@ fn render_who_row(out: &mut String, row: &WhoRow, include_project: bool) {
     };
     let _ = writeln!(
         out,
-        "{} [session {}]{}{}{} - {}",
+        "{} [session {}]{}{}{}{} - {}",
         name,
         session_short_code(&row.session_id).yellow(),
         dir,
         host,
         stale,
+        unread,
         status_colored(&row.status, &row.activity, row.active),
     );
 }
@@ -463,6 +469,7 @@ mod who_tests {
                 rel_cwd: String::new(),
                 remote: false,
                 attachable: false,
+                unread: 0,
             }],
             other_projects: vec![],
             spawnable: vec![],
@@ -521,6 +528,7 @@ mod who_tests {
                 rel_cwd: String::new(),
                 remote: false,
                 attachable: false,
+                unread: 0,
             }],
             other_projects: vec![],
             spawnable: vec![],
