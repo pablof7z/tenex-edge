@@ -51,17 +51,19 @@ pub fn assemble_turn_start_context(
     let mut blocks: Vec<String> = Vec::new();
 
     if first_turn {
-        blocks.push(
-            "[tenex-edge] You are connected to the tenex-edge agent fabric. \
+        let short_code = crate::util::session_short_code(&rec.session_id);
+        blocks.push(format!(
+            "[tenex-edge] You are {slug} [session {short_code}] on the tenex-edge fabric. \
              You can run `tenex-edge who`, `tenex-edge inbox`, and \
              `tenex-edge inbox send --to <agent@project|session-id> --subject \"...\" --message \"...\"`. \
              Reply to a message you received with `tenex-edge inbox reply --id <ID> \"...\"`. \
              If the user asks you to message/contact/tell another agent, run `tenex-edge inbox send`; \
              do not say you cannot send messages from here. Run `tenex-edge wait-for-mention` \
              with run_in_background=true so you are woken when a mention arrives. \
-             Re-run it each time one is received."
-                .to_string(),
-        );
+             Re-run it each time one is received.",
+            slug = rec.agent_slug,
+            short_code = short_code,
+        ));
 
         // Warn if this agent couldn't be added to the NIP-29 group (e.g. the
         // daemon on this machine is not the relay admin). The session-start hook

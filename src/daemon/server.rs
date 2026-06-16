@@ -591,7 +591,10 @@ async fn rpc_session_start(
 
     // Idempotent re-start (session reassert): the engine task already runs.
     if state.sessions.lock().unwrap().contains_key(&session_id) {
-        return Ok(serde_json::json!({ "session_id": session_id }));
+        return Ok(serde_json::json!({
+            "session_id": session_id,
+            "short_code": crate::util::session_short_code(&session_id),
+        }));
     }
 
     // Make sure the project's NIP-29 group exists and this agent is a member
@@ -699,7 +702,10 @@ async fn rpc_session_start(
         });
     }
 
-    Ok(serde_json::json!({ "session_id": session_id }))
+    Ok(serde_json::json!({
+        "session_id": session_id,
+        "short_code": crate::util::session_short_code(&session_id),
+    }))
 }
 
 #[derive(serde::Deserialize)]

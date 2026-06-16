@@ -180,10 +180,17 @@ pub(super) async fn hook_run(host_name: String, hook_type: String) -> Result<()>
                     return Ok(());
                 }
                 // Programmatic host with no id of its own: generate one and hand
-                // it back on stdout so the caller can adopt it.
+                // it back on stdout so the caller can adopt it. Return JSON with
+                // both session_id and short_code so the caller can display the
+                // short code (matching `who` output).
                 let new_sid =
                     session_start_inner(agent_slug, None, Some(cwd), watch_pid, resume_id)?;
-                println!("{new_sid}");
+                let short_code = crate::util::session_short_code(&new_sid);
+                let json = serde_json::json!({
+                    "session_id": new_sid,
+                    "short_code": short_code,
+                });
+                println!("{json}");
             } else {
                 // Harness supplied its own id — adopt it, discard the echo.
                 session_start_inner(agent_slug, Some(sid), Some(cwd), watch_pid, resume_id)?;

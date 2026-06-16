@@ -127,9 +127,19 @@ export const TenexEdge: Plugin = async ({ client, directory }) => {
   // stdout. We pass our PID so the engine reaps when opencode exits. The agent
   // slug comes from the inherited TENEX_EDGE_AGENT env (default "opencode").
   let SID = ""
+  let SHORT_CODE = ""
   runHook("session-start", { cwd: directory, pid: process.pid })
     .then((out) => {
-      SID = out.trim()
+      const trimmed = out.trim()
+      // The daemon returns JSON: {"session_id":"te-...","short_code":"abc123"}
+      // Legacy/CLI path returns a bare session_id string. Handle both.
+      try {
+        const parsed = JSON.parse(trimmed)
+        SID = parsed.session_id ?? trimmed
+        SHORT_CODE = parsed.short_code ?? ""
+      } catch {
+        SID = trimmed
+      }
       if (SID) process.env.TENEX_EDGE_SESSION = SID
     })
     .catch(() => {})
@@ -180,8 +190,12 @@ export const TenexEdge: Plugin = async ({ client, directory }) => {
       // One-time hint so the agent knows how to message peers from the shell.
       if (!hinted) {
         hinted = true
+        const agentSlug = process.env.TENEX_EDGE_AGENT || "opencode"
+        const selfLine = SHORT_CODE
+          ? `You are ${agentSlug} [session ${SHORT_CODE}] on the tenex-edge fabric.`
+          : `You are ${agentSlug} on the tenex-edge fabric.`
         blocks.push(
-          `You are a citizen on the tenex-edge fabric. Peers (across Claude Code, ` +
+          selfLine + ` Peers (across Claude Code, ` +
           `Codex, opencode) are reachable by name. See them: \`${BIN} who\`. ` +
           `Check messages others sent you: \`${BIN} inbox\`. ` +
           `Message one: \`${BIN} send-message --recipient <agent@project|session-id> --message "..."\`. ` +
