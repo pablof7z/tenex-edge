@@ -31,7 +31,9 @@ mod who;
 pub use admin::render_fabric;
 #[cfg(test)]
 use admin::{parse_since, render_tail_event};
+pub(crate) use messaging::row_envelope;
 pub use messaging::{format_envelope, mention_short_id, EnvelopeView};
+pub(crate) use turn::render_chat_block;
 pub use turn::{assemble_turn_check_context, assemble_turn_start_context};
 pub use who::load_who_snapshot;
 
@@ -204,7 +206,7 @@ enum Cmd {
         #[arg(long)]
         session: Option<String>,
     },
-    /// TMUX control-plane commands: status, send doorbell, spawn agent, attach.
+    /// TMUX control-plane commands: status, inject pending messages, spawn agent, attach.
     /// With no subcommand, opens an interactive TUI.
     Tmux {
         #[command(subcommand)]
@@ -302,9 +304,9 @@ enum ChatAction {
 enum TmuxAction {
     /// List registered tmux endpoints with liveness info.
     Status,
-    /// Manually fire the doorbell into a session's pane (debug).
+    /// Manually inject pending messages into a session's pane (debug).
     Send {
-        /// Session id (or prefix) to ring.
+        /// Session id (or prefix) to inject.
         #[arg(long)]
         session: String,
     },

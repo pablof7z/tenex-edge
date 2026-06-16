@@ -471,8 +471,8 @@ CREATE TABLE IF NOT EXISTS membership (
     PRIMARY KEY(project_id, pubkey)
 );
 -- TMUX control-plane: one row per (session, kind='tmux') endpoint. Written by
--- rpc_session_start when the hook env supplies TMUX_PANE; read by the doorbell
--- dispatcher. `target` is the stable tmux pane id (e.g. '%5'). `meta` is a JSON
+-- rpc_session_start when the hook env supplies TMUX_PANE; read by the pending
+-- message dispatcher. `target` is the stable tmux pane id (e.g. '%5'). `meta` is a JSON
 -- object that may carry {"socket":"...", "pane_command":"claude"}.
 CREATE TABLE IF NOT EXISTS session_endpoints (
     session_id    TEXT NOT NULL,
@@ -1146,6 +1146,25 @@ impl Store {
         Ok(rows)
     }
 
+    /// Mark exactly these mention rows delivered for `session_id`.
+    /// Used when another delivery path has already handed the rendered message to
+    /// the agent and must prevent turn-start from echoing it again.
+    pub fn mark_inbox_rows_delivered(
+        &self,
+        session_id: &str,
+        event_ids: &[String],
+        delivered_at: u64,
+    ) -> Result<()> {
+        let mut stmt = self.conn.prepare(
+            "UPDATE inbox SET delivered=1, delivered_at=?3
+             WHERE target_session=?1 AND mention_event_id=?2 AND delivered=0",
+        )?;
+        for event_id in event_ids {
+            stmt.execute(params![session_id, event_id, delivered_at])?;
+        }
+        Ok(())
+    }
+
     /// Peer sessions first seen at or after `since`, still live (last_seen >= fresh_since).
     pub fn list_new_peer_sessions(
         &self,
@@ -1254,8 +1273,8 @@ impl Store {
     }
 
     /// Returns `true` if the session is currently mid-turn (`working = 1`).
-    /// Defaults to `false` (not working) when no row exists — fail-open so
-    /// the doorbell is allowed when a session has never started a turn.
+    /// Defaults to `false` (not working) when no row exists, so tmux injection is
+    /// allowed when a session has never started a turn.
     pub fn is_session_working(&self, session_id: &str) -> bool {
         self.conn
             .query_row(
@@ -2183,6 +2202,21 @@ impl Store {
         Ok(rows)
     }
 
+    /// Read undelivered chat rows that explicitly mention this session.
+    pub fn peek_chat_mentions(&self, session_id: &str) -> Result<Vec<ChatInboxRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT chat_event_id, target_session, from_pubkey, from_slug, project, body, created_at, from_session, mentioned_session
+             FROM chat_inbox
+             WHERE target_session=?1 AND mentioned_session=?1 AND delivered=0
+             ORDER BY created_at",
+        )?;
+        let rows: Vec<ChatInboxRow> = stmt
+            .query_map(params![session_id], row_to_chat)?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rows)
+    }
+
     /// Return undelivered chat rows for a session and mark them delivered.
     pub fn drain_chat(&self, session_id: &str) -> Result<Vec<ChatInboxRow>> {
         let rows = self.peek_chat(session_id)?;
@@ -2191,6 +2225,23 @@ impl Store {
             params![session_id, crate::util::now_secs()],
         )?;
         Ok(rows)
+    }
+
+    /// Mark exactly these chat rows delivered for `session_id`.
+    pub fn mark_chat_rows_delivered(
+        &self,
+        session_id: &str,
+        event_ids: &[String],
+        delivered_at: u64,
+    ) -> Result<()> {
+        let mut stmt = self.conn.prepare(
+            "UPDATE chat_inbox SET delivered=1, delivered_at=?3
+             WHERE target_session=?1 AND chat_event_id=?2 AND delivered=0",
+        )?;
+        for event_id in event_ids {
+            stmt.execute(params![session_id, event_id, delivered_at])?;
+        }
+        Ok(())
     }
 
     // ── Phase 1: canonical read-model accessors ──────────────────────────
@@ -3169,6 +3220,38 @@ mod tests {
         assert_eq!(drained[0].body, "look here");
         assert!(s.drain_inbox("sess-A").unwrap().is_empty()); // delivered once
         assert_eq!(s.drain_inbox("sess-B").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn mark_inbox_rows_delivered_marks_only_selected_rows() {
+        let s = Store::open_memory().unwrap();
+        let row = InboxRow {
+            mention_event_id: "evt-1".into(),
+            target_session: "sess-A".into(),
+            from_pubkey: "pk".into(),
+            from_slug: "reviewer".into(),
+            project: "proj".into(),
+            body: "first".into(),
+            created_at: 5,
+            from_session: "sender-A".into(),
+            subject: String::new(),
+            branch: String::new(),
+            commit: String::new(),
+            dirty: 0,
+            host: String::new(),
+        };
+        let mut other = row.clone();
+        other.mention_event_id = "evt-2".into();
+        other.body = "second".into();
+        s.enqueue_mention(&row).unwrap();
+        s.enqueue_mention(&other).unwrap();
+
+        s.mark_inbox_rows_delivered("sess-A", &["evt-1".to_string()], 99)
+            .unwrap();
+
+        let remaining = s.peek_inbox("sess-A").unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].mention_event_id, "evt-2");
     }
 
     /// Bug C (agent-scoped sender resolution): the latest-alive fallback must be

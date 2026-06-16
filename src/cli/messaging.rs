@@ -313,7 +313,7 @@ fn strip_single_trailing_newline(mut s: String) -> String {
 /// otherwise fall back to `slug@project`, which always routes to the agent.
 /// Render an `InboxRow` as an email-like envelope (the daemon-side path; the CLI
 /// path renders from JSON). `self_host` decides the `[remote: …]` annotation.
-pub(super) fn row_envelope(r: &crate::state::InboxRow, self_host: &str, now: u64) -> String {
+pub(crate) fn row_envelope(r: &crate::state::InboxRow, self_host: &str, now: u64) -> String {
     let id = mention_short_id(&r.mention_event_id);
     format_envelope(&EnvelopeView {
         from_slug: &r.from_slug,

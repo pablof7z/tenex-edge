@@ -220,7 +220,7 @@ pub(super) fn turn_check(session: Option<String>, emit: EmitFormat) -> Result<()
     Ok(())
 }
 
-fn render_chat_block(
+pub(crate) fn render_chat_block(
     header: &str,
     rows: &[crate::state::ChatInboxRow],
     self_session: &str,

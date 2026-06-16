@@ -21,7 +21,7 @@ pub(super) fn rpc_tmux_status(state: &Arc<DaemonState>) -> Result<serde_json::Va
     Ok(serde_json::json!({ "endpoints": arr }))
 }
 
-// ── tmux_send (manual doorbell) ───────────────────────────────────────────────
+// ── tmux_send (manual pending-message injection) ──────────────────────────────
 
 #[derive(serde::Deserialize)]
 struct TmuxSendParams {
@@ -62,13 +62,21 @@ pub(super) async fn rpc_tmux_send(
         }));
     }
 
-    crate::tmux::inject_doorbell_pub(&pane_id).await?;
+    let injected = crate::tmux::inject_pending_messages_pub(state, &rec, &pane_id).await?;
     state.with_store(|s| {
         s.touch_session_endpoint_verified(&rec.session_id, "tmux", crate::util::now_secs())
             .ok()
     });
 
-    Ok(serde_json::json!({ "injected": true, "pane_id": pane_id }))
+    if injected {
+        Ok(serde_json::json!({ "injected": true, "pane_id": pane_id }))
+    } else {
+        Ok(serde_json::json!({
+            "injected": false,
+            "pane_id": pane_id,
+            "reason": "no unread messages for this session"
+        }))
+    }
 }
 
 // ── tmux_spawn ────────────────────────────────────────────────────────────────

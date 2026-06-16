@@ -4,7 +4,7 @@
 //!
 //!   • `ring_doorbells(state)` — called after every `mention_notify.notify_waiters()`.
 //!     Finds sessions that have unread inbox rows + a live tmux endpoint + no armed
-//!     waiter, then injects the nudge text into the pane.
+//!     waiter, then injects the rendered pending messages into the pane.
 //!
 //!   • `spawn_agent(state, slug, project)` — spawns a new tmux window running the
 //!     appropriate harness command. When the spawn was triggered by an inbound
@@ -32,11 +32,7 @@ const SPAWN_PROMPT_DELAY_MS: u64 = 2000;
 // ── constants ─────────────────────────────────────────────────────────────────
 
 /// Don't re-inject into the same session within this window (seconds).
-const DOORBELL_DEBOUNCE_SECS: u64 = 20;
-
-/// Text injected as the doorbell nudge (without the trailing Enter).
-const DOORBELL_TEXT: &str =
-    "You have new tenex-edge mentions. Run `tenex-edge inbox` to read and reply.";
+const MESSAGE_INJECT_DEBOUNCE_SECS: u64 = 20;
 
 // ── spawn-def registry ────────────────────────────────────────────────────────
 //
@@ -240,7 +236,7 @@ pub fn consume_pending_spawn(pane_id: &str) -> Option<PendingSpawn> {
 }
 
 /// Called by `handle_wait_for_mention` when it parks on `mention_notify`.
-/// Prevents the doorbell from firing while a waiter is parked.
+/// Prevents tmux prompt injection while a waiter is parked.
 pub fn arm_waiter(session_id: &str) {
     *armed()
         .lock()
@@ -268,11 +264,11 @@ fn is_armed(session_id: &str) -> bool {
 fn is_debounced(session_id: &str) -> bool {
     let m = debounce().lock().unwrap();
     m.get(session_id)
-        .map(|&t| now_secs().saturating_sub(t) < DOORBELL_DEBOUNCE_SECS)
+        .map(|&t| now_secs().saturating_sub(t) < MESSAGE_INJECT_DEBOUNCE_SECS)
         .unwrap_or(false)
 }
 
-fn record_doorbell(session_id: &str) {
+fn record_message_injection(session_id: &str) {
     debounce()
         .lock()
         .unwrap()
@@ -328,21 +324,6 @@ fn pane_alive(pane_id: &str) -> Option<String> {
 
 // ── low-level tmux input helpers ──────────────────────────────────────────────
 
-/// Send literal `text` to `pane_id` without submitting (no Enter).
-/// Uses `-l` (literal paste) so special characters are not interpreted by the
-/// shell or TUI.
-async fn inject_text(pane_id: &str, text: &str) -> Result<()> {
-    let status = tokio::process::Command::new("tmux")
-        .args(["send-keys", "-t", pane_id, "-l", "--", text])
-        .status()
-        .await
-        .context("tmux send-keys text")?;
-    if !status.success() {
-        anyhow::bail!("tmux send-keys text failed for pane {pane_id}");
-    }
-    Ok(())
-}
-
 /// Send a bare Enter keystroke to `pane_id` to submit whatever is on the
 /// input line.
 async fn send_enter(pane_id: &str) -> Result<()> {
@@ -354,22 +335,6 @@ async fn send_enter(pane_id: &str) -> Result<()> {
     if !status.success() {
         anyhow::bail!("tmux send-keys Enter failed for pane {pane_id}");
     }
-    Ok(())
-}
-
-// ── doorbell injection ────────────────────────────────────────────────────────
-
-/// Public wrapper for manual CLI invocation (tmux_rpc).
-pub async fn inject_doorbell_pub(pane_id: &str) -> Result<()> {
-    inject_doorbell(pane_id).await
-}
-
-/// Send the doorbell nudge to `pane_id`.
-async fn inject_doorbell(pane_id: &str) -> Result<()> {
-    inject_text(pane_id, DOORBELL_TEXT).await?;
-    // Short pause so the TUI has time to absorb the paste.
-    tokio::time::sleep(Duration::from_millis(200)).await;
-    send_enter(pane_id).await?;
     Ok(())
 }
 
@@ -435,17 +400,123 @@ pub async fn inject_spawn_message(pane_id: &str, text: &str) -> Result<()> {
     Ok(())
 }
 
+// ── pending-message injection ─────────────────────────────────────────────────
+
+struct PendingTmuxPrompt {
+    text: String,
+    mention_ids: Vec<String>,
+    chat_ids: Vec<String>,
+}
+
+fn render_pending_message_prompt(
+    inbox_rows: &[crate::state::InboxRow],
+    chat_rows: &[crate::state::ChatInboxRow],
+    rec: &crate::state::SessionRecord,
+    now: u64,
+) -> Option<String> {
+    let mut blocks = Vec::new();
+
+    if !inbox_rows.is_empty() {
+        let mut text = String::from(
+            "Messages from other agents (tenex-edge) - reply with `tenex-edge inbox reply --id <ID> \"...\"`:",
+        );
+        for row in inbox_rows {
+            text.push_str("\n\n");
+            text.push_str(&crate::cli::row_envelope(row, &rec.host, now));
+        }
+        blocks.push(text);
+    }
+
+    if !chat_rows.is_empty() {
+        blocks.push(crate::cli::render_chat_block(
+            "tenex-edge project chat - write with `tenex-edge chat write < message.txt`; mention a session with `tenex-edge chat write --mention <session-id>`:",
+            chat_rows,
+            &rec.session_id,
+            now,
+        ));
+    }
+
+    if blocks.is_empty() {
+        None
+    } else {
+        Some(blocks.join("\n\n"))
+    }
+}
+
+fn collect_pending_prompt(
+    state: &Arc<DaemonState>,
+    rec: &crate::state::SessionRecord,
+) -> Result<Option<PendingTmuxPrompt>> {
+    let now = now_secs();
+    state.with_store(|s| -> Result<Option<PendingTmuxPrompt>> {
+        let inbox_rows = s.peek_inbox(&rec.session_id)?;
+        let chat_rows = s.peek_chat_mentions(&rec.session_id)?;
+
+        let Some(text) = render_pending_message_prompt(&inbox_rows, &chat_rows, rec, now) else {
+            return Ok(None);
+        };
+
+        Ok(Some(PendingTmuxPrompt {
+            text,
+            mention_ids: inbox_rows
+                .iter()
+                .map(|row| row.mention_event_id.clone())
+                .collect(),
+            chat_ids: chat_rows
+                .iter()
+                .map(|row| row.chat_event_id.clone())
+                .collect(),
+        }))
+    })
+}
+
+fn mark_prompt_delivered(
+    state: &Arc<DaemonState>,
+    rec: &crate::state::SessionRecord,
+    prompt: &PendingTmuxPrompt,
+) -> Result<()> {
+    let delivered_at = now_secs();
+    state.with_store(|s| -> Result<()> {
+        s.mark_inbox_rows_delivered(&rec.session_id, &prompt.mention_ids, delivered_at)?;
+        for event_id in &prompt.mention_ids {
+            s.mark_mention_seen(&rec.agent_pubkey, event_id, delivered_at)?;
+        }
+        s.mark_chat_rows_delivered(&rec.session_id, &prompt.chat_ids, delivered_at)?;
+        Ok(())
+    })
+}
+
+/// Paste pending inbox/chat content into a live pane and submit it as the next
+/// prompt. Returns false if another path consumed the rows before we injected.
+pub async fn inject_pending_messages_pub(
+    state: &Arc<DaemonState>,
+    rec: &crate::state::SessionRecord,
+    pane_id: &str,
+) -> Result<bool> {
+    let Some(prompt) = collect_pending_prompt(state, rec)? else {
+        return Ok(false);
+    };
+
+    paste_text(pane_id, &prompt.text).await?;
+    // Mark the exact rendered rows delivered before Enter lands, so the harness
+    // turn-start hook does not drain and inject the same content a second time.
+    mark_prompt_delivered(state, rec, &prompt)?;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    send_enter(pane_id).await?;
+    Ok(true)
+}
+
 // ── public API ────────────────────────────────────────────────────────────────
 
 /// Called after every `mention_notify.notify_waiters()`.
 /// Scans for sessions with unread inbox rows that have a live tmux endpoint,
-/// no armed waiter, and haven't been doorbelled recently.
+/// no armed waiter, and have not been injected recently.
 /// Spawns a background task so the dispatcher never blocks the RPC path.
 pub fn ring_doorbells(state: Arc<DaemonState>) {
     tokio::spawn(async move {
         if let Err(e) = ring_doorbells_inner(&state).await {
             if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
-                eprintln!("[tmux] doorbell error: {e:#}");
+                eprintln!("[tmux] pending message injection error: {e:#}");
             }
         }
     });
@@ -458,8 +529,8 @@ async fn ring_doorbells_inner(state: &Arc<DaemonState>) -> Result<()> {
 
     // Collect sessions that have unread direct inbox rows or explicit chat
     // mentions AND are currently idle.
-    // Skip any session where working=1 to avoid injecting a doorbell mid-turn.
-    let sessions_with_inbox: Vec<String> = state.with_store(|s| {
+    // Skip any session where working=1 to avoid typing a prompt mid-turn.
+    let sessions_with_inbox: Vec<crate::state::SessionRecord> = state.with_store(|s| {
         s.list_alive_sessions()
             .unwrap_or_default()
             .into_iter()
@@ -468,11 +539,11 @@ async fn ring_doorbells_inner(state: &Arc<DaemonState>) -> Result<()> {
                     || s.count_unread_chat_mentions(&rec.session_id).unwrap_or(0) > 0)
                     && !s.is_session_working(&rec.session_id)
             })
-            .map(|rec| rec.session_id)
             .collect()
     });
 
-    for sid in sessions_with_inbox {
+    for rec in sessions_with_inbox {
+        let sid = rec.session_id.clone();
         if is_armed(&sid) || is_debounced(&sid) {
             continue;
         }
@@ -494,16 +565,26 @@ async fn ring_doorbells_inner(state: &Arc<DaemonState>) -> Result<()> {
             continue;
         }
 
-        record_doorbell(&sid);
+        record_message_injection(&sid);
         let ts = now_secs();
         state.with_store(|s| s.touch_session_endpoint_verified(&sid, "tmux", ts).ok());
 
-        if let Err(e) = inject_doorbell(&pane_id).await {
-            if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
-                eprintln!("[tmux] doorbell inject failed for {sid} pane {pane_id}: {e:#}");
+        match inject_pending_messages_pub(state, &rec, &pane_id).await {
+            Ok(true) => {
+                if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
+                    eprintln!(
+                        "[tmux] pending messages injected into pane {pane_id} for session {sid}"
+                    );
+                }
             }
-        } else if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
-            eprintln!("[tmux] doorbell injected into pane {pane_id} for session {sid}");
+            Ok(false) => {}
+            Err(e) => {
+                if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
+                    eprintln!(
+                        "[tmux] pending message inject failed for {sid} pane {pane_id}: {e:#}"
+                    );
+                }
+            }
         }
     }
     Ok(())
@@ -777,6 +858,47 @@ mod resume_command_tests {
             Some(ResumeShape::AppendFlag("--resume"))
         ));
         assert!(resume_shape_for_bin("npx").is_none());
+    }
+
+    fn sample_session() -> crate::state::SessionRecord {
+        crate::state::SessionRecord {
+            session_id: "sess-target".into(),
+            agent_slug: "claude".into(),
+            agent_pubkey: "pk-target".into(),
+            project: "proj".into(),
+            host: "host-a".into(),
+            child_pid: None,
+            watch_pid: None,
+            created_at: 1000,
+            alive: true,
+            rel_cwd: String::new(),
+        }
+    }
+
+    #[test]
+    fn pending_message_prompt_contains_the_actual_message_body() {
+        let rec = sample_session();
+        let row = crate::state::InboxRow {
+            mention_event_id: "abcdef123456".into(),
+            target_session: rec.session_id.clone(),
+            from_pubkey: "pk-sender".into(),
+            from_slug: "codex".into(),
+            project: "proj".into(),
+            body: "please review the tmux delivery path".into(),
+            created_at: 100,
+            from_session: "sender-session".into(),
+            subject: String::new(),
+            branch: String::new(),
+            commit: String::new(),
+            dirty: 0,
+            host: "host-a".into(),
+        };
+
+        let prompt = render_pending_message_prompt(&[row], &[], &rec, 120).unwrap();
+
+        assert!(prompt.contains("please review the tmux delivery path"));
+        assert!(prompt.contains("ID: abcdef12"));
+        assert!(!prompt.contains("Run `tenex-edge inbox` to read and reply"));
     }
 }
 
