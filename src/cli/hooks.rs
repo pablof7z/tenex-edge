@@ -1,6 +1,8 @@
 use super::turn::{turn_check, turn_end, turn_start, EmitFormat};
 use super::*;
 
+mod hook_forensics;
+
 // ── hook adapter registry ─────────────────────────────────────────────────────
 //
 // Adding a new agent harness: add one entry to HOOK_HOSTS. Zero new code needed
@@ -102,8 +104,37 @@ fn find_hook_host(name: &str) -> Option<&'static HostDef> {
 pub(super) async fn hook_run(host_name: String, hook_type: String) -> Result<()> {
     use std::io::Read as _;
 
+    let mut buf = String::new();
+    let read_error = std::io::stdin()
+        .read_to_string(&mut buf)
+        .err()
+        .map(|e| e.to_string());
+    let parsed = serde_json::from_str::<serde_json::Value>(&buf);
+    let parse_error = parsed.as_ref().err().map(|e| e.to_string());
+    let raw = parsed.unwrap_or(serde_json::Value::Null);
+    let parsed_json = parse_error.is_none().then_some(&raw);
+    let call_log = hook_forensics::HookCallLog::start(
+        &host_name,
+        &hook_type,
+        &buf,
+        read_error.as_deref(),
+        parse_error.as_deref(),
+        parsed_json,
+    );
+    let result = hook_dispatch(host_name, hook_type, raw, &call_log).await;
+    call_log.finish(&result);
+    result
+}
+
+async fn hook_dispatch(
+    host_name: String,
+    hook_type: String,
+    raw: serde_json::Value,
+    call_log: &hook_forensics::HookCallLog,
+) -> Result<()> {
     let Some(host) = find_hook_host(&host_name) else {
         eprintln!("[tenex-edge] unknown host {host_name:?}; run `--host help` to list");
+        call_log.note("unknown-host", serde_json::json!({ "host": host_name }));
         return Ok(());
     };
 
@@ -122,11 +153,6 @@ pub(super) async fn hook_run(host_name: String, hook_type: String) -> Result<()>
         std::env::var("TENEX_EDGE_AGENT").unwrap_or_else(|_| host.agent_slug.to_string());
 
     // Parse stdin — fail open if JSON is absent or malformed.
-    let raw: serde_json::Value = {
-        let mut buf = String::new();
-        std::io::stdin().read_to_string(&mut buf).ok();
-        serde_json::from_str(&buf).unwrap_or(serde_json::Value::Null)
-    };
     let obj = raw.as_object();
 
     let sid: String = host
@@ -177,6 +203,14 @@ pub(super) async fn hook_run(host_name: String, hook_type: String) -> Result<()>
                 if !host.generates_sid {
                     // Fail open: a harness that assigns its own id but dropped it
                     // here sent a malformed payload — don't spawn an orphan.
+                    call_log.note(
+                        "missing-session-id",
+                        serde_json::json!({
+                            "host": host.name,
+                            "hook_type": hook_type,
+                            "fields_tried": host.session_id_fields,
+                        }),
+                    );
                     return Ok(());
                 }
                 // Programmatic host with no id of its own: generate one and hand

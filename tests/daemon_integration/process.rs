@@ -85,6 +85,22 @@ fn cli_subprocess_blocking_path_session_start_and_who() {
         !sid.is_empty(),
         "session-start printed no generated session id"
     );
+    let hook_log = std::fs::read_to_string(home.dir.path().join("hook-calls.jsonl"))
+        .expect("hook forensic log");
+    let first_hook: serde_json::Value =
+        serde_json::from_str(hook_log.lines().next().expect("hook log line"))
+            .expect("hook log json");
+    assert_eq!(first_hook["hook"]["host"], "opencode");
+    assert_eq!(first_hook["hook"]["type"], "session-start");
+    assert_eq!(first_hook["stdin"]["raw"], r#"{"cwd":"/tmp"}"#);
+    assert_eq!(
+        first_hook["process"]["argv"][0],
+        bin().display().to_string()
+    );
+    assert!(
+        first_hook["parent_chain"].as_array().is_some(),
+        "parent chain should be captured"
+    );
 
     // who --all-projects shows the agent (blocking client + real renderer).
     let out = run_cli(&home, &["who", "--all", "--all-projects"]);
