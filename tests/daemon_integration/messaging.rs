@@ -244,6 +244,45 @@ fn chat_write_stdin_enqueues_live_project_chat_for_receiver() {
     }
     assert!(received, "receiver did not get live chat row");
 
+    rt().block_on(async {
+        let mut c = Client::connect_or_spawn().await.expect("connect");
+        let statusline = c
+            .call(
+                "statusline",
+                serde_json::json!({"session": &receiver_canon}),
+            )
+            .await
+            .expect("statusline");
+        let pending = statusline["pending"].as_array().expect("pending array");
+        assert!(
+            pending.iter().any(|row| {
+                row["from_slug"] == "chat-sender" && row["body"] == "hello from redirected stdin"
+            }),
+            "statusline should surface explicit chat mentions as pending: {statusline}"
+        );
+
+        c.call(
+            "turn_start",
+            serde_json::json!({"session": &receiver_canon}),
+        )
+        .await
+        .expect("turn_start");
+        let statusline = c
+            .call(
+                "statusline",
+                serde_json::json!({"session": &receiver_canon}),
+            )
+            .await
+            .expect("statusline after drain");
+        let recent = statusline["recent"].as_array().expect("recent array");
+        assert!(
+            recent.iter().any(|row| {
+                row["from_slug"] == "chat-sender" && row["body"] == "hello from redirected stdin"
+            }),
+            "statusline should briefly linger drained chat mentions: {statusline}"
+        );
+    });
+
     let store = Store::open(&home.store_path()).unwrap();
     assert!(
         store.peek_chat(&sender_canon).unwrap().is_empty(),

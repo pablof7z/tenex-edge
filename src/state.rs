@@ -2847,6 +2847,25 @@ impl Store {
         Ok(rows)
     }
 
+    /// Explicit chat mentions already drained to `session_id` at or after `since`.
+    pub fn list_recently_delivered_chat_mentions(
+        &self,
+        session_id: &str,
+        since: u64,
+    ) -> Result<Vec<ChatInboxRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT chat_event_id, target_session, from_pubkey, from_slug, project, body, created_at, from_session, mentioned_session
+             FROM chat_inbox
+             WHERE target_session=?1 AND mentioned_session=?1 AND delivered=1 AND delivered_at>=?2
+             ORDER BY created_at",
+        )?;
+        let rows: Vec<ChatInboxRow> = stmt
+            .query_map(params![session_id, since], row_to_chat)?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rows)
+    }
+
     pub fn find_inbox_by_event_prefix(&self, prefix: &str) -> Result<Option<InboxRow>> {
         let pattern = format!("{prefix}%");
         let mut stmt = self.conn.prepare(

@@ -1871,9 +1871,20 @@ fn rpc_statusline(
             })
             .unwrap_or((false, String::new()));
         let pending = s.peek_inbox(&rec.session_id).unwrap_or_default();
+        let pending_chat = s.peek_chat_mentions(&rec.session_id).unwrap_or_default();
+        let recent_since = now.saturating_sub(STATUSLINE_RECENT_SECS);
         let recent = s
-            .list_recently_delivered(&rec.session_id, now.saturating_sub(STATUSLINE_RECENT_SECS))
+            .list_recently_delivered(&rec.session_id, recent_since)
             .unwrap_or_default();
+        let recent_chat = s
+            .list_recently_delivered_chat_mentions(&rec.session_id, recent_since)
+            .unwrap_or_default();
+        let mut pending_json = rows_to_json(&pending, &host);
+        pending_json.extend(chat_rows_to_json(&pending_chat));
+        sort_message_json(&mut pending_json);
+        let mut recent_json = rows_to_json(&recent, &host);
+        recent_json.extend(chat_rows_to_json(&recent_chat));
+        sort_message_json(&mut recent_json);
         Ok(serde_json::json!({
             "agent": rec.agent_slug,
             "host": host,
@@ -1884,8 +1895,8 @@ fn rpc_statusline(
             "is_member": is_member,
             "working": working,
             "status": status,
-            "pending": rows_to_json(&pending, &host),
-            "recent": rows_to_json(&recent, &host),
+            "pending": pending_json,
+            "recent": recent_json,
         }))
     })
 }
@@ -3298,6 +3309,28 @@ fn rows_to_json(rows: &[InboxRow], self_host: &str) -> Vec<serde_json::Value> {
             })
         })
         .collect()
+}
+
+fn chat_rows_to_json(rows: &[ChatInboxRow]) -> Vec<serde_json::Value> {
+    rows.iter()
+        .map(|r| {
+            serde_json::json!({
+                "from_slug": r.from_slug,
+                "project": r.project,
+                "from_session": r.from_session,
+                "host": "",
+                "subject": "",
+                "created_at": r.created_at,
+                "id": crate::cli::mention_short_id(&r.chat_event_id),
+                "mention_event_id": r.chat_event_id,
+                "body": r.body,
+            })
+        })
+        .collect()
+}
+
+fn sort_message_json(rows: &mut [serde_json::Value]) {
+    rows.sort_by_key(|row| row["created_at"].as_i64().unwrap_or_default());
 }
 
 fn env_duration(key: &str, default: Duration) -> Duration {
