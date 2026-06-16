@@ -4,7 +4,7 @@
 //! without touching the tail channel or mention routing.
 
 use crate::domain::ChatMessage;
-use crate::state::{ChatInboxRow, Store};
+use crate::state::{ChatInboxRow, ChatLogRow, Store};
 use nostr_sdk::Event;
 
 pub struct Nip29Materializer;
@@ -82,6 +82,30 @@ impl Nip29Materializer {
             .as_ref()
             .map(|s| s.as_str().to_owned())
             .unwrap_or_default();
+        let host = store
+            .resolve_chat_host(
+                &from_pubkey,
+                if from_session.is_empty() {
+                    None
+                } else {
+                    Some(from_session.as_str())
+                },
+            )
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+
+        let _ = store.record_chat(&ChatLogRow {
+            chat_event_id: event.id.to_hex(),
+            from_pubkey: from_pubkey.clone(),
+            from_slug: from_slug.clone(),
+            host,
+            project: chat.project.clone(),
+            body: chat.body.clone(),
+            created_at,
+            from_session: from_session.clone(),
+            mentioned_session: mentioned_session.clone(),
+        });
 
         let mut routed = false;
         for rec in store.list_alive_sessions().unwrap_or_default() {

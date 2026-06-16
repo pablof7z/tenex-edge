@@ -198,6 +198,18 @@ fn chat_write_stdin_enqueues_live_project_chat_for_receiver() {
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
+    let out = run_cli(&home, &["chat", "read", "--project", "tmp", "--limit", "1"]);
+    assert!(
+        out.status.success(),
+        "chat read failed\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("<chat-sender@test-host> hello from redirected stdin ["),
+        "chat read should render sender, host, body, and timestamp; got: {stdout}"
+    );
 
     let mut received = false;
     for _ in 0..12 {

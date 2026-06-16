@@ -20,7 +20,7 @@ use crate::domain::{ChatMessage, DomainEvent, Mention};
 use crate::fabric::provider::Kind1Nip29Provider;
 use crate::identity::{self, AgentIdentity};
 use crate::runtime::{self, route_mention_into_with_id, EngineParams};
-use crate::state::{ChatInboxRow, InboxRow, Store};
+use crate::state::{ChatInboxRow, ChatLogRow, InboxRow, Store};
 use crate::transport::Transport;
 use crate::util::{now_secs, pubkey_short, session_short_code, SessionId};
 use anyhow::{Context, Result};
@@ -319,6 +319,10 @@ async fn serve_connection(state: Arc<DaemonState>, stream: UnixStream) -> Result
             "tail" => {
                 handle_tail(&state, req.id, &req.params, &mut writer).await?;
                 break; // tail owns the connection until the client disconnects
+            }
+            "chat_read" => {
+                handle_chat_read(&state, req.id, &req.params, &mut writer).await?;
+                break; // chat_read may own the connection for --live
             }
             "wait_for_mention" => {
                 let resp = handle_wait_for_mention(&state, &req).await;
@@ -954,6 +958,7 @@ async fn rpc_chat_write(
         p.agent.as_deref(),
     )?;
     let id = identity::load_or_create(&config::edge_home(), &rec.agent_slug, now_secs())?;
+    let from_pubkey = id.pubkey_hex();
 
     let mention = if let Some(raw) = p.mention.as_deref().filter(|m| !m.is_empty()) {
         let target = state.with_store(|s| resolve_recipient(s, &rec.project, raw))?;
@@ -975,7 +980,7 @@ async fn rpc_chat_write(
     let mentioned_session = mention.as_ref().map(|(_, sid)| sid.clone());
 
     let chat = ChatMessage {
-        from: crate::domain::AgentRef::new(id.pubkey_hex(), rec.agent_slug.clone()),
+        from: crate::domain::AgentRef::new(from_pubkey.clone(), rec.agent_slug.clone()),
         project: rec.project.clone(),
         body: p.message.clone(),
         from_session: Some(SessionId::from(rec.session_id.clone())),
@@ -993,6 +998,17 @@ async fn rpc_chat_write(
     // connection that published it, and chat intentionally does not catch up old
     // history. Route now to sessions already alive in the same project.
     let routed = state.with_store(|s| {
+        let _ = s.record_chat(&ChatLogRow {
+            chat_event_id: event_id.clone(),
+            from_pubkey: from_pubkey.clone(),
+            from_slug: rec.agent_slug.clone(),
+            host: state.host.clone(),
+            project: rec.project.clone(),
+            body: p.message.clone(),
+            created_at,
+            from_session: rec.session_id.clone(),
+            mentioned_session: mentioned_session.clone().unwrap_or_default(),
+        });
         let mut routed = false;
         for target in s.list_alive_sessions().unwrap_or_default() {
             if target.project != rec.project {
@@ -1007,7 +1023,7 @@ async fn rpc_chat_write(
             let row = ChatInboxRow {
                 chat_event_id: event_id.clone(),
                 target_session: target.session_id,
-                from_pubkey: id.pubkey_hex(),
+                from_pubkey: from_pubkey.clone(),
                 from_slug: rec.agent_slug.clone(),
                 project: rec.project.clone(),
                 body: p.message.clone(),
@@ -2206,6 +2222,120 @@ async fn handle_wait_for_mention(state: &Arc<DaemonState>, req: &Request) -> Res
             return Response::ok(req.id, serde_json::json!({ "rows": [] }));
         }
     }
+}
+
+// ── chat read (backfill + optional live stream) ───────────────────────────────
+
+#[derive(serde::Deserialize, Default)]
+struct ChatReadParams {
+    #[serde(default)]
+    project: Option<String>,
+    #[serde(default)]
+    since: Option<u64>,
+    #[serde(default)]
+    limit: Option<u64>,
+    #[serde(default)]
+    offset: Option<u64>,
+    #[serde(default)]
+    tail: bool,
+    #[serde(default)]
+    live: bool,
+}
+
+async fn handle_chat_read<W: AsyncWriteExt + Unpin>(
+    state: &Arc<DaemonState>,
+    id: u64,
+    params: &serde_json::Value,
+    writer: &mut W,
+) -> Result<()> {
+    let p: ChatReadParams = serde_json::from_value(params.clone()).unwrap_or_default();
+    let project = p.project.unwrap_or_else(|| {
+        crate::project::resolve(&std::env::current_dir().unwrap_or_default())
+    });
+    let since = p.since.unwrap_or(0);
+    let offset = p.offset.unwrap_or(0);
+
+    let _ = ensure_subscription(state, &project).await;
+    let mut rx = if p.live {
+        Some(state.tail_subscribe())
+    } else {
+        None
+    };
+    let live_started_at = now_secs();
+
+    let rows = state.with_store(|s| {
+        s.list_chat_messages(&project, since, p.limit, offset, p.tail)
+            .unwrap_or_default()
+    });
+    let mut seen: std::collections::HashSet<String> =
+        rows.iter().map(|r| r.chat_event_id.clone()).collect();
+    let mut cursor = rows
+        .iter()
+        .map(|r| r.created_at)
+        .max()
+        .unwrap_or(live_started_at.max(since));
+
+    for row in rows {
+        if write_json(writer, &Response::item(id, chat_log_row_to_json(&row)))
+            .await
+            .is_err()
+        {
+            let _ = write_json(writer, &Response::end(id)).await;
+            return Ok(());
+        }
+    }
+
+    let Some(ref mut rx) = rx else {
+        let _ = write_json(writer, &Response::end(id)).await;
+        return Ok(());
+    };
+
+    loop {
+        match rx.recv().await {
+            Ok(TailEvent::Msg {
+                project: ev_project,
+                thread,
+                ..
+            }) if ev_project == project && thread.is_none() => {
+                let rows = state.with_store(|s| {
+                    s.list_chat_messages(&project, cursor, None, 0, false)
+                        .unwrap_or_default()
+                });
+                for row in rows {
+                    if !seen.insert(row.chat_event_id.clone()) {
+                        continue;
+                    }
+                    cursor = cursor.max(row.created_at);
+                    if write_json(writer, &Response::item(id, chat_log_row_to_json(&row)))
+                        .await
+                        .is_err()
+                    {
+                        let _ = write_json(writer, &Response::end(id)).await;
+                        return Ok(());
+                    }
+                }
+            }
+            Ok(_) => {}
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+        }
+    }
+    let _ = write_json(writer, &Response::end(id)).await;
+    Ok(())
+}
+
+fn chat_log_row_to_json(row: &ChatLogRow) -> serde_json::Value {
+    serde_json::json!({
+        "event_id": &row.chat_event_id,
+        "from_pubkey": &row.from_pubkey,
+        "from_slug": &row.from_slug,
+        "host": &row.host,
+        "project": &row.project,
+        "body": &row.body,
+        "created_at": row.created_at,
+        "from_session": &row.from_session,
+        "mentioned_session": &row.mentioned_session,
+    })
 }
 
 // ── tail (streaming) ──────────────────────────────────────────────────────────

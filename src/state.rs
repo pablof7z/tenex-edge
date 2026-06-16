@@ -81,6 +81,19 @@ pub struct ChatInboxRow {
     pub mentioned_session: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatLogRow {
+    pub chat_event_id: String,
+    pub from_pubkey: String,
+    pub from_slug: String,
+    pub host: String,
+    pub project: String,
+    pub body: String,
+    pub created_at: u64,
+    pub from_session: String,
+    pub mentioned_session: String,
+}
+
 // ── Phase 7 read-model types ─────────────────────────────────────────────────
 
 /// Enriched thread summary returned by `list_threads` and `thread_meta`.
@@ -218,6 +231,19 @@ CREATE TABLE IF NOT EXISTS chat_inbox (
     mentioned_session TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (chat_event_id, target_session)
 );
+CREATE TABLE IF NOT EXISTS chat_messages (
+    chat_event_id     TEXT PRIMARY KEY,
+    from_pubkey       TEXT NOT NULL,
+    from_slug         TEXT NOT NULL,
+    host              TEXT NOT NULL DEFAULT '',
+    project           TEXT NOT NULL,
+    body              TEXT NOT NULL,
+    created_at        INTEGER NOT NULL,
+    from_session      TEXT NOT NULL DEFAULT '',
+    mentioned_session TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_project_created
+    ON chat_messages(project, created_at, chat_event_id);
 -- Per-session turn state: flipped by the host's turn-start/turn-end hooks. The
 -- engine polls this to decide when to distill activity (30s into a turn, then
 -- every few minutes) and when to go idle. No tool events — distillation reads
@@ -877,6 +903,51 @@ impl Store {
             .ok())
     }
 
+    pub fn resolve_chat_host(
+        &self,
+        pubkey: &str,
+        from_session: Option<&str>,
+    ) -> Result<Option<String>> {
+        if let Some(session_id) = from_session.filter(|s| !s.is_empty()) {
+            if let Ok(host) = self.conn.query_row(
+                "SELECT host FROM sessions WHERE session_id=?1 LIMIT 1",
+                params![session_id],
+                |r| r.get::<_, String>(0),
+            ) {
+                return Ok(Some(host));
+            }
+            if let Ok(host) = self.conn.query_row(
+                "SELECT host FROM peer_sessions WHERE session_id=?1 LIMIT 1",
+                params![session_id],
+                |r| r.get::<_, String>(0),
+            ) {
+                return Ok(Some(host));
+            }
+        }
+        if let Ok(host) = self.conn.query_row(
+            "SELECT host FROM sessions WHERE agent_pubkey=?1 ORDER BY created_at DESC LIMIT 1",
+            params![pubkey],
+            |r| r.get::<_, String>(0),
+        ) {
+            return Ok(Some(host));
+        }
+        if let Ok(host) = self.conn.query_row(
+            "SELECT host FROM peer_sessions WHERE pubkey=?1 ORDER BY last_seen DESC LIMIT 1",
+            params![pubkey],
+            |r| r.get::<_, String>(0),
+        ) {
+            return Ok(Some(host));
+        }
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT host FROM profiles WHERE pubkey=?1 LIMIT 1",
+                params![pubkey],
+                |r| r.get::<_, String>(0),
+            )
+            .ok())
+    }
+
     /// Find one of MY sessions by session-id prefix (for messaging a sibling
     /// session of the same agent on this machine).
     pub fn find_session_by_prefix(&self, prefix: &str) -> Result<Option<SessionRecord>> {
@@ -1412,6 +1483,62 @@ impl Store {
             ],
         )?;
         Ok(changed > 0)
+    }
+
+    /// Idempotently record a local chat history row. This is separate from
+    /// `chat_inbox`: the log powers explicit reads, while the inbox remains the
+    /// live-only hook injection queue.
+    pub fn record_chat(&self, row: &ChatLogRow) -> Result<bool> {
+        let changed = self.conn.execute(
+            "INSERT OR IGNORE INTO chat_messages
+               (chat_event_id, from_pubkey, from_slug, host, project, body, created_at, from_session, mentioned_session)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+            params![
+                row.chat_event_id,
+                row.from_pubkey,
+                row.from_slug,
+                row.host,
+                row.project,
+                row.body,
+                row.created_at,
+                row.from_session,
+                row.mentioned_session,
+            ],
+        )?;
+        Ok(changed > 0)
+    }
+
+    pub fn list_chat_messages(
+        &self,
+        project: &str,
+        since: u64,
+        limit: Option<u64>,
+        offset: u64,
+        tail: bool,
+    ) -> Result<Vec<ChatLogRow>> {
+        let limit = limit.unwrap_or(i64::MAX as u64).min(i64::MAX as u64) as i64;
+        let offset = offset.min(i64::MAX as u64) as i64;
+        let order = if tail {
+            "created_at DESC, chat_event_id DESC"
+        } else {
+            "created_at ASC, chat_event_id ASC"
+        };
+        let sql = format!(
+            "SELECT chat_event_id, from_pubkey, from_slug, host, project, body, created_at, from_session, mentioned_session
+             FROM chat_messages
+             WHERE project=?1 AND created_at>=?2
+             ORDER BY {order}
+             LIMIT ?3 OFFSET ?4"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let mut rows: Vec<ChatLogRow> = stmt
+            .query_map(params![project, since, limit, offset], row_to_chat_log)?
+            .filter_map(|r| r.ok())
+            .collect();
+        if tail {
+            rows.reverse();
+        }
+        Ok(rows)
     }
 
     /// Read undelivered chat rows without marking them delivered. Used by
@@ -2246,6 +2373,20 @@ fn row_to_chat(row: &rusqlite::Row) -> rusqlite::Result<ChatInboxRow> {
         target_session: row.get(1)?,
         from_pubkey: row.get(2)?,
         from_slug: row.get(3)?,
+        project: row.get(4)?,
+        body: row.get(5)?,
+        created_at: row.get(6)?,
+        from_session: row.get(7)?,
+        mentioned_session: row.get(8)?,
+    })
+}
+
+fn row_to_chat_log(row: &rusqlite::Row) -> rusqlite::Result<ChatLogRow> {
+    Ok(ChatLogRow {
+        chat_event_id: row.get(0)?,
+        from_pubkey: row.get(1)?,
+        from_slug: row.get(2)?,
+        host: row.get(3)?,
         project: row.get(4)?,
         body: row.get(5)?,
         created_at: row.get(6)?,

@@ -142,6 +142,11 @@ enum Cmd {
         #[arg(long, global = true)]
         session: Option<String>,
     },
+    /// Write or read NIP-29 project chat.
+    Chat {
+        #[command(subcommand)]
+        action: ChatAction,
+    },
     /// Block until a mention arrives for this session, then print it and exit.
     /// Run with run_in_background=true; the agent is woken when this exits.
     WaitForMention {
@@ -251,6 +256,45 @@ enum InboxAction {
         message: Option<String>,
         #[arg(long = "message", value_name = "MESSAGE")]
         message_flag: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ChatAction {
+    /// Publish a project chat line. Reads body from arg, --message, or stdin.
+    Write {
+        /// Highlight a session in the project chat.
+        #[arg(long)]
+        mention: Option<String>,
+        /// Message body. Positional, or via --message, or piped on stdin.
+        #[arg(value_name = "MESSAGE")]
+        message: Option<String>,
+        #[arg(long = "message", value_name = "MESSAGE")]
+        message_flag: Option<String>,
+        /// My session id; if omitted, resolved from the current directory.
+        #[arg(long)]
+        session: Option<String>,
+    },
+    /// Read project chat history.
+    Read {
+        /// Only show messages after this time (unix timestamp or duration like "1h").
+        #[arg(long)]
+        since: Option<String>,
+        /// Maximum messages to print.
+        #[arg(long)]
+        limit: Option<u64>,
+        /// Skip this many messages after ordering/filtering.
+        #[arg(long)]
+        offset: Option<u64>,
+        /// Page from the newest messages; output remains chronological.
+        #[arg(long)]
+        tail: bool,
+        /// Keep the chat reader open and print new messages as they arrive.
+        #[arg(long)]
+        live: bool,
+        /// Project slug; defaults to the project resolved from the current directory.
+        #[arg(long, hide = true)]
+        project: Option<String>,
     },
 }
 
@@ -416,6 +460,25 @@ pub async fn run(cli: Cli) -> Result<()> {
                 let message = messaging::resolve_send_message_body(message_flag.or(message))?;
                 messaging::inbox_reply(id, subject, message, session).await
             }
+        },
+        Cmd::Chat { action } => match action {
+            ChatAction::Write {
+                mention,
+                message,
+                message_flag,
+                session,
+            } => {
+                let message = messaging::resolve_send_message_body(message_flag.or(message))?;
+                messaging::chat_write(message, mention, session).await
+            }
+            ChatAction::Read {
+                since,
+                limit,
+                offset,
+                tail,
+                live,
+                project,
+            } => messaging::chat_read(since, limit, offset, tail, live, project).await,
         },
         Cmd::WaitForMention { session, timeout } => {
             messaging::wait_for_mention(session, timeout).await
