@@ -13,12 +13,18 @@ import { join } from "node:path"
 //   session-start (hook)        → on first message of a session (spawns the
 //                   presence engine, watching opencode's PID so it reaps on exit;
 //                   the daemon generates the session id and returns it on stdout)
-//   user-prompt-submit (hook)   → experimental.chat.messages.transform, gated to
-//                   once per user message (marks the session "working" so the
-//                   engine starts its distillation timer)
+//   user-prompt-submit (hook)   → experimental.chat.messages.transform, on the
+//                   first model invocation of a user message (marks "working",
+//                   starts the distillation timer). Its stdout — self-identity,
+//                   drained inbox, project chat, peer roster, all assembled by
+//                   the shared Rust hook — is injected verbatim into the turn.
+//   post-tool-use (hook)        → experimental.chat.messages.transform, on later
+//                   model invocations of the same message (mid-turn checkpoint:
+//                   peeks new messages + sibling deltas; same stdout-as-context).
 //   stop (hook)                 → event → session.idle (marks the session idle)
-//   inject        → experimental.chat.messages.transform (prepends peer mentions
-//                   addressed to this session, so the agent SEES them and acts)
+//
+// The plugin never builds context strings itself: the hook is the single source
+// of truth, identical to Claude Code / Codex. We pipe its stdout into the turn.
 //
 // Distillation is turn-bracketed, not tool-driven: the engine reads the
 // transcript ~30s after turn-start (then every 5 min until turn-end). opencode
@@ -28,10 +34,6 @@ import { join } from "node:path"
 //
 // tenex-edge knows nothing about opencode; this plugin is the straw.
 // Env: TENEX_EDGE_BIN (path), TENEX_EDGE_AGENT (slug, default "opencode").
-
-function stripAnsi(s: string): string {
-  return s.replace(/\x1b\[[0-9;]*m/g, "")
-}
 
 function resolveBin(): string {
   if (process.env.TENEX_EDGE_BIN) return process.env.TENEX_EDGE_BIN
@@ -43,15 +45,6 @@ function resolveBin(): string {
 
 export const TenexEdge: Plugin = async ({ client, directory }) => {
   const BIN = resolveBin()
-  let hinted = false
-
-  function run(args: string[]): Promise<string> {
-    return new Promise((resolve) => {
-      execFile(BIN, args, { timeout: 60_000, maxBuffer: 8 * 1024 * 1024 }, (_e, out) =>
-        resolve(out ?? ""),
-      )
-    })
-  }
 
   // Session/turn lifecycle goes through the single `hook` entry point — the same
   // door Claude Code and Codex use — by piping a small JSON payload on stdin and
@@ -127,16 +120,15 @@ export const TenexEdge: Plugin = async ({ client, directory }) => {
   // stdout. We pass our PID so the engine reaps when opencode exits. The agent
   // slug comes from the inherited TENEX_EDGE_AGENT env (default "opencode").
   let SID = ""
-  let SHORT_CODE = ""
   runHook("session-start", { cwd: directory, pid: process.pid })
     .then((out) => {
       const trimmed = out.trim()
       // The daemon returns JSON: {"session_id":"te-...","short_code":"abc123"}
-      // Legacy/CLI path returns a bare session_id string. Handle both.
+      // Legacy/CLI path returns a bare session_id string. Handle both. We only
+      // need the session id — the self-identity line (slug + short code) is
+      // assembled by the hook itself and arrives in the turn-start context.
       try {
-        const parsed = JSON.parse(trimmed)
-        SID = parsed.session_id ?? trimmed
-        SHORT_CODE = parsed.short_code ?? ""
+        SID = JSON.parse(trimmed).session_id ?? trimmed
       } catch {
         SID = trimmed
       }
@@ -167,60 +159,43 @@ export const TenexEdge: Plugin = async ({ client, directory }) => {
       const ocSessionID: string = lastUser.info.sessionID
       ocSessionForTurn = ocSessionID
 
-      // New user message → start of a new turn. Snapshot the conversation and
-      // hand the (deterministic) path to the engine; tool.execute.after keeps
-      // that same path fresh as the turn progresses.
+      // The hook is the single source of truth for injected context: the same
+      // Rust path that serves Claude Code and Codex assembles the self-identity
+      // line, drained inbox, project chat, and peer roster, and prints it on
+      // stdout. We don't rebuild any of that here — we just pipe stdout into the
+      // turn. Two hook types map to opencode's two moments:
+      //   • new user message → user-prompt-submit (turn start: drains the inbox
+      //     authoritatively, full roster on the first turn, deltas after).
+      //   • same user message, later model invocation → post-tool-use (mid-turn
+      //     checkpoint: non-destructive peek of new messages + sibling deltas,
+      //     rate-limited by the daemon — exactly Claude Code's PostToolUse).
+      let context = ""
       if (SID && msgID && msgID !== lastTurnMsgID) {
         lastTurnMsgID = msgID
         const transcriptPath = await fetchTranscript(ocSessionID)
-        // Turn start maps to the user-prompt-submit hook. We deliberately omit
-        // `prompt`, so (unlike Claude Code / Codex) the prompt is NOT published
-        // as a kind:1 OP — preserving this plugin's existing behavior.
+        // We deliberately omit `prompt`, so (unlike Claude Code / Codex) the
+        // prompt is NOT published as a kind:1 OP — preserving prior behavior.
         // Forward opencode's native session id as the resume token: it is what
         // `opencode --session <id>` wants, and (unlike claude/codex) it differs
         // from our synthetic `te-*` SID, so the daemon can't derive it itself.
-        await runHook("user-prompt-submit", {
-          session_id: SID,
-          resume_id: ocSessionID,
-          ...(transcriptPath ? { transcript_path: transcriptPath } : {}),
-        })
+        context = (
+          await runHook("user-prompt-submit", {
+            session_id: SID,
+            resume_id: ocSessionID,
+            ...(transcriptPath ? { transcript_path: transcriptPath } : {}),
+          })
+        ).trim()
+      } else if (SID) {
+        context = (await runHook("post-tool-use", { session_id: SID })).trim()
       }
 
-      let blocks: string[] = []
-      // One-time hint so the agent knows how to message peers from the shell.
-      if (!hinted) {
-        hinted = true
-        const agentSlug = process.env.TENEX_EDGE_AGENT || "opencode"
-        const selfLine = SHORT_CODE
-          ? `You are ${agentSlug} [session ${SHORT_CODE}] on the tenex-edge fabric.`
-          : `You are ${agentSlug} on the tenex-edge fabric.`
-        blocks.push(
-          selfLine + ` Peers (across Claude Code, ` +
-          `Codex, opencode) are reachable by name. See them: \`${BIN} who\`. ` +
-          `Check messages others sent you: \`${BIN} inbox\`. ` +
-          `Message one: \`${BIN} send-message --recipient <agent@project|session-id> --message "..."\`. ` +
-          `(No session id needed — it's resolved from the working directory.) ` +
-          `Run \`${BIN} wait-for-mention\` with run_in_background=true now so you are woken when a mention arrives. Re-run it each time one is received.`,
-        )
-      }
-      // Use SID when known, else let the CLI resolve via the env we exported.
-      const inboxArgs = SID ? ["inbox", "--session", SID] : ["inbox"]
-      const inbox = (await run(inboxArgs)).trim()
-      if (inbox) blocks.push("Messages from other agents (via tenex-edge):\n" + inbox)
-
-      // Who's around and what they're doing.
-      const who = stripAnsi((await run(["who"])).trim())
-      if (who && !who.includes("no live agents")) {
-        blocks.push("tenex-edge fabric — agents you can message (and what they're doing):\n" + who)
-      }
-
-      if (blocks.length) {
+      if (context) {
         lastUser.parts.unshift({
           id: `tenex-edge-${msgID}`,
           sessionID: ocSessionID,
           messageID: msgID,
           type: "text",
-          text: blocks.join("\n\n"),
+          text: context,
           _tenexInjected: true,
         } as any)
       }
