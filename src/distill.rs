@@ -142,25 +142,30 @@ fn parse_labels(out: &str) -> (Option<String>, Option<String>) {
     (title.or(unlabeled), activity)
 }
 
-/// Complete the combined session prompt natively via rig (openrouter/ollama),
-/// returning the raw multi-line text. `None` on any error so the caller falls back.
+/// Complete the combined session prompt natively via rig (openrouter/ollama).
+/// Returns `Ok(Some(text))` on success, `Ok(None)` for unsupported provider or
+/// empty output, `Err(msg)` when the LLM call itself fails so the caller can log it.
 async fn complete_via_rig(
     resolved: &crate::llmconfig::ResolvedModel,
     context: &str,
-) -> Option<String> {
+) -> Result<Option<String>, String> {
     use rig::client::CompletionClient;
     use rig::completion::Prompt;
 
     let text: String = match resolved.provider.as_str() {
         "openrouter" => {
-            let client = rig::providers::openrouter::Client::new(&resolved.api_key).ok()?;
+            let client = rig::providers::openrouter::Client::new(&resolved.api_key)
+                .map_err(|e| format!("openrouter client init: {e}"))?;
             let agent = client
                 .agent(&resolved.model)
                 .preamble(SESSION_SYSTEM_PROMPT)
                 .temperature(0.2)
                 .max_tokens(96)
                 .build();
-            agent.prompt(context).await.ok()?
+            agent
+                .prompt(context)
+                .await
+                .map_err(|e| format!("openrouter/{} prompt failed: {e}", resolved.model))?
         }
         "ollama" => {
             use rig::providers::ollama::OllamaApiKey;
@@ -172,21 +177,26 @@ async fn complete_via_rig(
             if !resolved.base_url.is_empty() {
                 builder = builder.base_url(&resolved.base_url);
             }
-            let client = builder.build().ok()?;
+            let client = builder
+                .build()
+                .map_err(|e| format!("ollama client init: {e}"))?;
             let agent = client
                 .agent(&resolved.model)
                 .preamble(SESSION_SYSTEM_PROMPT)
                 .temperature(0.2)
                 .max_tokens(96)
                 .build();
-            agent.prompt(context).await.ok()?
+            agent
+                .prompt(context)
+                .await
+                .map_err(|e| format!("ollama/{} prompt failed: {e}", resolved.model))?
         }
-        _ => return None,
+        _ => return Ok(None),
     };
     if text.trim().is_empty() {
-        None
+        Ok(None)
     } else {
-        Some(text)
+        Ok(Some(text))
     }
 }
 
@@ -218,20 +228,27 @@ fn assemble(
 ///   (a) `$TENEX_EDGE_DISTILL_CMD` set → external command (explicit override);
 ///   (b) else the `edge-distillation` role resolves → native rig (openrouter/ollama);
 ///   (c) else **nudge-to-keep**: retain the current title with an empty activity.
+///
+/// Returns `(labels, error)`. `error` is `Some` only when the LLM was actually
+/// called and failed — the caller should log it and surface it in the statusline.
+/// A nudge-to-keep (no model configured, empty transcript) is not an error.
 pub async fn distill_session(
     transcript: &str,
     current_title: Option<&str>,
-) -> Option<SessionLabels> {
+) -> (Option<SessionLabels>, Option<String>) {
     let ctx = transcript.trim();
     if ctx.is_empty() {
         // Nothing new to read: keep the title, no live activity.
-        return current_title
-            .map(str::trim)
-            .filter(|t| !t.is_empty())
-            .map(|t| SessionLabels {
-                title: t.to_string(),
-                activity: String::new(),
-            });
+        return (
+            current_title
+                .map(str::trim)
+                .filter(|t| !t.is_empty())
+                .map(|t| SessionLabels {
+                    title: t.to_string(),
+                    activity: String::new(),
+                }),
+            None,
+        );
     }
     // Give the model the current title as context so it can choose to keep it.
     let input = match current_title.map(str::trim).filter(|t| !t.is_empty()) {
@@ -243,26 +260,32 @@ pub async fn distill_session(
     if let Some(cmd) = CommandDistiller::resolve() {
         if let Some(out) = cmd.summarize_full(&input) {
             if let Some(labels) = assemble(parse_labels(&out), current_title) {
-                return Some(labels);
+                return (Some(labels), None);
             }
         }
     }
     // (b) native rig via the edge-distillation role, with the combined preamble.
+    let mut rig_error: Option<String> = None;
     if let Some(resolved) = crate::llmconfig::resolve_role("edge-distillation") {
-        if let Some(out) = complete_via_rig(&resolved, &input).await {
-            if let Some(labels) = assemble(parse_labels(&out), current_title) {
-                return Some(labels);
+        match complete_via_rig(&resolved, &input).await {
+            Ok(Some(out)) => {
+                if let Some(labels) = assemble(parse_labels(&out), current_title) {
+                    return (Some(labels), None);
+                }
             }
+            Ok(None) => {}
+            Err(e) => rig_error = Some(e),
         }
     }
     // (c) no model / empty output → keep the existing title (nudge-to-keep).
-    current_title
+    let labels = current_title
         .map(str::trim)
         .filter(|t| !t.is_empty())
         .map(|t| SessionLabels {
             title: t.to_string(),
             activity: String::new(),
-        })
+        });
+    (labels, rig_error)
 }
 
 #[cfg(test)]
@@ -329,9 +352,9 @@ mod tests {
             "TENEX_EDGE_DISTILL_CMD",
             "cat >/dev/null; printf 'TITLE: Fix GitHub issue 1\\nNOW: reading the issue tracker\\n'",
         );
-        let got = distill_session("user: fix github issue 1", None)
-            .await
-            .unwrap();
+        let (got, err) = distill_session("user: fix github issue 1", None).await;
+        assert!(err.is_none());
+        let got = got.unwrap();
         assert_eq!(got.title, "Fix GitHub issue 1");
         assert_eq!(got.activity, "reading the issue tracker");
 
@@ -340,13 +363,14 @@ mod tests {
             "TENEX_EDGE_DISTILL_CMD",
             "sed -n 's/^CURRENT TITLE: /TITLE: /p' | head -n1",
         );
-        let got = distill_session(
+        let (got, err) = distill_session(
             "TRANSCRIPT:\nuser: keep going",
             Some("refactoring the auth flow"),
         )
-        .await
-        .unwrap();
+        .await;
         std::env::remove_var("TENEX_EDGE_DISTILL_CMD");
+        assert!(err.is_none());
+        let got = got.unwrap();
         assert_eq!(got.title, "refactoring the auth flow");
         assert_eq!(got.activity, "");
     }
@@ -354,9 +378,9 @@ mod tests {
     /// Empty transcript returns the current title (no activity) rather than re-distilling.
     #[tokio::test]
     async fn distill_session_empty_transcript_returns_current() {
-        let got = distill_session("   ", Some("writing the parser"))
-            .await
-            .unwrap();
+        let (got, err) = distill_session("   ", Some("writing the parser")).await;
+        assert!(err.is_none());
+        let got = got.unwrap();
         assert_eq!(got.title, "writing the parser");
         assert_eq!(got.activity, "");
     }

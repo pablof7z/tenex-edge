@@ -84,6 +84,8 @@ pub struct StatuslineView {
     pending: Vec<MentionView>,
     #[serde(default)]
     recent: Vec<MentionView>,
+    #[serde(default)]
+    distill_error: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -170,6 +172,14 @@ pub fn render_statusline(v: &StatuslineView, color: bool) -> String {
         segs.push(paint("· idle".to_string(), "2"));
     }
 
+    // Distillation error — flashed in red for up to 5 minutes after the failure.
+    if let Some(ref err) = v.distill_error {
+        segs.push(paint(
+            format!("⚠ distill: {}", truncate_chars(err, 40)),
+            "1;31", // bold red
+        ));
+    }
+
     // Inbox envelope: a pending mention shows bright; a mention drained in the
     // last 30s lingers dimmed with a ✓ so you see what the agent just consumed.
     if let Some(newest) = v.pending.last() {
@@ -222,6 +232,7 @@ mod tests {
             status: "refactoring inbox envelope".into(),
             pending: vec![],
             recent: vec![],
+            distill_error: None,
         }
     }
 

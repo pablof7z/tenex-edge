@@ -1832,6 +1832,8 @@ async fn rpc_project_edit(
 /// How long a drained mention keeps showing on the statusline as "recently
 /// consumed" before disappearing.
 const STATUSLINE_RECENT_SECS: u64 = 30;
+/// How long a distillation error stays visible in the statusline before expiring.
+const DISTILL_ERROR_TTL_SECS: u64 = 300;
 
 #[derive(serde::Deserialize, Default)]
 struct StatuslineParams {
@@ -1897,6 +1899,10 @@ fn rpc_statusline(
         let mut recent_json = rows_to_json(&recent, &host);
         recent_json.extend(chat_rows_to_json(&recent_chat));
         sort_message_json(&mut recent_json);
+        let distill_error = s
+            .get_recent_session_error(&rec.session_id, now.saturating_sub(DISTILL_ERROR_TTL_SECS))
+            .ok()
+            .flatten();
         Ok(serde_json::json!({
             "agent": rec.agent_slug,
             "host": host,
@@ -1909,6 +1915,7 @@ fn rpc_statusline(
             "status": status,
             "pending": pending_json,
             "recent": recent_json,
+            "distill_error": distill_error,
         }))
     })
 }

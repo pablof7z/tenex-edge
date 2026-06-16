@@ -137,7 +137,7 @@ pub async fn run_session_in_daemon(
     //   - last_distill_attempt: wall-clock retry gate (success time lives in the
     //     store's last_distill_at),
     //   - cur_turn_started / prev_working: edge detection against turn_state.
-    let mut distill_task: Option<tokio::task::JoinHandle<Option<distill::SessionLabels>>> = None;
+    let mut distill_task: Option<tokio::task::JoinHandle<(Option<distill::SessionLabels>, Option<String>)>> = None;
     let mut distill_task_turn_id: i64 = 0;
     let mut distill_task_base_version: i64 = 0;
     let mut last_distill_attempt: u64 = 0;
@@ -179,7 +179,7 @@ pub async fn run_session_in_daemon(
                 // equals the base the task captured, so a stale distill or a
                 // duplicate runtime cannot flip the title.
                 if distill_task.as_ref().is_some_and(|h| h.is_finished()) {
-                    let result = distill_task.take().unwrap().await.ok().flatten();
+                    let (result, error) = distill_task.take().unwrap().await.ok().unwrap_or((None, None));
                     if let Some(labels) = result {
                         // Capture the pre-apply title to decide whether to broadcast
                         // a new Activity note (a social kind:1, separate from status).
@@ -204,6 +204,20 @@ pub async fn run_session_in_daemon(
                         }
                         // On a rejected apply (stale base) nothing changes; the next
                         // due-check re-reads the fresh base and reschedules.
+                    } else if let Some(err_msg) = error {
+                        let now = now_secs();
+                        // Append to per-session log file for post-mortem inspection.
+                        let log_dir = crate::config::edge_home().join("logs");
+                        if crate::config::ensure_dir(&log_dir).is_ok() {
+                            use std::io::Write as _;
+                            let short = crate::util::session_short_code(&p.session_id);
+                            let log_path = log_dir.join(format!("{short}.log"));
+                            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&log_path) {
+                                let _ = writeln!(f, "{} [distill] ERROR: {}", crate::util::format_local_datetime(now), err_msg);
+                            }
+                        }
+                        // Store in DB so the statusline can flash it for this session.
+                        st!(|s: &Store| { s.record_session_error(&p.session_id, &err_msg, now).ok(); });
                     }
                 }
 
@@ -274,13 +288,15 @@ pub async fn run_session_in_daemon(
                                     distill_task_turn_id = snap.turn_id;
                                     distill_task_base_version = snap.state_version;
                                     distill_task = Some(tokio::spawn(async move {
-                                        tokio::time::timeout(
+                                        match tokio::time::timeout(
                                             Duration::from_secs(20),
                                             distill::distill_session(&ctx, current.as_deref()),
                                         )
                                         .await
-                                        .ok()
-                                        .flatten()
+                                        {
+                                            Ok(pair) => pair,
+                                            Err(_) => (None, Some("distillation timed out after 20s".to_string())),
+                                        }
                                     }));
                                 }
                             }

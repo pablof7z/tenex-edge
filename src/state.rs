@@ -470,6 +470,14 @@ CREATE TABLE IF NOT EXISTS membership (
     updated_at  INTEGER NOT NULL,
     PRIMARY KEY(project_id, pubkey)
 );
+-- Per-session distillation error log. Written by the runtime when the LLM
+-- distiller fails; read by rpc_statusline to flash a warning. One row per
+-- session (upsert) so only the last error is kept — the log file has full history.
+CREATE TABLE IF NOT EXISTS session_errors (
+    session_id TEXT PRIMARY KEY,
+    message    TEXT NOT NULL,
+    ts         INTEGER NOT NULL
+);
 -- TMUX control-plane: one row per (session, kind='tmux') endpoint. Written by
 -- rpc_session_start when the hook env supplies TMUX_PANE; read by the pending
 -- message dispatcher. `target` is the stable tmux pane id (e.g. '%5'). `meta` is a JSON
@@ -3016,6 +3024,31 @@ impl Store {
     /// Transition an outbound message to `failed` with an error string.
     pub fn mark_outbound_failed(&self, message_id: &str, error: &str) -> Result<()> {
         self.mark_message_sync_state(message_id, "failed", Some(error))
+    }
+
+    /// Record a distillation failure for this session (upserts — only the last
+    /// error is kept in the DB; the log file retains full history).
+    pub fn record_session_error(&self, session_id: &str, message: &str, ts: u64) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO session_errors (session_id, message, ts) VALUES (?1, ?2, ?3)",
+            rusqlite::params![session_id, message, ts],
+        )?;
+        Ok(())
+    }
+
+    /// Return the last distillation error for `session_id` if it occurred at or
+    /// after `since` (unix seconds). Returns `None` when no recent error exists.
+    pub fn get_recent_session_error(&self, session_id: &str, since: u64) -> Result<Option<String>> {
+        let result: rusqlite::Result<String> = self.conn.query_row(
+            "SELECT message FROM session_errors WHERE session_id = ?1 AND ts >= ?2",
+            rusqlite::params![session_id, since],
+            |row| row.get(0),
+        );
+        match result {
+            Ok(msg) => Ok(Some(msg)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
     }
 }
 
