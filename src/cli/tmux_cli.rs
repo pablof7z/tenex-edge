@@ -19,7 +19,6 @@ pub(super) async fn tmux_run(action: TmuxAction) -> Result<()> {
         TmuxAction::Spawn { agent, project } => tmux_spawn(agent, project).await,
         TmuxAction::Attach { session } => tmux_attach(session).await,
         TmuxAction::Resume { session } => tmux_resume(session).await,
-        TmuxAction::Sidebar { session, project } => tmux_sidebar(session, project),
     }
 }
 
@@ -190,23 +189,19 @@ fn compute_project_tabs(data: &TuiData) -> ProjectTabs {
 }
 
 fn tab_project<'a>(tabs: &'a [String], tab_idx: usize) -> Option<&'a str> {
-    if tab_idx == 0 {
-        None
-    } else {
-        tabs.get(tab_idx - 1).map(|s| s.as_str())
-    }
+    tabs.get(tab_idx).map(|s| s.as_str())
 }
 
-fn filter_live<'a>(data: &'a TuiData, project_filter: Option<&str>) -> Vec<&'a LiveRow> {
+fn filter_live<'a>(data: &'a TuiData, project_filter: &str) -> Vec<&'a LiveRow> {
     data.live
         .iter()
-        .filter(|r| project_filter.map(|p| r.project == p).unwrap_or(true))
+        .filter(|r| r.project == project_filter)
         .collect()
 }
 
 fn filter_resumable<'a>(
     data: &'a TuiData,
-    project_filter: Option<&str>,
+    project_filter: &str,
     exited_hours: Option<u64>,
 ) -> Vec<&'a ResumeRow> {
     let hours = match exited_hours {
@@ -220,30 +215,23 @@ fn filter_resumable<'a>(
     let cutoff = now.saturating_sub(hours * 3600);
     data.resumable
         .iter()
-        .filter(|r| {
-            r.created_at >= cutoff
-                && project_filter.map(|p| r.project == p).unwrap_or(true)
-        })
+        .filter(|r| r.created_at >= cutoff && r.project == project_filter)
         .collect()
 }
 
 fn update_tabs_after_refresh(data: &TuiData, pt: &mut ProjectTabs, tab_idx: &mut usize) {
     let mut new_pt = compute_project_tabs(data);
     // Preserve the currently-selected project tab even if it became "hidden"
-    // (e.g., selected via fuzzy search but older than 7 days).
-    let current_proj = if *tab_idx > 0 {
-        pt.visible.get(*tab_idx - 1).cloned()
-    } else {
-        None
-    };
+    // (e.g., selected via fuzzy search but older than 12h).
+    let current_proj = pt.visible.get(*tab_idx).cloned();
     if let Some(proj) = current_proj {
         if let Some(idx) = new_pt.visible.iter().position(|p| *p == proj) {
-            *tab_idx = idx + 1;
+            *tab_idx = idx;
         } else if let Some(hi) = new_pt.hidden.iter().position(|p| *p == proj) {
             // Was hidden but user has it selected — keep it visible.
             let pinned = new_pt.hidden.remove(hi);
             new_pt.visible.push(pinned);
-            *tab_idx = new_pt.visible.len();
+            *tab_idx = new_pt.visible.len() - 1;
         } else {
             *tab_idx = 0;
         }
@@ -302,13 +290,9 @@ fn style_selected_bg() -> Style {
 // ── ratatui render functions ──────────────────────────────────────────────────
 
 /// Build a `Line` for a live-session row.
-fn live_row_line(row: &LiveRow, is_sel: bool, project_filter: Option<&str>) -> Line<'static> {
+fn live_row_line(row: &LiveRow, is_sel: bool) -> Line<'static> {
     let cursor = if is_sel { "► " } else { "  " };
-    let label = if project_filter.is_none() {
-        format!("{}@{}", row.slug, row.project)
-    } else {
-        format!("{}@{}", row.slug, row.host)
-    };
+    let label = format!("{}@{}", row.slug, row.host);
     let session_tag = format!(" [session {}]", row.session_short);
     let status_str = if row.status.trim().is_empty() {
         "idle".to_string()
@@ -369,13 +353,9 @@ fn spawn_row_line(row: &SpawnRow, is_sel: bool) -> Line<'static> {
 }
 
 /// Build a `Line` for a resumable-session row.
-fn resume_row_line(row: &ResumeRow, is_sel: bool, project_filter: Option<&str>) -> Line<'static> {
+fn resume_row_line(row: &ResumeRow, is_sel: bool) -> Line<'static> {
     let cursor = if is_sel { "► " } else { "  " };
-    let label = if project_filter.is_none() {
-        format!("{}@{}", row.slug, row.project)
-    } else {
-        row.slug.clone()
-    };
+    let label = row.slug.clone();
     let session_tag = format!(" [session {}]", row.session_short);
     let title = if row.title.trim().is_empty() {
         String::new()
@@ -411,7 +391,18 @@ fn render_main(
 ) {
     let area = f.area();
 
-    let project_filter = tab_project(tabs, tab_idx);
+    let project_filter = match tabs.get(tab_idx) {
+        Some(p) => p.as_str(),
+        None => {
+            // No tabs at all — render empty.
+            let lines = vec![Line::from(vec![
+                Span::raw("  "),
+                Span::styled("(no projects)", style_dim()),
+            ])];
+            f.render_widget(Paragraph::new(lines), area);
+            return;
+        }
+    };
 
     // ── layout ────────────────────────────────────────────────────────────
     // Fixed rows: title (1) + tab bar (1) + rule (1) + blank (1) = 4 top chrome
@@ -439,15 +430,12 @@ fn render_main(
 
     // ── tab bar ───────────────────────────────────────────────────────────
     let mut tab_spans: Vec<Span> = vec![Span::raw("  ")];
-    if tab_idx == 0 {
-        tab_spans.push(Span::styled("[All]", style_bold()));
-    } else {
-        tab_spans.push(Span::styled("[All]", style_dim()));
-    }
     for (i, tab) in tabs.iter().enumerate() {
-        tab_spans.push(Span::raw(" "));
+        if i > 0 {
+            tab_spans.push(Span::raw(" "));
+        }
         let label = format!("[{tab}]");
-        if tab_idx == i + 1 {
+        if tab_idx == i {
             tab_spans.push(Span::styled(label, style_bold()));
         } else {
             tab_spans.push(Span::styled(label, style_dim()));
@@ -525,7 +513,7 @@ fn render_scrolled_body(
     f: &mut Frame,
     data: &TuiData,
     selected: usize,
-    project_filter: Option<&str>,
+    project_filter: &str,
     exited_hours: Option<u64>,
     area: Rect,
 ) {
@@ -551,7 +539,7 @@ fn render_scrolled_body(
             if is_sel {
                 sel_line = Some(lines.len());
             }
-            lines.push(live_row_line(row, is_sel, project_filter));
+            lines.push(live_row_line(row, is_sel));
         }
     }
 
@@ -597,7 +585,7 @@ fn render_scrolled_body(
                 if is_sel {
                     sel_line = Some(lines.len());
                 }
-                lines.push(resume_row_line(row, is_sel, project_filter));
+                lines.push(resume_row_line(row, is_sel));
             }
         }
     }
@@ -951,12 +939,7 @@ fn fetch_tui_data() -> Result<TuiData> {
 
 /// Interactive TUI for `tenex-edge tmux` (bare, no subcommand).
 /// Shows live sessions and spawnable agents; lets the user attach or spawn.
-///
-/// When `popup` is true the TUI is running inside a `display-popup` overlay:
-/// instead of attaching inline (which would trap the session inside the popup),
-/// selecting a session switches the underlying client and exits, closing the
-/// popup so the chosen session takes over the full client.
-pub(super) fn tmux_tui(popup: bool) -> Result<()> {
+pub(super) fn tmux_tui() -> Result<()> {
     let refresh = Duration::from_secs(2);
     let mut selected: usize = 0;
     let mut status_msg = String::new();
@@ -968,6 +951,14 @@ pub(super) fn tmux_tui(popup: bool) -> Result<()> {
     // Initial fetch before entering raw mode: fail fast if daemon is down.
     let mut data = fetch_tui_data()?;
     let mut pt = compute_project_tabs(&data);
+
+    // Default to the project matching the current directory.
+    {
+        let cwd_project = crate::project::resolve(&std::env::current_dir().unwrap_or_default());
+        if let Some(idx) = pt.visible.iter().position(|p| *p == cwd_project) {
+            tab_idx = idx;
+        }
+    }
 
     {
         let _terminal = TuiTerminal::enter()?;
@@ -991,9 +982,12 @@ pub(super) fn tmux_tui(popup: bool) -> Result<()> {
                     // Compute filtered totals (borrows released at end of block).
                     let total = {
                         let pf = tab_project(&pt.visible, tab_idx);
-                        filter_live(&data, pf).len()
-                            + data.spawnable.len()
-                            + filter_resumable(&data, pf, exited_opt).len()
+                        match pf {
+                            Some(p) => filter_live(&data, p).len()
+                                + data.spawnable.len()
+                                + filter_resumable(&data, p, exited_opt).len(),
+                            None => 0,
+                        }
                     };
                     if total > 0 && selected >= total {
                         selected = total - 1;
@@ -1036,12 +1030,12 @@ pub(super) fn tmux_tui(popup: bool) -> Result<()> {
                                         if let Some(idx) =
                                             pt.visible.iter().position(|p| *p == proj)
                                         {
-                                            tab_idx = idx + 1;
+                                            tab_idx = idx;
                                         } else {
                                             // Hidden project: inject into visible temporarily.
                                             pt.hidden.retain(|p| p != &proj);
                                             pt.visible.push(proj);
-                                            tab_idx = pt.visible.len();
+                                            tab_idx = pt.visible.len() - 1;
                                         }
                                         selected = 0;
                                     }
@@ -1077,12 +1071,19 @@ pub(super) fn tmux_tui(popup: bool) -> Result<()> {
                             // `data` are released before any `data = fresh` below.
                             let total = {
                                 let pf = tab_project(&pt.visible, tab_idx);
-                                filter_live(&data, pf).len()
-                                    + data.spawnable.len()
-                                    + filter_resumable(&data, pf, exited_opt).len()
+                                match pf {
+                                    Some(p) => filter_live(&data, p).len()
+                                        + data.spawnable.len()
+                                        + filter_resumable(&data, p, exited_opt).len(),
+                                    None => 0,
+                                }
                             };
                             {
                                 let pf = tab_project(&pt.visible, tab_idx);
+                                if pf.is_none() {
+                                    continue;
+                                }
+                                let pf = pf.unwrap();
                                 let fl = filter_live(&data, pf);
                                 let fr = filter_resumable(&data, pf, exited_opt);
 
@@ -1114,7 +1115,7 @@ pub(super) fn tmux_tui(popup: bool) -> Result<()> {
                                         }
                                     }
                                     KeyCode::Right => {
-                                        if tab_idx < pt.visible.len() {
+                                        if tab_idx + 1 < pt.visible.len() {
                                             tab_idx += 1;
                                             selected = 0;
                                             status_msg.clear();
@@ -1162,17 +1163,8 @@ pub(super) fn tmux_tui(popup: bool) -> Result<()> {
                                             let si = selected.saturating_sub(fl.len());
                                             if selected >= fl.len() && si < data.spawnable.len() {
                                                 let slug = data.spawnable[si].slug.clone();
-                                                // Spawn into the selected project tab's dir, not
-                                                // the TUI process's cwd. Fall back to cwd-resolution
-                                                // only on the "all projects" tab (no filter).
-                                                let project = pf.map(str::to_string).unwrap_or_else(
-                                                    || {
-                                                        crate::project::resolve(
-                                                            &std::env::current_dir()
-                                                                .unwrap_or_default(),
-                                                        )
-                                                    },
-                                                );
+                                                // Spawn into the selected project tab's project.
+                                                let project = pf.to_string();
                                                 status_msg = format!("Spawning {slug}...");
                                                 // Render the status immediately before blocking.
                                                 let tabs_snap = pt.visible.clone();
@@ -1277,21 +1269,9 @@ pub(super) fn tmux_tui(popup: bool) -> Result<()> {
                 break;
             }
 
-            // Attach. In popup mode, switch the underlying client to the chosen
-            // session and exit so the `display-popup` closes and the session
-            // takes over the full client. Otherwise attach inline (blocking),
-            // then return to the TUI.
+            // Attach inline (blocking). When the user detaches (Ctrl-b d)
+            // they return to this TUI.
             if let Some(pane) = pending_attach {
-                if popup {
-                    if let Some(session) = session_of_pane(&pane) {
-                        ensure_sidebar(&session);
-                        bind_sidebar_keys();
-                        let _ = std::process::Command::new("tmux")
-                            .args(["switch-client", "-t", &session])
-                            .status();
-                    }
-                    break; // exit the TUI → display-popup -E closes
-                }
                 // Suspend ratatui/crossterm so the tmux client owns the tty.
                 TuiTerminal::suspend();
                 let res = attach_pane_blocking(&pane);
@@ -1365,9 +1345,6 @@ fn attach_pane_blocking(pane_id: &str) -> Result<()> {
     let Some(session) = session_of_pane(pane_id) else {
         anyhow::bail!("pane {pane_id} not found in any tmux session");
     };
-    // Ensure this session has a sidebar pane before we enter it.
-    ensure_sidebar(&session);
-    bind_sidebar_keys();
     std::process::Command::new("tmux")
         .args(["attach-session", "-t", &session])
         .env_remove("TMUX")
@@ -1384,9 +1361,6 @@ fn attach_pane(pane_id: &str) -> Result<()> {
         eprintln!("Pane {pane_id} not found in any tmux session.");
         return Ok(());
     };
-    // Ensure this session has a sidebar pane before we enter it.
-    ensure_sidebar(&session);
-    bind_sidebar_keys();
 
     let in_tmux = std::env::var("TMUX").map(|v| !v.is_empty()).unwrap_or(false);
     if in_tmux {
@@ -1407,346 +1381,4 @@ fn attach_pane(pane_id: &str) -> Result<()> {
     anyhow::bail!("exec tmux attach-session: {err}");
 }
 
-// ── sidebar ───────────────────────────────────────────────────────────────────
 
-/// Fixed sidebar width in columns. tmux rescales panes proportionally when the
-/// client resizes, so a one-time `-l` at split time isn't enough — we also pin
-/// it with a `client-resized` hook (see `ensure_sidebar`).
-const SIDEBAR_COLS: &str = "40";
-
-/// Idempotently inject a sidebar pane into `session` if one does not already
-/// exist. The sidebar is a narrow left pane (a fixed `SIDEBAR_COLS` wide)
-/// running `tenex-edge tmux sidebar --session <session>`. Focus stays on the
-/// agent pane.
-///
-/// Errors are swallowed (eprintln at most) — the caller is about to hand off
-/// the terminal and does not need sidebar injection to be fatal.
-fn ensure_sidebar(session: &str) {
-    // List all panes in the session and their start commands.
-    let out = std::process::Command::new("tmux")
-        .args([
-            "list-panes",
-            "-t",
-            session,
-            "-F",
-            "#{pane_id} #{pane_start_command}",
-        ])
-        .output();
-
-    match out {
-        Err(e) => {
-            eprintln!("ensure_sidebar: list-panes failed: {e}");
-            return;
-        }
-        Ok(o) => {
-            let stdout = String::from_utf8_lossy(&o.stdout);
-            // If any pane is already running our sidebar, do nothing.
-            if stdout.lines().any(|line| line.contains("tmux sidebar")) {
-                return;
-            }
-        }
-    }
-
-    // Split a fixed-width pane on the LEFT (-b), keep the current pane focused
-    // (-d). Capture the new pane id so we can pin its width on resize.
-    let sidebar_cmd = format!("tenex-edge tmux sidebar --session {session}");
-    let out = std::process::Command::new("tmux")
-        .args([
-            "split-window",
-            "-h",  // horizontal split (side-by-side)
-            "-b",  // new pane goes to the LEFT of the current pane
-            "-l",
-            SIDEBAR_COLS,
-            "-d",  // don't switch focus to the new pane
-            "-P",  // print the new pane id
-            "-F",
-            "#{pane_id}",
-            "-t",
-            session,
-            &sidebar_cmd,
-        ])
-        .output();
-
-    let pane_id = match out {
-        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
-        Ok(_) => {
-            eprintln!("ensure_sidebar: split-window exited non-zero for session {session}");
-            return;
-        }
-        Err(e) => {
-            eprintln!("ensure_sidebar: split-window failed: {e}");
-            return;
-        }
-    };
-
-    // Pin the sidebar width: when the client resizes, tmux would otherwise
-    // rescale this pane proportionally. A `client-resized` hook re-fixes it.
-    // (resize-pane fires `window-layout-changed`, not `client-resized`, so this
-    // does not recurse.) The hook is session-scoped and dies with the session.
-    let resize_cmd = format!("resize-pane -t {pane_id} -x {SIDEBAR_COLS}");
-    let _ = std::process::Command::new("tmux")
-        .args(["set-hook", "-t", session, "client-resized", &resize_cmd])
-        .status();
-}
-
-/// Bind Alt-s (focus sidebar/left), Alt-a (focus agent/right), and Alt-t (open
-/// the session-switcher popup) in the root key table. Re-binding is idempotent,
-/// so this is safe to call every attach.
-fn bind_sidebar_keys() {
-    let _ = std::process::Command::new("tmux")
-        .args(["bind-key", "-T", "root", "M-s", "select-pane", "-L"])
-        .status();
-    let _ = std::process::Command::new("tmux")
-        .args(["bind-key", "-T", "root", "M-a", "select-pane", "-R"])
-        .status();
-    // Alt-t: full-screen quick-switcher in a popup. `--popup` makes the TUI
-    // switch the underlying client and exit on selection (instead of attaching
-    // inline inside the popup); `-E` closes the popup when it exits.
-    let _ = std::process::Command::new("tmux")
-        .args([
-            "bind-key",
-            "-T",
-            "root",
-            "M-t",
-            "display-popup",
-            "-E",
-            "-w",
-            "80%",
-            "-h",
-            "80%",
-            "tenex-edge tmux --popup",
-        ])
-        .status();
-}
-
-/// Resolve the current tmux session name from within a running tmux client.
-/// Returns `None` if not inside tmux or the command fails.
-fn current_tmux_session() -> Option<String> {
-    let out = std::process::Command::new("tmux")
-        .args(["display-message", "-p", "#{client_session}"])
-        .output()
-        .ok()?;
-    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if s.is_empty() { None } else { Some(s) }
-}
-
-/// The sidebar TUI: a long-running narrow-pane process that lists project
-/// sessions and lets the user switch between them with arrow keys + Enter.
-///
-/// This is the implementation of `tenex-edge tmux sidebar`.
-fn tmux_sidebar(session_arg: Option<String>, project_arg: Option<String>) -> Result<()> {
-    // Resolve the session this sidebar belongs to.
-    let my_session = session_arg
-        .or_else(current_tmux_session)
-        .unwrap_or_default();
-
-    let refresh = Duration::from_secs(2);
-    let mut selected: usize = 0;
-    let mut project_filter: Option<String> = project_arg;
-
-    // Fetch initial data — fail fast if daemon is down.
-    let mut data = fetch_tui_data()?;
-
-    // Derive project from our session if no --project was given.
-    if project_filter.is_none() {
-        if let Some(row) = data.live.iter().find(|r| {
-            r.session_id == my_session
-                || session_name_for_id(&r.session_id).as_deref() == Some(my_session.as_str())
-        }) {
-            project_filter = Some(row.project.clone());
-        }
-    }
-
-    // Pre-select our own session in the list.
-    let rows_for_project = |live: &[LiveRow], pf: &Option<String>| -> Vec<usize> {
-        live.iter()
-            .enumerate()
-            .filter(|(_, r)| {
-                pf.as_deref()
-                    .map(|p| r.project == p)
-                    .unwrap_or(true)
-            })
-            .map(|(i, _)| i)
-            .collect()
-    };
-
-    {
-        let _terminal = TuiTerminal::enter()?;
-        let mut ratatui_term =
-            Terminal::new(CrosstermBackend::new(io::stdout())).context("init sidebar terminal")?;
-        let mut next_refresh = Instant::now() + refresh;
-
-        loop {
-            let indices = rows_for_project(&data.live, &project_filter);
-            let total = indices.len();
-
-            if total > 0 && selected >= total {
-                selected = total.saturating_sub(1);
-            }
-
-            // Render the sidebar.
-            let proj_snap = project_filter.clone().unwrap_or_default();
-            ratatui_term.draw(|f| {
-                sidebar_render(f, &data.live, &indices, selected, &my_session, &proj_snap)
-            })?;
-
-            let wait = next_refresh
-                .saturating_duration_since(Instant::now())
-                .min(Duration::from_millis(100));
-
-            if event::poll(wait)? {
-                if let TermEvent::Key(key) = event::read()? {
-                    match key.code {
-                        KeyCode::Char('q') | KeyCode::Esc => break,
-                        KeyCode::Char('c')
-                            if key.modifiers.contains(KeyModifiers::CONTROL) =>
-                        {
-                            break
-                        }
-                        KeyCode::Up | KeyCode::Char('k') => {
-                            selected = selected.saturating_sub(1);
-                        }
-                        KeyCode::Down | KeyCode::Char('j') => {
-                            if total > 0 && selected + 1 < total {
-                                selected += 1;
-                            }
-                        }
-                        KeyCode::Enter => {
-                            if let Some(&abs_idx) = indices.get(selected) {
-                                let target_row = &data.live[abs_idx];
-                                let target_sid = target_row.session_id.clone();
-
-                                // Don't switch if we're already here.
-                                let target_name =
-                                    session_name_for_id(&target_sid).unwrap_or_default();
-                                if target_name == my_session {
-                                    continue;
-                                }
-
-                                // Ensure the target session has its own sidebar.
-                                ensure_sidebar(&target_name);
-
-                                // Switch the tmux client to the target session.
-                                let _ = std::process::Command::new("tmux")
-                                    .args(["switch-client", "-t", &target_name])
-                                    .status();
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-
-            // Periodic refresh.
-            if Instant::now() >= next_refresh {
-                if let Ok(fresh) = fetch_tui_data() {
-                    data = fresh;
-                    // Re-derive project filter from updated data if still unset.
-                    if project_filter.is_none() {
-                        if let Some(row) = data.live.iter().find(|r| {
-                            session_name_for_id(&r.session_id).as_deref()
-                                == Some(my_session.as_str())
-                        }) {
-                            project_filter = Some(row.project.clone());
-                        }
-                    }
-                }
-                next_refresh = Instant::now() + refresh;
-            }
-        }
-    }
-
-    Ok(())
-}
-
-/// Render the sidebar contents into a narrow pane via ratatui.
-fn sidebar_render(
-    f: &mut Frame,
-    live: &[LiveRow],
-    indices: &[usize],
-    selected: usize,
-    my_session: &str,
-    project: &str,
-) {
-    let area = f.area();
-    let w = area.width as usize;
-
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1), // title
-            Constraint::Length(1), // rule
-            Constraint::Min(1),    // session list
-            Constraint::Length(1), // help
-        ])
-        .split(area);
-
-    // ── title: "sessions" bold + project dim ──────────────────────────────
-    let mut title_spans = vec![Span::styled("sessions", style_bold())];
-    if !project.is_empty() {
-        title_spans.push(Span::styled(format!(" {project}"), style_dim()));
-    }
-    f.render_widget(Paragraph::new(Line::from(title_spans)), chunks[0]);
-
-    // ── rule ──────────────────────────────────────────────────────────────
-    f.render_widget(
-        Paragraph::new(Line::from(Span::styled("─".repeat(w), style_dim()))),
-        chunks[1],
-    );
-
-    // ── session list ──────────────────────────────────────────────────────
-    let mut lines: Vec<Line> = Vec::new();
-    if indices.is_empty() {
-        lines.push(Line::from(Span::styled("  (no sessions)", style_dim())));
-    } else {
-        for (sel_idx, &abs_idx) in indices.iter().enumerate() {
-            let row = &live[abs_idx];
-            let is_current = session_name_for_id(&row.session_id).as_deref() == Some(my_session)
-                || row.session_id == my_session;
-            let is_sel = sel_idx == selected;
-            let cursor = if is_sel { "►" } else { " " };
-
-            // Compact status badge (max 4 chars).
-            let status_badge = if row.status.trim().is_empty() {
-                "idle".to_string()
-            } else {
-                let s = row.status.trim();
-                s.chars().take(4).collect()
-            };
-
-            // Truncate slug to fit: cursor(1) + space + slug + space + badge.
-            let slug_max = w.saturating_sub(1 + 1 + status_badge.len() + 1);
-            let slug_display: String = row.slug.chars().take(slug_max.max(1)).collect();
-
-            let (cursor_style, slug_style) = match (is_current, is_sel) {
-                (true, true) => (style_cyan_bold(), style_cyan_bold()),
-                (true, false) => (Style::default(), style_cyan()),
-                (false, true) => (style_bold(), style_bold()),
-                (false, false) => (Style::default(), style_dim()),
-            };
-
-            lines.push(Line::from(vec![
-                Span::styled(cursor.to_string(), cursor_style),
-                Span::raw(" "),
-                Span::styled(slug_display, slug_style),
-                Span::raw(" "),
-                Span::styled(status_badge, style_dim()),
-            ]));
-        }
-    }
-    f.render_widget(Paragraph::new(lines), chunks[2]);
-
-    // ── help ──────────────────────────────────────────────────────────────
-    f.render_widget(
-        Paragraph::new(Line::from(Span::styled("↑↓ move  ↵ switch", style_dim()))),
-        chunks[3],
-    );
-}
-
-/// Look up the tmux session NAME for a given tenex-edge session_id by scanning
-/// all live sessions. Returns `None` if the id isn't registered in tmux.
-fn session_name_for_id(session_id: &str) -> Option<String> {
-    // Ask the daemon for the pane registered to this session_id.
-    let pane = pane_for_session(session_id)?;
-    session_of_pane(&pane)
-}
