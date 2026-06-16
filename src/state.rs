@@ -4293,6 +4293,41 @@ mod tests {
         assert_ne!(a.session_id, b.session_id, "new harness id → new canonical id");
     }
 
+    /// all_live_local_snapshots feeds the heartbeat expiration re-arm: it must
+    /// return live sessions whose last_seen is fresh, drop stale ones, and drop
+    /// ended ones — otherwise live-but-idle sessions age off the relay.
+    #[test]
+    fn all_live_local_snapshots_filters_fresh_and_active() {
+        use crate::session::{Harness, SessionObservation};
+        let s = Store::open_memory().unwrap();
+        let obs = SessionObservation {
+            agent_slug: "claude".into(),
+            agent_pubkey: "pk".into(),
+            project: "proj".into(),
+            host: "host".into(),
+            rel_cwd: String::new(),
+            harness: Harness::ClaudeCode,
+            harness_session_id: Some("h1".into()),
+            resume_id: None,
+            tmux_pane: None,
+            watch_pid: None,
+            observed_at: 1000,
+        };
+        let snap = s.register_or_reassert_session(&obs).unwrap();
+        s.heartbeat_session(snap.session_id.as_str(), 1000).ok();
+
+        // Fresh window includes it; a window past its last_seen excludes it.
+        assert_eq!(s.all_live_local_snapshots(910).unwrap().len(), 1, "fresh → included");
+        assert!(s.all_live_local_snapshots(1001).unwrap().is_empty(), "stale → excluded");
+
+        // Ending the session drops it from the live set (lifecycle != active).
+        s.end_session(snap.session_id.as_str(), 1000).ok();
+        assert!(
+            s.all_live_local_snapshots(910).unwrap().is_empty(),
+            "ended → excluded even when last_seen is fresh"
+        );
+    }
+
     /// versioned distill guard: a stale base_version is rejected.
     #[test]
     fn apply_distill_result_rejects_stale_version() {

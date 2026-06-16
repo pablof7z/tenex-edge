@@ -1,0 +1,11 @@
+{"canonical":"claude code","name":"Claude Code","signed":1,"status":"provisional"}
+{"canonical":"claude max","name":"Claude Max","signed":0,"status":"provisional"}
+{"canonical":"fallback model","name":"fallbackModel","signed":0,"status":"provisional"}
+{"canonical":"kind 0","name":"kind:0","signed":3,"status":"real"}
+{"canonical":"kind 1","name":"kind:1","signed":0,"status":"provisional"}
+{"canonical":"nip 29","name":"NIP-29","signed":0,"status":"provisional"}
+{"canonical":"project wiki","name":"Project Wiki","signed":0,"status":"provisional"}
+{"canonical":"tenex edge acl","name":"tenex-edge acl","signed":1,"status":"provisional"}
+{"canonical":"tenex edge session start","name":"tenex-edge session-start","signed":1,"status":"provisional"}
+{"canonical":"update m 1","name":"Update M1","signed":1,"status":"provisional"}
+{"canonical":"work uto distill include","name":"Work AUto-distill Include","signed":0,"status":"provisional"}
