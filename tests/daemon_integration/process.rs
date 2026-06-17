@@ -144,6 +144,57 @@ fn cli_subprocess_blocking_path_session_start_and_who() {
 }
 
 #[test]
+fn invalid_cli_invocation_is_recorded_before_clap_rejects_it() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let home = Home::new();
+
+    let out = run_cli(
+        &home,
+        &[
+            "send-this-message",
+            "--session",
+            "hallucinated-session",
+            "hello",
+        ],
+    );
+    assert!(
+        !out.status.success(),
+        "hallucinated command unexpectedly succeeded"
+    );
+
+    let command_log = std::fs::read_to_string(home.dir.path().join("command-calls.jsonl"))
+        .expect("command forensic log");
+    let records: Vec<serde_json::Value> = command_log
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("command log json"))
+        .collect();
+    let received = records
+        .iter()
+        .find(|v| v["phase"] == "received")
+        .expect("received record");
+    assert_eq!(received["schema"], "tenex-edge.command-call.v1");
+    assert_eq!(received["command"]["subcommand"], "send-this-message");
+    assert_eq!(
+        received["command"]["explicit_session"],
+        "hallucinated-session"
+    );
+
+    let finished = records
+        .iter()
+        .find(|v| v["phase"] == "finished")
+        .expect("finished record");
+    assert_eq!(finished["result"]["ok"], false);
+    assert_eq!(finished["result"]["kind"], "InvalidSubcommand");
+    assert!(
+        finished["result"]["error"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("unrecognized subcommand"),
+        "unexpected clap error: {finished}"
+    );
+}
+
+#[test]
 fn claude_user_prompt_submit_reasserts_missing_session() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let home = Home::new();

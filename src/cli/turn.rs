@@ -20,9 +20,9 @@ pub(super) async fn turn_start(
     session: String,
     transcript: Option<String>,
     emit: EmitFormat,
-) -> Result<()> {
+) -> Result<Option<String>> {
     if session.is_empty() {
-        return Ok(());
+        return Ok(None);
     }
     let params = serde_json::json!({
         "session": session,
@@ -31,8 +31,9 @@ pub(super) async fn turn_start(
     let v = daemon_call_async("turn_start", params).await?;
     if let Some(ctx) = v["context"].as_str() {
         emit_context(ctx, emit);
+        return Ok(Some(ctx.to_string()));
     }
-    Ok(())
+    Ok(None)
 }
 
 /// The full turn-start context assembly, shared by the daemon's `turn_start` RPC
@@ -207,7 +208,7 @@ pub fn assemble_turn_check_context(
 
 /// Mid-turn check for PostToolUse hooks. Thin client: the daemon peeks the
 /// inbox and computes the rate-limited sibling-session delta.
-pub(super) fn turn_check(session: Option<String>, emit: EmitFormat) -> Result<()> {
+pub(super) fn turn_check(session: Option<String>, emit: EmitFormat) -> Result<Option<String>> {
     let params = serde_json::json!({
         "session": session,
         "env_session": std::env::var("TENEX_EDGE_SESSION").ok(),
@@ -217,8 +218,9 @@ pub(super) fn turn_check(session: Option<String>, emit: EmitFormat) -> Result<()
     let v = crate::daemon::blocking::call("turn_check", params)?;
     if let Some(ctx) = v["context"].as_str() {
         emit_context(ctx, emit);
+        return Ok(Some(ctx.to_string()));
     }
-    Ok(())
+    Ok(None)
 }
 
 pub(crate) fn render_chat_block(

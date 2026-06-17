@@ -21,6 +21,8 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 mod admin;
+pub mod command_forensics;
+mod debug;
 mod hooks;
 mod messaging;
 mod statusline;
@@ -188,6 +190,11 @@ enum Cmd {
     },
     /// Connectivity check: publish a test note to the configured relays and read it back.
     Doctor,
+    /// Local debugging tools for hook injection and command telemetry.
+    Debug {
+        #[command(subcommand)]
+        action: DebugAction,
+    },
     /// Handle a hook event from any supported agent harness.
     /// Reads hook JSON from stdin; emits context to inject into the model (if any).
     /// Run `tenex-edge hook --host <name> --type <hook-type>`.
@@ -385,6 +392,25 @@ enum ProjectAction {
     },
 }
 
+#[derive(Subcommand)]
+enum DebugAction {
+    /// Live TUI for hook injections and tenex-edge command invocations.
+    HookTail {
+        /// Filter panes/events to a project.
+        #[arg(long)]
+        project: Option<String>,
+        /// Filter panes/events to a session id or short code.
+        #[arg(long)]
+        session: Option<String>,
+        /// Maximum panes in the grid.
+        #[arg(long, default_value = "6")]
+        panes: usize,
+        /// Refresh interval in milliseconds.
+        #[arg(long, default_value = "1000")]
+        refresh_ms: u64,
+    },
+}
+
 pub async fn run(cli: Cli) -> Result<()> {
     match cli.cmd {
         Cmd::Propose {
@@ -501,6 +527,19 @@ pub async fn run(cli: Cli) -> Result<()> {
         Cmd::Statusline { session } => statusline::statusline(session),
         Cmd::Project { action } => admin::project(action).await,
         Cmd::Doctor => admin::doctor().await,
+        Cmd::Debug { action } => match action {
+            DebugAction::HookTail {
+                project,
+                session,
+                panes,
+                refresh_ms,
+            } => debug::hook_tail(debug::HookTailOpts {
+                project,
+                session,
+                panes,
+                refresh: Duration::from_millis(refresh_ms.max(100)),
+            }),
+        },
         Cmd::Hook { host, hook_type } => hooks::hook_run(host, hook_type).await,
         Cmd::Tmux { action, popup } => match action {
             Some(action) => tmux_cli::tmux_run(action).await,

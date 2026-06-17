@@ -289,7 +289,18 @@ async fn hook_dispatch(
                     eprintln!("[tenex-edge] session reassert skipped: {e:#}");
                 }
             }
-            turn_start(sid.clone(), transcript, emit).await?;
+            if let Some(ctx) = turn_start(sid.clone(), transcript, emit).await? {
+                call_log.note(
+                    "context-injection",
+                    serde_json::json!({
+                        "host": host.name,
+                        "hook_type": hook_type,
+                        "session": sid,
+                        "bytes": ctx.as_bytes().len(),
+                        "text": ctx,
+                    }),
+                );
+            }
             // Publish the user's prompt as a kind:1 OP on the Nostr fabric.
             // Fail open: if userNsec is absent or the relay is unreachable, the
             // hook must not block the editor.
@@ -307,7 +318,18 @@ async fn hook_dispatch(
         }
         "post-tool-use" => {
             let explicit = if sid.is_empty() { None } else { Some(sid) };
-            turn_check(explicit, emit)?;
+            if let Some(ctx) = turn_check(explicit.clone(), emit)? {
+                call_log.note(
+                    "context-injection",
+                    serde_json::json!({
+                        "host": host.name,
+                        "hook_type": hook_type,
+                        "session": explicit,
+                        "bytes": ctx.as_bytes().len(),
+                        "text": ctx,
+                    }),
+                );
+            }
         }
         "stop" => {
             if !sid.is_empty() {
