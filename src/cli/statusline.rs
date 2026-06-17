@@ -46,7 +46,7 @@ pub(super) fn statusline(session: Option<String>) -> Result<()> {
         "session": session,
         "env_session": env_session,
         "cwd": cwd,
-        "agent": std::env::var("TENEX_EDGE_AGENT").ok(),
+        "agent": agent_env_slug(),
     });
     // Fail open on ANY failure (no daemon, no session yet, protocol skew): a
     // status bar with a missing segment beats a status bar with an error in it.

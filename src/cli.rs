@@ -37,6 +37,19 @@ pub(crate) use turn::render_chat_block;
 pub use turn::{assemble_turn_check_context, assemble_turn_start_context};
 pub use who::load_who_snapshot;
 
+pub(crate) fn select_agent_env(active: Option<String>, fallback: Option<String>) -> Option<String> {
+    active
+        .filter(|s| !s.is_empty())
+        .or_else(|| fallback.filter(|s| !s.is_empty()))
+}
+
+pub(crate) fn agent_env_slug() -> Option<String> {
+    select_agent_env(
+        std::env::var("TENEX_EDGE_AGENT").ok(),
+        std::env::var("TENEX_EDGE_AGENT_FALLBACK").ok(),
+    )
+}
+
 #[derive(Parser)]
 #[command(
     name = "tenex-edge",
@@ -1100,5 +1113,18 @@ mod tail_render_tests {
     #[test]
     fn parse_since_zero_for_garbage() {
         assert_eq!(parse_since("not-a-time"), 0);
+    }
+
+    #[test]
+    fn agent_env_prefers_active_over_fallback() {
+        assert_eq!(
+            select_agent_env(Some("haiku".into()), Some("developer".into())).as_deref(),
+            Some("haiku")
+        );
+        assert_eq!(
+            select_agent_env(None, Some("developer".into())).as_deref(),
+            Some("developer")
+        );
+        assert_eq!(select_agent_env(Some(String::new()), None), None);
     }
 }

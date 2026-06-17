@@ -668,9 +668,10 @@ async fn open_agent_session(
     // pane's environment from the server's environment plus `-e` overrides, so a
     // var set only on the client process that issues `new-session` is dropped and
     // never reaches the pane. The session-start hook prefers `TENEX_EDGE_AGENT`
-    // over the harness's own default slug (see cli/hooks.rs), so without this the
-    // spawn's known identity is lost and a `codex` (or any custom) agent registers
-    // under the harness default (e.g. `claude`) — the wrong name in `who`/`tmux`.
+    // over `TENEX_EDGE_AGENT_FALLBACK` and the harness's own default slug (see
+    // cli/hooks.rs), so without this the spawn's known identity is lost and a
+    // `codex` (or any custom) agent registers under the harness default (e.g.
+    // `claude`) — the wrong name in `who`/`tmux`.
     let agent_env = format!("TENEX_EDGE_AGENT={slug}");
     let mut cmd_args: Vec<&str> = vec![
         "new-session",

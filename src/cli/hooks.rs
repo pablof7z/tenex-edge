@@ -22,7 +22,8 @@ enum HookOutputFormat {
 struct HostDef {
     /// Canonical harness name used in --host.
     name: &'static str,
-    /// Default agent slug (overridden by TENEX_EDGE_AGENT env var).
+    /// Default agent slug (used when neither TENEX_EDGE_AGENT nor
+    /// TENEX_EDGE_AGENT_FALLBACK is set).
     agent_slug: &'static str,
     /// JSON fields tried in order to extract the session id from stdin.
     session_id_fields: &'static [&'static str],
@@ -154,8 +155,7 @@ async fn hook_dispatch(
             HookOutputFormat::JsonSystemMessage => EmitFormat::JsonSystemMessage,
         },
     };
-    let agent_slug =
-        std::env::var("TENEX_EDGE_AGENT").unwrap_or_else(|_| host.agent_slug.to_string());
+    let agent_slug = agent_env_slug().unwrap_or_else(|| host.agent_slug.to_string());
 
     // Parse stdin — fail open if JSON is absent or malformed.
     let obj = raw.as_object();
@@ -296,7 +296,7 @@ async fn hook_dispatch(
             if let Some(prompt_text) = prompt {
                 let params = serde_json::json!({
                     "env_session": sid,
-                    "agent": std::env::var("TENEX_EDGE_AGENT").ok(),
+                    "agent": agent_env_slug(),
                     "cwd": cwd.to_string_lossy(),
                     "prompt": prompt_text,
                 });

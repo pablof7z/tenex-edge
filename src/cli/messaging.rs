@@ -15,7 +15,7 @@ pub(super) async fn inbox_send(
         "message": message,
         "session": session,
         "env_session": std::env::var("TENEX_EDGE_SESSION").ok(),
-        "agent": std::env::var("TENEX_EDGE_AGENT").ok(),
+        "agent": agent_env_slug(),
         "cwd": std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()),
         "thread_id": thread_id,
     });
@@ -36,7 +36,7 @@ pub(super) async fn inbox_reply(
         "message": message,
         "session": session,
         "env_session": std::env::var("TENEX_EDGE_SESSION").ok(),
-        "agent": std::env::var("TENEX_EDGE_AGENT").ok(),
+        "agent": agent_env_slug(),
         "cwd": std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()),
     });
     let v = daemon_call_async("inbox_reply", params).await?;
@@ -54,7 +54,7 @@ pub(super) async fn chat_write(
         "mention": mention,
         "session": session,
         "env_session": std::env::var("TENEX_EDGE_SESSION").ok(),
-        "agent": std::env::var("TENEX_EDGE_AGENT").ok(),
+        "agent": agent_env_slug(),
         "cwd": std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()),
     });
     let v = daemon_call_async("chat_write", params).await?;
@@ -175,7 +175,7 @@ pub(super) async fn propose(
         "body": body,
         "session": session,
         "env_session": std::env::var("TENEX_EDGE_SESSION").ok(),
-        "agent": std::env::var("TENEX_EDGE_AGENT").ok(),
+        "agent": agent_env_slug(),
         "cwd": std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()),
         "thread_id": thread_id,
         "d": d,
@@ -444,7 +444,7 @@ pub(super) async fn inbox(session: Option<String>) -> Result<()> {
     let params = serde_json::json!({
         "session": session,
         "env_session": std::env::var("TENEX_EDGE_SESSION").ok(),
-        "agent": std::env::var("TENEX_EDGE_AGENT").ok(),
+        "agent": agent_env_slug(),
         "cwd": std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()),
     });
     let v = daemon_call_async("inbox", params).await?;
@@ -468,7 +468,7 @@ pub(super) async fn wait_for_mention(session: Option<String>, timeout: u64) -> R
     let params = serde_json::json!({
         "session": session,
         "env_session": std::env::var("TENEX_EDGE_SESSION").ok(),
-        "agent": std::env::var("TENEX_EDGE_AGENT").ok(),
+        "agent": agent_env_slug(),
         "cwd": std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()),
         "timeout": timeout,
     });
@@ -481,7 +481,9 @@ pub(super) async fn wait_for_mention(session: Option<String>, timeout: u64) -> R
             }
             println!("{}", format_envelope_json(r, now));
         }
-        println!("\n[tenex-edge] Run `tenex-edge wait-for-mention` with run_in_background=true to receive the next mention.");
+        println!(
+            "\n[tenex-edge] Run `tenex-edge wait-for-mention` with run_in_background=true to receive the next mention."
+        );
     }
     Ok(())
 }

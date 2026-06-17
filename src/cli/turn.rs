@@ -211,7 +211,7 @@ pub(super) fn turn_check(session: Option<String>, emit: EmitFormat) -> Result<()
     let params = serde_json::json!({
         "session": session,
         "env_session": std::env::var("TENEX_EDGE_SESSION").ok(),
-        "agent": std::env::var("TENEX_EDGE_AGENT").ok(),
+        "agent": agent_env_slug(),
         "cwd": std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()),
     });
     let v = crate::daemon::blocking::call("turn_check", params)?;
