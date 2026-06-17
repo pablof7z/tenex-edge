@@ -56,6 +56,7 @@ pub(crate) fn run_cli(home: &Home, args: &[&str]) -> std::process::Output {
         // Isolate from the invoking shell's tenex-edge env (a live claude/codex
         // shell exports these), so agent/session resolution is deterministic.
         .env_remove("TENEX_EDGE_AGENT")
+        .env_remove("TENEX_EDGE_AGENT_FALLBACK")
         .env_remove("TENEX_EDGE_SESSION")
         .env("TENEX_EDGE_HOME", home.dir.path())
         .env("TENEX_CONFIG", home.dir.path().join("config.json"))
@@ -73,6 +74,7 @@ pub(crate) fn run_cli_stdin(home: &Home, args: &[&str], stdin: &str) -> std::pro
     let mut child = std::process::Command::new(bin())
         .args(args)
         .env_remove("TENEX_EDGE_AGENT")
+        .env_remove("TENEX_EDGE_AGENT_FALLBACK")
         .env_remove("TENEX_EDGE_SESSION")
         .env("TENEX_EDGE_HOME", home.dir.path())
         .env("TENEX_CONFIG", home.dir.path().join("config.json"))

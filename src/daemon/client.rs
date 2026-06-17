@@ -66,23 +66,61 @@ impl Client {
     }
 
     /// One-shot request → single `ok` result (errors map to `Err`).
+    /// Silently drops any `item` progress frames emitted before the terminal frame.
     pub async fn call(
         &mut self,
         method: &str,
         params: serde_json::Value,
     ) -> Result<serde_json::Value> {
         let id = self.send(method, params).await?;
-        let resp = self
-            .read_frame()
-            .await?
-            .context("daemon closed the connection")?;
-        if resp.id != id {
-            bail!("response id mismatch: got {}, want {id}", resp.id);
+        loop {
+            let resp = self
+                .read_frame()
+                .await?
+                .context("daemon closed the connection")?;
+            if resp.id != id {
+                bail!("response id mismatch: got {}, want {id}", resp.id);
+            }
+            if resp.item.is_some() {
+                continue; // progress frame — wait for the terminal ok/error
+            }
+            if let Some(err) = resp.error {
+                bail!("daemon error [{}]: {}", err.code, err.message);
+            }
+            return resp.ok.context("daemon returned neither ok nor error");
         }
-        if let Some(err) = resp.error {
-            bail!("daemon error [{}]: {}", err.code, err.message);
+    }
+
+    /// One-shot request that may emit progress `item` frames before the terminal
+    /// `ok`/`error`. Used by slow startup hooks so the caller can show where the
+    /// daemon is spending time without corrupting stdout protocols.
+    pub async fn call_with_items<F>(
+        &mut self,
+        method: &str,
+        params: serde_json::Value,
+        mut on_item: F,
+    ) -> Result<serde_json::Value>
+    where
+        F: FnMut(serde_json::Value),
+    {
+        let id = self.send(method, params).await?;
+        loop {
+            let resp = self
+                .read_frame()
+                .await?
+                .context("daemon closed the connection")?;
+            if resp.id != id {
+                continue;
+            }
+            if let Some(item) = resp.item {
+                on_item(item);
+                continue;
+            }
+            if let Some(err) = resp.error {
+                bail!("daemon error [{}]: {}", err.code, err.message);
+            }
+            return resp.ok.context("daemon returned neither ok nor error");
         }
-        resp.ok.context("daemon returned neither ok nor error")
     }
 
     /// Streaming request: returns each `item` to `on_item` until the daemon ends
@@ -132,8 +170,9 @@ impl Client {
     // ── handshake / connect ──────────────────────────────────────────────
 
     async fn try_connect_handshake() -> Result<ConnectOutcome> {
-        let stream = UnixStream::connect(socket_path())
+        let stream = tokio::time::timeout(Duration::from_secs(2), UnixStream::connect(socket_path()))
             .await
+            .context("timed out connecting to daemon socket")?
             .context("connecting to daemon socket")?;
         let (rh, wh) = stream.into_split();
         let mut reader = BufReader::new(rh);
@@ -148,8 +187,9 @@ impl Client {
             },
         )
         .await?;
-        let welcome: Welcome = read_line(&mut reader)
-            .await?
+        let welcome: Welcome = tokio::time::timeout(Duration::from_secs(2), read_line(&mut reader))
+            .await
+            .context("timed out waiting for daemon welcome")??
             .context("daemon closed before welcome")?;
 
         if welcome.protocol == protocol_version() {

@@ -202,25 +202,7 @@ fn extract(content: Option<&Value>, role: &str) -> String {
                             parts.push(t.to_string());
                         }
                     }
-                    Some("tool_use") if role == "assistant" => {
-                        let name = b.get("name").and_then(|x| x.as_str()).unwrap_or("tool");
-                        let hint = b
-                            .get("input")
-                            .and_then(|i| {
-                                i.get("file_path")
-                                    .or_else(|| i.get("command"))
-                                    .or_else(|| i.get("pattern"))
-                                    .or_else(|| i.get("path"))
-                                    .and_then(|x| x.as_str())
-                            })
-                            .unwrap_or("");
-                        parts.push(
-                            format!("[uses {name} {}]", truncate(hint, 80))
-                                .trim()
-                                .to_string(),
-                        );
-                    }
-                    // tool_result and others are noise for "what is the agent doing".
+                    // tool_use, tool_result, and others are noise for distillation.
                     _ => {}
                 }
             }
@@ -274,7 +256,7 @@ mod tests {
             out.contains("Assistant: Looking at the login flow"),
             "got: {out}"
         );
-        assert!(out.contains("[uses Edit src/auth.rs]"), "got: {out}");
+        assert!(!out.contains("[uses Edit"), "tool_use should be stripped: {out}");
         assert!(
             !out.contains("tool_result"),
             "tool results should be skipped: {out}"
