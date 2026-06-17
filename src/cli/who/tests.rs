@@ -1,4 +1,4 @@
-use super::render::render_who_once;
+use super::render::{render_who_once, render_who_plain};
 use super::*;
 use crate::session::{Harness, PeerStatusObservation, SessionObservation};
 use crate::util::session_short_code;
@@ -395,6 +395,86 @@ fn who_all_projects_includes_project_in_agent_names() {
         "reviewer@other [session {}] (tower) - idle",
         session_short_code("remote-session")
     )));
+}
+
+#[test]
+fn agent_renderer_uses_markdown_sections_and_session_table() {
+    let snapshot = WhoSnapshot {
+        project: "proj".to_string(),
+        all: false,
+        now: 1_000,
+        rows: vec![WhoRow {
+            source: WhoSource::Peer,
+            fresh: true,
+            slug: "reviewer".to_string(),
+            project: "proj".to_string(),
+            status: "Review plan".to_string(),
+            activity: "checking patch | tests".to_string(),
+            active: true,
+            host: "tower".to_string(),
+            session_id: "remote-session".to_string(),
+            age_secs: Some(5),
+            rel_cwd: "worktree".to_string(),
+            remote: true,
+            attachable: false,
+            unread: 0,
+        }],
+        other_projects: vec![OtherProjectSummary {
+            project: "other".to_string(),
+            agent_count: 1,
+            agents: vec!["codex".to_string()],
+            about: Some("ignored in agent renderer".to_string()),
+        }],
+        spawnable: vec![SpawnableRow {
+            host: "laptop".to_string(),
+            slug: "codex".to_string(),
+            command: "codex".to_string(),
+        }],
+    };
+
+    let out = render_who_plain(&snapshot);
+    assert!(out.starts_with("# tenex-edge who\n\nProject: proj\n\n## Sessions\n"));
+    assert!(out.contains("| Agent | Session | Host | Title | Status |"));
+    assert!(out.contains(&format!(
+        "| reviewer | `{}` | tower, remote [worktree] | Review plan | checking patch \\| tests |",
+        session_short_code("remote-session")
+    )));
+    assert!(out.contains("## Agents (for new sessions)"));
+    assert!(out.contains("| codex | laptop | `codex` |"));
+    assert!(out.contains("## Other projects\n\n- other"));
+}
+
+#[test]
+fn turn_start_fabric_block_uses_agent_markdown_renderer() {
+    let store = Store::open_memory().unwrap();
+    let _id = register_local(
+        &store,
+        "coder",
+        "pk-coder",
+        "proj",
+        "laptop",
+        "",
+        "sid-coder",
+        1_000,
+    );
+    let mutex = std::sync::Mutex::new(store);
+    let mut blocks = Vec::new();
+
+    push_turn_fabric_block(
+        &mutex,
+        &mut blocks,
+        true,
+        0,
+        "proj",
+        1_000,
+        "laptop",
+        "sid-coder",
+    );
+
+    let block = blocks.join("\n\n");
+    assert!(block.contains("tenex-edge fabric — agents you can message"));
+    assert!(block.contains("# tenex-edge who"));
+    assert!(block.contains("| Agent | Session | Host | Title | Status |"));
 }
 
 /// The shared delta renderer classifies appeared / changed (agent finished

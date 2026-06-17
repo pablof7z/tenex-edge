@@ -27,7 +27,7 @@ fn who_snapshot_via_daemon(
 
 pub(super) fn who(project: Option<String>, all: bool, all_projects: bool) -> Result<()> {
     let snapshot = who_snapshot_via_daemon(&project, all, all_projects)?;
-    print!("{}", render::render_who_once(&snapshot));
+    print!("{}", render::render_who_for_stdout(&snapshot));
     Ok(())
 }
 
@@ -316,8 +316,13 @@ pub(super) fn push_turn_fabric_block(
         // Self-exclude the viewer's own session: rpc_turn_start opens this turn
         // (busy transition) BEFORE context assembly, so without this the session
         // would see its own just-started change echoed back as a delta.
-        let delta =
-            build_status_delta(&store, prev_turn_started_at, project, now, Some(self_session));
+        let delta = build_status_delta(
+            &store,
+            prev_turn_started_at,
+            project,
+            now,
+            Some(self_session),
+        );
         if !delta.is_empty() {
             blocks.push(format!(
                 "tenex-edge fabric — changes since your last turn:\n{}",
