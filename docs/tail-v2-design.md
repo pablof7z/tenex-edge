@@ -44,8 +44,10 @@ Line grammar: `<TS>  <cat>  <agent@project[sess]>  <verb/glyph> <detail>`
 - TS: wall-clock `HH:MM:SS` default; `--relative` for `12s ago`.
 - cat: fixed 5-char colored tag (msg=yellow, sync=cyan/red, turn=green,
   stat=magenta, join=green, leave=dim, sess=blue, proj=dim).
-- identity: `slug@project[sess]` (peers: `slug@host[sess]`); sess = 4-char
-  hash short-code (reuse `session_short_code`/`short_id` from util.rs).
+- identity: `slug@project[sess]` (peers: `slug@host[sess]`); sess = session
+  codename (NATO phonetic word + 4-digit number, e.g. `bravo4217`), produced by
+  `session_codename` in util.rs. The codename is a display/addressing
+  convenience (26×10000 = 260000 space, not collision-free at scale), never identity.
 - glyphs: `▶` started, `⏸` idle, `→` message, `✗`/failed.
   ASCII fallback via `--no-emoji` (`>`,`||`,`->`,`[x]`).
 - thread id `#xxxx` (4-char short of thread/root id); same thread = same code.

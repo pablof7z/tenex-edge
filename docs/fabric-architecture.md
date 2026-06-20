@@ -724,7 +724,7 @@ Steps:
    - a compatibility projection over `messages` + `message_recipients`, or
    - a legacy table dual-written until turn injection is cut over.
 
-Done when: `inbox`, `wait-for-mention`, and turn-start context can render from
+Done when: `inbox` and turn-start context can render from
 canonical message rows without losing the old delivered/seen semantics.
 
 ### Phase 7 - thread materialization and APIs

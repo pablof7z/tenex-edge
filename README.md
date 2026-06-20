@@ -89,7 +89,6 @@ surface.
 | `who [--project <slug>] [--live]` | List visible peers (with session-id prefixes); `--live` opens a refreshing terminal board. |
 | `tail [--project <slug>]` | Stream all fabric activity, colorized. |
 | `inbox --session <id>` | Drain pending mentions (opencode injection path + manual "check my messages"). |
-| `wait-for-mention [--session <id>]` | Block until a mention arrives, print it, and exit (run in the background to be woken on a mention). |
 
 ## Host integrations (Claude Code · Codex · OpenCode)
 

@@ -211,25 +211,16 @@ Walking each verb's true I/O shape:
 | `who --live`       | client-side poll     | client calls `who` each refresh; renders terminal    |
 | `inbox`            | one-shot             | drain inbox                                          |
 | `doctor`           | one-shot             | daemon does the relay round-trip, returns result     |
-| `wait-for-mention` | **long-poll**        | daemon holds the request open until a mention or T/O |
 | `tail`             | **stream**           | daemon pushes decoded fabric events until disconnect |
 
-Two verbs force the protocol beyond simple req/resp:
-
-- **`wait-for-mention`** — long-poll: the daemon registers a per-session waiter
-  and parks the request; when a mention for that session lands (routed by the
-  shared relay subscription) or the timeout fires, it sends the single response.
-  Same single-frame framing, just delayed. This MUST keep working — the Claude
-  channel adapter shells it with `run_in_background=true`.
-- **`tail`** — true server-push: the client cannot open its own relay
+`tail` forces the protocol beyond simple req/resp: the client cannot open its own relay
   subscription anymore (the daemon owns the single relay connection), so the
   daemon must stream decoded events to the client as they arrive, indefinitely,
   until the client disconnects (Ctrl-C). This is what makes the `item`*/`end`
   streaming shape mandatory rather than optional.
 
 Client disconnect (EOF / broken pipe on the UDS) is the universal cancel signal:
-it drops a `tail` subscription forwarder and unparks a `wait-for-mention`
-waiter.
+it drops a `tail` subscription forwarder.
 
 ## 6. RPC surface (every method)
 
@@ -249,8 +240,12 @@ Spawns an in-daemon `SessionTask` (publishes profile, presence, subscribes,
 distills, routes mentions — today's `runtime::run_session`).
 ```jsonc
 params: {"agent": "coder", "session_id": "te-…"|null, "cwd": "/path", "watch_pid": 12345|null}
-result: {"session_id": "te-…"}   // printed verbatim to stdout, exactly as today
+result: {"session_id": "te-…", "codename": "bravo4217"}   // session_id printed verbatim to stdout
 ```
+The `codename` is the human-friendly session label (NATO phonetic word + 4-digit
+number, e.g. `bravo4217`, `echo0163`), produced by `session_codename` in util.rs. It
+is a display/addressing convenience only — the space is 26×10000 = 260000 codenames,
+so it is not collision-free at scale and is never used as identity.
 The provider opens the project's NIP-29 group and adds the session agent as a
 relay member before the engine publishes presence. There is no local agent
 allow/block file in the NIP-29 path.
@@ -266,13 +261,28 @@ produced client-side to match today's output.
 
 ### `send_message`
 ```jsonc
-params: {"recipient": "slug|slug@project|hex|session-prefix", "message": "…",
-         "session": "te-…"|null, "cwd": "/path", "env_session": "…"|null}
+params: {"recipient": "…", "mode": "session"|"new_session", "project": "…"|null,
+         "message": "…", "session": "te-…"|null, "cwd": "/path", "env_session": "…"|null}
 result: {"to_pubkey": "hex", "target_session": "te-…"|null}
 ```
-Daemon resolves recipient (today's `resolve_recipient`) and publishes the
-Mention on the **shared** relay connection. Client prints
-`mentioned <short> (session <short>)` / `mentioned <short>` to match today.
+Two addressing modes, set by the CLI's mutually-exclusive flags:
+- **`session`** (default; CLI `--to-session <id|codename>`): `recipient` is an
+  existing session. Resolved via `resolve_recipient` (accepts session id/prefix
+  and codenames such as `bravo4217`). Never spawns. The RPC also still accepts a
+  raw pubkey/`slug@project` here for untargeted delivery — the path remote inbound
+  mentions exercise — though the CLI never emits those forms.
+- **`new_session`** (CLI `--to-new-session <agent>`): `recipient` is an agent
+  slug. The daemon mints that agent's stable identity (works even if it has never
+  run here), spawns a fresh harness window in `project` (or the sender's project),
+  and pre-loads this message into the new session's inbox via the pending-spawn
+  mention. The spawn is awaited, so an unknown/unspawnable agent errors back to
+  the caller. Same-machine fan-out to the agent's *other* sessions is skipped —
+  the message belongs to the new session only.
+
+The daemon publishes the Mention on the **shared** relay connection. Client prints
+`mentioned <codename> (session <codename>)` / `mentioned <codename>` to match
+today. (`inbox reply --id <message-id>` remains its own RPC/subcommand for
+replying upstream to a received message.)
 
 ### `who`
 ```jsonc
@@ -336,16 +346,6 @@ event with the codec, renders with the existing `render()` and streams the line.
 The client just prints each `item.line`. (The daemon may need a project-scoped
 ephemeral subscription distinct from its trusted-author subscription; it can add
 a tail-scoped REQ for the duration of the connection.)
-
-### `wait_for_mention` (long-poll)
-```jsonc
-params: {"session": "te-…"|null, "timeout": u64, "cwd": "/path", "env_session": "…"|null}
-result: {"rows": [{from_slug, project, body, mention_event_id}, …]}   // empty ⇒ timed out
-```
-Daemon self-fetches, then either drains immediately (if rows already present) or
-parks a waiter until a mention for the session is routed or `timeout` elapses.
-Client prints the `[mention from …]` lines + the "Run wait-for-mention again"
-hint, exactly as today. **This is the verb the channel adapter depends on.**
 
 ### Control / handshake (not user verbs)
 - `hello` / `welcome` (§4)
@@ -471,12 +471,12 @@ hence reconciliation.)
 
 ## 8d. Clientful-but-sessionless connections vs idle-exit (§3)
 
-`tail`, `who --live`, and `wait-for-mention` hold a client connection open
+`tail` and `who --live` hold a client connection open
 without owning a session. Decision: **an open client connection cancels the
 idle-grace timer** (the daemon counts "live sessions + open client connections"
 for liveness). So a lone `tail` keeps the daemon up; when it disconnects and no
-sessions remain, the grace timer starts. This avoids `tail`/`wait-for-mention`
-being silently killed by an idle-exit mid-stream.
+sessions remain, the grace timer starts. This avoids live readers being silently
+killed by an idle-exit mid-stream.
 
 ## 8e. Working directory in presence/status + the `who` format  (IMPLEMENTED)
 
