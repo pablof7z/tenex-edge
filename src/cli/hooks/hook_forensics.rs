@@ -21,7 +21,7 @@ impl HookCallLog {
         parse_error: Option<&str>,
         parsed_json: Option<&Value>,
     ) -> Self {
-        let path = log_path();
+        let path = log_path(parsed_json);
         let call_id = call_id();
         let payload = serde_json::json!({
             "schema": LOG_SCHEMA,
@@ -79,7 +79,7 @@ impl HookCallLog {
     }
 }
 
-fn log_path() -> Option<PathBuf> {
+fn log_path(parsed_json: Option<&Value>) -> Option<PathBuf> {
     if let Ok(raw) = std::env::var("TENEX_EDGE_HOOK_CALL_LOG") {
         let trimmed = raw.trim();
         if matches!(trimmed, "" | "0" | "false" | "off" | "none") {
@@ -87,7 +87,17 @@ fn log_path() -> Option<PathBuf> {
         }
         return Some(PathBuf::from(trimmed));
     }
-    Some(crate::config::edge_home().join("hook-calls.jsonl"))
+    let session_id = parsed_json.and_then(|v| {
+        ["session_id", "sessionId", "conversation_id", "conversationId", "thread_id", "threadId"]
+            .iter()
+            .find_map(|k| v[*k].as_str())
+            .filter(|s| !s.is_empty())
+    });
+    let dir = match session_id {
+        Some(id) => crate::config::edge_home().join("sessions").join(id),
+        None => crate::config::edge_home().join("sessions").join("_unscoped"),
+    };
+    Some(dir.join("hook-calls.jsonl"))
 }
 
 fn append_json(path: Option<&PathBuf>, payload: &Value) {
