@@ -133,6 +133,18 @@ impl DaemonState {
     fn live_session_count(&self) -> usize {
         self.sessions.lock().unwrap().len()
     }
+    /// Stage 3: return all currently-live per-session derived pubkeys.
+    /// These are the Nostr pubkeys that session-signed events carry as their
+    /// author; included in subscriptions and the admission gate alongside the
+    /// durable agent pubkeys from `hosted_pubkeys()`.
+    fn live_session_pubkeys(&self) -> Vec<String> {
+        self.session_keys
+            .lock()
+            .unwrap()
+            .values()
+            .map(|k| k.public_key().to_hex())
+            .collect()
+    }
 }
 
 // ── entry point ──────────────────────────────────────────────────────────────
@@ -727,6 +739,19 @@ async fn rpc_session_start(
                 harness.as_str(),
                 anchor,
             );
+            // Stage 3: persist the session pubkey to the DB so the routing and
+            // slug-resolution subsystems can look it up without the in-memory map.
+            let session_pubkey = session_key.public_key().to_hex();
+            state.with_store(|s| {
+                s.upsert_session_pubkey(
+                    &session_pubkey,
+                    &session_id,
+                    &id.pubkey_hex(),
+                    &p.agent,
+                    now,
+                )
+                .ok();
+            });
             state
                 .session_keys
                 .lock()
@@ -912,6 +937,7 @@ async fn rpc_session_start(
         &project,
         &rel_cwd,
         p.watch_pid,
+        state.keys_for_session(&session_id),
     );
     if let Some(prog) = &progress {
         prog.emit("engine", "starting session engine and initial publishers");
@@ -1068,6 +1094,8 @@ fn rpc_session_end(
             // dead. The final publish carries a fresh expiration and ages off.
             s.end_session(&rec.session_id, now_secs()).ok();
             s.mark_session_dead(&rec.session_id).ok();
+            // Stage 3: clear the DB routing row for this session's derived pubkey.
+            s.remove_session_pubkeys_for_session(&rec.session_id).ok();
         });
         state.status_outbox_notify.notify_waiters();
         state.emit_tail(TailEvent::Sess {
@@ -1183,8 +1211,14 @@ async fn rpc_send_message(
         meta: meta.clone(),
     };
 
+    // Stage 3: sign with the session key so the wire event carries the session
+    // pubkey as the author. Falls back to the durable key when no session key
+    // was derived (operator nsec absent).
+    let signing_keys = state
+        .keys_for_session(&rec.session_id)
+        .unwrap_or_else(|| id.keys.clone());
     // Publish + canonical dual-write. On error the error propagates unchanged.
-    let receipt = state.provider.send(intent, &id.keys).await?;
+    let receipt = state.provider.send(intent, &signing_keys).await?;
 
     // LOCAL DELIVERY (the same-machine fix). When the recipient is an agent this
     // daemon hosts (e.g. a SIBLING claude session sharing the sender's pubkey),
@@ -1344,9 +1378,13 @@ async fn rpc_chat_write(
         mentioned_session: mentioned_session.clone().map(SessionId::from),
         mentioned_pubkey: mentioned_pubkey.clone(),
     };
+    // Stage 3: sign chat events with the session key.
+    let chat_signing_keys = state
+        .keys_for_session(&rec.session_id)
+        .unwrap_or_else(|| id.keys.clone());
     let event_id = state
         .provider
-        .publish_checked(&DomainEvent::ChatMessage(chat), &id.keys)
+        .publish_checked(&DomainEvent::ChatMessage(chat), &chat_signing_keys)
         .await?;
     let event_id = event_id.to_hex();
     let created_at = now_secs();
@@ -1532,9 +1570,14 @@ async fn rpc_propose(
     // isn't a member of the project group) used to resolve Ok and report a false
     // "published" — silent data loss. `publish_checked` fails on relay rejection
     // so the CLI exits nonzero with the relay's stated reason.
+    // Stage 3: sign with the session key when a live session is present.
+    let proposal_signing_keys = session_rec
+        .as_ref()
+        .and_then(|r| state.keys_for_session(&r.session_id))
+        .unwrap_or_else(|| id.keys.clone());
     let event_id = state
         .provider
-        .publish_checked(&ev, &id.keys)
+        .publish_checked(&ev, &proposal_signing_keys)
         .await
         .context("publishing proposal")?;
     let eid_hex = event_id.to_hex();
@@ -1919,7 +1962,12 @@ async fn rpc_turn_end(
                     if let Ok(id) =
                         crate::identity::load_or_create(&edge, &rec.agent_slug, now_secs())
                     {
-                        state.provider.publish(&ev, &id.keys).await.ok();
+                        // Stage 3: sign TurnReply with the session key so the
+                        // wire event carries the session pubkey as its author.
+                        let turn_signing_keys = state
+                            .keys_for_session(&session)
+                            .unwrap_or_else(|| id.keys.clone());
+                        state.provider.publish(&ev, &turn_signing_keys).await.ok();
                     }
                 }
             }
@@ -2403,7 +2451,11 @@ async fn rpc_inbox_reply(
         thread_id,
         meta: meta.clone(),
     };
-    let receipt = state.provider.send(intent, &id.keys).await?;
+    // Stage 3: sign inbox replies with the session key.
+    let reply_signing_keys = state
+        .keys_for_session(&rec.session_id)
+        .unwrap_or_else(|| id.keys.clone());
+    let receipt = state.provider.send(intent, &reply_signing_keys).await?;
 
     // Tail: outbound msg + sync, mirroring rpc_send_message.
     let thread_short = pubkey_short(&receipt.thread_id);
@@ -2422,10 +2474,13 @@ async fn rpc_inbox_reply(
         thread: Some(thread_short.clone()),
         body: p.message.chars().take(200).collect(),
     });
-    let is_local = state
-        .hosted_pubkeys()
-        .iter()
-        .any(|h| h == &original.from_pubkey);
+    // Stage 3: `original.from_pubkey` may be a session pubkey when the original
+    // message was session-signed. Check both durable and session pubkeys.
+    let is_local = state.hosted_pubkeys().iter().any(|h| h == &original.from_pubkey)
+        || state
+            .live_session_pubkeys()
+            .iter()
+            .any(|h| h == &original.from_pubkey);
     state.emit_tail(TailEvent::Sync {
         ts: now_secs(),
         project: original.project.clone(),
@@ -3075,7 +3130,17 @@ fn spawn_demux(state: Arc<DaemonState>) {
 /// from the domain event using the in-memory tracking maps.
 fn handle_incoming(state: &Arc<DaemonState>, event: &Event) {
     let env = crate::fabric::RawEnvelope::Nostr(event.clone());
-    let hosted = state.hosted_pubkeys();
+    // Stage 3: expand the hosted set to include live per-session derived pubkeys.
+    // This makes `is_self` (Profile/Status self-skip), the routing gate
+    // (`hosted.contains(&m.to_pubkey)`), and the sender admission check
+    // (`hosted.contains(&sender_pk)`) all recognize session-signed events.
+    let hosted: Vec<String> = {
+        let mut h = state.hosted_pubkeys();
+        h.extend(state.live_session_pubkeys());
+        h.sort_unstable();
+        h.dedup();
+        h
+    };
     let owners = state.owners.clone();
     let now = now_secs();
     // ALWAYS materialize: store writes are idempotent, and re-deliveries are
@@ -3416,8 +3481,13 @@ fn spawn_status_heartbeat_publisher(state: Arc<DaemonState>) {
             let snaps =
                 state.with_store(|s| s.all_live_local_snapshots(fresh_since).unwrap_or_default());
             for snap in snaps {
-                // Only locally-hosted agents have signing keys.
-                let keys = match state.keys_for(&snap.agent_pubkey) {
+                // Stage 3: prefer the derived per-session key so the heartbeat
+                // status event is signed by the session pubkey. Fall back to
+                // the durable agent key when no session key is present.
+                let keys = match state
+                    .keys_for_session(snap.session_id.as_str())
+                    .or_else(|| state.keys_for(&snap.agent_pubkey))
+                {
                     Some(k) => k,
                     None => continue,
                 };
@@ -3448,7 +3518,12 @@ fn spawn_status_outbox_drainer(state: Arc<DaemonState>) {
                     let now = now_secs();
                     // Only locally-hosted agents have signing keys; a row for an
                     // unhosted agent can never publish — record and skip it.
-                    let keys = match state.keys_for(&item.snapshot.agent_pubkey) {
+                    // Stage 3: prefer the derived per-session key so the status
+                    // event is signed by the session pubkey.
+                    let keys = match state
+                        .keys_for_session(item.snapshot.session_id.as_str())
+                        .or_else(|| state.keys_for(&item.snapshot.agent_pubkey))
+                    {
                         Some(k) => k,
                         None => {
                             state.with_store(|s| {
@@ -3557,6 +3632,11 @@ async fn spawn_session(state: &Arc<DaemonState>, params: EngineParams) -> Result
                 });
             }
         }
+        // Stage 3: clear the DB routing row regardless of whether the in-memory
+        // key was still present (graceful end clears it; self-exit may too).
+        st.with_store(|s| {
+            s.remove_session_pubkeys_for_session(&sid).ok();
+        });
         st.sessions.lock().unwrap().remove(&sid);
         prune_hosted(&st);
         st.liveness_changed.notify_waiters();
@@ -3598,16 +3678,27 @@ async fn ensure_subscription(state: &Arc<DaemonState>, project: &str) -> Result<
 
 /// Rebuild and apply the union subscription across all hosted agents/projects.
 async fn resubscribe(state: &Arc<DaemonState>) -> Result<()> {
-    let mut authors: Vec<String> = state.hosted_pubkeys();
-    authors.sort();
+    let hosted = state.hosted_pubkeys();
+    let session_pks = state.live_session_pubkeys();
+
+    // Stage 3: authors for kind:0 / kind:30315 includes both durable agent
+    // keys and active session keys so peers receive session-signed presence.
+    let mut authors: Vec<String> = hosted.clone();
+    authors.extend(session_pks.clone());
+    authors.sort_unstable();
     authors.dedup();
 
     let projects = state.subscribed_projects.lock().unwrap().clone();
     let owners = state.owners.clone();
-    let hosted = state.hosted_pubkeys();
+
+    // All pubkeys that should receive p-tagged mentions: durable + session.
+    let mut all_me: Vec<String> = hosted.clone();
+    all_me.extend(session_pks);
+    all_me.sort_unstable();
+    all_me.dedup();
 
     for project in &projects {
-        if hosted.is_empty() {
+        if all_me.is_empty() {
             let scope = crate::fabric::Scope {
                 authors: authors.clone(),
                 project: Some(project.clone()),
@@ -3617,7 +3708,7 @@ async fn resubscribe(state: &Arc<DaemonState>) -> Result<()> {
             };
             state.provider.subscribe(scope).await?;
         } else {
-            for me in &hosted {
+            for me in &all_me {
                 let scope = crate::fabric::Scope {
                     authors: authors.clone(),
                     project: Some(project.clone()),
@@ -3651,6 +3742,8 @@ async fn reconcile_sessions(state: &Arc<DaemonState>) {
             state.with_store(|s| {
                 s.end_session(&session_id, now).ok();
                 s.mark_session_dead(&session_id).ok();
+                // Stage 3: clear DB routing row for the dead session's derived pubkey.
+                s.remove_session_pubkeys_for_session(&session_id).ok();
             });
             // Stage 2 / crash-GC: remove the session pubkey from the NIP-29 group.
             //
@@ -3730,6 +3823,15 @@ async fn reconcile_sessions(state: &Arc<DaemonState>) {
                 state.with_store(|s| {
                     s.upsert_group_member(&snap.project, &session_pubkey, "member", now)
                         .ok();
+                    // Stage 3: re-populate the DB routing row for the revived session.
+                    s.upsert_session_pubkey(
+                        &session_pubkey,
+                        &session_id,
+                        &id.pubkey_hex(),
+                        &snap.agent_slug,
+                        now,
+                    )
+                    .ok();
                 });
             }
         }
@@ -3750,6 +3852,7 @@ async fn reconcile_sessions(state: &Arc<DaemonState>) {
             &snap.project,
             &snap.rel_cwd,
             watch_pid,
+            state.keys_for_session(&session_id),
         );
         let _ = spawn_session(state, ep).await;
     }
@@ -3765,11 +3868,14 @@ fn engine_params_for(
     project: &str,
     rel_cwd: &str,
     watch_pid: Option<i32>,
+    // Stage 3: derived per-session keypair (None when operator nsec is absent).
+    session_keys: Option<Keys>,
 ) -> EngineParams {
     EngineParams {
         agent_slug: agent_slug.to_string(),
         agent_pubkey: id.pubkey_hex(),
         keys: id.keys.clone(),
+        session_keys,
         project: project.to_string(),
         session_id: session_id.to_string(),
         host: cfg.host.clone(),

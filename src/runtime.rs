@@ -30,6 +30,12 @@ pub struct EngineParams {
     pub agent_slug: String,
     pub agent_pubkey: String,
     pub keys: nostr_sdk::prelude::Keys,
+    /// Stage 3 (Issue #2): derived per-session keypair. When `Some`, live
+    /// events emitted by this session (kind:0 profile, kind:30315 status,
+    /// kind:1 messages) are signed with this key so the session pubkey is the
+    /// on-wire author identity. Falls back to `keys` (durable agent key) when
+    /// `None` (operator nsec absent / derivation skipped).
+    pub session_keys: Option<nostr_sdk::prelude::Keys>,
     pub project: String,
     pub session_id: String,
     pub host: String,
@@ -121,6 +127,27 @@ pub async fn run_session_in_daemon(
         owners: owners.clone(),
     }))
     .await;
+
+    // Stage 3 (Issue #2): also publish a session-keyed kind:0 so peers can
+    // resolve the session pubkey to a display name ("<codename> (<agent_slug>)")
+    // via the profiles table. Signed with the session key so the event pubkey
+    // equals the session pubkey. The durable kind:0 above is NOT removed —
+    // both identities coexist, with the session key active for live events.
+    if let Some(ref sk) = p.session_keys {
+        let codename = crate::util::session_codename(&p.session_id);
+        let session_display = format!("{codename} ({})", p.agent_slug);
+        let session_aref = AgentRef::new(sk.public_key().to_hex(), session_display);
+        let _ = provider
+            .publish(
+                &DomainEvent::Profile(Profile {
+                    agent: session_aref,
+                    host: p.host.clone(),
+                    owners: owners.clone(),
+                }),
+                sk,
+            )
+            .await;
+    }
 
     // This loop is a STATELESS driver: it holds NO cur_title/cur_activity and
     // never builds a `Status` nor writes any status table. The canonical
@@ -370,7 +397,15 @@ pub fn route_mention_into_with_id(
     // if another sibling already marked the event seen. Idempotency for the
     // targeted case is carried by the inbox PK `(mention_event_id, target_session)`
     // (`enqueue_mention` is INSERT OR IGNORE; delivered rows are never deleted).
-    if m.target_session.is_none() && store.is_mention_seen(me, eid).unwrap_or(false) {
+    //
+    // Stage 3: when `me` is a session pubkey (not a durable agent pubkey), the
+    // mention is already targeted to a specific session — skip per-agent dedup.
+    // Idempotency is carried by the inbox PK.
+    let is_session_pubkey_route = store.session_pubkey_info(me).is_some();
+    if !is_session_pubkey_route
+        && m.target_session.is_none()
+        && store.is_mention_seen(me, eid).unwrap_or(false)
+    {
         return false;
     }
     let alive: Vec<String> = store
@@ -380,7 +415,32 @@ pub fn route_mention_into_with_id(
         .filter(|s| s.agent_pubkey == me && s.project == m.project)
         .map(|s| s.session_id)
         .collect();
-    let targets = compute_targets(m.target_session.as_ref().map(|s| s.as_str()), &alive);
+
+    // Stage 3: if no alive sessions found by durable agent pubkey AND `me`
+    // resolves as a session pubkey, route directly to the owning session.
+    // This bypasses the fan-out (`compute_targets`) — the session pubkey is a
+    // unique routing handle for exactly one session.
+    let targets: Vec<String> = if alive.is_empty() && is_session_pubkey_route {
+        if let Some((session_id, _agent_pubkey, _slug)) = store.session_pubkey_info(me) {
+            // Deliver only if the target session is still alive in the
+            // right project. A stale DB row (session ended while the
+            // mention was in-flight) simply drops the message.
+            let is_alive = store
+                .list_alive_sessions()
+                .unwrap_or_default()
+                .iter()
+                .any(|s| s.session_id == session_id && s.project == m.project);
+            if is_alive {
+                vec![session_id]
+            } else {
+                return false;
+            }
+        } else {
+            return false;
+        }
+    } else {
+        compute_targets(m.target_session.as_ref().map(|s| s.as_str()), &alive)
+    };
     let mut routed = false;
     for t in targets {
         let newly = store

@@ -498,6 +498,24 @@ CREATE TABLE IF NOT EXISTS project_paths (
     abs_path   TEXT NOT NULL,
     updated_at INTEGER NOT NULL
 );
+-- Stage 3 (Issue #2): derived per-session Nostr pubkeys. Maps the pubkey that
+-- results from `identity::derive_session_keys` back to the owning session.
+-- Populated on session_start; cleared on session_end / engine self-exit /
+-- crash-GC. Used by two subsystems:
+--   1. Routing: a mention p-tagged to a session pubkey resolves to the owning
+--      session via `session_pubkey_info` in `route_mention_into_with_id`.
+--   2. Slug resolution: `resolve_slug_for_pubkey(session_pubkey)` fabricates
+--      "<codename> (<agent_slug>)" from this table so inbound session-signed
+--      events render a sensible sender name without a round-trip to the relay.
+CREATE TABLE IF NOT EXISTS session_pubkeys (
+    session_pubkey  TEXT PRIMARY KEY,
+    session_id      TEXT NOT NULL,
+    agent_pubkey    TEXT NOT NULL,
+    agent_slug      TEXT NOT NULL DEFAULT '',
+    created_at      INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_session_pubkeys_session
+    ON session_pubkeys(session_id);
 "#;
 
 impl Store {
@@ -1034,15 +1052,23 @@ impl Store {
         ) {
             return Ok(Some(slug));
         }
-        // Fall back to profiles table.
-        Ok(self
-            .conn
-            .query_row(
-                "SELECT slug FROM profiles WHERE pubkey=?1 LIMIT 1",
-                params![pubkey],
-                |r| r.get::<_, String>(0),
-            )
-            .ok())
+        // Fall back to profiles table (populated by kind:0 events from peers).
+        if let Ok(slug) = self.conn.query_row(
+            "SELECT slug FROM profiles WHERE pubkey=?1 LIMIT 1",
+            params![pubkey],
+            |r| r.get::<_, String>(0),
+        ) {
+            return Ok(Some(slug));
+        }
+        // Stage 3: check if the pubkey is a per-session derived key. Local
+        // sessions skip profile materialization (is_self gate), so the profiles
+        // table won't have an entry. Fabricate "<codename> (<agent_slug>)"
+        // matching the session kind:0 we publish with the session key.
+        if let Some((session_id, _agent_pubkey, agent_slug)) = self.session_pubkey_info(pubkey) {
+            let codename = crate::util::session_codename(&session_id);
+            return Ok(Some(format!("{codename} ({agent_slug})")));
+        }
+        Ok(None)
     }
 
     pub fn resolve_chat_host(
@@ -2242,6 +2268,56 @@ impl Store {
             )?;
         }
         Ok(())
+    }
+
+    // ── session pubkeys (Stage 3 / Issue #2) ────────────────────────────────
+
+    /// Record the derived per-session pubkey and its owning session.
+    /// Called on session_start immediately after `derive_session_keys`.
+    pub fn upsert_session_pubkey(
+        &self,
+        session_pubkey: &str,
+        session_id: &str,
+        agent_pubkey: &str,
+        agent_slug: &str,
+        created_at: u64,
+    ) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO session_pubkeys (session_pubkey, session_id, agent_pubkey, agent_slug, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(session_pubkey) DO UPDATE SET session_id=?2, agent_pubkey=?3, agent_slug=?4",
+            params![session_pubkey, session_id, agent_pubkey, agent_slug, created_at],
+        )?;
+        Ok(())
+    }
+
+    /// Remove all session pubkey rows for a session.
+    /// Called on session_end / engine self-exit / crash-GC.
+    pub fn remove_session_pubkeys_for_session(&self, session_id: &str) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM session_pubkeys WHERE session_id=?1",
+            params![session_id],
+        )?;
+        Ok(())
+    }
+
+    /// Resolve a session pubkey to its (session_id, agent_pubkey, agent_slug).
+    /// Returns `None` when the pubkey is not a known session pubkey.
+    /// Used by routing (`route_mention_into_with_id`) and slug resolution.
+    pub fn session_pubkey_info(&self, session_pubkey: &str) -> Option<(String, String, String)> {
+        self.conn
+            .query_row(
+                "SELECT session_id, agent_pubkey, agent_slug FROM session_pubkeys WHERE session_pubkey=?1",
+                params![session_pubkey],
+                |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .ok()
     }
 
     pub fn is_mention_seen(&self, agent_pubkey: &str, event_id: &str) -> Result<bool> {
