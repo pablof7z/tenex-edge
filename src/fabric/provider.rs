@@ -523,6 +523,55 @@ impl Kind1Nip29Provider {
         }
     }
 
+    // ── session member management (Stage 2 / Issue #2) ───────────────────────
+
+    /// Parse the operator signing key from `user_nsec`. Returns `None` when
+    /// the nsec is absent or malformed (same skip-if-unset pattern as
+    /// `open_project`).
+    fn parse_user_keys(&self) -> Option<nostr_sdk::prelude::Keys> {
+        self.user_nsec
+            .as_ref()
+            .and_then(|n| nostr_sdk::prelude::Keys::parse(n).ok())
+    }
+
+    /// Admin-add `pubkey_hex` to `project` as a plain member (not admin).
+    ///
+    /// Best-effort: returns `true` when the relay accepted the 9000 event or
+    /// treated it as a benign duplicate ("already exists"). Returns `false`
+    /// when `user_nsec` is absent, malformed, or the relay rejected the event.
+    pub async fn nip29_add_member(&self, project: &str, pubkey_hex: &str) -> bool {
+        let Some(user_keys) = self.parse_user_keys() else {
+            return false;
+        };
+        match crate::fabric::nip29::lifecycle::group_put_user(project, pubkey_hex) {
+            Ok(b) => {
+                self.publish_group_management(b, &user_keys, "9000 put-user (session)")
+                    .await
+            }
+            Err(_) => false,
+        }
+    }
+
+    /// Admin-remove `pubkey_hex` from `project`.
+    ///
+    /// Best-effort: returns `true` when the relay accepted the 9001 event or
+    /// treated it as benign. Returns `false` when `user_nsec` is absent /
+    /// malformed or the relay rejected the event. Callers MUST mirror into the
+    /// `group_members` cache regardless, since relay rejection of a remove for
+    /// a non-member is benign (idempotent).
+    pub async fn nip29_remove_member(&self, project: &str, pubkey_hex: &str) -> bool {
+        let Some(user_keys) = self.parse_user_keys() else {
+            return false;
+        };
+        match crate::fabric::nip29::lifecycle::group_remove_user(project, pubkey_hex) {
+            Ok(b) => {
+                self.publish_group_management(b, &user_keys, "9001 remove-user (session)")
+                    .await
+            }
+            Err(_) => false,
+        }
+    }
+
     // ── subscribe ─────────────────────────────────────────────────────────────
 
     /// Forward a `Scope` subscription to the underlying delivery layer.

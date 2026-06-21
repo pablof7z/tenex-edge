@@ -98,6 +98,13 @@ pub struct DaemonState {
     last_status: Mutex<HashMap<String, (String, bool)>>,
     /// Wakes the status-outbox drainer the instant a transition enqueues a publish.
     status_outbox_notify: Notify,
+    /// Per-session derived keypairs (Stage 2 / Issue #2). Keyed by canonical
+    /// session id; populated in `rpc_session_start`, removed on graceful end
+    /// (`rpc_session_end`) or engine self-exit (`spawn_session` cleanup) or
+    /// crash-GC (`reconcile_sessions`). Re-derivable from stored aliases so
+    /// persistence is NOT required, but the key must be resident for the
+    /// session lifetime so Stage 3 can sign with it.
+    session_keys: Mutex<HashMap<String, Keys>>,
 }
 
 impl DaemonState {
@@ -114,6 +121,14 @@ impl DaemonState {
             .unwrap()
             .get(pubkey)
             .map(|h| h.keys.clone())
+    }
+    /// Retrieve the derived per-session keypair by canonical session id.
+    fn keys_for_session(&self, session_id: &str) -> Option<Keys> {
+        self.session_keys
+            .lock()
+            .unwrap()
+            .get(session_id)
+            .cloned()
     }
     fn live_session_count(&self) -> usize {
         self.sessions.lock().unwrap().len()
@@ -191,6 +206,7 @@ pub async fn run() -> Result<()> {
         seen_profiles: Mutex::new(std::collections::HashSet::new()),
         last_status: Mutex::new(HashMap::new()),
         status_outbox_notify: Notify::new(),
+        session_keys: Mutex::new(HashMap::new()),
     });
 
     // Idempotent read-model backfill: populate canonical `projects` + `membership`
@@ -694,6 +710,31 @@ async fn rpc_session_start(
     // The registration enqueued a kind:30315 publish — nudge the drainer.
     state.status_outbox_notify.notify_waiters();
 
+    // Derive the per-session keypair (Stage 2 / Issue #2).
+    //
+    // Anchor selection (locked decision): harness_session_id when the harness
+    // supplied one (claude-code / codex); canonical session_id otherwise
+    // (opencode / unknown). IKM is the operator nsec; skip derivation if unset
+    // (matches open_project's best-effort pattern). HKDF is deterministic so
+    // re-entering this path (idempotent re-start) overwrites with the same key.
+    if let Some(ref nsec) = state.cfg.user_nsec.clone() {
+        if let Ok(op_keys) = nostr_sdk::prelude::Keys::parse(nsec) {
+            let anchor: &str = harness_session_id.as_deref().unwrap_or(&session_id);
+            let session_key = identity::derive_session_keys(
+                op_keys.secret_key(),
+                &project,
+                &p.agent,
+                harness.as_str(),
+                anchor,
+            );
+            state
+                .session_keys
+                .lock()
+                .unwrap()
+                .insert(session_id.clone(), session_key);
+        }
+    }
+
     // The resume token survives the session going dead so a later `tmux resume`
     // can reconstitute the harness: opencode's `ses_*`, else claude/codex native id.
     let resume_token: Option<String> = resume_id.clone().or_else(|| harness_session_id.clone());
@@ -816,6 +857,31 @@ async fn rpc_session_start(
             .open_project(&project, &id.pubkey_hex())
             .await;
     }
+    // Admin-add the derived session pubkey as a plain member of the NIP-29 group
+    // (Stage 2 / Issue #2). Best-effort: never block session start. Runs AFTER
+    // open_project so the group is guaranteed to exist before we issue 9000.
+    if let Some(session_key) = state.keys_for_session(&session_id) {
+        let session_pubkey = session_key.public_key().to_hex();
+        let added = state
+            .provider
+            .nip29_add_member(&project, &session_pubkey)
+            .await;
+        if added {
+            state.with_store(|s| {
+                s.upsert_group_member(&project, &session_pubkey, "member", now_secs())
+                    .ok();
+            });
+        }
+        if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
+            eprintln!(
+                "[daemon] session {} pubkey {} member-add: {}",
+                crate::util::session_codename(&session_id),
+                crate::util::pubkey_short(&session_pubkey),
+                if added { "accepted" } else { "skipped/failed (best-effort)" },
+            );
+        }
+    }
+
     // Keep the relay-authored group state (39000/39001/39002) subscribed so the
     // membership cache stays current — "check which groups we own at all times".
     if let Some(prog) = &progress {
@@ -958,6 +1024,44 @@ fn rpc_session_end(
         // the runtime handle, the session_state row, and the registry are all keyed
         // by canonical — ending by alias would cancel/end nothing.
         cancel_session(state, &rec.session_id);
+
+        // Stage 2: remove session pubkey from the NIP-29 group. Done before
+        // marking the session dead so the key is still in session_keys when we
+        // remove it. Fire-and-forget task: session_end must not block on the relay.
+        // The Mutex removal is synchronous so spawn_session's cleanup (engine
+        // self-exit path) finds None and skips the duplicate publish.
+        let session_key = state
+            .session_keys
+            .lock()
+            .unwrap()
+            .remove(&rec.session_id);
+        if let Some(sk) = session_key {
+            let provider = state.provider.clone();
+            let store = state.store.clone();
+            let project = rec.project.clone();
+            let session_pubkey = sk.public_key().to_hex();
+            tokio::spawn(async move {
+                let removed = provider
+                    .nip29_remove_member(&project, &session_pubkey)
+                    .await;
+                // Mirror into the cache unconditionally: relay rejection of a
+                // remove for a non-member is benign (idempotent), so always
+                // clean up our local row to avoid stale membership.
+                store
+                    .lock()
+                    .unwrap()
+                    .remove_group_member(&project, &session_pubkey)
+                    .ok();
+                if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
+                    eprintln!(
+                        "[daemon] session-end NIP-29 remove {}: {}",
+                        crate::util::pubkey_short(&session_pubkey),
+                        if removed { "accepted" } else { "skipped/failed (best-effort)" },
+                    );
+                }
+            });
+        }
+
         state.with_store(|s| {
             // Finish the canonical aggregate (lifecycle=ended; title retained) so
             // the session surfaces as a 'gone' delta, AND mark the kept runtime row
@@ -3428,6 +3532,7 @@ async fn spawn_session(state: &Arc<DaemonState>, params: EngineParams) -> Result
 
     let st = state.clone();
     let sid = session_id.clone();
+    let proj = project.clone();
     let provider = state.provider.clone();
     let store = state.store.clone();
     tokio::spawn(async move {
@@ -3435,6 +3540,21 @@ async fn spawn_session(state: &Arc<DaemonState>, params: EngineParams) -> Result
         if let Err(e) = res {
             if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
                 eprintln!("[daemon] session {sid} task error: {e:#}");
+            }
+        }
+        // Stage 2 / engine self-exit path: remove session pubkey from the NIP-29
+        // group. The Mutex pop is atomic: if rpc_session_end already removed the key
+        // (graceful end), this finds None and is a no-op, avoiding a duplicate publish.
+        {
+            let maybe_key = st.session_keys.lock().unwrap().remove(&sid);
+            if let Some(sk) = maybe_key {
+                let session_pubkey = sk.public_key().to_hex();
+                st.provider
+                    .nip29_remove_member(&proj, &session_pubkey)
+                    .await;
+                st.with_store(|s| {
+                    s.remove_group_member(&proj, &session_pubkey).ok();
+                });
             }
         }
         st.sessions.lock().unwrap().remove(&sid);
@@ -3532,6 +3652,41 @@ async fn reconcile_sessions(state: &Arc<DaemonState>) {
                 s.end_session(&session_id, now).ok();
                 s.mark_session_dead(&session_id).ok();
             });
+            // Stage 2 / crash-GC: remove the session pubkey from the NIP-29 group.
+            //
+            // The in-memory session_keys map is empty at daemon restart, so we must
+            // re-derive the key. The anchor is recovered from session_aliases:
+            //   - claude-code / codex: harness alias row gives (harness, native_id)
+            //   - opencode: only a resume alias row exists → anchor = session_id
+            //   - unknown / no alias rows: ("unknown", session_id) — re-derivation
+            //     yields the correct key as long as session_start used the same path.
+            if let Some(ref nsec) = state.cfg.user_nsec.clone() {
+                if let Ok(op_keys) = nostr_sdk::prelude::Keys::parse(nsec) {
+                    let (harness_kind, anchor) = state
+                        .with_store(|s| s.get_session_derivation_anchor(&session_id));
+                    let session_key = identity::derive_session_keys(
+                        op_keys.secret_key(),
+                        &snap.project,
+                        &snap.agent_slug,
+                        &harness_kind,
+                        &anchor,
+                    );
+                    let session_pubkey = session_key.public_key().to_hex();
+                    let provider = state.provider.clone();
+                    let store = state.store.clone();
+                    let project = snap.project.clone();
+                    tokio::spawn(async move {
+                        provider
+                            .nip29_remove_member(&project, &session_pubkey)
+                            .await;
+                        store
+                            .lock()
+                            .unwrap()
+                            .remove_group_member(&project, &session_pubkey)
+                            .ok();
+                    });
+                }
+            }
             continue;
         }
         let id = match identity::load_or_create(&config::edge_home(), &snap.agent_slug, now) {
@@ -3545,6 +3700,40 @@ async fn reconcile_sessions(state: &Arc<DaemonState>) {
             .provider
             .open_project(&snap.project, &id.pubkey_hex())
             .await;
+
+        // Stage 2 / revived sessions: re-derive and store the session key so
+        // that the spawn_session cleanup task (engine self-exit) can find it to
+        // publish group_remove_user when the engine finishes.
+        if let Some(ref nsec) = state.cfg.user_nsec.clone() {
+            if let Ok(op_keys) = nostr_sdk::prelude::Keys::parse(nsec) {
+                let (harness_kind, anchor) = state
+                    .with_store(|s| s.get_session_derivation_anchor(&session_id));
+                let session_key = identity::derive_session_keys(
+                    op_keys.secret_key(),
+                    &snap.project,
+                    &snap.agent_slug,
+                    &harness_kind,
+                    &anchor,
+                );
+                // Also re-add the session pubkey to the group in case it was
+                // removed while the daemon was down (best-effort).
+                let session_pubkey = session_key.public_key().to_hex();
+                state
+                    .session_keys
+                    .lock()
+                    .unwrap()
+                    .insert(session_id.clone(), session_key);
+                state
+                    .provider
+                    .nip29_add_member(&snap.project, &session_pubkey)
+                    .await;
+                state.with_store(|s| {
+                    s.upsert_group_member(&snap.project, &session_pubkey, "member", now)
+                        .ok();
+                });
+            }
+        }
+
         if let Err(e) = ensure_subscription(state, &snap.project).await {
             if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
                 eprintln!(

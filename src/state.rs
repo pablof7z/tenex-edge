@@ -2183,6 +2183,45 @@ impl Store {
         Ok(())
     }
 
+    /// Return the `(harness_kind, anchor)` pair needed to re-derive a session's
+    /// per-session keypair at crash-GC time (Stage 2 / Issue #2).
+    ///
+    /// - `harness_kind`: the harness label stored in `session_aliases` (e.g.
+    ///   "claude-code", "opencode"); falls back to "unknown" when no alias row
+    ///   exists for the session.
+    /// - `anchor`: the harness-native session id when the harness supplied one
+    ///   (`external_id_kind = 'harness'`), otherwise the canonical `session_id`
+    ///   itself (which is what opencode / unknown harnesses use as the anchor).
+    ///
+    /// Reconstruction is correct for all realistic harnesses:
+    ///   - claude-code / codex: alias row with kind='harness' present → anchor = native id
+    ///   - opencode: only kind='resume' row present → anchor = session_id
+    ///   - unknown: possibly no alias rows → ("unknown", session_id)
+    pub fn get_session_derivation_anchor(&self, session_id: &str) -> (String, String) {
+        let harness_kind: String = self
+            .conn
+            .query_row(
+                "SELECT harness FROM session_aliases WHERE session_id=?1 LIMIT 1",
+                params![session_id],
+                |r| r.get(0),
+            )
+            .unwrap_or_else(|_| "unknown".to_string());
+
+        let native_id: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT external_id FROM session_aliases
+                 WHERE session_id=?1 AND external_id_kind='harness'
+                 ORDER BY created_at DESC LIMIT 1",
+                params![session_id],
+                |r| r.get::<_, String>(0),
+            )
+            .ok();
+
+        let anchor = native_id.unwrap_or_else(|| session_id.to_string());
+        (harness_kind, anchor)
+    }
+
     /// Apply a relay-authoritative 39002 members snapshot for one group: replace
     /// the cached membership wholesale so we self-heal if our optimistic writes drifted.
     pub fn replace_group_members(
