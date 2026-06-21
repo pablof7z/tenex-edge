@@ -398,15 +398,22 @@ mod tests {
         let receiver_pk = receiver_keys.public_key().to_hex();
         let future_pk = future_keys.public_key().to_hex();
 
+        // Stage 4: session keys are the wire identity; session_pubkey_info
+        // derives from_session / mentioned_session for routing and DB rows.
+        let sender_sess_keys = Keys::generate();
+        let receiver_sess_keys = Keys::generate();
+        let sender_sess_pk = sender_sess_keys.public_key().to_hex();
+        let receiver_sess_pk = receiver_sess_keys.public_key().to_hex();
+
+        // Sign with sender's SESSION key; p-tag carries receiver's SESSION pubkey.
+        // No from-session / session-id tags — Stage 4 drops them from the wire.
         let event = build_event(
-            &sender_keys,
+            &sender_sess_keys,
             9,
             "heads up: I pushed the parser fix",
             vec![
                 make_tag(&["h", "myproject"]),
-                make_tag(&["from-session", "sender-sess"]),
-                make_tag(&["p", &receiver_pk]),
-                make_tag(&["session-id", "receiver-sess"]),
+                make_tag(&["p", &receiver_sess_pk]),
             ],
         );
         let event_ts = event.created_at.as_secs();
@@ -431,6 +438,15 @@ mod tests {
                 })
                 .unwrap();
         }
+
+        // Register session pubkeys so from_session / mentioned_session can be
+        // derived via session_pubkey_info during routing.
+        store
+            .upsert_session_pubkey(&sender_sess_pk, "sender-sess", &sender_pk, "sender", 1)
+            .unwrap();
+        store
+            .upsert_session_pubkey(&receiver_sess_pk, "receiver-sess", &receiver_pk, "receiver", 1)
+            .unwrap();
 
         let hosted = vec![sender_pk, receiver_pk, future_pk];
         let env = RawEnvelope::Nostr(event);

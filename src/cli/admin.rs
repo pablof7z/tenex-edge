@@ -706,14 +706,10 @@ fn render(de: &DomainEvent) -> String {
             format!("{} {}: {}", "stat".magenta(), s.agent.slug.cyan(), s.title)
         }
         DomainEvent::Mention(m) => format!(
-            "{} {} -> {}{}: {}",
+            "{} {} -> {}: {}",
             "msg ".yellow(),
             m.from.slug.cyan(),
             pubkey_short(&m.to_pubkey),
-            m.target_session
-                .as_ref()
-                .map(|s| format!(" ({s})"))
-                .unwrap_or_default(),
             m.body
         ),
         DomainEvent::ChatMessage(c) => format!(
@@ -721,9 +717,9 @@ fn render(de: &DomainEvent) -> String {
             "chat".green(),
             c.from.slug.cyan(),
             c.project,
-            c.mentioned_session
-                .as_ref()
-                .map(|s| format!(" mentions {s}"))
+            c.mentioned_pubkey
+                .as_deref()
+                .map(|pk| format!(" mentions {}", pubkey_short(pk)))
                 .unwrap_or_default(),
             c.body
         ),

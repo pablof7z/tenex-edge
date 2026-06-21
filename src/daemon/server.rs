@@ -23,7 +23,7 @@ use crate::runtime::{self, route_mention_into_with_id, EngineParams};
 use crate::session::{derive_status, Harness, SessionObservation, SessionSnapshot};
 use crate::state::{ChatInboxRow, ChatLogRow, InboxRow, Store};
 use crate::transport::Transport;
-use crate::util::{now_secs, pubkey_short, session_codename, SessionId};
+use crate::util::{now_secs, pubkey_short, session_codename};
 use anyhow::{Context, Result};
 use nostr_sdk::prelude::{Event, Keys, RelayMessage, RelayPoolNotification};
 use std::collections::HashMap;
@@ -1205,8 +1205,6 @@ async fn rpc_send_message(
         to_pubkey: recipient.pubkey.clone(),
         project: recipient.project.clone(),
         body: p.message,
-        target_session: recipient.target_session.clone(),
-        from_session: Some(rec.session_id.clone()),
         thread_id: p.thread_id.clone(),
         meta: meta.clone(),
     };
@@ -1243,7 +1241,7 @@ async fn rpc_send_message(
         from: rec.agent_slug.clone(),
         from_session: Some(rec.session_id.clone()),
         to: to_slug,
-        to_session: recipient.target_session.clone(),
+        to_session: None,
         thread: Some(thread_short.clone()),
         body: body.chars().take(200).collect(),
     });
@@ -1275,8 +1273,6 @@ async fn rpc_send_message(
             to_pubkey: recipient.pubkey.clone(),
             project: recipient.project.clone(),
             body: body.clone(),
-            target_session: recipient.target_session.clone().map(SessionId::from),
-            from_session: Some(SessionId::from(rec.session_id.clone())),
             meta,
         };
         let routed = state.with_store(|s| {
@@ -1313,9 +1309,7 @@ async fn rpc_send_message(
         crate::tmux::register_pending_spawn_with_mention(&pane_id, pending_mention);
     }
 
-    Ok(
-        serde_json::json!({ "to_pubkey": recipient.pubkey, "target_session": recipient.target_session }),
-    )
+    Ok(serde_json::json!({ "to_pubkey": recipient.pubkey }))
 }
 
 // ── chat_write ───────────────────────────────────────────────────────────────
@@ -1374,8 +1368,6 @@ async fn rpc_chat_write(
         from: crate::domain::AgentRef::new(from_pubkey.clone(), rec.agent_slug.clone()),
         project: rec.project.clone(),
         body: p.message.clone(),
-        from_session: Some(SessionId::from(rec.session_id.clone())),
-        mentioned_session: mentioned_session.clone().map(SessionId::from),
         mentioned_pubkey: mentioned_pubkey.clone(),
     };
     // Stage 3: sign chat events with the session key.
@@ -1663,8 +1655,12 @@ fn resolve_recipient(store: &Store, my_project: &str, target: &str) -> Result<Re
     // opencode resume token, tmux pane, watch pid) resolvable to canonical via
     // `session_aliases`. Checked before prefix matching so a full id always wins.
     if let Some(s) = store.get_session(target)? {
+        // Stage 4: use the session pubkey as the wire address when registered.
+        let pubkey = store
+            .session_pubkey_for_session(&s.session_id)
+            .unwrap_or(s.agent_pubkey);
         return Ok(ResolvedRecipient {
-            pubkey: s.agent_pubkey,
+            pubkey,
             target_session: Some(s.session_id),
             project: s.project,
         });
@@ -1678,8 +1674,12 @@ fn resolve_recipient(store: &Store, my_project: &str, target: &str) -> Result<Re
             });
         }
         if let Some(s) = store.find_session_by_prefix(target)? {
+            // Stage 4: use the session pubkey as the wire address when registered.
+            let pubkey = store
+                .session_pubkey_for_session(&s.session_id)
+                .unwrap_or(s.agent_pubkey);
             return Ok(ResolvedRecipient {
-                pubkey: s.agent_pubkey,
+                pubkey,
                 target_session: Some(s.session_id),
                 project: s.project,
             });
@@ -1687,8 +1687,12 @@ fn resolve_recipient(store: &Store, my_project: &str, target: &str) -> Result<Re
         // Try matching against session codenames (from `who` display). This is a
         // fallback for when users copy a session codename from `who` output.
         if let Some(found) = find_session_by_codename(store, target)? {
+            // Stage 4: use the session pubkey as the wire address when registered.
+            let pubkey = store
+                .session_pubkey_for_session(&found.session_id)
+                .unwrap_or(found.pubkey);
             return Ok(ResolvedRecipient {
-                pubkey: found.pubkey,
+                pubkey,
                 target_session: Some(found.session_id),
                 project: found.project,
             });
@@ -2060,8 +2064,6 @@ async fn rpc_user_prompt(
         to_pubkey: rec.agent_pubkey.clone(),
         project: rec.project.clone(),
         body,
-        target_session: None,
-        from_session: None,
         meta: crate::domain::MentionMeta::default(),
     });
     // Suppress the relay echo of our own prompt: this RPC is only ever invoked
@@ -2359,6 +2361,7 @@ fn rpc_whoami(state: &Arc<DaemonState>, params: &serde_json::Value) -> Result<se
             + s.peek_chat_mentions(&rec.session_id)
                 .unwrap_or_default()
                 .len();
+        let session_pubkey = s.session_pubkey_for_session(&rec.session_id);
         Ok(serde_json::json!({
             "agent": rec.agent_slug,
             "session_id": rec.session_id,
@@ -2367,6 +2370,7 @@ fn rpc_whoami(state: &Arc<DaemonState>, params: &serde_json::Value) -> Result<se
             "host": host,
             "rel_cwd": rec.rel_cwd,
             "pubkey": rec.agent_pubkey,
+            "session_pubkey": session_pubkey,
             "npub": npub,
             "is_member": is_member,
             "working": working,
@@ -2445,9 +2449,6 @@ async fn rpc_inbox_reply(
         to_pubkey: original.from_pubkey.clone(),
         project: original.project.clone(),
         body: p.message.clone(),
-        // Route back to the precise sender session when we captured one.
-        target_session: Some(original.from_session.clone()).filter(|s| !s.is_empty()),
-        from_session: Some(rec.session_id.clone()),
         thread_id,
         meta: meta.clone(),
     };
@@ -2498,10 +2499,6 @@ async fn rpc_inbox_reply(
             to_pubkey: original.from_pubkey.clone(),
             project: original.project.clone(),
             body: p.message,
-            target_session: Some(original.from_session.clone())
-                .filter(|s| !s.is_empty())
-                .map(SessionId::from),
-            from_session: Some(SessionId::from(rec.session_id.clone())),
             meta,
         };
         let routed = state.with_store(|s| {
@@ -2520,7 +2517,6 @@ async fn rpc_inbox_reply(
 
     Ok(serde_json::json!({
         "to_pubkey": original.from_pubkey,
-        "target_session": original.from_session,
         "in_reply_to": original.mention_event_id,
     }))
 }
@@ -3285,9 +3281,9 @@ fn derive_and_emit_tail_events(
                 ts: now,
                 project: m.project.clone(),
                 from: from_slug,
-                from_session: m.from_session.as_ref().map(|s| s.as_str().to_owned()),
+                from_session: None,
                 to: pubkey_short(&m.to_pubkey),
-                to_session: m.target_session.as_ref().map(|s| s.as_str().to_owned()),
+                to_session: None,
                 thread: thread_short,
                 body: m.body.chars().take(200).collect(),
             });
@@ -3312,12 +3308,9 @@ fn derive_and_emit_tail_events(
                 ts: now,
                 project: chat.project.clone(),
                 from: from_slug,
-                from_session: chat.from_session.as_ref().map(|s| s.as_str().to_owned()),
+                from_session: None,
                 to,
-                to_session: chat
-                    .mentioned_session
-                    .as_ref()
-                    .map(|s| s.as_str().to_owned()),
+                to_session: None,
                 thread: None,
                 body: chat.body.chars().take(200).collect(),
             });

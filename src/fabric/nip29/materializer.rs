@@ -72,15 +72,16 @@ impl Nip29Materializer {
         } else {
             chat.from.slug.clone()
         };
-        let from_session = chat
-            .from_session
-            .as_ref()
-            .map(|s| s.as_str().to_owned())
+        // Stage 4: from_session and mentioned_session are no longer on the
+        // ChatMessage domain struct; derive them from the session_pubkeys table.
+        let from_session = store
+            .session_pubkey_info(&from_pubkey)
+            .map(|(sid, _, _)| sid)
             .unwrap_or_default();
         let mentioned_session = chat
-            .mentioned_session
-            .as_ref()
-            .map(|s| s.as_str().to_owned())
+            .mentioned_pubkey
+            .as_deref()
+            .and_then(|pk| store.session_pubkey_info(pk).map(|(sid, _, _)| sid))
             .unwrap_or_default();
         let host = store
             .resolve_chat_host(

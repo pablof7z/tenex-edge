@@ -210,20 +210,16 @@ impl Status {
     }
 }
 
-/// A directed message from one agent to another, optionally pinned to a
-/// specific session of the recipient (M1 §7 routing).
+/// A directed message from one agent to another, addressed by session pubkey
+/// (M1 §7 routing). Stage 4: `target_session` and `from_session` removed from
+/// the domain — session resolution is now done entirely at the wire/routing
+/// layer using session pubkeys.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Mention {
     pub from: AgentRef,
     pub to_pubkey: String,
     pub project: String,
     pub body: String,
-    /// When `Some`, only the recipient's matching session should surface it.
-    pub target_session: Option<SessionId>,
-    /// The SENDER's session id, when known. Lets the recipient reply to the exact
-    /// sibling session that wrote this (sessions of one agent share a pubkey, so
-    /// the author key alone can't disambiguate them). `None` for old peers.
-    pub from_session: Option<SessionId>,
     /// Envelope metadata: subject + the sender's workspace snapshot at send time,
     /// plus the event this is a reply to. Rendered as an email-like header on the
     /// receiving side (see `cli::messaging::format_envelope`).
@@ -254,15 +250,13 @@ pub struct MentionMeta {
 /// A NIP-29 project chat line. On the wire this is a NIP-C7 `kind:9` event
 /// scoped to the project group by its `h` tag. It is ambient project context,
 /// not a durable direct inbox item; live sessions see it going forward only.
+/// Stage 4: `from_session` and `mentioned_session` removed — derived from the
+/// store via `session_pubkey_info` in the materializer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChatMessage {
     pub from: AgentRef,
     pub project: String,
     pub body: String,
-    /// The sender's session id, when known.
-    pub from_session: Option<SessionId>,
-    /// Optional session explicitly mentioned in the chat line.
-    pub mentioned_session: Option<SessionId>,
     /// Optional pubkey for the mentioned session, carried as a Nostr `p` tag.
     pub mentioned_pubkey: Option<String>,
 }

@@ -218,17 +218,9 @@ impl Codec for Kind1Codec {
                 to_pubkey,
                 project,
                 body,
-                target_session,
-                from_session,
                 meta,
             }) => {
                 let mut tags = vec![project_tag(project)?, tag(&["p", to_pubkey])?];
-                if let Some(sess) = target_session {
-                    tags.push(tag(&["session-id", sess.as_str()])?);
-                }
-                if let Some(sess) = from_session {
-                    tags.push(tag(&["from-session", sess.as_str()])?);
-                }
                 if !meta.subject.is_empty() {
                     tags.push(tag(&["subject", &meta.subject])?);
                 }
@@ -259,19 +251,11 @@ impl Codec for Kind1Codec {
                 from: _from,
                 project,
                 body,
-                from_session,
-                mentioned_session,
                 mentioned_pubkey,
             }) => {
                 let mut tags = vec![project_tag(project)?];
-                if let Some(sess) = from_session {
-                    tags.push(tag(&["from-session", sess.as_str()])?);
-                }
                 if let Some(pk) = mentioned_pubkey {
                     tags.push(tag(&["p", pk])?);
-                }
-                if let Some(sess) = mentioned_session {
-                    tags.push(tag(&["session-id", sess.as_str()])?);
                 }
                 EventBuilder::new(kind(KIND_CHAT), body.clone())
                     .tags(tags)
@@ -359,8 +343,6 @@ impl Codec for Kind1Codec {
                 from: AgentRef::new(pubkey, String::new()),
                 project: project_from_tags(event)?,
                 body: event.content.clone(),
-                from_session: first_tag(event, "from-session").map(SessionId::from),
-                mentioned_session: first_tag(event, "session-id").map(SessionId::from),
                 mentioned_pubkey: first_tag(event, "p").map(str::to_string),
             })),
             KIND_NOTE => {
@@ -379,8 +361,6 @@ impl Codec for Kind1Codec {
                         to_pubkey: to.to_string(),
                         project,
                         body: event.content.clone(),
-                        target_session: first_tag(event, "session-id").map(SessionId::from),
-                        from_session: first_tag(event, "from-session").map(SessionId::from),
                         meta: MentionMeta {
                             subject: first_tag(event, "subject").unwrap_or_default().to_string(),
                             branch: first_tag(event, "git-branch")
@@ -696,7 +676,7 @@ mod tests {
     }
 
     #[test]
-    fn mention_roundtrip_session_targeted() {
+    fn mention_roundtrip() {
         // Slug is NOT on the wire; decoded mention always has empty slug.
         let keys = Keys::generate();
         let ev = DomainEvent::Mention(Mention {
@@ -704,32 +684,29 @@ mod tests {
             to_pubkey: "cc".repeat(32),
             project: "tenex-edge".into(),
             body: "can you review?".into(),
-            target_session: Some("sess-xyz".into()),
-            // Distinct from target_session so the roundtrip proves they don't swap.
-            from_session: Some("sender-sess-1".into()),
             meta: MentionMeta::default(),
         });
         assert_eq!(roundtrip(ev.clone(), &keys), ev);
-        // Wire event must have NO agent tag.
+        // Wire event must have NO agent tag, no session-id tag, no from-session tag.
         let signed = Kind1Codec
             .encode(&ev)
             .unwrap()
             .sign_with_keys(&keys)
             .unwrap();
         assert!(!has_tag_name(&signed, "agent"));
+        assert!(!has_tag_name(&signed, "session-id"));
+        assert!(!has_tag_name(&signed, "from-session"));
     }
 
     #[test]
-    fn mention_emits_from_session_tag_and_back_compat_decodes_none() {
+    fn mention_no_session_tags_on_wire() {
         let keys = Keys::generate();
-        // With a sender session → a `from-session` tag rides the wire.
+        // Session-pubkey addressing: no session-id or from-session tags emitted.
         let ev = DomainEvent::Mention(Mention {
             from: AgentRef::new(keys.public_key().to_hex(), String::new()),
             to_pubkey: "cc".repeat(32),
             project: "tenex-edge".into(),
             body: "ping".into(),
-            target_session: None,
-            from_session: Some("sender-9".into()),
             meta: MentionMeta::default(),
         });
         let signed = Kind1Codec
@@ -737,22 +714,11 @@ mod tests {
             .unwrap()
             .sign_with_keys(&keys)
             .unwrap();
-        assert!(has_tag(&signed, "from-session", "sender-9"));
+        // Stage 4: session-id and from-session tags must NOT appear on wire.
+        assert!(!has_tag_name(&signed, "from-session"));
+        assert!(!has_tag_name(&signed, "session-id"));
         // Wire event must have NO agent tag.
         assert!(!has_tag_name(&signed, "agent"));
-
-        // A peer note WITHOUT the from-session tag decodes to `from_session: None`.
-        let no_from_session = EventBuilder::new(Kind::from(KIND_NOTE), "ping")
-            .tags([
-                tag(&["h", "tenex-edge"]).unwrap(),
-                tag(&["p", &"cc".repeat(32)]).unwrap(),
-            ])
-            .sign_with_keys(&keys)
-            .unwrap();
-        match Kind1Codec.decode(&no_from_session) {
-            Some(DomainEvent::Mention(m)) => assert_eq!(m.from_session, None),
-            other => panic!("expected mention, got {other:?}"),
-        }
     }
 
     #[test]
@@ -763,8 +729,6 @@ mod tests {
             to_pubkey: "cc".repeat(32),
             project: "tenex-edge".into(),
             body: "can you review?".into(),
-            target_session: Some("sess-xyz".into()),
-            from_session: None,
             meta: MentionMeta::default(),
         });
         let signed = Kind1Codec
@@ -788,8 +752,6 @@ mod tests {
             to_pubkey: pk.clone(),
             project: "p".into(),
             body: "hi".into(),
-            target_session: Some("s2".into()),
-            from_session: Some("s1".into()),
             meta: MentionMeta::default(),
         });
         let signed = Kind1Codec
@@ -884,11 +846,6 @@ mod tests {
             Some(DomainEvent::Mention(m)) => {
                 assert_eq!(m.to_pubkey, agent_pk, "to_pubkey must be the p tag");
                 assert_eq!(
-                    m.target_session,
-                    Some(SessionId::from(session)),
-                    "target_session must be the session-id tag"
-                );
-                assert_eq!(
                     m.from.pubkey,
                     owner_keys.public_key().to_hex(),
                     "from.pubkey must be the event author"
@@ -901,7 +858,7 @@ mod tests {
     }
 
     #[test]
-    fn owner_note_p_only_no_session_id_decodes_as_mention() {
+    fn owner_note_p_only_decodes_as_mention() {
         // Under the new unified rule, ANY kind:1 with a `p` tag decodes as Mention
         // (including p-only notes without session-id). The routing gate in the
         // materializer then decides whether to admit based on signer identity.
@@ -912,7 +869,6 @@ mod tests {
             .tags([
                 tag(&["h", "myproject"]).unwrap(),
                 tag(&["p", &agent_pk]).unwrap(),
-                // deliberately no session-id
             ])
             .sign_with_keys(&owner_keys)
             .unwrap();
@@ -920,7 +876,6 @@ mod tests {
         match Kind1Codec.decode(&event) {
             Some(DomainEvent::Mention(m)) => {
                 assert_eq!(m.to_pubkey, agent_pk);
-                assert_eq!(m.target_session, None, "no session-id tag → None");
             }
             other => panic!("expected Mention for p-note, got {other:?}"),
         }
@@ -936,8 +891,6 @@ mod tests {
             to_pubkey: "cc".repeat(32),
             project: "myproject".into(),
             body: "review this".into(),
-            target_session: Some("target-sess".into()),
-            from_session: None,
             meta: MentionMeta::default(),
         });
         assert!(matches!(roundtrip(ev, &keys), DomainEvent::Mention(_)));
@@ -951,8 +904,6 @@ mod tests {
             from: agent(&keys, "codex"),
             project: "myproject".into(),
             body: "status: tests are green".into(),
-            from_session: Some("sender-sess".into()),
-            mentioned_session: Some("target-sess".into()),
             mentioned_pubkey: Some(mentioned_pk.clone()),
         });
         let codec = Kind1Codec;
@@ -961,16 +912,15 @@ mod tests {
 
         assert_eq!(signed.kind.as_u16(), KIND_CHAT);
         assert!(has_tag(&signed, "h", "myproject"));
-        assert!(has_tag(&signed, "from-session", "sender-sess"));
-        assert!(has_tag(&signed, "session-id", "target-sess"));
+        // Stage 4: from-session and session-id tags no longer emitted on chat wire.
+        assert!(!has_tag_name(&signed, "from-session"));
+        assert!(!has_tag_name(&signed, "session-id"));
         assert!(has_tag(&signed, "p", &mentioned_pk));
 
         match codec.decode(&signed) {
             Some(DomainEvent::ChatMessage(chat)) => {
                 assert_eq!(chat.project, "myproject");
                 assert_eq!(chat.body, "status: tests are green");
-                assert_eq!(chat.from_session, Some(SessionId::from("sender-sess")));
-                assert_eq!(chat.mentioned_session, Some(SessionId::from("target-sess")));
                 assert_eq!(chat.mentioned_pubkey, Some(mentioned_pk));
             }
             other => panic!("expected ChatMessage, got {other:?}"),

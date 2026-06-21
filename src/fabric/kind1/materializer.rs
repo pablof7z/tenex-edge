@@ -167,7 +167,7 @@ impl Kind1Materializer {
             store.add_message_recipient(
                 &message_id,
                 to_pubkey,
-                m.target_session.as_ref().map(|s| s.as_str()),
+                None,
             )?;
             Ok(thread_id)
         })()

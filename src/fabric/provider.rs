@@ -34,16 +34,14 @@ pub const FABRIC: &str = "kind1-nip29";
 pub struct SendIntent {
     /// Sender's identity on the fabric.
     pub from: AgentRef,
-    /// Recipient's pubkey (hex).
+    /// Recipient's pubkey (hex). Stage 4: always the session pubkey (or agent
+    /// pubkey when no session key was derived), never the legacy agent pubkey
+    /// + session-id pair.
     pub to_pubkey: String,
     /// Project slug (NIP-29 group name).
     pub project: String,
     /// Message body.
     pub body: String,
-    /// When `Some`, only the matching recipient session should surface it.
-    pub target_session: Option<String>,
-    /// The sender's own session id (return envelope for replies).
-    pub from_session: Option<String>,
     /// Existing canonical thread id to attach to. `None` → a new thread root
     /// is created from the published event id (Phase 7 will refine).
     pub thread_id: Option<String>,
@@ -54,18 +52,13 @@ pub struct SendIntent {
 
 impl SendIntent {
     /// Convert to the `Mention` domain event used by the wire codec and the
-    /// legacy local-delivery path. Both callers see the same struct.
+    /// local-delivery path. Both callers see the same struct.
     pub fn to_mention(&self) -> Mention {
         Mention {
             from: self.from.clone(),
             to_pubkey: self.to_pubkey.clone(),
             project: self.project.clone(),
             body: self.body.clone(),
-            target_session: self
-                .target_session
-                .clone()
-                .map(crate::util::SessionId::from),
-            from_session: self.from_session.clone().map(crate::util::SessionId::from),
             meta: self.meta.clone(),
         }
     }
@@ -686,7 +679,7 @@ impl Kind1Nip29Provider {
             s.add_message_recipient(
                 &message_id,
                 &intent.to_pubkey,
-                intent.target_session.as_deref(),
+                None,
             )?;
             Ok((message_id, thread_id))
         })?;
@@ -837,8 +830,6 @@ mod tests {
             to_pubkey: recipient_pk.clone(),
             project: "myproj".into(),
             body: "hello reply".into(),
-            target_session: None,
-            from_session: None,
             meta: crate::domain::MentionMeta::default(),
         };
 

@@ -2320,6 +2320,19 @@ impl Store {
             .ok()
     }
 
+    /// Resolve a session id to its derived session pubkey (reverse of
+    /// `session_pubkey_info`). Returns `None` when no session key was derived
+    /// (operator nsec absent). Callers fall back to the durable agent pubkey.
+    pub fn session_pubkey_for_session(&self, session_id: &str) -> Option<String> {
+        self.conn
+            .query_row(
+                "SELECT session_pubkey FROM session_pubkeys WHERE session_id=?1 LIMIT 1",
+                params![session_id],
+                |r| r.get(0),
+            )
+            .ok()
+    }
+
     pub fn is_mention_seen(&self, agent_pubkey: &str, event_id: &str) -> Result<bool> {
         let n: i64 = self.conn.query_row(
             "SELECT COUNT(*) FROM seen_mentions WHERE agent_pubkey=?1 AND mention_event_id=?2",
@@ -5043,8 +5056,6 @@ mod tests {
             to_pubkey: pk_hex.clone(),
             project: "test-proj".into(),
             body: "hi from sender".into(),
-            target_session: Some("sess-inbound-1".into()),
-            from_session: None,
             meta: crate::domain::MentionMeta::default(),
         };
         let pi = "test-pi-inbound";
@@ -5276,8 +5287,6 @@ mod tests {
             to_pubkey: recipient_pk.clone(),
             project: proj.into(),
             body: "reply body".into(),
-            target_session: Some("sess-reply-rg".into()),
-            from_session: None,
             meta: crate::domain::MentionMeta::default(),
         };
 

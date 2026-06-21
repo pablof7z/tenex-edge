@@ -60,21 +60,6 @@ pub struct EngineParams {
     pub turn_repeat: Duration,
 }
 
-/// Targets for an incoming mention addressed to me: a specific session if pinned
-/// (and it is one of mine), else all my alive sessions for this agent.
-pub fn compute_targets(target_session: Option<&str>, my_alive_sessions: &[String]) -> Vec<String> {
-    match target_session {
-        Some(ts) => {
-            if my_alive_sessions.iter().any(|s| s == ts) {
-                vec![ts.to_string()]
-            } else {
-                Vec::new()
-            }
-        }
-        None => my_alive_sessions.to_vec(),
-    }
-}
-
 // ── daemon-hosted session task (the relocated engine) ────────────────────────
 
 /// Run the per-session engine INSIDE the daemon, using the SHARED relay
@@ -402,10 +387,7 @@ pub fn route_mention_into_with_id(
     // mention is already targeted to a specific session — skip per-agent dedup.
     // Idempotency is carried by the inbox PK.
     let is_session_pubkey_route = store.session_pubkey_info(me).is_some();
-    if !is_session_pubkey_route
-        && m.target_session.is_none()
-        && store.is_mention_seen(me, eid).unwrap_or(false)
-    {
+    if !is_session_pubkey_route && store.is_mention_seen(me, eid).unwrap_or(false) {
         return false;
     }
     let alive: Vec<String> = store
@@ -439,8 +421,14 @@ pub fn route_mention_into_with_id(
             return false;
         }
     } else {
-        compute_targets(m.target_session.as_ref().map(|s| s.as_str()), &alive)
+        alive
     };
+    // Derive the sender's session id from the session_pubkeys table (Stage 4:
+    // from_session is no longer carried on the Mention domain struct).
+    let from_session = store
+        .session_pubkey_info(&m.from.pubkey)
+        .map(|(sid, _, _)| sid)
+        .unwrap_or_default();
     let mut routed = false;
     for t in targets {
         let newly = store
@@ -452,11 +440,7 @@ pub fn route_mention_into_with_id(
                 project: m.project.clone(),
                 body: m.body.clone(),
                 created_at: sent_at,
-                from_session: m
-                    .from_session
-                    .as_ref()
-                    .map(|s| s.as_str().to_owned())
-                    .unwrap_or_default(),
+                from_session: from_session.clone(),
                 subject: m.meta.subject.clone(),
                 branch: m.meta.branch.clone(),
                 commit: m.meta.commit.clone(),
@@ -501,19 +485,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn targets_pinned_session_only_if_mine() {
-        let mine = vec!["s1".to_string(), "s2".to_string()];
-        assert_eq!(compute_targets(Some("s2"), &mine), vec!["s2"]);
-        assert!(compute_targets(Some("not-mine"), &mine).is_empty());
-    }
-
-    #[test]
-    fn targets_agent_level_fans_out_to_all_my_sessions() {
-        let mine = vec!["s1".to_string(), "s2".to_string()];
-        assert_eq!(compute_targets(None, &mine), mine);
-    }
-
-    #[test]
     fn current_pid_is_alive() {
         assert!(pid_alive(std::process::id() as i32));
     }
@@ -541,19 +512,31 @@ mod tests {
         }
     }
 
+    /// Register a deterministic session pubkey for `session_id` in the store and
+    /// return it. Stage 4: targeted routing is addressed by session pubkey, not by
+    /// `target_session` field on the Mention struct. Tests that need session-targeted
+    /// delivery use this helper to set up the routing table entry.
+    fn register_session_pubkey(store: &Store, session_id: &str, agent_pubkey: &str) -> String {
+        // Deterministic 64-char hex derived from the session_id.
+        let hash = session_id
+            .bytes()
+            .fold(0xcbf2_9ce4_8422_2325_u64, |acc, b| {
+                acc.wrapping_mul(0x0000_0100_0000_01b3) ^ u64::from(b)
+            });
+        let sess_pk = format!("{:0>64x}", hash);
+        store
+            .upsert_session_pubkey(&sess_pk, session_id, agent_pubkey, "claude", 1000)
+            .unwrap();
+        sess_pk
+    }
+
     /// Build a real signed kind:1 Mention event from `from_keys` to `to_pubkey`.
-    fn signed_mention(
-        from_keys: &Keys,
-        to_pubkey: &str,
-        target_session: Option<&str>,
-    ) -> (Mention, Event) {
+    fn signed_mention(from_keys: &Keys, to_pubkey: &str) -> (Mention, Event) {
         let m = Mention {
             from: AgentRef::new(from_keys.public_key().to_hex(), "claude"),
             to_pubkey: to_pubkey.to_string(),
             project: "proj".to_string(),
             body: "hi sibling".to_string(),
-            target_session: target_session.map(crate::util::SessionId::from),
-            from_session: None,
             meta: crate::domain::MentionMeta::default(),
         };
         use crate::codec::Codec as _;
@@ -565,9 +548,8 @@ mod tests {
         (m, event)
     }
 
-    /// Bug A (sibling session delivery): a claude session A sends to a DIFFERENT
-    /// claude session B that shares the same pubkey. The mention must land in B's
-    /// inbox and NOT in A's. (Both sessions are alive.)
+    /// Stage 4 sibling session delivery: session A sends to sess-B's SESSION PUBKEY.
+    /// Routing looks up the session pubkey table and delivers only to sess-B.
     #[test]
     fn sibling_session_mention_lands_in_target_not_sender() {
         let s = Store::open_memory().unwrap();
@@ -575,10 +557,12 @@ mod tests {
         let pubkey = keys.public_key().to_hex();
         s.upsert_session(&alive_session("sess-A", &pubkey)).unwrap();
         s.upsert_session(&alive_session("sess-B", &pubkey)).unwrap();
+        // Register sess-B's session pubkey so routing can target it.
+        let sess_b_pk = register_session_pubkey(&s, "sess-B", &pubkey);
 
-        let (m, event) = signed_mention(&keys, &pubkey, Some("sess-B"));
-        let routed = route_mention_into(&s, &pubkey, &m, &event);
-        assert!(routed, "sibling-targeted mention should be newly routed");
+        let (m, event) = signed_mention(&keys, &sess_b_pk);
+        let routed = route_mention_into(&s, &sess_b_pk, &m, &event);
+        assert!(routed, "session-pubkey-targeted mention should be newly routed");
 
         assert_eq!(
             s.drain_inbox("sess-B").unwrap().len(),
@@ -591,10 +575,8 @@ mod tests {
         );
     }
 
-    /// Bug B (per-(pubkey,session) dedup): a session-targeted mention must still be
-    /// delivered to its target session even if a SIBLING session of the same agent
-    /// already "saw" (per-agent dedup-marked) that event. Per-agent dedup must NOT
-    /// block session-targeted delivery.
+    /// Stage 4: session pubkey routing bypasses per-agent dedup entirely
+    /// (is_session_pubkey_route=true skips the seen-mark check).
     #[test]
     fn session_targeted_mention_not_blocked_by_sibling_seen() {
         let s = Store::open_memory().unwrap();
@@ -602,17 +584,17 @@ mod tests {
         let pubkey = keys.public_key().to_hex();
         s.upsert_session(&alive_session("sess-A", &pubkey)).unwrap();
         s.upsert_session(&alive_session("sess-B", &pubkey)).unwrap();
+        let sess_b_pk = register_session_pubkey(&s, "sess-B", &pubkey);
 
-        let (m, event) = signed_mention(&keys, &pubkey, Some("sess-B"));
-        // Sibling A marks the event seen per-agent (e.g. it drained an agent-wide
-        // copy in its own turn). This must NOT block the session-targeted delivery.
+        let (m, event) = signed_mention(&keys, &sess_b_pk);
+        // Sibling A marks the event seen per-agent. Session pubkey route bypasses this.
         s.mark_mention_seen(&pubkey, &event.id.to_hex(), now_secs())
             .unwrap();
 
-        let routed = route_mention_into(&s, &pubkey, &m, &event);
+        let routed = route_mention_into(&s, &sess_b_pk, &m, &event);
         assert!(
             routed,
-            "session-targeted mention must bypass per-agent dedup"
+            "session-pubkey-targeted mention must bypass per-agent dedup"
         );
         assert_eq!(
             s.drain_inbox("sess-B").unwrap().len(),
@@ -621,11 +603,7 @@ mod tests {
         );
     }
 
-    /// Bug A (local delivery): `send_message` routes the just-published event to a
-    /// hosted sibling session via `route_mention_into_with_id`, using the SAME
-    /// event id it published. Delivery must reach the target sibling, not the
-    /// sender, and a later relay echo of the same id must NOT double-deliver
-    /// (idempotent on the inbox PK).
+    /// Stage 4 local delivery: route by session pubkey, idempotent on inbox PK.
     #[test]
     fn local_delivery_by_event_id_is_idempotent_and_targets_sibling() {
         let s = Store::open_memory().unwrap();
@@ -633,15 +611,16 @@ mod tests {
         let pubkey = keys.public_key().to_hex();
         s.upsert_session(&alive_session("sess-A", &pubkey)).unwrap();
         s.upsert_session(&alive_session("sess-B", &pubkey)).unwrap();
+        let sess_b_pk = register_session_pubkey(&s, "sess-B", &pubkey);
 
-        let (m, event) = signed_mention(&keys, &pubkey, Some("sess-B"));
+        let (m, event) = signed_mention(&keys, &sess_b_pk);
         let eid = event.id.to_hex();
 
         // Local delivery (send_message path).
-        assert!(route_mention_into_with_id(&s, &pubkey, &m, &eid, 12345));
+        assert!(route_mention_into_with_id(&s, &sess_b_pk, &m, &eid, 12345));
         // A later relay echo of the SAME event id (handle_incoming path).
         assert!(
-            !route_mention_into_with_id(&s, &pubkey, &m, &eid, 12345),
+            !route_mention_into_with_id(&s, &sess_b_pk, &m, &eid, 12345),
             "echo must not double-deliver"
         );
 
@@ -670,7 +649,7 @@ mod tests {
         s.upsert_session(&alive_session_in_project("sess-other", &pubkey, "other"))
             .unwrap();
 
-        let mut m = signed_mention(&keys, &pubkey, None).0;
+        let mut m = signed_mention(&keys, &pubkey).0;
         m.project = "current".to_string();
 
         assert!(route_mention_into_with_id(
@@ -693,7 +672,7 @@ mod tests {
         let pubkey = keys.public_key().to_hex();
         s.upsert_session(&alive_session("sess-A", &pubkey)).unwrap();
 
-        let (m, event) = signed_mention(&keys, &pubkey, None);
+        let (m, event) = signed_mention(&keys, &pubkey);
         s.mark_mention_seen(&pubkey, &event.id.to_hex(), now_secs())
             .unwrap();
 
@@ -704,9 +683,8 @@ mod tests {
 
     // ── freeze tests (Phase-0 regression oracle) ─────────────────────────────
 
-    /// FREEZE A1: TARGETED mention reaches ONLY the named session.
-    /// Two alive sessions (same agent, same project): a mention targeting sess-B
-    /// must land ONLY in sess-B. sess-A (sibling) must not receive it.
+    /// FREEZE A1: Session-pubkey-targeted mention reaches ONLY the named session.
+    /// Stage 4: targeting is by session pubkey (not `target_session` field).
     #[test]
     fn freeze_targeted_mention_routes_only_to_named_session() {
         let s = Store::open_memory().unwrap();
@@ -714,13 +692,15 @@ mod tests {
         let pubkey = keys.public_key().to_hex();
         s.upsert_session(&alive_session("sess-A", &pubkey)).unwrap();
         s.upsert_session(&alive_session("sess-B", &pubkey)).unwrap();
+        // Register sess-B's session pubkey.
+        let sess_b_pk = register_session_pubkey(&s, "sess-B", &pubkey);
 
-        let (m, event) = signed_mention(&keys, &pubkey, Some("sess-B"));
-        let routed = route_mention_into(&s, &pubkey, &m, &event);
+        let (m, event) = signed_mention(&keys, &sess_b_pk);
+        let routed = route_mention_into(&s, &sess_b_pk, &m, &event);
 
         assert!(
             routed,
-            "FREEZE: targeted mention to sess-B must be newly routed"
+            "FREEZE: session-pubkey-targeted mention to sess-B must be newly routed"
         );
         assert_eq!(
             s.drain_inbox("sess-B").unwrap().len(),
@@ -729,18 +709,12 @@ mod tests {
         );
         assert!(
             s.drain_inbox("sess-A").unwrap().is_empty(),
-            "FREEZE: sess-A (sibling) must NOT receive a targeted mention for sess-B"
+            "FREEZE: sess-A (sibling) must NOT receive a mention for sess-B"
         );
     }
 
-    /// FREEZE A2: UNTARGETED mention fans out to ALL alive sessions of the recipient
-    /// agent+project, and NOT to sessions of other agents or other projects.
-    ///
-    /// Scenario: three sessions alive —
-    ///   sess-1 (pk1, proj)
-    ///   sess-2 (pk1, proj)   ← both should receive
-    ///   sess-other (pk2, proj) ← different agent: must not receive
-    ///   sess-other-proj (pk1, other-proj) ← different project: must not receive
+    /// FREEZE A2: UNTARGETED mention (to agent pubkey) fans out to ALL alive sessions
+    /// of the recipient agent+project, and NOT to sessions of other agents or projects.
     #[test]
     fn freeze_untargeted_mention_fans_out_to_all_alive_sessions_of_recipient_agent_project() {
         let s = Store::open_memory().unwrap();
@@ -762,8 +736,8 @@ mod tests {
         ))
         .unwrap();
 
-        // Untargeted mention addressed to pk1/proj.
-        let (m, event) = signed_mention(&keys2, &pk1, None);
+        // Untargeted mention addressed to pk1's agent pubkey.
+        let (m, event) = signed_mention(&keys2, &pk1);
         let routed = route_mention_into(&s, &pk1, &m, &event);
 
         assert!(routed, "FREEZE: untargeted mention must be newly routed");
@@ -788,15 +762,6 @@ mod tests {
     }
 
     /// FREEZE A3: re-routing the SAME event id is idempotent (inbox PK guarantee).
-    ///
-    /// For UNTARGETED mentions: the per-agent seen-mark deduplicates. But this test
-    /// exercises idempotency at the inbox-PK level WITHOUT marking seen — to prove
-    /// the `INSERT OR IGNORE` constraint is the safety net for every code path.
-    ///
-    /// After the first route_mention_into_with_id: returns true (newly routed).
-    /// After the second call with same eid (without marking seen): returns false
-    /// (inbox PK `(eid, target_session)` already exists — INSERT OR IGNORE fires).
-    /// Drain yields exactly one row per session.
     #[test]
     fn freeze_routing_same_event_id_twice_is_idempotent_no_double_delivery() {
         let s = Store::open_memory().unwrap();
@@ -807,7 +772,7 @@ mod tests {
         s.upsert_session(&alive_session_in_project("sess-2", &pk, "proj"))
             .unwrap();
 
-        let (m, event) = signed_mention(&keys, &pk, None);
+        let (m, event) = signed_mention(&keys, &pk);
         let eid = event.id.to_hex();
 
         // First route: both sessions get the mention.
@@ -815,15 +780,13 @@ mod tests {
         assert!(first, "FREEZE: first route must be newly enqueued");
 
         // Second route (same eid, same sessions, no mark_mention_seen in between):
-        // inbox PK (eid, sess-1) and (eid, sess-2) already exist → both INSERT OR
-        // IGNORE fire → nothing new, returns false.
+        // inbox PK (eid, sess-1) and (eid, sess-2) already exist → INSERT OR IGNORE.
         let second = route_mention_into_with_id(&s, &pk, &m, &eid, 12345);
         assert!(
             !second,
             "FREEZE: second route of same eid must be idempotent (no new rows)"
         );
 
-        // Each session has exactly one undelivered row — no duplicates.
         assert_eq!(
             s.drain_inbox("sess-1").unwrap().len(),
             1,
@@ -836,26 +799,27 @@ mod tests {
         );
     }
 
-    /// FREEZE A4: TARGETED mention to a session id that is NOT among my alive
-    /// sessions results in zero deliveries and route returns false.
+    /// FREEZE A4: mention to an unknown pubkey (not an agent pubkey, not a session
+    /// pubkey) results in zero deliveries and route returns false.
     #[test]
     fn freeze_targeted_mention_to_unknown_session_delivers_nothing() {
         let s = Store::open_memory().unwrap();
         let keys = Keys::generate();
         let pk = keys.public_key().to_hex();
-        // Only sess-A is alive; the mention targets a nonexistent session.
         s.upsert_session(&alive_session("sess-A", &pk)).unwrap();
 
-        let (m, _event) = signed_mention(&keys, &pk, Some("nonexistent-session"));
-        let routed = route_mention_into_with_id(&s, &pk, &m, "eid-unknown", 12345);
+        // An unknown pubkey not registered in session_pubkeys and not an agent pubkey.
+        let unknown_pk = "b".repeat(64);
+        let (m, _event) = signed_mention(&keys, &unknown_pk);
+        let routed = route_mention_into_with_id(&s, &unknown_pk, &m, "eid-unknown", 12345);
 
         assert!(
             !routed,
-            "FREEZE: mention targeting unknown session must not route"
+            "FREEZE: mention to unknown pubkey must not route"
         );
         assert!(
             s.drain_inbox("sess-A").unwrap().is_empty(),
-            "FREEZE: sess-A must not receive a mention targeting a different session id"
+            "FREEZE: sess-A must not receive a mention for an unknown pubkey"
         );
     }
 }
