@@ -713,10 +713,69 @@ async fn open_agent_session(
         anyhow::bail!("tmux new-session failed: {stderr}");
     }
 
-    Ok(String::from_utf8(out.stdout)
+    let pane_id = String::from_utf8(out.stdout)
         .context("tmux new-session output")?
         .trim()
-        .to_string())
+        .to_string();
+
+    // Make tmux transparent to the user. The ONLY reason we run inside tmux is
+    // its persistent-session feature; every other tmux behavior (prefix key,
+    // status bar, mouse capture, ESC delay) gets in the way of the harness and
+    // betrays that we're running under tmux. These per-session options drop the
+    // prefix entirely, hide the chrome, disable mouse capture, kill the ESC
+    // delay, and let passthrough/focus sequences reach the app — so the harness
+    // appears to own the terminal directly.
+    make_session_transparent(&session_name)?;
+
+    Ok(pane_id)
+}
+
+/// Apply per-session tmux options that make the session invisible to the user.
+/// Called once right after `new-session` so every spawn path — `launch`, the
+/// TUI's spawn action, and spawn-on-send — is uniformly transparent.
+fn make_session_transparent(session: &str) -> Result<()> {
+    // Each `(option, value)` pair is applied with `set-option -t <session>`.
+    // `-g` is NOT used: we only want to affect this one session, not the global
+    // tmux environment (the user may have their own tmux sessions that should
+    // keep working normally with their own config).
+    const OPTIONS: &[(&str, &str)] = &[
+        // Hide the status bar — no tmux chrome at the bottom.
+        ("status", "off"),
+        // Drop the prefix key entirely so EVERY keystroke (including Ctrl-b)
+        // goes straight to the harness. With `prefix None`, tmux never
+        // intercepts Ctrl-b as a prefix, so the user doesn't need to double-tap
+        // Ctrl-b to send one. Detach is handled by `tenex-edge tmux` / `launch`,
+        // not by Ctrl-b d.
+        ("prefix", "None"),
+        // No ESC delay: vim-style apps see ESC immediately.
+        ("escape-time", "0"),
+        // Mouse off so wheel/trackpad events pass through to the harness as
+        // arrow keys instead of entering tmux copy-mode.
+        ("mouse", "off"),
+        // Let apps emit control sequences tmux would otherwise swallow
+        // (tmux 3.3+; silently ignored on older versions).
+        ("allow-passthrough", "on"),
+        // Apps see focus/blur events.
+        ("focus-events", "on"),
+        // True color + extended keys + better key reporting.
+        ("default-terminal", "tmux-256color"),
+        ("terminal-overrides", ",*:Tc,RGB,extkeys"),
+    ];
+
+    for &(opt, val) in OPTIONS {
+        let status = std::process::Command::new("tmux")
+            .args(["set-option", "-t", session, opt, val])
+            .status()
+            .with_context(|| format!("tmux set-option {opt}"))?;
+        // `allow-passthrough` and `terminal-overrides` syntax vary across tmux
+        // versions; treat them as best-effort so a legacy tmux doesn't abort
+        // an otherwise-fine spawn.
+        if !status.success() && !matches!(opt, "allow-passthrough" | "terminal-overrides") {
+            anyhow::bail!("tmux set-option {opt} {val} failed for session {session}");
+        }
+    }
+
+    Ok(())
 }
 
 /// Spawn a new tmux window running `slug`'s harness in `project`'s directory.
