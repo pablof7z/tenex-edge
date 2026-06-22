@@ -171,7 +171,7 @@ impl Codec for Kind1Codec {
                 text,
             }) => EventBuilder::new(kind(KIND_NOTE), text.clone()).tags([project_tag(project)?]),
             DomainEvent::Status(Status {
-                agent: _agent,
+                agent,
                 project,
                 session_id,
                 host,
@@ -199,6 +199,13 @@ impl Codec for Kind1Codec {
                     tag(&["status", if *busy { "busy" } else { "idle" }])?,
                     tag(&["host", host])?,
                 ];
+                // Carry the agent slug on the wire. Status is session-signed, so a
+                // peer can't resolve the author (session) pubkey to a slug via the
+                // agent's kind:0 — without this tag remote sessions render as
+                // "(unnamed)" in `who` and can't be addressed by agent name.
+                if !agent.slug.is_empty() {
+                    tags.push(tag(&["slug", &agent.slug])?);
+                }
                 if !rel_cwd.is_empty() {
                     tags.push(tag(&["rel-cwd", rel_cwd])?);
                 }
@@ -329,8 +336,13 @@ impl Codec for Kind1Codec {
                 let session_id = first_tag(event, "session-id")
                     .or_else(|| first_tag(event, "d").and_then(session_from_status_d))?;
                 Some(DomainEvent::Status(Status {
-                    // Slug is NOT on the wire; resolved downstream from kind:0 profile.
-                    agent: AgentRef::new(pubkey, String::new()),
+                    // Slug rides as a tag (session-signed status can't be resolved
+                    // to a slug via the author pubkey's kind:0); empty on legacy
+                    // emitters, then resolved downstream from the kind:0 profile.
+                    agent: AgentRef::new(
+                        pubkey,
+                        first_tag(event, "slug").unwrap_or_default().to_string(),
+                    ),
                     project: project_from_tags(event)?,
                     session_id: SessionId::from(session_id),
                     host: first_tag(event, "host").unwrap_or_default().to_string(),

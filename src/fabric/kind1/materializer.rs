@@ -49,12 +49,18 @@ impl Kind1Materializer {
                 return;
             }
         }
-        // Resolve slug from kind:0 profile (authoritative); fall back to empty.
-        let slug = store
-            .resolve_slug_for_pubkey(&st.agent.pubkey)
-            .ok()
-            .flatten()
-            .unwrap_or_default();
+        // Prefer the slug carried on the wire (session-signed status can't be
+        // resolved via the author pubkey's kind:0); fall back to kind:0 profile
+        // resolution for legacy emitters that didn't tag it.
+        let slug = if !st.agent.slug.is_empty() {
+            st.agent.slug.clone()
+        } else {
+            store
+                .resolve_slug_for_pubkey(&st.agent.pubkey)
+                .ok()
+                .flatten()
+                .unwrap_or_default()
+        };
         store
             .record_peer_status(&PeerStatusObservation {
                 agent_pubkey: st.agent.pubkey.clone(),
