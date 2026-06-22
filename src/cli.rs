@@ -24,6 +24,7 @@ mod admin;
 pub mod command_forensics;
 mod debug;
 mod hooks;
+mod install;
 mod messaging;
 mod project_agents;
 mod statusline;
@@ -257,6 +258,28 @@ enum Cmd {
         /// Example: `tenex-edge launch codex -- --yolo`
         #[arg(last = true, value_name = "COMMAND")]
         command: Vec<String>,
+    },
+    /// Detect local agent harnesses (Claude Code, Codex, opencode) and wire
+    /// tenex-edge's hook entries into each. With no flags, opens a picker when
+    /// interactive and selects detected harnesses in noninteractive shells.
+    Install {
+        /// Install into every detected harness (skip the interactive picker).
+        #[arg(long)]
+        all: bool,
+        /// Comma-separated harness ids to install (e.g. `claude-code,codex`).
+        /// Skips the picker.
+        #[arg(long, value_name = "HARNESSES")]
+        harness: Option<String>,
+        /// Print exactly what would be written without changing anything.
+        #[arg(long)]
+        dry_run: bool,
+        /// Show detection + install status for every known harness and exit.
+        #[arg(long)]
+        status: bool,
+        /// Remove tenex-edge's hooks from the selected harnesses instead of
+        /// installing.
+        #[arg(long)]
+        uninstall: bool,
     },
     /// Internal: the per-machine daemon. Spawned automatically; not for direct use.
     /// (Replaces the old detached per-session engine, which now runs as an async
@@ -632,6 +655,22 @@ pub async fn run(cli: Cli) -> Result<()> {
             command,
         } => tmux_cli::launch(slug, project, command).await,
         Cmd::Daemon => crate::daemon::server::run().await,
+        Cmd::Install {
+            all,
+            harness,
+            dry_run,
+            status,
+            uninstall,
+        } => {
+            install::install(install::InstallOpts {
+                all,
+                harness,
+                dry_run,
+                status,
+                uninstall,
+            })
+            .await
+        }
     }
 }
 

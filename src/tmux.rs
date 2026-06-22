@@ -668,6 +668,20 @@ async fn open_agent_session(
     // `codex` (or any custom) agent registers under the harness default (e.g.
     // `claude`) — the wrong name in `who`/`tmux`.
     let agent_env = format!("TENEX_EDGE_AGENT={slug}");
+    // Forward THIS daemon's tenex-edge home/config/binary into the pane's env via
+    // `-e`, for the same reason the slug travels this way: a tmux pane inherits the
+    // SERVER's global env, not the daemon's, so without this a spawned harness's
+    // hooks phone home to the wrong daemon. The daemon runs with these set (it was
+    // started under them); forwarding them makes `tenex-edge launch <agent>` work
+    // against a non-default TENEX_EDGE_HOME and pins the exact binary the hooks run.
+    let mut passthrough_env: Vec<String> = Vec::new();
+    for key in ["TENEX_EDGE_HOME", "TENEX_CONFIG", "TENEX_EDGE_BIN"] {
+        if let Ok(val) = std::env::var(key) {
+            if !val.is_empty() {
+                passthrough_env.push(format!("{key}={val}"));
+            }
+        }
+    }
     let mut cmd_args: Vec<&str> = vec![
         "new-session",
         "-d",
@@ -681,6 +695,12 @@ async fn open_agent_session(
         "TENEX_EDGE_SPAWNED=1",
         "-e",
         &agent_env,
+    ];
+    for e in &passthrough_env {
+        cmd_args.push("-e");
+        cmd_args.push(e.as_str());
+    }
+    cmd_args.extend_from_slice(&[
         "-PF",
         "#{pane_id}",
         "--",
@@ -698,7 +718,7 @@ async fn open_agent_session(
         "CLAUDE_CODE_SESSION_ID",
         "-u",
         "CLAUDE_CODE_CHILD_SESSION",
-    ];
+    ]);
     let cmd_strs: Vec<&str> = command.iter().map(|s| s.as_str()).collect();
     cmd_args.extend_from_slice(&cmd_strs);
 
