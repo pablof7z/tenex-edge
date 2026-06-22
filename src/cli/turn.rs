@@ -145,13 +145,20 @@ pub fn assemble_turn_start_context(
     }
 }
 
-/// Mid-turn context for the PostToolUse `turn_check` hook. Two independent
+/// Mid-turn context for the PostToolUse `turn_check` hook. Three independent
 /// blocks, each shown only when it has content:
 ///   1. Inbox PEEK — direct messages that arrived mid-turn (read-only peek;
-///      authoritative delivery still happens at turn_start). Always surfaced.
-///   2. Sibling-session delta — project-scoped title/status changes since the
-///      last check, excluding this session. Only present when `delta_since` is
-///      `Some` (the daemon's 30s floor passed) and something actually changed.
+///      authoritative delivery still happens at turn_start). Always surfaced,
+///      even when rate-limited: direct messages are high-value and the recipient
+///      should see them until the next turn drains them.
+///   2. Project chat — ambient chat that arrived since the last check. Unlike
+///      the inbox, this is delta-gated and debounced like the sibling block:
+///      it would otherwise re-emit the same undelivered rows on *every* tool
+///      call (peek never marks them delivered). Shown once per arrival.
+///   3. Sibling-session delta — project-scoped title/status changes since the
+///      last check, excluding this session.
+/// Blocks 2 and 3 are present only when `delta_since` is `Some` (the daemon's
+/// rate-limit floor passed) and there is something new past the cursor.
 /// `self_host` flags remote senders; `now` is the shared timestamp.
 pub fn assemble_turn_check_context(
     store: &std::sync::Mutex<Store>,
@@ -176,21 +183,27 @@ pub fn assemble_turn_check_context(
         blocks.push(text);
     }
 
-    let chat_rows = {
-        let s = store.lock().expect("store mutex poisoned");
-        s.peek_chat(&rec.session_id).unwrap_or_default()
-    };
-    if !chat_rows.is_empty() {
-        blocks.push(render_chat_block(
-            "[tenex-edge] Project chat while you were working:",
-            &chat_rows,
-            &rec.session_id,
-            now,
-        ));
-    }
-
-    // 2. Sibling-session delta — gated by the daemon's rate-limit floor.
+    // 2 + 3. Chat and sibling-delta — both gated by the daemon's rate-limit
+    // floor and cursored off the same `since` so nothing re-emits per tool call.
     if let Some(since) = delta_since {
+        let chat_rows: Vec<_> = {
+            let s = store.lock().expect("store mutex poisoned");
+            s.peek_chat(&rec.session_id).unwrap_or_default()
+        }
+        .into_iter()
+        // Only chat newer than the cursor is "new since the last check"; older
+        // rows were already surfaced this turn (peek leaves them undelivered).
+        .filter(|r| r.created_at > since)
+        .collect();
+        if !chat_rows.is_empty() {
+            blocks.push(render_chat_block(
+                "[tenex-edge] Project chat while you were working:",
+                &chat_rows,
+                &rec.session_id,
+                now,
+            ));
+        }
+
         let s = store.lock().expect("store mutex poisoned");
         let delta = build_status_delta(&s, since, &rec.project, now, Some(&rec.session_id));
         if !delta.is_empty() {

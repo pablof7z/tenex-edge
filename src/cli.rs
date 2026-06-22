@@ -1082,6 +1082,67 @@ mod turn_context_tests {
         );
     }
 
+    fn chat_row(session_id: &str, eid: &str, created_at: u64) -> crate::state::ChatInboxRow {
+        crate::state::ChatInboxRow {
+            chat_event_id: eid.to_string(),
+            target_session: session_id.to_string(),
+            from_pubkey: "pk-chat".to_string(),
+            from_slug: "chatter".to_string(),
+            project: "proj".to_string(),
+            body: "ambient chatter".to_string(),
+            created_at,
+            from_session: String::new(),
+            mentioned_session: String::new(),
+        }
+    }
+
+    /// Project chat is delta-gated: a row newer than the cursor surfaces once,
+    /// but a row older than the cursor (already shown earlier this turn) does
+    /// not re-emit on the next tool call. The peek never marks it delivered, so
+    /// without the cursor filter it would repeat on every PostToolUse.
+    #[test]
+    fn turn_check_chat_shown_once_not_per_tool_call() {
+        let store = Store::open_memory().unwrap();
+        // Arrived at 120, after the cursor (50) → surfaces on this check.
+        store.enqueue_chat(&chat_row("sess-me", "chat-new", 120)).unwrap();
+        let m = Mutex::new(store);
+
+        let text = assemble_turn_check_context(&m, &test_session("sess-me"), "laptop", Some(50), 200)
+            .expect("fresh chat past the cursor must surface");
+        assert!(
+            text.contains("[tenex-edge] Project chat while you were working:"),
+            "chat block expected; got: {text:?}"
+        );
+
+        // Next check's cursor has advanced past the row (since=150 > 120): the
+        // same undelivered row must NOT re-emit.
+        let text2 =
+            assemble_turn_check_context(&m, &test_session("sess-me"), "laptop", Some(150), 200);
+        assert!(
+            text2.is_none(),
+            "already-shown chat must not repeat once the cursor passes it; got: {text2:?}"
+        );
+
+        // The row is still undelivered (peek, not drain) so turn_start delivers it.
+        let g = m.lock().unwrap();
+        assert_eq!(g.peek_chat("sess-me").unwrap().len(), 1);
+    }
+
+    /// `delta_since = None` (rate-limited / not mid-turn) suppresses project chat
+    /// too, not just the sibling delta — chat is debounced, the inbox is not.
+    #[test]
+    fn turn_check_chat_suppressed_when_not_due() {
+        let store = Store::open_memory().unwrap();
+        store.enqueue_chat(&chat_row("sess-me", "chat-x", 120)).unwrap();
+        let m = Mutex::new(store);
+
+        let ctx = assemble_turn_check_context(&m, &test_session("sess-me"), "laptop", None, 200);
+        assert!(
+            ctx.is_none(),
+            "chat must be suppressed when not due (no inbox to surface); got: {ctx:?}"
+        );
+    }
+
     /// `delta_since = None` (rate-limited / not mid-turn) suppresses the sibling
     /// delta entirely, even when a sibling just changed.
     #[test]
