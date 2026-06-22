@@ -7,13 +7,8 @@
 //!     injects the rendered pending messages into the pane.
 //!
 //!   • `spawn_agent(state, slug, project, launch_args)` — spawns a new tmux window
-//!     running the
-//!     appropriate harness command. When the spawn was triggered by an inbound
-//!     mention (spawn-on-send), the caller tags the new pane with that mention via
-//!     `register_pending_spawn_with_mention`; when the harness fires its
-//!     `session-start` hook, the daemon types the received message straight into
-//!     the pane as its first prompt. Manual spawns (from the TUI) register nothing
-//!     and start clean — no prompt is injected.
+//!     running the appropriate harness command. Manual spawns start clean — no
+//!     prompt is injected.
 //!
 //! Fail-open everywhere: if the `tmux` binary is absent, TMUX_PANE was never set,
 //! or any sub-command errors, we log to stderr (debug only) and return Ok(()).
@@ -175,60 +170,6 @@ use std::sync::OnceLock;
 static DEBOUNCE: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new();
 fn debounce() -> &'static Mutex<HashMap<String, u64>> {
     DEBOUNCE.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-// ── pending-spawn tracking ────────────────────────────────────────────────────
-//
-// When `spawn_agent` creates a new tmux window it registers the returned pane id
-// here (keyed by pane_id, value is the spawn prompt text + optional mention).
-// When the harness later fires its `session-start` hook and calls
-// `rpc_session_start`, the server consumes the entry: writes the mention to the
-// new session's inbox (if present), and injects the prompt.
-
-/// A triggering mention that should be pre-loaded into the spawned session's
-/// inbox before the harness receives its first prompt.
-pub struct PendingMention {
-    pub event_id: String,
-    pub from_pubkey: String,
-    pub from_slug: String,
-    pub from_session: String,
-    pub project: String,
-    pub body: String,
-    pub created_at: u64,
-}
-
-/// State registered for a pane created by spawn-on-send: an inbound mention
-/// p-tagging a locally-owned agent spawned this window. Carries the triggering
-/// mention so `rpc_session_start` can type the received message into the new
-/// session as its first prompt. Manual spawns (from the TUI) register NO pending
-/// spawn, so they start clean with no injected prompt.
-pub struct PendingSpawn {
-    pub mention: PendingMention,
-}
-
-/// Map from pane_id → `PendingSpawn` for panes created by spawn-on-send whose
-/// harness has not yet called `session_start`.
-static PENDING_SPAWNS: OnceLock<Mutex<HashMap<String, PendingSpawn>>> = OnceLock::new();
-
-fn pending_spawns() -> &'static Mutex<HashMap<String, PendingSpawn>> {
-    PENDING_SPAWNS.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-/// Tag a freshly-spawned pane with the mention that triggered it, so that when
-/// the harness fires `session-start` the daemon types that message into the
-/// pane. Called from `rpc_send_message` after `spawn_agent` returns the pane id.
-pub fn register_pending_spawn_with_mention(pane_id: &str, mention: PendingMention) {
-    pending_spawns()
-        .lock()
-        .unwrap()
-        .insert(pane_id.to_string(), PendingSpawn { mention });
-}
-
-/// Remove and return the `PendingSpawn` for `pane_id`, or `None` if this pane
-/// was not created by spawn-on-send (a manual spawn or an ordinary harness
-/// start). Called by `rpc_session_start` when a pane registers its tmux endpoint.
-pub fn consume_pending_spawn(pane_id: &str) -> Option<PendingSpawn> {
-    pending_spawns().lock().unwrap().remove(pane_id)
 }
 
 fn is_debounced(session_id: &str) -> bool {

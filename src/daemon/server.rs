@@ -1017,20 +1017,6 @@ async fn rpc_session_start(
         rel_cwd: rel_cwd.clone(),
     });
 
-    // If this pane was created by spawn-on-send, it was tagged with the mention
-    // that triggered it. Type that message straight into the new session as its
-    // first prompt (the whole reason the session exists). Manual spawns from the
-    // TUI tag nothing and so start clean — no prompt injected. Consuming here
-    // ensures injection fires exactly once regardless of call count.
-    let pending_spawn = p
-        .tmux_pane
-        .as_deref()
-        .filter(|pane| !pane.is_empty())
-        .and_then(crate::tmux::consume_pending_spawn);
-
-    // pending_spawn is kept for future non-inbox spawn-on-send extensions.
-    let _ = (pending_spawn, &p.tmux_pane);
-
     Ok(serde_json::json!({
         "session_id": session_id,
         "codename": crate::util::session_codename(&session_id),
