@@ -299,7 +299,7 @@ tenex-edge statusline
 
 which reads the harness's statusline JSON payload (for `session_id`) on stdin and
 prints one line:
-`claude@host [session-id] ⬡{members} ◉{sessions} {activity} {inbox}`. It fails
+`claude@host [session-id] ⬡{members} ◉{sessions} {activity} {chat}`. It fails
 open — if the daemon is unreachable it prints nothing and exits 0, never blocking
 the prompt. In practice it runs as a second line under the proactive-context line
 via `ccstatusline`. See `docs/wiki/guides/tenex-edge-statusline.md` for the format
@@ -327,7 +327,7 @@ Found via `grep -rn "TENEX_EDGE_" src | grep env` plus `TENEX_CONFIG` /
 | --- | --- |
 | `TENEX_EDGE_AGENT` | The agent slug this pane runs as. Primary source for `agent_env_slug()`. |
 | `TENEX_EDGE_AGENT_FALLBACK` | Fallback agent slug when `TENEX_EDGE_AGENT` is empty. |
-| `TENEX_EDGE_SESSION` | The session id, threaded into session-resolving RPCs (chat, inbox, who, turn, forensics). Explicit `--session` flags win over it. |
+| `TENEX_EDGE_SESSION` | The session id, threaded into session-resolving RPCs (chat, who, turn, forensics). Explicit `--session` flags win over it. |
 | `TENEX_EDGE_GROUP` | NIP-29 subgroup id (`h`) for sessions spawned into a subgroup task room; absent for ordinary project sessions. Binds RPCs to the subgroup session rather than a sibling project session in the same directory. |
 
 ### Behavior knobs

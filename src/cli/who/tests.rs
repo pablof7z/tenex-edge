@@ -568,5 +568,5 @@ fn render_whoami_card_names_self_and_addressing() {
     );
     assert!(!out.contains("npub1xyz"), "npub must NOT be rendered: {out}");
     assert!(out.contains("| Status | Add whoami |"), "status title: {out}");
-    assert!(out.contains("| Inbox | 2 pending |"), "pending count: {out}");
+    assert!(out.contains("| Chat | 2 pending |"), "pending count: {out}");
 }

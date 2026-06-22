@@ -122,7 +122,7 @@ pub(super) fn render_whoami(v: &serde_json::Value) -> String {
             row("member", if is_member { "yes" } else { "no" })
         );
         if pending > 0 {
-            let _ = write!(out, "{}", row("inbox", &format!("{pending} pending")));
+            let _ = write!(out, "{}", row("chat", &format!("{pending} pending")));
         }
         out
     } else {
@@ -147,7 +147,9 @@ pub(super) fn render_whoami(v: &serde_json::Value) -> String {
             "| Project member | {} |",
             if is_member { "yes" } else { "no" }
         );
-        let _ = writeln!(out, "| Inbox | {} pending |", pending);
+        if pending > 0 {
+            let _ = writeln!(out, "| Chat | {} pending |", pending);
+        }
         out
     }
 }

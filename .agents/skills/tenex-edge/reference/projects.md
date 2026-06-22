@@ -254,7 +254,7 @@ into the group. The picker in `project add` *bridges* the two: it offers your
 
 In the domain model (see `tenex-edge-fabric-architecture.md`), the **project-state
 plane** is exactly: `open_project`, `roster`, `presence`, `status`,
-`project_meta` — distinct from the communications plane (send, inbox, threads).
+`project_meta` — distinct from the communications plane (chat, threads).
 ACL is a shared `is_member` predicate both planes consult, not a separate plane.
 
 ---
@@ -264,7 +264,7 @@ ACL is a shared `is_member` predicate both planes consult, not a separate plane.
 An agent doesn't "switch projects" with a command — its project follows its
 **working directory**. To operate in a different project, change into that
 project's directory (or a worktree of it) and the next `whoami` / `who` /
-`inbox` / `send` resolves to the new slug. Session auto-resolution means you
+`chat write` resolves to the new slug. Session auto-resolution means you
 rarely pass `--session`: it's taken from `$TENEX_EDGE_SESSION`, else the cwd's
 project.
 
