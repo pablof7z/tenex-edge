@@ -2,6 +2,7 @@
 
 pub mod lifecycle;
 pub mod materializer;
+pub mod orchestration;
 
 /// Read a single tag value by name from a Nostr event.
 ///
