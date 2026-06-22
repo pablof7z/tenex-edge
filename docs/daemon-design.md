@@ -1,6 +1,6 @@
 # tenex-edge: per-machine daemon design
 
-Status: proposed (human review checkpoint). Implements the architecture change
+Status: implemented. Implements the architecture change
 from **per-session process** to **one per-machine daemon** that solely owns
 `state.db`, the relay connection, the inbox, presence, NIP-29 membership cache,
 and peer pruning.
@@ -22,7 +22,7 @@ Unix domain socket. One writer by construction → corruption window goes to
 zero; N relay connections collapse to one.
 
 This is a pure-internal change: **external CLI behavior and output are
-preserved byte-for-byte** (the Python hooks in `integrations/` and the parallel
+preserved** (the Python hooks in `integrations/` and the parallel
 Claude channel adapter shell out to these verbs and parse their stdout).
 
 ## 2. Stages (sequenced, each independently reviewable)
@@ -37,12 +37,12 @@ Claude channel adapter shell out to these verbs and parse their stdout).
    the daemon is sole writer. **Done.**
 2. **Daemon + single writer** — introduce the UDS daemon, spawn-if-absent,
    lock/socket/stale-reclaim/version-handshake, and the RPC protocol. CLI verbs
-   become thin RPC clients. The daemon owns one `Store`.
+   become thin RPC clients. The daemon owns one `Store`. **Done.**
 3. **Engine + relay relocation** — move the per-session engine
    (`runtime::run_session`) **into** the daemon as a per-session async task, and
    collapse the relay connection(s) to **one** shared `Transport` inside the
-   daemon. `__run-session` (the detached subprocess) is removed; `session-start`
-   becomes an RPC that asks the daemon to spawn an in-process session task.
+   daemon. `__run-session` (the detached subprocess) is removed; `session_start`
+   is a daemon RPC that spawns an in-process `SessionTask`. **Done.**
 
 ## 3. Process model
 
@@ -201,12 +201,12 @@ Walking each verb's true I/O shape:
 
 | verb               | shape                | mechanism                                            |
 |--------------------|----------------------|------------------------------------------------------|
-| `session-start`    | one-shot             | daemon spawns a `SessionTask`, returns `session_id`  |
-| `session-end`      | one-shot             | daemon stops the `SessionTask`                       |
-| `turn-start`       | one-shot (may be big)| daemon drains inbox + builds context, returns text   |
-| `turn-check`       | one-shot, read-only  | peek inbox; no writes                                |
-| `turn-end`         | one-shot             | flip turn state                                      |
-| `send-message`     | one-shot             | daemon publishes the Mention on the shared relay     |
+| `session_start`    | one-shot             | daemon spawns a `SessionTask`, returns `session_id`  |
+| `session_end`      | one-shot             | daemon stops the `SessionTask`                       |
+| `turn_start`       | one-shot (may be big)| daemon drains inbox + builds context, returns text   |
+| `turn_check`       | one-shot, read-only  | peek inbox; no writes                                |
+| `turn_end`         | one-shot             | flip turn state                                      |
+| `send_message`     | one-shot             | daemon publishes the Mention on the shared relay     |
 | `who`              | one-shot             | snapshot rows                                        |
 | `who --live`       | client-side poll     | client calls `who` each refresh; renders terminal    |
 | `inbox`            | one-shot             | drain inbox                                          |
@@ -346,6 +346,158 @@ event with the codec, renders with the existing `render()` and streams the line.
 The client just prints each `item.line`. (The daemon may need a project-scoped
 ephemeral subscription distinct from its trusted-author subscription; it can add
 a tail-scoped REQ for the duration of the connection.)
+
+### `chat_read` (streaming)
+```jsonc
+params: {"session": "te-…"|null, "cwd": "/path", "env_session": "…"|null}
+stream: {"item": { message fields }}
+```
+Streams unread chat-inbox messages for the session; used by the TUI reader.
+
+### `chat_write`
+```jsonc
+params: {"session": "te-…"|null, "cwd": "/path", "message": "…", "mention": "…"|null, ...}
+result: {"ok": true}
+```
+Publishes a chat message (kind:1 chat thread event) from the session agent, optionally mentioning a specific peer session.
+
+### `propose`
+```jsonc
+params: {"title": "…", "body": "…", "session": "te-…"|null, "cwd": "/path", ...}
+result: {"event_id": "hex"}
+```
+Publishes a NIP-29 proposal (structured suggestion) to the project group.
+
+### `user_prompt`
+```jsonc
+params: {"prompt": "…", "session": "te-…"|null, "cwd": "/path", ...}
+result: {"ok": true}
+```
+Publishes a Mention from the owner (signed with `userNsec`/`tenexPrivateKey`) to the session agent — the human's message into the fabric.
+
+### `project_list`
+```jsonc
+params: {}
+result: {"projects": [ {slug, name, about, relay}, … ]}
+```
+Returns all known NIP-29 projects (group metadata) from the daemon's cache.
+
+### `project_edit`
+```jsonc
+params: {"project": "…", "name": "…"|null, "about": "…"|null}
+result: {"ok": true}
+```
+Publishes an updated NIP-29 kind:39000 group metadata event for the project.
+
+### `project_members`
+```jsonc
+params: {"project": "…"}
+result: {"members": [ {pubkey, slug, role}, … ]}
+```
+Returns the current membership list for the given NIP-29 group.
+
+### `project_add`
+```jsonc
+params: {"project": "…", "pubkey": "hex"|null, "agent": "slug"|null}
+result: {"ok": true}
+```
+Adds a pubkey or agent to the project's NIP-29 group (admin-signed kind:9000 add event).
+
+### `project_remove`
+```jsonc
+params: {"project": "…", "pubkey": "hex"}
+result: {"ok": true}
+```
+Removes a pubkey from the project's NIP-29 group (admin-signed kind:9001 remove event).
+
+### `groups_create`
+```jsonc
+params: {"slug": "…", "name": "…"|null, "about": "…"|null, "parent": "…"|null, "cwd": "/path", ...}
+result: {"group_id": "…", "relay": "wss://…"}
+```
+Creates a new NIP-29 group (subgroup or top-level); publishes kind:9007 create event.
+
+### `groups_list`
+```jsonc
+params: {"project": "…"|null, "cwd": "/path"}
+result: {"groups": [ {group_id, name, about, parent, relay}, … ]}
+```
+Lists NIP-29 groups visible to the daemon, optionally scoped to a project.
+
+### `publish_profile`
+```jsonc
+params: {"agent": "slug", "name": "…"|null, "about": "…"|null}
+result: {"event_id": "hex"}
+```
+Force-publishes or updates the agent's kind:0 profile.
+
+### `inbox_reply`
+```jsonc
+params: {"id": "mention_event_id", "message": "…", "session": "te-…"|null, ...}
+result: {"ok": true}
+```
+Replies to a received inbox mention, threading the reply onto the original event.
+
+### `statusline`
+```jsonc
+params: {"session": "te-…"|null, "cwd": "/path", ...}
+result: {"working": bool, "status": "…", "session_count": N, "member_count": N,
+         "is_member": bool, "pending": N, "pending_chat": N}
+```
+Pure-read snapshot for the host statusline integration — no inbox drain, no writes.
+
+### `whoami`
+```jsonc
+params: {"session": "te-…"|null, "cwd": "/path", ...}
+result: {"agent": "slug", "pubkey": "hex", "session_id": "te-…", "project": "…"}
+```
+Returns the resolved identity for the calling session.
+
+### `list_threads`
+```jsonc
+params: {"project": "…"|null, "cwd": "/path"}
+result: {"threads": [ {thread_id, subject, from_slug, created_at, unread}, … ]}
+```
+Lists inbox threads (email-style conversation groupings) for the session.
+
+### `messages`
+```jsonc
+params: {"thread_id": "…"}
+result: {"messages": [ {from_slug, body, created_at, mention_event_id}, … ]}
+```
+Returns all messages in a thread.
+
+### `thread_meta`
+```jsonc
+params: {"thread_id": "…"}
+result: {"subject": "…", "participants": [...], "created_at": N}
+```
+Returns metadata for a specific thread without fetching its messages.
+
+### `ping`
+```jsonc
+params: {}
+result: {"pong": true}
+```
+Health-check / keep-alive.
+
+### `tmux_status`
+Returns live tmux session state (panes, windows) known to the daemon.
+
+### `tmux_send`
+Sends keystrokes or text to a tmux pane.
+
+### `tmux_spawn`
+Spawns a new tmux window/session for an agent, optionally pre-loading a message.
+
+### `tmux_attach`
+Returns the tmux target string needed to attach to a session's pane.
+
+### `tmux_resume`
+Reconstitutes a dead harness session in tmux (re-opens the agent in its worktree).
+
+### `tmux_resumable`
+Returns the list of sessions that can be resumed (have a dead tmux pane but live session row).
 
 ### Control / handshake (not user verbs)
 - `hello` / `welcome` (§4)

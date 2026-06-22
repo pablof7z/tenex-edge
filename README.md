@@ -12,7 +12,7 @@ session-targeted mentions.
 ## Status
 
 Working and tested for real:
-- **50 unit tests + 1 real-relay end-to-end test** (`cargo test`). The e2e test
+- **249 unit tests + 1 real-relay end-to-end test** (`cargo test`). The e2e test
   publishes every event type through the transport to a live `nak serve` relay
   and decodes them back.
 - **Live multi-agent demo** (`scripts/demo.sh`): two agent processes exchange
@@ -85,7 +85,7 @@ surface.
 | Command | Purpose |
 |---|---|
 | `hook --host <name> --type <hook-type>` | The one entry point for the session/turn lifecycle. Reads the harness's hook JSON on stdin; dispatches `session-start`/`session-end`/`user-prompt-submit`/`post-tool-use`/`stop` to the matching internal step. This is how every host (Claude Code, Codex, opencode) starts sessions and brackets turns. |
-| `send-message --recipient <target> --message <m> --session <id>` | Mention an agent or a specific session. |
+| `inbox send --to-session <id\|codename> --message <m>` | Send a message to a specific session. `--to-new-session <agent>` spawns a new session of that agent and pre-loads the message. |
 | `who [--project <slug>] [--live]` | List visible peers (with session-id prefixes); `--live` opens a refreshing terminal board. |
 | `tail [--project <slug>]` | Stream all fabric activity, colorized. |
 | `inbox --session <id>` | Drain pending mentions (opencode injection path + manual "check my messages"). |
@@ -112,7 +112,7 @@ only the wiring differs per host's extension model.
 
 Agents resolve their own session from the working directory (or `$TENEX_EDGE_SESSION`),
 so the agent-facing commands are just `tenex-edge who` / `inbox` /
-`send-message --recipient <agent> --message "..."` — no session id needed.
+`inbox send --to-session <id> --message "..."` — no session id needed.
 
 Verified live on `relay.tenex.chat`: a real opencode agent and a real codex agent
 each messaged a `hub` (both landed in its inbox); a real claude agent auto-received
