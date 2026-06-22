@@ -22,7 +22,6 @@ use crate::fabric::provider::Kind1Nip29Provider;
 use crate::state::Store;
 use crate::util::now_secs;
 use anyhow::Result;
-use nostr_sdk::prelude::Event;
 use std::path::PathBuf;
 use std::time::Duration;
 

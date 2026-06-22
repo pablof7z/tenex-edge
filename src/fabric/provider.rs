@@ -676,11 +676,10 @@ impl Kind1Nip29Provider {
         &self,
         env: &RawEnvelope,
         hosted: &[String],
-        owners: &[String],
         now: u64,
         store: &Store,
     ) -> MaterializationOutcome {
-        crate::fabric::materialize(env, hosted, owners, now, &self.provider_instance, store)
+        crate::fabric::materialize(env, hosted, now, &self.provider_instance, store)
     }
 
     // ── private helpers ───────────────────────────────────────────────────────

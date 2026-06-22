@@ -72,7 +72,6 @@ pub struct MaterializationOutcome {
 pub fn materialize(
     env: &RawEnvelope,
     hosted: &[String],
-    owners: &[String],
     now: u64,
     _provider_instance: &str,
     store: &crate::state::Store,
@@ -237,7 +236,7 @@ mod tests {
 
         let hosted = vec![sender_pk, receiver_pk, future_pk];
         let env = RawEnvelope::Nostr(event);
-        let outcome = materialize(&env, &hosted, &[], event_ts, "test-pi", &store);
+        let outcome = materialize(&env, &hosted, event_ts, "test-pi", &store);
 
         assert!(outcome.wake_mentions, "live receiver should wake");
         assert!(

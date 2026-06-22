@@ -2022,35 +2022,6 @@ fn rpc_whoami(state: &Arc<DaemonState>, params: &serde_json::Value) -> Result<se
 }
 
 
-/// `(branch, short_commit, dirty_count)` for the git repo at `cwd` (or the
-/// daemon's cwd when `None`). All-empty / zero when `cwd` isn't a git repo.
-/// `dirty_count` is `git status --porcelain` line count, which already excludes
-/// gitignored files.
-fn git_snapshot(cwd: Option<&str>) -> (String, String, u32) {
-    use std::process::Command;
-    let dir = cwd
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-    let git = |args: &[&str]| -> Option<String> {
-        let out = Command::new("git")
-            .arg("-C")
-            .arg(&dir)
-            .args(args)
-            .output()
-            .ok()?;
-        if !out.status.success() {
-            return None;
-        }
-        Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
-    };
-    let branch = git(&["rev-parse", "--abbrev-ref", "HEAD"]).unwrap_or_default();
-    let commit = git(&["rev-parse", "--short", "HEAD"]).unwrap_or_default();
-    let dirty = git(&["status", "--porcelain"])
-        .map(|s| s.lines().filter(|l| !l.trim().is_empty()).count() as u32)
-        .unwrap_or(0);
-    (branch, commit, dirty)
-}
-
 // ── project_add ──────────────────────────────────────────────────────────────
 
 /// Publish a NIP-29 kind:9000 (put-user) event to add a pubkey to the group.
@@ -2937,18 +2908,17 @@ fn handle_incoming(state: &Arc<DaemonState>, event: &Event) {
         h.dedup();
         h
     };
-    let owners = state.owners.clone();
     let now = now_secs();
     // ALWAYS materialize: store writes are idempotent, and re-deliveries are
     // load-bearing — a refreshed subscription replays stored events, which is
     // how a NEW session receives mentions that predate it.
-    let outcome = state.with_store(|s| state.provider.materialize(&env, &hosted, &owners, now, s));
+    let outcome = state.with_store(|s| state.provider.materialize(&env, &hosted, now, s));
     // The relay pool notifies once PER MATCHING SUBSCRIPTION (scope filters ×
     // live sessions), so the same event reaches here many times. The tail
     // broadcast is NOT idempotent — emit only on first sight of the event id.
     if let Some(de) = outcome.tail {
         if state.first_sight(&event.id.to_hex()) {
-            derive_and_emit_tail_events(state, &de, outcome.thread_id.as_deref(), &hosted, now);
+            derive_and_emit_tail_events(state, &de, &hosted, now);
         }
     }
     if outcome.wake_mentions {
@@ -3130,7 +3100,6 @@ async fn handle_orchestration(
 fn derive_and_emit_tail_events(
     state: &Arc<DaemonState>,
     de: &DomainEvent,
-    thread_id: Option<&str>,
     hosted: &[String],
     now: u64,
 ) {
