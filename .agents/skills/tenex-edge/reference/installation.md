@@ -81,11 +81,11 @@ prunes any event arrays that become empty.
 > configured separately (see §6). Treat the code as authoritative.
 
 > Scope note: `install` wires **hooks only**. It does not copy the
-> `tenex-edge` skill, a dispatcher, or any "Claude Code plugin" bundle —
-> those live in the repo under `integrations/claude-code/` and are not deployed
-> by this subcommand. If you want the skill available to a Claude Code agent,
-> place `integrations/claude-code/skills/tenex-edge/` under your Claude skills
-> directory yourself.
+> `tenex-edge` skill, a dispatcher, or any "Claude Code plugin" bundle — those
+> live in the repo and are not deployed by this subcommand. The skill is
+> host-agnostic and lives under `.agents/skills/tenex-edge/`; to make it
+> available to a Claude Code agent, symlink (or copy) it into a skills directory
+> Claude reads, e.g. `.claude/skills/tenex-edge -> ../../.agents/skills/tenex-edge`.
 
 ### Recipes
 
