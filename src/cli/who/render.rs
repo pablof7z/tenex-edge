@@ -77,15 +77,21 @@ pub(super) fn render_whoami(v: &serde_json::Value) -> String {
     let project = s("project");
     let host = s("host");
     let rel_cwd = s("rel_cwd");
-    let npub = s("npub");
     let pubkey = s("pubkey");
+    let session_pubkey = s("session_pubkey");
     let working = v.get("working").and_then(|x| x.as_bool()).unwrap_or(false);
     let title = s("status");
     let is_member = v.get("is_member").and_then(|x| x.as_bool()).unwrap_or(true);
     let pending = v.get("pending").and_then(|x| x.as_u64()).unwrap_or(0);
 
     let status = status_plain(&title, "", working);
-    let key = if npub.is_empty() { pubkey } else { npub };
+    // Show the hex session pubkey (the wire address others route to), falling
+    // back to the durable agent pubkey when no session key was derived. Never npub.
+    let key = if session_pubkey.is_empty() {
+        pubkey
+    } else {
+        session_pubkey
+    };
     let dir = if rel_cwd.trim().is_empty() || rel_cwd == "." {
         host.clone()
     } else {
@@ -357,6 +363,10 @@ fn render_who_row(out: &mut String, row: &WhoRow, include_project: bool) {
         unread,
         status_colored(&row.status, &row.activity, row.active),
     );
+    // The hex pubkey behind the codename — the wire address others route to.
+    if !row.pubkey.is_empty() {
+        let _ = writeln!(out, "    {}", row.pubkey.dimmed());
+    }
 }
 
 /// The `[dir]` to show for a row's `rel_cwd`: `None` when empty or the project

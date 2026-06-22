@@ -148,6 +148,10 @@ struct WhoRow {
     /// Number of unread inbox mentions for this session.
     #[serde(default)]
     unread: usize,
+    /// Hex pubkey others route to: the per-session pubkey when derived, else the
+    /// durable agent pubkey. This is the wire address behind the codename.
+    #[serde(default)]
+    pubkey: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -230,6 +234,9 @@ pub fn load_who_snapshot(
                 remote: false,
                 attachable: tmux_sessions.contains(sid),
                 unread,
+                pubkey: store
+                    .session_pubkey_for_session(sid)
+                    .unwrap_or_else(|| s.agent_pubkey.clone()),
             });
         } else {
             other_agents
@@ -259,6 +266,9 @@ pub fn load_who_snapshot(
                 remote: slugify_host(&p.host) != local_host,
                 attachable: false,
                 unread: 0,
+                // Peer status is session-signed, so agent_pubkey IS the peer's
+                // session pubkey — the address to route to.
+                pubkey: p.agent_pubkey.clone(),
             });
         } else {
             other_agents

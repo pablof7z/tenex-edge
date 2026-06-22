@@ -325,6 +325,7 @@ fn live_renderer_same_as_once_with_hint() {
             remote: false,
             attachable: false,
             unread: 0,
+            pubkey: String::new(),
         }],
         other_projects: vec![],
         spawnable: vec![],
@@ -384,6 +385,7 @@ fn who_all_projects_includes_project_in_agent_names() {
             remote: false,
             attachable: false,
             unread: 0,
+            pubkey: String::new(),
         }],
         other_projects: vec![],
         spawnable: vec![],
@@ -418,6 +420,7 @@ fn agent_renderer_uses_markdown_sections_and_session_table() {
             remote: true,
             attachable: false,
             unread: 0,
+            pubkey: String::new(),
         }],
         other_projects: vec![OtherProjectSummary {
             project: "other".to_string(),
@@ -541,6 +544,7 @@ fn render_whoami_card_names_self_and_addressing() {
         "host": "laptop",
         "rel_cwd": "worktree1",
         "pubkey": "deadbeef",
+        "session_pubkey": "5e5510n",
         "npub": "npub1xyz",
         "is_member": true,
         "working": true,
@@ -560,7 +564,12 @@ fn render_whoami_card_names_self_and_addressing() {
     );
     assert!(out.contains("| Session ID | sess-abc |"), "raw id: {out}");
     assert!(out.contains("| Host | laptop [worktree1] |"), "host+cwd: {out}");
-    assert!(out.contains("| Pubkey | npub1xyz |"), "npub preferred: {out}");
+    // The hex session pubkey is shown (the wire address), never the npub.
+    assert!(
+        out.contains("| Pubkey | 5e5510n |"),
+        "hex session pubkey shown, not npub: {out}"
+    );
+    assert!(!out.contains("npub1xyz"), "npub must NOT be rendered: {out}");
     assert!(out.contains("| Status | Add whoami |"), "status title: {out}");
     assert!(out.contains("| Inbox | 2 pending |"), "pending count: {out}");
 }
