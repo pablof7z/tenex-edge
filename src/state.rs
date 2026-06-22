@@ -1546,6 +1546,28 @@ impl Store {
     fn alias_lookup(&self, obs: &SessionObservation) -> Option<SessionId> {
         use crate::session::AliasKind;
         let h = obs.harness.as_str();
+        // Echo harnesses (e.g. opencode) own no native id, so the daemon mints the
+        // canonical id at session-start and echoes it back; the harness then reports
+        // it as its own `harness_session_id` on every later hook. That id IS the
+        // session — recognize it directly so a reassert REATTACHES instead of falling
+        // through to the pane/pid supersede branch and minting a fresh session each
+        // first turn. Safe for claude/codex: their native ids are never `te-*`
+        // canonical ids, so this never matches for them.
+        if let Some(v) = &obs.harness_session_id {
+            if !v.is_empty() {
+                let is_canonical: bool = self
+                    .conn
+                    .query_row(
+                        "SELECT EXISTS(SELECT 1 FROM session_state WHERE session_id=?1)",
+                        params![v],
+                        |r| r.get(0),
+                    )
+                    .unwrap_or(false);
+                if is_canonical {
+                    return Some(SessionId::from(v.clone()));
+                }
+            }
+        }
         let mut candidates: Vec<(&str, &str)> = Vec::new();
         if let Some(v) = &obs.harness_session_id {
             candidates.push((AliasKind::HarnessSession.as_str(), v));
@@ -3908,6 +3930,70 @@ mod tests {
             !item.derived.liveness.is_live(),
             "an expired session is never live"
         );
+    }
+
+    #[test]
+    fn opencode_reassert_with_echoed_canonical_id_reattaches_not_supersedes() {
+        use crate::session::{Harness, SessionObservation};
+        let s = Store::open_memory().unwrap();
+        // session-start: opencode owns no native id (echo harness), so the daemon
+        // mints the canonical id, anchored on pane + watched pid. No
+        // harness_session_id / resume_id yet.
+        let start = SessionObservation {
+            agent_slug: "opencode".into(),
+            agent_pubkey: "pk-oc".into(),
+            project: "proj".into(),
+            host: "host".into(),
+            rel_cwd: String::new(),
+            harness: Harness::Opencode,
+            harness_session_id: None,
+            resume_id: None,
+            tmux_pane: Some("%0".into()),
+            watch_pid: Some(70282),
+            observed_at: 100,
+        };
+        let canonical = s
+            .register_or_reassert_session(&start)
+            .unwrap()
+            .session_id
+            .as_str()
+            .to_string();
+
+        // user-prompt-submit: the plugin echoes the canonical id back as the
+        // harness session id, now knows opencode's resume token, and reports a
+        // DIFFERENT pid (ancestor search). Pre-fix this missed the alias lookup and
+        // fell through to the pane/pid supersede branch, minting a brand-new
+        // session on every first turn.
+        let reassert = SessionObservation {
+            agent_slug: "opencode".into(),
+            agent_pubkey: "pk-oc".into(),
+            project: "proj".into(),
+            host: "host".into(),
+            rel_cwd: String::new(),
+            harness: Harness::Opencode,
+            harness_session_id: Some(canonical.clone()),
+            resume_id: Some("ses_abc".into()),
+            tmux_pane: Some("%0".into()),
+            watch_pid: Some(99999),
+            observed_at: 160,
+        };
+        let after = s
+            .register_or_reassert_session(&reassert)
+            .unwrap()
+            .session_id
+            .as_str()
+            .to_string();
+        assert_eq!(
+            after, canonical,
+            "reassert must reattach to the same canonical session, not mint a new one"
+        );
+        // No churn: exactly one session_state row exists (pre-fix the reassert
+        // superseded into a second row, leaving one ended + one active).
+        let rows: i64 = s
+            .conn
+            .query_row("SELECT COUNT(*) FROM session_state", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 1, "exactly one session_state row (no churn), got {rows}");
     }
 
     #[test]
