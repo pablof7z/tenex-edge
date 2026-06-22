@@ -281,8 +281,7 @@ Two addressing modes, set by the CLI's mutually-exclusive flags:
 
 The daemon publishes the Mention on the **shared** relay connection. Client prints
 `mentioned <codename> (session <codename>)` / `mentioned <codename>` to match
-today. (`inbox reply --id <message-id>` remains its own RPC/subcommand for
-replying upstream to a received message.)
+today.
 
 ### `who`
 ```jsonc

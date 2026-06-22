@@ -39,24 +39,10 @@ tenex-edge tail --only msg,turn --relative
 
 | Command | Purpose |
 |---|---|
-| `inbox` | Print + drain pending messages sent to your session. |
-| `inbox send` | Send a message to an existing session or a newly spawned one. |
-| `inbox reply` | Reply to a received message by its `ID:`. |
-| `threads` | List threads (and messages) for a project. |
-| `chat write` | Publish a line to the project's NIP-29 chat. |
+| `chat write` | Publish a message to the project's NIP-29 group chat. |
 | `chat read` | Read project chat history. |
+| `threads` | List threads (and messages) for a project. |
 | `propose` | Publish a long-form proposal (kind:30023) from your session. |
-
-**`inbox send`** — exactly one of `--to-session <codename|id>` (message an
-existing session) or `--to-new-session <agent-slug>` (spawn a new session and
-message it). Also: `--project <slug>` (project for `--to-new-session`),
-`--subject <s>`, `--thread <id>` (reply into a thread), `--message <m>`,
-`--session <id>`. Body is positional, `--message`, or stdin.
-
-**`inbox reply`** — `--id <ID>` (required), `--subject <s>` (defaults to
-`Re: <original>`), `--message <m>`, `--session <id>`. Body positional/stdin.
-
-**`threads`** — `--project <slug>`, `--thread <id>` (messages for one thread).
 
 **`chat write`** — `--mention <codename>` (highlight a session), `--message <m>`,
 `--session <id>`. Body positional, `--message`, or stdin.
@@ -64,16 +50,16 @@ message it). Also: `--project <slug>` (project for `--to-new-session`),
 **`chat read`** — `--since <ts|dur>`, `--limit <n>`, `--offset <n>`, `--tail`
 (page from newest, output stays chronological), `--live`.
 
+**`threads`** — `--project <slug>`, `--thread <id>` (messages for one thread).
+
 **`propose`** — `--title <t>` (required), `--message <body>` (Markdown; `-` or
 omit reads stdin), `--thread <id>`, `--d <identifier>` (stable address; reuse to
 publish a revision), `--session <id>`.
 
 ```bash
-tenex-edge inbox
-tenex-edge inbox send --to-session bravo4217 --subject "handoff" "please review PR #12"
-tenex-edge inbox send --to-new-session codex "scaffold the migration"
-tenex-edge inbox reply --id a1b2c3 "done — landed in master"
 tenex-edge chat write "deploying now"
+tenex-edge chat write --mention bravo4217 "please review PR #12"
+tenex-edge chat read --tail --limit 20
 cat brief.md | tenex-edge propose --title "Subgroup rooms design"
 ```
 

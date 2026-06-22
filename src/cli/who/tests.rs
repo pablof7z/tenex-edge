@@ -324,7 +324,6 @@ fn live_renderer_same_as_once_with_hint() {
             rel_cwd: String::new(),
             remote: false,
             attachable: false,
-            unread: 0,
             pubkey: String::new(),
         }],
         other_projects: vec![],
@@ -384,7 +383,6 @@ fn who_all_projects_includes_project_in_agent_names() {
             rel_cwd: String::new(),
             remote: false,
             attachable: false,
-            unread: 0,
             pubkey: String::new(),
         }],
         other_projects: vec![],
@@ -419,7 +417,6 @@ fn agent_renderer_uses_markdown_sections_and_session_table() {
             rel_cwd: "worktree".to_string(),
             remote: true,
             attachable: false,
-            unread: 0,
             pubkey: String::new(),
         }],
         other_projects: vec![OtherProjectSummary {

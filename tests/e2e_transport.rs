@@ -8,7 +8,7 @@ use common::TestRelay;
 use nostr_sdk::prelude::{Keys, RelayPoolNotification};
 use std::time::Duration;
 use tenex_edge::codec::{Codec, Kind1Codec};
-use tenex_edge::domain::*;
+use tenex_edge::domain::{AgentRef, DomainEvent, Profile, Status};
 use tenex_edge::fabric::nostr_delivery::scope_filters;
 use tenex_edge::fabric::Scope;
 use tenex_edge::transport::Transport;
@@ -66,11 +66,6 @@ async fn publishes_and_decodes_all_event_types() {
             expires_at: Some(1_900_000_000),
             thread_root_id: None,
         }),
-        DomainEvent::Activity(Activity {
-            agent: aref.clone(),
-            project: project.clone(),
-            text: "fixing the auth bug".into(),
-        }),
     ];
     for ev in &events {
         let builder = codec.encode(ev).expect("encode");
@@ -80,7 +75,7 @@ async fn publishes_and_decodes_all_event_types() {
     // Collect decoded events for a few seconds.
     let mut seen: Vec<DomainEvent> = Vec::new();
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-    while seen.len() < 3 && tokio::time::Instant::now() < deadline {
+    while seen.len() < 2 && tokio::time::Instant::now() < deadline {
         match tokio::time::timeout(Duration::from_millis(500), notifications.recv()).await {
             Ok(Ok(RelayPoolNotification::Event { event, .. })) => {
                 if let Some(de) = codec.decode(&event) {
@@ -98,15 +93,11 @@ async fn publishes_and_decodes_all_event_types() {
     let has_status = seen
         .iter()
         .any(|e| matches!(e, DomainEvent::Status(s) if s.session_id.as_str() == "sess-1"));
-    let has_activity = seen
-        .iter()
-        .any(|e| matches!(e, DomainEvent::Activity(a) if a.text == "fixing the auth bug"));
     let has_profile = seen
         .iter()
         .any(|e| matches!(e, DomainEvent::Profile(p) if p.host == "test-host"));
 
     assert!(has_status, "expected status; saw {seen:#?}");
-    assert!(has_activity, "expected activity; saw {seen:#?}");
     assert!(has_profile, "expected profile; saw {seen:#?}");
 }
 
