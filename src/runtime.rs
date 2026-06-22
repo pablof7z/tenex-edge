@@ -119,8 +119,8 @@ pub async fn run_session_in_daemon(
     // equals the session pubkey. The durable kind:0 above is NOT removed —
     // both identities coexist, with the session key active for live events.
     if let Some(ref sk) = p.session_keys {
-        let codename = crate::util::session_codename(&p.session_id);
-        let session_display = format!("{codename} ({})", p.agent_slug);
+        // Canonical session display name: `codename (agent@host)`.
+        let session_display = crate::idref::session_label(&p.session_id, &p.agent_slug, &p.host);
         let session_aref = AgentRef::new(sk.public_key().to_hex(), session_display);
         let _ = provider
             .publish(

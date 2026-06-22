@@ -247,15 +247,15 @@ pub(crate) fn render_chat_block(
 ) -> String {
     let mut text = String::from(header);
     for row in rows {
+        // Canonical sender: `codename (agent@host)` when the session is known,
+        // else `agent@host`, else the short pubkey for an unknown sender.
+        // ChatInboxRow carries no host, so this degrades to `codename (slug)`.
         let from = if row.from_slug.is_empty() {
             pubkey_short(&row.from_pubkey)
-        } else {
+        } else if row.from_session.is_empty() {
             row.from_slug.clone()
-        };
-        let session = if row.from_session.is_empty() {
-            String::new()
         } else {
-            format!(" [session {}]", session_codename(&row.from_session))
+            crate::idref::session_label(&row.from_session, &row.from_slug, "")
         };
         let mention = if row.mentioned_session == self_session {
             " mentioned you"
@@ -264,12 +264,10 @@ pub(crate) fn render_chat_block(
         };
         let _ = write!(
             text,
-            "\n\n{} ({})\n{}@{}{}{}:\n{}",
+            "\n\n{} ({})\n{}{}:\n{}",
             format_local_datetime(row.created_at),
             relative_time(row.created_at, now),
             from,
-            row.project,
-            session,
             mention,
             row.body
         );

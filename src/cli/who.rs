@@ -394,31 +394,26 @@ pub(super) fn build_status_delta(
         return Vec::new();
     }
 
-    // Render the delta with the SAME markdown table shape as the first-turn
-    // roster (`render_who_plain`) so both surfaces look identical. The change
-    // kind (joined / changed / left) is folded into the Status cell.
-    let mut delta: Vec<String> = render::SESSION_TABLE_HEADER
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
+    // Canonical presence lines, one per change, referring to each session the
+    // single standard way: `codename (agent@host)`.
+    //   * bravo4217 (codex@laptop) joined
+    //   * echo0163 (claude@tower) left
+    //   * bravo4217 (codex@laptop) — reviewing the patch
+    let mut delta: Vec<String> = Vec::with_capacity(items.len());
     for item in &items {
         let snap = &item.snapshot;
-        let d = &item.derived;
-        let slug = snap.agent_slug.as_str();
-        let code = session_codename(snap.session_id.as_str());
-        let title = if d.title.trim().is_empty() {
-            "—".to_string()
-        } else {
-            d.title.trim().to_string()
+        let label = crate::idref::session_label(
+            snap.session_id.as_str(),
+            snap.agent_slug.as_str(),
+            &snap.host,
+        );
+        let activity = render::status_plain("", &item.derived.activity, item.derived.busy);
+        let line = match item.kind {
+            DeltaKind::Appeared => format!("* {label} joined"),
+            DeltaKind::Gone => format!("* {label} left"),
+            DeltaKind::Changed => format!("* {label} — {activity}"),
         };
-        // Live activity / idle word, without the title (that's its own column).
-        let activity = render::status_plain("", &d.activity, d.busy);
-        let status = match item.kind {
-            DeltaKind::Appeared => format!("joined · {activity}"),
-            DeltaKind::Changed => activity,
-            DeltaKind::Gone => "left".to_string(),
-        };
-        delta.push(render::session_table_row(slug, &code, &snap.host, &title, &status));
+        delta.push(line);
     }
     delta
 }

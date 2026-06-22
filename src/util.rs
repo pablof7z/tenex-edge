@@ -95,6 +95,20 @@ pub fn session_codename(session_id: &str) -> String {
     format!("{word}{num:04}")
 }
 
+/// Heuristic: does `s` look like a session codename (`<nato-word><digits>`,
+/// e.g. `bravo4217`)? Used to disambiguate a bare token between a session
+/// codename and a durable agent slug when resolving an identifier. A leading
+/// NATO word immediately followed by one-or-more digits and nothing else.
+pub fn looks_like_codename(s: &str) -> bool {
+    let lower = s.to_ascii_lowercase();
+    let split = lower.find(|c: char| c.is_ascii_digit());
+    let Some(idx) = split else { return false };
+    let (word, digits) = lower.split_at(idx);
+    !digits.is_empty()
+        && digits.chars().all(|c| c.is_ascii_digit())
+        && CODENAME_WORDS.contains(&word)
+}
+
 /// A session identifier. Wraps the raw id (a UUID-shaped string stored verbatim
 /// in SQLite and carried on the wire) but its `Display` deliberately renders the
 /// stable `session_codename` (e.g. `bravo4217`), NOT the raw id. This makes it

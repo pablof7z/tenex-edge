@@ -11,6 +11,7 @@
 pub mod config;
 pub mod domain;
 pub mod identity;
+pub mod idref;
 pub mod llmconfig;
 pub mod project;
 pub mod session;

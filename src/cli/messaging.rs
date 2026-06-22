@@ -406,13 +406,19 @@ pub struct EnvelopeView<'a> {
 /// The Subject and Branch lines are omitted when absent; a remote sender adds
 /// `[remote: <host>]` to the From line.
 pub fn format_envelope(e: &EnvelopeView) -> String {
-    let mut from = format!("{}@{}", e.from_slug, e.project);
-    if !e.from_session.is_empty() {
-        let _ = write!(from, " [session {}]", session_codename(e.from_session));
-    }
-    if !e.host.is_empty() && slugify_host(e.host) != slugify_host(e.self_host) {
-        let _ = write!(from, " [remote: {}]", e.host);
-    }
+    // Canonical sender identity: `codename (agent@host)` when the session is
+    // known, else `agent@host`. Host (slugified) encodes locality, so no
+    // separate `[remote]` tag is needed.
+    let host = if e.host.is_empty() {
+        e.self_host
+    } else {
+        e.host
+    };
+    let from = if e.from_session.is_empty() {
+        crate::idref::agent_label(e.from_slug, host)
+    } else {
+        crate::idref::session_label(e.from_session, e.from_slug, host)
+    };
 
     let mut s = String::new();
     let _ = write!(s, "From: {from}");

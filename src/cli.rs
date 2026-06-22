@@ -919,7 +919,7 @@ mod turn_context_tests {
             "FREEZE: mention section header must be present; got: {text:?}"
         );
         assert!(
-            text.contains("From: sender@proj"),
+            text.contains("From: sender@laptop"),
             "envelope From line must be present; got: {text:?}"
         );
         assert!(
@@ -975,7 +975,7 @@ mod turn_context_tests {
             "FREEZE: turn_check header must be present; got: {text:?}"
         );
         assert!(
-            text.contains("From: sender@proj"),
+            text.contains("From: sender@laptop"),
             "turn_check must render the envelope From line; got: {text:?}"
         );
         assert!(
@@ -1043,15 +1043,10 @@ mod turn_context_tests {
             text.contains("changes since your last check"),
             "delta header expected; got: {text:?}"
         );
-        // Changed renders as a roster-shaped table row: title in its own column,
-        // the live activity in the Status column.
+        // Changed renders as a canonical presence line: `* codename (agent@host) — activity`.
         assert!(
-            text.contains("| Agent | Session | Host | Title | Status |"),
-            "delta must use the roster table header; got: {text:?}"
-        );
-        assert!(
-            text.contains("| sib | `") && text.contains("| laptop | Refactor tmux | editing hooks.rs |"),
-            "sibling title+activity expected as a table row; got: {text:?}"
+            text.contains("(sib@laptop) — editing hooks.rs"),
+            "sibling activity expected as a canonical presence line; got: {text:?}"
         );
         assert!(
             !text.contains("My own work"),
@@ -1092,8 +1087,8 @@ mod turn_context_tests {
             assemble_turn_check_context(&m, &test_session("sess-me"), "laptop", Some(50), 200)
                 .expect("delta block expected for idle transition");
         assert!(
-            text.contains("| Refactor tmux | idle |"),
-            "idle marker expected in the Status cell; got: {text:?}"
+            text.contains("(sib@laptop) — idle"),
+            "idle marker expected in the canonical presence line; got: {text:?}"
         );
     }
 
@@ -1241,10 +1236,11 @@ mod turn_context_tests {
     fn envelope_has_email_like_headers_then_body() {
         let out = format_envelope(&view());
         let lines: Vec<&str> = out.lines().collect();
+        // Canonical sender identity: `codename (agent@host)`.
         assert_eq!(
             lines[0],
             format!(
-                "From: codex@tenex-edge [session {}]",
+                "From: {} (codex@my-box)",
                 session_codename("sender-session-id")
             )
         );
@@ -1262,7 +1258,8 @@ mod turn_context_tests {
         v.dirty = 1;
         v.host = "prod-01.example.com";
         let out = format_envelope(&v);
-        assert!(out.contains("[remote: prod-01.example.com]"));
+        // Host (slugified) rides in the canonical `agent@host`; no `[remote:]` tag.
+        assert!(out.contains("(codex@prod-01-example-com)"));
         assert!(out.contains("Branch: features/oauth (a1b2c3d) [1 file dirty]"));
         v.dirty = 3;
         assert!(format_envelope(&v).contains("[3 files dirty]"));

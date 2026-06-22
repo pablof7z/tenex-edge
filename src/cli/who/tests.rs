@@ -172,13 +172,15 @@ fn who_snapshot_merges_local_and_peer_sessions() {
     assert!(once.starts_with("proj\n\n"));
     // Host is shown for every agent now, including same-machine sessions. The
     // freshly-registered coder is idle (no turn opened yet).
+    // Canonical agent reference `agent@host`; a local session shows no host paren.
     assert!(once.contains(&format!(
-        "coder [session {}] (laptop) - idle",
+        "coder@laptop [session {}] - idle",
         session_codename(&coder_id)
     )));
-    assert!(once.contains("coder"));
-    // The genuine remote is flagged `, remote` next to its hostname.
-    assert!(once.contains("(tower, remote)"));
+    assert!(once.contains("coder@laptop"));
+    // The genuine remote carries its host in the `@host` name plus a `(remote)` flag.
+    assert!(once.contains("@tower"));
+    assert!(once.contains("(remote)"));
 }
 
 #[test]
@@ -282,8 +284,8 @@ fn same_host_peer_is_not_remote() {
     assert_eq!(sib.rel_cwd, "worktree1");
     let once = strip_ansi(&render_who_once(&snap));
     assert!(
-        once.contains("(laptop)") && !once.contains("(laptop, remote)"),
-        "same-host peer shows its host with no remote flag"
+        once.contains("@laptop") && !once.contains("(remote)"),
+        "same-host peer shows its host in the @host name with no remote flag"
     );
     assert!(once.contains("[worktree1]"), "rel_cwd shown in bracket");
 }
@@ -299,8 +301,8 @@ fn root_rel_cwd_has_no_bracket() {
     let once = strip_ansi(&render_who_once(&snap));
     assert!(!once.contains("[.]"), "root cwd must not render a bracket");
     assert!(
-        once.contains("(tower, remote)"),
-        "remote peer shows hostname with remote flag"
+        once.contains("@tower") && once.contains("(remote)"),
+        "remote peer shows host in the @host name plus a remote flag"
     );
 }
 
@@ -357,7 +359,7 @@ fn who_renderer_summarizes_other_projects() {
     let once = strip_ansi(&render_who_once(&snap));
 
     assert!(once.contains(&format!(
-        "a [session {}] (laptop) - idle",
+        "a@laptop [session {}] - idle",
         session_codename("s1")
     )));
     assert!(once.contains("1 other agent(s) in other projects:"));
@@ -394,7 +396,7 @@ fn who_all_projects_includes_project_in_agent_names() {
     let once = strip_ansi(&render_who_once(&snapshot));
     assert!(once.starts_with("all projects\n\n"));
     assert!(once.contains(&format!(
-        "reviewer@other [session {}] (tower) - idle",
+        "reviewer@tower [session {}] - idle",
         session_codename("remote-session")
     )));
 }
@@ -440,7 +442,7 @@ fn agent_renderer_uses_markdown_sections_and_session_table() {
     assert!(out.starts_with("# tenex-edge who\n\nProject: proj\n\n## Sessions\n"));
     assert!(out.contains("| Agent | Session | Host | Title | Status |"));
     assert!(out.contains(&format!(
-        "| reviewer | `{}` | tower, remote [worktree] | Review plan | checking patch \\| tests |",
+        "| reviewer@tower | `{}` | tower, remote [worktree] | Review plan | checking patch \\| tests |",
         session_codename("remote-session")
     )));
     assert!(out.contains("## Agents (for new sessions)"));
@@ -510,21 +512,14 @@ fn build_status_delta_reports_appeared_changed_and_excludes_self() {
 
     let lines = build_status_delta(&store, 500, "proj", 1_000, Some(&me_id));
     let joined = lines.join("\n");
-    // The delta renders with the SAME table shape as the first-turn roster.
+    // The delta renders canonical presence lines: `* codename (agent@host) joined`.
     assert!(
-        joined.contains("| Agent | Session | Host | Title | Status |"),
-        "delta must use the roster's markdown table header: {joined}"
-    );
-    // The peer surfaces (it appeared after the cursor) as a table row carrying
-    // its title in the Title column and `joined` folded into the Status cell.
-    // (The session-codename cell is minted, so we assert the stable cells.)
-    assert!(
-        joined.contains("| reviewer | `"),
-        "peer appearance must surface as a `reviewer` row: {joined}"
+        joined.contains("(reviewer@tower) joined"),
+        "peer appearance must surface as a canonical `(reviewer@tower) joined` line: {joined}"
     );
     assert!(
-        joined.contains("| tower | Review PR | joined · idle |"),
-        "appeared row must carry host, title, and joined status: {joined}"
+        joined.trim_start().starts_with('*'),
+        "delta lines are `* …` presence lines, not a table: {joined}"
     );
     assert!(
         !joined.contains(&session_codename(&me_id)),

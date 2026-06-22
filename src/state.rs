@@ -1042,6 +1042,38 @@ impl Store {
             .ok())
     }
 
+    /// Canonical `agent@host` lookup: resolve a durable agent on a specific
+    /// machine — `(slug, slugify_host(host))` → pubkey. Scans kind:0 profiles
+    /// (covers remote agents) then own sessions, filtering by the slugified host.
+    /// This is the one place `@host` addressing resolves; `@` never means project.
+    pub fn pubkey_for_agent_on_host(&self, slug: &str, host_slug: &str) -> Result<Option<String>> {
+        let scan = |sql: &str| -> Option<String> {
+            let mut stmt = self.conn.prepare(sql).ok()?;
+            let rows = stmt
+                .query_map(params![slug], |r| {
+                    Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+                })
+                .ok()?;
+            for (pubkey, host) in rows.flatten() {
+                if crate::util::slugify_host(&host) == host_slug {
+                    return Some(pubkey);
+                }
+            }
+            None
+        };
+        if let Some(pk) =
+            scan("SELECT pubkey, host FROM profiles WHERE slug=?1 ORDER BY updated_at DESC")
+        {
+            return Ok(Some(pk));
+        }
+        if let Some(pk) = scan(
+            "SELECT agent_pubkey, host FROM sessions WHERE agent_slug=?1 ORDER BY created_at DESC",
+        ) {
+            return Ok(Some(pk));
+        }
+        Ok(None)
+    }
+
     /// Reverse-lookup: given a pubkey, return the slug this agent is known by
     /// (from own sessions, peer_sessions, or profiles). Returns None if completely unknown.
     /// Look up the agent slug for a locally-owned pubkey from the `sessions`

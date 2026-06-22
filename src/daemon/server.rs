@@ -1256,7 +1256,8 @@ async fn rpc_send_message(
             // RPC stays flexible — a raw pubkey/`slug@project` still resolves
             // untargeted, which is the path remote inbound mentions exercise. Never
             // spawns.
-            let resolved = state.with_store(|s| resolve_recipient(s, &rec.project, &p.recipient))?;
+            let resolved = state
+                .with_store(|s| resolve_recipient(s, &rec.project, &state.host, &p.recipient))?;
             (resolved, None)
         };
 
@@ -1462,14 +1463,23 @@ async fn rpc_chat_write(
     let id = identity::load_or_create(&config::edge_home(), &rec.agent_slug, now_secs())?;
     let from_pubkey = id.pubkey_hex();
 
-    let mention = if let Some(raw) = p.mention.as_deref().filter(|m| !m.is_empty()) {
-        let target = state.with_store(|s| resolve_recipient(s, &rec.project, raw))?;
+    // Mention target: an explicit `--mention <codename/id>`, OR — when none is
+    // given — the FIRST inline `@codename` found in the message body, so
+    // `chat write "hey @bravo4217"` highlights that session with no extra flag.
+    let mention_token: Option<String> = p
+        .mention
+        .as_deref()
+        .filter(|m| !m.is_empty())
+        .map(str::to_string)
+        .or_else(|| crate::idref::extract_mentions(&p.message).into_iter().next());
+    let mention = if let Some(raw) = mention_token {
+        let target = state.with_store(|s| resolve_recipient(s, &rec.project, &state.host, &raw))?;
         let Some(session_id) = target.target_session else {
-            anyhow::bail!("--mention must name a concrete session id/code from `tenex-edge who`");
+            anyhow::bail!("mention {raw:?} must name a concrete session id/codename from `tenex-edge who`");
         };
         if target.project != rec.project {
             anyhow::bail!(
-                "--mention target is in project {:?}, but this chat is for project {:?}",
+                "mention target is in project {:?}, but this chat is for project {:?}",
                 target.project,
                 rec.project
             );
@@ -1751,89 +1761,95 @@ struct ResolvedRecipient {
     project: String,
 }
 
-fn resolve_recipient(store: &Store, my_project: &str, target: &str) -> Result<ResolvedRecipient> {
-    if let Some((slug, proj)) = target.split_once('@') {
-        let pk = store
-            .resolve_agent_pubkey(slug, Some(proj))?
-            .with_context(|| {
-                format!("can't resolve {slug}@{proj} (no presence/profile seen yet)")
-            })?;
-        return Ok(ResolvedRecipient {
-            pubkey: pk,
-            target_session: None,
-            project: proj.to_string(),
-        });
-    }
-    if target.len() == 64 && target.chars().all(|c| c.is_ascii_hexdigit()) {
-        return Ok(ResolvedRecipient {
-            pubkey: target.to_string(),
-            target_session: None,
-            project: my_project.to_string(),
-        });
-    }
-    // Exact session id, or a harness external id (claude/codex native id,
-    // opencode resume token, tmux pane, watch pid) resolvable to canonical via
-    // `session_aliases`. Checked before prefix matching so a full id always wins.
-    if let Some(s) = store.get_session(target)? {
-        // Stage 4: use the session pubkey as the wire address when registered.
-        let pubkey = store
-            .session_pubkey_for_session(&s.session_id)
-            .unwrap_or(s.agent_pubkey);
-        return Ok(ResolvedRecipient {
-            pubkey,
-            target_session: Some(s.session_id),
-            project: s.project,
-        });
-    }
-    if target.len() >= 6 {
-        // Peer presence lives in peer_session_state (peer_sessions is test-only);
-        // scan the snapshots for a raw-session-id prefix. agent_pubkey is the
-        // peer's session pubkey (session-signed status) = the wire address.
-        if let Some(ps) = store
-            .peer_session_snapshots(None, 0)
-            .unwrap_or_default()
-            .into_iter()
-            .find(|ps| ps.session_id.as_str().starts_with(target))
-        {
-            return Ok(ResolvedRecipient {
-                pubkey: ps.agent_pubkey,
-                target_session: Some(ps.session_id.as_str().to_string()),
-                project: ps.project,
-            });
-        }
-        if let Some(s) = store.find_session_by_prefix(target)? {
-            // Stage 4: use the session pubkey as the wire address when registered.
+/// Resolve a recipient/identifier to a wire pubkey under the CANONICAL scheme:
+///   - `agent@host`  → the durable agent on that machine (host always slugified;
+///     `@` NEVER means project). The message still goes to `my_project`.
+///   - 64-hex / npub → raw pubkey.
+///   - a session     → by canonical id, harness alias, id prefix, or codename.
+///   - a bare slug   → that agent on the LOCAL host (`slug@<local_host>`).
+fn resolve_recipient(
+    store: &Store,
+    my_project: &str,
+    local_host: &str,
+    target: &str,
+) -> Result<ResolvedRecipient> {
+    use crate::idref::{parse_ref, Ref};
+
+    let session_recipient =
+        |store: &Store, session_id: String, fallback_pk: String, project: String| {
             let pubkey = store
-                .session_pubkey_for_session(&s.session_id)
-                .unwrap_or(s.agent_pubkey);
-            return Ok(ResolvedRecipient {
+                .session_pubkey_for_session(&session_id)
+                .unwrap_or(fallback_pk);
+            ResolvedRecipient {
                 pubkey,
-                target_session: Some(s.session_id),
-                project: s.project,
-            });
+                target_session: Some(session_id),
+                project,
+            }
+        };
+
+    match parse_ref(target) {
+        // `agent@host` — durable agent on a specific machine.
+        Ref::Agent { slug, host } => {
+            let pk = store
+                .pubkey_for_agent_on_host(&slug, &host)?
+                .with_context(|| format!("can't resolve {slug}@{host} (no presence/profile seen yet — try `tenex-edge who`)"))?;
+            Ok(ResolvedRecipient {
+                pubkey: pk,
+                target_session: None,
+                project: my_project.to_string(),
+            })
         }
-        // Try matching against session codenames (from `who` display). This is a
-        // fallback for when users copy a session codename from `who` output.
-        if let Some(found) = find_session_by_codename(store, target)? {
-            // Stage 4: use the session pubkey as the wire address when registered.
-            let pubkey = store
-                .session_pubkey_for_session(&found.session_id)
-                .unwrap_or(found.pubkey);
-            return Ok(ResolvedRecipient {
+        // 64-hex or npub.
+        Ref::Pubkey(raw) => {
+            let pubkey = nostr_sdk::prelude::PublicKey::parse(&raw)
+                .map(|pk| pk.to_hex())
+                .unwrap_or(raw);
+            Ok(ResolvedRecipient {
                 pubkey,
-                target_session: Some(found.session_id),
-                project: found.project,
-            });
+                target_session: None,
+                project: my_project.to_string(),
+            })
+        }
+        // A session (id / alias / prefix / codename) OR a bare agent slug.
+        Ref::Token(tok) => {
+            // 1. Exact canonical id or harness alias.
+            if let Some(s) = store.get_session(&tok)? {
+                return Ok(session_recipient(store, s.session_id, s.agent_pubkey, s.project));
+            }
+            // 2. Session id prefix (peer presence, then own sessions).
+            if tok.len() >= 6 {
+                if let Some(ps) = store
+                    .peer_session_snapshots(None, 0)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .find(|ps| ps.session_id.as_str().starts_with(&tok))
+                {
+                    return Ok(session_recipient(
+                        store,
+                        ps.session_id.as_str().to_string(),
+                        ps.agent_pubkey,
+                        ps.project,
+                    ));
+                }
+                if let Some(s) = store.find_session_by_prefix(&tok)? {
+                    return Ok(session_recipient(store, s.session_id, s.agent_pubkey, s.project));
+                }
+            }
+            // 3. Session codename (e.g. `bravo4217` from `who`).
+            if let Some(found) = find_session_by_codename(store, &tok)? {
+                return Ok(session_recipient(store, found.session_id, found.pubkey, found.project));
+            }
+            // 4. Bare agent slug → that agent on the LOCAL host.
+            if let Some(pk) = store.pubkey_for_agent_on_host(&tok, &crate::util::slugify_host(local_host))? {
+                return Ok(ResolvedRecipient {
+                    pubkey: pk,
+                    target_session: None,
+                    project: my_project.to_string(),
+                });
+            }
+            anyhow::bail!("can't resolve recipient {target:?} (try `tenex-edge who`)")
         }
     }
-    if let Some(pk) = store.resolve_agent_pubkey(target, Some(my_project))? {
-        return Ok(ResolvedRecipient {
-            pubkey: pk,
-            target_session: None,
-            project: my_project.to_string(),
-        });
-    }
-    anyhow::bail!("can't resolve recipient {target:?} (try `tenex-edge who`)")
 }
 
 struct SessionMatch {

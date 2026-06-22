@@ -53,7 +53,7 @@ pub(super) fn render_who_once(snapshot: &WhoSnapshot) -> String {
     if !snapshot.spawnable.is_empty() {
         let _ = writeln!(out);
         for row in &snapshot.spawnable {
-            let label = format!("{}@{}", row.slug, row.host);
+            let label = crate::idref::agent_label(&row.slug, &row.host);
             let byline = match row.byline.as_deref().map(str::trim) {
                 Some(b) if !b.is_empty() => format!(" — {b}"),
                 _ => String::new(),
@@ -239,16 +239,14 @@ pub(super) fn render_who_plain(snapshot: &WhoSnapshot) -> String {
     out
 }
 
-fn render_who_markdown_row(out: &mut String, row: &WhoRow, include_project: bool) {
-    let agent = if include_project {
-        format!("{}@{}", row.slug, row.project)
-    } else {
-        row.slug.clone()
-    };
+fn render_who_markdown_row(out: &mut String, row: &WhoRow, _include_project: bool) {
+    // Canonical agent reference `agent@host` (host slugified), the one way to
+    // name an agent everywhere — independent of project scope.
+    let agent = crate::idref::agent_label(&row.slug, &row.host);
     let host = if row.remote {
-        format!("{}, remote", row.host)
+        format!("{}, remote", crate::util::slugify_host(&row.host))
     } else {
-        row.host.clone()
+        crate::util::slugify_host(&row.host)
     };
     let host = rel_cwd_bracket(&row.rel_cwd)
         .map(|dir| format!("{host} [{dir}]"))
@@ -334,10 +332,11 @@ fn render_who_row(out: &mut String, row: &WhoRow, include_project: bool) {
     // Always show which host the agent runs on. Same-machine agents get a plain
     // `(hostname)`; a true remote (peer on a different host than the daemon) is
     // flagged `(hostname, remote)` so cross-machine sessions stay distinguishable.
+    // Host is already in the canonical `agent@host` name; only flag remoteness.
     let host = if row.remote {
-        format!(" {}", format!("({}, remote)", row.host).dimmed())
+        format!(" {}", "(remote)".dimmed())
     } else {
-        format!(" {}", format!("({})", row.host).dimmed())
+        String::new()
     };
     let dir = rel_cwd_bracket(&row.rel_cwd)
         .map(|d| format!(" {}", format!("[{d}]").dimmed()))
@@ -347,11 +346,11 @@ fn render_who_row(out: &mut String, row: &WhoRow, include_project: bool) {
     } else {
         String::new()
     };
-    let name = if include_project {
-        format!("{}@{}", row.slug, row.project).cyan().to_string()
-    } else {
-        row.slug.cyan().to_string()
-    };
+    // Canonical agent reference `agent@host` (host slugified), always.
+    let _ = include_project;
+    let name = crate::idref::agent_label(&row.slug, &row.host)
+        .cyan()
+        .to_string();
     let _ = writeln!(
         out,
         "{} [session {}]{}{}{}{} - {}",
