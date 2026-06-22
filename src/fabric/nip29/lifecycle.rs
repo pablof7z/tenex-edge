@@ -37,6 +37,36 @@ pub fn group_lock_closed(project: &str) -> Result<EventBuilder> {
     ]))
 }
 
+/// kind:9007 create-group for a CHILD (sub-)group, using `child_h` as the
+/// client-chosen group id. Same wire shape as [`group_create`] — a subgroup is a
+/// plain group at creation time; the parent relationship is set later by
+/// [`group_lock_closed_with_parent`]. The signer becomes the subgroup admin and,
+/// as with any fresh group, it is OPEN until locked.
+pub fn group_create_subgroup(child_h: &str) -> Result<EventBuilder> {
+    group_create(child_h)
+}
+
+/// kind:9002 edit-metadata that locks a CHILD group `closed` (only members may
+/// write) while keeping it `public` (anyone may read — required so the
+/// non-member daemon connection still receives group events) AND declares its
+/// NIP-29 subgroup parent via a `["parent", parent_h]` tag (per
+/// nostr-protocol/nips#2319). Unlike [`group_lock_closed`], `name` is a
+/// human-readable display name rather than the slug. Must stay `public`, never
+/// `private`, or the non-member daemon connection goes blind to the subgroup.
+pub fn group_lock_closed_with_parent(
+    child_h: &str,
+    name: &str,
+    parent_h: &str,
+) -> Result<EventBuilder> {
+    Ok(EventBuilder::new(kind(KIND_GROUP_EDIT_METADATA), "").tags([
+        project_tag(child_h)?,
+        tag(&["name", name])?,
+        tag(&["parent", parent_h])?,
+        tag(&["closed"])?,
+        tag(&["public"])?,
+    ]))
+}
+
 /// kind:9000 put-user adding `pubkey` to the group as a member, so it can publish
 /// presence/activity/mentions into the now-closed group.
 pub fn group_put_user(project: &str, pubkey: &str) -> Result<EventBuilder> {
@@ -101,6 +131,33 @@ mod tests {
         assert_eq!(ev.kind.as_u16(), KIND_GROUP_EDIT_METADATA);
         assert!(has_tag(&ev, "h", "tenex-edge"));
         assert!(has_tag(&ev, "name", "tenex-edge"));
+        assert!(has_tag_name(&ev, "closed"));
+        assert!(has_tag_name(&ev, "public"));
+        // Must NOT be private — would blind the non-member daemon connection.
+        assert!(!has_tag_name(&ev, "private"));
+    }
+
+    #[test]
+    fn group_create_subgroup_has_h_tag() {
+        let b = group_create_subgroup("subgroup-support-a1b2c3d4").unwrap();
+        let ev = b.sign_with_keys(&Keys::generate()).unwrap();
+        assert_eq!(ev.kind.as_u16(), KIND_GROUP_CREATE);
+        assert!(has_tag(&ev, "h", "subgroup-support-a1b2c3d4"));
+    }
+
+    #[test]
+    fn subgroup_lock_has_parent_name_closed_public() {
+        let b = group_lock_closed_with_parent(
+            "subgroup-support-a1b2c3d4",
+            "subgroup support",
+            "tenex-edge",
+        )
+        .unwrap();
+        let ev = b.sign_with_keys(&Keys::generate()).unwrap();
+        assert_eq!(ev.kind.as_u16(), KIND_GROUP_EDIT_METADATA);
+        assert!(has_tag(&ev, "h", "subgroup-support-a1b2c3d4"));
+        assert!(has_tag(&ev, "name", "subgroup support"));
+        assert!(has_tag(&ev, "parent", "tenex-edge"));
         assert!(has_tag_name(&ev, "closed"));
         assert!(has_tag_name(&ev, "public"));
         // Must NOT be private — would blind the non-member daemon connection.
