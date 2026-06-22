@@ -2869,6 +2869,22 @@ async fn rpc_groups_create(
         );
     }
 
+    // Gate on the relay reflecting OUR OWN admin status before issuing any
+    // dependent management events. The relay records the creator as admin while
+    // processing the 9007, but a put-admin / put-user we fire immediately can
+    // race that and be dropped (the relay validates the author's admin role at
+    // apply-time). Poll the child's 39001 until the signing key is admin; every
+    // subsequent grant/add then applies on the first try.
+    let mgmt_pk = mgmt_keys.public_key().to_hex();
+    for attempt in 0..20u32 {
+        let roles = state.provider.fetch_group_roles(&child_h).await;
+        if roles.get(&mgmt_pk).map(String::as_str) == Some("admin") {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(300 * (attempt as u64 + 1).min(4)))
+            .await;
+    }
+
     // Admin set for the child: copy ALL parent admins (our invariant is that
     // agents/sessions are NEVER admins, so the parent admin set is exactly the
     // trusted human/backend/operator/friend pubkeys), plus this daemon's own
@@ -3692,14 +3708,16 @@ async fn handle_orchestration(
         // up. Gate the spawn on a CONFIRMED member-add (a live harness whose
         // events the relay rejects is worse than no harness).
         let mut confirmed = false;
-        for attempt in 0..6u32 {
+        for _ in 0..12u32 {
             let _ = state.provider.nip29_add_member(&op.child_h, &agent_pk).await;
             let (_, _, members) = state.provider.fetch_group_state(&op.child_h).await;
             if members.contains(&agent_pk) {
                 confirmed = true;
                 break;
             }
-            tokio::time::sleep(std::time::Duration::from_millis(300 * (attempt as u64 + 1))).await;
+            // Evenly spaced (not bursty) so two backends confirming at once don't
+            // starve the relay's async apply queue.
+            tokio::time::sleep(std::time::Duration::from_millis(900)).await;
         }
         if !confirmed {
             eprintln!(

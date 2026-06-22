@@ -61,9 +61,10 @@ ok "child 39000 parent=${E2E_PROJECT}"
 
 # ── 3. parent admins copied down to the child ────────────────────────────────
 log "3: child kind:39001 admins include both backends"
-ADMINS="$(nak req -k 39001 -d "${CHILD_H}" "${RELAY_WS}" 2>/dev/null)"
-echo "${ADMINS}" | grep -q "${A_PK}" || die "edge-a is not a child admin"
-echo "${ADMINS}" | grep -q "${B_PK}" || die "edge-b is not a child admin"
+wait_for "child 39001 to list edge-a as admin" 15 \
+  "nak req -k 39001 -d '${CHILD_H}' '${RELAY_WS}' 2>/dev/null | grep -q '${A_PK}'"
+wait_for "child 39001 to list edge-b as admin" 15 \
+  "nak req -k 39001 -d '${CHILD_H}' '${RELAY_WS}' 2>/dev/null | grep -q '${B_PK}'"
 ok "child admins include edge-a and edge-b"
 
 # ── 4. the single orchestration kind:9 ───────────────────────────────────────
