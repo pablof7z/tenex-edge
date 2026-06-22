@@ -75,6 +75,9 @@ pub(super) async fn project(action: ProjectAction) -> Result<()> {
             agents,
             message,
         } => {
+            let parent = parent.unwrap_or_else(|| {
+                crate::project::resolve(&std::env::current_dir().unwrap_or_default())
+            });
             if agents.is_empty() {
                 bail!("at least one --agent role@backend is required");
             }

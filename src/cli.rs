@@ -501,9 +501,10 @@ enum ProjectAction {
     /// Create a NIP-29 subgroup task room under a parent group and publish one
     /// kind:9 orchestration event asking the named backends to add their agents.
     CreateGroup {
-        /// Parent project slug (the group this room hangs under).
+        /// Parent project slug (the group this room hangs under). Defaults to the
+        /// project resolved from the current directory.
         #[arg(long)]
-        parent: String,
+        parent: Option<String>,
         /// Human-readable room name, e.g. "subgroup support". The child group id
         /// becomes "<slugified-name>-<random8>".
         #[arg(long)]
