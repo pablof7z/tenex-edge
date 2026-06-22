@@ -69,27 +69,37 @@ pub(super) async fn project(action: ProjectAction) -> Result<()> {
                 super::project_agents::edit_membership(project).await?;
             }
         },
-        ProjectAction::CreateGroup {
-            parent,
+    }
+    Ok(())
+}
+
+// ── groups (NIP-29 subgroup task rooms) ───────────────────────────────────────
+
+pub(super) async fn groups(action: GroupsAction) -> Result<()> {
+    fn resolve_project(project: Option<String>) -> String {
+        project.unwrap_or_else(|| {
+            crate::project::resolve(&std::env::current_dir().unwrap_or_default())
+        })
+    }
+    match action {
+        GroupsAction::Create {
             name,
             agents,
+            project,
             message,
         } => {
-            let parent = parent.unwrap_or_else(|| {
-                crate::project::resolve(&std::env::current_dir().unwrap_or_default())
-            });
+            let parent = resolve_project(project);
             if agents.is_empty() {
-                bail!("at least one --agent role@backend is required");
+                bail!("at least one --agent slug@backend is required");
             }
-            // Parse each `role@backend` on the LAST `@` (roles never contain `@`,
-            // and an npub/hex backend won't either, but split_last is robust).
+            // Parse each `slug@backend` on the LAST `@` (agent slugs never contain `@`).
             let mut parsed: Vec<serde_json::Value> = Vec::with_capacity(agents.len());
             for a in &agents {
-                let (role, backend) = a
+                let (slug, backend) = a
                     .rsplit_once('@')
-                    .filter(|(r, b)| !r.is_empty() && !b.is_empty())
-                    .with_context(|| format!("malformed --agent {a:?}: expected role@backend"))?;
-                parsed.push(serde_json::json!({ "role": role, "backend": backend }));
+                    .filter(|(s, b)| !s.is_empty() && !b.is_empty())
+                    .with_context(|| format!("malformed --agent {a:?}: expected slug@backend"))?;
+                parsed.push(serde_json::json!({ "slug": slug, "backend": backend }));
             }
             let brief = match &message {
                 Some(path) => std::fs::read_to_string(path)
@@ -97,12 +107,18 @@ pub(super) async fn project(action: ProjectAction) -> Result<()> {
                 None => String::new(),
             };
             let v = daemon_call_async(
-                "project_create_group",
+                "groups_create",
                 serde_json::json!({
                     "parent": parent,
                     "name": name,
                     "agents": parsed,
                     "brief": brief,
+                    // Caller identity so the daemon auto-adds the creating agent
+                    // to the new room (resolved like the messaging commands).
+                    "agent": crate::cli::agent_env_slug(),
+                    "group": crate::cli::group_env(),
+                    "env_session": std::env::var("TENEX_EDGE_SESSION").ok(),
+                    "cwd": std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()),
                 }),
             )
             .await?;
@@ -113,8 +129,37 @@ pub(super) async fn project(action: ProjectAction) -> Result<()> {
             if let Some(admins) = v["admins"].as_array() {
                 println!("  admins copied: {}", admins.len());
             }
+            if let Some(joined) = v["creator"].as_str() {
+                if !joined.is_empty() {
+                    println!("  joined as {}", pubkey_short(joined).cyan());
+                }
+            }
             if !oid.is_empty() {
                 println!("  orchestration kind:9 {}", &oid[..oid.len().min(8)]);
+            }
+        }
+        GroupsAction::List { project } => {
+            let parent = resolve_project(project);
+            let v = daemon_call_async("groups_list", serde_json::json!({ "project": parent }))
+                .await?;
+            let rooms = v["rooms"].as_array().map(|a| a.as_slice()).unwrap_or(&[]);
+            // Root of the tree is the project itself.
+            println!("{}", parent.bold());
+            if rooms.is_empty() {
+                println!("  (no subgroup task rooms)");
+                return Ok(());
+            }
+            for r in rooms {
+                let id = r["child_h"].as_str().unwrap_or("");
+                let name = r["name"].as_str().unwrap_or("");
+                let depth = r["depth"].as_u64().unwrap_or(0) as usize;
+                // depth 0 = direct child of the project root → one level of indent.
+                let indent = "  ".repeat(depth + 1);
+                if name.is_empty() {
+                    println!("{indent}{}", id.cyan());
+                } else {
+                    println!("{indent}{}  — {name}", id.cyan());
+                }
             }
         }
     }

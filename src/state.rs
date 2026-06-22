@@ -377,7 +377,13 @@ CREATE INDEX IF NOT EXISTS idx_status_outbox_pending
 CREATE TABLE IF NOT EXISTS project_meta (
     project    TEXT PRIMARY KEY,
     about      TEXT NOT NULL,
-    updated_at INTEGER NOT NULL
+    updated_at INTEGER NOT NULL,
+    -- NIP-29 subgroup hierarchy (issue #3): `name` is the human display name from
+    -- the relay-authored kind:39000 `name` tag; `parent` is the parent group id
+    -- from its `parent` tag (empty for top-level project groups). Lets
+    -- `groups list` render the tree from local state without hitting the relay.
+    name       TEXT NOT NULL DEFAULT '',
+    parent     TEXT NOT NULL DEFAULT ''
 );
 -- NIP-29 groups this daemon owns/manages (created + locked closed via userNsec).
 CREATE TABLE IF NOT EXISTS owned_groups (
@@ -546,6 +552,15 @@ impl Store {
         conn.busy_timeout(std::time::Duration::from_secs(5)).ok();
         conn.execute_batch(SCHEMA).context("creating schema")?;
         // Migrations (ignore if column already present).
+        // NIP-29 subgroup hierarchy columns on project_meta (issue #3).
+        let _ = conn.execute(
+            "ALTER TABLE project_meta ADD COLUMN name TEXT NOT NULL DEFAULT ''",
+            [],
+        );
+        let _ = conn.execute(
+            "ALTER TABLE project_meta ADD COLUMN parent TEXT NOT NULL DEFAULT ''",
+            [],
+        );
         let _ = conn.execute(
             "ALTER TABLE sessions ADD COLUMN last_seen INTEGER NOT NULL DEFAULT 0",
             [],
@@ -2151,6 +2166,45 @@ impl Store {
                 |r| r.get::<_, String>(0),
             )
             .ok())
+    }
+
+    /// Record a group's NIP-29 subgroup hierarchy (display `name` + `parent` id)
+    /// from its relay-authored kind:39000, without disturbing its `about`. Keyed
+    /// by group id; coexists with `upsert_project_meta` on the same row.
+    pub fn upsert_group_metadata(
+        &self,
+        project: &str,
+        name: &str,
+        parent: &str,
+        ts: u64,
+    ) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO project_meta (project, about, name, parent, updated_at)
+             VALUES (?1, '', ?2, ?3, ?4)
+             ON CONFLICT(project) DO UPDATE SET name=?2, parent=?3, updated_at=?4",
+            params![project, name, parent, ts],
+        )?;
+        Ok(())
+    }
+
+    /// All known group metadata rows `(group_id, about, name, parent)`. Source of
+    /// truth for `groups list`'s hierarchy — purely local, no relay round-trip.
+    pub fn list_group_metadata(&self) -> Result<Vec<(String, String, String, String)>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT project, about, name, parent FROM project_meta")?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                ))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rows)
     }
 
     pub fn list_project_meta(&self) -> Result<Vec<(String, String)>> {

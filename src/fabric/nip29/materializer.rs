@@ -16,13 +16,18 @@ impl Nip29Materializer {
     /// metadata record using the event's creation timestamp. Byte-identical to
     /// the 39000 branch in `handle_incoming`.
     pub fn materialize_group_metadata(store: &Store, event: &Event) {
-        if let (Some(project), about) = (
-            super::nostr_tag(event, "d"),
-            super::nostr_tag(event, "about").unwrap_or(""),
-        ) {
-            store
-                .upsert_project_meta(project, about, event.created_at.as_secs())
-                .ok();
+        if let Some(project) = super::nostr_tag(event, "d") {
+            let ts = event.created_at.as_secs();
+            let about = super::nostr_tag(event, "about").unwrap_or("");
+            store.upsert_project_meta(project, about, ts).ok();
+            // NIP-29 subgroup hierarchy (issue #3): capture the display name and
+            // the parent relationship so `groups list` can render the tree from
+            // local state. `parent` is empty for top-level project groups.
+            let name = super::nostr_tag(event, "name").unwrap_or("");
+            let parent = super::nostr_tag(event, "parent").unwrap_or("");
+            if !name.is_empty() || !parent.is_empty() {
+                store.upsert_group_metadata(project, name, parent, ts).ok();
+            }
         }
     }
 

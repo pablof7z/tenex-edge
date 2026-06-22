@@ -192,6 +192,11 @@ enum Cmd {
         #[command(subcommand)]
         action: ProjectAction,
     },
+    /// Manage NIP-29 subgroup task rooms under a project (create, list).
+    Groups {
+        #[command(subcommand)]
+        action: GroupsAction,
+    },
     /// Manage the local agent keystore: agents that have a private key on THIS
     /// machine under `<edge_home>/agents/<slug>.json`. These are the identities
     /// you can spawn locally; project membership is governed separately by the
@@ -498,24 +503,39 @@ enum ProjectAction {
         #[arg(value_name = "PUBKEY")]
         pubkey: Option<String>,
     },
-    /// Create a NIP-29 subgroup task room under a parent group and publish one
-    /// kind:9 orchestration event asking the named backends to add their agents.
-    CreateGroup {
-        /// Parent project slug (the group this room hangs under). Defaults to the
-        /// project resolved from the current directory.
-        #[arg(long)]
-        parent: Option<String>,
+}
+
+/// Subgroup task rooms under a project (NIP-29 child groups).
+#[derive(Subcommand)]
+enum GroupsAction {
+    /// Create a subgroup task room under a project and publish one kind:9
+    /// orchestration event asking the named backends to add their agents. The
+    /// agent that runs this command is auto-added to the new room.
+    Create {
         /// Human-readable room name, e.g. "subgroup support". The child group id
         /// becomes "<slugified-name>-<random8>".
         #[arg(long)]
         name: String,
-        /// Repeatable `role@backend`, where `backend` is a hex pubkey or npub of
-        /// the target backend (the pubkey of its tenexPrivateKey).
-        #[arg(long = "agent", value_name = "ROLE@BACKEND")]
+        /// Repeatable `slug@backend`, where `slug` is the agent identity (the
+        /// `~/.tenex/edge/agents/*.json` filename stem, e.g. `developer`, `alice`)
+        /// and `backend` is a hex pubkey or npub of the target backend (the pubkey
+        /// of its tenexPrivateKey).
+        #[arg(long = "agent", value_name = "SLUG@BACKEND")]
         agents: Vec<String>,
+        /// Parent project slug this room hangs under. Defaults to the project
+        /// resolved from the current directory.
+        #[arg(long)]
+        project: Option<String>,
         /// Path to a markdown brief; its contents become the kind:9 prose body.
         #[arg(long = "message", value_name = "PATH")]
         message: Option<PathBuf>,
+    },
+    /// List the subgroup task rooms under a project.
+    List {
+        /// Parent project slug. Defaults to the project resolved from the current
+        /// directory.
+        #[arg(long)]
+        project: Option<String>,
     },
 }
 
@@ -659,6 +679,7 @@ pub async fn run(cli: Cli) -> Result<()> {
         },
         Cmd::Statusline { session } => statusline::statusline(session),
         Cmd::Project { action } => admin::project(action).await,
+        Cmd::Groups { action } => admin::groups(action).await,
         Cmd::Agent { action } => admin::agent(action).await,
         Cmd::Doctor => admin::doctor().await,
         Cmd::Debug { action } => match action {

@@ -498,7 +498,8 @@ async fn dispatch(state: &Arc<DaemonState>, req: &Request) -> Response {
         "project_members" => rpc_project_members(state, &req.params).await,
         "project_add" => rpc_project_add(state, &req.params).await,
         "project_remove" => rpc_project_remove(state, &req.params).await,
-        "project_create_group" => rpc_project_create_group(state, &req.params).await,
+        "groups_create" => rpc_groups_create(state, &req.params).await,
+        "groups_list" => rpc_groups_list(state, &req.params),
         "publish_profile" => rpc_publish_profile(state, &req.params).await,
         "inbox_reply" => rpc_inbox_reply(state, &req.params).await,
         "statusline" => rpc_statusline(state, &req.params),
@@ -2803,7 +2804,7 @@ async fn rpc_project_remove(
 /// `handle_orchestration` listener, which is what makes cross-device auto-start
 /// work; we invoke it locally here too since relays don't reliably echo to the
 /// publishing connection.
-async fn rpc_project_create_group(
+async fn rpc_groups_create(
     state: &Arc<DaemonState>,
     params: &serde_json::Value,
 ) -> Result<serde_json::Value> {
@@ -2812,7 +2813,7 @@ async fn rpc_project_create_group(
 
     #[derive(serde::Deserialize)]
     struct AgentSpec {
-        role: String,
+        slug: String,
         backend: String,
     }
     #[derive(serde::Deserialize)]
@@ -2824,9 +2825,9 @@ async fn rpc_project_create_group(
         #[serde(default)]
         brief: String,
     }
-    let p: P = serde_json::from_value(params.clone()).context("project_create_group params")?;
+    let p: P = serde_json::from_value(params.clone()).context("groups_create params")?;
     if p.agents.is_empty() {
-        anyhow::bail!("at least one agent (role@backend) is required");
+        anyhow::bail!("at least one agent (slug@backend) is required");
     }
 
     // Relay subgroup-support verification is handled by a separate workstream;
@@ -2847,7 +2848,7 @@ async fn rpc_project_create_group(
             .with_context(|| format!("resolving backend {:?}", a.backend))?;
         adds.push(AddTarget {
             backend_pubkey,
-            role_slug: a.role.clone(),
+            slug: a.slug.clone(),
         });
     }
 
@@ -2889,13 +2890,33 @@ async fn rpc_project_create_group(
     if let Some(bp) = state.backend_pubkey() {
         admin_set.insert(bp.to_string());
     }
+    // Grant each admin and CONFIRM it landed in the relay's 39001 roster. Like
+    // member-adds, the relay acks a put-admin on receipt but only APPLIES it once
+    // the author's own admin status (from the 9007 create we just published) has
+    // propagated — so the first grant for a second admin can silently no-op.
+    // Trust-but-verify: re-issue + read back the role map a few times.
     let mut granted: Vec<String> = Vec::new();
     for pk in &admin_set {
-        if state.provider.nip29_add_admin(&child_h, pk).await {
+        let mut confirmed = false;
+        for attempt in 0..6u32 {
+            let _ = state.provider.nip29_add_admin(&child_h, pk).await;
+            let (_, roles, _) = state.provider.fetch_group_state(&child_h).await;
+            if roles.get(pk).map(String::as_str) == Some("admin") {
+                confirmed = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(250 * (attempt as u64 + 1))).await;
+        }
+        if confirmed {
             state.with_store(|s| {
                 s.upsert_group_member(&child_h, pk, "admin", now_secs()).ok();
             });
             granted.push(pk.clone());
+        } else {
+            eprintln!(
+                "[daemon] groups_create: admin grant for {} in {child_h} not confirmed on the relay",
+                crate::util::pubkey_short(pk)
+            );
         }
     }
 
@@ -2904,6 +2925,28 @@ async fn rpc_project_create_group(
         s.mark_group_owned(&child_h, now_secs()).ok();
     });
     let _ = ensure_subscription(state, &child_h).await;
+
+    // Auto-join the creator: when this command is run from an agent session, add
+    // that agent's durable pubkey as a member of the room it just made, so the
+    // creator participates in its own subgroup. Best-effort; skipped for a bare
+    // operator invocation with no resolvable session.
+    let creator: Option<String> = resolve_session(
+        state,
+        None,
+        params.get("env_session").and_then(|v| v.as_str()),
+        params.get("cwd").and_then(|v| v.as_str()),
+        params.get("agent").and_then(|v| v.as_str()),
+        params.get("group").and_then(|v| v.as_str()),
+    )
+    .ok()
+    .map(|rec| rec.agent_pubkey);
+    if let Some(ref pk) = creator {
+        if state.provider.nip29_add_member(&child_h, pk).await {
+            state.with_store(|s| {
+                s.upsert_group_member(&child_h, pk, "member", now_secs()).ok();
+            });
+        }
+    }
 
     // Build + publish ONE kind:9 orchestration event into the parent (the
     // coordination group). The child id rides in an `h-target` tag.
@@ -2928,8 +2971,80 @@ async fn rpc_project_create_group(
         "child_h": child_h,
         "display_path": format!("{} > {}", p.parent, p.name),
         "admins": granted,
+        "creator": creator.unwrap_or_default(),
         "orchestration_event_id": orchestration_event_id,
     }))
+}
+
+/// `groups list`: render the subgroup tree under `project` from LOCAL daemon
+/// state (materialized kind:39000 metadata) — no relay round-trip. Returns the
+/// rooms in depth-first order, each with a `depth` (the project root is depth 0
+/// and not included; its direct children are depth 1) so the CLI can indent.
+fn rpc_groups_list(
+    state: &Arc<DaemonState>,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value> {
+    #[derive(serde::Deserialize)]
+    struct P {
+        project: String,
+    }
+    let p: P = serde_json::from_value(params.clone()).context("groups_list params")?;
+
+    // (group_id, about, name, parent) for every group the daemon knows about.
+    let rows = state.with_store(|s| s.list_group_metadata())?;
+    // parent id -> children (id, display name). Sorted for stable output.
+    let mut children: std::collections::BTreeMap<String, Vec<(String, String)>> =
+        std::collections::BTreeMap::new();
+    for (id, about, name, parent) in &rows {
+        if parent.is_empty() {
+            continue;
+        }
+        let display = if name.is_empty() { about.clone() } else { name.clone() };
+        children
+            .entry(parent.clone())
+            .or_default()
+            .push((id.clone(), display));
+    }
+    for v in children.values_mut() {
+        v.sort();
+    }
+
+    let rooms = preorder_rooms(&children, &p.project);
+    Ok(serde_json::json!({ "project": p.project, "rooms": rooms }))
+}
+
+/// Pre-order DFS flatten of the subgroup tree rooted at `root` into
+/// `{child_h, name, depth}` JSON (root excluded, its children at depth 0).
+fn preorder_rooms(
+    children: &std::collections::BTreeMap<String, Vec<(String, String)>>,
+    root: &str,
+) -> Vec<serde_json::Value> {
+    fn walk(
+        children: &std::collections::BTreeMap<String, Vec<(String, String)>>,
+        node: &str,
+        depth: usize,
+        seen: &mut std::collections::HashSet<String>,
+        out: &mut Vec<serde_json::Value>,
+    ) {
+        if let Some(kids) = children.get(node) {
+            for (child_id, name) in kids {
+                if !seen.insert(child_id.clone()) {
+                    continue;
+                }
+                out.push(serde_json::json!({
+                    "child_h": child_id,
+                    "name": name,
+                    "depth": depth,
+                }));
+                walk(children, child_id, depth + 1, seen, out);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    seen.insert(root.to_string());
+    walk(children, root, 0, &mut seen, &mut out);
+    out
 }
 
 /// Human-readable summary of the add-agents request, grouped per backend, e.g.
@@ -2942,14 +3057,14 @@ fn generate_orchestration_prose(adds: &[crate::fabric::nip29::orchestration::Add
         by_backend
             .entry(a.backend_pubkey.as_str())
             .or_default()
-            .push(a.role_slug.as_str());
+            .push(a.slug.as_str());
     }
     let mut parts: Vec<String> = Vec::new();
-    for (backend, roles) in by_backend {
+    for (backend, slugs) in by_backend {
         parts.push(format!(
             "@{}: add {}.",
             crate::util::pubkey_short(backend),
-            roles.join(" and ")
+            slugs.join(" and ")
         ));
     }
     parts.join(" ")
@@ -3470,8 +3585,8 @@ fn handle_incoming(state: &Arc<DaemonState>, event: &Event) {
 }
 
 /// React to a subgroup add-agents orchestration event: authorize the signer,
-/// provision the agent roles addressed to THIS backend (mint identity, publish
-/// kind:0, add as member), and spawn each role's harness into the child group.
+/// provision the agents addressed to THIS backend (mint identity, publish
+/// kind:0, add as member), and spawn each agent's harness into the child group.
 /// Best-effort and idempotent (durable `processed_orchestration` guard).
 async fn handle_orchestration(
     state: &Arc<DaemonState>,
@@ -3482,7 +3597,7 @@ async fn handle_orchestration(
 
     let event_id = event.id.to_hex();
 
-    // Only roles addressed to THIS backend's identity concern us. (Checked BEFORE
+    // Only agents addressed to THIS backend's identity concern us. (Checked BEFORE
     // claiming so a foreign event never burns this backend's idempotency slot.)
     let Some(backend_pk) = state.backend_pubkey().map(|s| s.to_string()) else {
         return;
@@ -3549,26 +3664,26 @@ async fn handle_orchestration(
 
     let edge = config::edge_home();
     for target in &mine {
-        let role = &target.role_slug;
-        let id = match crate::identity::load_or_create(&edge, role, now_secs()) {
+        let slug = &target.slug;
+        let id = match crate::identity::load_or_create(&edge, slug, now_secs()) {
             Ok(id) => id,
             Err(e) => {
-                eprintln!("[daemon] orchestration: minting role {role:?} failed: {e:#}");
+                eprintln!("[daemon] orchestration: minting agent {slug:?} failed: {e:#}");
                 state.with_store(|s| s.unclaim_orchestration(&event_id));
                 return;
             }
         };
-        let role_pk = id.pubkey_hex();
+        let agent_pk = id.pubkey_hex();
 
-        // Publish the durable role's kind:0 identity card.
+        // Publish the durable agent's kind:0 identity card.
         let profile = DomainEvent::Profile(crate::domain::Profile {
-            agent: crate::domain::AgentRef::new(role_pk.clone(), role.clone()),
+            agent: crate::domain::AgentRef::new(agent_pk.clone(), slug.clone()),
             host: state.host.clone(),
             owners: state.owners.clone(),
         });
         let _ = state.provider.publish(&profile, &id.keys).await;
 
-        // Add the durable role pubkey as a MEMBER (never admin) of the child, and
+        // Add the durable agent pubkey as a MEMBER (never admin) of the child, and
         // CONFIRM it landed in the relay's roster. The relay acks a put-user on
         // receipt but only APPLIES the membership if the author is an admin at
         // apply-time — and this backend's own admin grant (published moments
@@ -3578,9 +3693,9 @@ async fn handle_orchestration(
         // events the relay rejects is worse than no harness).
         let mut confirmed = false;
         for attempt in 0..6u32 {
-            let _ = state.provider.nip29_add_member(&op.child_h, &role_pk).await;
+            let _ = state.provider.nip29_add_member(&op.child_h, &agent_pk).await;
             let (_, _, members) = state.provider.fetch_group_state(&op.child_h).await;
-            if members.contains(&role_pk) {
+            if members.contains(&agent_pk) {
                 confirmed = true;
                 break;
             }
@@ -3588,7 +3703,7 @@ async fn handle_orchestration(
         }
         if !confirmed {
             eprintln!(
-                "[daemon] orchestration: member-add for role {role:?} in {} not confirmed on the \
+                "[daemon] orchestration: member-add for agent {slug:?} in {} not confirmed on the \
                  relay after retries; skipping spawn (will retry on re-delivery)",
                 op.child_h
             );
@@ -3596,25 +3711,25 @@ async fn handle_orchestration(
             return;
         }
         state.with_store(|s| {
-            s.upsert_group_member(&op.child_h, &role_pk, "member", now_secs())
+            s.upsert_group_member(&op.child_h, &agent_pk, "member", now_secs())
                 .ok();
         });
 
         // Spawn the harness in the PARENT project's working directory but scoped
         // to the child group (TENEX_EDGE_GROUP). The spawned session's
         // session-start path adds its derived session pubkey to the child group.
-        match crate::tmux::spawn_agent(state, role, &op.parent, Vec::new(), Some(&op.child_h)).await
+        match crate::tmux::spawn_agent(state, slug, &op.parent, Vec::new(), Some(&op.child_h)).await
         {
             Ok(pane) => {
                 if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
                     eprintln!(
-                        "[daemon] orchestration: spawned role {role:?} into {} (pane {pane})",
+                        "[daemon] orchestration: spawned agent {slug:?} into {} (pane {pane})",
                         op.child_h
                     );
                 }
             }
             Err(e) => {
-                eprintln!("[daemon] orchestration: spawn role {role:?} failed: {e:#}");
+                eprintln!("[daemon] orchestration: spawn agent {slug:?} failed: {e:#}");
             }
         }
     }

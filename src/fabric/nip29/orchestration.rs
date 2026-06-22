@@ -20,11 +20,12 @@ fn tag(parts: &[&str]) -> Result<Tag> {
     Ok(Tag::parse(parts.iter().copied())?)
 }
 
-/// One backend-targeted add: route role `role_slug` to backend `backend_pubkey`.
+/// One backend-targeted add: route agent `slug` to backend `backend_pubkey`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AddTarget {
     pub backend_pubkey: String,
-    pub role_slug: String,
+    /// Agent identity slug (the `~/.tenex/edge/agents/*.json` filename stem).
+    pub slug: String,
 }
 
 /// Build the `kind:9` add-agents orchestration event.
@@ -36,7 +37,7 @@ pub struct AddTarget {
 ///   `["h", parent_h]`, `["te-op", TE_OP_ADD_AGENTS]`, `["parent", parent_h]`,
 ///   `["h-target", child_h]`, one `["p", backend_pubkey]` per DISTINCT backend
 ///   (deduped, sorted for stable order), then one `["add", backend_pubkey,
-///   role_slug]` per entry in `adds` (input order preserved). Content = `prose`.
+///   slug]` per entry in `adds` (input order preserved). Content = `prose`.
 pub fn build_add_agents_event(
     parent_h: &str,
     child_h: &str,
@@ -60,7 +61,7 @@ pub fn build_add_agents_event(
 
     // One add tag per entry, preserving caller order.
     for a in adds {
-        tags.push(tag(&["add", &a.backend_pubkey, &a.role_slug])?);
+        tags.push(tag(&["add", &a.backend_pubkey, &a.slug])?);
     }
 
     Ok(EventBuilder::new(kind(KIND_CHAT), prose)
@@ -87,7 +88,7 @@ pub struct AddAgentsOp {
 ///   ignored)
 /// - the single routing `["h", _]` equals the single `["parent", _]`
 /// - exactly one `["h-target", _]`
-/// - at least one `["add", pubkey, role]` (both fields present)
+/// - at least one `["add", pubkey, slug]` (both fields present)
 ///
 /// Otherwise returns `None`.
 pub fn parse_orchestration(event: &Event) -> Option<AddAgentsOp> {
@@ -121,10 +122,10 @@ pub fn parse_orchestration(event: &Event) -> Option<AddAgentsOp> {
                 }
             }
             Some("add") => {
-                if let (Some(pk), Some(role)) = (s.get(1), s.get(2)) {
+                if let (Some(pk), Some(slug)) = (s.get(1), s.get(2)) {
                     adds.push(AddTarget {
                         backend_pubkey: pk.clone(),
-                        role_slug: role.clone(),
+                        slug: slug.clone(),
                     });
                 }
             }
@@ -177,10 +178,10 @@ pub fn adds_for_backend<'a>(adds: &'a [AddTarget], backend_pubkey: &str) -> Vec<
 mod tests {
     use super::*;
 
-    fn at(pk: &str, role: &str) -> AddTarget {
+    fn at(pk: &str, slug: &str) -> AddTarget {
         AddTarget {
             backend_pubkey: pk.to_string(),
-            role_slug: role.to_string(),
+            slug: slug.to_string(),
         }
     }
 
@@ -350,8 +351,8 @@ mod tests {
         let adds = vec![at("bk1", "architect"), at("bk2", "engineer"), at("bk1", "qa")];
         let mine = adds_for_backend(&adds, "bk1");
         assert_eq!(mine.len(), 2);
-        assert_eq!(mine[0].role_slug, "architect");
-        assert_eq!(mine[1].role_slug, "qa");
+        assert_eq!(mine[0].slug, "architect");
+        assert_eq!(mine[1].slug, "qa");
 
         assert!(adds_for_backend(&adds, "bk-none").is_empty());
     }

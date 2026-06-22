@@ -40,12 +40,12 @@ nak req -k 39000 -d "${E2E_PROJECT}" "${RELAY_WS}" 2>/dev/null | grep -q '"kind"
 ok "parent '${E2E_PROJECT}' present; backends a=${A_PK:0:8} b=${B_PK:0:8}"
 
 # ── 1. backend-a creates the subgroup ────────────────────────────────────────
-log "1: backend-a create-group (research-lead@edge-a, testing-lead@edge-b)"
-CG_OUT="$(edge edge-a project create-group \
-  --parent "${E2E_PROJECT}" \
+log "1: backend-a groups create (research-lead@edge-a, testing-lead@edge-b)"
+CG_OUT="$(edge edge-a groups create \
+  --project "${E2E_PROJECT}" \
   --name "subgroup support" \
   --agent "research-lead@${A_PK}" \
-  --agent "testing-lead@${B_PK}" 2>&1)" || { echo "${CG_OUT}" | sed 's/^/    /'; die "create-group failed"; }
+  --agent "testing-lead@${B_PK}" 2>&1)" || { echo "${CG_OUT}" | sed 's/^/    /'; die "groups create failed"; }
 echo "${CG_OUT}" | sed 's/^/    /'
 CHILD_H="$(echo "${CG_OUT}" | grep -oE 'subgroup-support-[0-9a-f]{8}' | head -1)"
 [[ -n "${CHILD_H}" ]] || die "could not parse child group id from create-group output"
@@ -107,6 +107,17 @@ A_ROLE_PK="$(grep -oE '\"public_key\"[^0-9a-f]*[0-9a-f]{64}' "${A_ROLE_JSON}" | 
 wait_for "child 39002 to include research-lead" 25 \
   "nak req -k 39002 -d '${CHILD_H}' '${RELAY_WS}' 2>/dev/null | grep -q '${A_ROLE_PK}'"
 ok "research-lead is a child member"
+
+# ── 9. groups list renders the hierarchy FROM LOCAL DAEMON STATE ──────────────
+log "9: backend-a 'groups list' shows the room under the project (from local state)"
+wait_for "groups list to include ${CHILD_H} under ${E2E_PROJECT}" 15 \
+  "edge edge-a groups list --project '${E2E_PROJECT}' 2>/dev/null | grep -q '${CHILD_H}'"
+GL_OUT="$(edge edge-a groups list --project "${E2E_PROJECT}" 2>/dev/null)"
+echo "${GL_OUT}" | sed 's/^/    /'
+# The tree prints the project as the root with the child indented beneath it.
+echo "${GL_OUT}" | grep -qE "^${E2E_PROJECT}$" || die "groups list missing project root"
+echo "${GL_OUT}" | grep -qE "^  .*${CHILD_H}" || die "child not indented under the project"
+ok "groups list renders the hierarchy from local daemon state"
 
 cat <<SUMMARY
 
