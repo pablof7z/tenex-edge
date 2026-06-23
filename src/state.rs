@@ -306,7 +306,11 @@ CREATE TABLE IF NOT EXISTS project_meta (
 -- NIP-29 groups this daemon owns/manages (created + locked closed via userNsec).
 CREATE TABLE IF NOT EXISTS owned_groups (
     project    TEXT PRIMARY KEY,
-    created_at INTEGER NOT NULL
+    created_at INTEGER NOT NULL,
+    -- 1 when this owned group is a per-session room (issue #6), so only the
+    -- owning session auto-renames it to its distilled title. The ALTER in `open`
+    -- backfills this column for databases created before the column existed.
+    is_session_room INTEGER NOT NULL DEFAULT 0
 );
 -- NIP-29 group membership cache (relay-authoritative kind 39002 + our optimistic
 -- put-user writes). Lets session_start skip redundant 9000 publishes idempotently.
@@ -439,6 +443,13 @@ impl Store {
         );
         let _ = conn.execute(
             "ALTER TABLE sessions ADD COLUMN last_seen INTEGER NOT NULL DEFAULT 0",
+            [],
+        );
+        // Issue #6: mark owned groups that are per-session rooms (vs project /
+        // task groups), so only the owning session auto-renames them to its
+        // distilled title.
+        let _ = conn.execute(
+            "ALTER TABLE owned_groups ADD COLUMN is_session_room INTEGER NOT NULL DEFAULT 0",
             [],
         );
         let _ = conn.execute("ALTER TABLE sessions ADD COLUMN transcript_path TEXT", []);
@@ -2098,6 +2109,28 @@ impl Store {
         Ok(n > 0)
     }
 
+    /// Mark an owned group as a per-session room (issue #6). Idempotent; assumes
+    /// the group is already (or concurrently) recorded in `owned_groups`.
+    pub fn mark_session_room(&self, project: &str, ts: u64) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO owned_groups (project, created_at, is_session_room) VALUES (?1, ?2, 1)
+             ON CONFLICT(project) DO UPDATE SET is_session_room=1",
+            params![project, ts],
+        )?;
+        Ok(())
+    }
+
+    /// True if `project` is a per-session room (minted at session birth), as
+    /// opposed to a project group or a task room.
+    pub fn is_session_room(&self, project: &str) -> Result<bool> {
+        let n: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM owned_groups WHERE project=?1 AND is_session_room=1",
+            params![project],
+            |r| r.get(0),
+        )?;
+        Ok(n > 0)
+    }
+
     /// True if this add-agents orchestration event id was already processed
     /// (durable dedup; see `processed_orchestration`). Errors are swallowed to
     /// `false` so a transient DB hiccup re-processes rather than silently drops.
@@ -3556,6 +3589,37 @@ mod tests {
         s.mark_group_owned("proj", 200).unwrap();
         assert!(s.is_group_owned("proj").unwrap());
         assert!(!s.is_group_owned("other").unwrap());
+    }
+
+    #[test]
+    fn session_room_flag_roundtrip() {
+        let s = Store::open_memory().unwrap();
+        // A plain owned group is not a session room.
+        s.mark_group_owned("proj", 100).unwrap();
+        assert!(!s.is_session_room("proj").unwrap());
+        // Marking a room sets the flag; it stays owned.
+        s.mark_session_room("proj-room", 100).unwrap();
+        assert!(s.is_session_room("proj-room").unwrap());
+        assert!(s.is_group_owned("proj-room").unwrap());
+        // Idempotent.
+        s.mark_session_room("proj-room", 200).unwrap();
+        assert!(s.is_session_room("proj-room").unwrap());
+        // Unknown group is not a session room.
+        assert!(!s.is_session_room("nope").unwrap());
+    }
+
+    #[test]
+    fn group_parent_distinguishes_subgroup_from_project() {
+        let s = Store::open_memory().unwrap();
+        // Unknown group → no parent.
+        assert_eq!(s.group_parent("unknown").unwrap(), None);
+        // Top-level project (empty parent) → None.
+        s.upsert_group_metadata("proj", "Proj", "", 100).unwrap();
+        assert_eq!(s.group_parent("proj").unwrap(), None);
+        // Subgroup with a parent → Some(parent).
+        s.upsert_group_metadata("proj-room", "Room", "proj", 100)
+            .unwrap();
+        assert_eq!(s.group_parent("proj-room").unwrap(), Some("proj".into()));
     }
 
     #[test]

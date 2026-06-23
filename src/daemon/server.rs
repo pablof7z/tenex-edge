@@ -2298,6 +2298,7 @@ async fn ensure_session_room(
     // `groups list` see the room immediately.
     state.with_store(|s| {
         s.mark_group_owned(room_h, now_secs()).ok();
+        s.mark_session_room(room_h, now_secs()).ok();
         s.upsert_group_metadata(room_h, name, parent, now_secs()).ok();
     });
     let _ = ensure_subscription(state, room_h).await;

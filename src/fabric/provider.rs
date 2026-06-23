@@ -550,6 +550,23 @@ impl Kind1Nip29Provider {
         }
     }
 
+    /// Admin-set the display `name` of `group` via kind:9002 edit-metadata
+    /// (issue #6 — rename a per-session room to its distilled title). The relay
+    /// re-publishes kind:39000 with the new name. Best-effort, same
+    /// accept/benign-duplicate semantics as [`nip29_add_member`].
+    pub async fn nip29_set_group_name(&self, group: &str, name: &str) -> bool {
+        let Some(user_keys) = self.parse_user_keys() else {
+            return false;
+        };
+        match crate::fabric::nip29::lifecycle::group_edit_name(group, name) {
+            Ok(b) => {
+                self.publish_group_management(b, &user_keys, "9002 edit-metadata (name)")
+                    .await
+            }
+            Err(_) => false,
+        }
+    }
+
     /// Admin-add `pubkey_hex` to `project` with the `admin` role. Best-effort,
     /// same accept/benign-duplicate semantics as [`nip29_add_member`].
     pub async fn nip29_add_admin(&self, project: &str, pubkey_hex: &str) -> bool {

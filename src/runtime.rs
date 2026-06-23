@@ -213,6 +213,18 @@ pub async fn run_session_in_daemon(
                                     project: p.project.clone(),
                                     text: format!("{} #{}", snap.title, p.project),
                                 })).await;
+                                // Issue #6: rename THIS session's room to the new
+                                // distilled title (kind:9002 edit-metadata, admin-
+                                // signed by the provider's operator key; the relay
+                                // re-emits kind:39000). Gated to per-session rooms so
+                                // a shared task room is never renamed by one member.
+                                // Only publishes on an actual title change (above), so
+                                // this stays low-churn — no debounce needed.
+                                let is_room = st!(|s: &Store| s.is_session_room(&p.project)).unwrap_or(false);
+                                if is_room && provider.nip29_set_group_name(&p.project, &snap.title).await {
+                                    let parent = st!(|s: &Store| s.group_parent(&p.project)).ok().flatten().unwrap_or_default();
+                                    st!(|s: &Store| s.upsert_group_metadata(&p.project, &snap.title, &parent, now).ok());
+                                }
                             }
                         }
                         // On a rejected apply (stale base) nothing changes; the next
