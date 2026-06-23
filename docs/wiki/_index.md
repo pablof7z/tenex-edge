@@ -63,11 +63,10 @@ Last updated: 2026-06-23
 |------|-------|---------|------|------------|----------|-------|
 | [disk-cleanup](guides/disk-cleanup.md) | Disk Cleanup | Disk cleanup removes only pure build artifacts â compiled output that is regenerable by running the build again | capture | warm | 2026-06-15 | disk-cleanup |
 
-## documentation (2 guides)
+## documentation (1 guide)
 
 | Slug | Title | Summary | Tags | Volatility | Verified | Topic |
 |------|-------|---------|------|------------|----------|-------|
-| [codex-refactor-review](guides/codex-refactor-review.md) | Codex Refactor Review | The review of the a41bd570 refactor is written to docs/review-codex.md with findings ordered by severity and line numbers referenced to the a41bd570 tree. | capture | warm | 2026-06-16 | documentation |
 | [docs-wiki-directory](guides/docs-wiki-directory.md) | Docs Wiki Directory | The docs/wiki directory (~400â460 files) is submitted as PR #434 for review on whether the generated/authored docs belong in the repo | capture | warm | 2026-06-13 | documentation |
 
 ## engineering-standards (2 guides)

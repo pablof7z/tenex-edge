@@ -126,7 +126,7 @@ tenex-edge install --harness codex --uninstall
 tenex-edge has its own writable root, **`edge_home`**, separate from TENEX's
 shared `~/.tenex`:
 
-- Default: `~/.tenex/edge/`
+- Default: `~/.tenex-edge/`
 - Override: `TENEX_EDGE_HOME=/some/path` (used for test isolation, but works for
   any custom location)
 
@@ -134,18 +134,18 @@ Under `edge_home`:
 
 | Path | What it is |
 | --- | --- |
-| `~/.tenex/edge/state.db` | The SQLite database. Owned and written **only** by the single per-machine daemon (`config::edge_home().join("state.db")`). |
-| `~/.tenex/edge/agents/<slug>.json` | A local agent's signing keypair (the keystore — see §4). |
-| `~/.tenex/edge/agents/<slug>.json.removed` | A parked (removed) agent key, recoverable. |
+| `~/.tenex-edge/state.db` | The SQLite database. Owned and written **only** by the single per-machine daemon (`config::edge_home().join("state.db")`). |
+| `~/.tenex-edge/agents/<slug>.json` | A local agent's signing keypair (the keystore — see §4). |
+| `~/.tenex-edge/agents/<slug>.json.removed` | A parked (removed) agent key, recoverable. |
 
 > Note: this `agents/` directory is **not** TENEX's `~/.tenex/agents` — tenex-edge
 > never touches those.
 
 ---
 
-## 3. Configuration — `~/.tenex/config.json`
+## 3. Configuration — `~/.tenex-edge/config.json`
 
-tenex-edge reads the shared TENEX config at `~/.tenex/config.json` (override the
+tenex-edge reads the shared TENEX config at `~/.tenex-edge/config.json` (override the
 path with `TENEX_CONFIG`). It only reads the handful of fields it cares about and
 ignores the rest, so it coexists with TENEX's larger camelCase config.
 
@@ -168,7 +168,7 @@ management + backend; `userNsec` is optional and only needed when the human
 wants to publish prompts as themselves. For the security rationale on these
 keys, see `docs/wiki/guides/tenex-edge-key-security.md`.
 
-Minimal example `~/.tenex/config.json`:
+Minimal example `~/.tenex-edge/config.json`:
 
 ```json
 {
@@ -183,7 +183,7 @@ Minimal example `~/.tenex/config.json`:
 ## 4. The agent keystore
 
 A **local agent** is an identity that has a private key on **this machine**, at
-`~/.tenex/edge/agents/<slug>.json`. These are the identities you can spawn
+`~/.tenex-edge/agents/<slug>.json`. These are the identities you can spawn
 locally. Identity is `(agent, machine)`: the same slug on a different machine is a
 *different* key.
 
@@ -318,8 +318,8 @@ Found via `grep -rn "TENEX_EDGE_" src | grep env` plus `TENEX_CONFIG` /
 
 | Var | Purpose | Default |
 | --- | --- | --- |
-| `TENEX_EDGE_HOME` | Override tenex-edge's writable root (state.db, agent keystore). | `~/.tenex/edge` |
-| `TENEX_CONFIG` | Override the path to `config.json`. | `~/.tenex/config.json` |
+| `TENEX_EDGE_HOME` | Override tenex-edge's writable root (state.db, agent keystore). | `~/.tenex-edge` |
+| `TENEX_CONFIG` | Override the path to `config.json`. | `~/.tenex-edge/config.json` |
 | `TENEX_DIR` | Override the shared `~/.tenex` directory. | `~/.tenex` |
 | `TENEX_EDGE_BIN` | Path to the `tenex-edge` binary the daemon/launcher re-execs (spawned panes, blocking calls). | the running exe |
 
@@ -330,7 +330,7 @@ Found via `grep -rn "TENEX_EDGE_" src | grep env` plus `TENEX_CONFIG` /
 | `TENEX_EDGE_AGENT` | The agent slug this pane runs as. Primary source for `agent_env_slug()`. |
 | `TENEX_EDGE_AGENT_FALLBACK` | Fallback agent slug when `TENEX_EDGE_AGENT` is empty. |
 | `TENEX_EDGE_SESSION` | The session id, threaded into session-resolving RPCs (chat, who, turn, forensics). Explicit `--session` flags win over it. |
-| `TENEX_EDGE_GROUP` | NIP-29 subgroup id (`h`) for sessions spawned into a subgroup task room; absent for ordinary project sessions. Binds RPCs to the subgroup session rather than a sibling project session in the same directory. |
+| `TENEX_EDGE_CHANNEL` | NIP-29 subgroup id (`h`) for sessions spawned into a subgroup task channel; absent for ordinary project sessions. Binds RPCs to the subgroup session rather than a sibling project session in the same directory. |
 
 ### Behavior knobs
 
@@ -354,7 +354,7 @@ Found via `grep -rn "TENEX_EDGE_" src | grep env` plus `TENEX_CONFIG` /
 ## 8. Quick start (operator)
 
 ```
-# 1. Make sure ~/.tenex/config.json has at least userNsec (or tenexPrivateKey).
+# 1. Make sure ~/.tenex-edge/config.json has at least userNsec (or tenexPrivateKey).
 # 2. Verify relay connectivity:
 tenex-edge doctor
 

@@ -22,7 +22,7 @@ it from your current directory. The resolution order (see `src/project.rs`) is:
 1. **git repo name** — derived from `git rev-parse --git-common-dir`, so a repo
    and all of its git worktrees resolve to the **same** slug (the basename of
    the shared main repo root).
-2. **`~/.tenex/edge/projects.json`** — a JSON object mapping slugs to absolute
+2. **`~/.tenex-edge/projects.json`** — a JSON object mapping slugs to absolute
    paths, written by `tenex-edge project init`. The cwd itself, or its nearest
    ancestor present in the map, wins. This is the only way to give a non-git
    directory a project.
@@ -35,7 +35,7 @@ it from your current directory. The resolution order (see `src/project.rs`) is:
    and exit non-zero. `--project <slug>` on a verb that accepts it bypasses
    the refusal — the user named a project explicitly.
 
-`~/.tenex/edge/projects.json` looks like:
+`~/.tenex-edge/projects.json` looks like:
 
 ```json
 {
@@ -149,7 +149,7 @@ tenex-edge project init --force    # overwrite an existing slug→path mapping
 
 `project init` registers the current directory as a tenex-edge project by
 writing `{ "<basename($PWD)>": "<canonicalized $PWD>" }` into
-`~/.tenex/edge/projects.json`. This is the only way to give a non-git directory
+`~/.tenex-edge/projects.json`. This is the only way to give a non-git directory
 a project slug (git repos resolve automatically via their repo name). Refuses if
 the slug is already mapped to a different path; pass `--force` to overwrite.
 Idempotent: if the slug already points to this exact path, it's a no-op.
@@ -261,7 +261,7 @@ These are two different things — keep them straight:
 
 - **Local keystore** (`tenex-edge agent add/list/...`, see `groups.md`) is the
   set of agent keypairs that live on *this machine* and can be spawned here. It
-  is purely local state under `~/.tenex/edge/agents/`.
+  is purely local state under `~/.tenex-edge/agents/`.
 - **Project membership** is the NIP-29 group member list on the *relay*. It is
   the authoritative answer to "is this pubkey allowed in the project?" — it is
   **not** derived from the local keystore.
@@ -290,7 +290,7 @@ into the group. The picker in `project add` *bridges* the two: it offers your
 
 In the domain model (see `tenex-edge-fabric-architecture.md`), the **project-state
 plane** is exactly: `open_project`, `roster`, `presence`, `status`,
-`project_meta` — distinct from the communications plane (chat, threads).
+`project_meta` — distinct from the communications plane (chat).
 ACL is a shared `is_member` predicate both planes consult, not a separate plane.
 
 ---

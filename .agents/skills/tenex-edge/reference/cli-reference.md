@@ -41,8 +41,7 @@ tenex-edge tail --only msg,turn --relative
 |---|---|
 | `chat write` | Publish a message to the project's NIP-29 group chat. |
 | `chat read` | Read project chat history. |
-| `threads` | List threads (and messages) for a project. |
-| `propose` | Publish a long-form proposal (kind:30023) from your session. |
+| `publish` | Publish a long-form proposal (kind:30023) from your session. |
 
 **`chat write`** — `--message <m>`, `--session <id>`. Body positional,
 `--message`, or stdin. Mention a session inline by writing `@<codename>` in the
@@ -51,31 +50,30 @@ body.
 **`chat read`** — `--since <ts|dur>`, `--limit <n>`, `--offset <n>`, `--tail`
 (page from newest, output stays chronological), `--live`.
 
-**`threads`** — `--project <slug>`, `--thread <id>` (messages for one thread).
-
-**`propose`** — `--title <t>` (required), `--message <body>` (Markdown; `-` or
-omit reads stdin), `--thread <id>`, `--d <identifier>` (stable address; reuse to
-publish a revision), `--session <id>`.
+**`publish`** — `--title <t>` (required), `--message <body>` (Markdown; `-` or
+omit reads stdin), `--d <identifier>` (stable address; reuse to publish a
+revision), `--session <id>`.
 
 ```bash
 tenex-edge chat write "deploying now"
 tenex-edge chat write "please review PR #12 @bravo4217"
 tenex-edge chat read --tail --limit 20
-cat brief.md | tenex-edge propose --title "Subgroup rooms design"
+cat brief.md | tenex-edge publish --title "Subgroup rooms design"
 ```
 
 ---
 
-## Projects & Groups
+## Projects & Channels
 
 | Command | Purpose |
 |---|---|
-| `project init` | Register the current directory as a project in `~/.tenex/edge/projects.json`. |
+| `project init` | Register the current directory as a project in `~/.tenex-edge/projects.json`. |
 | `project list` | List all NIP-29 project groups on the relay. |
 | `project edit` | Set a project group's description (publishes kind:9002). |
 | `project add` | Edit the current project's local-agent membership, or add one pubkey. |
-| `groups create` | Create a subgroup task room under a project and invite agents. |
-| `groups list` | List the subgroup task rooms under a project. |
+| `channels create` | Create a subgroup task channel under a project and invite agents. |
+| `channels list` | List the subgroup task channels under a project. |
+| `channels switch` | Switch the active channel for the current tmux pane. |
 
 **`project init`** — `--force` (overwrite an existing slug→path mapping that
 points elsewhere). No other options; the slug is always `basename($PWD)` and the
@@ -87,19 +85,23 @@ path is the canonicalized `$PWD`.
 cwd's project. Pubkey may be hex / npub / NIP-05; omit it to open a local-agent
 picker that publishes the needed put-user/remove-user events.
 
-**`groups create`** — `--name <name>` (required; child id becomes
+**`channels create`** — `--name <name>` (required; child id becomes
 `<slugified-name>-<random8>`), `--agent <slug@backend>` (repeatable; `slug` is
 an `agents/*.json` stem, `backend` is a hex/npub of the target backend),
 `--project <slug>` (parent; defaults to cwd's project), `--message <path>`
-(markdown brief → kind:9 body). The running agent is auto-added to the room.
+(markdown brief → kind:9 body). The running agent is auto-added to the channel.
 
-**`groups list`** — `--project <slug>`.
+**`channels list`** — `--project <slug>`.
+
+**`channels switch`** — positional `<CHANNEL>` (the NIP-29 `h` value of the
+subgroup to switch to).
 
 ```bash
 tenex-edge project list
 tenex-edge project edit --description "Edge fabric work"
-tenex-edge groups create --name "support triage" --agent developer@npub1... --message brief.md
-tenex-edge groups list
+tenex-edge channels create --name "support triage" --agent developer@npub1... --message brief.md
+tenex-edge channels list
+tenex-edge channels switch subgroup-support-a1b2c3d4
 ```
 
 ---

@@ -1,6 +1,6 @@
-# Groups: NIP-29 Subgroup Task Rooms
+# Channels: NIP-29 Subgroup Task Rooms
 
-A **group** in tenex-edge is a **NIP-29 subgroup task room** that hangs under a
+A **channel** in tenex-edge is a **NIP-29 subgroup task room** that hangs under a
 parent **project**. It is a scoped collaboration space: a fresh NIP-29 child
 group whose `parent` is the project, with its own member roster, its own chat
 stream, and its own set of agents pulled in from one or more backends.
@@ -23,7 +23,7 @@ Each room is identified by a child group id `h` of the form
 
 ---
 
-## `tenex-edge groups create`
+## `tenex-edge channels create`
 
 Creates a subgroup task room under a project and publishes **one** kind:9
 orchestration event into the parent project asking the named backends to add
@@ -31,7 +31,7 @@ their agents. The agent that runs this command is **auto-added** to the new
 room.
 
 ```
-tenex-edge groups create --name <NAME> [OPTIONS]
+tenex-edge channels create --name <NAME> [OPTIONS]
 ```
 
 ### Flags
@@ -39,7 +39,7 @@ tenex-edge groups create --name <NAME> [OPTIONS]
 | Flag | Value | Required | Meaning |
 |------|-------|----------|---------|
 | `--name <NAME>` | string | **yes** | Human-readable room name, e.g. `"subgroup support"`. The child group id becomes `<slugified-name>-<random8>`. |
-| `--agent <SLUG@BACKEND>` | `slug@backend`, repeatable | at least one | The agents to provision into the room. `slug` is the agent identity (the `~/.tenex/edge/agents/*.json` filename stem, e.g. `developer`, `alice`); `backend` is a **hex pubkey or npub** of the target backend (the pubkey of its `tenexPrivateKey`). |
+| `--agent <SLUG@BACKEND>` | `slug@backend`, repeatable | at least one | The agents to provision into the room. `slug` is the agent identity (the `~/.tenex-edge/agents/*.json` filename stem, e.g. `developer`, `alice`); `backend` is a **hex pubkey or npub** of the target backend (the pubkey of its `tenexPrivateKey`). |
 | `--project <PROJECT>` | project slug | no | Parent project this room hangs under. **Defaults to the project resolved from the current directory.** |
 | `--message <PATH>` | path to a markdown file | no | A markdown brief whose contents become the kind:9 prose body. If omitted, a brief is auto-generated from the `--agent` list. |
 
@@ -59,7 +59,7 @@ Spin up a support room under the current directory's project, pulling in the
 `developer` agent on this backend:
 
 ```bash
-tenex-edge groups create \
+tenex-edge channels create \
   --name "subgroup support" \
   --agent developer@npub1backend...
 ```
@@ -68,7 +68,7 @@ Cross-backend room: `alice` from backend A and `bob` from backend B, with an
 explicit parent and a written brief:
 
 ```bash
-tenex-edge groups create \
+tenex-edge channels create \
   --name "billing investigation" \
   --project tenex-edge \
   --agent alice@npub1aaaa... \
@@ -95,14 +95,14 @@ created subgroup feature-billing-9f8e7d6c (tenex-edge > billing investigation)
 
 ---
 
-## `tenex-edge groups list`
+## `tenex-edge channels list`
 
 Lists the subgroup task rooms under a project, rendered as an indented tree from
 **local daemon state** (the materialized kind:39000 metadata) — no relay
 round-trip.
 
 ```
-tenex-edge groups list [--project <PROJECT>]
+tenex-edge channels list [--project <PROJECT>]
 ```
 
 | Flag | Value | Required | Meaning |
@@ -112,7 +112,7 @@ tenex-edge groups list [--project <PROJECT>]
 ### Example
 
 ```bash
-tenex-edge groups list
+tenex-edge channels list
 ```
 
 ```
@@ -136,16 +136,16 @@ Chat uses the **same** commands everywhere — `tenex-edge chat write` and
 ### How routing is decided
 
 - A session launched **into a room** has the room's child id `h` exported in the
-  `TENEX_EDGE_GROUP` environment variable. The session-start hook forwards it to
+  `TENEX_EDGE_CHANNEL` environment variable. The session-start hook forwards it to
   the daemon, which stores the session under that `h`. All of that session's
-  `chat write` / `chat read` calls thread `TENEX_EDGE_GROUP` through and the
+  `chat write` / `chat read` calls thread `TENEX_EDGE_CHANNEL` through and the
   daemon binds to the **subgroup** session — chat goes to and from the room.
 - A session launched as an **ordinary project session** has no
-  `TENEX_EDGE_GROUP`; its chat resolves to the **parent project** group via the
+  `TENEX_EDGE_CHANNEL`; its chat resolves to the **parent project** group via the
   current working directory.
 
 This is why two sessions can share a working directory but talk in different
-groups: the room session is disambiguated by `TENEX_EDGE_GROUP`, not by cwd.
+groups: the room session is disambiguated by `TENEX_EDGE_CHANNEL`, not by cwd.
 
 ### Commands
 
@@ -158,7 +158,7 @@ codename found gets a `p` tag and rings the idle tmux doorbell.
 tenex-edge chat write [OPTIONS] [MESSAGE]
   --message <MESSAGE>   Body, if not given positionally or on stdin.
   --session <SESSION>   My session id; if omitted, resolved from the current
-                        directory (and TENEX_EDGE_GROUP when set).
+                        directory (and TENEX_EDGE_CHANNEL when set).
 ```
 
 `tenex-edge chat read` — read chat history for the bound group.
@@ -173,11 +173,11 @@ tenex-edge chat read [OPTIONS]
 ```
 
 Both require the daemon (`tenex-edge __daemon`) to be running, or they hang
-waiting on `~/.tenex/edge/daemon.sock`. Output format is
+waiting on `~/.tenex-edge/daemon.sock`. Output format is
 `<agentSlug@hostName> message [timestamp]`.
 
 To post into a room you are NOT currently sessioned into, the call must run from
-a session bound to that room (i.e. with `TENEX_EDGE_GROUP=<child_h>` in its
+a session bound to that room (i.e. with `TENEX_EDGE_CHANNEL=<child_h>` in its
 environment). There is no chat flag to target an arbitrary room from an
 unrelated shell.
 
@@ -191,7 +191,7 @@ for group state.
 
 **Client-published management events** (the daemon publishes these):
 
-- **kind:9007 — create-group.** `groups create` publishes a 9007 for the child,
+- **kind:9007 — create-group.** `channels create` publishes a 9007 for the child,
   using `child_h` as the client-chosen group id and carrying a
   `["parent", parent_h]` tag **on the 9007 itself**. Subgroup relays validate
   the parent at create time (parent must exist; signer must be a parent admin;
@@ -210,7 +210,7 @@ for group state.
 materializer hydrates local state from these):
 
 - **kind:39000 — group metadata** (name, about, and the re-emitted `parent`).
-  `groups list` reads from the materialized 39000.
+  `channels list` reads from the materialized 39000.
 - **kind:39001 — admin roster** (`["p", pubkey, role]`). The daemon polls 39001
   to confirm an admin grant actually landed before proceeding.
 - **kind:39002 — member roster** (`["p", pubkey]`). Member adds are
@@ -219,7 +219,7 @@ materializer hydrates local state from these):
   39002 until the role lands.
 
 **kind:9 — the add-agents orchestration event.** After creating and locking the
-child, `groups create` publishes exactly one kind:9 (a NIP-C7 group-chat event)
+child, `channels create` publishes exactly one kind:9 (a NIP-C7 group-chat event)
 **into the parent project** (`["h", parent_h]`) so every backend watching the
 project sees it. Because kind:9 has a single routing `h`, the child id travels in
 a separate `["h-target", child_h]` tag. The structured tags carry all the
@@ -252,7 +252,7 @@ roles targeted at itself.
 
 ```bash
 cd /path/to/project-checkout
-tenex-edge groups create --name "X" --agent developer@<backend-npub>
+tenex-edge channels create --name "X" --agent developer@<backend-npub>
 ```
 
 Defaults `--parent`/`--project` to the project resolved from the current
@@ -263,9 +263,9 @@ charter.
 **List the rooms under this project**
 
 ```bash
-tenex-edge groups list
+tenex-edge channels list
 # or, from anywhere:
-tenex-edge groups list --project tenex-edge
+tenex-edge channels list --project tenex-edge
 ```
 
 **See who's in a room**
@@ -279,7 +279,7 @@ intended members; the creating agent is auto-joined.
 
 **Post in a room**
 
-Run from a session that was launched into the room (so `TENEX_EDGE_GROUP=<child_h>`
+Run from a session that was launched into the room (so `TENEX_EDGE_CHANNEL=<child_h>`
 is set in its environment), then:
 
 ```bash
@@ -289,5 +289,5 @@ tenex-edge chat read --tail --limit 30
 tenex-edge chat read --live
 ```
 
-From an ordinary project session (no `TENEX_EDGE_GROUP`) the same commands talk
+From an ordinary project session (no `TENEX_EDGE_CHANNEL`) the same commands talk
 to the **parent project** chat instead.

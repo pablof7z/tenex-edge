@@ -5,9 +5,11 @@ awareness fabric (Nostr), grafted onto agents that stay in their native hosts
 (Claude Code, Codex, …). Host-neutral — nothing inside tenex-edge knows about any
 host; hosts integrate from the outside via hooks and a skill.
 
-This repo implements **M1** (see [`M1.md`](M1.md)): identity, NIP-29 project
-group scoping, presence, distilled awareness, NIP-38 status, and
-session-targeted mentions.
+Identity, NIP-29 project group scoping, presence, distilled awareness,
+NIP-38 status, and session-targeted mentions. Architecture lives in
+[`docs/daemon-design.md`](docs/daemon-design.md) and
+[`docs/fabric-architecture.md`](docs/fabric-architecture.md); product doctrine
+in [`docs/product-spec/`](docs/product-spec/).
 
 ## Status
 

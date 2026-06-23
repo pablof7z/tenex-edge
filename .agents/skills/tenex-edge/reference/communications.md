@@ -147,39 +147,28 @@ this order:
 In normal Claude Code use you can ignore all of this — the cwd + env resolve you
 automatically.
 
-### Threads
-
-```
-tenex-edge threads                    # list threads + messages for the current project
-tenex-edge threads --project <slug>   # for a specific project
-tenex-edge threads --thread <THREAD>  # messages for one thread id
-```
-
-Threading is a **derived** store entity. Use `threads` to inspect or catch up on
-a conversation.
-
 ### Proposals (long-form documents)
 
 ```
-tenex-edge propose --title <TITLE> [--message <BODY> | (stdin)] \
-    [--d <IDENTIFIER>] [--thread <THREAD_ID>] [--session <MY_SESSION>]
+tenex-edge publish --title <TITLE> [--message <BODY> | (stdin)] \
+    [--d <IDENTIFIER>] [--session <MY_SESSION>]
 ```
 
 Publishes a long-form proposal (Nostr kind:30023, Markdown body) from your
 session. Body comes from `--message` or stdin (use `-` or omit to read stdin).
 `--d <IDENTIFIER>` is a stable addressable id: **reuse the same `--d` value to
 publish a revision** that supersedes the prior proposal at that address; omit it
-to mint a fresh proposal. `--thread` attaches it to an existing thread.
+to mint a fresh proposal.
 
 ```bash
 # New proposal from a file
-cat rfc-subgroups.md | tenex-edge propose --title "NIP-29 subgroup task rooms"
+cat rfc-subgroups.md | tenex-edge publish --title "NIP-29 subgroup task rooms"
 
 # Revise it later (same --d address supersedes the old version)
-cat rfc-subgroups-v2.md | tenex-edge propose --title "NIP-29 subgroup task rooms" --d subgroup-rooms
+cat rfc-subgroups-v2.md | tenex-edge publish --title "NIP-29 subgroup task rooms" --d subgroup-rooms
 ```
 
-> Recipe — **"post a proposal":** `tenex-edge propose --title "…"` with the body
+> Recipe — **"post a proposal":** `tenex-edge publish --title "…"` with the body
 > on stdin; pass a stable `--d` if you'll revise it.
 
 ---
@@ -194,5 +183,4 @@ cat rfc-subgroups-v2.md | tenex-edge propose --title "NIP-29 subgroup task rooms
 | Message an agent | `tenex-edge chat write "… @<codename>"` |
 | Broadcast to project | `tenex-edge chat write "…"` |
 | Read project chat | `tenex-edge chat read` (`--live`) |
-| Inspect a conversation | `tenex-edge threads` |
-| Publish a proposal | `tenex-edge propose --title …` (body on stdin) |
+| Publish a proposal | `tenex-edge publish --title …` (body on stdin) |

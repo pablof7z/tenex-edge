@@ -30,4 +30,4 @@ Rules — enforced strictly:
 - **Retire executed plans.** A plan that has been implemented is no longer a source of truth — close the issue or delete the temporal detail; preserve durable lessons in the doc that owns that concept.
 - **When in doubt, fewer planning files.** The cost of a duplicate plan is divergence. If a new planning file feels necessary, justify why it cannot be a GitHub issue plus a durable doc.
 
-> **Migration note.** The existing `Plans/` directory and `M1.md` predate this rule. They are the current exception, not a sanctioned pattern: their live tactical content should be folded into GitHub Issues and their durable conclusions moved into `docs/` (product-spec, architecture, or wiki). Do not add new files under `Plans/` or new top-level plan docs; drain the existing ones into the canonical surfaces as the areas they cover are next touched.
+> **Migration note.** The `Plans/` directory is empty and `M1.md` has been drained into `docs/daemon-design.md`, `docs/fabric-architecture.md`, and `docs/product-spec/`. Do not add new files under `Plans/` or new top-level plan docs; the canonical surfaces are GitHub Issues plus the durable docs.
