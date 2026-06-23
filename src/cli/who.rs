@@ -1,5 +1,5 @@
 use super::*;
-use crate::session::{derive_status, DeltaKind, SessionSnapshot};
+use crate::session::{derive_status, DeltaKind, SessionSnapshot, StatusDeltaItem};
 
 mod render;
 
@@ -388,9 +388,7 @@ pub(super) fn build_status_delta(
         return Vec::new();
     }
 
-    let name_counts = load_who_snapshot(store, Some(project), now, daemon_host)
-        .map(|snapshot| render::agent_name_counts(&snapshot.rows))
-        .unwrap_or_default();
+    let name_counts = delta_agent_name_counts(store, &items, project, now, daemon_host);
 
     let mut delta: Vec<String> = Vec::with_capacity(items.len());
     for item in &items {
@@ -422,6 +420,36 @@ fn delta_agent_label(
     } else {
         format!("{agent} ({host})")
     }
+}
+
+fn delta_agent_name_counts(
+    store: &Store,
+    items: &[StatusDeltaItem],
+    project: &str,
+    now: u64,
+    daemon_host: &str,
+) -> std::collections::BTreeMap<String, usize> {
+    let mut seen = std::collections::BTreeSet::new();
+    if let Ok(snapshot) = load_who_snapshot(store, Some(project), now, daemon_host) {
+        for row in snapshot.rows {
+            seen.insert((row.slug, row.session_id));
+        }
+    }
+    for item in items {
+        let snap = &item.snapshot;
+        if snap.project == project {
+            seen.insert((
+                snap.agent_slug.clone(),
+                snap.session_id.as_str().to_string(),
+            ));
+        }
+    }
+
+    let mut counts = std::collections::BTreeMap::new();
+    for (slug, _) in seen {
+        *counts.entry(slug).or_insert(0) += 1;
+    }
+    counts
 }
 
 #[cfg(test)]

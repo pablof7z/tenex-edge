@@ -2,7 +2,8 @@ use super::*;
 
 pub(super) fn render_who_once(snapshot: &WhoSnapshot) -> String {
     let mut out = String::new();
-    let name_counts = agent_name_counts(&snapshot.rows);
+    let split_counts_by_project = snapshot.project == "*";
+    let name_counts = agent_name_counts_for_scope(&snapshot.rows, split_counts_by_project);
 
     let scope = if snapshot.project == "*" {
         "all projects".to_string()
@@ -16,11 +17,11 @@ pub(super) fn render_who_once(snapshot: &WhoSnapshot) -> String {
         let _ = writeln!(out, "(no live agents — start a session)");
     } else if snapshot.project == "*" {
         for row in &snapshot.rows {
-            render_who_row(&mut out, row, true, &name_counts);
+            render_who_row(&mut out, row, true, &name_counts, split_counts_by_project);
         }
     } else {
         for row in &snapshot.rows {
-            render_who_row(&mut out, row, false, &name_counts);
+            render_who_row(&mut out, row, false, &name_counts, split_counts_by_project);
         }
     }
 
@@ -140,7 +141,8 @@ pub(super) fn render_who_for_stdout(snapshot: &WhoSnapshot) -> String {
 
 pub(super) fn render_who_plain(snapshot: &WhoSnapshot) -> String {
     let mut out = String::new();
-    let name_counts = agent_name_counts(&snapshot.rows);
+    let split_counts_by_project = snapshot.project == "*";
+    let name_counts = agent_name_counts_for_scope(&snapshot.rows, split_counts_by_project);
 
     let _ = writeln!(out, "# tenex-edge who");
     let _ = writeln!(out);
@@ -169,7 +171,13 @@ pub(super) fn render_who_plain(snapshot: &WhoSnapshot) -> String {
             let _ = writeln!(out, "{line}");
         }
         for row in &snapshot.rows {
-            render_who_markdown_row(&mut out, row, snapshot.project == "*", &name_counts);
+            render_who_markdown_row(
+                &mut out,
+                row,
+                snapshot.project == "*",
+                &name_counts,
+                split_counts_by_project,
+            );
         }
     }
 
@@ -219,8 +227,9 @@ fn render_who_markdown_row(
     row: &WhoRow,
     _include_project: bool,
     name_counts: &std::collections::BTreeMap<String, usize>,
+    split_counts_by_project: bool,
 ) {
-    let agent = display_agent_name(&row.slug, &row.session_id, name_counts);
+    let agent = display_row_agent_name(row, name_counts, split_counts_by_project);
     let host = row_host_label(row);
     let title = row_title_label(row);
     let status = row_state_label(row);
@@ -234,10 +243,14 @@ fn render_who_markdown_row(
     );
 }
 
-pub(super) fn agent_name_counts(rows: &[WhoRow]) -> std::collections::BTreeMap<String, usize> {
+fn agent_name_counts_for_scope(
+    rows: &[WhoRow],
+    split_counts_by_project: bool,
+) -> std::collections::BTreeMap<String, usize> {
     let mut counts = std::collections::BTreeMap::new();
     for row in rows {
-        *counts.entry(row.slug.clone()).or_insert(0) += 1;
+        let key = agent_count_key(split_counts_by_project, &row.project, &row.slug);
+        *counts.entry(key).or_insert(0) += 1;
     }
     counts
 }
@@ -249,6 +262,27 @@ pub(super) fn display_agent_name(
 ) -> String {
     if name_counts.get(slug).copied().unwrap_or(0) > 1 {
         format!("{}-{}", slug, session_codename(session_id))
+    } else {
+        slug.to_string()
+    }
+}
+
+fn display_row_agent_name(
+    row: &WhoRow,
+    name_counts: &std::collections::BTreeMap<String, usize>,
+    split_counts_by_project: bool,
+) -> String {
+    let key = agent_count_key(split_counts_by_project, &row.project, &row.slug);
+    if name_counts.get(&key).copied().unwrap_or(0) > 1 {
+        format!("{}-{}", row.slug, session_codename(&row.session_id))
+    } else {
+        row.slug.clone()
+    }
+}
+
+fn agent_count_key(split_counts_by_project: bool, project: &str, slug: &str) -> String {
+    if split_counts_by_project {
+        format!("{project}\0{slug}")
     } else {
         slug.to_string()
     }
@@ -309,6 +343,7 @@ fn render_who_row(
     row: &WhoRow,
     include_project: bool,
     name_counts: &std::collections::BTreeMap<String, usize>,
+    split_counts_by_project: bool,
 ) {
     let stale = if row.fresh {
         String::new()
@@ -326,7 +361,7 @@ fn render_who_row(
         .map(|d| format!(" {}", format!("[{d}]").dimmed()))
         .unwrap_or_default();
     let _ = include_project;
-    let name = display_agent_name(&row.slug, &row.session_id, name_counts)
+    let name = display_row_agent_name(row, name_counts, split_counts_by_project)
         .cyan()
         .to_string();
     let _ = writeln!(
