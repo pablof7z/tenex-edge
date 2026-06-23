@@ -200,6 +200,14 @@ enum Cmd {
         /// pane's project directory).
         #[arg(long)]
         cwd: Option<String>,
+        /// Tmux pane id (e.g. `%5`) the statusline is rendering for. When
+        /// supplied, the daemon resolves the session bound to that pane via
+        /// `session_endpoints` BEFORE falling back to the agent+cwd lookup —
+        /// so two panes of the same agent in the same project no longer share
+        /// one status bar. The tmux status-format invocation passes
+        /// `#{pane_id}`, which tmux expands per-pane.
+        #[arg(long)]
+        pane: Option<String>,
         /// Emit tmux #[style] format strings instead of ANSI codes. Required
         /// when the output is consumed by tmux's status-format (#(...)).
         #[arg(long)]
@@ -600,8 +608,9 @@ pub async fn run(cli: Cli) -> Result<()> {
             session,
             agent,
             cwd,
+            pane,
             tmux,
-        } => statusline::statusline(session, agent, cwd, tmux),
+        } => statusline::statusline(session, agent, cwd, pane, tmux),
         Cmd::Project { action } => admin::project(action).await,
         Cmd::Channels { action } => admin::channels(action).await,
         Cmd::Agent { action } => admin::agent(action).await,

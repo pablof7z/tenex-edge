@@ -22,6 +22,7 @@ pub(super) fn statusline(
     session: Option<String>,
     agent_arg: Option<String>,
     cwd_arg: Option<String>,
+    pane_arg: Option<String>,
     tmux_fmt: bool,
 ) -> Result<()> {
     // Harness payload on stdin (absent when invoked by hand from a terminal or
@@ -54,12 +55,18 @@ pub(super) fn statusline(
     // invocation passes --agent because TENEX_EDGE_AGENT is a pane env var
     // not available in the tmux server's #(...) execution context).
     let agent = agent_arg.or_else(agent_env_slug);
+    // Explicit --pane wins (tmux status-format passes #{pane_id}); no env fallback
+    // — the pane id is only meaningful inside tmux, and a stray $TMUX_PANE from a
+    // parent shell would bind a hand-run `tenex-edge statusline` to the wrong
+    // session.
+    let pane = pane_arg.filter(|s| !s.is_empty());
 
     let params = serde_json::json!({
         "session": session,
         "env_session": env_session,
         "cwd": cwd,
         "agent": agent,
+        "pane": pane,
     });
     // Fail open on ANY failure (no daemon, no session yet, protocol skew): a
     // status bar with a missing segment beats a status bar with an error in it.
