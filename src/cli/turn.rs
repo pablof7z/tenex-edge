@@ -66,25 +66,27 @@ pub fn assemble_turn_start_context(
             codename = codename,
         ));
 
-        // Warn if this agent couldn't be added to the NIP-29 group (e.g. the
-        // daemon on this machine is not the relay admin). The session-start hook
-        // tried and failed silently; surface it here so the agent can tell the
-        // user what to fix.
-        let not_member = {
+        // Warn only when this daemon is not the local owner for the group. If it
+        // owns the group, session-start/room-minting is responsible for signing
+        // the member-add itself; a cache miss here is a transient local state,
+        // not a user action item.
+        let should_warn_not_member = {
             let s = store.lock().expect("store mutex poisoned");
-            !s.is_group_member(&rec.project, &rec.agent_pubkey)
-                .unwrap_or(true)
+            let not_member = !s
+                .is_group_member(&rec.project, &rec.agent_pubkey)
+                .unwrap_or(true);
+            let locally_owned = s.is_group_owned(&rec.project).unwrap_or(false);
+            not_member && !locally_owned
         };
-        if not_member {
+        if should_warn_not_member {
             blocks.push(format!(
-                "[tenex-edge] WARNING: this agent ({slug}, pubkey {pubkey}) \
+                "[tenex-edge] WARNING: this agent ({slug}) \
                  is not a member of the NIP-29 group for project \"{project}\". \
                  Messages published by this session may be rejected by the relay. \
                  Tell the user to run the following command from a machine that \
                  has relay admin access (e.g. where this project was first set up):\n\
-                 \n  tenex-edge project add {project} {pubkey}",
+                 \n  tenex-edge project add {project} {slug}",
                 slug = rec.agent_slug,
-                pubkey = rec.agent_pubkey,
                 project = rec.project,
             ));
         }

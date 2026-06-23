@@ -441,13 +441,13 @@ enum ProjectAction {
         #[arg(long)]
         project: Option<String>,
     },
-    /// Edit the current project's local-agent membership, or add one pubkey.
+    /// Edit the current project's local-agent membership, or add one local agent/pubkey.
     Add {
         /// Project slug. Omit to use the project resolved from the current directory.
         project: Option<String>,
-        /// Hex pubkey, npub, or NIP-05 address. When omitted, opens a picker of
-        /// local agents and publishes the needed put-user/remove-user events.
-        #[arg(value_name = "PUBKEY")]
+        /// Local agent slug, hex pubkey, npub, or NIP-05 address. When omitted,
+        /// opens a picker of local agents and publishes the needed put-user/remove-user events.
+        #[arg(value_name = "AGENT_OR_PUBKEY")]
         pubkey: Option<String>,
     },
 }
