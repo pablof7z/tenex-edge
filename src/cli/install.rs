@@ -3,14 +3,9 @@
 //! and --uninstall.
 
 use anyhow::{bail, Context, Result};
-use crossterm::{
-    cursor::{Hide, MoveTo, Show},
-    event::{self, Event as TermEvent, KeyCode, KeyModifiers},
-    execute,
-    terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen},
-};
+use dialoguer::MultiSelect;
 use owo_colors::OwoColorize;
-use std::io::{self, IsTerminal as _, Write as _};
+use std::io::{self, IsTerminal as _};
 use std::path::{Path, PathBuf};
 
 pub(super) struct InstallOpts {
@@ -35,10 +30,6 @@ struct Harness {
     detected: bool,
 }
 
-struct HarnessChoice {
-    index: usize,
-    selected: bool,
-}
 
 fn harnesses() -> Vec<Harness> {
     let home = home_dir();
@@ -405,104 +396,38 @@ fn resolve_selection<'a>(all: &'a [Harness], opts: &InstallOpts) -> Result<Vec<&
 }
 
 fn interactive_select(all: &[Harness]) -> Result<Vec<&Harness>> {
-    let mut choices = all
+    let labels: Vec<String> = all
         .iter()
-        .enumerate()
-        .map(|(index, h)| HarnessChoice {
-            index,
-            selected: h.detected,
+        .map(|h| {
+            let status = if h.detected {
+                "detected".green().to_string()
+            } else {
+                "not detected".dimmed().to_string()
+            };
+            let installed = if is_installed(h) {
+                format!("  {}", "installed".green())
+            } else {
+                String::new()
+            };
+            format!(
+                "{:<14} {}{}  {}",
+                h.display.cyan().bold(),
+                status,
+                installed,
+                h.config_path.display().to_string().dimmed()
+            )
         })
-        .collect::<Vec<_>>();
+        .collect();
 
-    if !run_selector(all, &mut choices)? {
-        return Ok(Vec::new());
-    }
+    let defaults: Vec<bool> = all.iter().map(|h| h.detected).collect();
 
-    Ok(choices
-        .into_iter()
-        .filter(|c| c.selected)
-        .map(|c| &all[c.index])
-        .collect())
-}
+    let chosen = MultiSelect::new()
+        .with_prompt("Install tenex-edge hooks  (space to toggle, enter to apply)")
+        .items(&labels)
+        .defaults(&defaults)
+        .interact()?;
 
-fn run_selector(all: &[Harness], choices: &mut [HarnessChoice]) -> Result<bool> {
-    let _guard = TerminalGuard::enter()?;
-    let mut active = 0usize;
-
-    loop {
-        render_selector(all, choices, active)?;
-        match event::read()? {
-            TermEvent::Key(key) => match key.code {
-                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    return Ok(false);
-                }
-                KeyCode::Esc | KeyCode::Char('q') => return Ok(false),
-                KeyCode::Enter => return Ok(true),
-                KeyCode::Up | KeyCode::Char('k') => {
-                    active = active.saturating_sub(1);
-                }
-                KeyCode::Down | KeyCode::Char('j') => {
-                    if active + 1 < choices.len() {
-                        active += 1;
-                    }
-                }
-                KeyCode::Char(' ') => {
-                    choices[active].selected = !choices[active].selected;
-                }
-                _ => {}
-            },
-            TermEvent::Resize(_, _) => {}
-            _ => {}
-        }
-    }
-}
-
-fn render_selector(all: &[Harness], choices: &[HarnessChoice], active: usize) -> Result<()> {
-    let mut out = io::stdout();
-    execute!(out, MoveTo(0, 0), Clear(ClearType::All))?;
-    writeln!(out, "Install tenex-edge hooks")?;
-    writeln!(out, "Use up/down to move, space to toggle, enter to apply.")?;
-    writeln!(out)?;
-
-    for (idx, choice) in choices.iter().enumerate() {
-        let h = &all[choice.index];
-        let cursor = if idx == active { ">" } else { " " };
-        let mark = if choice.selected { "[x]" } else { "[ ]" };
-        let detected = if h.detected {
-            "detected".green().to_string()
-        } else {
-            "not detected".dimmed().to_string()
-        };
-        let installed = if is_installed(h) {
-            "installed".green().to_string()
-        } else {
-            "-".dimmed().to_string()
-        };
-        if idx == active {
-            writeln!(
-                out,
-                "{} {} {}  {:<12} {:<14} {}",
-                cursor.bold(),
-                mark.bold(),
-                h.display.bold(),
-                detected,
-                installed,
-                h.config_path.display().to_string().dimmed()
-            )?;
-        } else {
-            writeln!(
-                out,
-                "{cursor} {mark} {}  {:<12} {:<14} {}",
-                h.display,
-                detected,
-                installed,
-                h.config_path.display().to_string().dimmed()
-            )?;
-        }
-    }
-
-    out.flush()?;
-    Ok(())
+    Ok(chosen.into_iter().map(|i| &all[i]).collect())
 }
 
 fn install_json_harness(h: &Harness, opts: &InstallOpts) -> Result<()> {
@@ -594,22 +519,6 @@ fn write_text(path: &Path, text: &str) -> Result<()> {
     Ok(())
 }
 
-struct TerminalGuard;
-
-impl TerminalGuard {
-    fn enter() -> Result<Self> {
-        terminal::enable_raw_mode()?;
-        execute!(io::stdout(), EnterAlternateScreen, Hide)?;
-        Ok(Self)
-    }
-}
-
-impl Drop for TerminalGuard {
-    fn drop(&mut self) {
-        let _ = execute!(io::stdout(), Show, LeaveAlternateScreen);
-        let _ = terminal::disable_raw_mode();
-    }
-}
 
 #[cfg(test)]
 mod tests {
