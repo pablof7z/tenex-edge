@@ -154,7 +154,19 @@ async fn complete_via_rig(
 
     let text: String = match resolved.provider.as_str() {
         "openrouter" => {
-            let client = rig::providers::openrouter::Client::new(&resolved.api_key)
+            let mut headers = reqwest::header::HeaderMap::new();
+            headers.insert(
+                reqwest::header::HeaderName::from_static("http-referer"),
+                reqwest::header::HeaderValue::from_static("https://github.com/pablof7z/tenex-edge"),
+            );
+            headers.insert(
+                reqwest::header::HeaderName::from_static("x-title"),
+                reqwest::header::HeaderValue::from_static("tenex-edge"),
+            );
+            let client = rig::providers::openrouter::Client::builder()
+                .api_key(&resolved.api_key)
+                .http_headers(headers)
+                .build()
                 .map_err(|e| format!("openrouter client init: {e}"))?;
             let agent = client
                 .agent(&resolved.model)
