@@ -496,6 +496,7 @@ async fn dispatch(state: &Arc<DaemonState>, req: &Request) -> Response {
         "session_start" => rpc_session_start(state, &req.params, None).await,
         "session_end" => rpc_session_end(state, &req.params),
         "chat_write" => rpc_chat_write(state, &req.params).await,
+        "user_prompt" => rpc_user_prompt(state, &req.params).await,
         "publish" => rpc_propose(state, &req.params).await,
         "turn_start" => rpc_turn_start(state, &req.params).await,
         "turn_check" => rpc_turn_check(state, &req.params),
@@ -1120,6 +1121,85 @@ struct ChatWriteParams {
     cwd: Option<String>,
     #[serde(default)]
     agent: Option<String>,
+}
+
+/// Publish a user's prompt as kind:9 chat into the session's room (issue #6).
+///
+/// The human is speaking, so the event is signed by the OPERATOR key (which is
+/// the room's admin) rather than the agent/session key. Fail-open: if no
+/// operator key is set the prompt is simply not mirrored — the hook must never
+/// block the editor. The session resolves to its room via `resolve_session`,
+/// so the prompt lands in the same per-session subgroup the agent posts into.
+async fn rpc_user_prompt(
+    state: &Arc<DaemonState>,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value> {
+    use nostr_sdk::prelude::Keys;
+
+    #[derive(serde::Deserialize, Default)]
+    struct P {
+        #[serde(default)]
+        session: Option<String>,
+        #[serde(default)]
+        env_session: Option<String>,
+        #[serde(default)]
+        agent: Option<String>,
+        #[serde(default)]
+        cwd: Option<String>,
+        #[serde(default)]
+        prompt: String,
+    }
+    let p: P = serde_json::from_value(params.clone()).context("parsing user_prompt params")?;
+    if p.prompt.trim().is_empty() {
+        return Ok(serde_json::json!({ "skipped": "empty prompt" }));
+    }
+
+    // No operator key → nothing to sign with; fail open (session still runs).
+    let Some(nsec) = state.cfg.management_nsec() else {
+        return Ok(serde_json::json!({ "skipped": "userNsec unset" }));
+    };
+    let op_keys = Keys::parse(nsec).context("parsing operator key")?;
+    let op_pubkey = op_keys.public_key().to_hex();
+
+    let rec = resolve_session(
+        state,
+        p.session.as_deref(),
+        p.env_session.as_deref(),
+        p.cwd.as_deref(),
+        p.agent.as_deref(),
+        params.get("group").and_then(|v| v.as_str()),
+    )?;
+
+    let chat = ChatMessage {
+        from: crate::domain::AgentRef::new(op_pubkey.clone(), "operator".to_string()),
+        project: rec.project.clone(),
+        body: p.prompt.clone(),
+        from_session: Some(rec.session_id.clone()),
+        mentioned_session: None,
+        mentioned_pubkey: None,
+    };
+    let event_id = state
+        .provider
+        .publish_checked(&DomainEvent::ChatMessage(chat), &op_keys)
+        .await?
+        .to_hex();
+    let created_at = now_secs();
+
+    state.with_store(|s| {
+        let _ = s.record_chat(&ChatLogRow {
+            chat_event_id: event_id.clone(),
+            from_pubkey: op_pubkey.clone(),
+            from_slug: "operator".to_string(),
+            host: state.host.clone(),
+            project: rec.project.clone(),
+            body: p.prompt.clone(),
+            created_at,
+            from_session: rec.session_id.clone(),
+            mentioned_session: String::new(),
+        });
+    });
+
+    Ok(serde_json::json!({ "event_id": event_id, "project": rec.project }))
 }
 
 async fn rpc_chat_write(

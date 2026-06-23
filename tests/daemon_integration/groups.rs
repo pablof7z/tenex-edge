@@ -134,6 +134,49 @@ fn orchestration_session_uses_existing_group_without_minting() {
     stop_daemon(&home);
 }
 
+/// A user's prompt is published as kind:9 chat into the session's room
+/// (operator-signed — the human is speaking, and the operator is the room
+/// admin). (Issue #6, increment 3.)
+#[test]
+fn user_prompt_publishes_kind9_chat_into_room() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let home = Home::new();
+    rewrite_config_with_user_nsec(&home);
+
+    rt().block_on(async {
+        let mut c = Client::connect_or_spawn().await.expect("connect");
+        c.call(
+            "session_start",
+            serde_json::json!({"agent": "coder", "session_id": "sess-prompt-1", "cwd": "/tmp"}),
+        )
+        .await
+        .expect("session_start");
+        c.call(
+            "user_prompt",
+            serde_json::json!({"env_session": "sess-prompt-1", "agent": "coder", "cwd": "/tmp", "prompt": "build me a thing"}),
+        )
+        .await
+        .expect("user_prompt");
+    });
+
+    let store = Store::open(&home.store_path()).unwrap();
+    let rec = store
+        .get_session("sess-prompt-1")
+        .unwrap()
+        .expect("session row");
+    let msgs = store
+        .list_chat_messages(&rec.project, 0, None, 0, false)
+        .unwrap();
+    assert!(
+        msgs.iter().any(|m| m.body == "build me a thing"),
+        "user prompt should be recorded as chat in room {}; got {:?}",
+        rec.project,
+        msgs.iter().map(|m| &m.body).collect::<Vec<_>>()
+    );
+
+    stop_daemon(&home);
+}
+
 #[test]
 fn session_start_without_user_nsec_still_starts_unmanaged() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());

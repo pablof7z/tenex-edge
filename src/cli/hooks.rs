@@ -339,9 +339,10 @@ async fn hook_dispatch(
                     }),
                 );
             }
-            // Publish the user's prompt as a kind:1 OP on the Nostr fabric.
-            // Fail open: if userNsec is absent or the relay is unreachable, the
-            // hook must not block the editor.
+            // Publish the user's prompt as kind:9 chat into the session's room
+            // (operator-signed; see daemon `rpc_user_prompt`). Fail open: if
+            // userNsec is absent or the relay is unreachable, the hook must not
+            // block the editor.
             if let Some(prompt_text) = prompt {
                 let params = serde_json::json!({
                     "env_session": sid,
