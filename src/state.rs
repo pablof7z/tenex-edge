@@ -2094,6 +2094,30 @@ impl Store {
             .ok())
     }
 
+    /// Human-readable display name of a group/channel: the NIP-29 `name` tag
+    /// from kind:39000 if known, else the `about` text, else empty. Source of
+    /// truth for the statusline channel title (== the channel's title on the
+    /// relay == what the relay renders as the room's name). Pure read.
+    pub fn group_display_name(&self, project: &str) -> Result<String> {
+        let row: Option<(String, String)> = self
+            .conn
+            .query_row(
+                "SELECT name, about FROM project_meta WHERE project=?1",
+                params![project],
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+            )
+            .ok();
+        Ok(row
+            .map(|(name, about)| {
+                if !name.is_empty() {
+                    name
+                } else {
+                    about
+                }
+            })
+            .unwrap_or_default())
+    }
+
     /// Record a group's NIP-29 subgroup hierarchy (display `name` + `parent` id)
     /// from its relay-authored kind:39000, without disturbing its `about`. Keyed
     /// by group id; coexists with `upsert_project_meta` on the same row.

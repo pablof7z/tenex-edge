@@ -2098,8 +2098,9 @@ async fn refresh_project_members_cache(state: &Arc<DaemonState>, project: &str) 
 
 // ── statusline ───────────────────────────────────────────────────────────────
 
-/// How long a drained mention keeps showing on the statusline as "recently
-/// consumed" before disappearing.
+/// How long a drained mention keeps showing in the statusline RPC snapshot as
+/// "recently consumed" before disappearing. The renderer no longer displays the
+/// inbox segment, but callers still consume `pending`/`recent` from this RPC.
 const STATUSLINE_RECENT_SECS: u64 = 30;
 /// How long a distillation error stays visible in the statusline before expiring.
 const DISTILL_ERROR_TTL_SECS: u64 = 300;
@@ -2140,26 +2141,52 @@ fn rpc_statusline(
     )?;
     let now = now_secs();
     let host = state.host.clone();
+    // Routing scope (channel when set, else the per-session room) — the member
+    // count and is_member check key on it so a `channels switch` is reflected
+    // in the statusline without restarting.
+    let scope = if rec.channel.is_empty() {
+        rec.project.clone()
+    } else {
+        rec.channel.clone()
+    };
     state.with_store(|s| {
-        let session_count = crate::cli::load_who_snapshot(s, Some(&rec.project), false, now, &host)
-            .map(|snap| snap.session_count())
-            .unwrap_or(0);
-        let member_count = s.count_group_members(&rec.project).unwrap_or(0);
-        let is_member = s
-            .is_group_member(&rec.project, &rec.agent_pubkey)
-            .unwrap_or(true);
-        // Read busy + title from the canonical aggregate via the SHARED projection
-        // (derive_status), so the statusline agrees with `who`/turn-deltas. Pure
-        // read: no drains, no touches.
-        let (working, status) = s
+        let member_count = s.count_group_members(&scope).unwrap_or(0);
+        let is_member = s.is_group_member(&scope, &rec.agent_pubkey).unwrap_or(true);
+        // Read busy + title + live activity from the canonical aggregate via
+        // the SHARED projection (derive_status), so the statusline agrees with
+        // `who`/turn-deltas. Pure read: no drains, no touches. The statusline
+        // shows the activity line (the live "doing now" signal from kind:30315),
+        // not the persistent title (the channel title segment carries that).
+        let (working, title, activity) = s
             .local_session_snapshot(&rec.session_id)
             .ok()
             .flatten()
             .map(|snap| {
                 let d = derive_status(&snap, now);
-                (d.busy, d.title)
+                (d.busy, d.title, d.activity)
             })
-            .unwrap_or((false, String::new()));
+            .unwrap_or((false, String::new(), String::new()));
+        // `channel_title` is the display name of the routing scope (channel or
+        // per-session room) from the relay-authored kind:39000 metadata cache
+        // (== the channel's title on the relay == what the relay renders as the
+        // room's name). Falls back to the distilled session title when the
+        // session is in its own per-session room (issue #6: the room is renamed
+        // to the distilled title via kind:9002 edit-metadata; the local cache
+        // may lag by one refresh).
+        let mut channel_title = s.group_display_name(&scope).unwrap_or_default();
+        if channel_title.is_empty() {
+            channel_title = title.clone();
+        }
+        // `work_root` is the parent project a per-session room or task channel
+        // hangs under, or the project itself for an ordinary project session.
+        // This is the "Project" line in `who`, surfaced as `project-name`.
+        let work_root = s
+            .session_room_parent(&rec.project)
+            .ok()
+            .flatten()
+            .or_else(|| s.group_parent(&scope).ok().flatten())
+            .or_else(|| s.group_parent(&rec.project).ok().flatten())
+            .unwrap_or_else(|| rec.project.clone());
         let pending_chat = s.peek_chat_mentions(&rec.session_id).unwrap_or_default();
         let recent_since = now.saturating_sub(STATUSLINE_RECENT_SECS);
         let recent_chat = s
@@ -2177,12 +2204,14 @@ fn rpc_statusline(
             "agent": rec.agent_slug,
             "host": host,
             "session_id": rec.session_id,
-            "project": rec.project,
+            "work_root": work_root,
+            "channel": scope,
+            "channel_title": channel_title,
             "member_count": member_count,
-            "session_count": session_count,
             "is_member": is_member,
             "working": working,
-            "status": status,
+            "title": title,
+            "activity": activity,
             "pending": pending_json,
             "recent": recent_json,
             "distill_error": distill_error,
