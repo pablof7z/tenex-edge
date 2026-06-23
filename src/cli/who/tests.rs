@@ -590,6 +590,31 @@ fn render_channel_context_shows_breadcrumb_members_and_subchannels() {
     assert!(block.contains("  #competitive-comparison (0 agents) - idle"), "got: {block}");
 }
 
+#[test]
+fn build_status_delta_includes_subchannels_with_channel_suffix() {
+    let store = Store::open_memory().unwrap();
+    // proj (current) with a subchannel "child" (display "subwork").
+    store.upsert_group_metadata("proj", "myproject", "", 1).unwrap();
+    store.upsert_group_metadata("child", "subwork", "proj", 1).unwrap();
+    // A peer appears in the current channel, and another in the subchannel.
+    record_peer(&store, "pk-a", "alpha", "proj", "na", "tower", "", "", false, 2_000);
+    record_peer(&store, "pk-b", "bravo", "child", "nb", "tower", "", "", false, 2_000);
+
+    // `now` within the liveness window of the appearances so they read as joins.
+    let delta = build_status_delta(&store, 1_000, "proj", 2_030, None);
+
+    // The current-channel appearance has no channel suffix; the subchannel one is
+    // tagged with the subchannel's display name.
+    assert!(
+        delta.iter().any(|l| l.contains("joined") && !l.contains('#')),
+        "expected an unsuffixed current-channel join; got {delta:?}"
+    );
+    assert!(
+        delta.iter().any(|l| l.contains("joined #subwork")),
+        "expected a subchannel join tagged #subwork; got {delta:?}"
+    );
+}
+
 /// The shared delta renderer classifies appeared / changed (agent finished
 /// busy→idle or a new title) / gone, project-scoped, with self-exclusion.
 #[test]

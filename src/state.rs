@@ -1949,6 +1949,25 @@ impl Store {
         Ok(out)
     }
 
+    /// Status deltas across a SET of channels (the current channel ∪ its
+    /// subtree). Each channel is classified independently by `status_delta_since`
+    /// — so per-channel self-echo dedup is preserved — and the results unioned.
+    /// Items carry their `snapshot.project`, so the caller can tag cross-channel
+    /// deltas with the originating subchannel.
+    pub fn status_delta_since_in(
+        &self,
+        channels: &[String],
+        since: u64,
+        now: u64,
+        exclude: Option<&str>,
+    ) -> Result<Vec<StatusDeltaItem>> {
+        let mut out: Vec<StatusDeltaItem> = Vec::new();
+        for ch in channels {
+            out.extend(self.status_delta_since(ch, since, now, exclude)?);
+        }
+        Ok(out)
+    }
+
     // ── peer mirror write (kind:30315 materializer surface) ───────────────────
 
     /// Mirror an inbound kind:30315 into `peer_session_state`. Idempotent upsert

@@ -531,8 +531,21 @@ pub(super) fn build_status_delta(
     daemon_host: &str,
     exclude_session: Option<&str>,
 ) -> Vec<String> {
+    // Scope the delta to the current channel AND its subtree, so an agent sees
+    // activity in subchannels beneath it (a new subchannel's first agent, a
+    // sibling working below) — not just its own channel. Each subchannel's
+    // display label is kept to tag cross-channel deltas.
+    let subs = store.subchannels_of(project).unwrap_or_default();
+    let mut channels: Vec<String> = Vec::with_capacity(subs.len() + 1);
+    channels.push(project.to_string());
+    channels.extend(subs.iter().map(|(id, _, _)| id.clone()));
+    let labels: std::collections::HashMap<String, String> = subs
+        .into_iter()
+        .map(|(id, name, _)| (id, name))
+        .collect();
+
     let items = store
-        .status_delta_since(project, since, now, exclude_session)
+        .status_delta_since_in(&channels, since, now, exclude_session)
         .unwrap_or_default();
     if items.is_empty() {
         return Vec::new();
@@ -540,15 +553,30 @@ pub(super) fn build_status_delta(
 
     let name_counts = delta_agent_name_counts(store, &items, project, now, daemon_host);
 
+    // Canonical presence lines, one per change. master's name disambiguation
+    // (delta_agent_label) is preserved; a delta from a subchannel additionally
+    // gets a ` #<subchannel>` suffix so the agent knows where it happened.
+    //   * bravo4217 (codex@laptop) joined
+    //   * echo0163 (claude@tower) left #research
+    //   * bravo4217 (codex@laptop) — reviewing the patch
     let mut delta: Vec<String> = Vec::with_capacity(items.len());
     for item in &items {
         let snap = &item.snapshot;
         let label = delta_agent_label(snap, &name_counts);
         let activity = render::status_plain("", &item.derived.activity, item.derived.busy);
+        let suffix = if snap.project != project {
+            let name = labels
+                .get(snap.project.as_str())
+                .cloned()
+                .unwrap_or_else(|| snap.project.clone());
+            format!(" #{name}")
+        } else {
+            String::new()
+        };
         let line = match item.kind {
-            DeltaKind::Appeared => format!("* {label} joined"),
-            DeltaKind::Gone => format!("* {label} left"),
-            DeltaKind::Changed => format!("* {label} — {activity}"),
+            DeltaKind::Appeared => format!("* {label} joined{suffix}"),
+            DeltaKind::Gone => format!("* {label} left{suffix}"),
+            DeltaKind::Changed => format!("* {label} — {activity}{suffix}"),
         };
         delta.push(line);
     }
