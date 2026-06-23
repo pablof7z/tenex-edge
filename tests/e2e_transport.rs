@@ -88,9 +88,12 @@ async fn publishes_and_decodes_all_event_types() {
         }
     }
 
+    // Identify the status by its title: #5 drops session_id from the wire
+    // (presence is keyed by d == h == group), so the decoded Status carries no
+    // session id — the title round-trips instead.
     let has_status = seen
         .iter()
-        .any(|e| matches!(e, DomainEvent::Status(s) if s.session_id.as_str() == "sess-1"));
+        .any(|e| matches!(e, DomainEvent::Status(s) if s.title == "fixing the auth bug"));
     let has_profile = seen
         .iter()
         .any(|e| matches!(e, DomainEvent::Profile(p) if p.host == "test-host"));

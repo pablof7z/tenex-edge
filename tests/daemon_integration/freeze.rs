@@ -67,13 +67,18 @@ fn freeze_39000_39002_idempotency_no_member_duplication() {
         .expect("session row");
     let project = rec.project.clone();
 
-    // FREEZE: group owned and member present after first start.
+    // FREEZE: group owned and member present after first start. Ownership is
+    // recorded synchronously; the agent's membership is established by the
+    // background room mint (issue #6), so wait for it.
     assert!(
         store.is_group_owned(&project).unwrap(),
         "group must be owned after session_start with userNsec"
     );
     assert!(
-        store.is_group_member(&project, &rec.agent_pubkey).unwrap(),
+        wait_until(Duration::from_secs(20), || Store::open(&home.store_path())
+            .unwrap()
+            .is_group_member(&project, &rec.agent_pubkey)
+            .unwrap()),
         "agent must be a member after session_start"
     );
 
