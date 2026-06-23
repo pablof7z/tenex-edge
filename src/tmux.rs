@@ -753,7 +753,10 @@ fn make_session_transparent(
         ("status-interval", "3".to_string()),
         ("status-left", String::new()),
         ("status-right", String::new()),
-        ("status-format", statusline_cmd),
+        // status-format is a tmux array option — setting it by name splits the
+        // value on spaces into separate entries, breaking the #(...) command.
+        // Use an explicit index to set a single entry as one token.
+        ("status-format[0]", statusline_cmd),
         // Drop the prefix key entirely so EVERY keystroke (including Ctrl-b)
         // goes straight to the harness. With `prefix None`, tmux never
         // intercepts Ctrl-b as a prefix, so the user doesn't need to double-tap
