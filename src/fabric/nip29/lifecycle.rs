@@ -103,9 +103,13 @@ pub fn group_edit_metadata(project: &str, about: &str) -> Result<EventBuilder> {
 /// kind:9002 edit-metadata: set the group's display `name` (issue #6 — a
 /// per-session room is renamed to its distilled session title). The relay
 /// validates admin rights and re-publishes kind:39000.
+///
+/// Targets the group with the `h` tag (`project_tag`), matching the working
+/// lock builders ([`group_lock_closed`] / [`group_lock_closed_with_parent`]):
+/// NIP-29 moderation events (900x) address the group via `h`, not `d`.
 pub fn group_edit_name(project: &str, name: &str) -> Result<EventBuilder> {
     Ok(EventBuilder::new(kind(KIND_GROUP_EDIT_METADATA), "")
-        .tags([tag(&["d", project])?, tag(&["name", name])?]))
+        .tags([project_tag(project)?, tag(&["name", name])?]))
 }
 
 #[cfg(test)]
@@ -183,7 +187,7 @@ mod tests {
         let b = group_edit_name("myrepo-1a2b3c4d", "Fix the auth race").unwrap();
         let ev = b.sign_with_keys(&Keys::generate()).unwrap();
         assert_eq!(ev.kind.as_u16(), KIND_GROUP_EDIT_METADATA);
-        assert!(has_tag(&ev, "d", "myrepo-1a2b3c4d"));
+        assert!(has_tag(&ev, "h", "myrepo-1a2b3c4d"));
         assert!(has_tag(&ev, "name", "Fix the auth race"));
     }
 

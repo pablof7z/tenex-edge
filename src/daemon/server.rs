@@ -931,7 +931,18 @@ async fn rpc_session_start(
         if let Some(prog) = &progress {
             prog.emit("nip29", format!("minting per-session room {project}"));
         }
-        ensure_session_room(state, &project, &p.agent, parent, &id.pubkey_hex()).await;
+        // Bounded so a slow/unreachable relay can't stall session start (and thus
+        // the first prompt). On timeout the mint is best-effort/incomplete; the
+        // session still starts and later heartbeats/publishes retry.
+        let agent_pubkey = id.pubkey_hex();
+        let mint = ensure_session_room(state, &project, &p.agent, parent, &agent_pubkey);
+        if tokio::time::timeout(std::time::Duration::from_secs(8), mint)
+            .await
+            .is_err()
+            && std::env::var("TENEX_EDGE_DEBUG").is_ok()
+        {
+            eprintln!("[daemon] session room {project} mint timed out (best-effort)");
+        }
     } else if let Some(init_progress) = progress.clone() {
         state
             .provider
@@ -1216,6 +1227,18 @@ async fn rpc_user_prompt(
         params.get("group").and_then(|v| v.as_str()),
     )?;
 
+    // Only mirror prompts into a subgroup (a per-session room or task room).
+    // A human start with no resume anchor keeps `project == work_root`; mirroring
+    // there would spam the bare project group, so skip it (fail-open).
+    let is_subgroup = state
+        .with_store(|s| s.group_parent(&rec.project))
+        .ok()
+        .flatten()
+        .is_some();
+    if !is_subgroup {
+        return Ok(serde_json::json!({ "skipped": "session not in a room" }));
+    }
+
     let chat = ChatMessage {
         from: crate::domain::AgentRef::new(op_pubkey.clone(), "operator".to_string()),
         project: rec.project.clone(),
@@ -1224,11 +1247,16 @@ async fn rpc_user_prompt(
         mentioned_session: None,
         mentioned_pubkey: None,
     };
-    let event_id = state
-        .provider
-        .publish_checked(&DomainEvent::ChatMessage(chat), &op_keys)
-        .await?
-        .to_hex();
+    // Bounded so a hung/unreachable relay can never block the editor — the
+    // UserPromptSubmit hook awaits this RPC. On timeout, fail open (the prompt
+    // simply is not mirrored).
+    let ev = DomainEvent::ChatMessage(chat);
+    let publish = state.provider.publish_checked(&ev, &op_keys);
+    let event_id = match tokio::time::timeout(std::time::Duration::from_secs(3), publish).await {
+        Ok(Ok(id)) => id.to_hex(),
+        Ok(Err(e)) => return Err(e),
+        Err(_) => return Ok(serde_json::json!({ "skipped": "relay publish timed out" })),
+    };
     let created_at = now_secs();
 
     state.with_store(|s| {
@@ -1815,10 +1843,16 @@ async fn rpc_turn_end(
                 .flatten()
                 .is_some();
             if !reply.is_empty() && is_room {
-                if let Err(e) = publish_agent_reply(state, rec, reply).await {
-                    if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
+                // Bounded so a hung relay can't stall the stop hook; fail-open.
+                let publish = publish_agent_reply(state, rec, reply);
+                match tokio::time::timeout(std::time::Duration::from_secs(3), publish).await {
+                    Ok(Err(e)) if std::env::var("TENEX_EDGE_DEBUG").is_ok() => {
                         eprintln!("[daemon] agent reply publish skipped: {e:#}");
                     }
+                    Err(_) if std::env::var("TENEX_EDGE_DEBUG").is_ok() => {
+                        eprintln!("[daemon] agent reply publish timed out (best-effort)");
+                    }
+                    _ => {}
                 }
             }
         }
@@ -2278,15 +2312,17 @@ async fn ensure_session_room(
 
     // Wait for the relay to reflect OUR admin status (recorded while processing
     // the 9007 create) before issuing the dependent member-add, which the relay
-    // validates against the author's admin role at apply-time.
+    // validates against the author's admin role at apply-time. Bounded to a few
+    // attempts (~3s worst case): this runs on the session-birth path, so it must
+    // not stall the first prompt. The common case resolves on attempt 0-1.
     let mgmt_pk = mgmt_keys.public_key().to_hex();
-    for attempt in 0..20u32 {
+    for attempt in 0..6u32 {
         let roles = state.provider.fetch_group_roles(room_h).await;
         if roles.get(&mgmt_pk).map(String::as_str) == Some("admin") {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(
-            300 * (attempt as u64 + 1).min(4),
+            250 * (attempt as u64 + 1).min(3),
         ))
         .await;
     }
