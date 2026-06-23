@@ -429,6 +429,39 @@ pub fn resolve_identity(
     IdentityDecision::Mint
 }
 
+/// Where a newly-born session's fabric events (chat, presence, membership)
+/// land — a per-session room it mints, or a group it was handed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RoomDecision {
+    /// Human-initiated session (no group override): mint a per-session NIP-29
+    /// subgroup as a leaf under `parent` and route the session's fabric events
+    /// into it.
+    Mint { parent: String },
+    /// Orchestration-spawned session (group override present): the backend
+    /// already scoped this agent to subgroup `group`; join it as a member, do
+    /// not mint a child room.
+    UseExisting { group: String },
+}
+
+/// Decide whether a session-birth mints its own per-session room.
+///
+/// The discriminator is the wire-level `TENEX_EDGE_GROUP` override the daemon
+/// reads as `group`:
+///   - `None`/empty → human-initiated (someone ran `claude` / `tenex-edge
+///     launch` directly) → mint a per-session subgroup under `work_root`.
+///   - `Some(g)`    → orchestration-spawned (the backend added this agent to
+///     subgroup `g`) → use `g` as-is; no child room.
+///
+/// Pure and total.
+pub fn decide_session_room(group: Option<&str>, work_root: &str) -> RoomDecision {
+    match group {
+        Some(g) if !g.is_empty() => RoomDecision::UseExisting { group: g.to_string() },
+        _ => RoomDecision::Mint {
+            parent: work_root.to_string(),
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -550,5 +583,43 @@ mod tests {
         let d = derive_status(&snap(true, 1000, Lifecycle::Ended), 1000);
         assert_eq!(d.liveness, Liveness::Stale);
         assert!(!d.busy);
+    }
+
+    // ── per-session room minting decision ───────────────────────────────
+
+    #[test]
+    fn room_no_group_override_mints_under_work_root() {
+        // Human-initiated: someone ran `claude` / `tenex-edge launch` directly,
+        // so TENEX_EDGE_GROUP is unset → mint a per-session room under the repo.
+        assert_eq!(
+            decide_session_room(None, "my-repo"),
+            RoomDecision::Mint {
+                parent: "my-repo".into()
+            }
+        );
+    }
+
+    #[test]
+    fn room_empty_group_override_mints_under_work_root() {
+        // An empty override is treated identically to absent (the daemon reads
+        // TENEX_EDGE_GROUP="" as "no group").
+        assert_eq!(
+            decide_session_room(Some(""), "my-repo"),
+            RoomDecision::Mint {
+                parent: "my-repo".into()
+            }
+        );
+    }
+
+    #[test]
+    fn room_with_group_override_uses_existing() {
+        // Orchestration-spawned: the backend added this agent to subgroup
+        // `issue-514` → join it, do not mint a child room.
+        assert_eq!(
+            decide_session_room(Some("issue-514"), "my-repo"),
+            RoomDecision::UseExisting {
+                group: "issue-514".into()
+            }
+        );
     }
 }

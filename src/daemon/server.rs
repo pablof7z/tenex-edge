@@ -713,7 +713,7 @@ async fn rpc_session_start(
     // the child `h` supplied via TENEX_EDGE_GROUP; otherwise it equals the
     // working-directory project (continuity: existing sessions are unchanged).
     // Everything below keys group membership + fabric publishing on `project`.
-    let project = p
+    let mut project = p
         .group
         .clone()
         .filter(|g| !g.is_empty())
@@ -749,6 +749,31 @@ async fn rpc_session_start(
             }
         });
     let tmux_pane = p.tmux_pane.clone().filter(|s| !s.is_empty());
+
+    // Per-session rooms (issue #6): a human-initiated session — one with no
+    // TENEX_EDGE_GROUP override (someone ran `claude` / `tenex-edge launch`
+    // directly) — lives in its OWN minted subgroup of the work-root project,
+    // not the bare project. Orchestration-spawned sessions (group override
+    // present) join the supplied subgroup as today. The room id is derived
+    // deterministically from a stable resume anchor so a resumed session
+    // rejoins the SAME room; minting needs an operator key to sign the create.
+    // `room_parent` is `Some(parent_project)` exactly when we routed the
+    // session into a freshly-minted room, and drives the create below.
+    let room_parent: Option<String> = {
+        let anchor = harness_session_id.as_deref().or(resume_id.as_deref());
+        match (
+            crate::session::decide_session_room(p.group.as_deref(), &work_root),
+            anchor,
+        ) {
+            (crate::session::RoomDecision::Mint { parent }, Some(anchor))
+                if state.cfg.management_nsec().is_some() =>
+            {
+                project = crate::util::child_group_id_from_anchor(&parent, anchor);
+                Some(parent)
+            }
+            _ => None,
+        }
+    };
 
     let obs = SessionObservation {
         agent_slug: p.agent.clone(),
@@ -898,7 +923,15 @@ async fn rpc_session_start(
             "checking NIP-29 group state and membership on the relay",
         );
     }
-    if let Some(init_progress) = progress.clone() {
+    if let Some(parent) = &room_parent {
+        // Human-initiated session: mint/confirm its per-session room under the
+        // work-root project. Best-effort, same fail-open contract as
+        // open_project — a relay hiccup never blocks the session from starting.
+        if let Some(prog) = &progress {
+            prog.emit("nip29", format!("minting per-session room {project}"));
+        }
+        ensure_session_room(state, &project, &p.agent, parent, &id.pubkey_hex()).await;
+    } else if let Some(init_progress) = progress.clone() {
         state
             .provider
             .open_project_with_progress(&project, &id.pubkey_hex(), move |message| {
@@ -2050,6 +2083,76 @@ async fn rpc_project_remove(
 /// `handle_orchestration` listener, which is what makes cross-device auto-start
 /// work; we invoke it locally here too since relays don't reliably echo to the
 /// publishing connection.
+/// Mint (idempotently) a per-session room: a NIP-29 subgroup `room_h` parented
+/// under the work-root `parent` project that a human-initiated session lives in
+/// (issue #6). Ensures the parent group exists, creates+locks the child, waits
+/// for the relay to reflect our admin status (so the dependent member-add
+/// applies on the first try), owns+subscribes locally, and adds the agent's
+/// durable pubkey as a member.
+///
+/// Best-effort and fail-open: a missing/invalid signing key or a relay
+/// rejection leaves the session running (it just won't have a relay-backed
+/// room), matching `open_project`'s contract. Returns true when the room was
+/// created/confirmed on the relay.
+async fn ensure_session_room(
+    state: &Arc<DaemonState>,
+    room_h: &str,
+    name: &str,
+    parent: &str,
+    agent_pubkey: &str,
+) -> bool {
+    use nostr_sdk::prelude::Keys;
+    let Some(nsec) = state.cfg.management_nsec() else {
+        return false;
+    };
+    let Ok(mgmt_keys) = Keys::parse(nsec) else {
+        return false;
+    };
+
+    // The parent project group must exist before a child can be parented under it.
+    state.provider.open_project(parent, agent_pubkey).await;
+
+    // Create + lock the child with its parent relationship.
+    if !state
+        .provider
+        .nip29_create_subgroup(room_h, name, parent)
+        .await
+    {
+        eprintln!("[daemon] session room {room_h} create/lock not accepted (best-effort)");
+        return false;
+    }
+
+    // Wait for the relay to reflect OUR admin status (recorded while processing
+    // the 9007 create) before issuing the dependent member-add, which the relay
+    // validates against the author's admin role at apply-time.
+    let mgmt_pk = mgmt_keys.public_key().to_hex();
+    for attempt in 0..20u32 {
+        let roles = state.provider.fetch_group_roles(room_h).await;
+        if roles.get(&mgmt_pk).map(String::as_str) == Some("admin") {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(
+            300 * (attempt as u64 + 1).min(4),
+        ))
+        .await;
+    }
+
+    // Own + subscribe so we receive the room's relay-authored state.
+    state.with_store(|s| {
+        s.mark_group_owned(room_h, now_secs()).ok();
+    });
+    let _ = ensure_subscription(state, room_h).await;
+
+    // Add the agent's durable pubkey as a member of its own room.
+    if state.provider.nip29_add_member(room_h, agent_pubkey).await {
+        state.with_store(|s| {
+            s.upsert_group_member(room_h, agent_pubkey, "member", now_secs())
+                .ok();
+        });
+    }
+    true
+}
+
 async fn rpc_groups_create(
     state: &Arc<DaemonState>,
     params: &serde_json::Value,

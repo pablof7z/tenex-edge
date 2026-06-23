@@ -8,11 +8,12 @@ use tenex_edge::state::Store;
 const EXAMPLE_USER_NSEC: &str = "nsec1eulru7a67wt9ndqxv424kmgvd6uyd8defdxh7y9peut28f2p2vhs35m5h4";
 
 fn rewrite_config_with_user_nsec(home: &Home) {
+    // NIP-29 ownership/minting needs a NIP-29-aware relay; nak can't do it.
     let cfg = home.dir.path().join("config.json");
     let body = serde_json::json!({
         "whitelistedPubkeys": [],
         "backendName": "test-host",
-        "relays": [shared_relay_url()],
+        "relays": [shared_croissant_url()],
         "userNsec": EXAMPLE_USER_NSEC,
     });
     std::fs::write(&cfg, serde_json::to_string(&body).unwrap()).unwrap();
@@ -51,6 +52,83 @@ fn session_start_with_user_nsec_owns_group_and_adds_member() {
             .is_group_member(&rec.project, &rec.agent_pubkey)
             .unwrap(),
         "the starting agent should be a member of its project group"
+    );
+
+    stop_daemon(&home);
+}
+
+/// A human-initiated session (no `group` override — someone ran `claude` /
+/// `tenex-edge launch` directly) mints its OWN per-session room: a child
+/// subgroup of the work-root project, not the bare project. (Issue #6.)
+#[test]
+fn human_initiated_session_mints_per_session_room() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let home = Home::new();
+    rewrite_config_with_user_nsec(&home);
+
+    rt().block_on(async {
+        let mut c = Client::connect_or_spawn().await.expect("connect");
+        c.call(
+            "session_start",
+            serde_json::json!({"agent": "coder", "session_id": "sess-room-1", "cwd": "/tmp"}),
+        )
+        .await
+        .expect("session_start");
+    });
+
+    let store = Store::open(&home.store_path()).unwrap();
+    let rec = store
+        .get_session("sess-room-1")
+        .unwrap()
+        .expect("session row");
+    // The session must live in a freshly-minted room (`<work-root>-<hex8>`),
+    // not the bare work-root project "tmp".
+    assert_ne!(
+        rec.project, "tmp",
+        "human-initiated session should mint a per-session room, not use the bare project"
+    );
+    assert!(
+        rec.project.starts_with("tmp-"),
+        "room id should be a child of the work-root project: got {}",
+        rec.project
+    );
+    assert!(
+        store
+            .is_group_member(&rec.project, &rec.agent_pubkey)
+            .unwrap(),
+        "the agent should be a member of its per-session room"
+    );
+
+    stop_daemon(&home);
+}
+
+/// An orchestration-spawned session (the backend set `TENEX_EDGE_GROUP` to add
+/// this agent to a task subgroup) joins that group as-is and does NOT mint a
+/// child room. Guards the discriminator boundary.
+#[test]
+fn orchestration_session_uses_existing_group_without_minting() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let home = Home::new();
+    rewrite_config_with_user_nsec(&home);
+
+    rt().block_on(async {
+        let mut c = Client::connect_or_spawn().await.expect("connect");
+        c.call(
+            "session_start",
+            serde_json::json!({"agent": "coder", "session_id": "sess-orch-1", "cwd": "/tmp", "group": "issue-42"}),
+        )
+        .await
+        .expect("session_start");
+    });
+
+    let store = Store::open(&home.store_path()).unwrap();
+    let rec = store
+        .get_session("sess-orch-1")
+        .unwrap()
+        .expect("session row");
+    assert_eq!(
+        rec.project, "issue-42",
+        "with a group override the session joins it; it must not mint a child room"
     );
 
     stop_daemon(&home);

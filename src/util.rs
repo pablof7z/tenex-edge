@@ -207,6 +207,28 @@ pub fn child_group_id(name: &str) -> String {
     format!("{slug}-{rand8}")
 }
 
+/// Derive a *deterministic* per-session room id of the same `<slug>-<hex8>`
+/// shape as [`child_group_id`], but with the hex suffix derived from a stable
+/// `anchor` (the session's resume token / harness id) instead of randomness.
+///
+/// Determinism is the point: a resumed session re-enters this path with the
+/// same `anchor` and so rejoins the SAME room (issue #6: "resume reuses the
+/// room"), rather than minting a fresh subgroup each time. `DefaultHasher::new()`
+/// uses fixed keys, so the suffix is stable across daemon restarts.
+///
+/// `anchor` is hashed, never embedded verbatim, so a local-only handle never
+/// reaches the wire (issue #5: "no session_id on the wire").
+pub fn child_group_id_from_anchor(name: &str, anchor: &str) -> String {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let slug = slugify_host(name);
+    let mut hasher = DefaultHasher::new();
+    anchor.hash(&mut hasher);
+    let hex8 = format!("{:08x}", hasher.finish() as u32);
+    format!("{slug}-{hex8}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -262,6 +284,41 @@ mod tests {
         let a = child_group_id("Subgroup Support");
         let b = child_group_id("Subgroup Support");
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn child_group_id_from_anchor_shape() {
+        let id = child_group_id_from_anchor("My Repo", "sess-abc-123");
+        assert!(id.starts_with("my-repo-"), "got {id}");
+        let suffix = id.rsplit('-').next().unwrap();
+        assert_eq!(suffix.len(), 8, "got {id}");
+        assert!(
+            suffix.chars().all(|c| c.is_ascii_hexdigit()),
+            "non-hex suffix in {id}"
+        );
+    }
+
+    #[test]
+    fn child_group_id_from_anchor_is_deterministic() {
+        // Same anchor → same id (so a resumed session rejoins the SAME room).
+        let a = child_group_id_from_anchor("my-repo", "sess-abc-123");
+        let b = child_group_id_from_anchor("my-repo", "sess-abc-123");
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn child_group_id_from_anchor_varies_by_anchor() {
+        // Different sessions in the same repo get different rooms.
+        let a = child_group_id_from_anchor("my-repo", "sess-aaa");
+        let b = child_group_id_from_anchor("my-repo", "sess-bbb");
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn child_group_id_from_anchor_does_not_embed_anchor() {
+        // The anchor (a local-only handle) is hashed, never carried verbatim.
+        let id = child_group_id_from_anchor("my-repo", "secret-resume-token-xyz");
+        assert!(!id.contains("secret-resume-token-xyz"), "got {id}");
     }
 
     #[test]
