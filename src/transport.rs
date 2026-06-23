@@ -129,17 +129,29 @@ impl Transport {
                 .await
                 .with_context(|| format!("adding relay {r}"))?;
         }
+        // Kick off the connection in the BACKGROUND (non-blocking) and return
+        // immediately. Awaiting connectivity + NIP-42 auth is `warmup()`'s job,
+        // which the daemon runs OFF its startup critical path so store-only RPCs
+        // (`who`, `tmux`, chat/inbox reads) serve instantly even when the relay
+        // is slow or unreachable.
         client.connect().await;
-        client.wait_for_connection(Duration::from_secs(8)).await;
-
-        // Force NIP-42 AUTH to complete BEFORE any subscription. On auth-gated
-        // relays a REQ opened pre-auth is closed by the relay and never delivers
-        // live events; `fetch_events` carries the auth-required retry, so this
-        // warm-up authenticates the connection. No-op on open relays.
-        let warmup = Filter::new().kind(Kind::from(0u16)).limit(1);
-        let _ = client.fetch_events(warmup, Duration::from_secs(5)).await;
-
         Ok(Self { client, pubkey })
+    }
+
+    /// Block (bounded) until the relay connection is established, then force
+    /// NIP-42 AUTH to complete BEFORE any subscription is opened. On auth-gated
+    /// relays a REQ opened pre-auth is closed by the relay and never delivers
+    /// live events; the warm-up `fetch_events` carries the auth-required retry.
+    /// No-op on open relays. Intended to run in a background task at startup.
+    pub async fn warmup(&self) {
+        self.client
+            .wait_for_connection(Duration::from_secs(8))
+            .await;
+        let warmup = Filter::new().kind(Kind::from(0u16)).limit(1);
+        let _ = self
+            .client
+            .fetch_events(warmup, Duration::from_secs(5))
+            .await;
     }
 
     /// Sign (with the connection's key) and publish an event template.

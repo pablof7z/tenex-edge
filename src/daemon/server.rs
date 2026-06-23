@@ -245,23 +245,13 @@ pub async fn run() -> Result<()> {
         });
     }
 
+    // These tolerate a not-yet-connected relay (demux just waits for events;
+    // publishers/subscribers are best-effort and queue), so they start now.
     spawn_demux(state.clone());
     spawn_pruner(state.clone());
     spawn_idle_watcher(state.clone());
     spawn_status_outbox_drainer(state.clone());
     spawn_status_heartbeat_publisher(state.clone());
-
-    // Establish the standalone backend orchestration subscription ONCE at startup
-    // (kind:9 p-tagged to this backend's identity), independent of any project —
-    // so a backend with no live sessions still receives subgroup add-agents
-    // requests addressed to it (issue #3, cross-device auto-start).
-    if let Some(bp) = state.backend_pubkey() {
-        if let Err(e) = state.provider.subscribe_backend_orchestration(bp).await {
-            if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
-                eprintln!("[daemon] backend orchestration subscription failed: {e:#}");
-            }
-        }
-    }
 
     let accept_state = state.clone();
     let accept = tokio::spawn(async move {
@@ -285,9 +275,29 @@ pub async fn run() -> Result<()> {
         }
     });
 
-    let reconcile_state = state.clone();
+    // Relay-DEPENDENT startup runs in the background, OFF the accept path, so the
+    // daemon serves store-only RPCs (`who`, `tmux`, chat/inbox reads, statusline,
+    // whoami) immediately even when the relay is slow or unreachable. We warm up
+    // the connection (await connectivity + NIP-42 auth) BEFORE opening any
+    // subscription — a REQ opened pre-auth on an auth-gated relay never delivers.
+    let relay_state = state.clone();
     tokio::spawn(async move {
-        reconcile_sessions(&reconcile_state).await;
+        relay_state.transport.warmup().await;
+
+        // Standalone backend orchestration subscription (kind:9 p-tagged to this
+        // backend's identity), independent of any project — so a backend with no
+        // live sessions still receives subgroup add-agents requests (issue #3).
+        if let Some(bp) = relay_state.backend_pubkey() {
+            if let Err(e) = relay_state.provider.subscribe_backend_orchestration(bp).await {
+                if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
+                    eprintln!("[daemon] backend orchestration subscription failed: {e:#}");
+                }
+            }
+        }
+
+        // Revive sessions a previous daemon left behind + (re)open their project
+        // subscriptions. Subscriptions go out post-auth.
+        reconcile_sessions(&relay_state).await;
     });
 
     let mut sigterm =
