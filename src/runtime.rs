@@ -221,9 +221,18 @@ pub async fn run_session_in_daemon(
                                 // Only publishes on an actual title change (above), so
                                 // this stays low-churn — no debounce needed.
                                 let is_room = st!(|s: &Store| s.is_session_room(&p.project)).unwrap_or(false);
-                                if is_room && provider.nip29_set_group_name(&p.project, &snap.title).await {
-                                    let parent = st!(|s: &Store| s.group_parent(&p.project)).ok().flatten().unwrap_or_default();
-                                    st!(|s: &Store| s.upsert_group_metadata(&p.project, &snap.title, &parent, now).ok());
+                                if is_room {
+                                    // Bounded: this runs in the engine loop that also
+                                    // owns heartbeat/distill, so a relay stall must not
+                                    // block it. Best-effort — the next title change retries.
+                                    let rename = provider.nip29_set_group_name(&p.project, &snap.title);
+                                    let renamed = tokio::time::timeout(std::time::Duration::from_secs(3), rename)
+                                        .await
+                                        .unwrap_or(false);
+                                    if renamed {
+                                        let parent = st!(|s: &Store| s.group_parent(&p.project)).ok().flatten().unwrap_or_default();
+                                        st!(|s: &Store| s.upsert_group_metadata(&p.project, &snap.title, &parent, now).ok());
+                                    }
                                 }
                             }
                         }

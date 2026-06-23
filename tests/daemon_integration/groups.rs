@@ -51,10 +51,14 @@ fn session_start_with_user_nsec_owns_group_and_adds_member() {
         store.is_group_owned(&rec.project).unwrap(),
         "project group should be owned after session_start with userNsec"
     );
+    // Room membership is established by the background mint; wait for it.
     assert!(
-        store
-            .is_group_member(&rec.project, &rec.agent_pubkey)
-            .unwrap(),
+        wait_until(std::time::Duration::from_secs(20), || Store::open(
+            &home.store_path()
+        )
+        .unwrap()
+        .is_group_member(&rec.project, &rec.agent_pubkey)
+        .unwrap()),
         "the starting agent should be a member of its project group"
     );
 
@@ -96,10 +100,14 @@ fn human_initiated_session_mints_per_session_room() {
         "room id should be a child of the work-root project: got {}",
         rec.project
     );
+    // Membership lands via the background mint.
     assert!(
-        store
-            .is_group_member(&rec.project, &rec.agent_pubkey)
-            .unwrap(),
+        wait_until(std::time::Duration::from_secs(20), || Store::open(
+            &home.store_path()
+        )
+        .unwrap()
+        .is_group_member(&rec.project, &rec.agent_pubkey)
+        .unwrap()),
         "the agent should be a member of its per-session room"
     );
 
@@ -151,10 +159,32 @@ fn user_prompt_publishes_kind9_chat_into_room() {
         let mut c = Client::connect_or_spawn().await.expect("connect");
         c.call(
             "session_start",
-            serde_json::json!({"agent": "coder", "session_id": "sess-prompt-1", "cwd": "/tmp"}),
+            serde_json::json!({"agent": "coder", "session_id": "sess-prompt-1", "cwd": "/tmp", "watch_pid": std::process::id()}),
         )
         .await
         .expect("session_start");
+    });
+
+    // The room is minted on the relay in the background; wait until the agent is
+    // a member (room fully live) before mirroring a prompt into it.
+    let rec = Store::open(&home.store_path())
+        .unwrap()
+        .get_session("sess-prompt-1")
+        .unwrap()
+        .expect("session row");
+    assert!(
+        wait_until(std::time::Duration::from_secs(20), || Store::open(
+            &home.store_path()
+        )
+        .unwrap()
+        .is_group_member(&rec.project, &rec.agent_pubkey)
+        .unwrap()),
+        "room {} not live in time",
+        rec.project
+    );
+
+    rt().block_on(async {
+        let mut c = Client::connect_or_spawn().await.expect("connect");
         c.call(
             "user_prompt",
             serde_json::json!({"env_session": "sess-prompt-1", "agent": "coder", "cwd": "/tmp", "prompt": "build me a thing"}),
@@ -164,10 +194,6 @@ fn user_prompt_publishes_kind9_chat_into_room() {
     });
 
     let store = Store::open(&home.store_path()).unwrap();
-    let rec = store
-        .get_session("sess-prompt-1")
-        .unwrap()
-        .expect("session row");
     let msgs = store
         .list_chat_messages(&rec.project, 0, None, 0, false)
         .unwrap();
@@ -194,10 +220,35 @@ fn agent_reply_publishes_kind9_chat_into_room() {
         let mut c = Client::connect_or_spawn().await.expect("connect");
         c.call(
             "session_start",
-            serde_json::json!({"agent": "coder", "session_id": "sess-reply-1", "cwd": "/tmp"}),
+            serde_json::json!({"agent": "coder", "session_id": "sess-reply-1", "cwd": "/tmp", "watch_pid": std::process::id()}),
         )
         .await
         .expect("session_start");
+    });
+
+    // Wait for the background mint to make the room live before driving a turn.
+    let rec = Store::open(&home.store_path())
+        .unwrap()
+        .get_session("sess-reply-1")
+        .unwrap()
+        .expect("session row");
+    assert!(
+        wait_until(std::time::Duration::from_secs(20), || Store::open(
+            &home.store_path()
+        )
+        .unwrap()
+        .is_group_member(&rec.project, &rec.agent_pubkey)
+        .unwrap()),
+        "room {} not live in time",
+        rec.project
+    );
+
+    rt().block_on(async {
+        let mut c = Client::connect_or_spawn().await.expect("connect");
+        // Open a turn so the stop-hook reply publish (gated on was_working) fires.
+        c.call("turn_start", serde_json::json!({"session": "sess-reply-1"}))
+            .await
+            .expect("turn_start");
         c.call(
             "turn_end",
             serde_json::json!({"session": "sess-reply-1", "reply": "I fixed the bug in auth.rs"}),
@@ -207,10 +258,6 @@ fn agent_reply_publishes_kind9_chat_into_room() {
     });
 
     let store = Store::open(&home.store_path()).unwrap();
-    let rec = store
-        .get_session("sess-reply-1")
-        .unwrap()
-        .expect("session row");
     let msgs = store
         .list_chat_messages(&rec.project, 0, None, 0, false)
         .unwrap();
@@ -221,20 +268,13 @@ fn agent_reply_publishes_kind9_chat_into_room() {
         rec.project,
         msgs.iter().map(|m| &m.body).collect::<Vec<_>>()
     );
-    // The reply is signed by the agent via keys_for_session. Once #5 lands
-    // (keys_for_session → durable fallback), this is the durable agent pubkey
-    // (rec.agent_pubkey). Pre-#5, signing still uses the per-session derived
-    // key, so we only require the durable identity here when #5 is integrated.
-    if reply.unwrap().from_pubkey == rec.agent_pubkey {
-        // durable signer (post-#5) — the intended end state.
-    } else {
-        eprintln!(
-            "[test] agent reply signed by non-durable key {} (expected durable {}); \
-             expected until issue #5 (durable signer) is integrated",
-            reply.unwrap().from_pubkey,
-            rec.agent_pubkey
-        );
-    }
+    // The reply is signed by the durable agent identity (the room member), so
+    // chat and presence stay on one identity.
+    assert_eq!(
+        reply.unwrap().from_pubkey,
+        rec.agent_pubkey,
+        "agent reply must be signed by the durable agent identity"
+    );
 
     stop_daemon(&home);
 }

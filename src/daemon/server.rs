@@ -925,24 +925,32 @@ async fn rpc_session_start(
         );
     }
     if let Some(parent) = &room_parent {
-        // Human-initiated session: mint/confirm its per-session room under the
-        // work-root project. Best-effort, same fail-open contract as
-        // open_project — a relay hiccup never blocks the session from starting.
+        // Human-initiated session: mint its per-session room under the work-root.
+        // Mark the room in the LOCAL read-model SYNCHRONOUSLY (so the
+        // room/subgroup gates and `groups list` recognize it immediately), then
+        // do all the relay-dependent work (parent open, subgroup create, admin
+        // reflection poll, member-add) in the BACKGROUND. This keeps session
+        // start — and thus the first prompt — off the relay's critical path
+        // entirely (fail-open). Chat into the room before the relay mint lands is
+        // best-effort and simply not mirrored until the room exists.
         if let Some(prog) = &progress {
             prog.emit("nip29", format!("minting per-session room {project}"));
         }
-        // Bounded so a slow/unreachable relay can't stall session start (and thus
-        // the first prompt). On timeout the mint is best-effort/incomplete; the
-        // session still starts and later heartbeats/publishes retry.
+        let now = now_secs();
+        state.with_store(|s| {
+            s.mark_group_owned(&project, now).ok();
+            s.mark_session_room(&project, now).ok();
+            s.upsert_group_metadata(&project, &p.agent, parent, now).ok();
+        });
+        let _ = ensure_subscription(state, &project).await;
+        let st = state.clone();
+        let room = project.clone();
+        let par = parent.clone();
+        let name = p.agent.clone();
         let agent_pubkey = id.pubkey_hex();
-        let mint = ensure_session_room(state, &project, &p.agent, parent, &agent_pubkey);
-        if tokio::time::timeout(std::time::Duration::from_secs(8), mint)
-            .await
-            .is_err()
-            && std::env::var("TENEX_EDGE_DEBUG").is_ok()
-        {
-            eprintln!("[daemon] session room {project} mint timed out (best-effort)");
-        }
+        tokio::spawn(async move {
+            ensure_session_room(&st, &room, &name, &par, &agent_pubkey).await;
+        });
     } else if let Some(init_progress) = progress.clone() {
         state
             .provider
@@ -956,35 +964,10 @@ async fn rpc_session_start(
             .open_project(&project, &id.pubkey_hex())
             .await;
     }
-    // Admin-add the derived session pubkey as a plain member of the NIP-29 group
-    // (Stage 2 / Issue #2). No-op in this slice: `session_keys` is not populated
-    // so `keys_for_session` returns None; the durable agent key is already a
-    // member via `open_project`.
-    if let Some(session_key) = state.keys_for_session(&session_id) {
-        let session_pubkey = session_key.public_key().to_hex();
-        let added = state
-            .provider
-            .nip29_add_member(&project, &session_pubkey)
-            .await;
-        if added {
-            state.with_store(|s| {
-                s.upsert_group_member(&project, &session_pubkey, "member", now_secs())
-                    .ok();
-            });
-        }
-        if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
-            eprintln!(
-                "[daemon] session {} pubkey {} member-add: {}",
-                crate::util::session_codename(&session_id),
-                crate::util::pubkey_short(&session_pubkey),
-                if added {
-                    "accepted"
-                } else {
-                    "skipped/failed (best-effort)"
-                },
-            );
-        }
-    }
+    // (The Stage-2 per-session-key member-add was removed here: #5 retires
+    // per-session keys, so `keys_for_session` is always None now. Durable-agent
+    // group membership is established by `open_project` for project/task
+    // sessions and by the background mint for per-session rooms.)
 
     // Keep the relay-authored group state (39000/39001/39002) subscribed so the
     // membership cache stays current — "check which groups we own at all times".
@@ -1145,9 +1128,12 @@ async fn publish_agent_reply(
 ) -> Result<()> {
     let id = identity::load_or_create(&config::edge_home(), &rec.agent_slug, now_secs())?;
     let from_pubkey = id.pubkey_hex();
-    let signing = state
-        .keys_for_session(&rec.session_id)
-        .unwrap_or_else(|| id.keys.clone());
+    // Sign with the DURABLE agent key: it is the identity added as the room
+    // member (so a closed-room post is accepted) and the one that should carry
+    // the agent's reputation in the room. This is exactly the (pubkey, h-tag)
+    // identity #5 makes the default; here we pin it directly so the reply is
+    // durable-signed regardless of #5 landing.
+    let signing = id.keys.clone();
 
     let chat = ChatMessage {
         from: crate::domain::AgentRef::new(from_pubkey.clone(), rec.agent_slug.clone()),
@@ -1227,15 +1213,16 @@ async fn rpc_user_prompt(
         params.get("group").and_then(|v| v.as_str()),
     )?;
 
-    // Only mirror prompts into a subgroup (a per-session room or task room).
-    // A human start with no resume anchor keeps `project == work_root`; mirroring
-    // there would spam the bare project group, so skip it (fail-open).
-    let is_subgroup = state
-        .with_store(|s| s.group_parent(&rec.project))
-        .ok()
-        .flatten()
-        .is_some();
-    if !is_subgroup {
+    // Only mirror prompts into a per-session room. A human start with no resume
+    // anchor (or no operator key) keeps `project == work_root`; mirroring there
+    // would spam the bare project group, so skip it (fail-open). Gate on the
+    // local `is_session_room` flag — set synchronously at mint and never touched
+    // by the relay materializer (unlike `project_meta.parent`, which a relay that
+    // doesn't re-emit the NIP-29 parent tag can clobber to empty).
+    let is_room = state
+        .with_store(|s| s.is_session_room(&rec.project))
+        .unwrap_or(false);
+    if !is_room {
         return Ok(serde_json::json!({ "skipped": "session not in a room" }));
     }
 
@@ -1830,29 +1817,43 @@ async fn rpc_turn_end(
         let rec = state.with_store(|s| s.get_session(&session).ok().flatten());
 
         // Publish the agent's turn output as kind:9 chat into the session's
-        // room (issue #6). Gated to sessions that live in a subgroup (a
-        // per-session room or task room — i.e. the group has a parent), so we
-        // never spam the bare top-level project group. Signed by the agent via
-        // keys_for_session, which falls back to the durable agent key (#5).
+        // room (issue #6). Gated to per-session rooms via the local
+        // `is_session_room` flag (robust against the relay materializer, unlike
+        // `project_meta.parent`), so we never spam the bare project group.
+        // Signed by the durable agent key (the room member).
+        //
+        // Gated on `was_working` so it is IDEMPOTENT against duplicate stop hooks
+        // and client retries: `end_turn` above clears the turn, so a second
+        // turn_end (e.g. the blocking client retried after its 2s timeout) reads
+        // `was_working == false` and never republishes. The publish timeout is
+        // kept below that client retry window so the first call resolves first.
         // Best-effort: a relay/parse hiccup must not fail turn-end.
-        if let (Some(rec), Some(reply)) = (rec.as_ref(), p.reply.as_deref()) {
-            let reply = reply.trim();
-            let is_room = state
-                .with_store(|s| s.group_parent(&rec.project))
-                .ok()
-                .flatten()
-                .is_some();
-            if !reply.is_empty() && is_room {
-                // Bounded so a hung relay can't stall the stop hook; fail-open.
-                let publish = publish_agent_reply(state, rec, reply);
-                match tokio::time::timeout(std::time::Duration::from_secs(3), publish).await {
-                    Ok(Err(e)) if std::env::var("TENEX_EDGE_DEBUG").is_ok() => {
-                        eprintln!("[daemon] agent reply publish skipped: {e:#}");
+        if was_working {
+            if let (Some(rec), Some(reply)) = (rec.as_ref(), p.reply.as_deref()) {
+                let reply = reply.trim();
+                let is_room = state
+                    .with_store(|s| s.is_session_room(&rec.project))
+                    .unwrap_or(false);
+                // Skip when the reply equals the turn-start baseline — the
+                // transcript's last assistant text is unchanged, so this turn
+                // produced no new response (e.g. a tool-only turn) and mirroring
+                // it would re-publish the PREVIOUS turn's output.
+                let baseline =
+                    state.with_store(|s| s.get_last_assistant_text_at_turn_start(&session));
+                let is_fresh = reply != baseline.trim();
+                if !reply.is_empty() && is_room && is_fresh {
+                    // Idempotency against duplicate stop hooks / client retries is
+                    // provided by the `was_working` gate above (a retry sees the
+                    // turn already ended), so the timeout only needs to bound a
+                    // hung relay — not race the client retry window.
+                    let publish = publish_agent_reply(state, rec, reply);
+                    let debug = std::env::var("TENEX_EDGE_DEBUG").is_ok();
+                    match tokio::time::timeout(std::time::Duration::from_secs(3), publish).await {
+                        Ok(Ok(())) => {}
+                        Ok(Err(e)) if debug => eprintln!("[daemon] agent reply publish skipped: {e:#}"),
+                        Err(_) if debug => eprintln!("[daemon] agent reply publish timed out"),
+                        _ => {}
                     }
-                    Err(_) if std::env::var("TENEX_EDGE_DEBUG").is_ok() => {
-                        eprintln!("[daemon] agent reply publish timed out (best-effort)");
-                    }
-                    _ => {}
                 }
             }
         }
@@ -2310,6 +2311,20 @@ async fn ensure_session_room(
         return false;
     }
 
+    // Own + subscribe and persist the room's hierarchy (name + parent) into the
+    // local read-model IMMEDIATELY after the create succeeds — BEFORE the slow
+    // admin-reflection poll below — so that even if the poll/member-add stall or
+    // the caller's mint timeout fires, the room is still locally recognized (the
+    // `group_parent`/`is_session_room` gates for prompt+reply mirroring depend on
+    // it) and `groups list` sees it. Eager because the relay's kind:39000 echo
+    // arrives later.
+    state.with_store(|s| {
+        s.mark_group_owned(room_h, now_secs()).ok();
+        s.mark_session_room(room_h, now_secs()).ok();
+        s.upsert_group_metadata(room_h, name, parent, now_secs()).ok();
+    });
+    let _ = ensure_subscription(state, room_h).await;
+
     // Wait for the relay to reflect OUR admin status (recorded while processing
     // the 9007 create) before issuing the dependent member-add, which the relay
     // validates against the author's admin role at apply-time. Bounded to a few
@@ -2326,18 +2341,6 @@ async fn ensure_session_room(
         ))
         .await;
     }
-
-    // Own + subscribe so we receive the room's relay-authored state. Also
-    // persist the room's hierarchy (name + parent) into the local read-model
-    // eagerly, rather than waiting for the relay to echo the kind:39000 back —
-    // so downstream logic (e.g. "is this session in a subgroup room?") and
-    // `groups list` see the room immediately.
-    state.with_store(|s| {
-        s.mark_group_owned(room_h, now_secs()).ok();
-        s.mark_session_room(room_h, now_secs()).ok();
-        s.upsert_group_metadata(room_h, name, parent, now_secs()).ok();
-    });
-    let _ = ensure_subscription(state, room_h).await;
 
     // Add the agent's durable pubkey as a member of its own room.
     if state.provider.nip29_add_member(room_h, agent_pubkey).await {

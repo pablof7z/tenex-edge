@@ -62,6 +62,23 @@ pub(crate) fn rt() -> tokio::runtime::Runtime {
     tokio::runtime::Runtime::new().unwrap()
 }
 
+/// Poll `pred` until it returns true or `timeout` elapses. Per-session rooms are
+/// minted on the relay in a background task (session start does not block on the
+/// relay), so tests must wait for relay-backed state (e.g. room membership)
+/// before asserting on it or publishing into the room.
+pub(crate) fn wait_until(timeout: Duration, mut pred: impl FnMut() -> bool) -> bool {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if pred() {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(150));
+    }
+}
+
 /// Run the real `tenex-edge` binary as a subprocess with the home's env — i.e.
 /// exactly how the hooks invoke it. This is the ONLY path that exercises the
 /// SYNCHRONOUS blocking client (`daemon::blocking`) + real CLI dispatch + the
