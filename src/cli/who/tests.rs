@@ -518,7 +518,7 @@ fn render_labels_session_room_as_channel_with_parent_project() {
 }
 
 #[test]
-fn turn_start_fabric_block_uses_agent_markdown_renderer() {
+fn turn_start_fabric_block_renders_channel_context() {
     let store = Store::open_memory().unwrap();
     let _id = register_local(
         &store,
@@ -545,11 +545,49 @@ fn turn_start_fabric_block_uses_agent_markdown_renderer() {
     );
 
     let block = blocks.join("\n\n");
-    assert!(block.contains("tenex-edge fabric — agents visible in this channel"));
-    assert!(!block.contains("@<codename>"), "got: {block}");
-    assert!(!block.contains("[session"), "got: {block}");
-    assert!(block.contains("# tenex-edge who"));
-    assert!(block.contains("| Agent | Host | Title | Status |"));
+    // The first-turn block is now the channel-hierarchy context.
+    assert!(block.contains("part of a team of agents"), "got: {block}");
+    assert!(block.contains("(coder)"), "got: {block}");
+    assert!(block.contains("Current channel: #proj"), "got: {block}");
+    assert!(
+        block.contains("To message a session"),
+        "got: {block}"
+    );
+}
+
+#[test]
+fn render_channel_context_shows_breadcrumb_members_and_subchannels() {
+    let store = Store::open_memory().unwrap();
+    // Channel tree: myproject(proj) ├ planning ├ research └(research) comparison
+    store.upsert_group_metadata("proj", "myproject", "", 1).unwrap();
+    store.upsert_group_metadata("planning", "planning", "proj", 1).unwrap();
+    store.upsert_group_metadata("research", "research", "proj", 1).unwrap();
+    store
+        .upsert_group_metadata("comparison", "competitive-comparison", "research", 1)
+        .unwrap();
+    store
+        .upsert_project_meta("proj", "The root project channel", 1)
+        .unwrap();
+    // Members of the current channel: an agent (live below) + a human admin.
+    store.upsert_group_member("proj", "pk-coder", "member", 1).unwrap();
+    store.upsert_group_member("proj", "pk-human", "admin", 1).unwrap();
+    // A live local session for the agent in the current channel.
+    register_local(&store, "coder", "pk-coder", "proj", "laptop", "", "sid-coder", 1_000);
+
+    let block = render_channel_context(&store, "proj", 1_000, "sid-coder").expect("context");
+
+    assert!(block.contains("(coder)"), "got: {block}");
+    assert!(block.contains("Project: myproject"), "got: {block}");
+    assert!(block.contains("Current channel: #myproject"), "got: {block}");
+    assert!(block.contains("Description: The root project channel"), "got: {block}");
+    // Members: the agent is "you" and idle; the admin with no session is a human.
+    assert!(block.contains("@coder (you) - idle"), "got: {block}");
+    assert!(block.contains(" - Human"), "got: {block}");
+    // Subchannels with agent counts; the grandchild is indented.
+    assert!(block.contains("Subchannels:"), "got: {block}");
+    assert!(block.contains("#planning (0 agents) - idle"), "got: {block}");
+    assert!(block.contains("#research (0 agents) - idle"), "got: {block}");
+    assert!(block.contains("  #competitive-comparison (0 agents) - idle"), "got: {block}");
 }
 
 /// The shared delta renderer classifies appeared / changed (agent finished

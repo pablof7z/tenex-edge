@@ -315,6 +315,159 @@ impl WhoSnapshot {
     }
 }
 
+/// Live `DerivedStatus` per agent pubkey in `channel` (local sessions preferred,
+/// then peers), within the liveness window. Used to annotate channel members.
+fn channel_status_map(
+    store: &Store,
+    channel: &str,
+    now: u64,
+) -> std::collections::HashMap<String, crate::session::DerivedStatus> {
+    let since = now.saturating_sub(crate::session::STATUS_TTL_SECS);
+    let mut map = std::collections::HashMap::new();
+    // Peers first so a local session of the same agent overrides it.
+    for snap in store
+        .peer_session_snapshots(Some(channel), since)
+        .unwrap_or_default()
+    {
+        map.insert(snap.agent_pubkey.clone(), crate::session::derive_status(&snap, now));
+    }
+    for snap in store
+        .live_session_snapshots(Some(channel), since)
+        .unwrap_or_default()
+    {
+        map.insert(snap.agent_pubkey.clone(), crate::session::derive_status(&snap, now));
+    }
+    map
+}
+
+/// Count of distinct LIVE agents in `channel` and whether any is busy.
+fn channel_agent_activity(store: &Store, channel: &str, now: u64) -> (usize, bool) {
+    let map = channel_status_map(store, channel, now);
+    let live: Vec<_> = map
+        .values()
+        .filter(|ds| ds.liveness.is_live())
+        .collect();
+    let busy = live.iter().any(|ds| ds.busy);
+    (live.len(), busy)
+}
+
+/// Render the channel-hierarchy context block injected at an agent's first turn.
+/// Shows the agent's identity, where it sits in the channel tree, who else is in
+/// the current channel, the subchannels beneath it, and a pointer to the rest of
+/// the fabric. Returns `None` when there is no resolvable channel.
+pub(super) fn render_channel_context(
+    store: &Store,
+    project: &str,
+    now: u64,
+    self_session: &str,
+) -> Option<String> {
+    use std::fmt::Write as _;
+
+    let breadcrumb = store.channel_breadcrumb(project).ok()?;
+    if breadcrumb.is_empty() {
+        return None;
+    }
+    let me = store.get_session(self_session).ok().flatten();
+    let my_pubkey = me.as_ref().map(|r| r.agent_pubkey.clone()).unwrap_or_default();
+    let my_slug = me
+        .as_ref()
+        .map(|r| r.agent_slug.clone())
+        .or_else(crate::cli::agent_env_slug)
+        .unwrap_or_default();
+    let my_codename = crate::util::session_codename(self_session);
+
+    let root_label = &breadcrumb[0].1;
+    let crumb = breadcrumb
+        .iter()
+        .map(|(_, label)| format!("#{label}"))
+        .collect::<Vec<_>>()
+        .join(" > ");
+
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
+        "[tenex-edge] You are `{my_codename} ({my_slug})`, part of a team of agents."
+    );
+    let _ = writeln!(out);
+    let _ = writeln!(out, "Project: {root_label}");
+    let _ = writeln!(out, "Current channel: {crumb}");
+    if let Some(about) = store
+        .get_project_meta(project)
+        .ok()
+        .flatten()
+        .filter(|a| !a.is_empty())
+    {
+        let _ = writeln!(out, "Description: {about}");
+    }
+
+    // Members of the current channel, with their live activity.
+    let members = store.list_group_members(project).unwrap_or_default();
+    if !members.is_empty() {
+        let status_map = channel_status_map(store, project, now);
+        let mut parts: Vec<String> = Vec::new();
+        for (pubkey, role) in &members {
+            let you = if pubkey == &my_pubkey { " (you)" } else { "" };
+            let label = match status_map.get(pubkey) {
+                Some(ds) if ds.busy && !ds.activity.is_empty() => ds.activity.clone(),
+                Some(_) => "idle".to_string(),
+                // No live session: an admin with no agent identity reads as a
+                // human; an agent member that is simply offline reads as such.
+                None if role == "admin" => "Human".to_string(),
+                None => "offline".to_string(),
+            };
+            let slug = store
+                .resolve_slug_for_pubkey(pubkey)
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| crate::util::pubkey_short(pubkey));
+            parts.push(format!("@{slug}{you} - {label}"));
+        }
+        let _ = writeln!(out, "Members: {}", parts.join(" / "));
+    }
+
+    // Subchannels beneath the current channel, indented by depth.
+    let subs = store.subchannels_of(project).unwrap_or_default();
+    if !subs.is_empty() {
+        let _ = writeln!(out);
+        let _ = writeln!(out, "Subchannels:");
+        for (id, name, depth) in &subs {
+            let (count, busy) = channel_agent_activity(store, id, now);
+            let indent = "  ".repeat(depth.saturating_sub(1));
+            let agents = if count == 1 {
+                "1 agent".to_string()
+            } else {
+                format!("{count} agents")
+            };
+            let status = if busy { "active" } else { "idle" };
+            let _ = writeln!(out, "{indent}#{name} ({agents}) - {status}");
+        }
+    }
+
+    // The rest of the fabric: how many other channels saw activity in 24h.
+    let mut exclude: Vec<String> = vec![project.to_string()];
+    exclude.extend(subs.iter().map(|(id, _, _)| id.clone()));
+    let other = store
+        .count_active_channels_since(now.saturating_sub(86_400), &exclude)
+        .unwrap_or(0);
+    if other > 0 {
+        let _ = writeln!(out);
+        let _ = writeln!(
+            out,
+            "There {} {other} other active channel{} in the past 24 hours. \
+             Use `tenex-edge channels list` for more.",
+            if other == 1 { "is" } else { "are" },
+            if other == 1 { "" } else { "s" }
+        );
+    }
+
+    let _ = writeln!(out);
+    let _ = write!(
+        out,
+        "To message a session, write `@<codename>` inline in a `tenex-edge chat write` body."
+    );
+    Some(out)
+}
+
 /// Append the turn-start "tenex-edge fabric" block(s): the full roster on the
 /// first turn, or "changes since your last turn" afterward. This is the single
 /// source of truth — both the CLI `turn_start` and the daemon's `turn_start` RPC
@@ -331,14 +484,11 @@ pub(super) fn push_turn_fabric_block(
 ) {
     let store = store.lock().expect("store mutex poisoned");
     if first_turn {
-        if let Ok(snapshot) = load_who_snapshot(&store, Some(project), now, daemon_host) {
-            if !snapshot.rows.is_empty() {
-                let who_text = render::render_who_plain(&snapshot);
-                blocks.push(format!(
-                    "tenex-edge fabric — agents visible in this channel:\n{}",
-                    who_text.trim_end()
-                ));
-            }
+        // The channel-hierarchy context: where the agent sits in the channel
+        // tree, who shares its channel, the subchannels beneath, and a pointer
+        // to the rest of the fabric.
+        if let Some(block) = render_channel_context(&store, project, now, self_session) {
+            blocks.push(block);
         }
     } else {
         // Self-exclude the viewer's own session: rpc_turn_start opens this turn
