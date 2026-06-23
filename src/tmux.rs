@@ -685,7 +685,10 @@ async fn open_agent_session(
     let tenex_bin = std::env::var("TENEX_EDGE_BIN")
         .ok()
         .filter(|s| !s.is_empty());
-    make_session_transparent(&session_name, tenex_bin.as_deref(), slug, abs_path)?;
+    let status_cmd_override = crate::config::Config::load()
+        .ok()
+        .and_then(|c| c.tmux_status_command);
+    make_session_transparent(&session_name, tenex_bin.as_deref(), slug, abs_path, status_cmd_override.as_deref())?;
 
     Ok(pane_id)
 }
@@ -703,6 +706,7 @@ fn make_session_transparent(
     tenex_bin: Option<&str>,
     slug: &str,
     abs_path: &str,
+    status_cmd_override: Option<&str>,
 ) -> Result<()> {
     // Each `(option, value)` pair is applied with `set-option -t <session>`.
     // `-g` is NOT used: we only want to affect this one session, not the global
@@ -726,7 +730,11 @@ fn make_session_transparent(
     // before the shell runs the command. #{q:...} adds shell quoting so paths
     // with spaces are safe. In Rust format strings, {{ and }} produce literal
     // { and } respectively.
-    let statusline_cmd = format!("#({bin} statusline --agent #{{@te_agent}} --cwd #{{q:@te_cwd}})");
+    let statusline_cmd = status_cmd_override
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| {
+            format!("#({bin} statusline --tmux --agent #{{@te_agent}} --cwd #{{q:@te_cwd}})")
+        });
     let OPTIONS: Vec<(&str, String)> = vec![
         // Session identity for the status bar: stored as user options so the
         // #(...) status-format command can read them via #{@te_agent} /

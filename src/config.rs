@@ -28,6 +28,8 @@ pub struct Config {
     /// an admin to every group we create and is the address the orchestration
     /// listener matches `add` tags against.
     pub tenex_private_key: Option<String>,
+    /// Custom tmux status-format string. None means use the default.
+    pub tmux_status_command: Option<String>,
 }
 
 impl Config {
@@ -74,6 +76,11 @@ struct RawConfig {
     /// Fallback signing key for NIP-29 group management when userNsec is absent.
     #[serde(default, rename = "tenexPrivateKey")]
     tenex_private_key: Option<String>,
+    /// Custom tmux status-format string for agent sessions. When set, overrides
+    /// the default `tenex-edge statusline` command. Use tmux format variables
+    /// #{@te_agent} and #{q:@te_cwd} to reference the session's agent and cwd.
+    #[serde(default, rename = "tmuxStatusCommand")]
+    tmux_status_command: Option<String>,
 }
 
 impl Config {
@@ -100,6 +107,7 @@ impl Config {
             host,
             user_nsec: raw.user_nsec,
             tenex_private_key: raw.tenex_private_key,
+            tmux_status_command: raw.tmux_status_command,
         })
     }
 

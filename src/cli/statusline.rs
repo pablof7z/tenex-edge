@@ -22,6 +22,7 @@ pub(super) fn statusline(
     session: Option<String>,
     agent_arg: Option<String>,
     cwd_arg: Option<String>,
+    tmux_fmt: bool,
 ) -> Result<()> {
     // Harness payload on stdin (absent when invoked by hand from a terminal or
     // from the tmux status-format #(...) invocation).
@@ -69,7 +70,12 @@ pub(super) fn statusline(
     let Ok(view) = serde_json::from_value::<StatuslineView>(v) else {
         return Ok(());
     };
-    println!("{}", render_statusline(&view, true));
+    let line = if tmux_fmt {
+        render_statusline_tmux(&view)
+    } else {
+        render_statusline(&view, true)
+    };
+    println!("{line}");
     Ok(())
 }
 
@@ -134,9 +140,31 @@ impl MentionView {
     }
 }
 
+/// Map an ANSI SGR code string to a tmux `#[style]` attribute string.
+fn ansi_to_tmux_style(code: &str) -> &'static str {
+    match code {
+        "36" => "fg=colour6",          // cyan
+        "2" => "dim",                  // dim
+        "32" => "fg=colour2",          // green
+        "1;31" => "fg=colour1,bold",   // bold red
+        "1;33" => "fg=colour3,bold",   // bold yellow
+        _ => "default",
+    }
+}
+
 pub fn render_statusline(v: &StatuslineView, color: bool) -> String {
+    render_statusline_inner(v, color, false)
+}
+
+pub fn render_statusline_tmux(v: &StatuslineView) -> String {
+    render_statusline_inner(v, true, true)
+}
+
+fn render_statusline_inner(v: &StatuslineView, color: bool, tmux_fmt: bool) -> String {
     let paint = |s: String, code: &str| -> String {
-        if color {
+        if tmux_fmt {
+            format!("#[{}]{}#[default]", ansi_to_tmux_style(code), s)
+        } else if color {
             format!("\x1b[{code}m{s}\x1b[0m")
         } else {
             s

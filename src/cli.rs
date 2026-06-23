@@ -200,6 +200,10 @@ enum Cmd {
         /// pane's project directory).
         #[arg(long)]
         cwd: Option<String>,
+        /// Emit tmux #[style] format strings instead of ANSI codes. Required
+        /// when the output is consumed by tmux's status-format (#(...)).
+        #[arg(long)]
+        tmux: bool,
     },
     /// Connectivity check: publish a test note to the configured relays and read it back.
     Doctor,
@@ -591,7 +595,8 @@ pub async fn run(cli: Cli) -> Result<()> {
             session,
             agent,
             cwd,
-        } => statusline::statusline(session, agent, cwd),
+            tmux,
+        } => statusline::statusline(session, agent, cwd, tmux),
         Cmd::Project { action } => admin::project(action).await,
         Cmd::Groups { action } => admin::groups(action).await,
         Cmd::Agent { action } => admin::agent(action).await,
