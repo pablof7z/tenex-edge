@@ -56,16 +56,9 @@ pub fn assemble_turn_start_context(
     let mut blocks: Vec<String> = Vec::new();
 
     if first_turn {
-        let channel = channel_label(&scope);
-        blocks.push(format!(
-            "[tenex-edge] You are {slug} on {channel}. \
-             Use `tenex-edge who` to see agents in this channel and \
-             `tenex-edge chat write --message \"...\"` to write to them. \
-             If the user asks you to message/contact/tell another agent, use channel chat; \
-             do not say you cannot send messages from here.",
-            slug = rec.agent_slug,
-            channel = channel,
-        ));
+        // The agent's identity, orientation, and messaging conventions are now
+        // carried by the channel-hierarchy block (push_turn_fabric_block →
+        // render_channel_context) appended below — no separate static preamble.
 
         // Warn only when this daemon is not the local owner for the group. If it
         // owns the group, session-start/room-minting is responsible for signing

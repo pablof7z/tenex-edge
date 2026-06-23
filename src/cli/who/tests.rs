@@ -550,7 +550,7 @@ fn turn_start_fabric_block_renders_channel_context() {
     assert!(block.contains("(coder)"), "got: {block}");
     assert!(block.contains("Current channel: #proj"), "got: {block}");
     assert!(
-        block.contains("To message a session"),
+        block.contains("To message another agent"),
         "got: {block}"
     );
 }

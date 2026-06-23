@@ -463,7 +463,10 @@ pub(super) fn render_channel_context(
     let _ = writeln!(out);
     let _ = write!(
         out,
-        "To message a session, write `@<codename>` inline in a `tenex-edge chat write` body."
+        "To message another agent, write `@<codename>` inline in a `tenex-edge chat write` \
+         body (run `tenex-edge chat write` whenever asked to contact/notify another agent — \
+         do not say you cannot). Your own identity: `tenex-edge whoami`; the full roster: \
+         `tenex-edge who`."
     );
     Some(out)
 }

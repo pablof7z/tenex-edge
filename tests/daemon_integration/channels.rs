@@ -38,6 +38,42 @@ fn rewrite_config_with_user_nsec(home: &Home) {
     std::fs::write(&cfg, serde_json::to_string(&body).unwrap()).unwrap();
 }
 
+/// e2e: a human-initiated session's first turn gets the channel-hierarchy
+/// context block, rendered through the real daemon (session_start mints the
+/// room + metadata, turn_start assembles + returns the injected context).
+#[test]
+fn first_turn_injects_channel_context_block() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let home = Home::new();
+    rewrite_config_with_user_nsec(&home);
+
+    let ctx = rt().block_on(async {
+        let mut c = Client::connect_or_spawn().await.expect("connect");
+        c.call(
+            "session_start",
+            serde_json::json!({"agent": "coder", "session_id": "sess-ctx-1", "cwd": "/tmp", "watch_pid": std::process::id()}),
+        )
+        .await
+        .expect("session_start");
+        // First turn → the daemon assembles + returns the turn-start context.
+        let v = c
+            .call("turn_start", serde_json::json!({"session": "sess-ctx-1"}))
+            .await
+            .expect("turn_start");
+        v.get("context").and_then(|c| c.as_str()).unwrap_or("").to_string()
+    });
+
+    // The injected context is the channel-hierarchy block (rendered daemon-side
+    // by render_channel_context), naming the session's identity, its channel
+    // breadcrumb, and the messaging convention.
+    assert!(ctx.contains("part of a team of agents"), "context was: {ctx}");
+    assert!(ctx.contains("(coder)"), "context was: {ctx}");
+    assert!(ctx.contains("Current channel:"), "context was: {ctx}");
+    assert!(ctx.contains("To message another agent"), "context was: {ctx}");
+
+    stop_daemon(&home);
+}
+
 #[test]
 fn session_start_with_user_nsec_owns_group_and_adds_member() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
