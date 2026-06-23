@@ -2229,9 +2229,14 @@ async fn rpc_groups_create(
     for pk in &admin_set {
         let mut confirmed = false;
         for attempt in 0..6u32 {
-            let _ = state.provider.nip29_add_admin(&child_h, pk).await;
+            let added = state.provider.nip29_add_admin(&child_h, pk).await;
             let (_, roles, _) = state.provider.fetch_group_state(&child_h).await;
-            if roles.get(pk).map(String::as_str) == Some("admin") {
+            // Confirm via the published 39001 roster OR a benign re-issue (attempt
+            // > 0 accepted as "already a member" → the relay's authoritative state
+            // already grants the role). Same stale-replaceable defense as the
+            // member-add loop below: a same-second created_at collision can freeze
+            // 39001, so the roster readback alone can deadlock the grant.
+            if roles.get(pk).map(String::as_str) == Some("admin") || (attempt > 0 && added) {
                 confirmed = true;
                 break;
             }
@@ -3050,10 +3055,21 @@ async fn handle_orchestration(
         // up. Gate the spawn on a CONFIRMED member-add (a live harness whose
         // events the relay rejects is worse than no harness).
         let mut confirmed = false;
-        for _ in 0..12u32 {
-            let _ = state.provider.nip29_add_member(&op.child_h, &agent_pk).await;
+        for attempt in 0..12u32 {
+            let added = state.provider.nip29_add_member(&op.child_h, &agent_pk).await;
             let (_, _, members) = state.provider.fetch_group_state(&op.child_h).await;
-            if members.contains(&agent_pk) {
+            // Two independent confirmations, EITHER suffices:
+            //  (a) the relay's published 39002 roster lists the agent, or
+            //  (b) a RE-issued add (attempt > 0) is accepted as benign — for
+            //      croissant that means it returned "all targets are members
+            //      already", i.e. the relay's authoritative in-memory membership
+            //      already holds the agent. Relying on (a) alone deadlocks when the
+            //      relay's 39002 replaceable is stale (a same-second created_at
+            //      collision can freeze the public roster even though membership is
+            //      applied), because every retry is then rejected-as-redundant and
+            //      the agent never reappears in the readback. (b) breaks that tie.
+            let relay_confirms_member = members.contains(&agent_pk) || (attempt > 0 && added);
+            if relay_confirms_member {
                 confirmed = true;
                 break;
             }

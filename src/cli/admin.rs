@@ -139,12 +139,17 @@ pub(super) async fn groups(action: GroupsAction) -> Result<()> {
             }
         }
         GroupsAction::List { project } => {
+            use owo_colors::Stream::Stdout;
             let parent = resolve_project(project);
             let v = daemon_call_async("groups_list", serde_json::json!({ "project": parent }))
                 .await?;
             let rooms = v["rooms"].as_array().map(|a| a.as_slice()).unwrap_or(&[]);
-            // Root of the tree is the project itself.
-            println!("{}", parent.bold());
+            // Root of the tree is the project itself. Colorize ONLY when stdout is a
+            // real terminal: piped/captured output (the e2e harness, shell
+            // substitution) must be plain so callers can match the slug literally —
+            // `.bold()` would otherwise wrap it in ANSI escapes and a `^slug$` grep
+            // would never match.
+            println!("{}", parent.if_supports_color(Stdout, |s| s.bold()));
             if rooms.is_empty() {
                 println!("  (no subgroup task rooms)");
                 return Ok(());
@@ -155,10 +160,11 @@ pub(super) async fn groups(action: GroupsAction) -> Result<()> {
                 let depth = r["depth"].as_u64().unwrap_or(0) as usize;
                 // depth 0 = direct child of the project root → one level of indent.
                 let indent = "  ".repeat(depth + 1);
+                let id_c = id.if_supports_color(Stdout, |s| s.cyan());
                 if name.is_empty() {
-                    println!("{indent}{}", id.cyan());
+                    println!("{indent}{id_c}");
                 } else {
-                    println!("{indent}{}  — {name}", id.cyan());
+                    println!("{indent}{id_c}  — {name}");
                 }
             }
         }

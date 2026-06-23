@@ -496,7 +496,20 @@ impl Kind1Nip29Provider {
             Err(e) => {
                 let benign = {
                     let s = e.to_string();
-                    s.contains("already exists") || s.contains("duplicate")
+                    // A NIP-29 group create that says the group already exists, or a
+                    // moderation action the relay reports as a no-op because its
+                    // target is ALREADY in the desired state, are both idempotent
+                    // successes — the relay's authoritative in-memory state already
+                    // reflects what we asked for. croissant phrases the put-user
+                    // no-op as "all targets are members already" / "already a member"
+                    // and the put-admin/create cases as "already exists"/"duplicate".
+                    // Treating these as failures makes a confirm-retry loop spin
+                    // forever (the relay keeps rejecting a redundant add), so a
+                    // genuinely-applied membership can look unconfirmed.
+                    s.contains("already exists")
+                        || s.contains("duplicate")
+                        || s.contains("members already")
+                        || s.contains("already a member")
                 };
                 if !benign && std::env::var("TENEX_EDGE_DEBUG").is_ok() {
                     eprintln!(
