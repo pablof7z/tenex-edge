@@ -337,10 +337,10 @@ impl Kind1Nip29Provider {
         let nsec = match &self.user_nsec {
             Some(n) => n.clone(),
             None => {
-                progress("userNsec unset; skipping group management".to_string());
+                progress("no signing key (userNsec/tenexPrivateKey) configured; skipping group management".to_string());
                 if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
                     eprintln!(
-                        "[daemon] userNsec unset; skipping NIP-29 group management for {project}"
+                        "[daemon] no signing key (userNsec/tenexPrivateKey) configured; skipping NIP-29 group management for {project}"
                     );
                 }
                 return;
