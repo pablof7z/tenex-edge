@@ -158,10 +158,7 @@ fn spawn_if_absent() -> Result<()> {
 }
 
 fn daemon_answers_ping() -> bool {
-    matches!(
-        try_call("ping", &serde_json::json!({})),
-        Ok(Outcome::Ok(_))
-    )
+    matches!(try_call("ping", &serde_json::json!({})), Ok(Outcome::Ok(_)))
 }
 
 fn spawn_detached_daemon() -> Result<()> {

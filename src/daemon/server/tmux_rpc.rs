@@ -87,6 +87,13 @@ struct TmuxSpawnParams {
     project: String,
     #[serde(default)]
     command: Vec<String>,
+    /// The client's cwd, forwarded so the daemon spawns the agent in the
+    /// directory the user actually invoked `tenex-edge launch` from — NOT the
+    /// daemon's own cwd (which is sticky and never matches the client's). When
+    /// present, this wins over `project_paths` lookup and also updates the
+    /// `project_paths` row so subsequent spawns without `cwd` still find it.
+    #[serde(default)]
+    cwd: Option<String>,
 }
 
 pub(super) async fn rpc_tmux_spawn(
@@ -95,7 +102,9 @@ pub(super) async fn rpc_tmux_spawn(
 ) -> Result<serde_json::Value> {
     let p: TmuxSpawnParams =
         serde_json::from_value(params.clone()).context("parsing tmux_spawn params")?;
-    let pane_id = crate::tmux::spawn_agent(state, &p.agent, &p.project, p.command, None).await?;
+    let client_cwd = p.cwd.as_deref().map(std::path::Path::new);
+    let pane_id =
+        crate::tmux::spawn_agent(state, &p.agent, &p.project, p.command, None, client_cwd).await?;
     Ok(serde_json::json!({ "pane_id": pane_id, "agent": p.agent, "project": p.project }))
 }
 
@@ -209,7 +218,10 @@ pub(super) async fn rpc_tmux_resume(
 /// Resolve a session by the codename the TUI displays (e.g. `bravo4217`), scanning
 /// recent local sessions (including dead rows) so a user can copy `[session
 /// bravo4217]` straight into `tmux resume`. Case-insensitive; first match wins.
-fn resume_by_codename(state: &Arc<DaemonState>, target: &str) -> Option<crate::state::SessionRecord> {
+fn resume_by_codename(
+    state: &Arc<DaemonState>,
+    target: &str,
+) -> Option<crate::state::SessionRecord> {
     let want = target.to_lowercase();
     let host = state.host.clone();
     state.with_store(|s| {

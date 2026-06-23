@@ -568,7 +568,7 @@ fn resolve_session_inner(
     let project = group
         .filter(|g| !g.is_empty())
         .map(|g| g.to_string())
-        .unwrap_or_else(|| crate::project::resolve(&cwd));
+        .unwrap_or_else(|| crate::project::resolve(&cwd).unwrap_or_default());
     if let Some(agent) = agent.filter(|a| !a.is_empty()) {
         if let Some(rec) =
             state.with_store(|s| s.latest_alive_session_for_agent_in_project(agent, &project))?
@@ -619,7 +619,7 @@ fn rpc_who(state: &Arc<DaemonState>, params: &serde_json::Value) -> Result<serde
                 .clone()
                 .map(std::path::PathBuf::from)
                 .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-            crate::project::resolve(&cwd)
+            crate::project::resolve(&cwd).unwrap_or_default()
         }))
     };
     let now = now_secs();
@@ -693,7 +693,7 @@ async fn rpc_session_start(
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
     // The working-directory project (the repo this harness runs in).
-    let work_root = crate::project::resolve(&cwd);
+    let work_root = crate::project::resolve(&cwd).unwrap_or_default();
     // The NIP-29 group this session belongs to. For a subgroup task room this is
     // the child `h` supplied via TENEX_EDGE_GROUP; otherwise it equals the
     // working-directory project (continuity: existing sessions are unchanged).
@@ -1304,7 +1304,7 @@ async fn rpc_propose(
     let project = session_rec
         .as_ref()
         .map(|r| r.project.clone())
-        .unwrap_or_else(|| crate::project::resolve(&cwd));
+        .unwrap_or_else(|| crate::project::resolve(&cwd).unwrap_or_default());
     let agent_slug = session_rec
         .as_ref()
         .map(|r| r.agent_slug.clone())
@@ -2497,9 +2497,9 @@ async fn handle_chat_read<W: AsyncWriteExt + Unpin>(
     writer: &mut W,
 ) -> Result<()> {
     let p: ChatReadParams = serde_json::from_value(params.clone()).unwrap_or_default();
-    let project = p
-        .project
-        .unwrap_or_else(|| crate::project::resolve(&std::env::current_dir().unwrap_or_default()));
+    let project = p.project.unwrap_or_else(|| {
+        crate::project::resolve(&std::env::current_dir().unwrap_or_default()).unwrap_or_default()
+    });
     let since = p.since.unwrap_or(0);
     let offset = p.offset.unwrap_or(0);
 
@@ -2999,7 +2999,8 @@ async fn handle_orchestration(
         // Spawn the harness in the PARENT project's working directory but scoped
         // to the child group (TENEX_EDGE_GROUP). The spawned session's
         // session-start path adds its derived session pubkey to the child group.
-        match crate::tmux::spawn_agent(state, slug, &op.parent, Vec::new(), Some(&op.child_h)).await
+        match crate::tmux::spawn_agent(state, slug, &op.parent, Vec::new(), Some(&op.child_h), None)
+            .await
         {
             Ok(pane) => {
                 if std::env::var("TENEX_EDGE_DEBUG").is_ok() {

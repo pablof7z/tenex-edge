@@ -380,4 +380,3 @@ mod tests {
         assert!(pid_alive(std::process::id() as i32));
     }
 }
-

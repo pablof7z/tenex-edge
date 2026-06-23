@@ -574,19 +574,20 @@ impl Kind1Nip29Provider {
         let Some(user_keys) = self.parse_user_keys() else {
             return false;
         };
-        let created = match crate::fabric::nip29::lifecycle::group_create_subgroup(child_h, parent_h)
-        {
-            Ok(b) => {
-                self.publish_group_management(b, &user_keys, "9007 create-subgroup")
-                    .await
-            }
-            Err(_) => false,
-        };
+        let created =
+            match crate::fabric::nip29::lifecycle::group_create_subgroup(child_h, parent_h) {
+                Ok(b) => {
+                    self.publish_group_management(b, &user_keys, "9007 create-subgroup")
+                        .await
+                }
+                Err(_) => false,
+            };
         if !created {
             return false;
         }
-        match crate::fabric::nip29::lifecycle::group_lock_closed_with_parent(child_h, name, parent_h)
-        {
+        match crate::fabric::nip29::lifecycle::group_lock_closed_with_parent(
+            child_h, name, parent_h,
+        ) {
             Ok(b) => {
                 self.publish_group_management(b, &user_keys, "9002 lock-with-parent")
                     .await
@@ -720,4 +721,3 @@ fn derive_provider_instance(relays: &[String]) -> String {
     joined.hash(&mut h);
     format!("{:016x}", h.finish())
 }
-

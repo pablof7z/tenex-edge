@@ -198,7 +198,11 @@ mod tests {
 
     #[test]
     fn build_parse_round_trip_preserves_order() {
-        let adds = vec![at("bk1", "architect"), at("bk2", "engineer"), at("bk1", "qa")];
+        let adds = vec![
+            at("bk1", "architect"),
+            at("bk2", "engineer"),
+            at("bk1", "qa"),
+        ];
         let b = build_add_agents_event("parent-g", "child-g", &adds, "please add these").unwrap();
         let ev = sign(b);
         assert_eq!(ev.kind.as_u16(), KIND_CHAT);
@@ -348,7 +352,11 @@ mod tests {
 
     #[test]
     fn adds_for_backend_filters() {
-        let adds = vec![at("bk1", "architect"), at("bk2", "engineer"), at("bk1", "qa")];
+        let adds = vec![
+            at("bk1", "architect"),
+            at("bk2", "engineer"),
+            at("bk1", "qa"),
+        ];
         let mine = adds_for_backend(&adds, "bk1");
         assert_eq!(mine.len(), 2);
         assert_eq!(mine[0].slug, "architect");

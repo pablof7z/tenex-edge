@@ -580,11 +580,13 @@ killed by an idle-exit mid-stream.
 > tolerates its absence (old peers → `""`), so it is backward compatible.
 >
 > **Worktree caveat:** `rel_cwd` is computed relative to `project::project_root`
-> (the dir holding the nearest `.tenex/project.json`, else `git rev-parse
-> --show-toplevel`). For real `git worktree add` dirs, `--show-toplevel` returns
-> each worktree's OWN path, so two worktrees both resolve to `.` and render
-> bracket-less. To make `worktree1`/`worktree2` render distinctly, place a
-> `.tenex/project.json` at their common parent so `project_root` resolves there.
+> (the git repo root via `git rev-parse --git-common-dir`, else the nearest
+> ancestor registered in `~/.tenex/edge/projects.json`). For real `git worktree
+> add` dirs, `--git-common-dir` returns the SHARED main repo path, so two
+> worktrees both resolve to `.` and render bracket-less. To make
+> `worktree1`/`worktree2` render distinctly, register their common parent in
+> `projects.json` (via `tenex-edge project init`) so `project_root` resolves
+> there.
 
 Agents may run in different working dirs / git worktrees on the same machine
 (`$PROJECT/worktree1` vs `worktree2`). Peers must see *where* a peer is working

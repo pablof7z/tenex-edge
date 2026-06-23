@@ -19,23 +19,34 @@ projects, and how membership works. For local agent keystore management see
 You almost never pass a project slug explicitly — every project command resolves
 it from your current directory. The resolution order (see `src/project.rs`) is:
 
-1. **`.tenex/project.json` → `slug`** — searched from the current directory
-   *upward* to the git root. The nearest one wins.
-2. **git repo name** — derived from `git rev-parse --git-common-dir`, so a repo
-   and all of its git worktrees resolve to the **same** slug.
-3. **basename of `$PWD`** — the fallback when you're not in a git repo and have
-   no `.tenex/project.json`.
+1. **git repo name** — derived from `git rev-parse --git-common-dir`, so a repo
+   and all of its git worktrees resolve to the **same** slug (the basename of
+   the shared main repo root).
+2. **`~/.tenex/edge/projects.json`** — a JSON object mapping slugs to absolute
+   paths, written by `tenex-edge project init`. The cwd itself, or its nearest
+   ancestor present in the map, wins. This is the only way to give a non-git
+   directory a project.
+3. Otherwise: **no project**. Hooks exit 0 silently (the agent is not disturbed);
+   explicit CLI verbs (`launch`, `who`, `chat`, …) print
 
-`.tenex/project.json` looks like:
+   > no known project in `<cwd>`; run `tenex-edge project init` or `git init`
+   > first, or pass `--project <slug>`
+
+   and exit non-zero. `--project <slug>` on a verb that accepts it bypasses
+   the refusal — the user named a project explicitly.
+
+`~/.tenex/edge/projects.json` looks like:
 
 ```json
-{ "slug": "tenex-edge" }
+{
+  "tenex-edge": "/Users/pablofernandez/src/tenex-edge",
+  "buzz": "/Users/pablofernandez/tmp/buzz"
+}
 ```
 
-Pinning a slug here is the way to (a) give a project a stable name independent of
-the directory name, and (b) make git worktrees that live in *separate* parent
-directories share one project — put a `.tenex/project.json` at their common
-parent.
+`tenex-edge project init` writes the current directory's basename as the slug
+and the canonicalized cwd as the path. Refuses if the slug is already mapped to
+a different path (pass `--force` to overwrite); no-op if it already points here.
 
 > The project root that step 1/2 walks up to is also what produces the
 > project-relative `rel_cwd` shown in presence and `who` (the project root
@@ -126,6 +137,31 @@ project scope.
 
 > Agents are addressed `agentSlug@projectSlug` (not `@hostname`) precisely so
 > messages can't accidentally route across projects.
+
+---
+
+## Initializing a project: `project init`
+
+```bash
+tenex-edge project init           # register the current directory
+tenex-edge project init --force    # overwrite an existing slug→path mapping
+```
+
+`project init` registers the current directory as a tenex-edge project by
+writing `{ "<basename($PWD)>": "<canonicalized $PWD>" }` into
+`~/.tenex/edge/projects.json`. This is the only way to give a non-git directory
+a project slug (git repos resolve automatically via their repo name). Refuses if
+the slug is already mapped to a different path; pass `--force` to overwrite.
+Idempotent: if the slug already points to this exact path, it's a no-op.
+
+On success it prints:
+
+```
+initialized project buzz at /Users/pablofernandez/tmp/buzz
+```
+
+> This command is the cure for the "no known project in <cwd>; run
+> `tenex-edge project init` or `git init` first" error.
 
 ---
 

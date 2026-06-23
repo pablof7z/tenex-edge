@@ -256,7 +256,10 @@ mod tests {
             out.contains("Assistant: Looking at the login flow"),
             "got: {out}"
         );
-        assert!(!out.contains("[uses Edit"), "tool_use should be stripped: {out}");
+        assert!(
+            !out.contains("[uses Edit"),
+            "tool_use should be stripped: {out}"
+        );
         assert!(
             !out.contains("tool_result"),
             "tool results should be skipped: {out}"

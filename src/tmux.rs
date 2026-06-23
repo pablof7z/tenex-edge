@@ -513,8 +513,24 @@ fn apply_agent_def_args(
     cmd
 }
 
-/// The absolute working directory for `project`, falling back to the daemon's cwd.
-fn project_abs_path(state: &Arc<DaemonState>, project: &str) -> String {
+/// The absolute working directory for `project`. When `client_cwd` is supplied
+/// (forwarded from the `tenex-edge launch`/`tmux spawn` client), use it
+/// directly and refresh the `project_paths` row so subsequent spawns without a
+/// cwd still find it. Otherwise look up the project in `project_paths`, falling
+/// back to the daemon's cwd.
+fn project_abs_path(
+    state: &Arc<DaemonState>,
+    project: &str,
+    client_cwd: Option<&std::path::Path>,
+) -> String {
+    if let Some(cwd) = client_cwd {
+        let abs = cwd.to_string_lossy().to_string();
+        // Refresh the project_paths row so subsequent spawns without a cwd find
+        // it. Best-effort; ignore store errors.
+        let now = crate::util::now_secs();
+        let _ = state.with_store(|s| s.upsert_project_path(project, &abs, now));
+        return abs;
+    }
     state
         .with_store(|s| s.get_project_path(project))
         .unwrap_or(None)
@@ -710,9 +726,7 @@ fn make_session_transparent(
     // before the shell runs the command. #{q:...} adds shell quoting so paths
     // with spaces are safe. In Rust format strings, {{ and }} produce literal
     // { and } respectively.
-    let statusline_cmd = format!(
-        "#({bin} statusline --agent #{{@te_agent}} --cwd #{{q:@te_cwd}})"
-    );
+    let statusline_cmd = format!("#({bin} statusline --agent #{{@te_agent}} --cwd #{{q:@te_cwd}})");
     let OPTIONS: Vec<(&str, String)> = vec![
         // Session identity for the status bar: stored as user options so the
         // #(...) status-format command can read them via #{@te_agent} /
@@ -765,12 +779,17 @@ fn make_session_transparent(
 
 /// Spawn a new tmux window running `slug`'s harness in `project`'s directory.
 /// Returns the new pane id (e.g. "%7") or an error.
+///
+/// `client_cwd`, when supplied, is the absolute path the client invoked the
+/// spawn from; it overrides `project_paths` lookup so the agent lands in the
+/// user's actual cwd, not whichever worktree last fired `session_start`.
 pub async fn spawn_agent(
     state: &Arc<DaemonState>,
     slug: &str,
     project: &str,
     launch_args: Vec<String>,
     group: Option<&str>,
+    client_cwd: Option<&std::path::Path>,
 ) -> Result<String> {
     if !tmux_available() {
         anyhow::bail!("tmux binary not found");
@@ -791,7 +810,7 @@ pub async fn spawn_agent(
         }
     };
 
-    let abs_path = project_abs_path(state, project);
+    let abs_path = project_abs_path(state, project, client_cwd);
     let pane_id = open_agent_session(slug, window_name, &abs_path, &agent_command, group).await?;
 
     // No prompt is injected by spawn alone. A spawn-on-send caller tags this
@@ -829,12 +848,19 @@ pub async fn resume_agent(
     let resume_command = build_resume_command(&base, shape, resume_id);
 
     let window_name = format!("{slug}·resume");
-    let abs_path = project_abs_path(state, project);
+    let abs_path = project_abs_path(state, project, None);
     // Re-scope the resumed session to the SAME group it was in. For a subgroup
     // session `project` is the child `h`; passing it as the group override keeps
     // the resumed session publishing into that subgroup. For an ordinary session
     // `project` equals the working-dir project, so this is a harmless no-op.
-    open_agent_session(slug, &window_name, &abs_path, &resume_command, Some(project)).await
+    open_agent_session(
+        slug,
+        &window_name,
+        &abs_path,
+        &resume_command,
+        Some(project),
+    )
+    .await
 }
 
 // ── status query ──────────────────────────────────────────────────────────────

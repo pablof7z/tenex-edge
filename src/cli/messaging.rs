@@ -33,8 +33,10 @@ pub(super) async fn chat_read(
 ) -> Result<()> {
     use std::io::IsTerminal as _;
 
-    let project = project
-        .unwrap_or_else(|| crate::project::resolve(&std::env::current_dir().unwrap_or_default()));
+    let project = match project {
+        Some(p) => p,
+        None => crate::project::resolve_or_bail(&std::env::current_dir().unwrap_or_default())?,
+    };
     let since_ts = since.as_deref().map(super::admin::parse_since);
     let effective_tail = tail || since.is_none();
     let effective_limit = limit.or_else(|| {
@@ -135,6 +137,8 @@ pub(super) async fn publish(
     }
     Ok(())
 }
+
+
 
 pub(super) fn resolve_send_message_body(raw: Option<String>) -> Result<String> {
     match raw {

@@ -29,7 +29,11 @@ struct StoredKey {
     agent: Option<serde_json::Value>,
     /// One-line "when to use this agent" note, surfaced in `who`'s agent table.
     /// Read from `byline` or its alias `useCriteria`.
-    #[serde(default, alias = "useCriteria", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        alias = "useCriteria",
+        skip_serializing_if = "Option::is_none"
+    )]
     byline: Option<String>,
 }
 
@@ -359,7 +363,15 @@ pub fn derive_session_keys(
     // Build the NUL-delimited info buffer.  The last byte is reserved for the
     // rejection-sampling counter; we mutate it in place on retry.
     let mut info: Vec<u8> = Vec::with_capacity(
-        project_slug.len() + 1 + agent_slug.len() + 1 + harness_kind.len() + 1 + anchor.len() + 1 + 1,
+        project_slug.len()
+            + 1
+            + agent_slug.len()
+            + 1
+            + harness_kind.len()
+            + 1
+            + anchor.len()
+            + 1
+            + 1,
     );
     info.extend_from_slice(project_slug.as_bytes());
     info.push(0x00);
@@ -647,7 +659,7 @@ mod tests {
         let harness_id = "claude-native-xKz8-resume-test";
 
         let original = derive_session_keys(&sk, "my-project", "coder", "claude", harness_id);
-        let resumed  = derive_session_keys(&sk, "my-project", "coder", "claude", harness_id);
+        let resumed = derive_session_keys(&sk, "my-project", "coder", "claude", harness_id);
 
         assert_eq!(
             original.public_key().to_hex(),
@@ -686,7 +698,7 @@ mod tests {
         let anchor = "same-harness-id-across-projects";
 
         let proj_alpha = derive_session_keys(&sk, "project-alpha", "coder", "claude", anchor);
-        let proj_beta  = derive_session_keys(&sk, "project-beta",  "coder", "claude", anchor);
+        let proj_beta = derive_session_keys(&sk, "project-beta", "coder", "claude", anchor);
 
         assert_ne!(
             proj_alpha.public_key().to_hex(),

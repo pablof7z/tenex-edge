@@ -70,11 +70,16 @@ cat brief.md | tenex-edge propose --title "Subgroup rooms design"
 
 | Command | Purpose |
 |---|---|
+| `project init` | Register the current directory as a project in `~/.tenex/edge/projects.json`. |
 | `project list` | List all NIP-29 project groups on the relay. |
 | `project edit` | Set a project group's description (publishes kind:9002). |
 | `project add` | Edit the current project's local-agent membership, or add one pubkey. |
 | `groups create` | Create a subgroup task room under a project and invite agents. |
 | `groups list` | List the subgroup task rooms under a project. |
+
+**`project init`** — `--force` (overwrite an existing slug→path mapping that
+points elsewhere). No other options; the slug is always `basename($PWD)` and the
+path is the canonicalized `$PWD`.
 
 **`project edit`** — `--description <text>` (required), `--project <slug>`.
 

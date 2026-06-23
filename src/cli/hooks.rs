@@ -177,6 +177,18 @@ async fn hook_dispatch(
         .map(PathBuf::from)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
 
+    // No known project in this directory? Hooks must NOT disturb the agent:
+    // exit 0 silently. The user will see the "no known project" message when
+    // they run an explicit `tenex-edge` verb from this dir; a harness running
+    // here should just proceed without tenex-edge's fabric features.
+    if crate::project::resolve(&cwd).is_err() {
+        call_log.note(
+            "no-project",
+            serde_json::json!({ "cwd": cwd.to_string_lossy() }),
+        );
+        return Ok(());
+    }
+
     let transcript: Option<String> = host.transcript_field.and_then(|field| {
         obj.and_then(|o| o.get(field))
             .and_then(|v| v.as_str())
@@ -400,11 +412,7 @@ async fn report_observation(
 }
 
 fn render_init_progress(item: &serde_json::Value) {
-    if std::env::var("TENEX_EDGE_INIT_PROGRESS")
-        .ok()
-        .as_deref()
-        == Some("0")
-    {
+    if std::env::var("TENEX_EDGE_INIT_PROGRESS").ok().as_deref() == Some("0") {
         return;
     }
     if item.get("kind").and_then(|v| v.as_str()) != Some("init_progress") {
@@ -414,14 +422,8 @@ fn render_init_progress(item: &serde_json::Value) {
         .get("elapsed_ms")
         .and_then(|v| v.as_u64())
         .unwrap_or_default();
-    let phase = item
-        .get("phase")
-        .and_then(|v| v.as_str())
-        .unwrap_or("init");
-    let message = item
-        .get("message")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let phase = item.get("phase").and_then(|v| v.as_str()).unwrap_or("init");
+    let message = item.get("message").and_then(|v| v.as_str()).unwrap_or("");
     eprintln!("[tenex-edge init +{elapsed}ms] {phase}: {message}");
 }
 

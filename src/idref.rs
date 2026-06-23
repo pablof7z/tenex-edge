@@ -106,7 +106,10 @@ mod tests {
 
     #[test]
     fn agent_label_slugifies_host() {
-        assert_eq!(agent_label("codex", "Pablo's Laptop"), "codex@pablo-s-laptop");
+        assert_eq!(
+            agent_label("codex", "Pablo's Laptop"),
+            "codex@pablo-s-laptop"
+        );
         assert_eq!(agent_label("claude", "laptop"), "claude@laptop");
     }
 

@@ -123,7 +123,10 @@ async fn seed_session_with_thread_root_link() {
                 break;
             }
             Ok(out) if out.failed.values().any(|m| m.contains("rate-limited")) => {
-                eprintln!("[seed] create rate-limited (attempt {}); backoff {backoff}s", attempt + 1);
+                eprintln!(
+                    "[seed] create rate-limited (attempt {}); backoff {backoff}s",
+                    attempt + 1
+                );
                 tokio::time::sleep(Duration::from_secs(backoff)).await;
             }
             Ok(out) => {
@@ -136,7 +139,10 @@ async fn seed_session_with_thread_root_link() {
             }
         }
     }
-    assert!(created, "could not create group (relay rate-limited?) — rerun");
+    assert!(
+        created,
+        "could not create group (relay rate-limited?) — rerun"
+    );
     tokio::time::sleep(Duration::from_millis(800)).await;
 
     let agent_ref = AgentRef::new(agent_pk.clone(), "validator");
@@ -188,10 +194,7 @@ async fn seed_session_with_thread_root_link() {
         .map(|e| e.into_iter().collect::<Vec<_>>())
         .unwrap_or_default();
 
-    eprintln!(
-        "[seed] readback: {} status event(s)",
-        statuses.len()
-    );
+    eprintln!("[seed] readback: {} status event(s)", statuses.len());
 
     eprintln!("\n[seed] ===== SEED COMPLETE — open tenex-off and find this session =====");
     eprintln!("[seed] Look for the session titled: {title:?}");

@@ -30,13 +30,21 @@ pub(super) async fn project(action: ProjectAction) -> Result<()> {
                 }
             }
         }
+        ProjectAction::Init { force } => {
+            let cwd = std::env::current_dir().unwrap_or_default();
+            let (slug, path) = crate::project::register_project(&cwd, force)?;
+            println!("initialized project {slug} at {}", path.display());
+        }
         ProjectAction::Edit {
             description,
             project,
         } => {
-            let slug = project.unwrap_or_else(|| {
-                crate::project::resolve(&std::env::current_dir().unwrap_or_default())
-            });
+            let slug = match project {
+                Some(p) => p,
+                None => {
+                    crate::project::resolve_or_bail(&std::env::current_dir().unwrap_or_default())?
+                }
+            };
             let v = daemon_call_async(
                 "project_edit",
                 serde_json::json!({ "project": slug, "description": description }),
@@ -47,9 +55,12 @@ pub(super) async fn project(action: ProjectAction) -> Result<()> {
         }
         ProjectAction::Add { project, pubkey } => match pubkey {
             Some(pubkey) => {
-                let project = project.unwrap_or_else(|| {
-                    crate::project::resolve(&std::env::current_dir().unwrap_or_default())
-                });
+                let project = match project {
+                    Some(p) => p,
+                    None => crate::project::resolve_or_bail(
+                        &std::env::current_dir().unwrap_or_default(),
+                    )?,
+                };
                 let v = daemon_call_async(
                     "project_add",
                     serde_json::json!({ "project": project, "pubkey": pubkey }),
@@ -63,9 +74,12 @@ pub(super) async fn project(action: ProjectAction) -> Result<()> {
                 );
             }
             None => {
-                let project = project.unwrap_or_else(|| {
-                    crate::project::resolve(&std::env::current_dir().unwrap_or_default())
-                });
+                let project = match project {
+                    Some(p) => p,
+                    None => crate::project::resolve_or_bail(
+                        &std::env::current_dir().unwrap_or_default(),
+                    )?,
+                };
                 super::project_agents::edit_membership(project).await?;
             }
         },
@@ -76,10 +90,11 @@ pub(super) async fn project(action: ProjectAction) -> Result<()> {
 // ── groups (NIP-29 subgroup task rooms) ───────────────────────────────────────
 
 pub(super) async fn groups(action: GroupsAction) -> Result<()> {
-    fn resolve_project(project: Option<String>) -> String {
-        project.unwrap_or_else(|| {
-            crate::project::resolve(&std::env::current_dir().unwrap_or_default())
-        })
+    fn resolve_project(project: Option<String>) -> Result<String> {
+        match project {
+            Some(p) => Ok(p),
+            None => crate::project::resolve_or_bail(&std::env::current_dir().unwrap_or_default()),
+        }
     }
     match action {
         GroupsAction::Create {
@@ -88,7 +103,7 @@ pub(super) async fn groups(action: GroupsAction) -> Result<()> {
             project,
             message,
         } => {
-            let parent = resolve_project(project);
+            let parent = resolve_project(project)?;
             if agents.is_empty() {
                 bail!("at least one --agent slug@backend is required");
             }
@@ -140,7 +155,7 @@ pub(super) async fn groups(action: GroupsAction) -> Result<()> {
         }
         GroupsAction::List { project } => {
             use owo_colors::Stream::Stdout;
-            let parent = resolve_project(project);
+            let parent = resolve_project(project)?;
             let v =
                 daemon_call_async("groups_list", serde_json::json!({ "project": parent })).await?;
             let rooms = v["rooms"].as_array().map(|a| a.as_slice()).unwrap_or(&[]);

@@ -100,7 +100,9 @@ fn log_path(argv: &[String]) -> Option<PathBuf> {
         .or_else(|| flag_value(argv, "--session"));
     let dir = match session_id.as_deref() {
         Some(id) => crate::config::edge_home().join("sessions").join(id),
-        None => crate::config::edge_home().join("sessions").join("_unscoped"),
+        None => crate::config::edge_home()
+            .join("sessions")
+            .join("_unscoped"),
     };
     Some(dir.join("command-calls.jsonl"))
 }

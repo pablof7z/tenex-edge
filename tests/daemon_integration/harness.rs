@@ -32,6 +32,15 @@ impl Home {
         std::env::set_var("TENEX_CONFIG", &cfg);
         std::env::set_var("TENEX_EDGE_DAEMON_GRACE_S", "30");
         std::env::set_var("TENEX_EDGE_BIN", bin());
+        // Register /tmp as a project so hooks (which all send cwd=/tmp) find a
+        // resolvable project. Without this, the new "refuse to start without a
+        // known project" gate silently exits 0 and the tests see no session.
+        let projects_map = serde_json::json!({ "tmp": "/tmp" });
+        std::fs::write(
+            dir.path().join("projects.json"),
+            serde_json::to_string(&projects_map).unwrap(),
+        )
+        .unwrap();
         Home { dir }
     }
     pub(crate) fn store_path(&self) -> PathBuf {

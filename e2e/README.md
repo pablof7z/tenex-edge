@@ -111,8 +111,9 @@ starts in a project directory, the daemon's provider runs `open_project`, which
 publishes **9007 create-group → 9002 lock (closed/public) → 9000 put-user** for
 the backend's admins and the session agent (`src/fabric/provider.rs`).
 
-1. **edge-a** drives a `claude-code` `session-start` hook in a project dir whose
-   `.tenex/project.json` pins the slug `e2e-demo`:
+1. **edge-a** drives a `claude-code` `session-start` hook in a project dir
+   registered in `~/.tenex/edge/projects.json` with the slug `e2e-demo` (via
+   `tenex-edge project init`):
    ```bash
    echo '{"session_id":"…","cwd":"…/work/e2e-demo"}' \
      | TENEX_EDGE_AGENT=claude tenex-edge hook --host claude-code --type session-start

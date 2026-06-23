@@ -83,11 +83,16 @@ async fn tmux_send(session: String) -> Result<()> {
 // ── spawn ─────────────────────────────────────────────────────────────────────
 
 async fn tmux_spawn(agent: String, project: Option<String>) -> Result<()> {
-    let project = project
-        .unwrap_or_else(|| crate::project::resolve(&std::env::current_dir().unwrap_or_default()));
+    let project = match project {
+        Some(p) => p,
+        None => crate::project::resolve_or_bail(&std::env::current_dir().unwrap_or_default())?,
+    };
+    let cwd = std::env::current_dir()
+        .ok()
+        .map(|p| p.to_string_lossy().to_string());
     let v = crate::daemon::blocking::call(
         "tmux_spawn",
-        serde_json::json!({ "agent": agent, "project": project }),
+        serde_json::json!({ "agent": agent, "project": project, "command": [], "cwd": cwd }),
     )
     .context("tmux_spawn RPC")?;
 
@@ -106,12 +111,21 @@ async fn tmux_spawn(agent: String, project: Option<String>) -> Result<()> {
 /// `tmux_spawn` just prints the pane id. Both paths produce a session with the
 /// tmux chrome already hidden and the prefix key unbound, so no per-verb
 /// `hide_session_chrome` step is needed here.
-pub(super) async fn launch(agent: String, project: Option<String>, command: Vec<String>) -> Result<()> {
-    let project = project
-        .unwrap_or_else(|| crate::project::resolve(&std::env::current_dir().unwrap_or_default()));
+pub(super) async fn launch(
+    agent: String,
+    project: Option<String>,
+    command: Vec<String>,
+) -> Result<()> {
+    let project = match project {
+        Some(p) => p,
+        None => crate::project::resolve_or_bail(&std::env::current_dir().unwrap_or_default())?,
+    };
+    let cwd = std::env::current_dir()
+        .ok()
+        .map(|p| p.to_string_lossy().to_string());
     let v = crate::daemon::blocking::call(
         "tmux_spawn",
-        serde_json::json!({ "agent": agent, "project": project, "command": command }),
+        serde_json::json!({ "agent": agent, "project": project, "command": command, "cwd": cwd }),
     )
     .context("tmux_spawn RPC")?;
 
@@ -816,7 +830,7 @@ struct LiveRow {
     slug: String,
     host: String,
     project: String,
-    session_id: String,    // full raw id for RPC calls
+    session_id: String,       // full raw id for RPC calls
     session_codename: String, // stable display codename (e.g. bravo4217)
     status: String,
     attachable: bool, // has a live tmux endpoint
@@ -842,7 +856,7 @@ struct PendingAttach {
 struct ResumeRow {
     slug: String,
     project: String,
-    session_id: String,    // full raw id for RPC calls
+    session_id: String,       // full raw id for RPC calls
     session_codename: String, // stable display codename (e.g. bravo4217)
     title: String,
     created_at: u64,
@@ -973,9 +987,12 @@ pub(super) fn tmux_tui(popup: bool) -> Result<()> {
 
     // Default to the project matching the current directory.
     {
-        let cwd_project = crate::project::resolve(&std::env::current_dir().unwrap_or_default());
-        if let Some(idx) = pt.visible.iter().position(|p| *p == cwd_project) {
-            tab_idx = idx;
+        let cwd_project =
+            crate::project::resolve(&std::env::current_dir().unwrap_or_default()).ok();
+        if let Some(cwd_project) = cwd_project {
+            if let Some(idx) = pt.visible.iter().position(|p| *p == cwd_project) {
+                tab_idx = idx;
+            }
         }
     }
 

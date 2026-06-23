@@ -175,8 +175,8 @@ mod tests {
         assert_eq!(c.host, "pablos' laptop");
         assert_eq!(c.relays, vec![DEFAULT_RELAY]); // defaulted
         assert_eq!(c.indexer_relay, DEFAULT_INDEXER_RELAY); // defaulted
-        // Back-compat: with only tenexPrivateKey set, all three accessors resolve
-        // to it (the old collapsed field's behavior).
+                                                            // Back-compat: with only tenexPrivateKey set, all three accessors resolve
+                                                            // to it (the old collapsed field's behavior).
         assert_eq!(c.tenex_private_key.as_deref(), Some("deadbeef"));
         assert_eq!(c.session_ikm_nsec().map(String::as_str), Some("deadbeef"));
         assert_eq!(c.management_nsec().map(String::as_str), Some("deadbeef"));
@@ -192,7 +192,10 @@ mod tests {
         }"#;
         let c = Config::from_json_str(json, "host").unwrap();
         // session derivation + management stay operator-first (continuity).
-        assert_eq!(c.session_ikm_nsec().map(String::as_str), Some("operatorkey"));
+        assert_eq!(
+            c.session_ikm_nsec().map(String::as_str),
+            Some("operatorkey")
+        );
         assert_eq!(c.management_nsec().map(String::as_str), Some("operatorkey"));
         // backend identity prefers the dedicated backend key.
         assert_eq!(c.backend_nsec().map(String::as_str), Some("backendkey"));

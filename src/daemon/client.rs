@@ -170,10 +170,11 @@ impl Client {
     // ── handshake / connect ──────────────────────────────────────────────
 
     async fn try_connect_handshake() -> Result<ConnectOutcome> {
-        let stream = tokio::time::timeout(Duration::from_secs(2), UnixStream::connect(socket_path()))
-            .await
-            .context("timed out connecting to daemon socket")?
-            .context("connecting to daemon socket")?;
+        let stream =
+            tokio::time::timeout(Duration::from_secs(2), UnixStream::connect(socket_path()))
+                .await
+                .context("timed out connecting to daemon socket")?
+                .context("connecting to daemon socket")?;
         let (rh, wh) = stream.into_split();
         let mut reader = BufReader::new(rh);
         let mut writer = wh;

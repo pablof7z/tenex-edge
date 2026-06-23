@@ -201,9 +201,7 @@ pub fn slugify_host(host: &str) -> String {
 /// This avoids a direct `rand` dependency while staying cryptographically random.
 pub fn child_group_id(name: &str) -> String {
     let slug = slugify_host(name);
-    let pk = nostr_sdk::prelude::Keys::generate()
-        .public_key()
-        .to_hex();
+    let pk = nostr_sdk::prelude::Keys::generate().public_key().to_hex();
     // First 8 hex chars == first 4 bytes; already lowercase from `to_hex`.
     let rand8: String = pk.chars().take(8).collect();
     format!("{slug}-{rand8}")

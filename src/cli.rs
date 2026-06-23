@@ -419,6 +419,15 @@ enum AgentAction {
 enum ProjectAction {
     /// List all NIP-29 project groups on the relay.
     List,
+    /// Initialize the current directory as a tenex-edge project. Registers the
+    /// directory's basename as a slug in `~/.tenex/edge/projects.json`. Refuses
+    /// if the slug is already mapped to a different path; pass `--force` to
+    /// overwrite. No-op if the slug is already mapped to this exact path.
+    Init {
+        /// Overwrite an existing slug→path mapping that points elsewhere.
+        #[arg(long)]
+        force: bool,
+    },
     /// Set the description for a project's NIP-29 group (publishes kind:9002).
     Edit {
         /// New description text.

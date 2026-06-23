@@ -287,8 +287,10 @@ fn render_who_markdown_row(out: &mut String, row: &WhoRow, _include_project: boo
 /// The header + alignment rows for the agent-facing session table. Shared by the
 /// first-turn roster (`render_who_plain`) and the "changes since…" delta so both
 /// render with an identical table shape.
-pub(super) const SESSION_TABLE_HEADER: [&str; 2] =
-    ["| Agent | Session | Host | Title | Status |", "|---|---:|---|---|---|"];
+pub(super) const SESSION_TABLE_HEADER: [&str; 2] = [
+    "| Agent | Session | Host | Title | Status |",
+    "|---|---:|---|---|---|",
+];
 
 /// One markdown row for the agent-facing session table. The session codename is
 /// backtick-wrapped; every other cell is escaped via [`md_cell`].

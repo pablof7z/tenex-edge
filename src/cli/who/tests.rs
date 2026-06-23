@@ -555,13 +555,22 @@ fn render_whoami_card_names_self_and_addressing() {
         "card must show how others address this session: {out}"
     );
     assert!(out.contains("| Session ID | sess-abc |"), "raw id: {out}");
-    assert!(out.contains("| Host | laptop [worktree1] |"), "host+cwd: {out}");
+    assert!(
+        out.contains("| Host | laptop [worktree1] |"),
+        "host+cwd: {out}"
+    );
     // The hex session pubkey is shown (the wire address), never the npub.
     assert!(
         out.contains("| Pubkey | 5e5510n |"),
         "hex session pubkey shown, not npub: {out}"
     );
-    assert!(!out.contains("npub1xyz"), "npub must NOT be rendered: {out}");
-    assert!(out.contains("| Status | Add whoami |"), "status title: {out}");
+    assert!(
+        !out.contains("npub1xyz"),
+        "npub must NOT be rendered: {out}"
+    );
+    assert!(
+        out.contains("| Status | Add whoami |"),
+        "status title: {out}"
+    );
     assert!(out.contains("| Chat | 2 pending |"), "pending count: {out}");
 }

@@ -206,8 +206,11 @@ pub(super) fn hook_tail(opts: HookTailOpts) -> Result<()> {
                         }
                         KeyCode::BackTab | KeyCode::Left => {
                             let n = snapshot.panes.len().min(state.pane_limit).max(1);
-                            state.focused =
-                                if state.focused == 0 { n - 1 } else { state.focused - 1 };
+                            state.focused = if state.focused == 0 {
+                                n - 1
+                            } else {
+                                state.focused - 1
+                            };
                             state.line_cursor = usize::MAX;
                         }
                         _ => {}
@@ -220,8 +223,7 @@ pub(super) fn hook_tail(opts: HookTailOpts) -> Result<()> {
                         }
                         KeyCode::Char('-') => {
                             state.pane_limit = state.pane_limit.saturating_sub(1).max(1);
-                            state.focused =
-                                state.focused.min(state.pane_limit.saturating_sub(1));
+                            state.focused = state.focused.min(state.pane_limit.saturating_sub(1));
                         }
                         KeyCode::Tab | KeyCode::Right => {
                             let n = snapshot.panes.len().min(state.pane_limit).max(1);
@@ -229,8 +231,11 @@ pub(super) fn hook_tail(opts: HookTailOpts) -> Result<()> {
                         }
                         KeyCode::BackTab | KeyCode::Left => {
                             let n = snapshot.panes.len().min(state.pane_limit).max(1);
-                            state.focused =
-                                if state.focused == 0 { n - 1 } else { state.focused - 1 };
+                            state.focused = if state.focused == 0 {
+                                n - 1
+                            } else {
+                                state.focused - 1
+                            };
                         }
                         KeyCode::Enter | KeyCode::Char('f') => {
                             state.focus_mode = true;
@@ -246,10 +251,8 @@ pub(super) fn hook_tail(opts: HookTailOpts) -> Result<()> {
                             state.popup = Some(ProjectPopup { cursor: 0 });
                         }
                         KeyCode::Char('s') => {
-                            state.session_filter = cycle_filter(
-                                state.session_filter.as_deref(),
-                                &snapshot.sessions,
-                            );
+                            state.session_filter =
+                                cycle_filter(state.session_filter.as_deref(), &snapshot.sessions);
                             state.status = match &state.session_filter {
                                 Some(s) => format!("session filter: {s}"),
                                 None => "session filter cleared".to_string(),
@@ -438,7 +441,11 @@ fn read_session_hook_log(
 }
 
 /// Legacy: read the global hook log with a byte-limit tail.
-fn read_hook_log(path: &std::path::Path, panes: &mut BTreeMap<String, SessionPane>, max_bytes: u64) {
+fn read_hook_log(
+    path: &std::path::Path,
+    panes: &mut BTreeMap<String, SessionPane>,
+    max_bytes: u64,
+) {
     let raw = tail_read(path, max_bytes);
     if raw.is_empty() {
         return;
@@ -446,7 +453,11 @@ fn read_hook_log(path: &std::path::Path, panes: &mut BTreeMap<String, SessionPan
     parse_hook_log(&raw, panes, None);
 }
 
-fn parse_hook_log(raw: &str, panes: &mut BTreeMap<String, SessionPane>, session_hint: Option<&str>) {
+fn parse_hook_log(
+    raw: &str,
+    panes: &mut BTreeMap<String, SessionPane>,
+    session_hint: Option<&str>,
+) {
     let mut hook_sessions: HashMap<String, String> = HashMap::new();
     for line in raw.lines() {
         let Ok(v) = serde_json::from_str::<Value>(line) else {
@@ -683,9 +694,7 @@ fn classify_hook(hook_type: &str, stdin: &Value) -> (String, String, String) {
                 format!("{tool}: {response}")
             }
         }
-        "stop" | "subagent-stop" => {
-            stdin["stop_reason"].as_str().unwrap_or("stop").to_string()
-        }
+        "stop" | "subagent-stop" => stdin["stop_reason"].as_str().unwrap_or("stop").to_string(),
         _ => stdin["transcript_path"]
             .as_str()
             .and_then(|p| std::path::Path::new(p).file_name())
@@ -735,7 +744,7 @@ fn fill_pane_from_hook(pane: &mut SessionPane, host: &str, stdin_json: &Value) {
     if pane.project.is_empty() {
         pane.project = stdin_json["cwd"]
             .as_str()
-            .map(|cwd| crate::project::resolve(std::path::Path::new(cwd)))
+            .map(|cwd| crate::project::resolve(std::path::Path::new(cwd)).unwrap_or_default())
             .unwrap_or_default();
     }
 }
@@ -766,7 +775,7 @@ fn command_session(v: &Value) -> Option<String> {
 fn command_project(v: &Value) -> String {
     v["process"]["cwd"]
         .as_str()
-        .map(|cwd| crate::project::resolve(std::path::Path::new(cwd)))
+        .map(|cwd| crate::project::resolve(std::path::Path::new(cwd)).unwrap_or_default())
         .unwrap_or_default()
 }
 
@@ -846,7 +855,11 @@ fn render_hook_tail(f: &mut ratatui::Frame, snapshot: &HookTailSnapshot, state: 
     let area = f.area();
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(2), Constraint::Min(1), Constraint::Length(1)])
+        .constraints([
+            Constraint::Length(2),
+            Constraint::Min(1),
+            Constraint::Length(1),
+        ])
         .split(area);
 
     let project_label: String = if state.project_filters.is_empty() {
@@ -863,14 +876,19 @@ fn render_hook_tail(f: &mut ratatui::Frame, snapshot: &HookTailSnapshot, state: 
     let title = Line::from(vec![
         Span::styled(
             "tenex-edge debug hook-tail",
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
         ),
         Span::raw("  project="),
         Span::styled(project_label, Style::default().fg(Color::Yellow)),
         Span::raw("  session="),
         Span::styled(session, Style::default().fg(Color::Yellow)),
         Span::raw("  panes="),
-        Span::styled(state.pane_limit.to_string(), Style::default().fg(Color::Yellow)),
+        Span::styled(
+            state.pane_limit.to_string(),
+            Style::default().fg(Color::Yellow),
+        ),
     ]);
     f.render_widget(Paragraph::new(title), chunks[0]);
 
@@ -889,7 +907,11 @@ fn render_hook_tail(f: &mut ratatui::Frame, snapshot: &HookTailSnapshot, state: 
     } else {
         "[enter/f] zoom  [tab/←/→] pane  [+/-] panes  [p] projects  [s] session  [a] clear  [q] quit"
     };
-    let status = if state.status.is_empty() || state.popup.is_some() || state.focus_mode || state.detail_open {
+    let status = if state.status.is_empty()
+        || state.popup.is_some()
+        || state.focus_mode
+        || state.detail_open
+    {
         hints.to_string()
     } else {
         format!("{}  {}", state.status, hints)
@@ -960,7 +982,12 @@ fn render_detail_overlay(
 
     let text_lines: Vec<Line> = detail
         .lines()
-        .map(|l| Line::from(Span::styled(l.to_string(), Style::default().fg(Color::White))))
+        .map(|l| {
+            Line::from(Span::styled(
+                l.to_string(),
+                Style::default().fg(Color::White),
+            ))
+        })
         .collect();
 
     f.render_widget(
@@ -995,7 +1022,9 @@ fn render_project_popup(
             let focused = i == popup.cursor;
             let prefix = if checked { " [x] " } else { " [ ] " };
             let style = if focused {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
             } else if checked {
                 Style::default().fg(Color::Green)
             } else {
@@ -1100,13 +1129,12 @@ fn pane_title(pane: &SessionPane) -> String {
     }
 }
 
-fn render_pane_grid(
-    f: &mut ratatui::Frame,
-    area: Rect,
-    pane: &SessionPane,
-    focused: bool,
-) {
-    let border_color = if focused { Color::Yellow } else { Color::DarkGray };
+fn render_pane_grid(f: &mut ratatui::Frame, area: Rect, pane: &SessionPane, focused: bool) {
+    let border_color = if focused {
+        Color::Yellow
+    } else {
+        Color::DarkGray
+    };
     let inner_h = area.height.saturating_sub(2) as usize;
     let base_ts = pane.lines.first().map(|l| l.ts_ms).unwrap_or(0);
     let start = pane.lines.len().saturating_sub(inner_h);
@@ -1127,12 +1155,7 @@ fn render_pane_grid(
     );
 }
 
-fn render_pane_focus(
-    f: &mut ratatui::Frame,
-    area: Rect,
-    pane: &SessionPane,
-    selected: usize,
-) {
+fn render_pane_focus(f: &mut ratatui::Frame, area: Rect, pane: &SessionPane, selected: usize) {
     let inner_h = area.height.saturating_sub(2) as usize;
     let n = pane.lines.len();
     // Scroll to keep selected visible
@@ -1172,7 +1195,12 @@ fn render_detail_panel(f: &mut ratatui::Frame, area: Rect, line: Option<&DebugLi
     };
     let text_lines: Vec<Line> = text
         .lines()
-        .map(|l| Line::from(Span::styled(l.to_string(), Style::default().fg(Color::White))))
+        .map(|l| {
+            Line::from(Span::styled(
+                l.to_string(),
+                Style::default().fg(Color::White),
+            ))
+        })
         .collect();
     f.render_widget(
         Paragraph::new(text_lines)
@@ -1191,13 +1219,18 @@ fn render_timeline_line(line: &DebugLine, base_ts: u128, selected: bool) -> Line
     let ts = fmt_rel_ts(line.ts_ms, base_ts);
     let label = fixed_label(&line.label, 18);
     let color = kind_color(line.kind);
-    let bg = if selected { Color::Rgb(40, 40, 60) } else { Color::Reset };
+    let bg = if selected {
+        Color::Rgb(40, 40, 60)
+    } else {
+        Color::Reset
+    };
 
     // User prompt text gets a brighter color so it's easy to scan
     let summary_color = match line.kind {
         DebugKind::Hook if line.label == "user-prompt-submit" => Color::LightYellow,
-        DebugKind::Hook if line.label.starts_with("pre-tool-use")
-            || line.label.starts_with("post-tool-use") =>
+        DebugKind::Hook
+            if line.label.starts_with("pre-tool-use")
+                || line.label.starts_with("post-tool-use") =>
         {
             Color::Gray
         }

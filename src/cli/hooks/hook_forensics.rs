@@ -88,14 +88,23 @@ fn log_path(parsed_json: Option<&Value>) -> Option<PathBuf> {
         return Some(PathBuf::from(trimmed));
     }
     let session_id = parsed_json.and_then(|v| {
-        ["session_id", "sessionId", "conversation_id", "conversationId", "thread_id", "threadId"]
-            .iter()
-            .find_map(|k| v[*k].as_str())
-            .filter(|s| !s.is_empty())
+        [
+            "session_id",
+            "sessionId",
+            "conversation_id",
+            "conversationId",
+            "thread_id",
+            "threadId",
+        ]
+        .iter()
+        .find_map(|k| v[*k].as_str())
+        .filter(|s| !s.is_empty())
     });
     let dir = match session_id {
         Some(id) => crate::config::edge_home().join("sessions").join(id),
-        None => crate::config::edge_home().join("sessions").join("_unscoped"),
+        None => crate::config::edge_home()
+            .join("sessions")
+            .join("_unscoped"),
     };
     Some(dir.join("hook-calls.jsonl"))
 }
