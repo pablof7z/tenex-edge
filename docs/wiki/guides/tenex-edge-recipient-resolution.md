@@ -2,14 +2,14 @@
 title: tenex-edge Recipient Resolution
 slug: tenex-edge-recipient-resolution
 topic: tenex-edge
-summary: When the `--to` argument contains an `@`, `resolve_recipient` parses it as a slug and project qualifier, then calls `store.resolve_agent_pubkey(slug, Some(proj)
+summary: `resolve_recipient` accepts `agent@host`, raw pubkeys, session ids/aliases/prefixes/codenames, and bare local agent slugs for daemon chat delivery.
 tags:
   - capture
 volatility: warm
 confidence: medium
 created: 2026-06-16
-updated: 2026-06-16
-verified: 2026-06-16
+updated: 2026-06-23
+verified: 2026-06-23
 compiled-from: conversation
 sources:
   - session:ses_13081afccffeSOadIDwUtF3Sfz
@@ -18,12 +18,13 @@ sources:
 
 # tenex-edge Recipient Resolution
 
-## Recipient Resolution Fallback
+## Resolver Order
 
-When the `--to` argument contains an `@`, `resolve_recipient` parses it as a slug and project qualifier, then calls `store.resolve_agent_pubkey(slug, Some(proj))`. The `resolve_agent_pubkey` method only queries Nostr relay-sourced tables (`peer_sessions` and `profiles`); it does not check the local agent keystore. When `resolve_agent_pubkey` returns `None`, `resolve_recipient` must fall back to the local agent keystore before producing an error. This fallback bridges the gap via a function like `identity::resolve_local_agent_pubkey(edge_home, slug)` that reads `<slug>.json` and returns its `public_key`. If resolution ultimately fails, the error is formatted as "can't resolve {slug}@{proj} (no presence/profile seen yet)".
+The daemon's `resolve_recipient` path is used for chat delivery targets, including inline `@codename` mentions. It parses target strings through `idref` in this order:
 
-The part after `@` in a recipient like `slug@host` is ambiguous — it can be a hostname (from local agents) or a project name (from relay data). Because local agent keystore files are keyed by slug only, the local keystore lookup must ignore or reinterpret the project parameter when the part after `@` is a host name rather than a project. (Previously: the local keystore fallback ignores the `@` suffix.)
+- `agent@host` resolves through local/peer profile state for that agent on that host.
+- A 64-hex key or `npub` resolves directly to the raw pubkey.
+- A bare token first tries exact canonical session id or harness alias, then a session-id prefix, then a displayed session codename.
+- A remaining bare token is treated as an agent slug on the local host.
 
-NIP-29 group_members is not the source for `resolve_agent_pubkey`; the source is kind:0 profile events and kind:30315 status events. NIP-29 group_members has pubkeys but no slugs, making it an unused potential fallback for recipient resolution.
-
-<!-- citations: [^ses_1-28] [^ses_1-29] [^ses_1-36] -->
+Session targets p-tag the durable agent pubkey and also carry `target_session` for local delivery. Bare agent targets route to the local host's durable agent key. NIP-29 group membership is not the source for recipient resolution; it has pubkeys but no agent slugs or session codenames.

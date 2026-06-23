@@ -4,7 +4,7 @@ date: 2026-06-09
 session: 435ec383-d607-459b-a712-a00ed4decaa7
 transcript: /Users/pablofernandez/.claude/projects/-Users-pablofernandez-src-tenex-edge/435ec383-d607-459b-a712-a00ed4decaa7.jsonl
 salience: product
-status: active
+status: superseded
 subjects:
   - session-id
   - short-id

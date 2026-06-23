@@ -6,7 +6,7 @@
 {"canonical":"claude max","name":"Claude Max","signed":0,"status":"provisional"}
 {"canonical":"cli rs","name":"cli.rs","signed":1,"status":"provisional"}
 {"canonical":"codec","name":"Codec","signed":1,"status":"provisional"}
-{"canonical":"codex exec","name":"codex exec","signed":1,"status":"provisional"}
+{"canonical":"codex exec","name":"codex exec","signed":2,"status":"provisional"}
 {"canonical":"delivery wire codec delivery entity","name":"Delivery Wire-codec Delivery Entities","signed":0,"status":"provisional"}
 {"canonical":"drop table","name":"DROP TABLE","signed":1,"status":"provisional"}
 {"canonical":"fabric provider","name":"Fabric Provider","signed":0,"status":"provisional"}
@@ -27,6 +27,7 @@
 {"canonical":"nip 29","name":"NIP-29","signed":3,"status":"real"}
 {"canonical":"nip 29 for","name":"NIP29 For","signed":1,"status":"provisional"}
 {"canonical":"nip 40","name":"NIP-40","signed":1,"status":"provisional"}
+{"canonical":"pc debug transcript","name":"pc debug transcript","signed":1,"status":"provisional"}
 {"canonical":"peer session","name":"peer_sessions","signed":1,"status":"provisional"}
 {"canonical":"project meta","name":"project_meta","signed":1,"status":"provisional"}
 {"canonical":"project wiki","name":"Project Wiki","signed":0,"status":"provisional"}

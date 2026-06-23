@@ -4,7 +4,7 @@ date: 2026-06-10
 session: 56f9fe89-5ff7-4e5b-b202-334cd7629d42
 transcript: /Users/pablofernandez/.claude/projects/-Users-pablofernandez-src-tenex-edge/56f9fe89-5ff7-4e5b-b202-334cd7629d42.jsonl
 salience: architecture
-status: active
+status: superseded
 subjects:
   - session-id-display
   - sessionid-newtype

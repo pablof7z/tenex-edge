@@ -8,7 +8,7 @@ tags:
 volatility: warm
 confidence: medium
 created: 2026-06-09
-updated: 2026-06-17
+updated: 2026-06-19
 verified: 2026-06-09
 compiled-from: conversation
 sources:
@@ -21,13 +21,14 @@ sources:
   - session:rollout-2026-06-16T17-43-45-019ed0e3-68e5-7091-899d-6a4e0fcb5716
   - session:rollout-2026-06-17T10-51-45-019ed490-9414-75c3-ab93-66265458c6e9
   - session:ses_13089dfceffeDFSl8v4Lv8hCBt
+  - session:460b104d-e734-4dbd-9a8b-6e8182b1d699
 ---
 
 # tenex-edge Session Identity
 
 ## Session Identity Display
 
-Session IDs display as a human-friendly **codename** (`session_codename`) — a NATO phonetic word plus a four-digit number, e.g. `bravo4217` or `echo0163` — rather than UUID prefix truncation (`short_id`) or the older 6-character hex hash. The codename is deterministic (same session id → same codename) and copy-pasteable into `send --to`. A `SessionId` newtype in `src/util.rs` has its `Display` impl hardwired to `session_codename`, so any `{session_id}` in a format string automatically produces the codename. The codename space is 26×10000 = 260000, ample for the handful of live sessions a fabric holds but NOT collision-free at scale — it is a display/addressing convenience, never the identity (the canonical session id remains authoritative). The `short_id` utility is renamed to `pubkey_short` everywhere, making it explicit at every call site that it is for pubkeys only.
+Session IDs display as a human-friendly **codename** (`session_codename`) — a NATO phonetic word plus a four-digit number, e.g. `bravo4217` or `echo0163` — rather than UUID prefix truncation (`short_id`) or the older 6-character hex hash. The codename is deterministic (same session id → same codename) and copy-pasteable into chat messages as `@codename`, and into `tmux resume`. A `SessionId` newtype in `src/util.rs` has its `Display` impl hardwired to `session_codename`, so any `{session_id}` in a format string automatically produces the codename. The codename space is 26×10000 = 260000, ample for the handful of live sessions a fabric holds but NOT collision-free at scale — it is a display/addressing convenience, never the identity (the canonical session id remains authoritative). The `short_id` utility is renamed to `pubkey_short` everywhere, making it explicit at every call site that it is for pubkeys only.
 
 The `d` tag for kind 30315 events must be formatted as `tenex-edge:<bare-session-id>`, with no embedded JSON object in the identifier string. The `session-id` tag must contain only the bare session ID string, not a stringified JSON object. <!-- [^ea5dd-2] -->
 
@@ -43,9 +44,15 @@ Alias fallback ignores namespace. <!-- [^rollo-84] -->
 
 Heartbeats update the local DB only and never republish kind:30315, so NIP-40 expiration is not re-armed. <!-- [^rollo-85] -->
 
-Session/project filters must consistently accept project slug, canonical session ID, harness alias, and codename. The `tmux resume` and `inbox send --to-session` recipient resolvers both accept a codename as a lookup path (case-insensitive, first match wins), so a user can copy `[session bravo4217]` straight from `who`/the TUI.
+Session/project filters must consistently accept project slug, canonical session ID, harness alias, and codename. The `tmux resume` path and daemon chat mention resolver both accept a codename as a lookup path (case-insensitive, first match wins), so a user can copy `[session bravo4217]` straight from `who`/the TUI.
 
 The context injection must tell the agent its own identity (slug and session codename), not just list other agents. The first-turn intro in `turn.rs` must read `You are {slug} [session {codename}] on the tenex-edge fabric.` instead of the previous `You are connected to the tenex-edge agent fabric`. The codename shown in the self-identity line must match the codenames displayed in the `who` output, so the agent can identify which row in the fabric list is itself.
+
+Codenames render on every surface where a session identifier appears: `who` output, statusline, TUI, turn-intro self-identity line, and envelope renders. <!-- [^460b1-2] -->
+
+The `tmux resume` codename lookup uses a `resume_by_codename` fallback after the raw-id/prefix lookup. Session codenames are always long enough to pass the `>= 6` recipient-resolution lookup gate.
+
+The JSON protocol field for the session short identifier is renamed from `short_code` to `codename`. This is a wire-protocol change between the daemon and hooks, safe because the daemon and binary ship together and no external consumer reads that field. <!-- [^460b1-4] -->
 
 <!-- citations: [^ea5dd-2] [^rollo-57] [^rollo-81] [^rollo-82] [^rollo-83] [^rollo-84] [^rollo-85] [^435ec-4] [^56f9f-7] [^a0037-5] [^rollo-111] [^ses_1-26] -->
 ## SessionId Newtype and Domain Usage

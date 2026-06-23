@@ -2,14 +2,14 @@
 title: Tenex-Edge Thread Storage
 slug: tenex-edge-thread-storage
 topic: tenex-edge
-summary: The thread dual-write infrastructure (local SQLite read-model of relay conversations via `projects`, `threads`, `messages`, `message_recipients` tables) was rem
+summary: The old threads read model and `tenex-edge threads` CLI are removed on current master; proposal publication now goes through `tenex-edge publish`.
 tags:
   - capture
 volatility: warm
 confidence: medium
 created: 2026-06-10
-updated: 2026-06-10
-verified: 2026-06-10
+updated: 2026-06-23
+verified: 2026-06-23
 compiled-from: conversation
 sources:
   - session:56f9fe89-5ff7-4e5b-b202-334cd7629d42
@@ -18,8 +18,8 @@ sources:
 
 # Tenex-Edge Thread Storage
 
-## Thread Storage History
+## Threads Plane Removed
 
-The thread dual-write infrastructure (local SQLite read-model of relay conversations via `projects`, `threads`, `messages`, `message_recipients` tables) was removed from the codebase prior to the `98582fa` refactor. Each session tracks thread_root_event_id (immutable, set on first user prompt) and last_prompt_event_id (updated every user prompt) in the database.
+The former threads read model and `tenex-edge threads` command are not present on current master. The thread tables/RPCs were removed, and proposal publication now uses `tenex-edge publish` to publish kind:30023 proposals directly.
 
-<!-- citations: [^56f9f-9] [^40a4d-19] -->
+Current agent communication uses project chat (`chat write` / `chat read`) and per-session room chat. Any future threaded conversation browser needs a new current design rather than depending on the old `threads`, `messages`, or `thread_meta` surfaces.
