@@ -1872,9 +1872,12 @@ async fn rpc_turn_end(
                     // provided by the `was_working` gate above (a retry sees the
                     // turn already ended), so the timeout only needs to bound a
                     // hung relay — not race the client retry window.
+                    // Timeout kept below the blocking hook client's 2s read
+                    // deadline so the daemon fail-opens (and replies) before the
+                    // client gives up and retries the stop hook.
                     let publish = publish_agent_reply(state, rec, reply);
                     let debug = std::env::var("TENEX_EDGE_DEBUG").is_ok();
-                    match tokio::time::timeout(std::time::Duration::from_secs(3), publish).await {
+                    match tokio::time::timeout(std::time::Duration::from_millis(1500), publish).await {
                         Ok(Ok(())) => {}
                         Ok(Err(e)) if debug => eprintln!("[daemon] agent reply publish skipped: {e:#}"),
                         Err(_) if debug => eprintln!("[daemon] agent reply publish timed out"),
@@ -3749,7 +3752,20 @@ async fn ensure_subscription(state: &Arc<DaemonState>, project: &str) -> Result<
             projs.push(project.to_string());
         }
     }
-    resubscribe(state).await
+    // Bounded: `resubscribe` opens a relay subscription, which can hang on a slow
+    // or unreachable relay. `ensure_subscription` is awaited on hook-critical
+    // paths (session_start, spawn_session), so a hang would block the editor.
+    // The intent (the project is in `subscribed_projects`) is recorded above; on
+    // timeout we fail open and the next session event re-runs resubscribe.
+    match tokio::time::timeout(std::time::Duration::from_secs(5), resubscribe(state)).await {
+        Ok(r) => r,
+        Err(_) => {
+            if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
+                eprintln!("[daemon] resubscribe timed out for {project} (best-effort)");
+            }
+            Ok(())
+        }
+    }
 }
 
 /// Rebuild and apply the union subscription across all hosted agents/projects.
