@@ -73,6 +73,11 @@ static SPAWN_DEFS: &[SpawnDef] = &[
         window_name: "opencode·tenex-edge",
         command: &["opencode"],
     },
+    SpawnDef {
+        slug: "grok",
+        window_name: "grok·tenex-edge",
+        command: &["grok"],
+    },
 ];
 
 fn find_spawn_def(slug: &str) -> Option<&'static SpawnDef> {
@@ -93,6 +98,7 @@ fn resume_shape_for_bin(bin: &str) -> Option<ResumeShape> {
         "claude" => Some(ResumeShape::AppendFlag("--resume")),
         "codex" => Some(ResumeShape::Subcommand("resume")),
         "opencode" => Some(ResumeShape::AppendFlag("--session")),
+        "grok" => Some(ResumeShape::AppendFlag("--resume")),
         _ => None,
     }
 }
