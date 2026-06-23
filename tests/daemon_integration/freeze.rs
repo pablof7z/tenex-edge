@@ -10,12 +10,15 @@ use tenex_edge::state::Store;
 const EXAMPLE_USER_NSEC: &str = "nsec1eulru7a67wt9ndqxv424kmgvd6uyd8defdxh7y9peut28f2p2vhs35m5h4";
 
 fn rewrite_config_with_user_nsec(home: &Home) {
+    // Both userNsec (operator identity) and tenexPrivateKey (management signer)
+    // set to the same key so the test exercises group ownership.
     let cfg = home.dir.path().join("config.json");
     let body = serde_json::json!({
         "whitelistedPubkeys": [],
         "backendName": "test-host",
         "relays": [shared_relay_url()],
         "userNsec": EXAMPLE_USER_NSEC,
+        "tenexPrivateKey": EXAMPLE_USER_NSEC,
     });
     std::fs::write(&cfg, serde_json::to_string(&body).unwrap()).unwrap();
 }

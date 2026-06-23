@@ -54,9 +54,16 @@ pub struct Kind1Nip29Provider {
     pub store: Arc<Mutex<Store>>,
     /// Same Arc as `DaemonState.transport` — used for lifecycle publishes only.
     pub transport: Arc<Transport>,
-    /// Operator nsec for NIP-29 group management. Optional: if unset, group
-    /// management is skipped and sessions still start (best-effort).
-    pub user_nsec: Option<String>,
+    /// Backend management signing key (`tenexPrivateKey`). The sole signer for
+    /// NIP-29 group-management events (create/lock/put-user/put-admin/remove-
+    /// user/edit-metadata). Optional: if unset, group management is skipped and
+    /// sessions still start (best-effort).
+    pub management_nsec: Option<String>,
+    /// Hex pubkey of the human operator (`userNsec`), if configured. Granted
+    /// the `admin` role in every project group by `open_project` (signed by
+    /// `management_nsec`), so the human can speak and manage their groups.
+    /// `None` when no `userNsec` is configured (no operator admin grant).
+    pub operator_pubkey: Option<String>,
     /// Whitelisted human pubkeys (hex) from config. Every owned NIP-29 group
     /// grants each of these the `admin` role, backfilled on every `open_project`
     /// by diffing against the relay's live admin set.
@@ -71,7 +78,8 @@ impl Kind1Nip29Provider {
     pub fn new(
         transport: Arc<Transport>,
         store: Arc<Mutex<Store>>,
-        user_nsec: Option<String>,
+        management_nsec: Option<String>,
+        operator_pubkey: Option<String>,
         whitelisted_pubkeys: Vec<String>,
         relays: &[String],
     ) -> Self {
@@ -83,7 +91,8 @@ impl Kind1Nip29Provider {
             wire,
             store,
             transport,
-            user_nsec,
+            management_nsec,
+            operator_pubkey,
             whitelisted_pubkeys,
             provider_instance,
         }
@@ -334,23 +343,23 @@ impl Kind1Nip29Provider {
     {
         use nostr_sdk::prelude::Keys;
         progress(format!("using project group {project}"));
-        let nsec = match &self.user_nsec {
+        let nsec = match &self.management_nsec {
             Some(n) => n.clone(),
             None => {
-                progress("no signing key (userNsec/tenexPrivateKey) configured; skipping group management".to_string());
+                progress("no signing key (tenexPrivateKey) configured; skipping group management".to_string());
                 if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
                     eprintln!(
-                        "[daemon] no signing key (userNsec/tenexPrivateKey) configured; skipping NIP-29 group management for {project}"
+                        "[daemon] no signing key (tenexPrivateKey) configured; skipping NIP-29 group management for {project}"
                     );
                 }
                 return;
             }
         };
-        let user_keys = match Keys::parse(&nsec) {
+        let mgmt_keys = match Keys::parse(&nsec) {
             Ok(k) => k,
             Err(e) => {
-                progress("userNsec parse failed; skipping group management".to_string());
-                eprintln!("[daemon] userNsec parse failed; skipping group management: {e}");
+                progress("tenexPrivateKey parse failed; skipping group management".to_string());
+                eprintln!("[daemon] tenexPrivateKey parse failed; skipping group management: {e}");
                 return;
             }
         };
@@ -369,7 +378,7 @@ impl Kind1Nip29Provider {
             progress("group not found; publishing kind:9007 create-group".to_string());
             let created = match crate::fabric::nip29::lifecycle::group_create(project) {
                 Ok(b) => {
-                    self.publish_group_management(b, &user_keys, "9007 create-group")
+                    self.publish_group_management(b, &mgmt_keys, "9007 create-group")
                         .await
                 }
                 Err(_) => false,
@@ -383,7 +392,7 @@ impl Kind1Nip29Provider {
                 progress("publishing kind:9002 closed/public group lock".to_string());
                 match crate::fabric::nip29::lifecycle::group_lock_closed(project) {
                     Ok(b) => {
-                        self.publish_group_management(b, &user_keys, "9002 lock-closed")
+                        self.publish_group_management(b, &mgmt_keys, "9002 lock-closed")
                             .await
                     }
                     Err(_) => false,
@@ -410,7 +419,7 @@ impl Kind1Nip29Provider {
             // rejected by the relay. Surface a clear, actionable error and bail out
             // of the membership-provisioning steps (fail-open: the session still
             // starts, but we won't spam the relay with guaranteed-rejected events).
-            let mgmt_pubkey = user_keys.public_key().to_hex();
+            let mgmt_pubkey = mgmt_keys.public_key().to_hex();
             if roles.get(&mgmt_pubkey).map(String::as_str) != Some("admin") {
                 let short = crate::util::pubkey_short(&mgmt_pubkey);
                 eprintln!(
@@ -426,20 +435,27 @@ impl Kind1Nip29Provider {
             }
         }
 
-        // 2. Backfill admins: every whitelisted human pubkey MUST hold the admin
-        //    role. Diff against the relay's live 39001 set (above) so a re-run
-        //    repairs any pubkey that is missing or only a plain member.
-        for pk in &self.whitelisted_pubkeys {
-            if roles.get(pk).map(String::as_str) == Some("admin") {
+        // 2. Backfill admins. The admin set is: every whitelisted human pubkey
+        //    PLUS the operator's pubkey (from `userNsec`), so the human can
+        //    speak and manage their groups. Signed by `tenexPrivateKey`.
+        //    Diff against the relay's live 39001 set so a re-run repairs any
+        //    pubkey that is missing or only a plain member.
+        let mut admin_set: std::collections::BTreeSet<&str> =
+            self.whitelisted_pubkeys.iter().map(String::as_str).collect();
+        if let Some(ref op_pk) = self.operator_pubkey {
+            admin_set.insert(op_pk.as_str());
+        }
+        for pk in &admin_set {
+            if roles.get(*pk).map(String::as_str) == Some("admin") {
                 continue;
             }
             progress(format!(
-                "granting admin to owner {}",
+                "granting admin to {}",
                 crate::util::pubkey_short(pk)
             ));
             let granted = match crate::fabric::nip29::lifecycle::group_put_admin(project, pk) {
                 Ok(b) => {
-                    self.publish_group_management(b, &user_keys, "9000 put-user (admin)")
+                    self.publish_group_management(b, &mgmt_keys, "9000 put-user (admin)")
                         .await
                 }
                 Err(_) => false,
@@ -476,7 +492,7 @@ impl Kind1Nip29Provider {
             let added = match crate::fabric::nip29::lifecycle::group_put_user(project, agent_pubkey)
             {
                 Ok(b) => {
-                    self.publish_group_management(b, &user_keys, "9000 put-user")
+                    self.publish_group_management(b, &mgmt_keys, "9000 put-user")
                         .await
                 }
                 Err(_) => false,
@@ -542,11 +558,11 @@ impl Kind1Nip29Provider {
 
     // ── session member management (Stage 2 / Issue #2) ───────────────────────
 
-    /// Parse the operator signing key from `user_nsec`. Returns `None` when
-    /// the nsec is absent or malformed (same skip-if-unset pattern as
+    /// Parse the management signing key (`tenexPrivateKey`). Returns `None`
+    /// when the nsec is absent or malformed (same skip-if-unset pattern as
     /// `open_project`).
-    fn parse_user_keys(&self) -> Option<nostr_sdk::prelude::Keys> {
-        self.user_nsec
+    fn parse_management_keys(&self) -> Option<nostr_sdk::prelude::Keys> {
+        self.management_nsec
             .as_ref()
             .and_then(|n| nostr_sdk::prelude::Keys::parse(n).ok())
     }
@@ -555,14 +571,14 @@ impl Kind1Nip29Provider {
     ///
     /// Best-effort: returns `true` when the relay accepted the 9000 event or
     /// treated it as a benign duplicate ("already exists"). Returns `false`
-    /// when `user_nsec` is absent, malformed, or the relay rejected the event.
+    /// when `tenexPrivateKey` is absent, malformed, or the relay rejected.
     pub async fn nip29_add_member(&self, project: &str, pubkey_hex: &str) -> bool {
-        let Some(user_keys) = self.parse_user_keys() else {
+        let Some(mgmt_keys) = self.parse_management_keys() else {
             return false;
         };
         match crate::fabric::nip29::lifecycle::group_put_user(project, pubkey_hex) {
             Ok(b) => {
-                self.publish_group_management(b, &user_keys, "9000 put-user (session)")
+                self.publish_group_management(b, &mgmt_keys, "9000 put-user (session)")
                     .await
             }
             Err(_) => false,
@@ -574,12 +590,12 @@ impl Kind1Nip29Provider {
     /// re-publishes kind:39000 with the new name. Best-effort, same
     /// accept/benign-duplicate semantics as [`nip29_add_member`].
     pub async fn nip29_set_group_name(&self, group: &str, name: &str) -> bool {
-        let Some(user_keys) = self.parse_user_keys() else {
+        let Some(mgmt_keys) = self.parse_management_keys() else {
             return false;
         };
         match crate::fabric::nip29::lifecycle::group_edit_name(group, name) {
             Ok(b) => {
-                self.publish_group_management(b, &user_keys, "9002 edit-metadata (name)")
+                self.publish_group_management(b, &mgmt_keys, "9002 edit-metadata (name)")
                     .await
             }
             Err(_) => false,
@@ -589,12 +605,12 @@ impl Kind1Nip29Provider {
     /// Admin-add `pubkey_hex` to `project` with the `admin` role. Best-effort,
     /// same accept/benign-duplicate semantics as [`nip29_add_member`].
     pub async fn nip29_add_admin(&self, project: &str, pubkey_hex: &str) -> bool {
-        let Some(user_keys) = self.parse_user_keys() else {
+        let Some(mgmt_keys) = self.parse_management_keys() else {
             return false;
         };
         match crate::fabric::nip29::lifecycle::group_put_admin(project, pubkey_hex) {
             Ok(b) => {
-                self.publish_group_management(b, &user_keys, "9000 put-user (admin)")
+                self.publish_group_management(b, &mgmt_keys, "9000 put-user (admin)")
                     .await
             }
             Err(_) => false,
@@ -605,15 +621,15 @@ impl Kind1Nip29Provider {
     /// `child_h`, then kind:9002 edit-metadata locking it closed+public, naming
     /// it `name`, and recording the `parent_h` relationship. Returns `true` when
     /// both events were accepted (or benign-duplicate). Best-effort; signed with
-    /// the management key.
+    /// the management key (`tenexPrivateKey`).
     pub async fn nip29_create_subgroup(&self, child_h: &str, name: &str, parent_h: &str) -> bool {
-        let Some(user_keys) = self.parse_user_keys() else {
+        let Some(mgmt_keys) = self.parse_management_keys() else {
             return false;
         };
         let created =
             match crate::fabric::nip29::lifecycle::group_create_subgroup(child_h, parent_h) {
                 Ok(b) => {
-                    self.publish_group_management(b, &user_keys, "9007 create-subgroup")
+                    self.publish_group_management(b, &mgmt_keys, "9007 create-subgroup")
                         .await
                 }
                 Err(_) => false,
@@ -625,7 +641,7 @@ impl Kind1Nip29Provider {
             child_h, name, parent_h,
         ) {
             Ok(b) => {
-                self.publish_group_management(b, &user_keys, "9002 lock-with-parent")
+                self.publish_group_management(b, &mgmt_keys, "9002 lock-with-parent")
                     .await
             }
             Err(_) => false,
@@ -635,17 +651,17 @@ impl Kind1Nip29Provider {
     /// Admin-remove `pubkey_hex` from `project`.
     ///
     /// Best-effort: returns `true` when the relay accepted the 9001 event or
-    /// treated it as benign. Returns `false` when `user_nsec` is absent /
+    /// treated it as benign. Returns `false` when `tenexPrivateKey` is absent /
     /// malformed or the relay rejected the event. Callers MUST mirror into the
     /// `group_members` cache regardless, since relay rejection of a remove for
     /// a non-member is benign (idempotent).
     pub async fn nip29_remove_member(&self, project: &str, pubkey_hex: &str) -> bool {
-        let Some(user_keys) = self.parse_user_keys() else {
+        let Some(mgmt_keys) = self.parse_management_keys() else {
             return false;
         };
         match crate::fabric::nip29::lifecycle::group_remove_user(project, pubkey_hex) {
             Ok(b) => {
-                self.publish_group_management(b, &user_keys, "9001 remove-user (session)")
+                self.publish_group_management(b, &mgmt_keys, "9001 remove-user (session)")
                     .await
             }
             Err(_) => false,

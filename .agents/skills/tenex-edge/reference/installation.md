@@ -157,14 +157,16 @@ Fields tenex-edge reads (all optional):
 | `relays` | NIP-29 group relays. | `["wss://nip29.f7z.io"]` |
 | `indexerRelay` | Relay for kind:0 profile discovery/publishing. | `"wss://purplepag.es"` |
 | `backendName` | Human label for this host (shown as the machine in identities). | system hostname |
-| `userNsec` | Operator signing key. Used for session-key derivation and NIP-29 group management. | — |
-| `tenexPrivateKey` | Fallback backend/management key when `userNsec` is absent. | — |
+| `userNsec` | Operator signing key. Used for (1) signing user-prompt events and (2) deriving the operator's pubkey to grant it admin in every project group. | — |
+| `tenexPrivateKey` | Backend's own signing key for NIP-29 group management, session-key derivation, and backend identity. | — |
 
-Key resolution (see `src/config.rs`): session derivation and group management
-prefer `userNsec`; the backend identity prefers `tenexPrivateKey`. If only
-`tenexPrivateKey` is set, all three roles collapse onto it (back-compat). For the
-security rationale on these keys, see
-`docs/wiki/guides/tenex-edge-key-security.md`.
+Key resolution (see `src/config.rs`): group management, session derivation, and
+backend identity all use `tenexPrivateKey` only. `userNsec` is used solely for
+user-prompt signing and granting the operator's pubkey the admin role in groups
+(signed by `tenexPrivateKey`). If only `tenexPrivateKey` is set, it covers
+management + backend; `userNsec` is optional and only needed when the human
+wants to publish prompts as themselves. For the security rationale on these
+keys, see `docs/wiki/guides/tenex-edge-key-security.md`.
 
 Minimal example `~/.tenex/config.json`:
 

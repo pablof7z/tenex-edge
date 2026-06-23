@@ -107,10 +107,10 @@ pub struct DaemonState {
     /// in `rpc_session_end` / `spawn_session` cleanup / crash-GC are harmless
     /// no-ops. `keys_for_session` always returns `None` in this slice.
     session_keys: Mutex<HashMap<String, Keys>>,
-    /// Hex pubkey of this backend's identity (pubkey of `tenexPrivateKey`,
-    /// falling back to `userNsec`). Added as an admin to every group we create
+    /// Hex pubkey of this backend's identity (pubkey of `tenexPrivateKey`;
+    /// no `userNsec` fallback). Added as an admin to every group we create
     /// and the address the subgroup orchestration listener matches `add` tags
-    /// against. `None` only when no signing key is configured at all.
+    /// against. `None` only when no `tenexPrivateKey` is configured.
     backend_pubkey: Option<String>,
 }
 
@@ -199,16 +199,25 @@ pub async fn run() -> Result<()> {
     );
 
     let store = Arc::new(Mutex::new(Store::open(&store_path())?));
+    // Operator pubkey (from `userNsec`) — granted the `admin` role in every
+    // project group by `open_project` (signed by `tenexPrivateKey`). `None` when
+    // no `userNsec` is configured (no operator admin grant).
+    let operator_pubkey: Option<String> = cfg
+        .user_nsec()
+        .and_then(|n| Keys::parse(n).ok())
+        .map(|k| k.public_key().to_hex());
     let provider = Arc::new(Kind1Nip29Provider::new(
         transport.clone(),
         store.clone(),
         cfg.management_nsec().cloned(),
+        operator_pubkey,
         cfg.whitelisted_pubkeys.clone(),
         &cfg.relays, // provider_instance hashes main relays only, not indexer
     ));
-    // Backend identity: pubkey of tenexPrivateKey (falling back to userNsec).
-    // Used as a copied admin on every group we create and as the orchestration
-    // listener's `add`-tag matcher.
+    // Backend identity: pubkey of `tenexPrivateKey` (no `userNsec` fallback —
+    // the operator key is a human identity, not a backend identity). Used as a
+    // copied admin on every group we create and as the orchestration listener's
+    // `add`-tag matcher.
     let backend_pubkey: Option<String> = cfg
         .backend_nsec()
         .and_then(|n| Keys::parse(n).ok())
@@ -1255,7 +1264,8 @@ async fn rpc_user_prompt(
     }
 
     // No operator key → nothing to sign with; fail open (session still runs).
-    let Some(nsec) = state.cfg.management_nsec() else {
+    // `userNsec` is the ONLY signer for user prompts — the human is speaking.
+    let Some(nsec) = state.cfg.user_nsec() else {
         return Ok(serde_json::json!({ "skipped": "userNsec unset" }));
     };
     let op_keys = Keys::parse(nsec).context("parsing operator key")?;
@@ -2005,7 +2015,7 @@ async fn rpc_project_edit(
     let nsec = state
         .cfg
         .management_nsec()
-        .ok_or_else(|| anyhow::anyhow!("no signing key (userNsec/tenexPrivateKey) set"))?;
+        .ok_or_else(|| anyhow::anyhow!("no signing key (tenexPrivateKey) set"))?;
     let user_keys = Keys::parse(nsec).context("parsing signing key")?;
 
     // NIP-29 edit-metadata: the wire shape lives in the nip29 lifecycle module.
@@ -2104,6 +2114,12 @@ struct StatuslineParams {
     cwd: Option<String>,
     #[serde(default)]
     agent: Option<String>,
+    /// Tmux pane id (e.g. `%5`) the statusline is rendering for. When present
+    /// and the pane is bound to a live session via `session_endpoints`, that
+    /// session wins over the agent+cwd fallback — so two panes of the same
+    /// agent in the same project no longer collapse to one status bar.
+    #[serde(default)]
+    pane: Option<String>,
 }
 
 /// `statusline`: everything the host's status bar renders, in one pure-read RPC.
@@ -2258,7 +2274,7 @@ async fn rpc_project_add(
     let nsec = state
         .cfg
         .management_nsec()
-        .ok_or_else(|| anyhow::anyhow!("no signing key (userNsec/tenexPrivateKey) set"))?;
+        .ok_or_else(|| anyhow::anyhow!("no signing key (tenexPrivateKey) set"))?;
     let user_keys = Keys::parse(nsec).context("parsing signing key")?;
 
     let pubkey_hex = resolve_project_member_pubkey_hex(&p.pubkey).await?;
@@ -2300,7 +2316,7 @@ async fn rpc_project_remove(
     let nsec = state
         .cfg
         .management_nsec()
-        .ok_or_else(|| anyhow::anyhow!("no signing key (userNsec/tenexPrivateKey) set"))?;
+        .ok_or_else(|| anyhow::anyhow!("no signing key (tenexPrivateKey) set"))?;
     let user_keys = Keys::parse(nsec).context("parsing signing key")?;
 
     let pubkey_hex = resolve_pubkey_hex(&p.pubkey).await?;
@@ -2445,7 +2461,7 @@ async fn rpc_channels_create(
     let nsec = state
         .cfg
         .management_nsec()
-        .ok_or_else(|| anyhow::anyhow!("no signing key (userNsec/tenexPrivateKey) set"))?;
+        .ok_or_else(|| anyhow::anyhow!("no signing key (tenexPrivateKey) set"))?;
     let mgmt_keys = Keys::parse(nsec).context("parsing signing key")?;
 
     // Resolve each backend token to a hex pubkey. Accepts explicit
@@ -2513,8 +2529,7 @@ async fn rpc_channels_create(
     }
     if let Some(op) = state
         .cfg
-        .user_nsec
-        .as_ref()
+        .user_nsec()
         .and_then(|n| Keys::parse(n).ok())
     {
         admin_set.insert(op.public_key().to_hex());
