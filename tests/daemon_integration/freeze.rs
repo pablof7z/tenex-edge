@@ -130,4 +130,3 @@ fn freeze_39000_39002_idempotency_no_member_duplication() {
 
     stop_daemon(&home);
 }
-

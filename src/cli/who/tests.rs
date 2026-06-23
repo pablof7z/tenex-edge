@@ -537,7 +537,6 @@ fn render_whoami_card_names_self_and_addressing() {
         "host": "laptop",
         "rel_cwd": "worktree1",
         "pubkey": "deadbeef",
-        "session_pubkey": "5e5510n",
         "npub": "npub1xyz",
         "is_member": true,
         "working": true,
@@ -560,10 +559,10 @@ fn render_whoami_card_names_self_and_addressing() {
         out.contains("| Host | laptop [worktree1] |"),
         "host+cwd: {out}"
     );
-    // The hex session pubkey is shown (the wire address), never the npub.
+    // The durable agent hex pubkey is shown (the wire address), never the npub.
     assert!(
-        out.contains("| Pubkey | 5e5510n |"),
-        "hex session pubkey shown, not npub: {out}"
+        out.contains("| Pubkey | deadbeef |"),
+        "hex durable pubkey shown, not npub: {out}"
     );
     assert!(
         !out.contains("npub1xyz"),

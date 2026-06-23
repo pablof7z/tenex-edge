@@ -232,9 +232,9 @@ pub fn load_who_snapshot(
                 rel_cwd: s.rel_cwd.clone(),
                 remote: false,
                 attachable: tmux_sessions.contains(sid),
-                pubkey: store
-                    .session_pubkey_for_session(sid)
-                    .unwrap_or_else(|| s.agent_pubkey.clone()),
+                // The durable agent key is the session's wire identity now;
+                // never prefer a stale per-session derived pubkey.
+                pubkey: s.agent_pubkey.clone(),
             });
         } else {
             other_agents

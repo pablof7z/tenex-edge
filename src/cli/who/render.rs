@@ -78,20 +78,14 @@ pub(super) fn render_whoami(v: &serde_json::Value) -> String {
     let host = s("host");
     let rel_cwd = s("rel_cwd");
     let pubkey = s("pubkey");
-    let session_pubkey = s("session_pubkey");
     let working = v.get("working").and_then(|x| x.as_bool()).unwrap_or(false);
     let title = s("status");
     let is_member = v.get("is_member").and_then(|x| x.as_bool()).unwrap_or(true);
     let pending = v.get("pending").and_then(|x| x.as_u64()).unwrap_or(0);
 
     let status = status_plain(&title, "", working);
-    // Show the hex session pubkey (the wire address others route to), falling
-    // back to the durable agent pubkey when no session key was derived. Never npub.
-    let key = if session_pubkey.is_empty() {
-        pubkey
-    } else {
-        session_pubkey
-    };
+    // The durable agent pubkey is the wire address others route to. Never npub.
+    let key = pubkey;
     let dir = if rel_cwd.trim().is_empty() || rel_cwd == "." {
         host.clone()
     } else {

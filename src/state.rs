@@ -1743,12 +1743,22 @@ impl Store {
                AND (first_seen>=?2 OR updated_at>=?2 OR (last_seen < ?3 AND last_seen+?4 >= ?2))"
         );
         let now_minus_ttl = now.saturating_sub(ttl);
-        // Track which agent pubkeys the local table already emitted, so a peer echo
-        // of one of our own sessions (our kind:30315 round-tripping back from the
-        // relay into peer_session_state) is not surfaced a second time. Keyed on
-        // agent_pubkey since peer rows no longer carry a session_id (issue #5 §4).
+        // Self-echo dedup must cover EVERY local session's pubkey in this
+        // project, not only those inside the delta window: a local session that
+        // hasn't changed since the cursor still round-trips a fresh kind:30315
+        // into peer_session_state, and that echo must never surface to ourselves.
+        // Keyed on agent_pubkey since peer rows no longer carry a session_id (#5 §4).
         let mut local_pubkeys: std::collections::HashSet<String> =
             std::collections::HashSet::new();
+        {
+            let mut stmt = self
+                .conn
+                .prepare("SELECT agent_pubkey FROM session_state WHERE project=?1")?;
+            let rows = stmt.query_map(params![project], |r| r.get::<_, String>(0))?;
+            for pk in rows.filter_map(|r| r.ok()) {
+                local_pubkeys.insert(pk);
+            }
+        }
         {
             let mut stmt = self.conn.prepare(&local_sql)?;
             let rows = stmt.query_map(
@@ -1756,10 +1766,6 @@ impl Store {
                 row_to_session_state,
             )?;
             for snap in rows.filter_map(|r| r.ok()) {
-                // Track our own pubkey BEFORE the exclude-skip: even when the
-                // viewer's own local row is excluded from output, its pubkey must
-                // still dedup the peer echo of that same session below.
-                local_pubkeys.insert(snap.agent_pubkey.clone());
                 if exclude == Some(snap.session_id.as_str()) {
                     continue;
                 }

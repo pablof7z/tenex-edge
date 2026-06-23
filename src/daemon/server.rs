@@ -80,7 +80,10 @@ pub struct DaemonState {
     shutdown: Notify,
     /// In-memory peer-session tracking for join/leave derivation.
     /// key = session_id. Populated on first-seen presence; cleared on leave.
-    peer_sessions: Mutex<HashMap<String, PeerTracked>>,
+    /// Peer presence join/leave tracking, keyed by `(pubkey, project)` — peers
+    /// no longer carry a session id, and a durable agent can be present in
+    /// several projects at once, so identity is `(pubkey, group)`.
+    peer_sessions: Mutex<HashMap<(String, String), PeerTracked>>,
     /// Bounded first-sight tracking of native event ids: the relay pool
     /// notifies once per matching subscription, so the same event arrives many
     /// times. Set + insertion-order queue, capped at SEEN_EVENTS_CAP.
@@ -1365,13 +1368,13 @@ fn resolve_recipient(
 ) -> Result<ResolvedRecipient> {
     use crate::idref::{parse_ref, Ref};
 
+    // The durable agent key is the session's wire identity; a session target
+    // still scopes LOCAL delivery (target_session) but p-tags the durable key,
+    // never a stale per-session derived pubkey.
     let session_recipient =
-        |store: &Store, session_id: String, fallback_pk: String, project: String| {
-            let pubkey = store
-                .session_pubkey_for_session(&session_id)
-                .unwrap_or(fallback_pk);
+        |_store: &Store, session_id: String, durable_pk: String, project: String| {
             ResolvedRecipient {
-                pubkey,
+                pubkey: durable_pk,
                 target_session: Some(session_id),
                 project,
             }
@@ -1935,7 +1938,6 @@ fn rpc_whoami(state: &Arc<DaemonState>, params: &serde_json::Value) -> Result<se
             .peek_chat_mentions(&rec.session_id)
             .unwrap_or_default()
             .len();
-        let session_pubkey = s.session_pubkey_for_session(&rec.session_id);
         Ok(serde_json::json!({
             "agent": rec.agent_slug,
             "session_id": rec.session_id,
@@ -1944,7 +1946,6 @@ fn rpc_whoami(state: &Arc<DaemonState>, params: &serde_json::Value) -> Result<se
             "host": host,
             "rel_cwd": rec.rel_cwd,
             "pubkey": rec.agent_pubkey,
-            "session_pubkey": session_pubkey,
             "npub": npub,
             "is_member": is_member,
             "working": working,
@@ -3010,14 +3011,14 @@ fn derive_and_emit_tail_events(
             if hosted.contains(&s.agent.pubkey) {
                 return;
             }
-            // The unified per-session Status replaces the old presence heartbeat,
-            // so first-sight of a session here is the peer "joined" signal.
-            let session_id = s.session_id.as_str().to_owned();
+            // The unified Status replaces the old presence heartbeat, so
+            // first-sight of a (pubkey, project) here is the peer "joined" signal.
+            let key = (s.agent.pubkey.clone(), s.project.clone());
             let is_new = {
                 let mut map = state.peer_sessions.lock().unwrap();
-                if !map.contains_key(&session_id) {
+                if !map.contains_key(&key) {
                     map.insert(
-                        session_id.clone(),
+                        key.clone(),
                         PeerTracked {
                             first_seen: now,
                             project: s.project.clone(),
@@ -3036,7 +3037,7 @@ fn derive_and_emit_tail_events(
                     project: s.project.clone(),
                     agent: s.agent.slug.clone(),
                     host: s.host.clone(),
-                    session: session_id,
+                    session: s.agent.pubkey.clone(),
                     rel_cwd: s.rel_cwd.clone(),
                 });
             }
@@ -3126,18 +3127,18 @@ fn spawn_pruner(state: Arc<DaemonState>) {
 
             // Identify which peer sessions will be pruned by checking the map
             // against sessions that are about to expire.
-            let expired_sessions: Vec<String> = {
+            let tracked_keys: Vec<(String, String)> = {
                 let map = state.peer_sessions.lock().unwrap();
-                // We'll emit Leave for sessions in our map whose last_seen is
-                // older than `before`. We need to cross-reference with the store.
+                // We'll emit Leave for (pubkey, project) pairs in our map that are
+                // no longer live in the store. Cross-reference below.
                 map.keys().cloned().collect()
             };
 
-            // Query which of those are actually expired in the store.
-            let still_alive: std::collections::HashSet<String> = state
+            // Which (pubkey, project) pairs are still live in the store.
+            let still_alive: std::collections::HashSet<(String, String)> = state
                 .with_store(|s| s.list_peer_sessions(None, before).unwrap_or_default())
                 .into_iter()
-                .map(|p| p.session_id)
+                .map(|p| (p.pubkey, p.project))
                 .collect();
 
             // Prune from DB.
@@ -3145,29 +3146,29 @@ fn spawn_pruner(state: Arc<DaemonState>) {
                 let _ = s.prune_peer_sessions(before);
             });
 
-            // Emit Leave for sessions that were in our map but are now expired.
-            let to_leave: Vec<(String, PeerTracked)> = {
+            // Emit Leave for pairs that were in our map but are now expired.
+            let to_leave: Vec<((String, String), PeerTracked)> = {
                 let mut map = state.peer_sessions.lock().unwrap();
-                let expired: Vec<String> = expired_sessions
+                let expired: Vec<(String, String)> = tracked_keys
                     .into_iter()
-                    .filter(|sid| !still_alive.contains(sid))
+                    .filter(|k| !still_alive.contains(k))
                     .collect();
                 let mut leaves = Vec::new();
-                for sid in expired {
-                    if let Some(tracked) = map.remove(&sid) {
-                        leaves.push((sid, tracked));
+                for key in expired {
+                    if let Some(tracked) = map.remove(&key) {
+                        leaves.push((key, tracked));
                     }
                 }
                 leaves
             };
-            for (sid, tracked) in to_leave {
+            for ((pubkey, _project), tracked) in to_leave {
                 let online_s = now.saturating_sub(tracked.first_seen);
                 state.emit_tail(TailEvent::Leave {
                     ts: now,
                     project: tracked.project,
                     agent: tracked.slug,
                     host: tracked.host,
-                    session: sid,
+                    session: pubkey,
                     online_s,
                 });
             }
