@@ -214,6 +214,7 @@ mod tests {
                     created_at,
                     alive: true,
                     rel_cwd: String::new(),
+                    channel: String::new(),
                 })
                 .unwrap();
         }

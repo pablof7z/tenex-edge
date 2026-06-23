@@ -793,6 +793,7 @@ mod turn_context_tests {
             created_at: 1,
             alive: true,
             rel_cwd: String::new(),
+            channel: String::new(),
         }
     }
 

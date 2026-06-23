@@ -898,6 +898,7 @@ async fn rpc_session_start(
             agent_slug: p.agent.clone(),
             agent_pubkey: id.pubkey_hex(),
             project: project.clone(),
+            channel: p.channel.clone().unwrap_or_default(),
             host: state.host.clone(),
             child_pid: None,
             watch_pid: p.watch_pid,
@@ -1266,7 +1267,7 @@ async fn rpc_user_prompt(
         p.env_session.as_deref(),
         p.cwd.as_deref(),
         p.agent.as_deref(),
-        params.get("channel").and_then(|v| v.as_str()),
+        None,
     )?;
 
     // Only mirror prompts into a per-session room. A human start with no resume
@@ -1331,7 +1332,7 @@ async fn rpc_chat_write(
         p.env_session.as_deref(),
         p.cwd.as_deref(),
         p.agent.as_deref(),
-        params.get("channel").and_then(|v| v.as_str()),
+        None,
     )?;
     let id = identity::load_or_create(&config::edge_home(), &rec.agent_slug, now_secs())?;
     let from_pubkey = id.pubkey_hex();
@@ -1499,7 +1500,7 @@ async fn rpc_propose(
         p.env_session.as_deref(),
         p.cwd.as_deref(),
         p.agent.as_deref(),
-        params.get("channel").and_then(|v| v.as_str()),
+        None,
     )
     .ok();
     let cwd = p
@@ -1826,7 +1827,7 @@ fn rpc_turn_check(
         p.env_session.as_deref(),
         p.cwd.as_deref(),
         p.agent.as_deref(),
-        params.get("channel").and_then(|v| v.as_str()),
+        None,
     )?;
     let now = now_secs();
     // Rate-limit the sibling-session delta to at most once per 60s per session
@@ -2119,7 +2120,7 @@ fn rpc_statusline(
         p.env_session.as_deref(),
         p.cwd.as_deref(),
         p.agent.as_deref(),
-        params.get("channel").and_then(|v| v.as_str()),
+        None,
     )?;
     let now = now_secs();
     let host = state.host.clone();
@@ -2191,7 +2192,7 @@ fn rpc_whoami(state: &Arc<DaemonState>, params: &serde_json::Value) -> Result<se
         p.env_session.as_deref(),
         p.cwd.as_deref(),
         p.agent.as_deref(),
-        params.get("channel").and_then(|v| v.as_str()),
+        None,
         false,
     )?;
     let now = now_secs();
@@ -2573,7 +2574,7 @@ async fn rpc_channels_create(
         params.get("env_session").and_then(|v| v.as_str()),
         params.get("cwd").and_then(|v| v.as_str()),
         params.get("agent").and_then(|v| v.as_str()),
-        params.get("channel").and_then(|v| v.as_str()),
+        None,
     )
     .ok()
     .map(|rec| rec.agent_pubkey);
@@ -2689,11 +2690,10 @@ fn preorder_rooms(
     out
 }
 
-/// `channels_switch`: update the session's NIP-29 channel binding (`project`
+/// `channels_switch`: update the session's NIP-29 channel binding (`channel`
 /// column) to the supplied `h` value. This lets a running session move to a
-/// different subgroup room without restarting. The new channel must already
-/// exist. Best-effort: the caller is responsible for ensuring membership in the
-/// target channel before or after switching.
+/// different subgroup room without restarting. Fails if the channel does not
+/// exist in local state.
 async fn rpc_channels_switch(
     state: &Arc<DaemonState>,
     params: &serde_json::Value,
@@ -2720,13 +2720,18 @@ async fn rpc_channels_switch(
         p.env_session.as_deref(),
         p.cwd.as_deref(),
         p.agent.as_deref(),
-        params.get("channel").and_then(|v| v.as_str()),
+        None,
     )?;
-    let prev_channel = rec.project.clone();
     let new_channel = p.channel.clone();
+    // Validate the channel exists in local state before switching.
+    let exists: bool = state.with_store(|s| Ok::<bool, anyhow::Error>(s.channel_exists(&new_channel)))?;
+    if !exists {
+        anyhow::bail!("channel {:?} does not exist", new_channel);
+    }
+    let prev_channel = rec.channel.clone();
     state.with_store(|s| {
         s.upsert_session(&crate::state::SessionRecord {
-            project: new_channel.clone(),
+            channel: new_channel.clone(),
             ..rec.clone()
         })
     })?;
