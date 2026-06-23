@@ -85,7 +85,7 @@ impl Client {
                 continue; // progress frame — wait for the terminal ok/error
             }
             if let Some(err) = resp.error {
-                bail!("daemon error [{}]: {}", err.code, err.message);
+                bail!("{}", err.message);
             }
             return resp.ok.context("daemon returned neither ok nor error");
         }
@@ -117,7 +117,7 @@ impl Client {
                 continue;
             }
             if let Some(err) = resp.error {
-                bail!("daemon error [{}]: {}", err.code, err.message);
+                bail!("{}", err.message);
             }
             return resp.ok.context("daemon returned neither ok nor error");
         }
@@ -140,7 +140,7 @@ impl Client {
                 continue;
             }
             if let Some(err) = frame.error {
-                bail!("daemon error [{}]: {}", err.code, err.message);
+                bail!("{}", err.message);
             }
             if frame.end.unwrap_or(false) {
                 return Ok(());

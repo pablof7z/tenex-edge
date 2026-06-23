@@ -1368,6 +1368,28 @@ impl Store {
                 obs.resume_id.clone().unwrap_or_default(),
             ],
         )?;
+        // Keep `sessions` in sync: rpc_session_start also calls upsert_session, but
+        // the reassert path (user-prompt-submit → register_or_reassert_session) does
+        // not, leaving get_session_exact unable to find the canonical row. Also set
+        // last_seen so list_my_live_sessions (last_seen>=?) finds the row before the
+        // rpc_session_start touch_session arrives.
+        self.conn.execute(
+            "INSERT INTO sessions
+               (session_id, agent_slug, agent_pubkey, project, host,
+                child_pid, watch_pid, created_at, alive, rel_cwd, last_seen)
+             VALUES (?1,?2,?3,?4,?5, NULL,?6,?7,1,?8,?7)
+             ON CONFLICT(session_id) DO NOTHING",
+            params![
+                session_id,
+                obs.agent_slug,
+                obs.agent_pubkey,
+                obs.project,
+                obs.host,
+                obs.watch_pid,
+                obs.observed_at,
+                obs.rel_cwd,
+            ],
+        )?;
         self.enqueue_status_outbox(session_id, 1, obs.observed_at)
     }
 

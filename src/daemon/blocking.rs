@@ -22,7 +22,7 @@ pub fn call(method: &str, params: serde_json::Value) -> Result<serde_json::Value
     for _ in 0..5 {
         match try_call(method, &params) {
             Ok(Outcome::Ok(v)) => return Ok(v),
-            Ok(Outcome::Err(code, msg)) => bail!("daemon error [{code}]: {msg}"),
+            Ok(Outcome::Err(_code, msg)) => bail!("{msg}"),
             Ok(Outcome::SkewExit) => {
                 std::thread::sleep(Duration::from_millis(200));
                 spawn_if_absent()?;
@@ -44,7 +44,7 @@ pub fn call(method: &str, params: serde_json::Value) -> Result<serde_json::Value
 pub fn call_no_spawn(method: &str, params: serde_json::Value) -> Result<serde_json::Value> {
     match try_call(method, &params)? {
         Outcome::Ok(v) => Ok(v),
-        Outcome::Err(code, msg) => bail!("daemon error [{code}]: {msg}"),
+        Outcome::Err(_code, msg) => bail!("{msg}"),
         Outcome::SkewExit => bail!("daemon protocol skew; awaiting respawn"),
     }
 }
