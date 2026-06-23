@@ -228,6 +228,9 @@ pub(crate) fn render_chat_block(
             mention,
             row.body
         );
+        if !row.chat_event_id.is_empty() {
+            let _ = write!(text, "\n(message id: {})", pubkey_short(&row.chat_event_id));
+        }
     }
     text
 }
