@@ -27,6 +27,10 @@ struct HostDef {
     agent_slug: &'static str,
     /// JSON fields tried in order to extract the session id from stdin.
     session_id_fields: &'static [&'static str],
+    /// Environment variable to check when all session_id_fields are absent or
+    /// empty. Used by harnesses (e.g. Grok) that inject the session id via
+    /// process environment rather than stdin JSON.
+    session_id_env: Option<&'static str>,
     /// JSON field for the live transcript path (None if the harness omits it).
     transcript_field: Option<&'static str>,
     /// Output format for context injection hooks.
@@ -51,6 +55,7 @@ static HOOK_HOSTS: &[HostDef] = &[
         name: "claude-code",
         agent_slug: "claude",
         session_id_fields: &["session_id"],
+        session_id_env: None,
         transcript_field: Some("transcript_path"),
         output_format: HookOutputFormat::PlainText,
         pid_search: Some("claude"),
@@ -67,6 +72,7 @@ static HOOK_HOSTS: &[HostDef] = &[
             "thread_id",
             "threadId",
         ],
+        session_id_env: None,
         transcript_field: Some("transcript_path"),
         output_format: HookOutputFormat::JsonSystemMessage,
         pid_search: Some("codex"),
@@ -83,10 +89,26 @@ static HOOK_HOSTS: &[HostDef] = &[
         name: "opencode",
         agent_slug: "opencode",
         session_id_fields: &["session_id"],
+        session_id_env: None,
         transcript_field: Some("transcript_path"),
         output_format: HookOutputFormat::PlainText,
         pid_search: None,
         echo_session_id: true,
+    },
+    HostDef {
+        // Grok Build (xAI) injects the session id via the GROK_SESSION_ID
+        // environment variable rather than the JSON payload, so we fall back to
+        // that env var when the JSON fields are absent. The workspace root is
+        // available as GROK_WORKSPACE_ROOT but current_dir() already points
+        // there when the hook is invoked, so no special cwd handling is needed.
+        name: "grok",
+        agent_slug: "grok",
+        session_id_fields: &["session_id", "sessionId"],
+        session_id_env: Some("GROK_SESSION_ID"),
+        transcript_field: None,
+        output_format: HookOutputFormat::PlainText,
+        pid_search: Some("grok"),
+        echo_session_id: false,
     },
 ];
 
@@ -167,6 +189,10 @@ async fn hook_dispatch(
             obj.and_then(|o| o.get(*f))
                 .and_then(|v| v.as_str())
                 .map(str::to_string)
+        })
+        .or_else(|| {
+            host.session_id_env
+                .and_then(|k| std::env::var(k).ok().filter(|s| !s.is_empty()))
         })
         .unwrap_or_default();
 

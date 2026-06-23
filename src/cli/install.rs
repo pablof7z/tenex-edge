@@ -61,6 +61,12 @@ fn harnesses() -> Vec<Harness> {
             config_path: home.join(".config/opencode/plugin/tenex-edge.ts"),
             detected: home.join(".config/opencode").exists() || bin_on_path("opencode"),
         },
+        Harness {
+            id: "grok",
+            display: "Grok Build",
+            config_path: home.join(".grok/user-settings.json"),
+            detected: home.join(".grok").exists() || bin_on_path("grok"),
+        },
     ]
 }
 
@@ -126,10 +132,30 @@ fn codex_hook_entries() -> Vec<(&'static str, serde_json::Value)> {
     ]
 }
 
+fn grok_hook_entries() -> Vec<(&'static str, serde_json::Value)> {
+    let mk = |ty: &str, timeout: u64| {
+        serde_json::json!({
+            "hooks": [{
+                "type": "command",
+                "command": sig("grok", ty),
+                "timeout": timeout,
+            }]
+        })
+    };
+    vec![
+        ("SessionStart", mk("session-start", 10)),
+        ("SessionEnd", mk("session-end", 10)),
+        ("UserPromptSubmit", mk("user-prompt-submit", 30)),
+        ("PostToolUse", mk("post-tool-use", 10)),
+        ("Stop", mk("stop", 10)),
+    ]
+}
+
 fn hook_entries(h: &Harness) -> Vec<(&'static str, serde_json::Value)> {
     match h.id {
         "claude-code" => claude_hook_entries(),
         "codex" => codex_hook_entries(),
+        "grok" => grok_hook_entries(),
         _ => Vec::new(),
     }
 }
@@ -138,6 +164,7 @@ fn host_for_harness(h: &Harness) -> &'static str {
     match h.id {
         "claude-code" => "claude-code",
         "codex" => "codex",
+        "grok" => "grok",
         _ => h.id,
     }
 }
@@ -265,7 +292,7 @@ fn is_installed(h: &Harness) -> bool {
                     .map(|s| s.contains("tenex-edge") && s.contains("opencode"))
                     .unwrap_or(false)
         }
-        "claude-code" | "codex" => is_json_harness_installed(h),
+        "claude-code" | "codex" | "grok" => is_json_harness_installed(h),
         _ => false,
     }
 }
@@ -294,7 +321,7 @@ pub(super) async fn install(opts: InstallOpts) -> Result<()> {
     for h in selected {
         println!("\n{} {}{flag}", verb.bold(), h.display.cyan().bold());
         match h.id {
-            "claude-code" | "codex" => install_json_harness(h, &opts)?,
+            "claude-code" | "codex" | "grok" => install_json_harness(h, &opts)?,
             "opencode" => install_opencode(h, &opts)?,
             _ => {}
         }
