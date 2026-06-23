@@ -32,6 +32,9 @@ pub struct SessionRecord {
     pub alive: bool,
     /// Project-relative working directory advertised on presence/status.
     pub rel_cwd: String,
+    /// User-chosen NIP-29 subgroup h-tag the session is operating within
+    /// (distinct from `project`, which is the per-session room h-tag).
+    pub channel: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -143,7 +146,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     last_seen     INTEGER NOT NULL DEFAULT 0,
     transcript_path TEXT,
     alive         INTEGER NOT NULL DEFAULT 1,
-    rel_cwd       TEXT NOT NULL DEFAULT ''
+    rel_cwd       TEXT NOT NULL DEFAULT '',
+    channel       TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS profiles (
     pubkey     TEXT PRIMARY KEY,
@@ -473,6 +477,10 @@ impl Store {
             [],
         );
         let _ = conn.execute(
+            "ALTER TABLE sessions ADD COLUMN channel TEXT NOT NULL DEFAULT ''",
+            [],
+        );
+        let _ = conn.execute(
             "ALTER TABLE peer_sessions ADD COLUMN rel_cwd TEXT NOT NULL DEFAULT ''",
             [],
         );
@@ -566,14 +574,14 @@ impl Store {
     pub fn upsert_session(&self, r: &SessionRecord) -> Result<()> {
         self.conn.execute(
             "INSERT INTO sessions
-               (session_id, agent_slug, agent_pubkey, project, host, child_pid, watch_pid, created_at, alive, rel_cwd)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)
+               (session_id, agent_slug, agent_pubkey, project, host, child_pid, watch_pid, created_at, alive, rel_cwd, channel)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)
              ON CONFLICT(session_id) DO UPDATE SET
                agent_slug=?2, agent_pubkey=?3, project=?4, host=?5,
-               child_pid=?6, watch_pid=?7, alive=?9, rel_cwd=?10",
+               child_pid=?6, watch_pid=?7, alive=?9, rel_cwd=?10, channel=?11",
             params![
                 r.session_id, r.agent_slug, r.agent_pubkey, r.project, r.host,
-                r.child_pid, r.watch_pid, r.created_at, r.alive as i32, r.rel_cwd
+                r.child_pid, r.watch_pid, r.created_at, r.alive as i32, r.rel_cwd, r.channel
             ],
         )?;
         Ok(())
@@ -647,7 +655,7 @@ impl Store {
     /// Direct lookup of a session by its canonical id (no alias resolution).
     fn get_session_exact(&self, id: &str) -> Result<Option<SessionRecord>> {
         let mut stmt = self.conn.prepare(
-            "SELECT session_id, agent_slug, agent_pubkey, project, host, child_pid, watch_pid, created_at, alive, rel_cwd
+            "SELECT session_id, agent_slug, agent_pubkey, project, host, child_pid, watch_pid, created_at, alive, rel_cwd, channel
              FROM sessions WHERE session_id=?1",
         )?;
         let mut rows = stmt.query(params![id])?;
@@ -660,7 +668,7 @@ impl Store {
 
     pub fn list_alive_sessions(&self) -> Result<Vec<SessionRecord>> {
         let mut stmt = self.conn.prepare(
-            "SELECT session_id, agent_slug, agent_pubkey, project, host, child_pid, watch_pid, created_at, alive, rel_cwd
+            "SELECT session_id, agent_slug, agent_pubkey, project, host, child_pid, watch_pid, created_at, alive, rel_cwd, channel
              FROM sessions WHERE alive=1 ORDER BY created_at",
         )?;
         let rows = stmt.query_map([], row_to_session)?;
@@ -679,7 +687,7 @@ impl Store {
     /// doesn't know its session id resolve "my session" from the cwd.
     pub fn latest_alive_session_for_project(&self, project: &str) -> Result<Option<SessionRecord>> {
         let mut stmt = self.conn.prepare(
-            "SELECT session_id, agent_slug, agent_pubkey, project, host, child_pid, watch_pid, created_at, alive, rel_cwd
+            "SELECT session_id, agent_slug, agent_pubkey, project, host, child_pid, watch_pid, created_at, alive, rel_cwd, channel
              FROM sessions WHERE alive=1 AND project=?1 ORDER BY created_at DESC LIMIT 1",
         )?;
         let mut rows = stmt.query(params![project])?;
@@ -701,7 +709,7 @@ impl Store {
         project: &str,
     ) -> Result<Option<SessionRecord>> {
         let mut stmt = self.conn.prepare(
-            "SELECT session_id, agent_slug, agent_pubkey, project, host, child_pid, watch_pid, created_at, alive, rel_cwd
+            "SELECT session_id, agent_slug, agent_pubkey, project, host, child_pid, watch_pid, created_at, alive, rel_cwd, channel
              FROM sessions WHERE alive=1 AND project=?1 AND agent_slug=?2 ORDER BY created_at DESC LIMIT 1",
         )?;
         let mut rows = stmt.query(params![project, agent_slug])?;
@@ -726,7 +734,7 @@ impl Store {
         agent_slug: Option<&str>,
     ) -> Result<Option<SessionRecord>> {
         let mut stmt = self.conn.prepare(
-            "SELECT session_id, agent_slug, agent_pubkey, project, host, child_pid, watch_pid, created_at, alive, rel_cwd
+            "SELECT session_id, agent_slug, agent_pubkey, project, host, child_pid, watch_pid, created_at, alive, rel_cwd, channel
              FROM sessions WHERE alive=1 AND (?2 IS NULL OR agent_slug=?2) ORDER BY created_at DESC",
         )?;
         let mut rows = stmt.query(params![work_root, agent_slug])?;
@@ -781,12 +789,12 @@ impl Store {
         limit: usize,
     ) -> Result<Vec<(SessionRecord, String)>> {
         let mut stmt = self.conn.prepare(
-            "SELECT session_id, agent_slug, agent_pubkey, project, host, child_pid, watch_pid, created_at, alive, rel_cwd, resume_id
+            "SELECT session_id, agent_slug, agent_pubkey, project, host, child_pid, watch_pid, created_at, alive, rel_cwd, channel, resume_id
              FROM sessions WHERE host=?1 ORDER BY created_at DESC LIMIT ?2",
         )?;
         let rows = stmt.query_map(params![host, limit as i64], |row| {
             let rec = row_to_session(row)?;
-            let resume_id: String = row.get(10)?;
+            let resume_id: String = row.get(11)?;
             Ok((rec, resume_id))
         })?;
         Ok(rows.filter_map(|r| r.ok()).collect())
@@ -871,7 +879,7 @@ impl Store {
     /// My own sessions whose heartbeat is fresh (alive + recently touched).
     pub fn list_my_live_sessions(&self, since: u64) -> Result<Vec<SessionRecord>> {
         let mut stmt = self.conn.prepare(
-            "SELECT session_id, agent_slug, agent_pubkey, project, host, child_pid, watch_pid, created_at, alive, rel_cwd
+            "SELECT session_id, agent_slug, agent_pubkey, project, host, child_pid, watch_pid, created_at, alive, rel_cwd, channel
              FROM sessions WHERE alive=1 AND last_seen>=?1 ORDER BY created_at DESC",
         )?;
         let rows = stmt.query_map(params![since], row_to_session)?;
@@ -1117,7 +1125,7 @@ impl Store {
     pub fn find_session_by_prefix(&self, prefix: &str) -> Result<Option<SessionRecord>> {
         let pat = format!("{prefix}%");
         let mut stmt = self.conn.prepare(
-            "SELECT session_id, agent_slug, agent_pubkey, project, host, child_pid, watch_pid, created_at, alive, rel_cwd
+            "SELECT session_id, agent_slug, agent_pubkey, project, host, child_pid, watch_pid, created_at, alive, rel_cwd, channel
              FROM sessions WHERE session_id LIKE ?1 ORDER BY created_at DESC LIMIT 1",
         )?;
         let mut rows = stmt.query(params![pat])?;
@@ -2173,6 +2181,19 @@ impl Store {
         Ok(n > 0)
     }
 
+    /// Returns `true` if `project` is known locally — either it has a
+    /// `project_meta` row (seen on relay) or an `owned_groups` row (we created it).
+    pub fn channel_exists(&self, project: &str) -> bool {
+        self.conn
+            .query_row(
+                "SELECT 1 FROM project_meta WHERE project = ?1 \
+                 UNION SELECT 1 FROM owned_groups WHERE project = ?1",
+                params![project],
+                |_| Ok(()),
+            )
+            .is_ok()
+    }
+
     /// Mark an owned group as a per-session room (issue #6). Idempotent; assumes
     /// the group is already (or concurrently) recorded in `owned_groups`.
     pub fn mark_session_room(&self, project: &str, parent: &str, ts: u64) -> Result<()> {
@@ -2852,7 +2873,7 @@ impl Store {
         since: u64,
     ) -> Result<Vec<SessionRecord>> {
         let mut stmt = self.conn.prepare(
-            "SELECT session_id, agent_slug, agent_pubkey, project, host, child_pid, watch_pid, created_at, alive, rel_cwd
+            "SELECT session_id, agent_slug, agent_pubkey, project, host, child_pid, watch_pid, created_at, alive, rel_cwd, channel
              FROM sessions WHERE alive=1 AND last_seen>=?1 AND (?2 IS NULL OR project=?2) ORDER BY created_at DESC",
         )?;
         let rows = stmt.query_map(params![since, project], row_to_session)?;
@@ -3127,6 +3148,7 @@ fn row_to_session(row: &rusqlite::Row) -> rusqlite::Result<SessionRecord> {
         created_at: row.get(7)?,
         alive: row.get::<_, i32>(8)? != 0,
         rel_cwd: row.get(9)?,
+        channel: row.get(10)?,
     })
 }
 
@@ -3187,6 +3209,7 @@ mod tests {
             created_at: 1000,
             alive: true,
             rel_cwd: String::new(),
+            channel: String::new(),
         }
     }
 

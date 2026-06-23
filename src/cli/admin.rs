@@ -131,7 +131,6 @@ pub(super) async fn channels(action: ChannelsAction) -> Result<()> {
                     // Caller identity so the daemon auto-adds the creating agent
                     // to the new room (resolved like the messaging commands).
                     "agent": crate::cli::agent_env_slug(),
-                    "channel": crate::cli::channel_env(),
                     "env_session": std::env::var("TENEX_EDGE_SESSION").ok(),
                     "cwd": std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()),
                 }),
@@ -184,23 +183,18 @@ pub(super) async fn channels(action: ChannelsAction) -> Result<()> {
             }
         }
         ChannelsAction::Switch { channel } => {
-            // Update TENEX_EDGE_CHANNEL in the current tmux pane's environment
-            // and call a daemon RPC to rebind this session to the new channel.
-            let tmux_pane = std::env::var("TMUX_PANE").ok();
-            if let Some(pane) = tmux_pane {
-                std::process::Command::new("tmux")
-                    .args(["set-environment", "-t", &pane, "TENEX_EDGE_CHANNEL", &channel])
-                    .status()
-                    .context("tmux set-environment failed")?;
-            }
             match daemon_call_async(
                 "channels_switch",
-                serde_json::json!({ "channel": channel }),
+                serde_json::json!({
+                    "channel": channel,
+                    "agent": crate::cli::agent_env_slug(),
+                    "cwd": std::env::current_dir()?.to_string_lossy(),
+                }),
             )
             .await
             {
                 Ok(_) => {}
-                Err(e) => eprintln!("warning: daemon channels_switch failed ({}); env updated", e),
+                Err(e) => eprintln!("warning: daemon channels_switch failed ({})", e),
             }
             println!("switched to channel {}", channel);
         }

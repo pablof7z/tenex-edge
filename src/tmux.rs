@@ -987,6 +987,7 @@ mod resume_command_tests {
             created_at: 1000,
             alive: true,
             rel_cwd: String::new(),
+            channel: String::new(),
         }
     }
 

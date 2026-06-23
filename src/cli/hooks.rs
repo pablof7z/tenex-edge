@@ -347,7 +347,6 @@ async fn hook_dispatch(
                 let params = serde_json::json!({
                     "env_session": sid,
                     "agent": agent_env_slug(),
-                    "channel": crate::cli::channel_env(),
                     "cwd": cwd.to_string_lossy(),
                     "prompt": prompt_text,
                 });

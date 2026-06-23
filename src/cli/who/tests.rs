@@ -106,6 +106,7 @@ fn local_session(id: &str) -> crate::state::SessionRecord {
         created_at: 1,
         alive: true,
         rel_cwd: String::new(),
+        channel: String::new(),
     }
 }
 
