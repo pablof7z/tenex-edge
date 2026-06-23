@@ -2321,6 +2321,107 @@ impl Store {
         }
     }
 
+    /// The display label for a channel: its kind:39000 `name`, falling back to
+    /// the raw id when unknown/empty.
+    fn channel_label(&self, id: &str) -> String {
+        let name: rusqlite::Result<String> = self.conn.query_row(
+            "SELECT name FROM project_meta WHERE project=?1",
+            params![id],
+            |r| r.get::<_, String>(0),
+        );
+        match name {
+            Ok(n) if !n.is_empty() => n,
+            _ => id.to_string(),
+        }
+    }
+
+    /// The channel breadcrumb from the top-level project down to `leaf`, as
+    /// `(id, label)` pairs in root→leaf order. Walks the `parent` chain
+    /// (`group_parent`); a top-level project returns a single element. Bounded
+    /// against cycles/corrupt data.
+    pub fn channel_breadcrumb(&self, leaf: &str) -> Result<Vec<(String, String)>> {
+        let mut chain: Vec<(String, String)> = Vec::new();
+        let mut cur = leaf.to_string();
+        for _ in 0..64 {
+            chain.push((cur.clone(), self.channel_label(&cur)));
+            match self.group_parent(&cur)? {
+                Some(p) => cur = p,
+                None => break,
+            }
+        }
+        chain.reverse();
+        Ok(chain)
+    }
+
+    /// Descendant channels of `root` (excluding `root` itself) in preorder, with
+    /// `depth` relative to `root` (direct children = depth 1). Drives the
+    /// "Subchannels:" block. Source: the `project_meta` parent→children tree.
+    pub fn subchannels_of(&self, root: &str) -> Result<Vec<(String, String, usize)>> {
+        // Build the parent→children adjacency from the metadata table once.
+        let meta = self.list_group_metadata()?; // (id, about, name, parent)
+        let mut children: std::collections::BTreeMap<String, Vec<(String, String)>> =
+            std::collections::BTreeMap::new();
+        for (id, _about, name, parent) in &meta {
+            if !parent.is_empty() {
+                let label = if name.is_empty() { id.clone() } else { name.clone() };
+                children
+                    .entry(parent.clone())
+                    .or_default()
+                    .push((id.clone(), label));
+            }
+        }
+        // Deterministic ordering: sort each sibling list by channel id so the
+        // rendered subchannel tree is stable across runs (metadata row order is
+        // otherwise arbitrary).
+        for kids in children.values_mut() {
+            kids.sort_by(|a, b| a.0.cmp(&b.0));
+        }
+        let mut out: Vec<(String, String, usize)> = Vec::new();
+        // Preorder DFS, bounded depth to guard against cycles.
+        fn walk(
+            children: &std::collections::BTreeMap<String, Vec<(String, String)>>,
+            node: &str,
+            depth: usize,
+            out: &mut Vec<(String, String, usize)>,
+        ) {
+            if depth > 32 {
+                return;
+            }
+            if let Some(kids) = children.get(node) {
+                for (id, label) in kids {
+                    out.push((id.clone(), label.clone(), depth));
+                    walk(children, id, depth + 1, out);
+                }
+            }
+        }
+        walk(&children, root, 1, &mut out);
+        Ok(out)
+    }
+
+    /// Count distinct channels with any session activity (local or peer) at or
+    /// after `cutoff`, excluding the channels in `exclude` (typically the current
+    /// channel + its rendered subtree). Drives the "N other active channels in
+    /// the past 24h" tail.
+    pub fn count_active_channels_since(&self, cutoff: u64, exclude: &[String]) -> Result<u64> {
+        let mut stmt = self.conn.prepare(
+            "SELECT DISTINCT project FROM (
+               SELECT project FROM session_state      WHERE last_seen>=?1
+               UNION
+               SELECT project FROM peer_session_state WHERE last_seen>=?1
+             )",
+        )?;
+        let excl: std::collections::HashSet<&str> = exclude.iter().map(|s| s.as_str()).collect();
+        let rows = stmt.query_map(params![cutoff], |r| r.get::<_, String>(0))?;
+        let mut n: u64 = 0;
+        for row in rows {
+            let project = row?;
+            if !excl.contains(project.as_str()) {
+                n += 1;
+            }
+        }
+        Ok(n)
+    }
+
     /// True if `project` is a per-session room (minted at session birth), as
     /// opposed to a project group or a task room.
     pub fn is_session_room(&self, project: &str) -> Result<bool> {
@@ -3861,6 +3962,67 @@ mod tests {
         s.upsert_group_metadata("proj-room", "Room", "proj", 100)
             .unwrap();
         assert_eq!(s.group_parent("proj-room").unwrap(), Some("proj".into()));
+    }
+
+    // ── channel hierarchy helpers (channel-context block) ────────────────
+
+    fn seed_channel_tree(s: &Store) {
+        // proj
+        //  ├─ research        (#research)
+        //  │   └─ comparison  (#competitive-comparison)
+        //  └─ planning        (#planning)
+        s.upsert_group_metadata("proj", "myproject", "", 1).unwrap();
+        s.upsert_group_metadata("research", "research", "proj", 1)
+            .unwrap();
+        s.upsert_group_metadata("comparison", "competitive-comparison", "research", 1)
+            .unwrap();
+        s.upsert_group_metadata("planning", "planning", "proj", 1)
+            .unwrap();
+    }
+
+    #[test]
+    fn channel_breadcrumb_walks_parent_chain_to_root() {
+        let s = Store::open_memory().unwrap();
+        seed_channel_tree(&s);
+        // Leaf → root→leaf order with display labels.
+        assert_eq!(
+            s.channel_breadcrumb("comparison").unwrap(),
+            vec![
+                ("proj".into(), "myproject".into()),
+                ("research".into(), "research".into()),
+                ("comparison".into(), "competitive-comparison".into()),
+            ]
+        );
+        // A top-level project is a single crumb.
+        assert_eq!(
+            s.channel_breadcrumb("proj").unwrap(),
+            vec![("proj".into(), "myproject".into())]
+        );
+        // Unknown id falls back to itself.
+        assert_eq!(
+            s.channel_breadcrumb("ghost").unwrap(),
+            vec![("ghost".into(), "ghost".into())]
+        );
+    }
+
+    #[test]
+    fn subchannels_of_returns_preorder_descendants_with_depth() {
+        let s = Store::open_memory().unwrap();
+        seed_channel_tree(&s);
+        // From the root: direct children at depth 1, the grandchild at depth 2,
+        // preorder (BTreeMap orders children by id: comparison's parent is
+        // research; planning and research are children of proj, ordered by id).
+        let subs = s.subchannels_of("proj").unwrap();
+        assert_eq!(
+            subs,
+            vec![
+                ("planning".into(), "planning".into(), 1),
+                ("research".into(), "research".into(), 1),
+                ("comparison".into(), "competitive-comparison".into(), 2),
+            ]
+        );
+        // A leaf channel has no subchannels.
+        assert!(s.subchannels_of("comparison").unwrap().is_empty());
     }
 
     #[test]
