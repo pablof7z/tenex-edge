@@ -2143,6 +2143,10 @@ async fn refresh_project_members_cache(state: &Arc<DaemonState>, project: &str) 
 
 // ── statusline ───────────────────────────────────────────────────────────────
 
+/// How long a drained mention keeps showing in the statusline RPC snapshot as
+/// "recently consumed" before disappearing. The renderer no longer displays the
+/// inbox segment, but callers still consume `pending`/`recent` from this RPC.
+const STATUSLINE_RECENT_SECS: u64 = 30;
 /// How long a distillation error stays visible in the statusline before expiring.
 const DISTILL_ERROR_TTL_SECS: u64 = 300;
 
@@ -2208,14 +2212,25 @@ fn rpc_statusline(
         if channel_title.is_empty() {
             channel_title = title.clone();
         }
-        // `work_root` is the parent project a per-session room hangs under, or
-        // the project itself for an ordinary project session. This is the
-        // "Project" line in `who`, surfaced as `project-name` in the statusline.
+        // `work_root` is the parent project a per-session room or task channel
+        // hangs under, or the project itself for an ordinary project session.
+        // This is the "Project" line in `who`, surfaced as `project-name`.
         let work_root = s
             .session_room_parent(&rec.project)
             .ok()
             .flatten()
+            .or_else(|| s.group_parent(&scope).ok().flatten())
+            .or_else(|| s.group_parent(&rec.project).ok().flatten())
             .unwrap_or_else(|| rec.project.clone());
+        let pending_chat = s.peek_chat_mentions(&rec.session_id).unwrap_or_default();
+        let recent_since = now.saturating_sub(STATUSLINE_RECENT_SECS);
+        let recent_chat = s
+            .list_recently_delivered_chat_mentions(&rec.session_id, recent_since)
+            .unwrap_or_default();
+        let mut pending_json = chat_rows_to_json(&pending_chat);
+        sort_message_json(&mut pending_json);
+        let mut recent_json = chat_rows_to_json(&recent_chat);
+        sort_message_json(&mut recent_json);
         let distill_error = s
             .get_recent_session_error(&rec.session_id, now.saturating_sub(DISTILL_ERROR_TTL_SECS))
             .ok()
@@ -2232,6 +2247,8 @@ fn rpc_statusline(
             "working": working,
             "title": title,
             "activity": activity,
+            "pending": pending_json,
+            "recent": recent_json,
             "distill_error": distill_error,
         }))
     })
@@ -4169,6 +4186,28 @@ impl DaemonState {
     fn emit_tail(&self, ev: TailEvent) {
         let _ = self.tail_tx.send(ev);
     }
+}
+
+fn chat_rows_to_json(rows: &[ChatInboxRow]) -> Vec<serde_json::Value> {
+    rows.iter()
+        .map(|r| {
+            serde_json::json!({
+                "from_slug": r.from_slug,
+                "project": r.project,
+                "from_session": r.from_session,
+                "host": "",
+                "subject": "",
+                "created_at": r.created_at,
+                "id": crate::cli::mention_short_id(&r.chat_event_id),
+                "mention_event_id": r.chat_event_id,
+                "body": r.body,
+            })
+        })
+        .collect()
+}
+
+fn sort_message_json(rows: &mut [serde_json::Value]) {
+    rows.sort_by_key(|row| row["created_at"].as_i64().unwrap_or_default());
 }
 
 fn env_duration(key: &str, default: Duration) -> Duration {
