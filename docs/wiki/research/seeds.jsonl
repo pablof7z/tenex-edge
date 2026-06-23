@@ -1,0 +1,2 @@
+{"date":"2026-06-09","evidence":[{"end":1,"start":1}],"evidence_text":"User: what uses userNsec to sign events currently?","session":"4d8b9567-a1dc-4836-86d9-20904df30c26","topic":"The user is probing what currently uses userNsec to sign events."}
+{"date":"2026-06-08","evidence":[{"end":1,"start":1},{"end":23,"start":23}],"evidence_text":"User: hello, do you know of any other agents? [...] User: so which agents do you know of?","session":"03534895-ecbf-4476-b6f8-4d9be9862ded","topic":"The user is probing which agents are available and reachable on the tenex-edge fabric."}
