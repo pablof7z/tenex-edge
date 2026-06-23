@@ -59,12 +59,13 @@ impl Kind1Materializer {
                 .flatten()
                 .unwrap_or_default()
         };
+        // `project` == st.project == the kind:30315 `d` tag == `h` tag == group_id.
+        // No native_session_id: peer presence is keyed by (pubkey, group_id) per issue #5 §4.
         store
             .record_peer_status(&PeerStatusObservation {
                 agent_pubkey: st.agent.pubkey.clone(),
                 agent_slug: slug,
                 project: st.project.clone(),
-                native_session_id: st.session_id.as_str().to_string(),
                 host: st.host.clone(),
                 rel_cwd: st.rel_cwd.clone(),
                 title: st.title.clone(),

@@ -4,18 +4,19 @@
 //! |-------------|------|
 //! | Profile     | kind:0,     content `{"name": slug}`, `["host", host]` |
 //! | Activity    | kind:1,     `["h", project]` — social narrative (no inbox routing) |
-//! | Status      | kind:30315, content = live activity (may be empty when idle), `["d", "<project>:<session>"]`, `["h", project]`, `["session-id", id]`, `["title", title]` (always), `["status", "busy"\|"idle"]`, `["host", host]`, optional `["rel-cwd", rel]`, optional NIP-40 `["expiration", ts]` |
+//! | Status      | kind:30315, content = live activity (may be empty when idle), `["d", group_id]`, `["h", group_id]` (`d == h == project slug`, the durable agent's group), `["title", title]` (always), `["status", "busy"\|"idle"]`, `["host", host]`, optional `["rel-cwd", rel]`, optional NIP-40 `["expiration", ts]` |
 //! | Chat        | kind:9,     `["h", project]`, optional `["from-session", sender]`, optional `["p", mentioned_pubkey]`, optional `["session-id", mentioned_session]` |
 //!
-//! Status is the single self-contained per-session signal: ONE kind:30315 event
-//! carries the whole live state of a session (busy/idle, the live activity in
-//! the content, the persistent title, host, rel-cwd). It is replaceable PER
-//! SESSION via `d = "<project>:<session>"`, so each session keeps its own title
-//! even when idle. Liveness IS the freshness of this event: the daemon re-arms a
-//! NIP-40 `["expiration", now + STATUS_TTL_SECS]` tag on every heartbeat, so a
-//! stopped session's event ages off the relay shortly after its last beat. A
-//! `Status` with `expires_at == None` publishes no expiration (tests /
-//! non-heartbeat contexts). There is no separate presence heartbeat.
+//! Status is the single self-contained per-group signal: ONE kind:30315 event
+//! per `(author_pubkey, group_id)` carries the whole live state (busy/idle, the
+//! live activity in the content, the persistent title, host, rel-cwd). It is
+//! replaceable PER GROUP via `d = group_id` (the project slug), with the hard
+//! invariant `d == h` enforced on both encode and decode. Events where `d != h`
+//! are rejected as malformed. Liveness IS the freshness of this event: the daemon
+//! re-arms a NIP-40 `["expiration", now + STATUS_TTL_SECS]` tag on every
+//! heartbeat, so a stopped session's event ages off the relay shortly after its
+//! last beat. A `Status` with `expires_at == None` publishes no expiration (tests
+//! / non-heartbeat contexts). There is no separate presence heartbeat.
 //!
 //! Chat (kind:9) is the sole agent-to-agent messaging mechanism. Direct messaging
 //! uses an inline `@<codename>` in the chat body, which adds `p` + `session-id`
@@ -64,19 +65,6 @@ pub(crate) fn h_filter(f: Filter, project: &str) -> Filter {
 
 fn project_tag(project: &str) -> Result<Tag> {
     tag(&["h", project])
-}
-
-/// Per-session addressable `d` value: `"<project>:<session>"`. Makes the status
-/// event replaceable per session so each session keeps its own title when idle.
-fn status_d(project: &str, session_id: &str) -> String {
-    format!("{project}:{session_id}")
-}
-
-/// Split a `d = "<project>:<session>"` value into its session-id suffix.
-/// The project may itself contain colons; the session id is the part after the
-/// LAST colon. Returns `None` when there is no colon.
-fn session_from_status_d(d: &str) -> Option<&str> {
-    d.rsplit_once(':').map(|(_project, session)| session)
 }
 
 /// First value of the first tag whose name matches `name` (i.e. `slice[1]`).
@@ -153,7 +141,7 @@ impl Codec for Kind1Codec {
             DomainEvent::Status(Status {
                 agent,
                 project,
-                session_id,
+                session_id: _session_id, // not emitted on kind:30315; d == h == project
                 host,
                 title,
                 activity,
@@ -161,27 +149,32 @@ impl Codec for Kind1Codec {
                 rel_cwd,
                 expires_at,
             }) => {
-                // The single self-contained per-session signal. Content is the
-                // live activity (empty when idle); the title always rides as a
-                // tag so it persists across idle turns AND after exit. Liveness
-                // IS the freshness of this event: when `expires_at` is Some, a
-                // NIP-40 `["expiration", ts]` tag rides the wire, so a stopped
-                // session's event ages off the relay ~STATUS_TTL_SECS after its
-                // last heartbeat re-arm. `None` publishes no expiration (tests /
+                // The single self-contained per-group signal. `d == h == group_id`
+                // (the project slug) makes the event addressable per
+                // (author_pubkey, group_id). Content is the live activity (empty
+                // when idle); the title always rides as a tag so it persists
+                // across idle turns AND after exit. Liveness IS the freshness of
+                // this event: when `expires_at` is Some, a NIP-40
+                // `["expiration", ts]` tag rides the wire, so a stopped session's
+                // event ages off the relay ~STATUS_TTL_SECS after its last
+                // heartbeat re-arm. `None` publishes no expiration (tests /
                 // non-heartbeat contexts).
-                let d = status_d(project, session_id.as_str());
+                //
+                // `d == h == project` — the invariant is enforced here and
+                // required on decode. No `session-id` tag on kind:30315 (chat
+                // kind:9 keeps its own `session-id`/`from-session` tags).
+                let d = project.as_str();
                 let mut tags = vec![
-                    tag(&["d", &d])?,
+                    tag(&["d", d])?,
                     project_tag(project)?,
-                    tag(&["session-id", session_id.as_str()])?,
                     tag(&["title", title])?,
                     tag(&["status", if *busy { "busy" } else { "idle" }])?,
                     tag(&["host", host])?,
                 ];
-                // Carry the agent slug on the wire. Status is session-signed, so a
-                // peer can't resolve the author (session) pubkey to a slug via the
-                // agent's kind:0 — without this tag remote sessions render as
-                // "(unnamed)" in `who` and can't be addressed by agent name.
+                // Carry the agent slug on the wire as a convenience hint. The
+                // durable agent key IS the author, so peers can resolve it via
+                // kind:0; the slug tag avoids that extra round-trip lookup and
+                // lets `who` render the name immediately on receipt.
                 if !agent.slug.is_empty() {
                     tags.push(tag(&["slug", &agent.slug])?);
                 }
@@ -253,21 +246,27 @@ impl Codec for Kind1Codec {
                 owners: all_tag_values(event, "p"),
             })),
             KIND_STATUS => {
-                // Every kind:30315 is a single self-contained per-session status.
-                // The session id comes from the explicit `session-id` tag, else
-                // from the `<project>:<session>` suffix of the `d` tag.
-                let session_id = first_tag(event, "session-id")
-                    .or_else(|| first_tag(event, "d").and_then(session_from_status_d))?;
+                // Per-group addressable status: d must equal h (the group_id).
+                // Events where d != h are malformed/foreign and are rejected.
+                let d = first_tag(event, "d")?;
+                let h = first_tag(event, "h")?;
+                if d != h {
+                    return None;
+                }
+                let group_id = d.to_string();
                 Some(DomainEvent::Status(Status {
-                    // Slug rides as a tag (session-signed status can't be resolved
-                    // to a slug via the author pubkey's kind:0); empty on legacy
-                    // emitters, then resolved downstream from the kind:0 profile.
+                    // Slug rides as a convenience tag (avoids a kind:0 lookup);
+                    // empty on legacy emitters, resolved downstream from kind:0.
                     agent: AgentRef::new(
                         pubkey,
                         first_tag(event, "slug").unwrap_or_default().to_string(),
                     ),
-                    project: project_from_tags(event)?,
-                    session_id: SessionId::from(session_id),
+                    project: group_id,
+                    // session_id is no longer carried on kind:30315. Field is
+                    // scheduled for removal from Status in domain.rs; callers
+                    // that relied on native_session_id from this decode path must
+                    // be updated by the integrator (see materializer.rs).
+                    session_id: SessionId::from(""),
                     host: first_tag(event, "host").unwrap_or_default().to_string(),
                     title: first_tag(event, "title").unwrap_or_default().to_string(),
                     // The live activity is the event content (empty when idle).
@@ -357,7 +356,9 @@ mod tests {
             // Slug is NOT on the wire; decoded status always has empty slug.
             agent: AgentRef::new(keys.public_key().to_hex(), String::new()),
             project: "tenex-edge".into(),
-            session_id: "sess-123".into(),
+            // session_id is no longer on the kind:30315 wire; decode always
+            // yields "" here. Roundtrip tests must use "" to stay equal.
+            session_id: "".into(),
             host: "laptop".into(),
             title: "fixing the auth bug".into(),
             activity: if busy {
@@ -414,9 +415,9 @@ mod tests {
     }
 
     #[test]
-    fn status_is_per_session_self_contained_signal() {
-        // The single unified shape: a per-session `d`, the full tag set, content =
-        // live activity, and the title persisted as a tag even when busy.
+    fn status_is_per_group_self_contained_signal() {
+        // The unified shape: `d == h == group_id` (the project slug), full tag
+        // set, content = live activity, title persisted as a tag even when busy.
         let keys = Keys::generate();
         let signed = Kind1Codec
             .encode(&status(&keys, true, "worktree1"))
@@ -424,10 +425,11 @@ mod tests {
             .sign_with_keys(&keys)
             .unwrap();
         assert_eq!(signed.kind.as_u16(), KIND_STATUS);
-        // Per-SESSION addressable `d = "<project>:<session>"`.
-        assert!(has_tag(&signed, "d", "tenex-edge:sess-123"));
+        // Per-GROUP addressable: `d == h == project slug`.
+        assert!(has_tag(&signed, "d", "tenex-edge"));
         assert!(has_tag(&signed, "h", "tenex-edge"));
-        assert!(has_tag(&signed, "session-id", "sess-123"));
+        // d == h is the invariant; no session-id on kind:30315.
+        assert!(!has_tag_name(&signed, "session-id"));
         assert!(has_tag(&signed, "title", "fixing the auth bug"));
         assert!(has_tag(&signed, "status", "busy"));
         assert!(has_tag(&signed, "host", "laptop"));
@@ -437,7 +439,7 @@ mod tests {
         // The live activity is the content, not a tag.
         assert_eq!(signed.content, "reading the diff");
         assert!(!has_tag_name(&signed, "activity"));
-        // No presence-heartbeat artifacts, no self-asserted agent tag.
+        // No legacy presence-heartbeat artifacts, no self-asserted agent tag.
         assert!(!has_tag(&signed, "d", "tenex-edge-presence:sess-123"));
         assert!(!has_tag_name(&signed, "agent"));
     }
@@ -487,9 +489,9 @@ mod tests {
     }
 
     #[test]
-    fn status_session_recovered_from_d_when_session_id_tag_absent() {
-        // A peer that omits the explicit session-id tag still decodes: the session
-        // id is the suffix of `d = "<project>:<session>"`.
+    fn status_old_d_shape_rejected_when_d_ne_h() {
+        // Old wire shape `d = "<project>:<session>"` produces d != h, so it must
+        // be rejected. This is the tombstone for the old fallback behaviour.
         let keys = Keys::generate();
         let event = EventBuilder::new(Kind::from(KIND_STATUS), "")
             .tags([
@@ -499,10 +501,32 @@ mod tests {
             ])
             .sign_with_keys(&keys)
             .unwrap();
+        assert!(
+            Kind1Codec.decode(&event).is_none(),
+            "d != h must be rejected (old <project>:<session> shape)"
+        );
+    }
+
+    #[test]
+    fn status_d_equals_h_is_accepted() {
+        // New canonical shape: `d == h == group_id`.
+        let keys = Keys::generate();
+        let event = EventBuilder::new(Kind::from(KIND_STATUS), "working on tests")
+            .tags([
+                tag(&["h", "tenex-edge"]).unwrap(),
+                tag(&["d", "tenex-edge"]).unwrap(),
+                tag(&["status", "busy"]).unwrap(),
+                tag(&["title", "codec refactor"]).unwrap(),
+                tag(&["host", "laptop"]).unwrap(),
+            ])
+            .sign_with_keys(&keys)
+            .unwrap();
         match Kind1Codec.decode(&event) {
             Some(DomainEvent::Status(s)) => {
-                assert_eq!(s.session_id.as_str(), "sess-xyz");
                 assert_eq!(s.project, "tenex-edge");
+                assert_eq!(s.activity, "working on tests");
+                assert_eq!(s.title, "codec refactor");
+                assert!(s.busy);
             }
             other => panic!("expected status, got {other:?}"),
         }

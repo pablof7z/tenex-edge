@@ -250,14 +250,15 @@ CREATE TABLE IF NOT EXISTS session_aliases (
 );
 CREATE INDEX IF NOT EXISTS idx_session_aliases_session
     ON session_aliases(session_id);
--- Peer mirror, materialized from inbound kind:30315. Keyed by the peer's
--- (pubkey, project, native session id). Same delta cursors as session_state so
--- the shared status_delta_since works across both. last_seen = the event's
--- emitted-at (a finished peer stops emitting → ages out); never local-writable.
+-- Peer mirror, materialized from inbound kind:30315. Keyed by (pubkey, project):
+-- one row per agent per group. `project` == the kind:30315 `d` tag == `h` tag ==
+-- project slug. A newer heartbeat replaces the older row for the same agent+group.
+-- Same delta cursors as session_state so status_delta_since works across both.
+-- last_seen = the event's emitted-at (a finished peer stops emitting → ages out);
+-- never local-writable. No native_session_id — issue #5 §4.
 CREATE TABLE IF NOT EXISTS peer_session_state (
     pubkey            TEXT NOT NULL,
     project           TEXT NOT NULL,
-    native_session_id TEXT NOT NULL,
     agent_slug        TEXT NOT NULL DEFAULT '',
     host              TEXT NOT NULL DEFAULT '',
     rel_cwd           TEXT NOT NULL DEFAULT '',
@@ -269,7 +270,7 @@ CREATE TABLE IF NOT EXISTS peer_session_state (
     lifecycle         TEXT NOT NULL DEFAULT 'active',
     first_seen        INTEGER NOT NULL DEFAULT 0,
     updated_at        INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (pubkey, project, native_session_id)
+    PRIMARY KEY (pubkey, project)
 );
 CREATE INDEX IF NOT EXISTS idx_peer_session_state_project_seen
     ON peer_session_state(project, last_seen);
@@ -467,6 +468,44 @@ impl Store {
         // a stale schema can't be read by accident.
         let _ = conn.execute("DROP TABLE IF EXISTS agent_status", []);
         let _ = conn.execute("DROP TABLE IF EXISTS session_status", []);
+        // Issue #5 §4: peer_session_state PK changed from (pubkey, project,
+        // native_session_id) to (pubkey, project). No backwards compat — drop and
+        // recreate when the old native_session_id column is still present.
+        {
+            let has_old: bool = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM pragma_table_info('peer_session_state') WHERE name='native_session_id'",
+                    [],
+                    |r| r.get::<_, i64>(0),
+                )
+                .unwrap_or(0)
+                > 0;
+            if has_old {
+                conn.execute_batch(
+                    "DROP TABLE IF EXISTS peer_session_state;
+                     DROP INDEX IF EXISTS idx_peer_session_state_project_seen;
+                     CREATE TABLE IF NOT EXISTS peer_session_state (
+                         pubkey            TEXT NOT NULL,
+                         project           TEXT NOT NULL,
+                         agent_slug        TEXT NOT NULL DEFAULT '',
+                         host              TEXT NOT NULL DEFAULT '',
+                         rel_cwd           TEXT NOT NULL DEFAULT '',
+                         title             TEXT NOT NULL DEFAULT '',
+                         activity          TEXT NOT NULL DEFAULT '',
+                         busy              INTEGER NOT NULL DEFAULT 0,
+                         last_seen         INTEGER NOT NULL DEFAULT 0,
+                         state_version     INTEGER NOT NULL DEFAULT 0,
+                         lifecycle         TEXT NOT NULL DEFAULT 'active',
+                         first_seen        INTEGER NOT NULL DEFAULT 0,
+                         updated_at        INTEGER NOT NULL DEFAULT 0,
+                         PRIMARY KEY (pubkey, project)
+                     );
+                     CREATE INDEX IF NOT EXISTS idx_peer_session_state_project_seen
+                         ON peer_session_state(project, last_seen);",
+                )
+                .ok();
+            }
+        }
         // Harness-native resume token (e.g. the id `claude --resume <id>` /
         // `codex resume <id>` / `opencode --session <id>` wants). For claude-code
         // and codex this equals `session_id` (they assign their own id, which we
@@ -1704,11 +1743,12 @@ impl Store {
                AND (first_seen>=?2 OR updated_at>=?2 OR (last_seen < ?3 AND last_seen+?4 >= ?2))"
         );
         let now_minus_ttl = now.saturating_sub(ttl);
-        // Track which canonical sessions the local table already emitted, so a peer
-        // echo of one of our own sessions (our kind:30315 round-tripping back from
-        // the relay into peer_session_state) is not surfaced a second time. Mirrors
-        // the dedup `load_who_snapshot` does for the full roster.
-        let mut local_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+        // Track which agent pubkeys the local table already emitted, so a peer echo
+        // of one of our own sessions (our kind:30315 round-tripping back from the
+        // relay into peer_session_state) is not surfaced a second time. Keyed on
+        // agent_pubkey since peer rows no longer carry a session_id (issue #5 §4).
+        let mut local_pubkeys: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
         {
             let mut stmt = self.conn.prepare(&local_sql)?;
             let rows = stmt.query_map(
@@ -1716,10 +1756,13 @@ impl Store {
                 row_to_session_state,
             )?;
             for snap in rows.filter_map(|r| r.ok()) {
+                // Track our own pubkey BEFORE the exclude-skip: even when the
+                // viewer's own local row is excluded from output, its pubkey must
+                // still dedup the peer echo of that same session below.
+                local_pubkeys.insert(snap.agent_pubkey.clone());
                 if exclude == Some(snap.session_id.as_str()) {
                     continue;
                 }
-                local_ids.insert(snap.session_id.as_str().to_string());
                 if let Some(item) = classify_delta(snap, since, now) {
                     out.push(item);
                 }
@@ -1738,10 +1781,13 @@ impl Store {
                 row_to_peer_session_state,
             )?;
             for snap in rows.filter_map(|r| r.ok()) {
+                // exclude is a local session_id (te-*); peer snapshot uses pubkey
+                // as session_id, so this guard only fires for the exact exclude match.
                 if exclude == Some(snap.session_id.as_str()) {
                     continue;
                 }
-                if local_ids.contains(snap.session_id.as_str()) {
+                // Dedup: skip peer echoes of our own sessions (keyed by pubkey).
+                if local_pubkeys.contains(&snap.agent_pubkey) {
                     continue;
                 }
                 if let Some(item) = classify_delta(snap, since, now) {
@@ -1755,19 +1801,20 @@ impl Store {
     // ── peer mirror write (kind:30315 materializer surface) ───────────────────
 
     /// Mirror an inbound kind:30315 into `peer_session_state`. Idempotent upsert
-    /// keyed by (pubkey, project, native session id). Bumps `state_version` +
-    /// `updated_at` only when public content changed (title/activity/busy/host/
+    /// keyed by `(pubkey, project)` — one row per agent per group; a newer
+    /// heartbeat from the same agent replaces the older one. Bumps `state_version`
+    /// + `updated_at` only when public content changed (title/activity/busy/host/
     /// rel_cwd/slug); advances `last_seen` only on a newer `emitted_at` so
     /// out-of-order refetches never resurrect a finished peer. `first_seen` is set
-    /// once on insert. Replaces the deleted `materialize_status`/`set_agent_status`.
+    /// once on insert. No native_session_id (issue #5 §4).
     pub fn record_peer_status(&self, obs: &PeerStatusObservation) -> Result<()> {
         let existing: Option<(String, String, i64, String, String, String, u64, i64)> = self
             .conn
             .query_row(
                 "SELECT title, activity, busy, host, rel_cwd, agent_slug, last_seen, state_version
                  FROM peer_session_state
-                 WHERE pubkey=?1 AND project=?2 AND native_session_id=?3",
-                params![obs.agent_pubkey, obs.project, obs.native_session_id],
+                 WHERE pubkey=?1 AND project=?2",
+                params![obs.agent_pubkey, obs.project],
                 |r| {
                     Ok((
                         r.get::<_, String>(0)?,
@@ -1787,14 +1834,13 @@ impl Store {
             None => {
                 self.conn.execute(
                     "INSERT INTO peer_session_state
-                       (pubkey, project, native_session_id, agent_slug, host, rel_cwd,
+                       (pubkey, project, agent_slug, host, rel_cwd,
                         title, activity, busy, last_seen, state_version, lifecycle,
                         first_seen, updated_at)
-                     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,1,'active',?10,?11)",
+                     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,1,'active',?9,?10)",
                     params![
                         obs.agent_pubkey,
                         obs.project,
-                        obs.native_session_id,
                         obs.agent_slug,
                         obs.host,
                         obs.rel_cwd,
@@ -1826,14 +1872,13 @@ impl Store {
                 };
                 self.conn.execute(
                     "UPDATE peer_session_state SET
-                       agent_slug=CASE WHEN ?4<>'' THEN ?4 ELSE agent_slug END,
-                       host=?5, rel_cwd=?6, title=?7, activity=?8, busy=?9,
-                       last_seen=?10, state_version=?11, updated_at=?12
-                     WHERE pubkey=?1 AND project=?2 AND native_session_id=?3",
+                       agent_slug=CASE WHEN ?3<>'' THEN ?3 ELSE agent_slug END,
+                       host=?4, rel_cwd=?5, title=?6, activity=?7, busy=?8,
+                       last_seen=?9, state_version=?10, updated_at=?11
+                     WHERE pubkey=?1 AND project=?2",
                     params![
                         obs.agent_pubkey,
                         obs.project,
-                        obs.native_session_id,
                         obs.agent_slug,
                         obs.host,
                         obs.rel_cwd,
@@ -2815,8 +2860,11 @@ const SESSION_STATE_COLS_PREFIXED: &str = "s.session_id, s.agent_slug, s.agent_p
      s.first_seen, s.updated_at";
 
 /// Canonical column order for `peer_session_state` reads. Keep in lockstep with
-/// `row_to_peer_session_state`.
-const PEER_STATE_COLS: &str = "pubkey, project, native_session_id, agent_slug, host, rel_cwd, \
+/// `row_to_peer_session_state`. Column indices (0-based):
+///   0=pubkey, 1=project, 2=agent_slug, 3=host, 4=rel_cwd, 5=title,
+///   6=activity, 7=busy, 8=last_seen, 9=state_version, 10=lifecycle,
+///   11=first_seen, 12=updated_at
+const PEER_STATE_COLS: &str = "pubkey, project, agent_slug, host, rel_cwd, \
      title, activity, busy, last_seen, state_version, lifecycle, first_seen, updated_at";
 
 /// Mint a fresh canonical session id (daemon-owned, opaque).
@@ -2862,23 +2910,29 @@ fn row_to_session_state_offset(
 
 /// Build a `SessionSnapshot` (Peer source) from a `peer_session_state` row. Peer
 /// rows carry no turn/distill/resume data, so those fields project as defaults.
+/// The PK is (pubkey, project) — `session_id` is synthesized as `pubkey` since
+/// there is no native_session_id (issue #5 §4).
 fn row_to_peer_session_state(row: &rusqlite::Row) -> rusqlite::Result<SessionSnapshot> {
-    let busy = row.get::<_, i64>(8)? != 0;
+    // 0=pubkey, 1=project, 2=agent_slug, 3=host, 4=rel_cwd, 5=title,
+    // 6=activity, 7=busy, 8=last_seen, 9=state_version, 10=lifecycle,
+    // 11=first_seen, 12=updated_at
+    let busy = row.get::<_, i64>(7)? != 0;
     Ok(SessionSnapshot {
         source: SnapshotSource::Peer,
         agent_pubkey: row.get(0)?,
         project: row.get(1)?,
-        session_id: SessionId::from(row.get::<_, String>(2)?),
-        agent_slug: row.get(3)?,
-        host: row.get(4)?,
-        rel_cwd: row.get(5)?,
-        title: row.get(6)?,
-        title_source: if row.get::<_, String>(6)?.is_empty() {
+        // No native session id: use pubkey as the stable per-agent identity.
+        session_id: SessionId::from(row.get::<_, String>(0)?),
+        agent_slug: row.get(2)?,
+        host: row.get(3)?,
+        rel_cwd: row.get(4)?,
+        title: row.get(5)?,
+        title_source: if row.get::<_, String>(5)?.is_empty() {
             TitleSource::None
         } else {
             TitleSource::Peer
         },
-        activity: row.get(7)?,
+        activity: row.get(6)?,
         busy,
         phase: if busy {
             "working".into()
@@ -2888,12 +2942,12 @@ fn row_to_peer_session_state(row: &rusqlite::Row) -> rusqlite::Result<SessionSna
         turn_id: 0,
         turn_started_at: 0,
         last_distill_at: 0,
-        last_seen: row.get(9)?,
+        last_seen: row.get(8)?,
         resume_id: String::new(),
-        state_version: row.get(10)?,
-        lifecycle: Lifecycle::from_str(&row.get::<_, String>(11)?),
-        first_seen: row.get(12)?,
-        updated_at: row.get(13)?,
+        state_version: row.get(9)?,
+        lifecycle: Lifecycle::from_str(&row.get::<_, String>(10)?),
+        first_seen: row.get(11)?,
+        updated_at: row.get(12)?,
     })
 }
 
@@ -3262,13 +3316,12 @@ mod tests {
                 observed_at: 160,
             })
             .unwrap();
-        // The same session's status, observed back off the relay as a peer echo
-        // keyed by the SAME session id.
+        // The same agent's status, observed back off the relay as a peer echo.
+        // Keyed by (pubkey, project) — no session_id on the peer row.
         s.record_peer_status(&PeerStatusObservation {
             agent_pubkey: "pk-a".into(),
             agent_slug: "alpha".into(),
             project: "proj".into(),
-            native_session_id: local.session_id.as_str().into(),
             host: "host".into(),
             rel_cwd: String::new(),
             title: String::new(),
@@ -3280,13 +3333,14 @@ mod tests {
         .unwrap();
 
         let delta = s.status_delta_since("proj", 150, 200, None).unwrap();
+        // The local row surfaces; the peer echo (same pubkey) is deduped out.
         let hits = delta
             .iter()
-            .filter(|d| d.snapshot.session_id == local.session_id)
+            .filter(|d| d.snapshot.agent_pubkey == "pk-a")
             .count();
         assert_eq!(
             hits, 1,
-            "local session + its own peer echo must dedup to one"
+            "local session + its own peer echo must dedup to one (keyed by pubkey)"
         );
     }
 
@@ -3316,7 +3370,6 @@ mod tests {
             agent_pubkey: "pk-me".into(),
             agent_slug: "me".into(),
             project: "proj".into(),
-            native_session_id: me.session_id.as_str().into(),
             host: "host".into(),
             rel_cwd: String::new(),
             title: String::new(),
@@ -3330,8 +3383,10 @@ mod tests {
         let delta = s
             .status_delta_since("proj", 150, 200, Some(me.session_id.as_str()))
             .unwrap();
+        // The local row is excluded by session_id; the peer echo is deduped by
+        // pubkey since "pk-me" appears in local_pubkeys.
         assert!(
-            delta.iter().all(|d| d.snapshot.session_id != me.session_id),
+            delta.iter().all(|d| d.snapshot.agent_pubkey != "pk-me"),
             "a session must never see its own status (local row or peer echo)"
         );
     }
@@ -3858,7 +3913,6 @@ mod tests {
             agent_pubkey: "pk-peer".into(),
             agent_slug: "peer".into(),
             project: "proj".into(),
-            native_session_id: "n1".into(),
             host: "host2".into(),
             rel_cwd: String::new(),
             title: "fixing auth".into(),

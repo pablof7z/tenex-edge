@@ -174,14 +174,14 @@ impl SessionObservation {
 
 /// What `Store::record_peer_status` receives from the kind:30315 materializer.
 /// Mirrors a peer's self-contained per-session signal into `peer_session_state`.
+/// Keyed by `(agent_pubkey, project)` — one row per agent per group, no session_id.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PeerStatusObservation {
     pub agent_pubkey: String,
     /// Resolved from the peer's kind:0 profile (NEVER self-asserted); may be "".
     pub agent_slug: String,
+    /// Group id (== kind:30315 `d` tag == `h` tag == project slug).
     pub project: String,
-    /// The peer's native session id (its kind:30315 `session-id`). Part of the PK.
-    pub native_session_id: String,
     pub host: String,
     pub rel_cwd: String,
     pub title: String,

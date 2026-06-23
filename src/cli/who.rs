@@ -180,9 +180,11 @@ pub fn load_who_snapshot(
     // `session_state`, peer rows project `peer_session_state`, and BOTH run through
     // the one `derive_status` projection — there is no local-vs-peer busy fork.
     let mine = store.live_session_snapshots(None, since)?;
-    let my_ids: std::collections::HashSet<String> = mine
+    // Identity is (pubkey, group) now — a peer row that shares a live local
+    // session's (pubkey, project) IS that session's own relay echo, so drop it.
+    let my_keys: std::collections::HashSet<(String, String)> = mine
         .iter()
-        .map(|s| s.session_id.as_str().to_string())
+        .map(|s| (s.agent_pubkey.clone(), s.project.clone()))
         .collect();
     let local_agent_pubkeys: std::collections::HashSet<String> = store
         .list_local_agent_pubkeys()
@@ -192,7 +194,7 @@ pub fn load_who_snapshot(
     let all_peers: Vec<SessionSnapshot> = store
         .peer_session_snapshots(None, since)?
         .into_iter()
-        .filter(|p| !my_ids.contains(p.session_id.as_str()))
+        .filter(|p| !my_keys.contains(&(p.agent_pubkey.clone(), p.project.clone())))
         .filter(|p| {
             !(slugify_host(&p.host) == local_host && local_agent_pubkeys.contains(&p.agent_pubkey))
         })

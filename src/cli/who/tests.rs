@@ -72,7 +72,7 @@ fn record_peer(
     pubkey: &str,
     slug: &str,
     project: &str,
-    native_session_id: &str,
+    _native_session_id: &str,
     host: &str,
     rel_cwd: &str,
     title: &str,
@@ -83,7 +83,6 @@ fn record_peer(
         agent_pubkey: pubkey.to_string(),
         agent_slug: slug.to_string(),
         project: project.to_string(),
-        native_session_id: native_session_id.to_string(),
         host: host.to_string(),
         rel_cwd: rel_cwd.to_string(),
         title: title.to_string(),
@@ -357,9 +356,11 @@ fn who_renderer_summarizes_other_projects() {
     let snap = load_who_snapshot(&store, Some("proj"), false, 1_000, "laptop").unwrap();
     let once = strip_ansi(&render_who_once(&snap));
 
+    // Peer rows no longer carry a native session id; their display id is the
+    // pubkey, so the codename derives from "pk-a" (issue #5 §4 re-key).
     assert!(once.contains(&format!(
         "a@laptop [session {}] - idle",
-        session_codename("s1")
+        session_codename("pk-a")
     )));
     assert!(once.contains("1 other agent(s) in other projects:"));
     assert!(once.contains("  * other - Other work"));

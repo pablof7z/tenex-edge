@@ -90,20 +90,19 @@ pub struct DaemonState {
     )>,
     /// Pubkeys for which a Profile event has already been emitted, for first-seen dedup.
     seen_profiles: Mutex<std::collections::HashSet<String>>,
-    /// Last-seen (title, active) keyed by the SESSION id (canonical for locals,
-    /// native for peers) for tail dedup. Keying by session — not (pubkey,project)
-    /// — is the multi-session fix: sibling sessions of one agent each emit their
-    /// own status transitions. Tracking `active` too means an active→idle flip
-    /// emits a tail event even though the persistent title text is unchanged.
-    last_status: Mutex<HashMap<String, (String, bool)>>,
+    /// Last-seen (title, active) keyed by `(author_pubkey, group_id)` for tail
+    /// dedup. All sessions of a durable agent in one project sign with the same
+    /// key and address the same replaceable slot, so per-agent/group dedup is
+    /// correct. Tracking `active` too means an active→idle flip emits a tail
+    /// event even though the persistent title text is unchanged.
+    last_status: Mutex<HashMap<(String, String), (String, bool)>>,
     /// Wakes the status-outbox drainer the instant a transition enqueues a publish.
     status_outbox_notify: Notify,
-    /// Per-session derived keypairs (Stage 2 / Issue #2). Keyed by canonical
-    /// session id; populated in `rpc_session_start`, removed on graceful end
-    /// (`rpc_session_end`) or engine self-exit (`spawn_session` cleanup) or
-    /// crash-GC (`reconcile_sessions`). Re-derivable from stored aliases so
-    /// persistence is NOT required, but the key must be resident for the
-    /// session lifetime so Stage 3 can sign with it.
+    /// Per-session derived keypairs — retained as a permanently-empty map in
+    /// this slice. The signer path no longer derives or inserts per-session keys;
+    /// the durable agent key (from `hosted`) is used instead. The removal paths
+    /// in `rpc_session_end` / `spawn_session` cleanup / crash-GC are harmless
+    /// no-ops. `keys_for_session` always returns `None` in this slice.
     session_keys: Mutex<HashMap<String, Keys>>,
     /// Hex pubkey of this backend's identity (pubkey of `tenexPrivateKey`,
     /// falling back to `userNsec`). Added as an admin to every group we create
@@ -132,16 +131,19 @@ impl DaemonState {
             .map(|h| h.keys.clone())
     }
     /// Retrieve the derived per-session keypair by canonical session id.
+    /// Always returns `None` in this slice — `session_keys` is not populated;
+    /// callers fall back to the durable agent key via `keys_for`.
     fn keys_for_session(&self, session_id: &str) -> Option<Keys> {
         self.session_keys.lock().unwrap().get(session_id).cloned()
     }
     fn live_session_count(&self) -> usize {
         self.sessions.lock().unwrap().len()
     }
-    /// Stage 3: return all currently-live per-session derived pubkeys.
-    /// These are the Nostr pubkeys that session-signed events carry as their
-    /// author; included in subscriptions and the admission gate alongside the
-    /// durable agent pubkeys from `hosted_pubkeys()`.
+    /// Return live per-session derived pubkeys. Returns empty in this slice
+    /// because `session_keys` is not populated — the durable agent pubkeys from
+    /// `hosted_pubkeys()` are the only authors. Callers in `resubscribe` and
+    /// `handle_incoming` extend their sets with this and so naturally remain
+    /// durable-only.
     fn live_session_pubkeys(&self) -> Vec<String> {
         self.session_keys
             .lock()
@@ -778,50 +780,10 @@ async fn rpc_session_start(
         );
     }
 
-    // Derive the per-session keypair (Stage 2 / Issue #2) BEFORE nudging the
-    // status drainer below. The registration enqueued the session's first
-    // kind:30315 row; if we notified the drainer before the session key was
-    // resident, that first presence beat would sign with the durable agent key
-    // (the keys_for_session fallback), producing an orphan replaceable event
-    // under the wrong author that lingers until its NIP-40 TTL.
-    //
-    // Anchor selection (locked decision): harness_session_id when the harness
-    // supplied one (claude-code / codex); canonical session_id otherwise
-    // (opencode / unknown). IKM is the operator nsec; skip derivation if unset
-    // (matches open_project's best-effort pattern). HKDF is deterministic so
-    // re-entering this path (idempotent re-start) overwrites with the same key.
-    if let Some(nsec) = state.cfg.session_ikm_nsec().cloned() {
-        if let Ok(op_keys) = nostr_sdk::prelude::Keys::parse(&nsec) {
-            let anchor: &str = harness_session_id.as_deref().unwrap_or(&session_id);
-            let session_key = identity::derive_session_keys(
-                op_keys.secret_key(),
-                &project,
-                &p.agent,
-                harness.as_str(),
-                anchor,
-            );
-            // Stage 3: persist the session pubkey to the DB so the routing and
-            // slug-resolution subsystems can look it up without the in-memory map.
-            let session_pubkey = session_key.public_key().to_hex();
-            state.with_store(|s| {
-                s.upsert_session_pubkey(
-                    &session_pubkey,
-                    &session_id,
-                    &id.pubkey_hex(),
-                    &p.agent,
-                    now,
-                )
-                .ok();
-            });
-            state
-                .session_keys
-                .lock()
-                .unwrap()
-                .insert(session_id.clone(), session_key);
-        }
-    }
-    // Now that the session key is resident, nudge the drainer so the first
-    // kind:30315 publish signs with the session key.
+    // Nudge the drainer: the session's first kind:30315 row was enqueued by
+    // register_or_reassert_session above. The durable agent key (`id.keys`,
+    // already resident in `hosted`) is used for signing — no per-session key
+    // derivation in this slice.
     state.status_outbox_notify.notify_waiters();
 
     // The resume token survives the session going dead so a later `tmux resume`
@@ -947,8 +909,9 @@ async fn rpc_session_start(
             .await;
     }
     // Admin-add the derived session pubkey as a plain member of the NIP-29 group
-    // (Stage 2 / Issue #2). Best-effort: never block session start. Runs AFTER
-    // open_project so the group is guaranteed to exist before we issue 9000.
+    // (Stage 2 / Issue #2). No-op in this slice: `session_keys` is not populated
+    // so `keys_for_session` returns None; the durable agent key is already a
+    // member via `open_project`.
     if let Some(session_key) = state.keys_for_session(&session_id) {
         let session_pubkey = session_key.public_key().to_hex();
         let added = state
@@ -1005,7 +968,7 @@ async fn rpc_session_start(
         &project,
         &rel_cwd,
         p.watch_pid,
-        state.keys_for_session(&session_id),
+        None, // no per-session derived key in this slice; engine uses durable key
     );
     if let Some(prog) = &progress {
         prog.emit("engine", "starting session engine and initial publishers");
@@ -3078,9 +3041,10 @@ fn derive_and_emit_tail_events(
                 });
             }
 
-            // Dedup per SESSION (not per agent/project): sibling sessions of one
-            // agent each track their own (title, busy) transition.
-            let key = s.session_id.as_str().to_owned();
+            // Dedup by (author_pubkey, group_id): all sessions of a durable
+            // agent in one project sign with the same key and occupy the same
+            // replaceable slot, so per-agent/group dedup is the correct unit.
+            let key = (s.agent.pubkey.clone(), s.project.clone());
             let cur = (s.title.clone(), s.busy);
             let should_emit = {
                 let mut map = state.last_status.lock().unwrap();
@@ -3273,13 +3237,9 @@ fn spawn_status_heartbeat_publisher(state: Arc<DaemonState>) {
             let snaps =
                 state.with_store(|s| s.all_live_local_snapshots(fresh_since).unwrap_or_default());
             for snap in snaps {
-                // Stage 3: prefer the derived per-session key so the heartbeat
-                // status event is signed by the session pubkey. Fall back to
-                // the durable agent key when no session key is present.
-                let keys = match state
-                    .keys_for_session(snap.session_id.as_str())
-                    .or_else(|| state.keys_for(&snap.agent_pubkey))
-                {
+                // Sign the heartbeat re-arm with the durable agent key.
+                // Per-session keys are not derived in this slice.
+                let keys = match state.keys_for(&snap.agent_pubkey) {
                     Some(k) => k,
                     None => continue,
                 };
@@ -3309,12 +3269,9 @@ fn spawn_status_outbox_drainer(state: Arc<DaemonState>) {
                     let now = now_secs();
                     // Only locally-hosted agents have signing keys; a row for an
                     // unhosted agent can never publish — record and skip it.
-                    // Stage 3: prefer the derived per-session key so the status
-                    // event is signed by the session pubkey.
-                    let keys = match state
-                        .keys_for_session(item.snapshot.session_id.as_str())
-                        .or_else(|| state.keys_for(&item.snapshot.agent_pubkey))
-                    {
+                    // Sign with the durable agent key; per-session keys are not
+                    // derived in this slice.
+                    let keys = match state.keys_for(&item.snapshot.agent_pubkey) {
                         Some(k) => k,
                         None => {
                             state.with_store(|s| {
@@ -3590,47 +3547,8 @@ async fn reconcile_sessions(state: &Arc<DaemonState>) {
             .open_project(&snap.project, &id.pubkey_hex())
             .await;
 
-        // Stage 2 / revived sessions: re-derive and store the session key so
-        // that the spawn_session cleanup task (engine self-exit) can find it to
-        // publish group_remove_user when the engine finishes.
-        if let Some(nsec) = state.cfg.session_ikm_nsec().cloned() {
-            if let Ok(op_keys) = nostr_sdk::prelude::Keys::parse(&nsec) {
-                let (harness_kind, anchor) =
-                    state.with_store(|s| s.get_session_derivation_anchor(&session_id));
-                let session_key = identity::derive_session_keys(
-                    op_keys.secret_key(),
-                    &snap.project,
-                    &snap.agent_slug,
-                    &harness_kind,
-                    &anchor,
-                );
-                // Also re-add the session pubkey to the group in case it was
-                // removed while the daemon was down (best-effort).
-                let session_pubkey = session_key.public_key().to_hex();
-                state
-                    .session_keys
-                    .lock()
-                    .unwrap()
-                    .insert(session_id.clone(), session_key);
-                state
-                    .provider
-                    .nip29_add_member(&snap.project, &session_pubkey)
-                    .await;
-                state.with_store(|s| {
-                    s.upsert_group_member(&snap.project, &session_pubkey, "member", now)
-                        .ok();
-                    // Stage 3: re-populate the DB routing row for the revived session.
-                    s.upsert_session_pubkey(
-                        &session_pubkey,
-                        &session_id,
-                        &id.pubkey_hex(),
-                        &snap.agent_slug,
-                        now,
-                    )
-                    .ok();
-                });
-            }
-        }
+        // No per-session key derivation in this slice: the durable agent key
+        // is used for signing and is already a member of the NIP-29 group.
 
         if let Err(e) = ensure_subscription(state, &snap.project).await {
             if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
@@ -3648,7 +3566,7 @@ async fn reconcile_sessions(state: &Arc<DaemonState>) {
             &snap.project,
             &snap.rel_cwd,
             watch_pid,
-            state.keys_for_session(&session_id),
+            None, // no per-session derived key in this slice; engine uses durable key
         );
         let _ = spawn_session(state, ep).await;
     }
@@ -3664,7 +3582,8 @@ fn engine_params_for(
     project: &str,
     rel_cwd: &str,
     watch_pid: Option<i32>,
-    // Stage 3: derived per-session keypair (None when operator nsec is absent).
+    // Per-session derived keypair. Always `None` in this slice; reserved for
+    // the future collision-fallback path.
     session_keys: Option<Keys>,
 ) -> EngineParams {
     EngineParams {
