@@ -48,6 +48,11 @@ pub fn assemble_turn_start_context(
     prev_turn_started_at: u64,
 ) -> Option<String> {
     let first_turn = prev_turn_started_at == 0;
+    // Routing scope: channel when set (a `channels switch` moved the session
+    // to a subgroup), else the per-session room (`rec.project`). All fabric
+    // presence/deltas key on this so a switched session's turn context reflects
+    // the new room, not the one it minted at spawn.
+    let scope = rec.route_scope().to_string();
     let mut blocks: Vec<String> = Vec::new();
 
     if first_turn {
@@ -72,10 +77,8 @@ pub fn assemble_turn_start_context(
         // not a user action item.
         let should_warn_not_member = {
             let s = store.lock().expect("store mutex poisoned");
-            let not_member = !s
-                .is_group_member(&rec.project, &rec.agent_pubkey)
-                .unwrap_or(true);
-            let locally_owned = s.is_group_owned(&rec.project).unwrap_or(false);
+            let not_member = !s.is_group_member(&scope, &rec.agent_pubkey).unwrap_or(true);
+            let locally_owned = s.is_group_owned(&scope).unwrap_or(false);
             not_member && !locally_owned
         };
         if should_warn_not_member {
@@ -87,7 +90,7 @@ pub fn assemble_turn_start_context(
                  has relay admin access (e.g. where this project was first set up):\n\
                  \n  tenex-edge project add {project} {slug}",
                 slug = rec.agent_slug,
-                project = rec.project,
+                project = scope,
             ));
         }
     }
@@ -111,7 +114,7 @@ pub fn assemble_turn_start_context(
         &mut blocks,
         first_turn,
         prev_turn_started_at,
-        &rec.project,
+        &scope,
         now_secs(),
         &rec.host,
         &rec.session_id,
@@ -141,6 +144,12 @@ pub fn assemble_turn_check_context(
     now: u64,
 ) -> Option<String> {
     let mut blocks: Vec<String> = Vec::new();
+    // Routing scope: channel when set (a `channels switch` moved the session
+    // to a subgroup), else the per-session room. The status delta + chat label
+    // key on this so mid-turn context reflects the room the session is actually
+    // publishing into after a switch.
+    let scope = rec.route_scope().to_string();
+    let channel = channel_label(&scope);
 
     // Chat and sibling-delta — both gated by the daemon's rate-limit
     // floor and cursored off the same `since` so nothing re-emits per tool call.
@@ -156,7 +165,7 @@ pub fn assemble_turn_check_context(
         .collect();
         if !chat_rows.is_empty() {
             blocks.push(render_chat_block(
-                "[tenex-edge] Project chat while you were working:",
+                &format!("[tenex-edge] Messages on {channel} since your last check:"),
                 &chat_rows,
                 &rec.session_id,
                 now,
@@ -164,10 +173,10 @@ pub fn assemble_turn_check_context(
         }
 
         let s = store.lock().expect("store mutex poisoned");
-        let delta = build_status_delta(&s, since, &rec.project, now, Some(&rec.session_id));
+        let delta = build_status_delta(&s, since, &scope, now, Some(&rec.session_id));
         if !delta.is_empty() {
             blocks.push(format!(
-                "tenex-edge fabric — changes since your last check:\n{}",
+                "tenex-edge fabric — changes on {channel} since your last check:\n{}",
                 delta.join("\n")
             ));
         }
@@ -177,6 +186,17 @@ pub fn assemble_turn_check_context(
         None
     } else {
         Some(blocks.join("\n\n"))
+    }
+}
+
+fn channel_label(project: &str) -> String {
+    let p = project.trim();
+    if p.is_empty() {
+        "#unknown".to_string()
+    } else if p.starts_with('#') {
+        p.to_string()
+    } else {
+        format!("#{p}")
     }
 }
 

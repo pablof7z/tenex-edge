@@ -37,6 +37,22 @@ pub struct SessionRecord {
     pub channel: String,
 }
 
+impl SessionRecord {
+    /// The NIP-29 group id this session currently routes under — its channel
+    /// when set, else its per-session room (`project`). All fabric publishing
+    /// (chat/mentions/proposals), local chat routing, `who`/statusline scoping,
+    /// and turn-context deltas key on this so `channels switch` actually moves
+    /// the session to a different room without restarting. `project` alone is
+    /// stale the moment `channel` is set.
+    pub fn route_scope(&self) -> &str {
+        if self.channel.is_empty() {
+            &self.project
+        } else {
+            &self.channel
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PeerSession {
     pub session_id: String,
@@ -805,6 +821,48 @@ impl Store {
             "UPDATE sessions SET alive=0 WHERE session_id=?1",
             params![id],
         )?;
+        Ok(())
+    }
+
+    /// Move a session to a different NIP-29 routing scope (`channels switch`).
+    /// Writes `sessions.channel` AND `session_state.project` so the status
+    /// drainer, `who`/`statusline` scoping, and `status_delta_since` all key on
+    /// the new scope. Bumping `session_state.project` + `state_version` +
+    /// enqueueing an outbox row makes the next kind:30315 publish land in the
+    /// new group, so peers see the session's heartbeat under the channel it
+    /// switched to rather than the per-session room it minted at spawn. `scope`
+    /// is the new NIP-29 group id (channel); pass `""` to clear the binding and
+    /// fall back to the per-session room (`sessions.project`).
+    pub fn set_session_channel(&self, session_id: &str, scope: &str, ts: u64) -> Result<()> {
+        // The effective routing scope: the new channel when non-empty, else the
+        // per-session room (`sessions.project`) — `channels switch ""` reverts.
+        let effective: String = if scope.is_empty() {
+            self.conn
+                .query_row(
+                    "SELECT project FROM sessions WHERE session_id=?1",
+                    params![session_id],
+                    |r| r.get::<_, String>(0),
+                )
+                .unwrap_or_default()
+        } else {
+            scope.to_string()
+        };
+        // sessions.channel tracks the user-facing channel binding (empty = none).
+        self.conn.execute(
+            "UPDATE sessions SET channel=?2 WHERE session_id=?1",
+            params![session_id, scope],
+        )?;
+        // session_state.project is the routing scope the drainer + who/turn
+        // deltas read; move it to the effective scope and bump the version so a
+        // fresh kind:30315 is enqueued for the new group.
+        let n = self.conn.execute(
+            "UPDATE session_state SET project=?2, state_version=state_version+1, updated_at=?3, last_seen=?3
+             WHERE session_id=?1",
+            params![session_id, effective, ts],
+        )?;
+        if n > 0 {
+            self.enqueue_status_outbox_current(session_id, ts)?;
+        }
         Ok(())
     }
 
@@ -1831,8 +1889,7 @@ impl Store {
         // hasn't changed since the cursor still round-trips a fresh kind:30315
         // into peer_session_state, and that echo must never surface to ourselves.
         // Keyed on agent_pubkey since peer rows no longer carry a session_id (#5 §4).
-        let mut local_pubkeys: std::collections::HashSet<String> =
-            std::collections::HashSet::new();
+        let mut local_pubkeys: std::collections::HashSet<String> = std::collections::HashSet::new();
         {
             let mut stmt = self
                 .conn
@@ -2092,6 +2149,30 @@ impl Store {
                 |r| r.get::<_, String>(0),
             )
             .ok())
+    }
+
+    /// Human-readable display name of a group/channel: the NIP-29 `name` tag
+    /// from kind:39000 if known, else the `about` text, else empty. Source of
+    /// truth for the statusline channel title (== the channel's title on the
+    /// relay == what the relay renders as the room's name). Pure read.
+    pub fn group_display_name(&self, project: &str) -> Result<String> {
+        let row: Option<(String, String)> = self
+            .conn
+            .query_row(
+                "SELECT name, about FROM project_meta WHERE project=?1",
+                params![project],
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+            )
+            .ok();
+        Ok(row
+            .map(|(name, about)| {
+                if !name.is_empty() {
+                    name
+                } else {
+                    about
+                }
+            })
+            .unwrap_or_default())
     }
 
     /// Record a group's NIP-29 subgroup hierarchy (display `name` + `parent` id)
@@ -3705,7 +3786,10 @@ mod tests {
         s.mark_session_room("proj-room", "proj", 100).unwrap();
         assert!(s.is_session_room("proj-room").unwrap());
         assert!(s.is_group_owned("proj-room").unwrap());
-        assert_eq!(s.session_room_parent("proj-room").unwrap().as_deref(), Some("proj"));
+        assert_eq!(
+            s.session_room_parent("proj-room").unwrap().as_deref(),
+            Some("proj")
+        );
         // Idempotent (parent preserved).
         s.mark_session_room("proj-room", "proj", 200).unwrap();
         assert!(s.is_session_room("proj-room").unwrap());

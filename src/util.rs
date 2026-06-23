@@ -305,7 +305,10 @@ mod tests {
     #[test]
     fn session_room_id_is_deterministic() {
         // Same anchor → same id (so a resumed session rejoins the SAME room).
-        assert_eq!(session_room_id("sess-abc-123"), session_room_id("sess-abc-123"));
+        assert_eq!(
+            session_room_id("sess-abc-123"),
+            session_room_id("sess-abc-123")
+        );
     }
 
     #[test]

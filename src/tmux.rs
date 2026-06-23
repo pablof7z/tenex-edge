@@ -239,6 +239,69 @@ fn pane_alive(pane_id: &str) -> Option<String> {
     Some(cmd)
 }
 
+// ── session-id option ────────────────────────────────────────────────────────
+
+/// Resolve a pane id (e.g. "%5") to the tmux session that owns it, or `None`
+/// if the pane is gone. Uses `display-message -p` for an O(1) lookup rather
+/// than scanning all panes. Respects a non-default `socket` path (e.g. from
+/// `tmux -S` / `tmux -L`).
+fn session_of_pane(pane_id: &str, socket: Option<&str>) -> Option<String> {
+    let mut cmd = std::process::Command::new("tmux");
+    if let Some(s) = socket.filter(|s| !s.is_empty()) {
+        cmd.args(["-S", s]);
+    }
+    let out = cmd
+        .args(["display-message", "-p", "-t", pane_id, "#{session_name}"])
+        .output()
+        .ok()?;
+    let name = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if name.is_empty() {
+        None
+    } else {
+        Some(name)
+    }
+}
+
+/// Set the `@te_session` tmux user option on the session owning `pane_id` to
+/// `session_id`, so the status-format `#(...)` invocation can read it via
+/// `#{q:@te_session}` and pass it as `--session` to `tenex-edge statusline`.
+/// This is the key that lets two panes of the same agent in the same project
+/// resolve to different sessions: the tmux server's env can't see the pane's
+/// `TENEX_EDGE_SESSION`, but a per-session tmux option is readable from the
+/// `#(...)` context. `socket` is the tmux server socket path (from
+/// `TENEX_EDGE_TMUX_SOCKET` / `p.tmux_socket`) — pass `None` for the default.
+/// Best-effort: a missing/pane-gone is logged and swallowed.
+pub fn set_pane_session_id(pane_id: &str, session_id: &str, socket: Option<&str>) {
+    let Some(session) = session_of_pane(pane_id, socket) else {
+        if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
+            eprintln!(
+                "[tmux] set_pane_session_id: pane {pane_id} not found in any tmux session"
+            );
+        }
+        return;
+    };
+    let mut cmd = std::process::Command::new("tmux");
+    if let Some(s) = socket.filter(|s| !s.is_empty()) {
+        cmd.args(["-S", s]);
+    }
+    let status = cmd
+        .args(["set-option", "-t", &session, "@te_session", session_id])
+        .status();
+    match status {
+        Ok(s) if s.success() => {}
+        Err(e) => {
+            if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
+                eprintln!("[tmux] set-option @te_session failed: {e}");
+            }
+        }
+        Ok(s) => {
+            if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
+                eprintln!("[tmux] set-option @te_session exited {s}");
+            }
+        }
+    }
+}
+
 // ── low-level tmux input helpers ──────────────────────────────────────────────
 
 /// Send a bare Enter keystroke to `pane_id` to submit whatever is on the
@@ -694,7 +757,13 @@ async fn open_agent_session(
     let status_cmd_override = crate::config::Config::load()
         .ok()
         .and_then(|c| c.tmux_status_command);
-    make_session_transparent(&session_name, tenex_bin.as_deref(), slug, abs_path, status_cmd_override.as_deref())?;
+    make_session_transparent(
+        &session_name,
+        tenex_bin.as_deref(),
+        slug,
+        abs_path,
+        status_cmd_override.as_deref(),
+    )?;
 
     Ok(pane_id)
 }
@@ -727,19 +796,26 @@ fn make_session_transparent(
     // claude. Refresh at 3s matches ccstatusline's cadence.
     //
     // The `#(...)` status-format command runs in the tmux SERVER's environment,
-    // not the pane's — TENEX_EDGE_AGENT and the project cwd are not available
-    // there. We store them as tmux user options (@te_agent, @te_cwd) and pass
-    // them explicitly via --agent and --cwd so session resolution works.
-    // #{q:@te_cwd} applies shell quoting so paths with spaces are handled safely.
+    // not the pane's: TENEX_EDGE_AGENT, the project cwd, and
+    // TENEX_EDGE_SESSION are not available there. `@te_session` is stamped onto
+    // the tmux session by the daemon's `session_start` handler (see
+    // `tmux::set_pane_session_id`) once it mints the canonical session id, so the
+    // statusline resolves to THIS pane's session even when several panes share
+    // the same agent + cwd. Before the hook fires (or if the daemon is down),
+    // `@te_session` is empty and we fall back to `@te_agent` + `@te_cwd` so the
+    // bar still shows something. `#{q:...}` applies shell quoting so paths with
+    // spaces are safe.
     let bin = tenex_bin.unwrap_or("tenex-edge");
-    // #{@te_agent} and #{q:@te_cwd} are tmux format variables expanded by tmux
-    // before the shell runs the command. #{q:...} adds shell quoting so paths
-    // with spaces are safe. In Rust format strings, {{ and }} produce literal
-    // { and } respectively.
+    // #{q:@te_session}, #{@te_agent}, #{q:@te_cwd} are tmux format variables
+    // expanded by tmux before the shell runs the command. #{q:...} adds shell
+    // quoting so paths with spaces are safe. In Rust format strings, {{ and }}
+    // produce literal { and } respectively.
     let statusline_cmd = status_cmd_override
         .map(|s| s.to_string())
         .unwrap_or_else(|| {
-            format!("#({bin} statusline --tmux --agent #{{@te_agent}} --cwd #{{q:@te_cwd}})")
+            format!(
+                "#({bin} statusline --tmux --session #{{q:@te_session}} --agent #{{@te_agent}} --cwd #{{q:@te_cwd}})"
+            )
         });
     let OPTIONS: Vec<(&str, String)> = vec![
         // Session identity for the status bar: stored as user options so the

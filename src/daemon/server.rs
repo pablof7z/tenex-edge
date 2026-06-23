@@ -302,7 +302,11 @@ pub async fn run() -> Result<()> {
         // backend's identity), independent of any project — so a backend with no
         // live sessions still receives subgroup add-agents requests (issue #3).
         if let Some(bp) = relay_state.backend_pubkey() {
-            if let Err(e) = relay_state.provider.subscribe_backend_orchestration(bp).await {
+            if let Err(e) = relay_state
+                .provider
+                .subscribe_backend_orchestration(bp)
+                .await
+            {
                 if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
                     eprintln!("[daemon] backend orchestration subscription failed: {e:#}");
                 }
@@ -937,6 +941,16 @@ async fn rpc_session_start(
         }
     });
 
+    // Stamp the canonical session id onto the tmux session owning this pane so
+    // the status-format `#(...)` can read it via `#{q:@te_session}` and pass
+    // `--session` to `tenex-edge statusline`. Without this, two panes of the
+    // same agent in the same project collapse to a single status bar (the
+    // `#(...)` runs in the tmux server's env, which can't see the pane's
+    // TENEX_EDGE_SESSION). Best-effort and deliberately outside the store lock.
+    if let Some(ref pane) = tmux_pane {
+        crate::tmux::set_pane_session_id(pane, &session_id, p.tmux_socket.as_deref());
+    }
+
     // A session may acquire or refresh its tmux endpoint after unread rows were
     // already stored. Ring from the daemon on endpoint registration too, not
     // only from inbox write paths, so delivery does not depend on the tmux TUI
@@ -981,7 +995,8 @@ async fn rpc_session_start(
         state.with_store(|s| {
             s.mark_group_owned(&project, now).ok();
             s.mark_session_room(&project, parent, now).ok();
-            s.upsert_group_metadata(&project, &p.agent, parent, now).ok();
+            s.upsert_group_metadata(&project, &p.agent, parent, now)
+                .ok();
             // NOTE: we deliberately do NOT pre-insert local group membership here.
             // The first-turn "not a member" warning is already suppressed by the
             // `locally_owned` guard (mark_group_owned above is synchronous), so a
@@ -1118,19 +1133,21 @@ fn rpc_session_end(
         if let Some(sk) = session_key {
             let provider = state.provider.clone();
             let store = state.store.clone();
-            let project = rec.project.clone();
+            // Remove from the session's CURRENT routing scope — its channel when
+            // set (a `channels switch` moved it), else its per-session room — so
+            // the NIP-29 member removal lands in the group the relay actually has
+            // the agent in, not the room it minted at spawn.
+            let scope = rec.route_scope().to_string();
             let session_pubkey = sk.public_key().to_hex();
             tokio::spawn(async move {
-                let removed = provider
-                    .nip29_remove_member(&project, &session_pubkey)
-                    .await;
+                let removed = provider.nip29_remove_member(&scope, &session_pubkey).await;
                 // Mirror into the cache unconditionally: relay rejection of a
                 // remove for a non-member is benign (idempotent), so always
                 // clean up our local row to avoid stale membership.
                 store
                     .lock()
                     .unwrap()
-                    .remove_group_member(&project, &session_pubkey)
+                    .remove_group_member(&scope, &session_pubkey)
                     .ok();
                 if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
                     eprintln!(
@@ -1158,7 +1175,7 @@ fn rpc_session_end(
         state.status_outbox_notify.notify_waiters();
         state.emit_tail(TailEvent::Sess {
             ts: now_secs(),
-            project: rec.project.clone(),
+            project: rec.route_scope().to_string(),
             agent: rec.agent_slug.clone(),
             session: rec.session_id.clone(),
             state: "end".into(),
@@ -1200,10 +1217,14 @@ async fn publish_agent_reply(
     // identity #5 makes the default; here we pin it directly so the reply is
     // durable-signed regardless of #5 landing.
     let signing = id.keys.clone();
+    // Route into the session's CURRENT scope (channel when set, else the
+    // per-session room) so a `channels switch` moves the agent's turn replies
+    // to the new room without restarting.
+    let scope = rec.route_scope().to_string();
 
     let chat = ChatMessage {
         from: crate::domain::AgentRef::new(from_pubkey.clone(), rec.agent_slug.clone()),
-        project: rec.project.clone(),
+        project: scope.clone(),
         body: reply.to_string(),
         from_session: Some(rec.session_id.clone()),
         mentioned_session: None,
@@ -1222,7 +1243,7 @@ async fn publish_agent_reply(
             from_pubkey: from_pubkey.clone(),
             from_slug: rec.agent_slug.clone(),
             host: state.host.clone(),
-            project: rec.project.clone(),
+            project: scope.clone(),
             body: reply.to_string(),
             created_at,
             from_session: rec.session_id.clone(),
@@ -1293,9 +1314,15 @@ async fn rpc_user_prompt(
         return Ok(serde_json::json!({ "skipped": "session not in a room" }));
     }
 
+    // Publish into the session's CURRENT routing scope — its channel when set
+    // (a `channels switch` moved it to a subgroup), else its per-session room.
+    // The `is_room` gate above still keys on `project` (the minted room flag is
+    // stable across a switch), but the wire `h` tag must follow the channel so
+    // the prompt lands where the rest of the session's chat now goes.
+    let scope = rec.route_scope().to_string();
     let chat = ChatMessage {
         from: crate::domain::AgentRef::new(op_pubkey.clone(), "operator".to_string()),
-        project: rec.project.clone(),
+        project: scope.clone(),
         body: p.prompt.clone(),
         from_session: Some(rec.session_id.clone()),
         mentioned_session: None,
@@ -1319,7 +1346,7 @@ async fn rpc_user_prompt(
             from_pubkey: op_pubkey.clone(),
             from_slug: "operator".to_string(),
             host: state.host.clone(),
-            project: rec.project.clone(),
+            project: scope.clone(),
             body: p.prompt.clone(),
             created_at,
             from_session: rec.session_id.clone(),
@@ -1327,7 +1354,7 @@ async fn rpc_user_prompt(
         });
     });
 
-    Ok(serde_json::json!({ "event_id": event_id, "project": rec.project }))
+    Ok(serde_json::json!({ "event_id": event_id, "project": scope }))
 }
 
 async fn rpc_chat_write(
@@ -1346,6 +1373,12 @@ async fn rpc_chat_write(
     )?;
     let id = identity::load_or_create(&config::edge_home(), &rec.agent_slug, now_secs())?;
     let from_pubkey = id.pubkey_hex();
+    // Routing scope: the NIP-29 group this session currently publishes into —
+    // its `channel` when set (a `channels switch` moved it to a subgroup), else
+    // its per-session room (`project`). All chat routing + the wire `h` tag key
+    // on this so a switched session's chat lands in the new room, not the old
+    // one it minted at spawn.
+    let scope = rec.route_scope().to_string();
 
     // Mention target: the FIRST inline `@codename` found in the message body,
     // so `chat write "hey @bravo4217"` highlights that session. Only codename-
@@ -1356,17 +1389,17 @@ async fn rpc_chat_write(
         .into_iter()
         .next();
     let mention = if let Some(raw) = mention_token {
-        let target = state.with_store(|s| resolve_recipient(s, &rec.project, &state.host, &raw))?;
+        let target = state.with_store(|s| resolve_recipient(s, &scope, &state.host, &raw))?;
         let Some(session_id) = target.target_session else {
             anyhow::bail!(
                 "mention @{raw} must name a concrete session codename from `tenex-edge who`"
             );
         };
-        if target.project != rec.project {
+        if target.project != scope {
             anyhow::bail!(
                 "mention target is in project {:?}, but this chat is for project {:?}",
                 target.project,
-                rec.project
+                scope
             );
         }
         Some((target.pubkey, session_id))
@@ -1378,7 +1411,7 @@ async fn rpc_chat_write(
 
     let chat = ChatMessage {
         from: crate::domain::AgentRef::new(from_pubkey.clone(), rec.agent_slug.clone()),
-        project: rec.project.clone(),
+        project: scope.clone(),
         body: p.message.clone(),
         from_session: Some(rec.session_id.clone()),
         mentioned_session: mentioned_session.clone(),
@@ -1397,14 +1430,16 @@ async fn rpc_chat_write(
 
     // Local live delivery: relays often don't echo an event back to the same
     // connection that published it, and chat intentionally does not catch up old
-    // history. Route now to sessions already alive in the same project.
+    // history. Route now to sessions already alive in the same routing scope
+    // (channel when set, else the per-session room) so a `channels switch` is
+    // reflected immediately, not only once the relay echoes back.
     let routed = state.with_store(|s| {
         let _ = s.record_chat(&ChatLogRow {
             chat_event_id: event_id.clone(),
             from_pubkey: from_pubkey.clone(),
             from_slug: rec.agent_slug.clone(),
             host: state.host.clone(),
-            project: rec.project.clone(),
+            project: scope.clone(),
             body: p.message.clone(),
             created_at,
             from_session: rec.session_id.clone(),
@@ -1412,7 +1447,7 @@ async fn rpc_chat_write(
         });
         let mut routed = false;
         for target in s.list_alive_sessions().unwrap_or_default() {
-            if target.project != rec.project {
+            if target.route_scope() != scope {
                 continue;
             }
             if target.created_at > created_at {
@@ -1426,7 +1461,7 @@ async fn rpc_chat_write(
                 target_session: target.session_id,
                 from_pubkey: from_pubkey.clone(),
                 from_slug: rec.agent_slug.clone(),
-                project: rec.project.clone(),
+                project: scope.clone(),
                 body: p.message.clone(),
                 created_at,
                 from_session: rec.session_id.clone(),
@@ -1444,7 +1479,7 @@ async fn rpc_chat_write(
 
     state.emit_tail(TailEvent::Msg {
         ts: created_at,
-        project: rec.project.clone(),
+        project: scope.clone(),
         from: rec.agent_slug,
         from_session: Some(rec.session_id),
         to: mentioned_pubkey
@@ -1457,7 +1492,7 @@ async fn rpc_chat_write(
 
     Ok(serde_json::json!({
         "event_id": event_id,
-        "project": rec.project,
+        "project": scope,
         "mentioned_pubkey": mentioned_pubkey,
         "mentioned_session": mentioned_session,
     }))
@@ -1518,9 +1553,13 @@ async fn rpc_propose(
         .as_deref()
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+    // Publish into the session's CURRENT routing scope — channel when set
+    // (a `channels switch` moved it to a subgroup), else the per-session room.
+    // Falls back to the cwd-derived project when no session is live (a bare
+    // `tenex-edge publish` from the repo root).
     let project = session_rec
         .as_ref()
-        .map(|r| r.project.clone())
+        .map(|r| r.route_scope().to_string())
         .unwrap_or_else(|| crate::project::resolve(&cwd).unwrap_or_default());
     let agent_slug = session_rec
         .as_ref()
@@ -1796,10 +1835,12 @@ async fn rpc_turn_start(
         None => return Ok(serde_json::json!({ "context": serde_json::Value::Null })),
     };
 
-    // Emit Turn{working} for the live tail feed.
+    // Emit Turn{working} for the live tail feed. Key on the routing scope
+    // (channel when set, else the per-session room) so the tail reflects the
+    // room the session actually publishes into after a `channels switch`.
     state.emit_tail(TailEvent::Turn {
         ts: now_secs(),
-        project: rec.project.clone(),
+        project: rec.route_scope().to_string(),
         agent: rec.agent_slug.clone(),
         session: rec.session_id.clone(),
         state: "working".into(),
@@ -1918,9 +1959,13 @@ async fn rpc_turn_end(
                     // client gives up and retries the stop hook.
                     let publish = publish_agent_reply(state, rec, reply);
                     let debug = std::env::var("TENEX_EDGE_DEBUG").is_ok();
-                    match tokio::time::timeout(std::time::Duration::from_millis(1500), publish).await {
+                    match tokio::time::timeout(std::time::Duration::from_millis(1500), publish)
+                        .await
+                    {
                         Ok(Ok(())) => {}
-                        Ok(Err(e)) if debug => eprintln!("[daemon] agent reply publish skipped: {e:#}"),
+                        Ok(Err(e)) if debug => {
+                            eprintln!("[daemon] agent reply publish skipped: {e:#}")
+                        }
                         Err(_) if debug => eprintln!("[daemon] agent reply publish timed out"),
                         _ => {}
                     }
@@ -1938,7 +1983,7 @@ async fn rpc_turn_end(
             if let Some(rec) = rec.as_ref() {
                 state.emit_tail(TailEvent::Turn {
                     ts: now,
-                    project: rec.project.clone(),
+                    project: rec.route_scope().to_string(),
                     agent: rec.agent_slug.clone(),
                     session: rec.session_id.clone(),
                     state: "idle".into(),
@@ -2098,9 +2143,6 @@ async fn refresh_project_members_cache(state: &Arc<DaemonState>, project: &str) 
 
 // ── statusline ───────────────────────────────────────────────────────────────
 
-/// How long a drained mention keeps showing on the statusline as "recently
-/// consumed" before disappearing.
-const STATUSLINE_RECENT_SECS: u64 = 30;
 /// How long a distillation error stays visible in the statusline before expiring.
 const DISTILL_ERROR_TTL_SECS: u64 = 300;
 
@@ -2114,12 +2156,6 @@ struct StatuslineParams {
     cwd: Option<String>,
     #[serde(default)]
     agent: Option<String>,
-    /// Tmux pane id (e.g. `%5`) the statusline is rendering for. When present
-    /// and the pane is bound to a live session via `session_endpoints`, that
-    /// session wins over the agent+cwd fallback — so two panes of the same
-    /// agent in the same project no longer collapse to one status bar.
-    #[serde(default)]
-    pane: Option<String>,
 }
 
 /// `statusline`: everything the host's status bar renders, in one pure-read RPC.
@@ -2140,35 +2176,46 @@ fn rpc_statusline(
     )?;
     let now = now_secs();
     let host = state.host.clone();
+    // Routing scope (channel when set, else the per-session room) — the member
+    // count and is_member check key on it so a `channels switch` is reflected in
+    // the statusline without restarting.
+    let scope = rec.route_scope().to_string();
     state.with_store(|s| {
-        let session_count = crate::cli::load_who_snapshot(s, Some(&rec.project), false, now, &host)
-            .map(|snap| snap.session_count())
-            .unwrap_or(0);
-        let member_count = s.count_group_members(&rec.project).unwrap_or(0);
-        let is_member = s
-            .is_group_member(&rec.project, &rec.agent_pubkey)
-            .unwrap_or(true);
-        // Read busy + title from the canonical aggregate via the SHARED projection
-        // (derive_status), so the statusline agrees with `who`/turn-deltas. Pure
-        // read: no drains, no touches.
-        let (working, status) = s
+        let member_count = s.count_group_members(&scope).unwrap_or(0);
+        let is_member = s.is_group_member(&scope, &rec.agent_pubkey).unwrap_or(true);
+        // Read busy + title + live activity from the canonical aggregate via
+        // the SHARED projection (derive_status), so the statusline agrees with
+        // `who`/turn-deltas. Pure read: no drains, no touches. The statusline
+        // shows the activity line (the live "doing now" signal from kind:30315),
+        // not the persistent title (the channel title segment carries that).
+        let (working, title, activity) = s
             .local_session_snapshot(&rec.session_id)
             .ok()
             .flatten()
             .map(|snap| {
                 let d = derive_status(&snap, now);
-                (d.busy, d.title)
+                (d.busy, d.title, d.activity)
             })
-            .unwrap_or((false, String::new()));
-        let pending_chat = s.peek_chat_mentions(&rec.session_id).unwrap_or_default();
-        let recent_since = now.saturating_sub(STATUSLINE_RECENT_SECS);
-        let recent_chat = s
-            .list_recently_delivered_chat_mentions(&rec.session_id, recent_since)
-            .unwrap_or_default();
-        let mut pending_json = chat_rows_to_json(&pending_chat);
-        sort_message_json(&mut pending_json);
-        let mut recent_json = chat_rows_to_json(&recent_chat);
-        sort_message_json(&mut recent_json);
+            .unwrap_or((false, String::new(), String::new()));
+        // `channel_title` is the display name of the routing scope (channel or
+        // per-session room) from the relay-authored kind:39000 metadata cache
+        // (== the channel's title on the relay == what the relay renders as the
+        // room's name). Falls back to the distilled session title when the
+        // session is in its own per-session room (issue #6: the room is renamed
+        // to the distilled title via kind:9002 edit-metadata; the local cache
+        // may lag by one refresh).
+        let mut channel_title = s.group_display_name(&scope).unwrap_or_default();
+        if channel_title.is_empty() {
+            channel_title = title.clone();
+        }
+        // `work_root` is the parent project a per-session room hangs under, or
+        // the project itself for an ordinary project session. This is the
+        // "Project" line in `who`, surfaced as `project-name` in the statusline.
+        let work_root = s
+            .session_room_parent(&rec.project)
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| rec.project.clone());
         let distill_error = s
             .get_recent_session_error(&rec.session_id, now.saturating_sub(DISTILL_ERROR_TTL_SECS))
             .ok()
@@ -2177,14 +2224,14 @@ fn rpc_statusline(
             "agent": rec.agent_slug,
             "host": host,
             "session_id": rec.session_id,
-            "project": rec.project,
+            "work_root": work_root,
+            "channel": scope,
+            "channel_title": channel_title,
             "member_count": member_count,
-            "session_count": session_count,
             "is_member": is_member,
             "working": working,
-            "status": status,
-            "pending": pending_json,
-            "recent": recent_json,
+            "title": title,
+            "activity": activity,
             "distill_error": distill_error,
         }))
     })
@@ -2219,10 +2266,14 @@ fn rpc_whoami(state: &Arc<DaemonState>, params: &serde_json::Value) -> Result<se
             .ok()
             .and_then(|pk| pk.to_bech32().ok())
     };
+    // Routing scope: channel when set (a `channels switch` moved the session),
+    // else the per-session room. `whoami` answers "which agent am I on the
+    // fabric" — the scope it currently publishes into is the relevant one, and
+    // the is_member check must key on it so a switched session doesn't report
+    // a stale membership in the room it minted at spawn.
+    let scope = rec.route_scope().to_string();
     state.with_store(|s| {
-        let is_member = s
-            .is_group_member(&rec.project, &rec.agent_pubkey)
-            .unwrap_or(true);
+        let is_member = s.is_group_member(&scope, &rec.agent_pubkey).unwrap_or(true);
         let (working, status) = s
             .local_session_snapshot(&rec.session_id)
             .ok()
@@ -2240,7 +2291,7 @@ fn rpc_whoami(state: &Arc<DaemonState>, params: &serde_json::Value) -> Result<se
             "agent": rec.agent_slug,
             "session_id": rec.session_id,
             "codename": crate::util::session_codename(&rec.session_id),
-            "project": rec.project,
+            "project": scope,
             "host": host,
             "rel_cwd": rec.rel_cwd,
             "pubkey": rec.agent_pubkey,
@@ -2397,7 +2448,8 @@ async fn ensure_session_room(
     state.with_store(|s| {
         s.mark_group_owned(room_h, now_secs()).ok();
         s.mark_session_room(room_h, parent, now_secs()).ok();
-        s.upsert_group_metadata(room_h, name, parent, now_secs()).ok();
+        s.upsert_group_metadata(room_h, name, parent, now_secs())
+            .ok();
     });
     let _ = ensure_subscription(state, room_h).await;
 
@@ -2527,11 +2579,7 @@ async fn rpc_channels_create(
     for pk in &state.cfg.whitelisted_pubkeys {
         admin_set.insert(pk.clone());
     }
-    if let Some(op) = state
-        .cfg
-        .user_nsec()
-        .and_then(|n| Keys::parse(n).ok())
-    {
+    if let Some(op) = state.cfg.user_nsec().and_then(|n| Keys::parse(n).ok()) {
         admin_set.insert(op.public_key().to_hex());
     }
     if let Some(bp) = state.backend_pubkey() {
@@ -2612,7 +2660,14 @@ async fn rpc_channels_create(
     let builder = build_add_agents_event(&p.parent, &child_h, &adds, &prose)?;
     let signed = state.transport.sign(builder, &mgmt_keys).await?;
     let orchestration_event_id = signed.id.to_hex();
-    state.transport.publish_event(&signed).await?;
+    // Checked publish: the bare `publish_event` resolves `Ok` even when every
+    // relay rejected the kind:9 (NIP-29 `blocked` / rate-limited), so reporting
+    // `orchestration_event_id` off it would advertise a channel whose
+    // orchestration event was silently dropped — backends would never receive
+    // the add-agents directive. `publish_event_checked` turns a relay rejection
+    // into a hard error so `channels_create` fails loudly instead of lying
+    // about success.
+    state.transport.publish_event_checked(&signed).await?;
 
     // Local fast-path: relays don't reliably echo to the publishing connection,
     // so drive the same listener directly for roles targeted at THIS backend.
@@ -2705,10 +2760,14 @@ fn preorder_rooms(
     out
 }
 
-/// `channels_switch`: update the session's NIP-29 channel binding (`channel`
-/// column) to the supplied `h` value. This lets a running session move to a
-/// different subgroup room without restarting. Fails if the channel does not
-/// exist in local state.
+/// `channels_switch`: move a running session to a different NIP-29 subgroup
+/// without restarting. Writes `sessions.channel`, re-points `session_state.
+/// project` at the new scope (so the status drainer, `who`/`statusline`
+/// scoping, and `status_delta_since` all key on it), bumps the state version,
+/// and enqueues a status_outbox row so a fresh kind:30315 publishes into the
+/// new room. All fabric publishing (chat/mentions/proposals), local chat
+/// routing, and turn-context deltas follow the new scope via `route_scope()`.
+/// Fails if the channel does not exist in local state.
 async fn rpc_channels_switch(
     state: &Arc<DaemonState>,
     params: &serde_json::Value,
@@ -2739,17 +2798,24 @@ async fn rpc_channels_switch(
     )?;
     let new_channel = p.channel.clone();
     // Validate the channel exists in local state before switching.
-    let exists: bool = state.with_store(|s| Ok::<bool, anyhow::Error>(s.channel_exists(&new_channel)))?;
+    let exists: bool =
+        state.with_store(|s| Ok::<bool, anyhow::Error>(s.channel_exists(&new_channel)))?;
     if !exists {
         anyhow::bail!("channel {:?} does not exist", new_channel);
     }
     let prev_channel = rec.channel.clone();
-    state.with_store(|s| {
-        s.upsert_session(&crate::state::SessionRecord {
-            channel: new_channel.clone(),
-            ..rec.clone()
-        })
-    })?;
+    // Apply the switch in ONE store transaction: update `sessions.channel`,
+    // move `session_state.project` to the new scope (so the status drainer, who
+    // snapshot, and status_delta all key on it), bump the version, and enqueue
+    // a status_outbox row so a fresh kind:30315 publishes into the new room.
+    // Without this, `channels switch` only flipped a column and the session
+    // kept routing into its old per-session room.
+    state.with_store(|s| s.set_session_channel(&rec.session_id, &new_channel, now_secs()))?;
+    // Nudge the drainer so the scope-changed status publishes immediately
+    // rather than waiting for the next heartbeat tick. The kind:30315 it
+    // publishes carries the new `h` tag, so peers in the channel see the
+    // session's presence without a separate profile push.
+    state.status_outbox_notify.notify_waiters();
     Ok(serde_json::json!({
         "session_id": rec.session_id,
         "prev_channel": prev_channel,
@@ -4103,28 +4169,6 @@ impl DaemonState {
     fn emit_tail(&self, ev: TailEvent) {
         let _ = self.tail_tx.send(ev);
     }
-}
-
-fn chat_rows_to_json(rows: &[ChatInboxRow]) -> Vec<serde_json::Value> {
-    rows.iter()
-        .map(|r| {
-            serde_json::json!({
-                "from_slug": r.from_slug,
-                "project": r.project,
-                "from_session": r.from_session,
-                "host": "",
-                "subject": "",
-                "created_at": r.created_at,
-                "id": crate::cli::mention_short_id(&r.chat_event_id),
-                "mention_event_id": r.chat_event_id,
-                "body": r.body,
-            })
-        })
-        .collect()
-}
-
-fn sort_message_json(rows: &mut [serde_json::Value]) {
-    rows.sort_by_key(|row| row["created_at"].as_i64().unwrap_or_default());
 }
 
 fn env_duration(key: &str, default: Duration) -> Duration {

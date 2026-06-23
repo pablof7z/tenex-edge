@@ -211,7 +211,8 @@ pub(super) fn hook_tail(opts: HookTailOpts) -> Result<()> {
                         KeyCode::Tab | KeyCode::Right => {
                             let n = snapshot.panes.len().min(state.pane_limit).max(1);
                             state.focused = (state.focused + 1) % n;
-                            state.focused_session = snapshot.panes.get(state.focused).map(|p| p.session.clone());
+                            state.focused_session =
+                                snapshot.panes.get(state.focused).map(|p| p.session.clone());
                             state.line_cursor = usize::MAX;
                         }
                         KeyCode::BackTab | KeyCode::Left => {
@@ -221,7 +222,8 @@ pub(super) fn hook_tail(opts: HookTailOpts) -> Result<()> {
                             } else {
                                 state.focused - 1
                             };
-                            state.focused_session = snapshot.panes.get(state.focused).map(|p| p.session.clone());
+                            state.focused_session =
+                                snapshot.panes.get(state.focused).map(|p| p.session.clone());
                             state.line_cursor = usize::MAX;
                         }
                         _ => {}
@@ -235,12 +237,14 @@ pub(super) fn hook_tail(opts: HookTailOpts) -> Result<()> {
                         KeyCode::Char('-') => {
                             state.pane_limit = state.pane_limit.saturating_sub(1).max(1);
                             state.focused = state.focused.min(state.pane_limit.saturating_sub(1));
-                            state.focused_session = snapshot.panes.get(state.focused).map(|p| p.session.clone());
+                            state.focused_session =
+                                snapshot.panes.get(state.focused).map(|p| p.session.clone());
                         }
                         KeyCode::Tab | KeyCode::Right => {
                             let n = snapshot.panes.len().min(state.pane_limit).max(1);
                             state.focused = (state.focused + 1) % n;
-                            state.focused_session = snapshot.panes.get(state.focused).map(|p| p.session.clone());
+                            state.focused_session =
+                                snapshot.panes.get(state.focused).map(|p| p.session.clone());
                         }
                         KeyCode::BackTab | KeyCode::Left => {
                             let n = snapshot.panes.len().min(state.pane_limit).max(1);
@@ -249,10 +253,12 @@ pub(super) fn hook_tail(opts: HookTailOpts) -> Result<()> {
                             } else {
                                 state.focused - 1
                             };
-                            state.focused_session = snapshot.panes.get(state.focused).map(|p| p.session.clone());
+                            state.focused_session =
+                                snapshot.panes.get(state.focused).map(|p| p.session.clone());
                         }
                         KeyCode::Enter | KeyCode::Char('f') => {
-                            state.focused_session = snapshot.panes.get(state.focused).map(|p| p.session.clone());
+                            state.focused_session =
+                                snapshot.panes.get(state.focused).map(|p| p.session.clone());
                             state.focus_mode = true;
                             state.line_cursor = usize::MAX;
                         }

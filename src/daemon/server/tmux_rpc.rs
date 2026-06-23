@@ -205,7 +205,13 @@ pub(super) async fn rpc_tmux_resume(
         }
     };
 
-    match crate::tmux::resume_agent(state, &rec.agent_slug, &rec.project, &resume_id).await {
+    // Re-scope the resumed session to the SAME routing scope it had when it
+    // exited — its channel when set (a `channels switch` had moved it to a
+    // subgroup), else its per-session room. Passing the scope as the group
+    // override sets `TENEX_EDGE_CHANNEL` so the resumed session publishes into
+    // the right room without restarting.
+    let scope = rec.route_scope().to_string();
+    match crate::tmux::resume_agent(state, &rec.agent_slug, &scope, &resume_id).await {
         Ok(pane_id) => Ok(serde_json::json!({
             "pane_id": pane_id,
             "session_id": rec.session_id,
@@ -275,7 +281,7 @@ pub(super) fn rpc_tmux_resumable(state: &Arc<DaemonState>) -> Result<serde_json:
             Some(serde_json::json!({
                 "session_id": rec.session_id,
                 "slug": rec.agent_slug,
-                "project": rec.project,
+                "project": rec.route_scope(),
                 "rel_cwd": rec.rel_cwd,
                 "alive": rec.alive,
                 "created_at": rec.created_at,

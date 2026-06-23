@@ -475,7 +475,10 @@ fn render_labels_session_room_as_channel_with_parent_project() {
     );
     assert!(out.contains("Project: lsjkd"), "got: {out}");
     // The room id must NOT be presented as the project.
-    assert!(!out.contains("Project: session-a1b2c3d4e5f60718"), "got: {out}");
+    assert!(
+        !out.contains("Project: session-a1b2c3d4e5f60718"),
+        "got: {out}"
+    );
 }
 
 #[test]

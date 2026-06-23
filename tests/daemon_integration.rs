@@ -6,13 +6,13 @@
 //! `TENEX_EDGE_HOME`. Env mutation is serialized; the file is run single-threaded
 //! by the runner invocation in the SUMMARY (each test sets process-global env).
 
+#[path = "daemon_integration/channels.rs"]
+mod channels;
 mod common;
 #[path = "daemon_integration/harness.rs"]
 mod daemon_harness;
 #[path = "daemon_integration/freeze.rs"]
 mod freeze;
-#[path = "daemon_integration/channels.rs"]
-mod channels;
 #[path = "daemon_integration/messaging.rs"]
 mod messaging;
 #[path = "daemon_integration/process.rs"]

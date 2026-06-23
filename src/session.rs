@@ -455,7 +455,9 @@ pub enum RoomDecision {
 /// Pure and total.
 pub fn decide_session_room(group: Option<&str>, work_root: &str) -> RoomDecision {
     match group {
-        Some(g) if !g.is_empty() => RoomDecision::UseExisting { group: g.to_string() },
+        Some(g) if !g.is_empty() => RoomDecision::UseExisting {
+            group: g.to_string(),
+        },
         _ => RoomDecision::Mint {
             parent: work_root.to_string(),
         },

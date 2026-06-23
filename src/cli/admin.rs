@@ -155,8 +155,8 @@ pub(super) async fn channels(action: ChannelsAction) -> Result<()> {
         ChannelsAction::List { project } => {
             use owo_colors::Stream::Stdout;
             let parent = resolve_project(project)?;
-            let v =
-                daemon_call_async("channels_list", serde_json::json!({ "project": parent })).await?;
+            let v = daemon_call_async("channels_list", serde_json::json!({ "project": parent }))
+                .await?;
             let rooms = v["rooms"].as_array().map(|a| a.as_slice()).unwrap_or(&[]);
             // Root of the tree is the project itself. Colorize ONLY when stdout is a
             // real terminal: piped/captured output (the e2e harness, shell

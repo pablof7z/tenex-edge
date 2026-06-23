@@ -91,7 +91,11 @@ struct RawConfig {
     tenex_private_key: Option<String>,
     /// Custom tmux status-format string for agent sessions. When set, overrides
     /// the default `tenex-edge statusline` command. Use tmux format variables
-    /// #{@te_agent} and #{q:@te_cwd} to reference the session's agent and cwd.
+    /// `#{q:@te_session}` (the canonical session id, stamped by the daemon once
+    /// the session-start hook fires), `#{@te_agent}`, and `#{q:@te_cwd}` to
+    /// reference the session's identity. `#{q:@te_session}` is the preferred key:
+    /// it disambiguates panes of the same agent in the same project; the others
+    /// are fallbacks for the brief window before the hook fires.
     #[serde(default, rename = "tmuxStatusCommand")]
     tmux_status_command: Option<String>,
 }
@@ -212,10 +216,7 @@ mod tests {
         let c = Config::from_json_str(json, "host").unwrap();
         // session derivation + management + backend identity all use the
         // backend key; the operator key is only for user prompts + admin grant.
-        assert_eq!(
-            c.session_ikm_nsec().map(String::as_str),
-            Some("backendkey")
-        );
+        assert_eq!(c.session_ikm_nsec().map(String::as_str), Some("backendkey"));
         assert_eq!(c.management_nsec().map(String::as_str), Some("backendkey"));
         assert_eq!(c.backend_nsec().map(String::as_str), Some("backendkey"));
         assert_eq!(c.user_nsec().map(String::as_str), Some("operatorkey"));

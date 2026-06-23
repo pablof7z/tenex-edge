@@ -365,3 +365,85 @@ fn run_cli_proto(home: &Home, args: &[&str], proto: Option<&str>) -> std::proces
     }
     cmd.output().expect("run tenex-edge")
 }
+
+#[test]
+fn statusline_resolves_to_specific_session_when_session_id_is_supplied() {
+    // Regression: two sessions of the same agent in the same project must NOT
+    // collapse to a single statusline. When the statusline RPC receives an
+    // explicit `session` (the canonical id, stamped as `@te_session` on the
+    // tmux session by `rpc_session_start`), it must resolve to THAT session,
+    // not whichever session is newest for the agent+cwd pair.
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let home = Home::new();
+
+    // Start two sessions with the same agent + cwd but distinct harness ids.
+    let (canon_a, canon_b) = rt().block_on(async {
+        let mut c = Client::connect_or_spawn().await.expect("connect");
+        let a = c
+            .call(
+                "session_start",
+                serde_json::json!({"agent": "claude", "session_id": "sess-a", "cwd": "/tmp"}),
+            )
+            .await
+            .expect("session_start a");
+        let b = c
+            .call(
+                "session_start",
+                serde_json::json!({"agent": "claude", "session_id": "sess-b", "cwd": "/tmp"}),
+            )
+            .await
+            .expect("session_start b");
+        (
+            a["session_id"].as_str().unwrap().to_string(),
+            b["session_id"].as_str().unwrap().to_string(),
+        )
+    });
+    assert_ne!(canon_a, canon_b, "two sessions must mint distinct ids");
+
+    rt().block_on(async {
+        let mut c = Client::connect_or_spawn().await.expect("connect");
+        // Statusline with session A's canonical id must show session A.
+        let v = c
+            .call(
+                "statusline",
+                serde_json::json!({"session": &canon_a, "agent": "claude", "cwd": "/tmp"}),
+            )
+            .await
+            .expect("statusline A");
+        assert_eq!(
+            v["session_id"].as_str().unwrap(),
+            canon_a,
+            "statusline --session A must resolve to session A, not the latest"
+        );
+        // Statusline with session B's canonical id must show session B.
+        let v = c
+            .call(
+                "statusline",
+                serde_json::json!({"session": &canon_b, "agent": "claude", "cwd": "/tmp"}),
+            )
+            .await
+            .expect("statusline B");
+        assert_eq!(
+            v["session_id"].as_str().unwrap(),
+            canon_b,
+            "statusline --session B must resolve to session B, not the latest"
+        );
+        // Statusline with NO session (empty) falls back to agent+cwd. We don't
+        // assert WHICH of the two wins (both were minted in the same second, so
+        // `created_at DESC` is nondeterministic), only that it's one of them.
+        let v = c
+            .call(
+                "statusline",
+                serde_json::json!({"session": "", "agent": "claude", "cwd": "/tmp"}),
+            )
+            .await
+            .expect("statusline fallback");
+        let fallback_id = v["session_id"].as_str().unwrap();
+        assert!(
+            fallback_id == canon_a || fallback_id == canon_b,
+            "empty --session falls back to agent+cwd (one of the two): got {fallback_id}"
+        );
+    });
+
+    stop_daemon(&home);
+}

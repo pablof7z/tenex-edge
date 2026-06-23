@@ -346,7 +346,10 @@ impl Kind1Nip29Provider {
         let nsec = match &self.management_nsec {
             Some(n) => n.clone(),
             None => {
-                progress("no signing key (tenexPrivateKey) configured; skipping group management".to_string());
+                progress(
+                    "no signing key (tenexPrivateKey) configured; skipping group management"
+                        .to_string(),
+                );
                 if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
                     eprintln!(
                         "[daemon] no signing key (tenexPrivateKey) configured; skipping NIP-29 group management for {project}"
@@ -440,8 +443,11 @@ impl Kind1Nip29Provider {
         //    speak and manage their groups. Signed by `tenexPrivateKey`.
         //    Diff against the relay's live 39001 set so a re-run repairs any
         //    pubkey that is missing or only a plain member.
-        let mut admin_set: std::collections::BTreeSet<&str> =
-            self.whitelisted_pubkeys.iter().map(String::as_str).collect();
+        let mut admin_set: std::collections::BTreeSet<&str> = self
+            .whitelisted_pubkeys
+            .iter()
+            .map(String::as_str)
+            .collect();
         if let Some(ref op_pk) = self.operator_pubkey {
             admin_set.insert(op_pk.as_str());
         }

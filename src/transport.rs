@@ -242,6 +242,23 @@ impl Transport {
         Ok(out.val)
     }
 
+    /// Like [`publish_event`], but FAILS when no relay accepted the event.
+    /// `send_event` resolves `Ok` even when every relay rejected (e.g. NIP-29
+    /// `blocked` / `rate-limited`); a caller that reports success on a bare `Ok`
+    /// would mask a silently-dropped event. Use this whenever a reported event id
+    /// must mean the event is actually on the relay — the canonical case is
+    /// `channels_create`, which returns `orchestration_event_id` to the operator
+    /// and drives a local fast-path handler off the same event.
+    pub async fn publish_event_checked(&self, signed: &Event) -> Result<EventId> {
+        let out = self
+            .client
+            .send_event(signed)
+            .await
+            .context("publishing signed event")?;
+        assert_relay_accepted(&out)?;
+        Ok(out.val)
+    }
+
     /// One-shot query (used for resolution — e.g. fetch a `kind:0` profile).
     pub async fn fetch(&self, filter: Filter, timeout: Duration) -> Result<Vec<Event>> {
         let events = self

@@ -200,14 +200,6 @@ enum Cmd {
         /// pane's project directory).
         #[arg(long)]
         cwd: Option<String>,
-        /// Tmux pane id (e.g. `%5`) the statusline is rendering for. When
-        /// supplied, the daemon resolves the session bound to that pane via
-        /// `session_endpoints` BEFORE falling back to the agent+cwd lookup —
-        /// so two panes of the same agent in the same project no longer share
-        /// one status bar. The tmux status-format invocation passes
-        /// `#{pane_id}`, which tmux expands per-pane.
-        #[arg(long)]
-        pane: Option<String>,
         /// Emit tmux #[style] format strings instead of ANSI codes. Required
         /// when the output is consumed by tmux's status-format (#(...)).
         #[arg(long)]
@@ -608,9 +600,8 @@ pub async fn run(cli: Cli) -> Result<()> {
             session,
             agent,
             cwd,
-            pane,
             tmux,
-        } => statusline::statusline(session, agent, cwd, pane, tmux),
+        } => statusline::statusline(session, agent, cwd, tmux),
         Cmd::Project { action } => admin::project(action).await,
         Cmd::Channels { action } => admin::channels(action).await,
         Cmd::Agent { action } => admin::agent(action).await,
@@ -868,7 +859,7 @@ mod turn_context_tests {
         let text = assemble_turn_check_context(&m, &test_session(&me_id), "laptop", Some(50), 200)
             .expect("delta block expected when a sibling changed");
         assert!(
-            text.contains("changes since your last check"),
+            text.contains("changes on #proj since your last check"),
             "delta header expected; got: {text:?}"
         );
         // Changed renders as a canonical presence line: `* codename (agent@host) — activity`.
@@ -987,7 +978,7 @@ mod turn_context_tests {
             assemble_turn_check_context(&m, &test_session("sess-me"), "laptop", Some(50), 200)
                 .expect("fresh chat past the cursor must surface");
         assert!(
-            text.contains("[tenex-edge] Project chat while you were working:"),
+            text.contains("[tenex-edge] Messages on #proj since your last check:"),
             "chat block expected; got: {text:?}"
         );
 

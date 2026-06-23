@@ -136,8 +136,6 @@ pub(super) async fn publish(
     Ok(())
 }
 
-
-
 pub(super) fn resolve_send_message_body(raw: Option<String>) -> Result<String> {
     match raw {
         Some(message) if message == "-" => read_stdin_message(),

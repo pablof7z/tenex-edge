@@ -306,8 +306,7 @@ pub fn load_who_snapshot(
 
     // If the current scope is a per-session room, surface its work-root parent
     // so the renderer can label it as the channel (not the project).
-    let channel_parent = current_project
-        .and_then(|p| store.session_room_parent(p).ok().flatten());
+    let channel_parent = current_project.and_then(|p| store.session_room_parent(p).ok().flatten());
 
     Ok(WhoSnapshot {
         project: current_project.unwrap_or("*").to_string(),
@@ -347,10 +346,10 @@ pub(super) fn push_turn_fabric_block(
             if !snapshot.rows.is_empty() {
                 let who_text = render::render_who_plain(&snapshot);
                 blocks.push(format!(
-                "tenex-edge fabric — agents you can message. Message a session by \
+                    "tenex-edge fabric — agents you can message. Message a session by \
                  writing `@<codename>` inline in a `chat write` body:\n{}",
-                who_text.trim_end()
-            ));
+                    who_text.trim_end()
+                ));
             }
         }
     } else {

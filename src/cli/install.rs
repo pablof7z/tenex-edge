@@ -30,7 +30,6 @@ struct Harness {
     detected: bool,
 }
 
-
 fn harnesses() -> Vec<Harness> {
     let home = home_dir();
     vec![
@@ -518,7 +517,6 @@ fn write_text(path: &Path, text: &str) -> Result<()> {
     std::fs::write(path, text)?;
     Ok(())
 }
-
 
 #[cfg(test)]
 mod tests {

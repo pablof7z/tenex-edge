@@ -123,7 +123,12 @@ impl Nip29Materializer {
 
         let mut routed = false;
         for rec in store.list_alive_sessions().unwrap_or_default() {
-            if rec.project != chat.project {
+            // Match on the session's CURRENT routing scope (channel when set,
+            // else the per-session room) so a `channels switch` is reflected
+            // immediately for inbound chat — otherwise a switched session keeps
+            // receiving chat in its old room and misses everything published to
+            // the channel it moved to.
+            if rec.route_scope() != chat.project {
                 continue;
             }
             if rec.created_at > created_at {

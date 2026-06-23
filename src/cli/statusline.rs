@@ -1,28 +1,39 @@
 //! `tenex-edge statusline` — the fabric, one line at a time.
 //!
 //! Renders the awareness floor for a host status bar:
-//!   claude@kubrick [601a36] ⬡4 ◉9 ✎ refactoring inbox ✉ codex@kubrick: review?
-//!   └ identity ┘  └session┘ │   │  └ own session status┘ └ inbox envelope ┘
-//!                  members ─┘   └─ live sessions (incl. idle)
+//!   claude@kubrick tenex-edge #bravo4217 [Refactoring the inbox] [writing tests]
+//!   └ identity ┘  └ project┘  └ session ┘  └ channel title┘   └ live activity ┘
+//!
+//! `agentName` is exactly what the session published in its kind:0 profile
+//! (the `name` field). `host` is the slugified machine host. `project-name` is
+//! the work-root project the session room hangs under. `#session` is the
+//! channel the session is currently on (changes with `tenex-edge channels
+//! switch`). `[title]` is that channel's title on the relay (kind:39000 `name`
+//! tag for a task channel; the distilled session title for a per-session
+//! room). `[status]` is what the agent last published in its kind:30315 — the
+//! live activity line when busy, or `idle` when not.
+//!
+//! Optional warning segments (kept per user request) append after `[status]`:
+//!   - `⚠ not in channel <name>` — citizenship problem (not a member of the
+//!     channel's NIP-29 group).
+//!   - `⚠ distill: <message>` — distillation failure flash (up to 5 min).
 //!
 //! Reads the harness's statusline JSON payload on stdin (Claude Code sends
 //! `session_id` + `workspace.current_dir`), asks the daemon for one pure-read
-//! snapshot, prints one line. Harnesses re-run this constantly, so it must fail
-//! open — daemon down → print nothing, exit 0, and NEVER spawn a daemon just to
-//! draw a line.
+//! snapshot, prints one line. Harnesses re-run this constantly, so it must
+//! fail open — daemon down → print nothing, exit 0, and NEVER spawn a daemon
+//! just to draw a line.
 
 use super::*;
 
-/// Cap for the own-status segment.
-const STATUS_MAX_CHARS: usize = 48;
-/// Cap for the inbox message preview.
-const MESSAGE_MAX_CHARS: usize = 60;
+/// Cap for the channel title and live-activity segments.
+const TITLE_MAX_CHARS: usize = 48;
+const ACTIVITY_MAX_CHARS: usize = 48;
 
 pub(super) fn statusline(
     session: Option<String>,
     agent_arg: Option<String>,
     cwd_arg: Option<String>,
-    pane_arg: Option<String>,
     tmux_fmt: bool,
 ) -> Result<()> {
     // Harness payload on stdin (absent when invoked by hand from a terminal or
@@ -55,18 +66,12 @@ pub(super) fn statusline(
     // invocation passes --agent because TENEX_EDGE_AGENT is a pane env var
     // not available in the tmux server's #(...) execution context).
     let agent = agent_arg.or_else(agent_env_slug);
-    // Explicit --pane wins (tmux status-format passes #{pane_id}); no env fallback
-    // — the pane id is only meaningful inside tmux, and a stray $TMUX_PANE from a
-    // parent shell would bind a hand-run `tenex-edge statusline` to the wrong
-    // session.
-    let pane = pane_arg.filter(|s| !s.is_empty());
 
     let params = serde_json::json!({
         "session": session,
         "env_session": env_session,
         "cwd": cwd,
         "agent": agent,
-        "pane": pane,
     });
     // Fail open on ANY failure (no daemon, no session yet, protocol skew): a
     // status bar with a missing segment beats a status bar with an error in it.
@@ -87,28 +92,47 @@ pub(super) fn statusline(
 
 #[derive(Debug, Default, serde::Deserialize)]
 pub struct StatuslineView {
+    /// The agent's published name — exactly the `name` field of its kind:0
+    /// profile (the durable identity on the fabric). Renamed from `agent` to
+    /// make the kind:0 correspondence explicit.
     #[serde(default)]
     agent: String,
     #[serde(default)]
     host: String,
     #[serde(default)]
     session_id: String,
+    /// The work-root project the session's room hangs under (== `who`'s
+    /// "Project:" line). For an ordinary project session this is `project`
+    /// itself; for a per-session room it's the parent project.
     #[serde(default)]
-    project: String,
+    work_root: String,
+    /// The NIP-29 channel the session is currently routing under — its
+    /// `channel` when set (via `tenex-edge channels switch`), else its
+    /// per-session room `project`. The `#session-…` segment renders this id.
+    #[serde(default)]
+    channel: String,
+    /// The channel's display title on the relay (kind:39000 `name` tag for a
+    /// task channel; the distilled session title for a per-session room).
+    /// Falls back to the distilled session title when the local metadata
+    /// cache lags. Empty only when neither is known (brand-new session).
+    #[serde(default)]
+    channel_title: String,
     #[serde(default)]
     member_count: u64,
-    #[serde(default)]
-    session_count: u64,
     #[serde(default = "default_true")]
     is_member: bool,
     #[serde(default)]
     working: bool,
+    /// The persistent distilled session title (carried on kind:30315 as the
+    /// `title` tag). Retained across idle turns and after exit. Surfaced
+    /// indirectly via `channel_title` for a per-session room; kept here for
+    /// the fallback when the channel has no relay-echoed name yet.
     #[serde(default)]
-    status: String,
+    title: String,
+    /// The live "doing now" line from kind:30315 (empty when idle). This is
+    /// what `[status]` renders when busy; idle renders `[idle]` instead.
     #[serde(default)]
-    pending: Vec<MentionView>,
-    #[serde(default)]
-    recent: Vec<MentionView>,
+    activity: String,
     #[serde(default)]
     distill_error: Option<String>,
 }
@@ -117,43 +141,13 @@ fn default_true() -> bool {
     true
 }
 
-#[derive(Debug, Default, serde::Deserialize)]
-pub struct MentionView {
-    #[serde(default)]
-    from_slug: String,
-    #[serde(default)]
-    host: String,
-    #[serde(default)]
-    subject: String,
-    #[serde(default)]
-    body: String,
-}
-
-impl MentionView {
-    /// `codex@kubrick: Please review my work` — subject wins over body.
-    fn preview(&self) -> String {
-        let text = if self.subject.is_empty() {
-            self.body.lines().next().unwrap_or_default()
-        } else {
-            self.subject.as_str()
-        };
-        let from = if self.host.is_empty() {
-            self.from_slug.clone()
-        } else {
-            format!("{}@{}", self.from_slug, slugify_host(&self.host))
-        };
-        format!("{from}: {}", truncate_chars(text, MESSAGE_MAX_CHARS))
-    }
-}
-
 /// Map an ANSI SGR code string to a tmux `#[style]` attribute string.
 fn ansi_to_tmux_style(code: &str) -> &'static str {
     match code {
-        "36" => "fg=colour6",          // cyan
-        "2" => "dim",                  // dim
-        "32" => "fg=colour2",          // green
-        "1;31" => "fg=colour1,bold",   // bold red
-        "1;33" => "fg=colour3,bold",   // bold yellow
+        "36" => "fg=colour6",        // cyan
+        "2" => "dim",                // dim
+        "32" => "fg=colour2",        // green
+        "1;31" => "fg=colour1,bold", // bold red
         _ => "default",
     }
 }
@@ -178,45 +172,54 @@ fn render_statusline_inner(v: &StatuslineView, color: bool, tmux_fmt: bool) -> S
     };
     let mut segs: Vec<String> = Vec::new();
 
-    // Identity: who I am on the fabric + which session body I'm wearing.
-    segs.push(format!(
-        "{}{}",
-        paint(
-            format!("{}@{}", v.agent, slugify_host(&v.host)),
-            "36" // cyan
-        ),
-        paint(
-            format!(" [{}]", SessionId::from(v.session_id.as_str())),
-            "2"
-        ),
+    // Identity: the agent's published kind:0 name @ the slugified host.
+    segs.push(paint(
+        format!("{}@{}", v.agent, slugify_host(&v.host)),
+        "36", // cyan
     ));
 
-    // Counts: ⬡ project roster (NIP-29 members), ◉ live sessions (incl. idle).
-    // No roster cache (no group management) → no ⬡ segment rather than a lying 0.
-    if v.member_count > 0 {
-        segs.push(paint(format!("⬡{}", v.member_count), "2"));
+    // Project: the work-root project the session's room hangs under.
+    segs.push(paint(v.work_root.clone(), "2"));
+
+    // Session: the channel the session is currently on (its `channel` when
+    // set, else its per-session room). Rendered as `#<channel-id>` so a
+    // `channels switch` is reflected immediately — matches what the relay
+    // shows as the room's `h` tag.
+    segs.push(paint(format!("#{}", v.channel), "2"));
+
+    // Title: the channel's title on the relay (== the channel's display name
+    // from kind:39000, == the distilled session title for a per-session room).
+    // Omitted when empty (brand-new session before any distill).
+    if !v.channel_title.is_empty() {
+        segs.push(paint(
+            format!("[{}]", truncate_chars(&v.channel_title, TITLE_MAX_CHARS)),
+            "2",
+        ));
     }
-    segs.push(paint(format!("◉{}", v.session_count), "2"));
+
+    // Status: what the agent last published in its kind:30315. The live
+    // activity line when busy; `idle` when not. A busy session with no live
+    // activity line shows `working` (matches `who`'s status_plain).
+    let status = if v.working {
+        if v.activity.is_empty() {
+            "working".to_string()
+        } else {
+            truncate_chars(&v.activity, ACTIVITY_MAX_CHARS)
+        }
+    } else {
+        "idle".to_string()
+    };
+    segs.push(paint(format!("[{status}]"), "2"));
+
+    // ── Optional warning segments (kept per user request) ──────────────────
 
     // Citizenship problem beats cosmetics: surface the membership gap loudly.
+    // Only when the roster is non-empty (otherwise unknown, not a problem).
     if !v.is_member && v.member_count > 0 {
-        segs.push(paint(format!("⚠ not in channel {}", v.project), "1;31"));
-    }
-
-    // What this session says it is doing right now (its `who` status).
-    if v.working {
-        let status = if v.status.is_empty() {
-            "working"
-        } else {
-            &v.status
-        };
-        segs.push(format!(
-            "{} {}",
-            paint("✎".to_string(), "32"),
-            truncate_chars(status, STATUS_MAX_CHARS)
+        segs.push(paint(
+            format!("⚠ not in channel {}", v.channel),
+            "1;31", // bold red
         ));
-    } else {
-        segs.push(paint("· idle".to_string(), "2"));
     }
 
     // Distillation error — flashed in red for up to 5 minutes after the failure.
@@ -225,28 +228,6 @@ fn render_statusline_inner(v: &StatuslineView, color: bool, tmux_fmt: bool) -> S
             format!("⚠ distill: {}", truncate_chars(err, 40)),
             "1;31", // bold red
         ));
-    }
-
-    // Inbox envelope: a pending mention shows bright; a mention drained in the
-    // last 30s lingers dimmed with a ✓ so you see what the agent just consumed.
-    if let Some(newest) = v.pending.last() {
-        let n = v.pending.len();
-        let marker = if n > 1 {
-            format!("✉{n}")
-        } else {
-            "✉".to_string()
-        };
-        let more = if n > 1 {
-            format!(" (+{})", n - 1)
-        } else {
-            String::new()
-        };
-        segs.push(paint(
-            format!("{marker} {}{more}", newest.preview()),
-            "1;33", // bold yellow
-        ));
-    } else if let Some(newest) = v.recent.last() {
-        segs.push(paint(format!("✉✓ {}", newest.preview()), "2"));
     }
 
     segs.join(" ")
@@ -271,99 +252,94 @@ mod tests {
             agent: "claude".into(),
             host: "Kubrick's Mac".into(),
             session_id: "some-long-uuid".into(),
-            project: "tenex-edge".into(),
+            work_root: "tenex-edge".into(),
+            channel: "session-a1b2c3d4e5f60718".into(),
+            channel_title: "Refactoring the inbox".into(),
             member_count: 4,
-            session_count: 9,
             is_member: true,
             working: true,
-            status: "refactoring inbox envelope".into(),
-            pending: vec![],
-            recent: vec![],
+            title: "Refactoring the inbox".into(),
+            activity: "writing tests".into(),
             distill_error: None,
         }
     }
 
-    fn mention(subject: &str, body: &str) -> MentionView {
-        MentionView {
-            from_slug: "codex".into(),
-            host: "kubrick".into(),
-            subject: subject.into(),
-            body: body.into(),
-        }
-    }
-
     #[test]
-    fn renders_identity_counts_and_activity() {
+    fn renders_identity_project_session_title_status() {
         let s = render_statusline(&view(), false);
-        let sid = session_codename("some-long-uuid");
         assert_eq!(
             s,
-            format!("claude@kubrick-s-mac [{sid}] ⬡4 ◉9 ✎ refactoring inbox envelope")
+            "claude@kubrick-s-mac tenex-edge #session-a1b2c3d4e5f60718 \
+             [Refactoring the inbox] [writing tests]"
         );
     }
 
     #[test]
-    fn renders_pending_mention_with_count() {
+    fn busy_with_no_activity_shows_working() {
         let mut v = view();
-        v.pending = vec![mention("", "older"), mention("Please review my work", "x")];
+        v.activity = String::new();
         let s = render_statusline(&v, false);
-        assert!(
-            s.ends_with("✉2 codex@kubrick: Please review my work (+1)"),
-            "got: {s}"
-        );
+        assert!(s.ends_with("[working]"), "got: {s}");
     }
 
     #[test]
-    fn renders_recently_consumed_mention() {
-        let mut v = view();
-        v.recent = vec![mention("", "Please review my work\nsecond line")];
-        let s = render_statusline(&v, false);
-        assert!(
-            s.ends_with("✉✓ codex@kubrick: Please review my work"),
-            "got: {s}"
-        );
-    }
-
-    #[test]
-    fn pending_wins_over_recent() {
-        let mut v = view();
-        v.pending = vec![mention("new one", "")];
-        v.recent = vec![mention("old one", "")];
-        let s = render_statusline(&v, false);
-        assert!(s.contains("✉ codex@kubrick: new one"), "got: {s}");
-        assert!(!s.contains("old one"), "got: {s}");
-    }
-
-    #[test]
-    fn idle_session_says_idle() {
+    fn idle_shows_idle() {
         let mut v = view();
         v.working = false;
         let s = render_statusline(&v, false);
-        assert!(s.ends_with("· idle"), "got: {s}");
+        assert!(s.ends_with("[idle]"), "got: {s}");
     }
 
     #[test]
-    fn membership_gap_is_loud_and_zero_roster_hides_hexagon() {
+    fn empty_channel_title_omits_title_segment() {
+        let mut v = view();
+        v.channel_title = String::new();
+        let s = render_statusline(&v, false);
+        assert!(
+            !s.contains("[]"),
+            "empty title segment rendered: {s}"
+        );
+        // Status segment still present.
+        assert!(s.contains("[writing tests]"), "got: {s}");
+    }
+
+    #[test]
+    fn membership_gap_is_loud() {
         let mut v = view();
         v.is_member = false;
         let s = render_statusline(&v, false);
-        assert!(s.contains("⚠ not in channel tenex-edge"), "got: {s}");
+        assert!(
+            s.contains("⚠ not in channel session-a1b2c3d4e5f60718"),
+            "got: {s}"
+        );
 
+        // Unknown roster (count 0) → no warning (unknown, not a problem).
         v.member_count = 0;
         let s = render_statusline(&v, false);
-        assert!(!s.contains('⬡'), "got: {s}");
-        assert!(
-            !s.contains("not in group"),
-            "membership unknown when roster cache is empty: {s}"
-        );
+        assert!(!s.contains("not in channel"), "got: {s}");
     }
 
     #[test]
-    fn truncates_long_status() {
+    fn distill_error_flashes_red() {
         let mut v = view();
-        v.status = "x".repeat(100);
+        v.distill_error = Some("LLM rate-limited".into());
+        let s = render_statusline(&v, false);
+        assert!(s.contains("⚠ distill: LLM rate-limited"), "got: {s}");
+    }
+
+    #[test]
+    fn truncates_long_channel_title() {
+        let mut v = view();
+        v.channel_title = "x".repeat(100);
         let s = render_statusline(&v, false);
         assert!(s.contains('…'), "got: {s}");
-        assert!(s.chars().count() < 100, "got: {s}");
+    }
+
+    #[test]
+    fn truncates_long_activity() {
+        let mut v = view();
+        v.activity = "y".repeat(100);
+        let s = render_statusline(&v, false);
+        assert!(s.contains('…'), "got: {s}");
     }
 }
