@@ -756,12 +756,20 @@ async fn rpc_session_start(
     // directly) — lives in its OWN minted subgroup of the work-root project,
     // not the bare project. Orchestration-spawned sessions (group override
     // present) join the supplied subgroup as today. The room id is derived
-    // deterministically from a stable resume anchor so a resumed session
+    // deterministically from a stable per-session anchor so a resumed session
     // rejoins the SAME room; minting needs an operator key to sign the create.
-    // `room_parent` is `Some(parent_project)` exactly when we routed the
-    // session into a freshly-minted room, and drives the create below.
+    //
+    // Anchor preference: the harness-native id (claude/codex) or resume token,
+    // else the watched pid — opencode supplies neither id nor resume token at
+    // start (only its pid), so the pid keeps it from being left in the bare
+    // project. `room_parent` is `Some(parent_project)` exactly when we routed
+    // the session into a freshly-minted room, and drives the create below.
+    let pid_anchor = p.watch_pid.map(|pid| format!("pid-{pid}"));
     let room_parent: Option<String> = {
-        let anchor = harness_session_id.as_deref().or(resume_id.as_deref());
+        let anchor = harness_session_id
+            .as_deref()
+            .or(resume_id.as_deref())
+            .or(pid_anchor.as_deref());
         match (
             crate::session::decide_session_room(p.group.as_deref(), &work_root),
             anchor,
@@ -942,7 +950,10 @@ async fn rpc_session_start(
             s.mark_session_room(&project, now).ok();
             s.upsert_group_metadata(&project, &p.agent, parent, now).ok();
         });
-        let _ = ensure_subscription(state, &project).await;
+        // ALL relay work (subgroup create, admin poll, member-add, subscription)
+        // runs in the background — session start has zero synchronous relay await
+        // on the room path, so a slow/unreachable relay never delays the engine
+        // or the first prompt. ensure_session_room subscribes internally.
         let st = state.clone();
         let room = project.clone();
         let par = parent.clone();
@@ -951,18 +962,33 @@ async fn rpc_session_start(
         tokio::spawn(async move {
             ensure_session_room(&st, &room, &name, &par, &agent_pubkey).await;
         });
-    } else if let Some(init_progress) = progress.clone() {
-        state
-            .provider
-            .open_project_with_progress(&project, &id.pubkey_hex(), move |message| {
-                init_progress.emit("nip29", message);
-            })
-            .await;
     } else {
-        state
-            .provider
-            .open_project(&project, &id.pubkey_hex())
-            .await;
+        // Project / orchestration sessions: ensure the group exists + the agent
+        // is a member. Bounded so a hung relay can't block session start (and the
+        // hook that awaits it). On timeout the session still starts; membership
+        // converges on the next start/heartbeat. Best-effort, fail-open.
+        let open = async {
+            if let Some(init_progress) = progress.clone() {
+                state
+                    .provider
+                    .open_project_with_progress(&project, &id.pubkey_hex(), move |message| {
+                        init_progress.emit("nip29", message);
+                    })
+                    .await;
+            } else {
+                state
+                    .provider
+                    .open_project(&project, &id.pubkey_hex())
+                    .await;
+            }
+        };
+        if tokio::time::timeout(std::time::Duration::from_secs(8), open)
+            .await
+            .is_err()
+            && std::env::var("TENEX_EDGE_DEBUG").is_ok()
+        {
+            eprintln!("[daemon] open_project({project}) timed out (best-effort)");
+        }
     }
     // (The Stage-2 per-session-key member-add was removed here: #5 retires
     // per-session keys, so `keys_for_session` is always None now. Durable-agent

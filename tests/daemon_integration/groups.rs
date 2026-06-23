@@ -114,6 +114,47 @@ fn human_initiated_session_mints_per_session_room() {
     stop_daemon(&home);
 }
 
+/// An opencode-style human session — no harness/resume id, only a watched pid —
+/// still mints a per-session room (anchored on the pid), rather than being left
+/// in the bare project. (Issue #6; regression for the codex-flagged opencode gap.)
+#[test]
+fn opencode_style_session_without_id_mints_room_via_pid() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let home = Home::new();
+    rewrite_config_with_user_nsec(&home);
+
+    rt().block_on(async {
+        let mut c = Client::connect_or_spawn().await.expect("connect");
+        // No session_id / resume_id — exactly what the opencode plugin sends.
+        c.call(
+            "session_start",
+            serde_json::json!({"agent": "opencoder", "cwd": "/tmp", "watch_pid": std::process::id()}),
+        )
+        .await
+        .expect("session_start");
+    });
+
+    let store = Store::open(&home.store_path()).unwrap();
+    // The opencode session has no harness id; find it by agent slug.
+    let rec = store
+        .list_alive_sessions()
+        .unwrap()
+        .into_iter()
+        .find(|r| r.agent_slug == "opencoder")
+        .expect("opencode session row");
+    assert!(
+        rec.project.starts_with("tmp-"),
+        "opencode session must mint a per-session room, not stay in the bare project: got {}",
+        rec.project
+    );
+    assert!(
+        store.is_session_room(&rec.project).unwrap(),
+        "minted group must be flagged as a per-session room"
+    );
+
+    stop_daemon(&home);
+}
+
 /// An orchestration-spawned session (the backend set `TENEX_EDGE_GROUP` to add
 /// this agent to a task subgroup) joins that group as-is and does NOT mint a
 /// child room. Guards the discriminator boundary.
