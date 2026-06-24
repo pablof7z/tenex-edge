@@ -1190,6 +1190,83 @@ struct ChatWriteParams {
     agent: Option<String>,
 }
 
+#[derive(Clone)]
+struct ChatRecordDraft {
+    from_pubkey: String,
+    from_slug: String,
+    host: String,
+    project: String,
+    body: String,
+    from_session: String,
+    mentioned_session: String,
+}
+
+async fn publish_chat_checked(
+    state: &Arc<DaemonState>,
+    chat: &ChatMessage,
+    signing: &Keys,
+    draft: &ChatRecordDraft,
+) -> Result<String> {
+    let event_id = state
+        .provider
+        .publish_checked(&DomainEvent::ChatMessage(chat.clone()), signing)
+        .await?
+        .to_hex();
+    let created_at = now_secs();
+
+    state.with_store(|s| {
+        let _ = s.record_chat(&ChatLogRow {
+            chat_event_id: event_id.clone(),
+            from_pubkey: draft.from_pubkey.clone(),
+            from_slug: draft.from_slug.clone(),
+            host: draft.host.clone(),
+            project: draft.project.clone(),
+            body: draft.body.clone(),
+            created_at,
+            from_session: draft.from_session.clone(),
+            mentioned_session: draft.mentioned_session.clone(),
+        });
+    });
+
+    Ok(event_id)
+}
+
+fn spawn_chat_publish_retry(
+    state: Arc<DaemonState>,
+    chat: ChatMessage,
+    signing: Keys,
+    draft: ChatRecordDraft,
+    label: &'static str,
+) {
+    tokio::spawn(async move {
+        let mut last_err = String::new();
+        for attempt in 0..60 {
+            if attempt > 0 {
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            }
+            match publish_chat_checked(&state, &chat, &signing, &draft).await {
+                Ok(_) => return,
+                Err(e) => last_err = e.to_string(),
+            }
+        }
+        eprintln!("[daemon] {label} kind:9 publish retry exhausted: {last_err}");
+    });
+}
+
+fn spawn_group_name_retry(state: Arc<DaemonState>, group: String, title: String) {
+    tokio::spawn(async move {
+        for attempt in 0..60 {
+            if attempt > 0 {
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            }
+            if state.provider.nip29_set_group_name(&group, &title).await {
+                return;
+            }
+        }
+        eprintln!("[daemon] session room rename retry exhausted for {group}");
+    });
+}
+
 /// Publish the agent's completed-turn output as kind:9 chat into the session's
 /// room (issue #6). Signed by the agent via `keys_for_session`, which falls
 /// back to the durable agent key (#5). Mirrors `rpc_chat_write`'s publish +
@@ -1216,30 +1293,18 @@ async fn publish_agent_reply(
         from: crate::domain::AgentRef::new(from_pubkey.clone(), rec.agent_slug.clone()),
         project: scope.clone(),
         body: reply.to_string(),
-        from_session: Some(rec.session_id.clone()),
-        mentioned_session: None,
         mentioned_pubkey: None,
     };
-    let event_id = state
-        .provider
-        .publish_checked(&DomainEvent::ChatMessage(chat), &signing)
-        .await?
-        .to_hex();
-    let created_at = now_secs();
-
-    state.with_store(|s| {
-        let _ = s.record_chat(&ChatLogRow {
-            chat_event_id: event_id.clone(),
-            from_pubkey: from_pubkey.clone(),
-            from_slug: rec.agent_slug.clone(),
-            host: state.host.clone(),
-            project: scope.clone(),
-            body: reply.to_string(),
-            created_at,
-            from_session: rec.session_id.clone(),
-            mentioned_session: String::new(),
-        });
-    });
+    let draft = ChatRecordDraft {
+        from_pubkey,
+        from_slug: rec.agent_slug.clone(),
+        host: state.host.clone(),
+        project: scope,
+        body: reply.to_string(),
+        from_session: rec.session_id.clone(),
+        mentioned_session: String::new(),
+    };
+    spawn_chat_publish_retry(state.clone(), chat, signing, draft, "agent reply");
     Ok(())
 }
 
@@ -1304,6 +1369,48 @@ async fn rpc_user_prompt(
         return Ok(serde_json::json!({ "skipped": "session not in a room" }));
     }
 
+    // SessionStart can only name a just-minted room with the harness agent slug
+    // because the user prompt has not arrived yet. The room name must NOT have
+    // a parallel naming pipeline: it follows the same `session_state.title` that
+    // feeds kind:30315 status. Seed that title via the canonical store
+    // transition when it is still empty, then mirror the stored title to the
+    // room metadata. The runtime's distillation path later renames the room
+    // again when the LLM title replaces the seed.
+    let title_for_room = state
+        .with_store(|s| s.local_session_snapshot(&rec.session_id).ok().flatten())
+        .and_then(|snap| {
+            if snap.title_source == crate::session::TitleSource::None {
+                let seed = crate::util::titleize_prompt(&p.prompt);
+                if seed.is_empty() {
+                    return None;
+                }
+                state
+                    .with_store(|s| {
+                        s.seed_title_if_empty(&rec.session_id, snap.turn_id, &seed, now_secs())
+                            .ok()
+                            .flatten()
+                    })
+                    .and_then(|updated| {
+                        let title = updated.title.trim();
+                        (!title.is_empty()).then(|| title.to_string())
+                    })
+            } else {
+                let title = snap.title.trim();
+                (!title.is_empty()).then(|| title.to_string())
+            }
+        });
+    if let Some(room_title) = title_for_room {
+        let room = rec.project.clone();
+        let parent = state
+            .with_store(|s| s.session_room_parent(&room).ok().flatten())
+            .unwrap_or_default();
+        state.with_store(|s| {
+            s.upsert_group_metadata(&room, &room_title, &parent, now_secs())
+                .ok();
+        });
+        spawn_group_name_retry(state.clone(), room, room_title);
+    }
+
     // Publish into the session's CURRENT routing scope — its channel when set
     // (a `channels switch` moved it to a subgroup), else its per-session room.
     // The `is_room` gate above still keys on `project` (the minted room flag is
@@ -1314,37 +1421,24 @@ async fn rpc_user_prompt(
         from: crate::domain::AgentRef::new(op_pubkey.clone(), "operator".to_string()),
         project: scope.clone(),
         body: p.prompt.clone(),
-        from_session: Some(rec.session_id.clone()),
-        mentioned_session: None,
         mentioned_pubkey: None,
     };
-    // Bounded so a hung/unreachable relay can never block the editor — the
-    // UserPromptSubmit hook awaits this RPC. On timeout, fail open (the prompt
-    // simply is not mirrored).
-    let ev = DomainEvent::ChatMessage(chat);
-    let publish = state.provider.publish_checked(&ev, &op_keys);
-    let event_id = match tokio::time::timeout(std::time::Duration::from_secs(3), publish).await {
-        Ok(Ok(id)) => id.to_hex(),
-        Ok(Err(e)) => return Err(e),
-        Err(_) => return Ok(serde_json::json!({ "skipped": "relay publish timed out" })),
+    let draft = ChatRecordDraft {
+        from_pubkey: op_pubkey,
+        from_slug: "operator".to_string(),
+        host: state.host.clone(),
+        project: scope.clone(),
+        body: p.prompt.clone(),
+        from_session: rec.session_id.clone(),
+        mentioned_session: String::new(),
     };
-    let created_at = now_secs();
+    // Do not block the editor on relay room creation or membership convergence.
+    // SessionStart marks the room locally, then provisions it on the relay in
+    // the background; the first UserPromptSubmit often arrives before that
+    // relay state exists. Queue an in-daemon retry so the prompt is not lost.
+    spawn_chat_publish_retry(state.clone(), chat, op_keys, draft, "user prompt");
 
-    state.with_store(|s| {
-        let _ = s.record_chat(&ChatLogRow {
-            chat_event_id: event_id.clone(),
-            from_pubkey: op_pubkey.clone(),
-            from_slug: "operator".to_string(),
-            host: state.host.clone(),
-            project: scope.clone(),
-            body: p.prompt.clone(),
-            created_at,
-            from_session: rec.session_id.clone(),
-            mentioned_session: String::new(),
-        });
-    });
-
-    Ok(serde_json::json!({ "event_id": event_id, "project": scope }))
+    Ok(serde_json::json!({ "queued": true, "project": scope }))
 }
 
 async fn rpc_chat_write(
@@ -1403,8 +1497,6 @@ async fn rpc_chat_write(
         from: crate::domain::AgentRef::new(from_pubkey.clone(), rec.agent_slug.clone()),
         project: scope.clone(),
         body: p.message.clone(),
-        from_session: Some(rec.session_id.clone()),
-        mentioned_session: mentioned_session.clone(),
         mentioned_pubkey: mentioned_pubkey.clone(),
     };
     // Stage 3: sign chat events with the session key.
@@ -1432,7 +1524,7 @@ async fn rpc_chat_write(
             project: scope.clone(),
             body: p.message.clone(),
             created_at,
-            from_session: rec.session_id.clone(),
+            from_session: String::new(),
             mentioned_session: mentioned_session.clone().unwrap_or_default(),
         });
         let mut routed = false;
@@ -1443,9 +1535,18 @@ async fn rpc_chat_write(
             if target.created_at > created_at {
                 continue;
             }
-            if target.session_id == rec.session_id {
+            // Skip sender's own sessions by pubkey.
+            if target.agent_pubkey == from_pubkey {
                 continue;
             }
+            // Preserve local mention routing: if the resolved mention targets
+            // this session, mark it as a direct mention in the inbox row.
+            let row_mentioned = if mentioned_session.as_deref() == Some(target.session_id.as_str())
+            {
+                target.session_id.clone()
+            } else {
+                String::new()
+            };
             let row = ChatInboxRow {
                 chat_event_id: event_id.clone(),
                 target_session: target.session_id,
@@ -1454,8 +1555,8 @@ async fn rpc_chat_write(
                 project: scope.clone(),
                 body: p.message.clone(),
                 created_at,
-                from_session: rec.session_id.clone(),
-                mentioned_session: mentioned_session.clone().unwrap_or_default(),
+                from_session: String::new(),
+                mentioned_session: row_mentioned,
             };
             if s.enqueue_chat(&row).unwrap_or(false) {
                 routed = true;

@@ -77,34 +77,8 @@ impl Nip29Materializer {
         } else {
             chat.from.slug.clone()
         };
-        // Chat (kind:9) carries from_session / mentioned_session as display
-        // metadata tags. Mention (kind:1) routing fully cut over to the session
-        // pubkey, but chat fans out to all alive project sessions, so these tags
-        // remain the source of truth for "who sent / who was @-mentioned" — and
-        // they're the only way to recover that in unmanaged (no-tenexPrivateKey)
-        // mode where no session keys exist. Fall back to the session_pubkeys mapping
-        // when a tag is absent (older publishers / managed-mode enrichment).
-        let from_session = chat.from_session.clone().unwrap_or_else(|| {
-            store
-                .session_pubkey_info(&from_pubkey)
-                .map(|(sid, _, _)| sid)
-                .unwrap_or_default()
-        });
-        let mentioned_session = chat.mentioned_session.clone().unwrap_or_else(|| {
-            chat.mentioned_pubkey
-                .as_deref()
-                .and_then(|pk| store.session_pubkey_info(pk).map(|(sid, _, _)| sid))
-                .unwrap_or_default()
-        });
         let host = store
-            .resolve_chat_host(
-                &from_pubkey,
-                if from_session.is_empty() {
-                    None
-                } else {
-                    Some(from_session.as_str())
-                },
-            )
+            .resolve_chat_host(&from_pubkey, None)
             .ok()
             .flatten()
             .unwrap_or_default();
@@ -117,8 +91,8 @@ impl Nip29Materializer {
             project: chat.project.clone(),
             body: chat.body.clone(),
             created_at,
-            from_session: from_session.clone(),
-            mentioned_session: mentioned_session.clone(),
+            from_session: String::new(),
+            mentioned_session: String::new(),
         });
 
         let mut routed = false;
@@ -134,9 +108,21 @@ impl Nip29Materializer {
             if rec.created_at > created_at {
                 continue;
             }
-            if !from_session.is_empty() && rec.session_id == from_session {
+            // Skip sender's own sessions — identified by durable pubkey.
+            if rec.agent_pubkey == from_pubkey {
                 continue;
             }
+            // A `p` tag carries the mentioned agent's durable pubkey. When it
+            // matches this session's agent, mark it as a direct mention so
+            // count_unread_chat_mentions / peek_chat_mentions can distinguish
+            // direct mentions from ambient channel messages and ring_doorbells
+            // injects them immediately.
+            let mentioned_session =
+                if chat.mentioned_pubkey.as_deref() == Some(rec.agent_pubkey.as_str()) {
+                    rec.session_id.clone()
+                } else {
+                    String::new()
+                };
             let row = ChatInboxRow {
                 chat_event_id: event.id.to_hex(),
                 target_session: rec.session_id,
@@ -145,8 +131,8 @@ impl Nip29Materializer {
                 project: chat.project.clone(),
                 body: chat.body.clone(),
                 created_at,
-                from_session: from_session.clone(),
-                mentioned_session: mentioned_session.clone(),
+                from_session: String::new(),
+                mentioned_session,
             };
             if store.enqueue_chat(&row).unwrap_or(false) {
                 routed = true;

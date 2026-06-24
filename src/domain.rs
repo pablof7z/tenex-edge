@@ -185,20 +185,13 @@ impl Status {
 /// A NIP-29 project chat line. On the wire this is a NIP-C7 `kind:9` event
 /// scoped to the project group by its `h` tag. It is ambient project context;
 /// live sessions see it going forward only. Chat fans out to every alive project
-/// session — `from_session`/`mentioned_session` are display metadata (who sent /
-/// who was @-mentioned), not the routing mechanism, so they stay on the wire.
-/// They are also the only way to recover this in unmanaged (no-tenexPrivateKey)
-/// mode, where no per-session keys exist.
+/// session — routing is by pubkey + current channel, no session IDs on the wire.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChatMessage {
     pub from: AgentRef,
     pub project: String,
     pub body: String,
-    /// Canonical session id of the sender, carried as a `from-session` tag.
-    pub from_session: Option<String>,
-    /// Canonical session id of the @-mentioned session, carried as a `session-id` tag.
-    pub mentioned_session: Option<String>,
-    /// Optional pubkey for the mentioned session, carried as a Nostr `p` tag.
+    /// Optional pubkey for the @-mentioned agent, carried as a Nostr `p` tag.
     pub mentioned_pubkey: Option<String>,
 }
 
