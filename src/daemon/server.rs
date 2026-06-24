@@ -123,6 +123,11 @@ impl DaemonState {
         let g = self.store.lock().expect("store mutex poisoned");
         f(&g)
     }
+    /// The shared relay connection. Used by the kind:0 profile resolver to
+    /// one-shot fetch a pubkey's metadata on a cache miss.
+    pub(crate) fn transport(&self) -> &Arc<Transport> {
+        &self.transport
+    }
     fn hosted_pubkeys(&self) -> Vec<String> {
         self.hosted.lock().unwrap().keys().cloned().collect()
     }
@@ -1969,6 +1974,25 @@ async fn rpc_turn_start(
         state: "working".into(),
         elapsed_s: None,
     });
+
+    // Warm the kind:0 profile cache for any pending chat sender we cannot yet
+    // name (a human operator / unseen remote agent), so the synchronous context
+    // assembly below renders display names rather than raw pubkeys. Resolution
+    // (cache→relay) lives in one place: `crate::profile`.
+    let to_warm: Vec<String> = state.with_store(|s| {
+        let mut v: Vec<String> = Vec::new();
+        for r in s.peek_chat(&session).unwrap_or_default() {
+            if r.from_slug.is_empty() {
+                v.push(r.from_pubkey);
+            }
+            // Also names referenced by `nostr:npub1…` mentions in the body.
+            v.extend(crate::profile::body_mention_pubkeys(&r.body));
+        }
+        v.sort();
+        v.dedup();
+        v
+    });
+    crate::profile::warm(state, &to_warm).await;
 
     // Assemble via the SHARED cli.rs function so the injected text is byte-identical
     // to the pre-daemon CLI and cannot drift.

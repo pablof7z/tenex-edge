@@ -35,6 +35,25 @@ pub(super) async fn turn_start(
     Ok(None)
 }
 
+/// Backfill a display label for chat rows whose `from_slug` is empty — a sender
+/// whose agent slug we never learned (a human operator or an unseen remote
+/// agent). Reads the profile cache synchronously; the daemon warms it from
+/// `kind:0` (see [`crate::profile`]) before assembling context. Rows that
+/// already carry a slug are left untouched; any still unresolved fall back to a
+/// short pubkey at render time.
+fn fill_sender_labels(s: &Store, rows: &mut [crate::state::ChatInboxRow]) {
+    for row in rows.iter_mut() {
+        if row.from_slug.is_empty() {
+            if let Some(name) = s.resolve_slug_for_pubkey(&row.from_pubkey).ok().flatten() {
+                row.from_slug = name;
+            }
+        }
+        // Resolve `nostr:npub1…` mentions in the body to `@<name>` from the warm
+        // cache (the daemon warms it in `rpc_turn_start` before assembly).
+        row.body = crate::profile::rewrite_body_mentions(s, &row.body);
+    }
+}
+
 /// The full turn-start context assembly, shared by the daemon's `turn_start` RPC
 /// (the only caller now). Mutating reads (mark_turn_start, drain, set_transcript)
 /// happen here under the shared store; the relay self-fetch is done by the
@@ -86,7 +105,9 @@ pub fn assemble_turn_start_context(
 
     let chat_rows = {
         let s = store.lock().expect("store mutex poisoned");
-        s.drain_chat(&rec.session_id).unwrap_or_default()
+        let mut rows = s.drain_chat(&rec.session_id).unwrap_or_default();
+        fill_sender_labels(&s, &mut rows);
+        rows
     };
     let (mentions, ambient) = crate::injection::split_direct_mentions(chat_rows, &rec.session_id);
     let now = now_secs();
@@ -151,8 +172,11 @@ pub fn assemble_turn_check_context(
 
     let direct_mentions = {
         let s = store.lock().expect("store mutex poisoned");
-        s.peek_unnotified_chat_mentions(&rec.session_id)
-            .unwrap_or_default()
+        let mut rows = s
+            .peek_unnotified_chat_mentions(&rec.session_id)
+            .unwrap_or_default();
+        fill_sender_labels(&s, &mut rows);
+        rows
     };
     if let Some(block) = crate::injection::render_direct_mention_prompt(&direct_mentions, now) {
         let ids: Vec<String> = direct_mentions
@@ -171,7 +195,9 @@ pub fn assemble_turn_check_context(
     if let Some(since) = delta_since {
         let chat_rows: Vec<_> = {
             let s = store.lock().expect("store mutex poisoned");
-            s.peek_chat(&rec.session_id).unwrap_or_default()
+            let mut rows = s.peek_chat(&rec.session_id).unwrap_or_default();
+            fill_sender_labels(&s, &mut rows);
+            rows
         }
         .into_iter()
         .filter(|r| r.mentioned_session != rec.session_id)

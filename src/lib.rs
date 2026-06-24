@@ -14,6 +14,7 @@ pub mod identity;
 pub mod idref;
 pub mod injection;
 pub mod llmconfig;
+pub mod profile;
 pub mod project;
 pub mod session;
 pub mod util;

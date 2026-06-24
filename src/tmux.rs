@@ -385,26 +385,31 @@ struct PendingTmuxPrompt {
     chat_ids: Vec<String>,
 }
 
-fn collect_pending_prompt(
+async fn collect_pending_prompt(
     state: &Arc<DaemonState>,
     rec: &crate::state::SessionRecord,
 ) -> Result<Option<PendingTmuxPrompt>> {
+    let mut chat_rows = state.with_store(|s| s.peek_chat_mentions(&rec.session_id))?;
+    if chat_rows.is_empty() {
+        return Ok(None);
+    }
+    // Resolve human-readable sender names (kind:0; cache→relay) BEFORE rendering,
+    // so a mention from a human operator or unseen remote agent shows their name
+    // rather than a raw pubkey.
+    crate::profile::label_chat_senders(state, &mut chat_rows).await;
+
     let now = now_secs();
-    state.with_store(|s| -> Result<Option<PendingTmuxPrompt>> {
-        let chat_rows = s.peek_chat_mentions(&rec.session_id)?;
+    let Some(text) = crate::injection::render_direct_mention_prompt(&chat_rows, now) else {
+        return Ok(None);
+    };
 
-        let Some(text) = crate::injection::render_direct_mention_prompt(&chat_rows, now) else {
-            return Ok(None);
-        };
-
-        Ok(Some(PendingTmuxPrompt {
-            text,
-            chat_ids: chat_rows
-                .iter()
-                .map(|row| row.chat_event_id.clone())
-                .collect(),
-        }))
-    })
+    Ok(Some(PendingTmuxPrompt {
+        text,
+        chat_ids: chat_rows
+            .iter()
+            .map(|row| row.chat_event_id.clone())
+            .collect(),
+    }))
 }
 
 fn mark_prompt_delivered(
@@ -426,7 +431,7 @@ pub async fn inject_pending_messages_pub(
     rec: &crate::state::SessionRecord,
     pane_id: &str,
 ) -> Result<bool> {
-    let Some(prompt) = collect_pending_prompt(state, rec)? else {
+    let Some(prompt) = collect_pending_prompt(state, rec).await? else {
         return Ok(false);
     };
 

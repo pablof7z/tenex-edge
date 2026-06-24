@@ -960,6 +960,20 @@ impl Store {
         Ok(())
     }
 
+    /// The cached kind:0 display name for `pubkey` and when it was last written,
+    /// straight from the `profiles` table. Returns `None` when no profile is
+    /// cached. The caller (the kind:0 resolver) uses `updated_at` to decide
+    /// whether the entry is fresh enough or must be re-fetched from a relay.
+    pub fn cached_profile(&self, pubkey: &str) -> Option<(String, u64)> {
+        self.conn
+            .query_row(
+                "SELECT slug, updated_at FROM profiles WHERE pubkey=?1 LIMIT 1",
+                params![pubkey],
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, u64>(1)?)),
+            )
+            .ok()
+    }
+
     pub fn upsert_peer_session(
         &self,
         session_id: &str,
