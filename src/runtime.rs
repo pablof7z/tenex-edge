@@ -29,11 +29,10 @@ pub struct EngineParams {
     pub agent_slug: String,
     pub agent_pubkey: String,
     pub keys: nostr_sdk::prelude::Keys,
-    /// Stage 3 (Issue #2): derived per-session keypair. When `Some`, live
-    /// events emitted by this session (kind:0 profile, kind:30315 status,
-    /// kind:1 messages) are signed with this key so the session pubkey is the
-    /// on-wire author identity. Falls back to `keys` (durable agent key) when
-    /// `None` (operator nsec absent / derivation skipped).
+    /// Collision fallback signer. When `Some`, this session is a duplicate live
+    /// instance of the same durable agent in the same routing scope, so it signs
+    /// live events with a deterministic transient key. `None` is the default:
+    /// sign as the durable agent.
     pub session_keys: Option<nostr_sdk::prelude::Keys>,
     pub project: String,
     pub session_id: String,
@@ -113,11 +112,9 @@ pub async fn run_session_in_daemon(
     }))
     .await;
 
-    // Stage 3 (Issue #2): also publish a session-keyed kind:0 so peers can
-    // resolve the session pubkey to a display name ("<codename> (<agent_slug>)")
-    // via the profiles table. Signed with the session key so the event pubkey
-    // equals the session pubkey. The durable kind:0 above is NOT removed —
-    // both identities coexist, with the session key active for live events.
+    // Duplicate-session fallback: also publish a session-keyed kind:0 so peers
+    // can resolve the transient pubkey to a display name ("<codename>
+    // (<agent_slug>)"). The durable kind:0 above remains the default identity.
     if let Some(ref sk) = p.session_keys {
         // Canonical session display name: `codename (agent@host)`.
         let session_display = crate::idref::session_label(&p.session_id, &p.agent_slug, &p.host);

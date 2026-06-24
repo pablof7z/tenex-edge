@@ -252,6 +252,8 @@ fn who_snapshot_ignores_same_host_peer_echo_for_known_local_agent() {
     );
 }
 
+mod session_pubkeys;
+
 #[test]
 fn same_host_peer_is_not_remote() {
     // A sibling agent (e.g. codex@) on the SAME laptop arrives as a peer row;

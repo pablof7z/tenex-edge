@@ -17,3 +17,5 @@ mod freeze;
 mod messaging;
 #[path = "daemon_integration/process.rs"]
 mod process;
+#[path = "daemon_integration/signers.rs"]
+mod signers;

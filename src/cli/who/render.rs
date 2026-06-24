@@ -76,7 +76,8 @@ pub(super) fn render_whoami(v: &serde_json::Value) -> String {
     let pending = v.get("pending").and_then(|x| x.as_u64()).unwrap_or(0);
 
     let status = status_plain(&title, "", working);
-    // The durable agent pubkey is the wire address others route to. Never npub.
+    // This is the selected fabric address: durable by default, or a transient
+    // session pubkey for a duplicate live signer. Never npub.
     let key = pubkey;
     let dir = if rel_cwd.trim().is_empty() || rel_cwd == "." {
         host.clone()
