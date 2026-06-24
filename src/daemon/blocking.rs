@@ -8,7 +8,7 @@
 //! one-shot CLI invocation is fine.
 
 use super::protocol::{protocol_version, PleaseExit};
-use super::{lock_path, log_path, socket_path};
+use super::socket_path;
 use crate::config;
 use anyhow::{bail, Context, Result};
 use std::io::{BufRead, BufReader, Write};
@@ -161,34 +161,4 @@ fn daemon_answers_ping() -> bool {
     matches!(try_call("ping", &serde_json::json!({})), Ok(Outcome::Ok(_)))
 }
 
-fn spawn_detached_daemon() -> Result<()> {
-    let exe = match std::env::var_os("TENEX_EDGE_BIN") {
-        Some(p) => std::path::PathBuf::from(p),
-        None => std::env::current_exe().context("locating own executable")?,
-    };
-    let log = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(log_path())
-        .context("opening daemon.log")?;
-    let log_err = log.try_clone()?;
-    let mut command = std::process::Command::new(exe);
-    command
-        .arg("__daemon")
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::from(log))
-        .stderr(std::process::Stdio::from(log_err));
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
-    }
-    command.spawn().context("spawning detached daemon")?;
-    Ok(())
-}
-
-/// `lock_path` re-export silencer (kept for symmetry with the async client).
-#[allow(dead_code)]
-fn _lock_path_ref() -> std::path::PathBuf {
-    lock_path()
-}
+use super::spawn::spawn_detached_daemon;

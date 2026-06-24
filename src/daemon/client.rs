@@ -9,10 +9,9 @@
 //!     daemon asks it to exit, then respawns the new binary's daemon.
 
 use super::protocol::{protocol_version, Hello, PleaseExit, Request, Response, Welcome};
-use super::{lock_path, log_path, socket_path};
+use super::{lock_path, socket_path};
 use crate::config;
 use anyhow::{bail, Context, Result};
-use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{
