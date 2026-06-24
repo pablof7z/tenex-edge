@@ -1409,7 +1409,7 @@ async fn rpc_user_prompt(
         p.env_session.as_deref(),
         p.cwd.as_deref(),
         p.agent.as_deref(),
-        p.group.as_deref(),
+        None,
     )?;
 
     // Only mirror prompts into a per-session room. A human start with no resume
@@ -2349,7 +2349,7 @@ fn rpc_statusline(
         p.env_session.as_deref(),
         p.cwd.as_deref(),
         p.agent.as_deref(),
-        p.group.as_deref(),
+        None,
     )?;
     let now = now_secs();
     let host = state.host.clone();
