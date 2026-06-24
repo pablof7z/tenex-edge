@@ -638,7 +638,7 @@ rendering stays client-side.
   the process that touches the relay, so the install must run on its path too
   (it already runs in `main` before dispatch; `__daemon` goes through `main`).
 - **Identical standard-Nostr wire output** — the codec seam
-  (`codec::kind1`) is untouched; the daemon publishes the same builders.
+  (`fabric::nip29::wire`) is untouched; the daemon publishes the same builders.
 - **Relay NIP-42 AUTH warm-up fetch** before any subscribe — `Transport::connect`
   already does the `kind:0 limit 1` warm-up; the daemon connects once and that
   warm-up runs once, before its union subscription.

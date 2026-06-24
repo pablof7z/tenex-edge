@@ -373,11 +373,20 @@ async fn hook_dispatch(
         "stop" => {
             if !sid.is_empty() {
                 // The agent's turn output (last assistant text) is published as
-                // kind:9 chat into the session's room by the daemon. Read it
-                // from the transcript; absent/unreadable → no reply mirrored.
-                let reply = transcript.as_deref().and_then(|p| {
-                    crate::transcript::read_last_assistant_text(std::path::Path::new(p))
-                });
+                // kind:9 chat into the session's room by the daemon. Codex
+                // includes the final assistant text directly on Stop; prefer
+                // that over rereading the transcript, which can lag or omit the
+                // just-finished turn. Other hosts keep the transcript fallback.
+                let reply = obj
+                    .and_then(|o| o.get("last_assistant_message"))
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.trim().is_empty())
+                    .map(str::to_string)
+                    .or_else(|| {
+                        transcript.as_deref().and_then(|p| {
+                            crate::transcript::read_last_assistant_text(std::path::Path::new(p))
+                        })
+                    });
                 turn_end(sid, reply)?;
             }
         }

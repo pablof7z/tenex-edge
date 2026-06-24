@@ -3,7 +3,7 @@
 //! `Transport` is the private implementation detail; this struct is the
 //! fabric-layer boundary that `resubscribe` in the daemon talks to.
 
-use crate::codec::kind1::{
+use crate::fabric::nip29::wire::{
     h_filter, kind, KIND_CHAT, KIND_GROUP_ADMINS, KIND_GROUP_MEMBERS, KIND_GROUP_METADATA,
     KIND_PROFILE, KIND_STATUS,
 };
@@ -35,9 +35,8 @@ impl Delivery for NostrDelivery {
 
 /// Build relay subscription filters for a given `Scope`.
 ///
-/// This is the EXACT logic relocated verbatim from `Kind1Codec::filters`
-/// (src/codec/kind1.rs prior to Phase 8). The test
-/// `filters_cover_all_kinds_and_mentions` directly exercises this function.
+/// The test `filters_cover_all_kinds_and_mentions` directly exercises this
+/// function so subscription drift is caught at the delivery seam.
 pub fn scope_filters(scope: &Scope) -> Vec<Filter> {
     let authors: Vec<PublicKey> = scope
         .authors

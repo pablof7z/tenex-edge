@@ -109,6 +109,29 @@ pub fn looks_like_codename(s: &str) -> bool {
         && CODENAME_WORDS.contains(&word)
 }
 
+/// Derive a short title from a raw user prompt: take the first non-empty line,
+/// strip leading markdown sigils (#, *, -, >), and cap at 60 chars on a word
+/// boundary. Returns an empty string when nothing meaningful remains.
+pub fn titleize_prompt(prompt: &str) -> String {
+    let line = prompt
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .unwrap_or("")
+        .trim_start_matches(['#', '*', '-', '>', ' ', '\t'])
+        .trim();
+    if line.is_empty() {
+        return String::new();
+    }
+    if line.len() <= 60 {
+        return line.to_string();
+    }
+    match line[..60].rfind(' ') {
+        Some(i) => line[..i].to_string(),
+        None => line[..60].to_string(),
+    }
+}
+
 /// A session identifier. Wraps the raw id (a UUID-shaped string stored verbatim
 /// in SQLite and carried on the wire) but its `Display` deliberately renders the
 /// stable `session_codename` (e.g. `bravo4217`), NOT the raw id. This makes it

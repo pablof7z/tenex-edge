@@ -274,9 +274,7 @@ fn session_of_pane(pane_id: &str, socket: Option<&str>) -> Option<String> {
 pub fn set_pane_session_id(pane_id: &str, session_id: &str, socket: Option<&str>) {
     let Some(session) = session_of_pane(pane_id, socket) else {
         if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
-            eprintln!(
-                "[tmux] set_pane_session_id: pane {pane_id} not found in any tmux session"
-            );
+            eprintln!("[tmux] set_pane_session_id: pane {pane_id} not found in any tmux session");
         }
         return;
     };

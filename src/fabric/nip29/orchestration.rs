@@ -8,7 +8,7 @@
 //! is advisory and is IGNORED by receivers — a plain `kind:9` with no `te-op` tag
 //! is just chat and parses to `None`.
 
-use crate::codec::kind1::{kind, KIND_CHAT};
+use crate::fabric::nip29::wire::{kind, KIND_CHAT};
 use anyhow::Result;
 use nostr_sdk::prelude::*;
 use std::collections::HashMap;

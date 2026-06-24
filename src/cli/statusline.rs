@@ -295,10 +295,7 @@ mod tests {
         let mut v = view();
         v.channel_title = String::new();
         let s = render_statusline(&v, false);
-        assert!(
-            !s.contains("[]"),
-            "empty title segment rendered: {s}"
-        );
+        assert!(!s.contains("[]"), "empty title segment rendered: {s}");
         // Status segment still present.
         assert!(s.contains("[writing tests]"), "got: {s}");
     }

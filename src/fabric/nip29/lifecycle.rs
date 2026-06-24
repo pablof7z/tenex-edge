@@ -5,7 +5,7 @@
 //! `tests/nip29_probe.rs` against nip29.f7z.io. Recipe for an owned closed group:
 //!   group_create -> group_lock_closed -> group_put_user (per agent).
 
-use crate::codec::kind1::{
+use crate::fabric::nip29::wire::{
     kind, KIND_GROUP_CREATE, KIND_GROUP_EDIT_METADATA, KIND_GROUP_PUT_USER, KIND_GROUP_REMOVE_USER,
 };
 use anyhow::Result;

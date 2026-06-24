@@ -7,7 +7,7 @@
 //! carries the NEW NIP-10 `["e", root, "", "root"]` thread-root link, plus the
 //! kind:1 conversation it points at (the user's root prompt + the agent's two
 //! turn replies + a follow-up prompt). Everything is built through the REAL
-//! `Kind1Codec`, so this also proves the patched wire format.
+//! `Nip29WireCodec`, so this also proves the patched wire format.
 //!
 //! A fresh NIP-29 group is OPEN by default (writes accepted, non-members may
 //! read), per tests/nip29_probe.rs findings — so we create a unique group and
@@ -19,8 +19,8 @@
 
 use nostr_sdk::prelude::*;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tenex_edge::codec::{Codec, Kind1Codec};
 use tenex_edge::domain::{AgentRef, DomainEvent, Profile as TeProfile, Status};
+use tenex_edge::fabric::nip29::wire::Nip29WireCodec;
 
 fn relay_url() -> String {
     std::env::var("TE_NIP29_RELAY").unwrap_or_else(|_| "wss://nip29.f7z.io".to_string())
@@ -52,8 +52,8 @@ async fn connect(keys: Keys, relay: &str) -> Client {
 /// Build a signed event from a domain event through the real codec, stamping an
 /// explicit created_at so the conversation orders deterministically.
 async fn sign_domain(keys: &Keys, ev: &DomainEvent, created_at: u64) -> Event {
-    let builder = Kind1Codec
-        .encode(ev)
+    let builder = Nip29WireCodec
+        .encode_event(ev)
         .expect("encode")
         .custom_created_at(Timestamp::from_secs(created_at));
     let unsigned = builder.build(keys.public_key());

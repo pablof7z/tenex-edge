@@ -86,12 +86,7 @@ pub(super) fn render_whoami(v: &serde_json::Value) -> String {
 
     if io::stdout().is_terminal() {
         let mut out = String::new();
-        let _ = writeln!(
-            out,
-            "You are {} on {}.",
-            agent.cyan().bold(),
-            project
-        );
+        let _ = writeln!(out, "You are {} on {}.", agent.cyan().bold(), project);
         let _ = writeln!(out);
         let row = |k: &str, val: &str| format!("  {:<10} {}\n", format!("{k}:").dimmed(), val);
         let _ = write!(out, "{}", row("agent", &agent));

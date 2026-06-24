@@ -1,4 +1,4 @@
-//! Phase 5: `Kind1Nip29Provider` — concrete provider wrapping delivery, wire
+//! Phase 5: `Nip29Provider` — concrete provider wrapping delivery, wire
 //! codec, materializer, and lifecycle in one place.
 //!
 //! Design constraints (see docs/fabric-architecture.md §Phase 5):
@@ -9,7 +9,7 @@
 //!   methods, not stored; the provider owns only stable construction-time data.
 
 use crate::domain::DomainEvent;
-use crate::fabric::kind1::wire::Kind1WireCodec;
+use crate::fabric::nip29::wire::Nip29WireCodec;
 use crate::fabric::nostr_delivery::NostrDelivery;
 use crate::fabric::{MaterializationOutcome, RawEnvelope, WireCodec};
 use crate::state::Store;
@@ -23,13 +23,13 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 // Fabric identifier used in all canonical origin rows.
-pub const FABRIC: &str = "kind1-nip29";
+pub const FABRIC: &str = "nip29";
 
 // ── Trait shell (documentation only; daemon calls concrete inherent methods) ───
 
 /// Shell trait documenting the provider API surface.
 ///
-/// Phase 5 implements the concrete methods directly on `Kind1Nip29Provider`
+/// Phase 5 implements the concrete methods directly on `Nip29Provider`
 /// (inherent) rather than via `impl FabricProvider`, to avoid async-fn-in-trait
 /// machinery. `set_status` is implemented as an inherent method.
 #[allow(dead_code)]
@@ -41,15 +41,15 @@ pub trait FabricProvider {
     // fn materialize(&self, env: RawEnvelope, hosted: &[String], owners: &[String], now: u64, store: &Store) -> MaterializationOutcome;
 }
 
-// ── Kind1Nip29Provider ────────────────────────────────────────────────────────
+// ── Nip29Provider ────────────────────────────────────────────────────────
 
-/// The first concrete provider: NIP-29 groups over Nostr kind:1 wire encoding.
+/// Concrete provider for NIP-29 groups over Nostr events.
 ///
 /// Fields held at construction time (stable config). Per-call dynamic data
 /// (hosted "me" set, owners, now) is received as method parameters.
-pub struct Kind1Nip29Provider {
+pub struct Nip29Provider {
     pub delivery: NostrDelivery,
-    pub wire: Kind1WireCodec,
+    pub wire: Nip29WireCodec,
     /// Shared store Arc — same handle as `DaemonState.store`. No new Connection.
     pub store: Arc<Mutex<Store>>,
     /// Same Arc as `DaemonState.transport` — used for lifecycle publishes only.
@@ -69,7 +69,7 @@ pub struct Kind1Nip29Provider {
     pub provider_instance: String,
 }
 
-impl Kind1Nip29Provider {
+impl Nip29Provider {
     pub fn new(
         transport: Arc<Transport>,
         store: Arc<Mutex<Store>>,
@@ -78,7 +78,7 @@ impl Kind1Nip29Provider {
         relays: &[String],
     ) -> Self {
         let delivery = NostrDelivery::new(transport.clone());
-        let wire = Kind1WireCodec;
+        let wire = Nip29WireCodec;
         let provider_instance = derive_provider_instance(relays);
         Self {
             delivery,
@@ -94,17 +94,17 @@ impl Kind1Nip29Provider {
     // ── name ──────────────────────────────────────────────────────────────────
 
     pub fn name(&self) -> &'static str {
-        "kind1-nip29"
+        "nip29"
     }
 
     // ── encode / decode ───────────────────────────────────────────────────────
 
-    /// Encode a domain event to an `EventBuilder` via the Kind1 wire codec.
+    /// Encode a domain event to an `EventBuilder` via the NIP-29 wire codec.
     pub fn encode(&self, ev: &DomainEvent) -> Result<EventBuilder> {
         self.wire.encode(ev)
     }
 
-    /// Decode a raw envelope to a domain event via the Kind1 wire codec.
+    /// Decode a raw envelope to a domain event via the NIP-29 wire codec.
     pub fn decode(&self, env: &RawEnvelope) -> Option<DomainEvent> {
         self.wire.decode(env)
     }
@@ -204,13 +204,15 @@ impl Kind1Nip29Provider {
         std::collections::HashMap<String, String>,
         std::collections::HashSet<String>,
     ) {
-        use crate::codec::kind1::{KIND_GROUP_ADMINS, KIND_GROUP_MEMBERS, KIND_GROUP_METADATA};
+        use crate::fabric::nip29::wire::{
+            KIND_GROUP_ADMINS, KIND_GROUP_MEMBERS, KIND_GROUP_METADATA,
+        };
         use nostr_sdk::prelude::Filter;
         let filter = Filter::new()
             .kinds([
-                crate::codec::kind1::kind(KIND_GROUP_METADATA),
-                crate::codec::kind1::kind(KIND_GROUP_ADMINS),
-                crate::codec::kind1::kind(KIND_GROUP_MEMBERS),
+                crate::fabric::nip29::wire::kind(KIND_GROUP_METADATA),
+                crate::fabric::nip29::wire::kind(KIND_GROUP_ADMINS),
+                crate::fabric::nip29::wire::kind(KIND_GROUP_MEMBERS),
             ])
             .identifier(group);
         let state_evs = self
@@ -276,7 +278,9 @@ impl Kind1Nip29Provider {
         use nostr_sdk::prelude::{Filter, PublicKey};
         if let Ok(pk) = PublicKey::from_hex(backend_pubkey) {
             let f = Filter::new()
-                .kind(crate::codec::kind1::kind(crate::codec::kind1::KIND_CHAT))
+                .kind(crate::fabric::nip29::wire::kind(
+                    crate::fabric::nip29::wire::KIND_CHAT,
+                ))
                 .pubkey(pk);
             self.transport.subscribe(vec![f]).await?;
         }
@@ -288,10 +292,10 @@ impl Kind1Nip29Provider {
     /// not echoed) or carries no `parent` tag. Used to verify a subgroup actually
     /// belongs to its claimed parent before provisioning into it.
     pub async fn fetch_group_parent(&self, group: &str) -> Option<String> {
-        use crate::codec::kind1::KIND_GROUP_METADATA;
+        use crate::fabric::nip29::wire::KIND_GROUP_METADATA;
         use nostr_sdk::prelude::Filter;
         let filter = Filter::new()
-            .kind(crate::codec::kind1::kind(KIND_GROUP_METADATA))
+            .kind(crate::fabric::nip29::wire::kind(KIND_GROUP_METADATA))
             .identifier(group);
         let evs = self
             .transport
@@ -339,7 +343,10 @@ impl Kind1Nip29Provider {
         let nsec = match &self.management_nsec {
             Some(n) => n.clone(),
             None => {
-                progress("no signing key (tenexPrivateKey) configured; skipping group management".to_string());
+                progress(
+                    "no signing key (tenexPrivateKey) configured; skipping group management"
+                        .to_string(),
+                );
                 if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
                     eprintln!(
                         "[daemon] no signing key (tenexPrivateKey) configured; skipping NIP-29 group management for {project}"

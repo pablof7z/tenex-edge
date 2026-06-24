@@ -1052,7 +1052,9 @@ mod turn_context_tests {
 
         let s = m.lock().unwrap();
         assert!(
-            s.peek_unnotified_chat_mentions("sess-me").unwrap().is_empty(),
+            s.peek_unnotified_chat_mentions("sess-me")
+                .unwrap()
+                .is_empty(),
             "direct mention should be marked notified after hook fallback"
         );
         assert!(

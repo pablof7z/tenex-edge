@@ -122,7 +122,7 @@ pub struct QuarantinedEnvelope {
 /// `snapshot` is the CURRENT `session_state` row for `session_id` (the drainer
 /// publishes the latest fact; older pending versions coalesce). The drainer
 /// builds a `Status` from `snapshot`, sets `expires_at = now + STATUS_TTL_SECS`,
-/// calls `Kind1Nip29Provider::set_status`, then `mark_status_published`.
+/// calls `Nip29Provider::set_status`, then `mark_status_published`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatusOutboxItem {
     pub session_id: String,
@@ -296,7 +296,7 @@ CREATE TABLE IF NOT EXISTS peer_session_state (
 CREATE INDEX IF NOT EXISTS idx_peer_session_state_project_seen
     ON peer_session_state(project, last_seen);
 -- Desired kind:30315 publications. One row per (session_id, state_version): the
--- daemon drainer publishes it via Kind1Nip29Provider::set_status, records the
+-- daemon drainer publishes it via Nip29Provider::set_status, records the
 -- native event id, and retries on failure. Only versioned CONTENT changes land
 -- here; the per-heartbeat liveness re-arm republishes the latest snapshot WITHOUT
 -- an outbox row.
@@ -2094,7 +2094,7 @@ impl Store {
     }
 
     /// Pending publications joined to the CURRENT session snapshot, oldest first.
-    /// The drainer publishes each via `Kind1Nip29Provider::set_status` and then
+    /// The drainer publishes each via `Nip29Provider::set_status` and then
     /// calls `mark_status_published` / `mark_status_failed`.
     pub fn pending_status_outbox(&self, limit: u64) -> Result<Vec<StatusOutboxItem>> {
         let sql = format!(
@@ -2189,13 +2189,7 @@ impl Store {
             )
             .ok();
         Ok(row
-            .map(|(name, about)| {
-                if !name.is_empty() {
-                    name
-                } else {
-                    about
-                }
-            })
+            .map(|(name, about)| if !name.is_empty() { name } else { about })
             .unwrap_or_default())
     }
 
@@ -2382,7 +2376,11 @@ impl Store {
             std::collections::BTreeMap::new();
         for (id, _about, name, parent) in &meta {
             if !parent.is_empty() {
-                let label = if name.is_empty() { id.clone() } else { name.clone() };
+                let label = if name.is_empty() {
+                    id.clone()
+                } else {
+                    name.clone()
+                };
                 children
                     .entry(parent.clone())
                     .or_default()
@@ -3035,11 +3033,12 @@ impl Store {
     }
 
     /// Backfill canonical project origins + membership from the legacy tables for
-    /// the current kind1/nip29 fabric. `provider_instance` is the relay-set hash
+    /// the current NIP-29 fabric. `provider_instance` is the relay-set hash
     /// (the daemon derives it from config and passes it in — not this layer's job).
     /// Idempotent: re-running creates no duplicate origins or membership rows.
-    pub fn backfill_kind1_nip29_origins(&self, provider_instance: &str, now: u64) -> Result<()> {
-        const FABRIC: &str = "kind1-nip29";
+    pub fn backfill_nip29_origins(&self, provider_instance: &str, now: u64) -> Result<()> {
+        const FABRIC: &str = "nip29";
+        const LEGACY_FABRIC: &str = "kind1-nip29";
         // Every project slug ever observed across the legacy tables.
         let slugs: Vec<String> = {
             let mut stmt = self.conn.prepare(
@@ -3055,6 +3054,27 @@ impl Store {
             v
         };
         for slug in &slugs {
+            if let Some(old_pid) =
+                self.project_id_for_origin(LEGACY_FABRIC, provider_instance, slug)?
+            {
+                if self
+                    .project_id_for_origin(FABRIC, provider_instance, slug)?
+                    .is_none()
+                {
+                    self.conn.execute(
+                        "UPDATE project_origins
+                         SET fabric=?1
+                         WHERE fabric=?2 AND provider_instance=?3 AND native_project_key=?4",
+                        params![FABRIC, LEGACY_FABRIC, provider_instance, slug],
+                    )?;
+                } else {
+                    self.conn.execute(
+                        "DELETE FROM project_origins
+                         WHERE project_id=?1 AND fabric=?2 AND provider_instance=?3 AND native_project_key=?4",
+                        params![old_pid, LEGACY_FABRIC, provider_instance, slug],
+                    )?;
+                }
+            }
             let pid = self.ensure_project_origin(FABRIC, provider_instance, slug, slug, now)?;
             // project_meta is the authority for `about`; carry it onto the row.
             if let Some(about) = self.get_project_meta(slug)? {
@@ -3145,7 +3165,7 @@ impl Store {
     }
 
     /// Resolve a project display-slug to its canonical `project_id` for the
-    /// kind1-nip29 fabric.  Read-only — does NOT create an origin.
+    /// NIP-29 fabric. Read-only — does NOT create an origin.
     pub fn project_id_for_slug(
         &self,
         fabric: &str,
@@ -3217,7 +3237,7 @@ impl Store {
         // Legacy table: authoritative wholesale replace.
         self.replace_group_members(project_slug, members, ts)?;
         // Canonical mirror via Phase 1 accessor.
-        const FABRIC: &str = "kind1-nip29";
+        const FABRIC: &str = "nip29";
         if let Some(pid) = self.project_id_for_origin(FABRIC, provider_instance, project_slug)? {
             for (pubkey, role) in members {
                 self.admit_member(&pid, pubkey, role, "nip29-39002", ts)?;
@@ -4155,10 +4175,10 @@ mod tests {
     fn phase1_ensure_project_origin_is_idempotent() {
         let s = Store::open_memory().unwrap();
         let a = s
-            .ensure_project_origin("kind1-nip29", "relayhash", "tenex-edge", "tenex-edge", 100)
+            .ensure_project_origin("nip29", "relayhash", "tenex-edge", "tenex-edge", 100)
             .unwrap();
         let b = s
-            .ensure_project_origin("kind1-nip29", "relayhash", "tenex-edge", "tenex-edge", 200)
+            .ensure_project_origin("nip29", "relayhash", "tenex-edge", "tenex-edge", 200)
             .unwrap();
         assert_eq!(a, b, "same origin → same project_id");
         let count: i64 = s
@@ -4167,13 +4187,13 @@ mod tests {
             .unwrap();
         assert_eq!(count, 1, "no duplicate project row");
         assert_eq!(
-            s.project_id_for_origin("kind1-nip29", "relayhash", "tenex-edge")
+            s.project_id_for_origin("nip29", "relayhash", "tenex-edge")
                 .unwrap(),
             Some(a.clone())
         );
         // A different fabric/instance/key is a distinct project.
         let c = s
-            .ensure_project_origin("kind1-nip29", "relayhash", "other", "other", 100)
+            .ensure_project_origin("nip29", "relayhash", "other", "other", 100)
             .unwrap();
         assert_ne!(a, c);
     }
@@ -4182,7 +4202,7 @@ mod tests {
     fn phase1_is_member_at_lifecycle() {
         let s = Store::open_memory().unwrap();
         let pid = s
-            .ensure_project_origin("kind1-nip29", "ri", "p", "p", 10)
+            .ensure_project_origin("nip29", "ri", "p", "p", 10)
             .unwrap();
         // No membership rows at all → Unhydrated.
         assert_eq!(
@@ -4275,7 +4295,7 @@ mod tests {
                 .unwrap()
         };
 
-        s.backfill_kind1_nip29_origins("relayhash", 100).unwrap();
+        s.backfill_nip29_origins("relayhash", 100).unwrap();
         let p1 = projects_before();
         let m1 = members_before();
         assert!(p1 >= 2, "tenex-edge + otherproj origins created (got {p1})");
@@ -4283,7 +4303,7 @@ mod tests {
 
         // about carried from project_meta onto the canonical project row.
         let pid = s
-            .project_id_for_origin("kind1-nip29", "relayhash", "tenex-edge")
+            .project_id_for_origin("nip29", "relayhash", "tenex-edge")
             .unwrap()
             .unwrap();
         let about: Option<String> = s
@@ -4305,7 +4325,7 @@ mod tests {
         );
 
         // Second run is a no-op at the row-count level.
-        s.backfill_kind1_nip29_origins("relayhash", 300).unwrap();
+        s.backfill_nip29_origins("relayhash", 300).unwrap();
         assert_eq!(
             projects_before(),
             p1,
@@ -4589,7 +4609,7 @@ mod tests {
             .unwrap();
         // Seed canonical origin.
         let pid = s
-            .ensure_project_origin("kind1-nip29", "ri", "proj", "proj", 1)
+            .ensure_project_origin("nip29", "ri", "proj", "proj", 1)
             .unwrap();
 
         let members = vec![

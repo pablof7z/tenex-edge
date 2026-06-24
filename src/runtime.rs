@@ -18,7 +18,7 @@
 
 use crate::distill;
 use crate::domain::{Activity, AgentRef, DomainEvent, Profile};
-use crate::fabric::provider::Kind1Nip29Provider;
+use crate::fabric::provider::Nip29Provider;
 use crate::state::Store;
 use crate::util::now_secs;
 use anyhow::Result;
@@ -78,7 +78,7 @@ pub struct EngineParams {
 /// only across the synchronous rusqlite calls, NEVER across `.await`.
 pub async fn run_session_in_daemon(
     p: EngineParams,
-    provider: std::sync::Arc<Kind1Nip29Provider>,
+    provider: std::sync::Arc<Nip29Provider>,
     store: std::sync::Arc<std::sync::Mutex<Store>>,
     cancel: std::sync::Arc<tokio::sync::Notify>,
 ) -> Result<()> {
@@ -277,7 +277,7 @@ pub async fn run_session_in_daemon(
                                 let quick = st!(|s: &Store| s.get_session_transcript(&p.session_id).ok().flatten())
                                     .and_then(|path| crate::transcript::read_last_user_prompt(std::path::Path::new(&path)))
                                     .and_then(|prompt| {
-                                        let t = titleize_prompt(&prompt);
+                                        let t = crate::util::titleize_prompt(&prompt);
                                         if t.is_empty() { None } else { Some(t) }
                                     });
                                 if let Some(qt) = quick {
@@ -363,29 +363,6 @@ pub async fn run_session_in_daemon(
         s.mark_session_dead(&p.session_id).ok();
     });
     Ok(())
-}
-
-/// Derive a short title from a raw user prompt: take the first non-empty line,
-/// strip leading markdown sigils (#, *, -, >), and cap at 60 chars on a word
-/// boundary. Returns an empty string when nothing meaningful remains.
-fn titleize_prompt(prompt: &str) -> String {
-    let line = prompt
-        .lines()
-        .map(str::trim)
-        .find(|l| !l.is_empty())
-        .unwrap_or("")
-        .trim_start_matches(['#', '*', '-', '>', ' ', '\t'])
-        .trim();
-    if line.is_empty() {
-        return String::new();
-    }
-    if line.len() <= 60 {
-        return line.to_string();
-    }
-    match line[..60].rfind(' ') {
-        Some(i) => line[..i].to_string(),
-        None => line[..60].to_string(),
-    }
 }
 
 fn pid_alive(pid: i32) -> bool {

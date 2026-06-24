@@ -278,8 +278,14 @@ fn same_host_peer_is_not_remote() {
     assert!(!sib.remote, "same-host peer must not be remote");
     assert_eq!(sib.rel_cwd, "worktree1");
     let once = strip_ansi(&render_who_once(&snap));
-    assert!(once.contains("codex (laptop)"), "same-host peer shows its host");
-    assert!(!once.contains("remote"), "same-host peer must not be remote");
+    assert!(
+        once.contains("codex (laptop)"),
+        "same-host peer shows its host"
+    );
+    assert!(
+        !once.contains("remote"),
+        "same-host peer must not be remote"
+    );
     assert!(once.contains("[worktree1]"), "rel_cwd shown in bracket");
 }
 
@@ -484,7 +490,10 @@ fn agent_renderer_disambiguates_duplicate_slugs_as_agent_names() {
     };
 
     let out = render_who_plain(&snapshot);
-    assert!(out.contains(&format!("| codex-{} | laptop |", session_codename("sess-a"))));
+    assert!(out.contains(&format!(
+        "| codex-{} | laptop |",
+        session_codename("sess-a")
+    )));
     assert!(out.contains(&format!(
         "| codex-{} | tower, remote |",
         session_codename("sess-b")
@@ -558,9 +567,15 @@ fn turn_start_fabric_block_renders_channel_context() {
 fn render_channel_context_shows_breadcrumb_members_and_subchannels() {
     let store = Store::open_memory().unwrap();
     // Channel tree: myproject(proj) ├ planning ├ research └(research) comparison
-    store.upsert_group_metadata("proj", "myproject", "", 1).unwrap();
-    store.upsert_group_metadata("planning", "planning", "proj", 1).unwrap();
-    store.upsert_group_metadata("research", "research", "proj", 1).unwrap();
+    store
+        .upsert_group_metadata("proj", "myproject", "", 1)
+        .unwrap();
+    store
+        .upsert_group_metadata("planning", "planning", "proj", 1)
+        .unwrap();
+    store
+        .upsert_group_metadata("research", "research", "proj", 1)
+        .unwrap();
     store
         .upsert_group_metadata("comparison", "competitive-comparison", "research", 1)
         .unwrap();
@@ -568,37 +583,77 @@ fn render_channel_context_shows_breadcrumb_members_and_subchannels() {
         .upsert_project_meta("proj", "The root project channel", 1)
         .unwrap();
     // Members of the current channel: an agent (live below) + a human admin.
-    store.upsert_group_member("proj", "pk-coder", "member", 1).unwrap();
-    store.upsert_group_member("proj", "pk-human", "admin", 1).unwrap();
+    store
+        .upsert_group_member("proj", "pk-coder", "member", 1)
+        .unwrap();
+    store
+        .upsert_group_member("proj", "pk-human", "admin", 1)
+        .unwrap();
     // A live local session for the agent in the current channel.
-    register_local(&store, "coder", "pk-coder", "proj", "laptop", "", "sid-coder", 1_000);
+    register_local(
+        &store,
+        "coder",
+        "pk-coder",
+        "proj",
+        "laptop",
+        "",
+        "sid-coder",
+        1_000,
+    );
 
-    let block = render_channel_context(&store, "proj", 1_000, "coder", "pk-coder").expect("context");
+    let block =
+        render_channel_context(&store, "proj", 1_000, "coder", "pk-coder").expect("context");
 
-    assert!(block.contains("You are coder on #myproject"), "got: {block}");
-    assert!(!block.contains("[session"), "must not expose a session code; got: {block}");
+    assert!(
+        block.contains("You are coder on #myproject"),
+        "got: {block}"
+    );
+    assert!(
+        !block.contains("[session"),
+        "must not expose a session code; got: {block}"
+    );
     assert!(block.contains("Project: myproject"), "got: {block}");
     assert!(block.contains("Channel: #myproject"), "got: {block}");
-    assert!(block.contains("Description: The root project channel"), "got: {block}");
+    assert!(
+        block.contains("Description: The root project channel"),
+        "got: {block}"
+    );
     // Members: the agent is "you" and idle; the admin with no session is a human.
     assert!(block.contains("@coder (you) - idle"), "got: {block}");
     assert!(block.contains(" - Human"), "got: {block}");
     // Subchannels with agent counts; the grandchild is indented.
     assert!(block.contains("Subchannels:"), "got: {block}");
-    assert!(block.contains("#planning (0 agents) - idle"), "got: {block}");
-    assert!(block.contains("#research (0 agents) - idle"), "got: {block}");
-    assert!(block.contains("  #competitive-comparison (0 agents) - idle"), "got: {block}");
+    assert!(
+        block.contains("#planning (0 agents) - idle"),
+        "got: {block}"
+    );
+    assert!(
+        block.contains("#research (0 agents) - idle"),
+        "got: {block}"
+    );
+    assert!(
+        block.contains("  #competitive-comparison (0 agents) - idle"),
+        "got: {block}"
+    );
 }
 
 #[test]
 fn build_status_delta_includes_subchannels_with_channel_suffix() {
     let store = Store::open_memory().unwrap();
     // proj (current) with a subchannel "child" (display "subwork").
-    store.upsert_group_metadata("proj", "myproject", "", 1).unwrap();
-    store.upsert_group_metadata("child", "subwork", "proj", 1).unwrap();
+    store
+        .upsert_group_metadata("proj", "myproject", "", 1)
+        .unwrap();
+    store
+        .upsert_group_metadata("child", "subwork", "proj", 1)
+        .unwrap();
     // A peer appears in the current channel, and another in the subchannel.
-    record_peer(&store, "pk-a", "alpha", "proj", "na", "tower", "", "", false, 2_000);
-    record_peer(&store, "pk-b", "bravo", "child", "nb", "tower", "", "", false, 2_000);
+    record_peer(
+        &store, "pk-a", "alpha", "proj", "na", "tower", "", "", false, 2_000,
+    );
+    record_peer(
+        &store, "pk-b", "bravo", "child", "nb", "tower", "", "", false, 2_000,
+    );
 
     // `now` within the liveness window of the appearances so they read as joins.
     let delta = build_status_delta(&store, 1_000, "proj", 2_030, "laptop", None);
@@ -606,7 +661,9 @@ fn build_status_delta_includes_subchannels_with_channel_suffix() {
     // The current-channel appearance has no channel suffix; the subchannel one is
     // tagged with the subchannel's display name.
     assert!(
-        delta.iter().any(|l| l.contains("joined") && !l.contains('#')),
+        delta
+            .iter()
+            .any(|l| l.contains("joined") && !l.contains('#')),
         "expected an unsuffixed current-channel join; got {delta:?}"
     );
     assert!(
@@ -650,7 +707,10 @@ fn build_status_delta_reports_appeared_changed_and_excludes_self() {
         joined.trim_start().starts_with('*'),
         "delta lines are `* …` presence lines, not a table: {joined}"
     );
-    assert!(!joined.contains("coder"), "viewer's own session must be excluded: {joined}");
+    assert!(
+        !joined.contains("coder"),
+        "viewer's own session must be excluded: {joined}"
+    );
 }
 
 /// `whoami`'s agent-facing (non-TTY) render is a markdown identity card that
@@ -678,9 +738,18 @@ fn render_whoami_card_names_self_without_session_code() {
         out.contains("You are **developer** on **tenex-edge**."),
         "card must name the agent + project: {out}"
     );
-    assert!(!out.contains(&code), "session code must not be rendered: {out}");
-    assert!(!out.contains("--to-session"), "addressing guidance must not mention sessions: {out}");
-    assert!(!out.contains("| Session"), "session rows must not be rendered: {out}");
+    assert!(
+        !out.contains(&code),
+        "session code must not be rendered: {out}"
+    );
+    assert!(
+        !out.contains("--to-session"),
+        "addressing guidance must not mention sessions: {out}"
+    );
+    assert!(
+        !out.contains("| Session"),
+        "session rows must not be rendered: {out}"
+    );
     assert!(!out.contains("sess-abc"), "raw id: {out}");
     assert!(
         out.contains("| Host | laptop [worktree1] |"),

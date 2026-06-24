@@ -2,7 +2,7 @@
 
 > High-level architecture for the swap-seam. The load-bearing idea: **all data is
 > read from one unified local store; *how* it was hydrated is irrelevant to its
-> use.** A **Fabric Provider** (kind1 / nip29 / mls / a2a / …) is a write-side
+> use.** A **Fabric Provider** (legacy-tag / nip29 / mls / a2a / …) is a write-side
 > materializer that owns all of how-and-who — wire shape, membership/admission, lifecycle
 > side-effects — and projects everything into canonical store rows. Readers query
 > the store; nothing in a read path ever names a kind, a tag, a group, or a relay.
@@ -16,7 +16,7 @@ The current `Codec` seam swaps *NIP layouts*, not *fabrics*. It traffics in
 
 - **wire mapping** (domain event ↔ envelope),
 - **subscription model** (`filters → Vec<Filter>`, relay-REQ-shaped),
-- **admission control** (NIP-29 group create / lock / put-user, bolted into `kind1`).
+- **admission control** (NIP-29 group create / lock / put-user, bolted into `legacy-tag`).
 
 That fusion is why "a new codec" can only ever be another nostr codec, and why
 NIP-29 — an *admission strategy* — leaks into an *event codec*. The fix is to cut the
@@ -32,7 +32,7 @@ Two observations drive the whole design:
    |--------|----------------|---------------|
    | nip29  | in the NIP-29 group | live `39002` members list (kept subscribed) |
    | mls    | in the MLS group | MLS group roster after invite/accept |
-   | kind1  | locally accepted | a future kind1-owned local trust file |
+   | legacy-tag  | locally accepted | a future legacy-tag-owned local trust file |
 
    The **shape** is uniform (`is_member(project, pubkey)` + a change stream); the
    **source** is the provider's secret. Add a member from another machine → the
@@ -45,10 +45,10 @@ Two observations drive the whole design:
    |--------|---------------------|---------|
    | nip29  | server-side — relay rejects non-member writes (closed group) | the relay |
    | mls    | cryptographically — non-members cannot decrypt | the crypto |
-   | kind1  | client-side — a future kind1 provider filters inbound locally | us |
+   | legacy-tag  | client-side — a future legacy-tag provider filters inbound locally | us |
 
    **Principle:** the domain `is_member` gate is *always* consulted client-side;
-   server/crypto enforcement is defense-in-depth, never a replacement. kind1 has
+   server/crypto enforcement is defense-in-depth, never a replacement. legacy-tag has
    no server enforcement at all, and even nip29 has un-scoped inbound paths (a
    direct p-tagged note reaches us via the `mentions_to` filter without the relay
    ever checking group membership). So the gate can never be skipped — which is
@@ -62,7 +62,7 @@ Two observations drive the whole design:
    |--------|-----------------------------|
    | nip29  | create group `9007` → lock closed `9002` → put agent member `9000` |
    | mls    | create MLS group → invite agent key → await accept |
-   | kind1  | **no-op** — a "group" is just a `t`/`h` tag on each event |
+   | legacy-tag  | **no-op** — a "group" is just a `t`/`h` tag on each event |
 
 ---
 
@@ -89,7 +89,7 @@ flowchart TD
         direction LR
         P1["Nip29Provider"]
         P2["MlsProvider"]
-        P3["Kind1Provider"]
+        P3["LegacyTagProvider"]
     end
 
     subgraph WIRE["Wire / transport substrate"]
@@ -134,7 +134,7 @@ daemon owns the writer, every session/CLI is a read-only IPC client.
 ```mermaid
 flowchart LR
     subgraph FABRICS["Fabrics — write-side, adapter-facing"]
-        F1["kind1"]
+        F1["legacy-tag"]
         F2["nip29"]
         F3["mls"]
         F4["a2a / invented / future"]
@@ -175,8 +175,8 @@ entity.
 inbound message has to know *who to reply to* — and that means the exact sender
 *session*, not just the author pubkey: sibling sessions of one agent share a
 pubkey, so the author key alone can't address a reply. So `inbox.from_session`
-is a canonical column (materialized in kind1 from a `from-session` wire tag;
-other fabrics carry it their own way, or leave it empty). The **reply handle** is
+is a canonical column derived from session pubkeys or local runtime state, never
+from a session-specific wire tag. The **reply handle** is
 then a *read-side derivation* over store rows — the session id when it resolves to
 a known session, else `slug@project` — exactly the same shape as the `is_member`
 read-query: a pure `SELECT`-time computation, never a trip to the wire. When a
@@ -186,7 +186,7 @@ the same `Option`/derived concession as everywhere else.
 **Three consequences that make "how we hydrate is irrelevant" true:**
 
 1. **Multiple providers populate one store.** Project A on nip29 and project B on
-   kind1 land in the *same* tables; a reader querying `list_projects()` cannot
+   legacy-tag land in the *same* tables; a reader querying `list_projects()` cannot
    tell which fabric backed which row, and doesn't care.
 2. **Every per-fabric difference lives behind the materialization seam.** The
    provenance axis, the enforcement-locus, the derived-vs-enumerated distinction
@@ -262,18 +262,18 @@ per fabric:
 |--------|----------------------|----------------------|-------------------------|
 | nip29  | groups the agent belongs to (reverse of `39002`) / relay group enumeration | relay-authored `kind:39000` group metadata | **canonical & shared** — one source, every machine agrees |
 | mls    | MLS groups in local state | group-context extension / metadata message | **member-authored**, cryptographically scoped to the group |
-| kind1  | *derived* — observed `h`/`t` tags + local list of dirs run in | **none native** → local descriptor file or a self-published note | **client-local** — two machines may disagree; eventually-divergent |
+| legacy-tag  | *derived* — observed `h`/`t` tags + local list of dirs run in | **none native** → local descriptor file or a self-published note | **client-local** — two machines may disagree; eventually-divergent |
 
-The sharp edge is **kind1**: a "group" is just a tag, so there is no native
+The sharp edge is **legacy-tag**: a "group" is just a tag, so there is no native
 carrier for a description and no authoritative project registry. Two consequences
 the domain must absorb:
 
-- **The list is *derived*, not *enumerated*.** For kind1, `list_projects()` is
+- **The list is *derived*, not *enumerated*.** For legacy-tag, `list_projects()` is
   reconstructed from observed events (which `h`/`t` tags have we seen?) plus a
   local record of directories opened — never a server-side directory listing.
 - **Description is `Option`, and may be local-only.** The domain types
   `description: Option<String>` and tolerate per-machine divergence. This is the
-  exact analogue of kind1's client-side membership enforcement: not a flaw in the
+  exact analogue of legacy-tag's client-side membership enforcement: not a flaw in the
   abstraction, but the abstraction faithfully surfacing that the fabric has no
   shared truth here.
 
@@ -281,7 +281,7 @@ the domain must absorb:
 can one-shot **fetch** the `39000` metadata *or* **subscribe** to it (it's
 replaceable) and re-upsert on every change, so a description edited on another
 machine propagates by simply updating the store row — and the reader's next
-`SELECT` reflects it with zero changes anywhere above the seam. kind1 uses whatever
+`SELECT` reflects it with zero changes anywhere above the seam. legacy-tag uses whatever
 local mechanism applies (file watch, or re-derive from the event stream). Either
 way the reader sees only the current row; "a new project appeared on the fabric"
 is just an `INSERT` it will observe on its next query (or via a store-level
@@ -297,7 +297,7 @@ and prevents the current "codec also does admission" fusion.
 
 ```mermaid
 flowchart TD
-    PROVIDER["FabricProvider<br/>(Nip29 · Mls · Kind1)"]
+    PROVIDER["FabricProvider<br/>(Nip29 · Mls)"]
     PROVIDER --> L["① Lifecycle reactor<br/>react(ProjectOpened, AgentJoined…)<br/>→ native side-effects"]
     PROVIDER --> M["② Materializer<br/>composes ③+④ → admit · derive<br/>· upsert canonical rows into the store"]
     PROVIDER --> W["③ Wire codec<br/>DomainEvent ⇄ raw envelope<br/>(bytes / event / MLS app-msg)"]
@@ -345,7 +345,7 @@ sequenceDiagram
         P->>FAB: create MLS group
         P->>FAB: invite agent key
         FAB-->>P: agent accepts → roster updated
-    else kind1 provider
+    else legacy-tag provider
         P-->>P: no-op (group == t/h tag; nothing to create)
     end
 
@@ -390,7 +390,7 @@ both reflect it, with zero changes above the store.
 ## 6. Implementation plan
 
 The refactor should be done in behavior-preserving slices. The first provider is
-not a new fabric; it is today's kind1 + NIP-29 behavior pulled behind the new
+not a new fabric; it is today's legacy-tag + NIP-29 behavior pulled behind the new
 seams. Do not start by deleting the current `Codec`/`Transport`/`Store` paths.
 Add the new read model, dual-write where necessary, cut readers over, then delete
 legacy access once tests prove the projections are authoritative.
@@ -457,10 +457,10 @@ Add canonical communication rows:
   - `author_session` is the **return envelope**: the sender's session id, so a
     reply can target the exact sibling session that wrote the message (sessions of
     one agent share `author_pubkey`, so the pubkey alone can't address a reply).
-    Carried today on `inbox.from_session`; materialized in kind1 from a
-    `from-session` wire tag, `NULL` when a fabric can't supply it (reply then
-    degrades to agent-level). The reply *handle* stays a read-side derivation, not
-    a stored column.
+    Carried today on `inbox.from_session`; derived from session pubkeys or local
+    runtime state, `NULL` when a fabric can't supply it (reply then degrades to
+    agent-level). The reply *handle* stays a read-side derivation, not a stored
+    column.
 - `message_recipients(message_id TEXT NOT NULL, recipient_pubkey TEXT NOT NULL,
   target_session TEXT, delivered_at INTEGER, PRIMARY KEY(message_id,
   recipient_pubkey, target_session))`
@@ -490,7 +490,7 @@ Backfill rules:
 
 - For every existing `project_meta.project`, `sessions.project`,
   `peer_sessions.project`, and `group_members.project`, create a project with
-  origin `(fabric='kind1-nip29', provider_instance=<relay set hash>,
+  origin `(fabric='nip29', provider_instance=<relay set hash>,
   native_project_key=<slug>)`.
 - Mirror existing `group_members` into `membership` with `source='nip29-39002'`.
 - Do not migrate historical `inbox` rows into `messages` yet unless tests need
@@ -548,8 +548,8 @@ New module shape:
 
 - `src/fabric/mod.rs`
 - `src/fabric/nostr_delivery.rs`
-- `src/fabric/kind1/wire.rs`
-- `src/fabric/kind1/materializer.rs`
+- `src/fabric/nip29/wire.rs`
+- `src/fabric/nip29/materializer.rs`
 - `src/fabric/nip29/lifecycle.rs`
 
 Types:
@@ -583,13 +583,11 @@ pub trait WireCodec {
 
 Implementation steps:
 
-1. Move the filter construction from `Kind1Codec::filters` into
+1. Move the filter construction from `Nip29WireCodec::filters` into
    `NostrDelivery::subscribe(scope)`.
 2. Keep `Transport` as the private implementation detail of `NostrDelivery`.
-3. Keep `Kind1Codec::encode/decode` mostly intact, but rename conceptually to
-   `Kind1WireCodec`.
-4. Leave the old `Codec` trait as a compatibility shim until `DaemonState` no
-   longer stores `codec: Kind1Codec`.
+3. Keep `Nip29WireCodec::encode/decode` under `src/fabric/nip29/wire.rs`.
+4. Remove the old `Codec` trait/module; NIP-29 is the active wire provider.
 
 Done when: `resubscribe` no longer calls `state.codec.filters(&scope)`; it asks
 delivery to subscribe to `Scope`, while decode remains in the wire codec.
@@ -617,8 +615,8 @@ Extraction order:
 
 1. Move 39000 handling to `Nip29Materializer::materialize_group_metadata`.
 2. Move 39002 handling to `Nip29Materializer::materialize_membership_snapshot`.
-3. Move profile materialization to `Kind1Materializer::materialize_profile`.
-4. Move presence/status upserts to `Kind1Materializer`.
+3. Move profile materialization to `Nip29Materializer::materialize_profile`.
+4. Move presence/status upserts to `Nip29Materializer`.
 5. Move mention routing from `runtime::route_mention_into` into
    `materialize_inbound_message`, while leaving a thin compatibility wrapper for
    existing tests.
@@ -649,7 +647,7 @@ Once delivery, wire codec, materializer, and lifecycle have concrete homes, add
 the top-level provider.
 
 Provider API shape (pseudo-Rust; implement first with a concrete
-`Kind1Nip29Provider`, or use boxed futures / `async_trait` before storing it
+`Nip29Provider`, or use boxed futures / `async_trait` before storing it
 behind `dyn`):
 
 ```rust
@@ -664,17 +662,17 @@ pub trait FabricProvider {
 }
 ```
 
-The first implementation is `Kind1Nip29Provider`:
+The first implementation is `Nip29Provider`:
 
 - Lifecycle wraps the current `ensure_group_and_membership`.
 - Delivery wraps `Transport`.
-- Wire codec wraps current kind1 encode/decode.
+- Wire codec owns the current NIP-29 event shape.
 - Materializer owns metadata, membership, profile, presence, status, messages,
   recipients, quarantine, and tail output.
 
 Daemon changes:
 
-- `DaemonState` holds one active provider (`Kind1Nip29Provider` at first; a
+- `DaemonState` holds one active provider (`Nip29Provider` at first; a
   provider enum or object-safe boxed trait later) instead of exposing separate
   `transport + codec` fields to RPC code.
 - `spawn_demux` receives raw envelopes from provider delivery and calls
@@ -718,7 +716,7 @@ canonical message rows without losing the old delivered/seen semantics.
 Only after the cutover tests pass:
 
 - Remove `Codec::filters` from the public seam.
-- Move NIP-29 group builders out of `src/codec/kind1.rs`.
+- Move NIP-29 group builders out of `src/fabric/nip29/wire.rs`.
 - Delete direct fabric handling from `daemon/server.rs`.
 - Remove direct reader dependence on `profiles`, `peer_sessions`, `inbox`, and
   `project_meta` table shape; keep tables only if they are compatibility views or
@@ -755,7 +753,7 @@ Run this after each phase, broadening only when the phase touches more surface:
 - **Identity binding** (agent keypair ↔ fabric identity) is assumed shared, but
   MLS adds a key-package / accept handshake with no nostr analogue. Is that a
   fifth provider capability, or part of Lifecycle?
-- **Multi-fabric at once** — can a daemon run nip29 *and* kind1 providers
+- **Multi-fabric at once** — can a daemon run nip29 *and* legacy-tag providers
   concurrently (one project per fabric), and are rosters ever merged across
   providers or always partitioned by `project_id` / `project_origins`?
 - **Store schema versioning** — once the read model is the contract, migrations

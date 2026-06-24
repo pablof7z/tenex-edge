@@ -49,7 +49,7 @@ impl Config {
     /// put-admin/remove-user/edit-metadata). Always the backend's own
     /// `tenexPrivateKey` — the operator's `userNsec` is no longer used for
     /// group management. The operator's pubkey is instead *granted* the admin
-    /// role by this signer (see `Kind1Nip29Provider::open_project`).
+    /// role by this signer (see `Nip29Provider::open_project`).
     pub fn management_nsec(&self) -> Option<&String> {
         self.tenex_private_key.as_ref()
     }
@@ -217,10 +217,7 @@ mod tests {
         let c = Config::from_json_str(json, "host").unwrap();
         // session derivation + management + backend identity all use the
         // backend key; the operator key is only for user prompts + admin grant.
-        assert_eq!(
-            c.session_ikm_nsec().map(String::as_str),
-            Some("backendkey")
-        );
+        assert_eq!(c.session_ikm_nsec().map(String::as_str), Some("backendkey"));
         assert_eq!(c.management_nsec().map(String::as_str), Some("backendkey"));
         assert_eq!(c.backend_nsec().map(String::as_str), Some("backendkey"));
         assert_eq!(c.user_nsec().map(String::as_str), Some("operatorkey"));

@@ -1,14 +1,14 @@
 //! End-to-end: publish every domain event through the real transport to a real
-//! relay, and verify a subscriber decodes them back. Exercises codec + transport
-//! + a live relay together.
+//! relay, and verify a subscriber decodes them back. Exercises NIP-29 wire
+//! encoding + transport + a live relay together.
 
 mod common;
 
 use common::TestRelay;
 use nostr_sdk::prelude::{Keys, RelayPoolNotification};
 use std::time::Duration;
-use tenex_edge::codec::{Codec, Kind1Codec};
 use tenex_edge::domain::{AgentRef, DomainEvent, Profile, Status};
+use tenex_edge::fabric::nip29::wire::Nip29WireCodec;
 use tenex_edge::fabric::nostr_delivery::scope_filters;
 use tenex_edge::fabric::Scope;
 use tenex_edge::transport::Transport;
@@ -16,7 +16,7 @@ use tenex_edge::transport::Transport;
 #[tokio::test]
 async fn publishes_and_decodes_all_event_types() {
     let relay = TestRelay::start();
-    let codec = Kind1Codec;
+    let codec = Nip29WireCodec;
 
     let agent_keys = Keys::generate();
     let reader_keys = Keys::generate();
@@ -66,7 +66,7 @@ async fn publishes_and_decodes_all_event_types() {
         }),
     ];
     for ev in &events {
-        let builder = codec.encode(ev).expect("encode");
+        let builder = codec.encode_event(ev).expect("encode");
         agent.publish_builder(builder).await.expect("publish");
     }
 
@@ -76,7 +76,7 @@ async fn publishes_and_decodes_all_event_types() {
     while seen.len() < 2 && tokio::time::Instant::now() < deadline {
         match tokio::time::timeout(Duration::from_millis(500), notifications.recv()).await {
             Ok(Ok(RelayPoolNotification::Event { event, .. })) => {
-                if let Some(de) = codec.decode(&event) {
+                if let Some(de) = codec.decode_event(&event) {
                     if !seen.contains(&de) {
                         seen.push(de);
                     }

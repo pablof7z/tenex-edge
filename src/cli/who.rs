@@ -15,10 +15,7 @@ fn who_params(project: &Option<String>, all_projects: bool) -> serde_json::Value
     })
 }
 
-fn who_snapshot_via_daemon(
-    project: &Option<String>,
-    all_projects: bool,
-) -> Result<WhoSnapshot> {
+fn who_snapshot_via_daemon(project: &Option<String>, all_projects: bool) -> Result<WhoSnapshot> {
     let v = crate::daemon::blocking::call("who", who_params(project, all_projects))?;
     Ok(serde_json::from_value(v)?)
 }
@@ -29,10 +26,7 @@ pub(super) fn who(project: Option<String>, all_projects: bool) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn who_live(
-    project: Option<String>,
-    all_projects: bool,
-) -> Result<()> {
+pub(super) fn who_live(project: Option<String>, all_projects: bool) -> Result<()> {
     let refresh = Duration::from_millis(1000);
     let _terminal = render::LiveTerminal::enter()?;
     let mut next_draw = Instant::now();
@@ -329,13 +323,19 @@ fn channel_status_map(
         .peer_session_snapshots(Some(channel), since)
         .unwrap_or_default()
     {
-        map.insert(snap.agent_pubkey.clone(), crate::session::derive_status(&snap, now));
+        map.insert(
+            snap.agent_pubkey.clone(),
+            crate::session::derive_status(&snap, now),
+        );
     }
     for snap in store
         .live_session_snapshots(Some(channel), since)
         .unwrap_or_default()
     {
-        map.insert(snap.agent_pubkey.clone(), crate::session::derive_status(&snap, now));
+        map.insert(
+            snap.agent_pubkey.clone(),
+            crate::session::derive_status(&snap, now),
+        );
     }
     map
 }
@@ -343,10 +343,7 @@ fn channel_status_map(
 /// Count of distinct LIVE agents in `channel` and whether any is busy.
 fn channel_agent_activity(store: &Store, channel: &str, now: u64) -> (usize, bool) {
     let map = channel_status_map(store, channel, now);
-    let live: Vec<_> = map
-        .values()
-        .filter(|ds| ds.liveness.is_live())
-        .collect();
+    let live: Vec<_> = map.values().filter(|ds| ds.liveness.is_live()).collect();
     let busy = live.iter().any(|ds| ds.busy);
     (live.len(), busy)
 }
@@ -406,7 +403,11 @@ pub(super) fn render_channel_context(
         let status_map = channel_status_map(store, project, now);
         let mut parts: Vec<String> = Vec::new();
         for (pubkey, role) in &members {
-            let you = if pubkey.as_str() == my_pubkey { " (you)" } else { "" };
+            let you = if pubkey.as_str() == my_pubkey {
+                " (you)"
+            } else {
+                ""
+            };
             let label = match status_map.get(pubkey) {
                 Some(ds) if ds.busy && !ds.activity.is_empty() => ds.activity.clone(),
                 Some(_) => "idle".to_string(),
@@ -543,10 +544,8 @@ pub(super) fn build_status_delta(
     let mut channels: Vec<String> = Vec::with_capacity(subs.len() + 1);
     channels.push(project.to_string());
     channels.extend(subs.iter().map(|(id, _, _)| id.clone()));
-    let labels: std::collections::HashMap<String, String> = subs
-        .into_iter()
-        .map(|(id, name, _)| (id, name))
-        .collect();
+    let labels: std::collections::HashMap<String, String> =
+        subs.into_iter().map(|(id, name, _)| (id, name)).collect();
 
     let items = store
         .status_delta_since_in(&channels, since, now, exclude_session)

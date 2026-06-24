@@ -3,13 +3,58 @@
 //! These are relay-authored state events; materialize them into the local store
 //! without touching the tail channel or mention routing.
 
-use crate::domain::ChatMessage;
+use crate::domain::{ChatMessage, Profile, Status};
+use crate::session::PeerStatusObservation;
 use crate::state::{ChatInboxRow, ChatLogRow, Store};
 use nostr_sdk::Event;
 
 pub struct Nip29Materializer;
 
 impl Nip29Materializer {
+    /// Apply a decoded `Profile` (kind:0) to the store.
+    ///
+    /// NIP-29 admission happens at the relay/group layer. If a profile event is
+    /// delivered by our scoped subscription, persist it for identity resolution.
+    pub fn materialize_profile(store: &Store, pf: &Profile, now: u64) {
+        let pk = &pf.agent.pubkey;
+        store.upsert_profile(pk, &pf.agent.slug, &pf.host, now).ok();
+    }
+
+    /// Apply a decoded peer `Status` (kind:30315) to `peer_session_state`.
+    ///
+    /// Local sessions live in `session_state`, written exclusively by daemon
+    /// transitions. This path only mirrors peer status observed on the relay.
+    pub fn materialize_status(store: &Store, st: &Status, seen_at: u64, now: u64) {
+        if let Some(exp) = st.expires_at {
+            if exp <= now {
+                return;
+            }
+        }
+        let slug = if !st.agent.slug.is_empty() {
+            st.agent.slug.clone()
+        } else {
+            store
+                .resolve_slug_for_pubkey(&st.agent.pubkey)
+                .ok()
+                .flatten()
+                .unwrap_or_default()
+        };
+        store
+            .record_peer_status(&PeerStatusObservation {
+                agent_pubkey: st.agent.pubkey.clone(),
+                agent_slug: slug,
+                project: st.project.clone(),
+                host: st.host.clone(),
+                rel_cwd: st.rel_cwd.clone(),
+                title: st.title.clone(),
+                activity: st.activity.clone(),
+                busy: st.busy,
+                emitted_at: seen_at,
+                observed_at: now,
+            })
+            .ok();
+    }
+
     /// Materialise kind:39000 — NIP-29 group metadata.
     ///
     /// Reads the `d` (project slug) and `about` tags and upserts the project
@@ -77,8 +122,24 @@ impl Nip29Materializer {
         } else {
             chat.from.slug.clone()
         };
+        let from_session = store
+            .session_pubkey_info(&from_pubkey)
+            .map(|(sid, _, _)| sid)
+            .unwrap_or_default();
+        let mentioned_session = chat
+            .mentioned_pubkey
+            .as_deref()
+            .and_then(|pk| store.session_pubkey_info(pk).map(|(sid, _, _)| sid))
+            .unwrap_or_default();
         let host = store
-            .resolve_chat_host(&from_pubkey, None)
+            .resolve_chat_host(
+                &from_pubkey,
+                if from_session.is_empty() {
+                    None
+                } else {
+                    Some(from_session.as_str())
+                },
+            )
             .ok()
             .flatten()
             .unwrap_or_default();
@@ -91,8 +152,8 @@ impl Nip29Materializer {
             project: chat.project.clone(),
             body: chat.body.clone(),
             created_at,
-            from_session: String::new(),
-            mentioned_session: String::new(),
+            from_session: from_session.clone(),
+            mentioned_session: mentioned_session.clone(),
         });
 
         let mut routed = false;
@@ -108,21 +169,23 @@ impl Nip29Materializer {
             if rec.created_at > created_at {
                 continue;
             }
-            // Skip sender's own sessions — identified by durable pubkey.
-            if rec.agent_pubkey == from_pubkey {
+            // Skip sender's own session by session pubkey when available, then
+            // durable pubkey for emitters that still sign chat with durable keys.
+            if (!from_session.is_empty() && rec.session_id == from_session)
+                || rec.agent_pubkey == from_pubkey
+            {
                 continue;
             }
-            // A `p` tag carries the mentioned agent's durable pubkey. When it
-            // matches this session's agent, mark it as a direct mention so
-            // count_unread_chat_mentions / peek_chat_mentions can distinguish
-            // direct mentions from ambient channel messages and ring_doorbells
-            // injects them immediately.
-            let mentioned_session =
-                if chat.mentioned_pubkey.as_deref() == Some(rec.agent_pubkey.as_str()) {
-                    rec.session_id.clone()
-                } else {
-                    String::new()
-                };
+            // A `p` tag may carry either a session pubkey or a durable agent
+            // pubkey. Resolve session pubkeys through the local map, and keep a
+            // durable-pubkey fallback for agent-level mentions.
+            let row_mentioned = if mentioned_session == rec.session_id
+                || chat.mentioned_pubkey.as_deref() == Some(rec.agent_pubkey.as_str())
+            {
+                rec.session_id.clone()
+            } else {
+                String::new()
+            };
             let row = ChatInboxRow {
                 chat_event_id: event.id.to_hex(),
                 target_session: rec.session_id,
@@ -131,8 +194,8 @@ impl Nip29Materializer {
                 project: chat.project.clone(),
                 body: chat.body.clone(),
                 created_at,
-                from_session: String::new(),
-                mentioned_session,
+                from_session: from_session.clone(),
+                mentioned_session: row_mentioned,
             };
             if store.enqueue_chat(&row).unwrap_or(false) {
                 routed = true;

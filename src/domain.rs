@@ -102,14 +102,13 @@ pub struct Proposal {
     pub body: String,
     /// Stable addressable identifier; reuse to publish a superseding revision.
     pub d: String,
-    /// Authoring session, when one is live.
-    pub session_id: Option<SessionId>,
     /// Owner pubkeys the proposal is surfaced to.
     pub audience: Vec<String>,
 }
 
-/// The agent's complete live state for ONE session — the single self-contained
-/// per-session signal on the fabric. From this one value a reader knows
+/// The agent's complete live state for one local session. On the wire, NIP-29
+/// status is addressed by `(author pubkey, group id)`; the local `session_id`
+/// never rides as a tag. From this one value a reader knows
 /// everything: who/where (agent, project, host, session, rel_cwd), what the
 /// session is about (the persistent `title`), what it is doing *right now* (the
 /// live `activity`), and whether it is mid-turn (`busy`). It is replaceable per
@@ -126,7 +125,7 @@ pub struct Proposal {
 /// module — specified here so the codec/provider/drainer agents bind to it):
 ///
 /// ```ignore
-/// impl crate::fabric::provider::Kind1Nip29Provider {
+/// impl crate::fabric::provider::Nip29Provider {
 ///     /// Encode `status` to kind:30315 (NIP-40 expiration when `expires_at` is
 ///     /// Some), sign with `keys`, publish. Returns the native event id.
 ///     pub async fn set_status(
@@ -147,8 +146,7 @@ pub struct Proposal {
 pub struct Status {
     pub agent: AgentRef,
     pub project: String,
-    /// The session this status belongs to. Every status is per-session — this is
-    /// what makes the wire event replaceable per `(project, session)`.
+    /// The local session this status belongs to. Not emitted on the wire.
     pub session_id: SessionId,
     /// The machine this session lives on.
     pub host: String,

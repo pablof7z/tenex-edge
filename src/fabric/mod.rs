@@ -2,11 +2,10 @@
 //!
 //! Layering intent (see docs/fabric-architecture.md §Phase 3/4):
 //!   Delivery    (subscribe, publish)  ← NostrDelivery
-//!   WireCodec   (encode, decode)      ← Kind1WireCodec
+//!   WireCodec   (encode, decode)      ← Nip29WireCodec
 //!   Materializer (store writes)       ← materialize()
 //!   Transport                         ← (private detail of NostrDelivery)
 
-pub mod kind1;
 pub mod nip29;
 pub mod nostr_delivery;
 pub mod provider;
@@ -71,9 +70,8 @@ pub fn materialize(
     store: &crate::state::Store,
 ) -> MaterializationOutcome {
     use crate::domain::DomainEvent;
-    use crate::fabric::kind1::materializer::Kind1Materializer;
-    use crate::fabric::kind1::wire::Kind1WireCodec;
     use crate::fabric::nip29::materializer::Nip29Materializer;
+    use crate::fabric::nip29::wire::Nip29WireCodec;
 
     let RawEnvelope::Nostr(event) = env;
 
@@ -89,8 +87,8 @@ pub fn materialize(
         return MaterializationOutcome::default();
     }
 
-    // Decode via the Kind1 wire codec.
-    let codec = Kind1WireCodec;
+    // Decode via the NIP-29 wire codec.
+    let codec = Nip29WireCodec;
     let Some(de) = codec.decode(env) else {
         return MaterializationOutcome::default();
     };
@@ -112,11 +110,11 @@ pub fn materialize(
         DomainEvent::Profile(_) if is_self => {}
 
         DomainEvent::Profile(ref pf) => {
-            Kind1Materializer::materialize_profile(store, pf, now);
+            Nip29Materializer::materialize_profile(store, pf, now);
         }
 
         DomainEvent::Status(ref st) => {
-            Kind1Materializer::materialize_status(store, st, event.created_at.as_secs(), now);
+            Nip29Materializer::materialize_status(store, st, event.created_at.as_secs(), now);
         }
 
         DomainEvent::ChatMessage(ref chat) => {
@@ -179,7 +177,7 @@ mod tests {
 
         // Routing is pubkey-based: event is signed with the sender's durable key
         // and the p-tag carries the receiver's durable pubkey. No session-derived
-        // keys, no from-session / session-id wire tags.
+        // keys, no session-specific wire tags.
         let event = build_event(
             &sender_keys,
             9,

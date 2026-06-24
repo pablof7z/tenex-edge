@@ -67,7 +67,10 @@ fn first_turn_injects_channel_context_block() {
     // by render_channel_context), naming the session's identity, its channel
     // breadcrumb, and the messaging convention.
     assert!(ctx.contains("You are coder on #"), "context was: {ctx}");
-    assert!(!ctx.contains("[session"), "must not expose a session code; context was: {ctx}");
+    assert!(
+        !ctx.contains("[session"),
+        "must not expose a session code; context was: {ctx}"
+    );
     assert!(ctx.contains("Channel: #"), "context was: {ctx}");
     assert!(ctx.contains("mention its `@name`"), "context was: {ctx}");
 

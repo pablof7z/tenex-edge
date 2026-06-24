@@ -17,7 +17,7 @@ use super::tail_event::TailEvent;
 use super::{lock_path, socket_path, store_path};
 use crate::config::{self, Config};
 use crate::domain::{ChatMessage, DomainEvent};
-use crate::fabric::provider::Kind1Nip29Provider;
+use crate::fabric::provider::Nip29Provider;
 use crate::identity::{self, AgentIdentity};
 use crate::runtime::{self, EngineParams};
 use crate::session::{derive_status, Harness, SessionObservation, SessionSnapshot};
@@ -65,7 +65,7 @@ struct PeerTracked {
 pub struct DaemonState {
     store: Arc<Mutex<Store>>,
     transport: Arc<Transport>,
-    provider: Arc<Kind1Nip29Provider>,
+    provider: Arc<Nip29Provider>,
     cfg: Config,
     host: String,
     owners: Vec<String>,
@@ -199,7 +199,7 @@ pub async fn run() -> Result<()> {
     );
 
     let store = Arc::new(Mutex::new(Store::open(&store_path())?));
-    let provider = Arc::new(Kind1Nip29Provider::new(
+    let provider = Arc::new(Nip29Provider::new(
         transport.clone(),
         store.clone(),
         cfg.management_nsec().cloned(),
@@ -247,7 +247,7 @@ pub async fn run() -> Result<()> {
     {
         let pi = state.provider.provider_instance.clone();
         state.with_store(|s| {
-            s.backfill_kind1_nip29_origins(&pi, now_secs()).ok();
+            s.backfill_nip29_origins(&pi, now_secs()).ok();
         });
     }
 
@@ -666,9 +666,8 @@ fn rpc_who(state: &Arc<DaemonState>, params: &serde_json::Value) -> Result<serde
     };
     let now = now_secs();
     let host = state.host.clone();
-    let snapshot = state.with_store(|s| {
-        crate::cli::load_who_snapshot(s, current_project.as_deref(), now, &host)
-    })?;
+    let snapshot = state
+        .with_store(|s| crate::cli::load_who_snapshot(s, current_project.as_deref(), now, &host))?;
     Ok(serde_json::to_value(snapshot)?)
 }
 
@@ -1524,7 +1523,7 @@ async fn rpc_chat_write(
             project: scope.clone(),
             body: p.message.clone(),
             created_at,
-            from_session: String::new(),
+            from_session: rec.session_id.clone(),
             mentioned_session: mentioned_session.clone().unwrap_or_default(),
         });
         let mut routed = false;
@@ -1555,7 +1554,7 @@ async fn rpc_chat_write(
                 project: scope.clone(),
                 body: p.message.clone(),
                 created_at,
-                from_session: String::new(),
+                from_session: rec.session_id.clone(),
                 mentioned_session: row_mentioned,
             };
             if s.enqueue_chat(&row).unwrap_or(false) {
@@ -1616,8 +1615,7 @@ struct ProposeParams {
 ///   ["title", <title>]          — human-readable title
 ///   ["h", <project>]            — NIP-29 group
 ///   ["p", <owner>]              — per owner in cfg.owners, surfaces to the human
-///   ["session-id", <session>]   — authoring session, lets a note route back
-///   (no agent tag — author identity is the event signer pubkey; kind:0 carries slug)
+///   (no agent/session tag — author identity is the event signer pubkey; kind:0 carries slug)
 async fn rpc_propose(
     state: &Arc<DaemonState>,
     params: &serde_json::Value,
@@ -1671,17 +1669,13 @@ async fn rpc_propose(
         )
     });
 
-    // Build the Proposal domain event; the wire shape lives in the codec.
+    // Build the Proposal domain event; the wire shape lives in the NIP-29 provider.
     let ev = DomainEvent::Proposal(crate::domain::Proposal {
         agent: crate::domain::AgentRef::new(id.pubkey_hex(), agent_slug.clone()),
         project: project.clone(),
         title: p.title.clone(),
         body: p.body.clone(),
         d: d_tag.clone(),
-        // Authoring session — only when a live session exists.
-        session_id: session_rec
-            .as_ref()
-            .map(|rec| crate::util::SessionId::from(rec.session_id.clone())),
         // Surface to each owner.
         audience: state.owners.clone(),
     });
@@ -1743,9 +1737,11 @@ fn resolve_recipient(
     // still scopes LOCAL delivery (target_session) but p-tags the durable key,
     // never a stale per-session derived pubkey.
     let session_recipient =
-        |_store: &Store, session_id: String, durable_pk: String, project: String| {
+        |store: &Store, session_id: String, fallback_pk: String, project: String| {
             ResolvedRecipient {
-                pubkey: durable_pk,
+                pubkey: store
+                    .session_pubkey_for_session(&session_id)
+                    .unwrap_or(fallback_pk),
                 target_session: Some(session_id),
                 project,
             }
@@ -2202,7 +2198,7 @@ async fn rpc_project_members(
 }
 
 async fn refresh_project_members_cache(state: &Arc<DaemonState>, project: &str) {
-    use crate::codec::kind1::{kind, KIND_GROUP_MEMBERS};
+    use crate::fabric::nip29::wire::{kind, KIND_GROUP_MEMBERS};
     use nostr_sdk::prelude::Filter;
 
     let filter = Filter::new()
@@ -3438,7 +3434,7 @@ fn handle_incoming(state: &Arc<DaemonState>, event: &Event) {
     // (prose is ignored); dispatch the async handler off the demux loop. Durable
     // idempotency lives inside the handler, not `first_sight` (which is in-memory
     // and would respawn agents after a daemon restart).
-    if event.kind.as_u16() == crate::codec::kind1::KIND_CHAT {
+    if event.kind.as_u16() == crate::fabric::nip29::wire::KIND_CHAT {
         if let Some(op) = crate::fabric::nip29::orchestration::parse_orchestration(event) {
             let st = state.clone();
             let ev = event.clone();

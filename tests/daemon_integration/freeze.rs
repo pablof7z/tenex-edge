@@ -16,7 +16,10 @@ fn rewrite_config_with_user_nsec(home: &Home) {
     // The user's pubkey is whitelisted (granted admin in every group); the
     // backend key signs group management. Distinct keys per doctrine.
     use nostr_sdk::prelude::Keys;
-    let user_pk = Keys::parse(EXAMPLE_USER_NSEC).unwrap().public_key().to_hex();
+    let user_pk = Keys::parse(EXAMPLE_USER_NSEC)
+        .unwrap()
+        .public_key()
+        .to_hex();
     let cfg = home.dir.path().join("config.json");
     let body = serde_json::json!({
         "whitelistedPubkeys": [user_pk],

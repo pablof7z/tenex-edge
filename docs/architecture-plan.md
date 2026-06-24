@@ -91,7 +91,7 @@ tables are projections written by one canonical path only — never independentl
   writes out of `runtime.rs` into `Store` transitions (may dual-write old tables
   during migration); runtime calls transitions and receives snapshots.
 - **Phase 4 — Status outbox + provider status API + expiration.** Add
-  `Kind1Nip29Provider::set_status` and the outbox drainer; emit the NIP-40
+  `Nip29Provider::set_status` and the outbox drainer; emit the NIP-40
   expiration tag here; runtime stops calling `provider.publish(Status)` directly.
 - **Phase 5 — Switch local readers to canonical.** `who`, `build_status_delta`,
   `rpc_statusline`, `build_backfill` onto `derive_status` + the facade.
