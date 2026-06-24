@@ -199,18 +199,10 @@ pub async fn run() -> Result<()> {
     );
 
     let store = Arc::new(Mutex::new(Store::open(&store_path())?));
-    // Operator pubkey (from `userNsec`) — granted the `admin` role in every
-    // project group by `open_project` (signed by `tenexPrivateKey`). `None` when
-    // no `userNsec` is configured (no operator admin grant).
-    let operator_pubkey: Option<String> = cfg
-        .user_nsec()
-        .and_then(|n| Keys::parse(n).ok())
-        .map(|k| k.public_key().to_hex());
     let provider = Arc::new(Kind1Nip29Provider::new(
         transport.clone(),
         store.clone(),
         cfg.management_nsec().cloned(),
-        operator_pubkey,
         cfg.whitelisted_pubkeys.clone(),
         &cfg.relays, // provider_instance hashes main relays only, not indexer
     ));
@@ -2493,6 +2485,17 @@ async fn ensure_session_room(
                 .ok();
         });
     }
+    // Grant every whitelisted human pubkey the admin role in the room. The
+    // whitelist carries the user's own pubkey (the human behind `userNsec`),
+    // so this is what lets the user publish prompts into the closed room.
+    // Signed by `tenexPrivateKey` (the management signer). Best-effort.
+    for pk in &state.cfg.whitelisted_pubkeys {
+        if state.provider.nip29_add_admin(room_h, pk).await {
+            state.with_store(|s| {
+                s.upsert_group_member(room_h, pk, "admin", now_secs()).ok();
+            });
+        }
+    }
     true
 }
 
@@ -2594,9 +2597,6 @@ async fn rpc_channels_create(
     }
     for pk in &state.cfg.whitelisted_pubkeys {
         admin_set.insert(pk.clone());
-    }
-    if let Some(op) = state.cfg.user_nsec().and_then(|n| Keys::parse(n).ok()) {
-        admin_set.insert(op.public_key().to_hex());
     }
     if let Some(bp) = state.backend_pubkey() {
         admin_set.insert(bp.to_string());

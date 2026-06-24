@@ -21,11 +21,12 @@ pub struct Config {
     /// Host label published on the agent's profile (M1 §3 `host` tag).
     pub host: String,
     /// Human operator's Nostr secret key (bech32 nsec or hex). Used for exactly
-    /// two purposes: (1) signing user-prompt events when the human submits a
-    /// prompt from the CLI, and (2) deriving the operator's pubkey to grant it
-    /// the `admin` role in every project group (the grant itself is signed by
-    /// `tenexPrivateKey`). Never used for group management, session-key
-    /// derivation, or backend identity.
+    /// one purpose: signing user-prompt events when the human submits a prompt
+    /// from the CLI. The operator's pubkey is NOT derived from this field for
+    /// group admin grants — the operator's pubkey lives in `whitelisted_pubkeys`
+    /// (config `whitelistedPubkeys`), which is the source of truth for who is an
+    /// admin in every project group. Never used for group management,
+    /// session-key derivation, or backend identity.
     pub user_nsec: Option<String>,
     /// This backend/daemon's own Nostr secret key (bech32 nsec or hex). The
     /// sole signer for NIP-29 group management, session-key derivation, and
@@ -60,11 +61,11 @@ impl Config {
         self.tenex_private_key.as_ref()
     }
 
-    /// The human operator's Nostr secret key. Used in exactly two places:
-    /// (1) `rpc_user_prompt` signs the user's prompt as the operator, and
-    /// (2) `open_project` derives the operator's pubkey to grant it the `admin`
-    /// role in every project group (signed by `tenexPrivateKey`). Never used
-    /// for group management, session-key derivation, or backend identity.
+    /// The human operator's Nostr secret key. Used in exactly one place:
+    /// `rpc_user_prompt` signs the user's prompt as the operator. The
+    /// operator's pubkey is NOT derived from this field for group admin grants —
+    /// it lives in `whitelisted_pubkeys` instead. Never used for group
+    /// management, session-key derivation, or backend identity.
     pub fn user_nsec(&self) -> Option<&String> {
         self.user_nsec.as_ref()
     }
@@ -216,7 +217,10 @@ mod tests {
         let c = Config::from_json_str(json, "host").unwrap();
         // session derivation + management + backend identity all use the
         // backend key; the operator key is only for user prompts + admin grant.
-        assert_eq!(c.session_ikm_nsec().map(String::as_str), Some("backendkey"));
+        assert_eq!(
+            c.session_ikm_nsec().map(String::as_str),
+            Some("backendkey")
+        );
         assert_eq!(c.management_nsec().map(String::as_str), Some("backendkey"));
         assert_eq!(c.backend_nsec().map(String::as_str), Some("backendkey"));
         assert_eq!(c.user_nsec().map(String::as_str), Some("operatorkey"));

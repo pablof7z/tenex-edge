@@ -59,11 +59,6 @@ pub struct Kind1Nip29Provider {
     /// user/edit-metadata). Optional: if unset, group management is skipped and
     /// sessions still start (best-effort).
     pub management_nsec: Option<String>,
-    /// Hex pubkey of the human operator (`userNsec`), if configured. Granted
-    /// the `admin` role in every project group by `open_project` (signed by
-    /// `management_nsec`), so the human can speak and manage their groups.
-    /// `None` when no `userNsec` is configured (no operator admin grant).
-    pub operator_pubkey: Option<String>,
     /// Whitelisted human pubkeys (hex) from config. Every owned NIP-29 group
     /// grants each of these the `admin` role, backfilled on every `open_project`
     /// by diffing against the relay's live admin set.
@@ -79,7 +74,6 @@ impl Kind1Nip29Provider {
         transport: Arc<Transport>,
         store: Arc<Mutex<Store>>,
         management_nsec: Option<String>,
-        operator_pubkey: Option<String>,
         whitelisted_pubkeys: Vec<String>,
         relays: &[String],
     ) -> Self {
@@ -92,7 +86,6 @@ impl Kind1Nip29Provider {
             store,
             transport,
             management_nsec,
-            operator_pubkey,
             whitelisted_pubkeys,
             provider_instance,
         }
@@ -346,10 +339,7 @@ impl Kind1Nip29Provider {
         let nsec = match &self.management_nsec {
             Some(n) => n.clone(),
             None => {
-                progress(
-                    "no signing key (tenexPrivateKey) configured; skipping group management"
-                        .to_string(),
-                );
+                progress("no signing key (tenexPrivateKey) configured; skipping group management".to_string());
                 if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
                     eprintln!(
                         "[daemon] no signing key (tenexPrivateKey) configured; skipping NIP-29 group management for {project}"
@@ -438,21 +428,13 @@ impl Kind1Nip29Provider {
             }
         }
 
-        // 2. Backfill admins. The admin set is: every whitelisted human pubkey
-        //    PLUS the operator's pubkey (from `userNsec`), so the human can
-        //    speak and manage their groups. Signed by `tenexPrivateKey`.
-        //    Diff against the relay's live 39001 set so a re-run repairs any
-        //    pubkey that is missing or only a plain member.
-        let mut admin_set: std::collections::BTreeSet<&str> = self
-            .whitelisted_pubkeys
-            .iter()
-            .map(String::as_str)
-            .collect();
-        if let Some(ref op_pk) = self.operator_pubkey {
-            admin_set.insert(op_pk.as_str());
-        }
-        for pk in &admin_set {
-            if roles.get(*pk).map(String::as_str) == Some("admin") {
+        // 2. Backfill admins: every whitelisted human pubkey MUST hold the admin
+        //    role. The whitelist carries the user's own pubkey (the human behind
+        //    `userNsec`), so granting admin here is what lets the user publish
+        //    prompts into closed groups. Diff against the relay's live 39001 set
+        //    so a re-run repairs any pubkey that is missing or only a plain member.
+        for pk in &self.whitelisted_pubkeys {
+            if roles.get(pk).map(String::as_str) == Some("admin") {
                 continue;
             }
             progress(format!(
