@@ -230,9 +230,9 @@ pub fn child_group_id(name: &str) -> String {
     format!("{slug}-{rand8}")
 }
 
-/// Deterministic id for a per-session room (issue #6): six `[a-z0-9]` chars
-/// (base36) derived from a stable hash of the session's `anchor` (resume token /
-/// harness id / pid).
+/// Deterministic id for a per-session room (issue #6): `session-` followed by
+/// six `[a-z0-9]` chars (base36) derived from a stable hash of the session's
+/// `anchor` (resume token / harness id / pid).
 ///
 /// The id does NOT prefix the work-root project name: a per-session room is
 /// already nested under its project via the NIP-29 `parent` tag, so repeating
@@ -240,11 +240,11 @@ pub fn child_group_id(name: &str) -> String {
 /// explicitly (`owned_groups.room_parent`) rather than inferred from the id, so
 /// host-side resolution doesn't depend on the id's shape.
 ///
-/// Six base36 chars (~2.2 billion values) keep it short yet globally unique
-/// enough on the relay across all projects, since the id is no longer scoped by
-/// a project prefix. Deterministic (`DefaultHasher::new()` uses fixed keys) so a
-/// resumed session re-derives the same room; `anchor` is hashed, never embedded
-/// verbatim (no session_id on the wire, issue #5).
+/// The short hash keeps the room id readable while the `session-` prefix makes
+/// the scope explicit in prompts, status lines, and injected mentions.
+/// Deterministic (`DefaultHasher::new()` uses fixed keys) so a resumed session
+/// re-derives the same room; `anchor` is hashed, never embedded verbatim (no
+/// session_id on the wire, issue #5).
 pub fn session_room_id(anchor: &str) -> String {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
@@ -259,7 +259,7 @@ pub fn session_room_id(anchor: &str) -> String {
         n /= 36;
     }
     // Safe: every byte is an ASCII char from ALPHABET.
-    String::from_utf8(id.to_vec()).unwrap()
+    format!("session-{}", String::from_utf8(id.to_vec()).unwrap())
 }
 
 #[cfg(test)]
@@ -322,9 +322,13 @@ mod tests {
     #[test]
     fn session_room_id_shape() {
         let id = session_room_id("sess-abc-123");
-        assert_eq!(id.len(), 6, "got {id}");
+        assert!(id.starts_with("session-"), "got {id}");
+        let suffix = id.trim_start_matches("session-");
+        assert_eq!(suffix.len(), 6, "got {id}");
         assert!(
-            id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()),
+            suffix
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()),
             "non-[a-z0-9] char in {id}"
         );
         // No project name anywhere in the id — the room is nested via parent.

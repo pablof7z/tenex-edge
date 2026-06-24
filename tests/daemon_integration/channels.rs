@@ -158,6 +158,12 @@ fn human_initiated_session_mints_per_session_room() {
         "room id should be a project-agnostic session room: got {}",
         rec.project
     );
+    let breadcrumb = store.channel_breadcrumb(&rec.project).unwrap();
+    assert_eq!(
+        breadcrumb.last().map(|(_, label)| label.as_str()),
+        Some(rec.project.as_str()),
+        "session room display label should be the room id, not the agent slug"
+    );
     // Membership lands via the background mint.
     assert!(
         wait_until(std::time::Duration::from_secs(20), || Store::open(

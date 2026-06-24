@@ -902,11 +902,19 @@ async fn rpc_session_start(
         let alive = state.with_store(|s| s.list_alive_sessions().unwrap_or_default());
         let mut stale_ids: Vec<String> = Vec::new();
         for rec in &alive {
-            if rec.session_id == session_id
-                || rec.agent_slug != p.agent
-                || rec.project != project
-                || rec.host != state.host
-            {
+            if rec.session_id == session_id || rec.agent_slug != p.agent || rec.host != state.host {
+                continue;
+            }
+            let same_work_root = state
+                .with_store(|s| {
+                    let old_root = s.work_root_for_scope(&rec.project)?;
+                    let new_root = room_parent.clone().unwrap_or_else(|| {
+                        s.work_root_for_scope(&project).unwrap_or(project.clone())
+                    });
+                    Ok::<bool, anyhow::Error>(old_root == new_root)
+                })
+                .unwrap_or(rec.project == project);
+            if !same_work_root {
                 continue;
             }
             let same_pid = p.watch_pid.is_some() && rec.watch_pid == p.watch_pid;
@@ -1022,10 +1030,13 @@ async fn rpc_session_start(
             prog.emit("nip29", format!("minting per-session room {project}"));
         }
         let now = now_secs();
+        let can_manage_room = state.cfg.management_nsec().is_some();
         state.with_store(|s| {
-            s.mark_group_owned(&project, now).ok();
+            if can_manage_room {
+                s.mark_group_owned(&project, now).ok();
+            }
             s.mark_session_room(&project, parent, now).ok();
-            s.upsert_group_metadata(&project, &p.agent, parent, now)
+            s.upsert_group_metadata(&project, &project, parent, now)
                 .ok();
             // Session rooms are fail-open local routing scopes first; relay
             // membership converges asynchronously below. Record the durable
@@ -1041,7 +1052,7 @@ async fn rpc_session_start(
         let st = state.clone();
         let room = project.clone();
         let par = parent.clone();
-        let name = p.agent.clone();
+        let name = project.clone();
         let agent_pubkey = id.pubkey_hex();
         tokio::spawn(async move {
             ensure_session_room(&st, &room, &name, &par, &agent_pubkey).await;
@@ -1539,23 +1550,33 @@ async fn rpc_chat_write(
                 "mention @{raw} must name a concrete session codename from `tenex-edge who`"
             );
         };
-        if target.project != scope {
+        let same_work_root = state.with_store(|s| {
+            let source_root = s.work_root_for_scope(&scope)?;
+            let target_root = s.work_root_for_scope(&target.project)?;
+            Ok::<bool, anyhow::Error>(source_root == target_root)
+        })?;
+        if target.project != scope && !same_work_root {
             anyhow::bail!(
                 "mention target is in project {:?}, but this chat is for project {:?}",
                 target.project,
                 scope
             );
         }
-        Some((target.pubkey, session_id))
+        Some((target.pubkey, session_id, target.project))
     } else {
         None
     };
-    let mentioned_pubkey = mention.as_ref().map(|(pk, _)| pk.clone());
-    let mentioned_session = mention.as_ref().map(|(_, sid)| sid.clone());
+    let mentioned_pubkey = mention.as_ref().map(|(pk, _, _)| pk.clone());
+    let mentioned_session = mention.as_ref().map(|(_, sid, _)| sid.clone());
+    let publish_scope = mention
+        .as_ref()
+        .map(|(_, _, project)| project.as_str())
+        .unwrap_or(scope.as_str())
+        .to_string();
 
     let chat = ChatMessage {
         from: crate::domain::AgentRef::new(from_pubkey.clone(), rec.agent_slug.clone()),
-        project: scope.clone(),
+        project: publish_scope.clone(),
         body: p.message.clone(),
         mentioned_pubkey: mentioned_pubkey.clone(),
     };
@@ -1589,7 +1610,8 @@ async fn rpc_chat_write(
         });
         let mut routed = false;
         for target in s.list_alive_sessions().unwrap_or_default() {
-            if target.route_scope() != scope {
+            let is_direct_target = mentioned_session.as_deref() == Some(target.session_id.as_str());
+            if !is_direct_target && target.route_scope() != scope {
                 continue;
             }
             if target.created_at > created_at {
@@ -1601,18 +1623,22 @@ async fn rpc_chat_write(
             }
             // Preserve local mention routing: if the resolved mention targets
             // this session, mark it as a direct mention in the inbox row.
-            let row_mentioned = if mentioned_session.as_deref() == Some(target.session_id.as_str())
-            {
+            let row_mentioned = if is_direct_target {
                 target.session_id.clone()
             } else {
                 String::new()
+            };
+            let row_project = if is_direct_target {
+                target.route_scope().to_string()
+            } else {
+                scope.clone()
             };
             let row = ChatInboxRow {
                 chat_event_id: event_id.clone(),
                 target_session: target.session_id,
                 from_pubkey: from_pubkey.clone(),
                 from_slug: rec.agent_slug.clone(),
-                project: scope.clone(),
+                project: row_project,
                 body: p.message.clone(),
                 created_at,
                 from_session: rec.session_id.clone(),
@@ -1643,7 +1669,7 @@ async fn rpc_chat_write(
 
     Ok(serde_json::json!({
         "event_id": event_id,
-        "project": scope,
+        "project": publish_scope,
         "mentioned_pubkey": mentioned_pubkey,
         "mentioned_session": mentioned_session,
     }))
@@ -3340,8 +3366,39 @@ async fn handle_chat_read<W: AsyncWriteExt + Unpin>(
     let live_started_at = now_secs();
 
     let rows = state.with_store(|s| {
-        s.list_chat_messages(&scope, since, p.limit, offset, p.tail)
-            .unwrap_or_default()
+        let mut scopes = vec![scope.clone()];
+        if s.session_room_parent(&scope).ok().flatten().is_none() {
+            scopes.extend(s.session_rooms_under(&scope).unwrap_or_default());
+        }
+        let mut rows: Vec<ChatLogRow> = scopes
+            .iter()
+            .flat_map(|scope| {
+                s.list_chat_messages(scope, since, None, 0, false)
+                    .unwrap_or_default()
+            })
+            .collect();
+        rows.sort_by(|a, b| {
+            a.created_at
+                .cmp(&b.created_at)
+                .then_with(|| a.chat_event_id.cmp(&b.chat_event_id))
+        });
+        if p.tail {
+            let limit = p.limit.unwrap_or(10) as usize;
+            let start = rows
+                .len()
+                .saturating_sub(limit.saturating_add(offset as usize));
+            let end = rows.len().saturating_sub(offset as usize);
+            rows = rows.get(start..end).unwrap_or(&[]).to_vec();
+        } else {
+            let start = offset as usize;
+            let end = p
+                .limit
+                .map(|limit| start.saturating_add(limit as usize))
+                .unwrap_or(rows.len())
+                .min(rows.len());
+            rows = rows.get(start..end).unwrap_or(&[]).to_vec();
+        }
+        rows
     });
     let mut seen: std::collections::HashSet<String> =
         rows.iter().map(|r| r.chat_event_id.clone()).collect();

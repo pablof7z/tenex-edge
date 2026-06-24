@@ -328,6 +328,10 @@ CREATE TABLE IF NOT EXISTS project_meta (
 CREATE TABLE IF NOT EXISTS owned_groups (
     project    TEXT PRIMARY KEY,
     created_at INTEGER NOT NULL,
+    -- 1 when this group is actually owned/managed by this daemon. Session-room
+    -- rows may exist with owns_group=0 when a no-management-key daemon starts
+    -- fail-open and needs local routing metadata without claiming relay admin.
+    owns_group INTEGER NOT NULL DEFAULT 1,
     -- 1 when this owned group is a per-session room (issue #6), so only the
     -- owning session auto-renames it to its distilled title. The ALTER in `open`
     -- backfills this column for databases created before the column existed.
@@ -477,6 +481,10 @@ impl Store {
         // distilled title.
         let _ = conn.execute(
             "ALTER TABLE owned_groups ADD COLUMN is_session_room INTEGER NOT NULL DEFAULT 0",
+            [],
+        );
+        let _ = conn.execute(
+            "ALTER TABLE owned_groups ADD COLUMN owns_group INTEGER NOT NULL DEFAULT 1",
             [],
         );
         let _ = conn.execute(
@@ -747,7 +755,7 @@ impl Store {
 
     /// Most-recent still-alive session for an agent under a `work_root` — the
     /// bare project OR any per-session room minted beneath it
-    /// (`<slug>-<hex8>`). A human-initiated session is stored under its minted
+    /// (`session-<hash>`). A human-initiated session is stored under its minted
     /// room (issue #6), but the same terminal's later `tenex-edge` verbs only
     /// resolve the bare work-root from `cwd` (no `TENEX_EDGE_CHANNEL` is exported
     /// into an already-running interactive shell). Without this the agent can't
@@ -2297,8 +2305,8 @@ impl Store {
 
     pub fn mark_group_owned(&self, project: &str, ts: u64) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO owned_groups (project, created_at) VALUES (?1, ?2)
-             ON CONFLICT(project) DO NOTHING",
+            "INSERT INTO owned_groups (project, created_at, owns_group) VALUES (?1, ?2, 1)
+             ON CONFLICT(project) DO UPDATE SET owns_group=1",
             params![project, ts],
         )?;
         Ok(())
@@ -2306,7 +2314,7 @@ impl Store {
 
     pub fn is_group_owned(&self, project: &str) -> Result<bool> {
         let n: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM owned_groups WHERE project=?1",
+            "SELECT COUNT(*) FROM owned_groups WHERE project=?1 AND owns_group=1",
             params![project],
             |r| r.get(0),
         )?;
@@ -2339,12 +2347,13 @@ impl Store {
             .is_ok()
     }
 
-    /// Mark an owned group as a per-session room (issue #6). Idempotent; assumes
-    /// the group is already (or concurrently) recorded in `owned_groups`.
+    /// Mark a group as a per-session room (issue #6). Idempotent. This records
+    /// local routing metadata but does not by itself claim relay ownership; call
+    /// `mark_group_owned` separately when management credentials exist.
     pub fn mark_session_room(&self, project: &str, parent: &str, ts: u64) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO owned_groups (project, created_at, is_session_room, room_parent)
-             VALUES (?1, ?2, 1, ?3)
+            "INSERT INTO owned_groups (project, created_at, owns_group, is_session_room, room_parent)
+             VALUES (?1, ?2, 0, 1, ?3)
              ON CONFLICT(project) DO UPDATE SET is_session_room=1, room_parent=?3",
             params![project, ts, parent],
         )?;
@@ -2365,6 +2374,17 @@ impl Store {
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(e.into()),
         }
+    }
+
+    /// Per-session rooms directly nested under a work-root project.
+    pub fn session_rooms_under(&self, parent: &str) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT project FROM owned_groups
+             WHERE is_session_room=1 AND room_parent=?1
+             ORDER BY project",
+        )?;
+        let rows = stmt.query_map(params![parent], |r| r.get::<_, String>(0))?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
     }
 
     /// Top-level project that owns `scope`. `scope` may already be a root
@@ -4059,9 +4079,13 @@ mod tests {
         // A plain owned group is not a session room.
         s.mark_group_owned("proj", 100).unwrap();
         assert!(!s.is_session_room("proj").unwrap());
-        // Marking a room sets the flag + records its work-root parent; it stays owned.
+        // Marking a room sets the flag + records its work-root parent. It is
+        // known locally, but is not owned until relay-management code claims it.
         s.mark_session_room("proj-room", "proj", 100).unwrap();
         assert!(s.is_session_room("proj-room").unwrap());
+        assert!(!s.is_group_owned("proj-room").unwrap());
+        assert!(s.channel_exists("proj-room"));
+        s.mark_group_owned("proj-room", 100).unwrap();
         assert!(s.is_group_owned("proj-room").unwrap());
         assert_eq!(
             s.session_room_parent("proj-room").unwrap().as_deref(),

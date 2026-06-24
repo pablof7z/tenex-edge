@@ -322,7 +322,7 @@ enum ChatAction {
         #[arg(long)]
         live: bool,
         /// Channel id to read; defaults to the current agent session's active channel.
-        #[arg(long)]
+        #[arg(long, alias = "project")]
         channel: Option<String>,
     },
 }
