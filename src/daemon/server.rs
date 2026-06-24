@@ -208,6 +208,7 @@ pub async fn run() -> Result<()> {
         transport.clone(),
         store.clone(),
         cfg.management_nsec().cloned(),
+        cfg.user_nsec().cloned(),
         cfg.whitelisted_pubkeys.clone(),
         &cfg.relays, // provider_instance hashes main relays only, not indexer
     ));

@@ -59,6 +59,10 @@ pub struct Nip29Provider {
     /// user/edit-metadata). Optional: if unset, group management is skipped and
     /// sessions still start (best-effort).
     pub management_nsec: Option<String>,
+    /// Human operator key (`userNsec`). Used to self-grant the management key
+    /// admin rights when `management_nsec`'s pubkey is not yet an admin of an
+    /// existing group (e.g. first session on a new machine).
+    pub user_nsec: Option<String>,
     /// Whitelisted human pubkeys (hex) from config. Every owned NIP-29 group
     /// grants each of these the `admin` role, backfilled on every `open_project`
     /// by diffing against the relay's live admin set.
@@ -74,6 +78,7 @@ impl Nip29Provider {
         transport: Arc<Transport>,
         store: Arc<Mutex<Store>>,
         management_nsec: Option<String>,
+        user_nsec: Option<String>,
         whitelisted_pubkeys: Vec<String>,
         relays: &[String],
     ) -> Self {
@@ -86,6 +91,7 @@ impl Nip29Provider {
             store,
             transport,
             management_nsec,
+            user_nsec,
             whitelisted_pubkeys,
             provider_instance,
         }
@@ -322,6 +328,35 @@ impl Nip29Provider {
     /// Decisions are driven by the relay's LIVE group state (kinds 39000/39001/
     /// 39002 fetched by `#d == project`), not the local cache — so a re-run
     /// auto-detects a missing group or a whitelisted pubkey that isn't yet an
+    /// Use `userNsec` to publish a kind:9000 put-admin granting `mgmt_pubkey`
+    /// admin rights on `group`. Returns true if the event was accepted by the
+    /// relay. Used to self-bootstrap a new machine's management key into an
+    /// existing group that was originally created on another machine.
+    async fn try_grant_mgmt_admin_via_user_nsec(&self, group: &str, mgmt_pubkey: &str) -> bool {
+        use nostr_sdk::prelude::Keys;
+        let nsec = match &self.user_nsec {
+            Some(n) => n.clone(),
+            None => {
+                eprintln!("[daemon] try_grant_mgmt_admin: no userNsec configured");
+                return false;
+            }
+        };
+        let user_keys = match Keys::parse(&nsec) {
+            Ok(k) => k,
+            Err(e) => {
+                eprintln!("[daemon] try_grant_mgmt_admin: userNsec parse failed: {e}");
+                return false;
+            }
+        };
+        match crate::fabric::nip29::lifecycle::group_put_admin(group, mgmt_pubkey) {
+            Ok(b) => self.publish_group_management(b, &user_keys, "9000 put-admin (self-grant via userNsec)").await,
+            Err(e) => {
+                eprintln!("[daemon] try_grant_mgmt_admin: build event failed: {e}");
+                false
+            }
+        }
+    }
+
     /// admin and repairs it (the "backfill" property). The trailing
     /// `ensure_subscription` call remains at the call site (rpc_session_start /
     /// reconcile_sessions) to preserve the existing double-subscribe behavior.
@@ -421,23 +456,34 @@ impl Nip29Provider {
             }
         } else {
             progress("group already exists on relay".to_string());
-            // Bug C fix: if this machine's management key is NOT an admin of the
-            // pre-existing channel, all subsequent put-user calls will be silently
-            // rejected by the relay. Surface a clear, actionable error and bail out
-            // of the membership-provisioning steps (fail-open: the session still
-            // starts, but we won't spam the relay with guaranteed-rejected events).
+            // If this machine's management key is not yet an admin of the
+            // pre-existing group (e.g. first session on a new machine), try to
+            // self-grant using userNsec, which the human operator presumably used
+            // to create the group originally. If that succeeds we can proceed
+            // normally; if it fails (no userNsec, relay rejects) bail loudly.
             if roles.get(&mgmt_pubkey).map(String::as_str) != Some("admin") {
                 let short = crate::util::pubkey_short(&mgmt_pubkey);
-                eprintln!(
-                    "[daemon] ERROR: this backend's management key ({short}) is not an admin \
-                     of channel {project} on the relay (it was likely created on another \
-                     machine). Sessions here may have their events rejected. Ask an admin of \
-                     that channel to grant this pubkey admin."
-                );
-                progress(format!(
-                    "management key {short} is not an admin of this channel; skipping membership provisioning"
-                ));
-                return;
+                let granted = self.try_grant_mgmt_admin_via_user_nsec(project, &mgmt_pubkey).await;
+                if !granted {
+                    eprintln!(
+                        "[daemon] ERROR: management key ({short}) is not an admin of \
+                         channel {project} and userNsec self-grant failed. \
+                         Ask an existing admin to run: tenex-edge project add {project} {short}"
+                    );
+                    progress(format!(
+                        "management key {short} is not an admin and self-grant failed; skipping membership provisioning"
+                    ));
+                    return;
+                }
+                progress(format!("self-granted admin for management key {short} via userNsec"));
+                // Re-fetch roles so the admin backfill loop below sees the updated set.
+                let (_, roles_after, _) = self.fetch_group_state(project).await;
+                if roles_after.get(&mgmt_pubkey).map(String::as_str) != Some("admin") {
+                    eprintln!(
+                        "[daemon] WARNING: self-grant published for {short} but relay \
+                         39001 not yet reflecting it; proceeding optimistically"
+                    );
+                }
             }
         }
 
