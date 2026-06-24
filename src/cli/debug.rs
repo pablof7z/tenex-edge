@@ -24,7 +24,7 @@ struct DebugLine {
     label: String,   // event type, e.g. "user-prompt-submit", "inject", "inbox send"
     summary: String, // smart one-liner shown in the timeline
     detail: String,  // full content for the detail panel (real newlines)
-    ok: Option<bool>,
+
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -385,7 +385,6 @@ pub(crate) fn load_hook_tail_snapshot(
                 label: "session".to_string(),
                 summary: "no hook or command telemetry yet".to_string(),
                 detail: String::new(),
-                ok: None,
             });
         }
     }
@@ -508,7 +507,6 @@ fn parse_hook_log(
                     label,
                     summary,
                     detail,
-                    ok: None,
                 });
             }
             "note" => {
@@ -536,7 +534,6 @@ fn parse_hook_log(
                         label: "inject".to_string(),
                         summary,
                         detail: full_text,
-                        ok: None,
                     });
                 } else {
                     pane.lines.push(DebugLine {
@@ -545,7 +542,6 @@ fn parse_hook_log(
                         label: note.to_string(),
                         summary: truncate_str(&detail_val.to_string(), 160),
                         detail: detail_val.to_string(),
-                        ok: None,
                     });
                 }
             }
@@ -570,7 +566,6 @@ fn parse_hook_log(
                     label: "error".to_string(),
                     summary: error.to_string(),
                     detail: error.to_string(),
-                    ok,
                 });
             }
             _ => {}
@@ -664,7 +659,6 @@ fn parse_command_log(
                     label: "cmd".to_string(),
                     summary,
                     detail,
-                    ok,
                 };
                 if let Some(session) = session {
                     let pane = panes

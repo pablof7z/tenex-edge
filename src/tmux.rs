@@ -804,7 +804,7 @@ fn make_session_transparent(
                 "#({bin} statusline --tmux --session #{{q:@te_session}} --agent #{{@te_agent}} --cwd #{{q:@te_cwd}})"
             )
         });
-    let OPTIONS: Vec<(&str, String)> = vec![
+    let options: Vec<(&str, String)> = vec![
         // Session identity for the status bar: stored as user options so the
         // #(...) status-format command can read them via #{@te_agent} /
         // #{q:@te_cwd} without needing the pane's process environment.
@@ -841,7 +841,7 @@ fn make_session_transparent(
         ("terminal-overrides", ",*:Tc,RGB,extkeys".to_string()),
     ];
 
-    for (opt, val) in &OPTIONS {
+    for (opt, val) in &options {
         let status = std::process::Command::new("tmux")
             .args(["set-option", "-t", session, opt, val])
             .status()

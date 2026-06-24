@@ -190,7 +190,7 @@ pub fn read_recent(path: &Path, max_msgs: usize, max_chars: usize) -> Option<Str
     Some(cap_tail(&joined, max_chars))
 }
 
-fn extract(content: Option<&Value>, role: &str) -> String {
+fn extract(content: Option<&Value>, _role: &str) -> String {
     match content {
         Some(Value::String(s)) => s.clone(),
         Some(Value::Array(blocks)) => {

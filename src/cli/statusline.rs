@@ -101,6 +101,7 @@ pub struct StatuslineView {
     #[serde(default)]
     host: String,
     #[serde(default)]
+    #[allow(dead_code)]
     session_id: String,
     /// The work-root project the session's room hangs under (== `who`'s
     /// "Project:" line). For an ordinary project session this is `project`
@@ -129,6 +130,7 @@ pub struct StatuslineView {
     /// indirectly via `channel_title` for a per-session room; kept here for
     /// the fallback when the channel has no relay-echoed name yet.
     #[serde(default)]
+    #[allow(dead_code)]
     title: String,
     /// The live "doing now" line from kind:30315 (empty when idle). This is
     /// what `[status]` renders when busy; idle renders `[idle]` instead.

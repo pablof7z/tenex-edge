@@ -1226,8 +1226,6 @@ struct ChatWriteParams {
     cwd: Option<String>,
     #[serde(default)]
     agent: Option<String>,
-    #[serde(default)]
-    group: Option<String>,
 }
 
 #[derive(Clone)]
