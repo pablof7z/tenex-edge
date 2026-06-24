@@ -39,9 +39,9 @@ log "tearing down tenex-edge e2e rig"
 
 stop_backend edge-a
 stop_backend edge-b
-kill_pidfile "${RELAY_PIDFILE}" "croissant relay"
+kill_pidfile "${RELAY_PIDFILE}" "NIP-29 relay"
 
-# Also reclaim the relay PORT: a croissant from a manual launch or a crashed
+# Also reclaim the relay PORT: an orphan relay from a manual launch or a crashed
 # prior run (no pidfile we own) would otherwise keep $RELAY_PORT bound, and the
 # next run.sh would silently talk to that STALE relay. Kill whatever holds it.
 port_pids="$(lsof -nP -tiTCP:"${RELAY_PORT}" -sTCP:LISTEN 2>/dev/null || true)"

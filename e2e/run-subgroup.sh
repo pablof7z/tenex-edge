@@ -40,12 +40,12 @@ nak req -k 39000 -d "${E2E_PROJECT}" "${RELAY_WS}" 2>/dev/null | grep -q '"kind"
 ok "parent '${E2E_PROJECT}' present; backends a=${A_PK:0:8} b=${B_PK:0:8}"
 
 # ── 1. backend-a creates the subgroup ────────────────────────────────────────
-log "1: backend-a groups create (research-lead@edge-a, testing-lead@edge-b)"
-CG_OUT="$(edge edge-a groups create \
+log "1: backend-a channels create (research-lead@edge-a, testing-lead@edge-b)"
+CG_OUT="$(edge edge-a channels create \
   --project "${E2E_PROJECT}" \
   --name "subgroup support" \
   --agent "research-lead@${A_PK}" \
-  --agent "testing-lead@${B_PK}" 2>&1)" || { echo "${CG_OUT}" | sed 's/^/    /'; die "groups create failed"; }
+  --agent "testing-lead@${B_PK}" 2>&1)" || { echo "${CG_OUT}" | sed 's/^/    /'; die "channels create failed"; }
 echo "${CG_OUT}" | sed 's/^/    /'
 CHILD_H="$(echo "${CG_OUT}" | grep -oE 'subgroup-support-[0-9a-f]{8}' | head -1)"
 [[ -n "${CHILD_H}" ]] || die "could not parse child group id from create-group output"
@@ -88,16 +88,16 @@ wait_for "child 39002 to include testing-lead" 25 \
   "nak req -k 39002 -d '${CHILD_H}' '${RELAY_WS}' 2>/dev/null | grep -q '${B_ROLE_PK}'"
 ok "testing-lead is a child member"
 
-# croissant is a PURE NIP-29 group relay: it stores group events only and drops
+# The NIP-29 relay is a PURE NIP-29 group relay: it stores group events only and drops
 # non-group kind:0 metadata (in production the kind:0 goes to a separate
 # indexerRelay like purplepag.es). The role's kind:0 publish is best-effort, so
 # this is a soft check here — its absence reflects relay policy, not the feature.
-log "7: testing-lead kind:0 profile (soft — croissant drops non-group kind:0)"
+log "7: testing-lead kind:0 profile (soft — NIP-29 relay drops non-group kind:0)"
 if wait_for_soft "testing-lead kind:0 profile" 6 \
      "nak req -k 0 -a '${B_ROLE_PK}' '${RELAY_WS}' 2>/dev/null | grep -q 'testing-lead'"; then
   ok "testing-lead kind:0 published"
 else
-  warn "no testing-lead kind:0 on croissant (expected: this relay stores group events only)"
+  warn "no testing-lead kind:0 on NIP-29 relay (expected: this relay stores group events only)"
 fi
 
 # ── 8. local fast-path: backend-a provisioned research-lead ──────────────────
@@ -109,16 +109,16 @@ wait_for "child 39002 to include research-lead" 25 \
   "nak req -k 39002 -d '${CHILD_H}' '${RELAY_WS}' 2>/dev/null | grep -q '${A_ROLE_PK}'"
 ok "research-lead is a child member"
 
-# ── 9. groups list renders the hierarchy FROM LOCAL DAEMON STATE ──────────────
-log "9: backend-a 'groups list' shows the room under the project (from local state)"
-wait_for "groups list to include ${CHILD_H} under ${E2E_PROJECT}" 15 \
-  "edge edge-a groups list --project '${E2E_PROJECT}' 2>/dev/null | grep -q '${CHILD_H}'"
-GL_OUT="$(edge edge-a groups list --project "${E2E_PROJECT}" 2>/dev/null)"
+# ── 9. channels list renders the hierarchy FROM LOCAL DAEMON STATE ────────────
+log "9: backend-a 'channels list' shows the room under the project (from local state)"
+wait_for "channels list to include ${CHILD_H} under ${E2E_PROJECT}" 15 \
+  "edge edge-a channels list --project '${E2E_PROJECT}' 2>/dev/null | grep -q '${CHILD_H}'"
+GL_OUT="$(edge edge-a channels list --project "${E2E_PROJECT}" 2>/dev/null)"
 echo "${GL_OUT}" | sed 's/^/    /'
 # The tree prints the project as the root with the child indented beneath it.
-echo "${GL_OUT}" | grep -qE "^${E2E_PROJECT}$" || die "groups list missing project root"
+echo "${GL_OUT}" | grep -qE "^${E2E_PROJECT}$" || die "channels list missing project root"
 echo "${GL_OUT}" | grep -qE "^  .*${CHILD_H}" || die "child not indented under the project"
-ok "groups list renders the hierarchy from local daemon state"
+ok "channels list renders the hierarchy from local daemon state"
 
 cat <<SUMMARY
 

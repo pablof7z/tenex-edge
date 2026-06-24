@@ -13,15 +13,15 @@ set -euo pipefail
 
 # ── tunables (override from the environment) ─────────────────────────────────
 
-# Where the relay listens. Croissant speaks plain ws:// (no TLS) locally.
+# Where the relay listens. The NIP-29 relay speaks plain ws:// (no TLS) locally.
 : "${RELAY_PORT:=10547}"
 : "${RELAY_HOST:=127.0.0.1}"
 RELAY_WS="ws://${RELAY_HOST}:${RELAY_PORT}"
 RELAY_HTTP="http://${RELAY_HOST}:${RELAY_PORT}"
 
-# Croissant source checkout + built binary. Build is done once by run.sh.
-: "${CROISSANT_DIR:=/Users/pablofernandez/Work/croissant}"
-: "${CROISSANT_BIN:=${CROISSANT_DIR}/croissant}"
+# NIP-29 relay source checkout + built binary. Build is done once by run.sh.
+: "${NIP29_RELAY_DIR:=/Users/pablofernandez/Work/croissant}"
+: "${NIP29_RELAY_BIN:=${NIP29_RELAY_DIR}/croissant}"
 
 # The tenex-edge binary under test: this worktree's debug build, resolved
 # relative to this file so the rig works from any cwd. Override ONLY with the
@@ -59,7 +59,7 @@ backend_edge_home() { echo "$(backend_root "$1")/edge"; }
 backend_tenex_dir() { echo "$(backend_root "$1")/tenex"; }
 backend_pidfile() { echo "$(backend_root "$1")/daemon.pid"; }
 # Project working dir lives under the backend's tenex dir so the two backends
-# resolve the SAME project slug from a `.tenex/project.json` marker but keep
+# resolve the SAME project slug from backend-local project maps while keeping
 # independent checkouts (no shared git root that could collapse the slug).
 backend_project_dir() { echo "$(backend_root "$1")/work/${E2E_PROJECT}"; }
 

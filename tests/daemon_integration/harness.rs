@@ -10,11 +10,11 @@ pub(crate) fn shared_relay_url() -> String {
     RELAY.get_or_init(TestRelay::start).url.clone()
 }
 
-/// A shared NIP-29-aware croissant relay for tests that own groups / mint
-/// subgroups (nak can't do NIP-29). Spawned once per test binary.
-pub(crate) fn shared_croissant_url() -> String {
+/// A shared NIP-29 relay for tests that own groups / mint subgroups
+/// (nak can't do NIP-29). Spawned once per test binary.
+pub(crate) fn shared_nip29_relay_url() -> String {
     static RELAY: OnceLock<TestRelay> = OnceLock::new();
-    RELAY.get_or_init(TestRelay::start_croissant).url.clone()
+    RELAY.get_or_init(TestRelay::start_nip29_relay).url.clone()
 }
 
 pub(crate) fn bin() -> PathBuf {

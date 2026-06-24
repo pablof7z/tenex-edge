@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# e2e/run.sh — boot a local croissant relay + two isolated tenex-edge backends
+# e2e/run.sh — boot a local NIP-29 relay + two isolated tenex-edge backends
 # and prove they communicate THROUGH the relay with existing functionality.
 #
 # Pipeline:
 #   0. teardown any previous run (idempotent)
-#   1. build croissant if needed; start it on ws://127.0.0.1:$RELAY_PORT
+#   1. build the NIP-29 relay if needed; start it on ws://127.0.0.1:$RELAY_PORT
 #   2. mint keypairs for backend-a and backend-b
-#   3. write each backend's isolated config.json + project marker
+#   3. write each backend's isolated config.json + project registration
 #   4. SMOKE TEST:
 #        a. backend-a drives a session-start in the project dir
 #           → daemon-a publishes kind:9007 create-group + 9000 put-user to relay
@@ -28,12 +28,12 @@ E2E_KEEP_DATA=0 "${E2E_DIR}/teardown.sh" >/dev/null 2>&1 || true
 mkdir -p "${E2E_WORK}" "${KEYS_DIR}"
 
 # ── 1. relay ─────────────────────────────────────────────────────────────────
-log "step 1: croissant relay"
-if [[ ! -x "${CROISSANT_BIN}" ]]; then
-  log "building croissant (CGO; one-time, ~1m)"
-  ( cd "${CROISSANT_DIR}" && CGO_ENABLED=1 go build -o ./croissant ) || die "croissant build failed"
+log "step 1: NIP-29 relay"
+if [[ ! -x "${NIP29_RELAY_BIN}" ]]; then
+  log "building NIP-29 relay (CGO; one-time, ~1m)"
+  ( cd "${NIP29_RELAY_DIR}" && CGO_ENABLED=1 go build -o ./croissant ) || die "NIP-29 relay build failed"
 fi
-ok "croissant binary: ${CROISSANT_BIN}"
+ok "NIP-29 relay binary: ${NIP29_RELAY_BIN}"
 
 mkdir -p "${RELAY_DATA}"
 # OWNER_PUBLIC_KEY must be a valid hex pubkey; we use backend-a's so it is also
@@ -41,20 +41,19 @@ mkdir -p "${RELAY_DATA}"
 # (the relay validates group writes by NIP-29 admin membership, not by owner).
 OWNER_PK="$(backend_pubkey edge-a)"
 log "starting relay on ${RELAY_WS} (data: ${RELAY_DATA})"
-# Launch croissant DIRECTLY (no wrapping subshell) so $! is the relay's own pid,
-# not a shell wrapper's — the stale-relay guard below compares against it. Static
-# assets are compiled in (//go:embed) and DATAPATH is absolute, so cwd is
-# irrelevant; `env` sets config without a subshell.
-env PORT="${RELAY_PORT}" HOST="${RELAY_HOST}" DATAPATH="${RELAY_DATA}" \
+# Launch the relay through nohup so follow-up scripts can reuse the live relay in
+# ordinary shells. `env` execs the relay, so $! still tracks the long-lived
+# listener process used by the stale-relay guard below.
+nohup env PORT="${RELAY_PORT}" HOST="${RELAY_HOST}" DATAPATH="${RELAY_DATA}" \
     OWNER_PUBLIC_KEY="${OWNER_PK}" DOMAIN="" \
-    "${CROISSANT_BIN}" >"${RELAY_LOG}" 2>&1 &
+    "${NIP29_RELAY_BIN}" >"${RELAY_LOG}" 2>&1 &
 RELAY_PID=$!
 echo "${RELAY_PID}" >"${RELAY_PIDFILE}"
 
 wait_for "relay NIP-11 to report supported_nips" 20 relay_up
 
 # Guard against a stale relay: the process answering on the port MUST be the one
-# we just started. An orphan croissant (manual launch / crashed run) would bind
+# we just started. An orphan relay (manual launch / crashed run) would bind
 # the port first and serve OLD group state, making the test pass against the
 # wrong relay. teardown reclaims the port, but verify here too.
 LISTENER_PID="$(lsof -nP -tiTCP:"${RELAY_PORT}" -sTCP:LISTEN 2>/dev/null | head -1 || true)"
@@ -78,7 +77,7 @@ B_SK="$(backend_seckey edge-b)"; B_PK="$(backend_pubkey edge-b)"
 ok  "edge-a pubkey ${A_PK}"
 ok  "edge-b pubkey ${B_PK}"
 
-# ── 3. per-backend config + project marker ───────────────────────────────────
+# ── 3. per-backend config + project registration ─────────────────────────────
 log "step 3: writing isolated configs"
 write_backend() {
   local name="$1" sk="$2"
@@ -86,10 +85,10 @@ write_backend() {
   root="$(backend_root "$name")"; edge="$(backend_edge_home "$name")"
   tdir="$(backend_tenex_dir "$name")"; cfg="$(backend_config "$name")"
   proj="$(backend_project_dir "$name")"
-  mkdir -p "${edge}" "${tdir}" "${proj}/.tenex"
+  mkdir -p "${edge}" "${tdir}" "${proj}"
 
   # Both backends' pubkeys are whitelisted on BOTH so each is a trusted admin on
-  # every group. relays: only the local croissant. tenexPrivateKey = this
+  # every group. relays: only the local NIP-29 relay. tenexPrivateKey = this
   # backend's own identity (its pubkey becomes a group admin via open_project).
   cat >"${cfg}" <<JSON
 {
@@ -102,9 +101,9 @@ write_backend() {
 }
 JSON
 
-  # Project marker so both backends resolve the SAME project slug independent of
-  # any git root. (Decouples the group `h` id from the filesystem path.)
-  printf '{"slug":"%s"}\n' "${E2E_PROJECT}" >"${proj}/.tenex/project.json"
+  # Register each isolated checkout in its backend-local project map so both
+  # backends resolve the same slug independent of any git root.
+  ( cd "${proj}" && edge "${name}" project init --force >/dev/null )
   dim "  ${name}: config=${cfg}"
   dim "          edge_home=${edge}  project_dir=${proj}"
 }

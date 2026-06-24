@@ -7,7 +7,7 @@ relay* using existing functionality. Built to be extended for the upcoming
 
 ```
         ws://127.0.0.1:10547
-   ┌──────── croissant relay ────────┐
+   ┌──────── NIP-29 relay ──────────┐
    │  (NIP-29 groups, relay-signed    │
    │   39000/39001/39002 metadata)    │
    └────▲───────────────────▲─────────┘
@@ -29,10 +29,11 @@ cargo build                 # build the tenex-edge binary under test
 `run.sh` is hermetic: it tears down any prior run, starts a fresh relay with
 empty data, and exits non-zero with a clear `FAIL` line if anything is wrong.
 
-## The relay: croissant
+## The Relay
 
-[`croissant`](https://viewsource.win) (at `/Users/pablofernandez/Work/croissant`)
-is a Go relay built on `khatru` + the `fiatjaf.com/nostr/nip29` library.
+The default local relay binary is [`croissant`](https://viewsource.win) (at
+`/Users/pablofernandez/Work/croissant`), a Go relay built on `khatru` + the
+`fiatjaf.com/nostr/nip29` library.
 
 **It fully implements NIP-29 relay-based groups.** Evidence:
 
@@ -43,7 +44,7 @@ is a Go relay built on `khatru` + the `fiatjaf.com/nostr/nip29` library.
   edit-metadata, plus 9021/9022 join/leave; the relay itself **signs and
   broadcasts** the replaceable **39000** (metadata), **39001** (admins),
   **39002** (members) state events with its own key.
-- `subgroup_test.go`: it even carries the **croissant subgroup extension** — a
+- `subgroup_test.go`: it even carries the **NIP-29 subgroup extension** — a
   `["parent", <group-id>]` tag on the 9007 create that is re-emitted on 39000,
   with create-time validation (parent must exist, creator must be a parent
   admin, no cycles). This is exactly the substrate the subgroup-task-rooms
@@ -156,7 +157,8 @@ ok  PASS — backend-b observed backend-a's group 'e2e-demo' through ws://127.0.
 | `E2E_PROJECT`          | `e2e-demo`                                | project slug / group id driven by the test |
 | `E2E_WORK`             | `$TMPDIR/tenex-edge-e2e`                  | scratch root (relay data, backend homes, logs) |
 | `E2E_TENEX_EDGE_BIN`   | `<repo>/target/debug/tenex-edge`          | binary under test (override only via THIS var) |
-| `CROISSANT_DIR`        | `/Users/pablofernandez/Work/croissant`    | croissant checkout |
+| `NIP29_RELAY_DIR`      | `/Users/pablofernandez/Work/croissant`    | NIP-29 relay checkout |
+| `NIP29_RELAY_BIN`      | `$NIP29_RELAY_DIR/croissant`              | NIP-29 relay binary |
 | `TENEX_EDGE_DEBUG`     | `1`                                       | verbose daemon logging |
 
 > **Do not** override the binary with `$TENEX_EDGE_BIN` — tenex-edge itself reads
@@ -179,7 +181,7 @@ nak req -k 9      -h e2e-demo "$RELAY_WS"   # chat messages in the group
 Logs: `$E2E_WORK/relay.log`, `$(backend_edge_home edge-a)/daemon.log`,
 `$(backend_edge_home edge-b)/daemon.log`.
 
-**To extend for subgroup task rooms:** croissant already enforces the `parent`
+**To extend for subgroup task rooms:** the NIP-29 relay already enforces the `parent`
 tag rules, so a new test can have edge-a create a child group
 (`["parent","e2e-demo"]` on the 9007) and assert edge-b sees the parent link on
 the child's 39000. Add a new `run-*.sh` that sources `lib.sh` and reuses the
@@ -194,7 +196,7 @@ the child's 39000. Add a new `run-*.sh` that sources `lib.sh` and reuses the
 ## Caveats
 
 - macOS / `lsof` are assumed for port reclaiming.
-- The croissant build is CGO (bleve/sqlite); first build ~1 min. The rig builds
-  it once if `croissant` is missing.
+- The default relay build is CGO (bleve/sqlite); first build ~1 min. The rig
+  builds it once if the configured binary is missing.
 - Each `run.sh` starts a **fresh** relay (empty data), so group state never
   carries across runs — every run exercises the create path from scratch.

@@ -29,12 +29,12 @@ fn free_port() -> u16 {
     port
 }
 
-/// Path to the croissant relay binary — `nak serve` does NOT implement NIP-29
+/// Path to the NIP-29 relay binary — `nak serve` does NOT implement NIP-29
 /// group semantics (9007/9002 creates, 39001 admin reflection), so any test
-/// that owns groups or mints subgroups must run against croissant instead.
-/// Override with `$CROISSANT_BIN`.
-fn croissant_bin() -> PathBuf {
-    if let Ok(p) = std::env::var("CROISSANT_BIN") {
+/// that owns groups or mints subgroups must run against a real NIP-29 relay.
+/// Override with `$NIP29_RELAY_BIN`.
+fn nip29_relay_bin() -> PathBuf {
+    if let Ok(p) = std::env::var("NIP29_RELAY_BIN") {
         return PathBuf::from(p);
     }
     let home = std::env::var("HOME").unwrap_or_default();
@@ -42,18 +42,17 @@ fn croissant_bin() -> PathBuf {
 }
 
 impl TestRelay {
-    /// Spawn a real croissant relay (NIP-29 aware) on an ephemeral port with an
-    /// isolated data dir. Use for daemon tests that exercise group ownership /
-    /// subgroup minting.
-    pub fn start_croissant() -> Self {
+    /// Spawn a real NIP-29 relay on an ephemeral port with an isolated data dir.
+    /// Use for daemon tests that exercise group ownership / subgroup minting.
+    pub fn start_nip29_relay() -> Self {
         let port = free_port();
-        let bin = croissant_bin();
+        let bin = nip29_relay_bin();
         assert!(
             bin.exists(),
-            "croissant binary not found at {} (set $CROISSANT_BIN)",
+            "NIP-29 relay binary not found at {} (set $NIP29_RELAY_BIN)",
             bin.display()
         );
-        let data = std::env::temp_dir().join(format!("croissant-test-{port}"));
+        let data = std::env::temp_dir().join(format!("nip29-relay-test-{port}"));
         let _ = std::fs::remove_dir_all(&data);
         let child = Command::new(&bin)
             .env("PORT", port.to_string())
@@ -62,7 +61,7 @@ impl TestRelay {
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
-            .expect("spawn croissant");
+            .expect("spawn NIP-29 relay");
 
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
@@ -70,7 +69,7 @@ impl TestRelay {
                 break;
             }
             if Instant::now() > deadline {
-                panic!("croissant did not come up on port {port}");
+                panic!("NIP-29 relay did not come up on port {port}");
             }
             std::thread::sleep(Duration::from_millis(50));
         }
