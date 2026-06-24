@@ -90,15 +90,12 @@ pub fn assemble_turn_start_context(
     };
     let (mentions, ambient) = crate::injection::split_direct_mentions(chat_rows, &rec.session_id);
     let now = now_secs();
-    if let Some(block) =
-        crate::injection::render_direct_mention_prompt(&mentions, &rec.session_id, now)
-    {
+    if let Some(block) = crate::injection::render_direct_mention_prompt(&mentions, now) {
         blocks.push(block);
     }
     if let Some(block) = crate::injection::render_channel_chat_block(
         "tenex-edge channel messages - reply with `tenex-edge chat write --message \"...\"`:",
         &ambient,
-        &rec.session_id,
         now,
     ) {
         blocks.push(block);
@@ -157,9 +154,7 @@ pub fn assemble_turn_check_context(
         s.peek_unnotified_chat_mentions(&rec.session_id)
             .unwrap_or_default()
     };
-    if let Some(block) =
-        crate::injection::render_direct_mention_prompt(&direct_mentions, &rec.session_id, now)
-    {
+    if let Some(block) = crate::injection::render_direct_mention_prompt(&direct_mentions, now) {
         let ids: Vec<String> = direct_mentions
             .iter()
             .map(|row| row.chat_event_id.clone())
@@ -187,7 +182,6 @@ pub fn assemble_turn_check_context(
         if let Some(block) = crate::injection::render_channel_chat_block(
             &format!("[tenex-edge] Messages on {channel} since your last check:"),
             &chat_rows,
-            &rec.session_id,
             now,
         ) {
             blocks.push(block);

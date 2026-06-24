@@ -1060,8 +1060,8 @@ mod turn_context_tests {
         let ctx = assemble_turn_check_context(&m, &test_session("sess-me"), "laptop", None, 200)
             .expect("direct mention must surface at the next available hook");
         assert!(
-            ctx.contains("Incoming user message mentioning this agent"),
-            "direct mention must be labeled as user input; got: {ctx:?}"
+            ctx.contains("Incoming message mentioning this agent"),
+            "direct mention must be surfaced as input addressed to the agent; got: {ctx:?}"
         );
         assert!(ctx.contains("please review this now"));
 

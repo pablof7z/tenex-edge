@@ -1360,6 +1360,15 @@ async fn rpc_user_prompt(
         return Ok(serde_json::json!({ "skipped": "empty prompt" }));
     }
 
+    // A daemon-injected fabric envelope (a mention pasted into the pane by the
+    // tmux delivery path) is ALREADY a kind:9 event in the room. The harness
+    // re-submits it as a prompt, firing user-prompt-submit, but republishing it
+    // would echo the message back into the channel (and, on publish timeout +
+    // retry, twice). Only genuine human keyboard input is mirrored.
+    if crate::injection::is_fabric_injection(&p.prompt) {
+        return Ok(serde_json::json!({ "skipped": "fabric injection echo" }));
+    }
+
     // No operator key → nothing to sign with; fail open (session still runs).
     // `userNsec` is the ONLY signer for user prompts — the human is speaking.
     let Some(nsec) = state.cfg.user_nsec() else {

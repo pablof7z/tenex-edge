@@ -385,14 +385,6 @@ struct PendingTmuxPrompt {
     chat_ids: Vec<String>,
 }
 
-fn render_pending_message_prompt(
-    chat_rows: &[crate::state::ChatInboxRow],
-    rec: &crate::state::SessionRecord,
-    now: u64,
-) -> Option<String> {
-    crate::injection::render_direct_mention_prompt(chat_rows, &rec.session_id, now)
-}
-
 fn collect_pending_prompt(
     state: &Arc<DaemonState>,
     rec: &crate::state::SessionRecord,
@@ -401,7 +393,7 @@ fn collect_pending_prompt(
     state.with_store(|s| -> Result<Option<PendingTmuxPrompt>> {
         let chat_rows = s.peek_chat_mentions(&rec.session_id)?;
 
-        let Some(text) = render_pending_message_prompt(&chat_rows, rec, now) else {
+        let Some(text) = crate::injection::render_direct_mention_prompt(&chat_rows, now) else {
             return Ok(None);
         };
 
@@ -1079,10 +1071,10 @@ mod resume_command_tests {
             mentioned_session: rec.session_id.clone(),
         };
 
-        let prompt = render_pending_message_prompt(&[row], &rec, 120).unwrap();
+        let prompt = crate::injection::render_direct_mention_prompt(&[row], 120).unwrap();
 
-        assert!(prompt.contains("Incoming user message mentioning this agent"));
-        assert!(prompt.contains("User message from codex mentioned you"));
+        assert!(prompt.contains("Incoming message mentioning this agent"));
+        assert!(prompt.contains("Mention in #proj from codex"));
         assert!(prompt.contains("please review the tmux delivery path"));
         assert!(!prompt.contains("tenex-edge inbox"));
         assert!(!prompt.contains("project chat - write"));
