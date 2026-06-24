@@ -417,6 +417,9 @@ pub(super) fn render_channel_context(
         let status_map = channel_status_map(store, project, now);
         let mut parts: Vec<String> = Vec::new();
         for (pubkey, role) in &members {
+            if store.is_backend_profile(pubkey) {
+                continue;
+            }
             let you = if pubkey.as_str() == my_pubkey {
                 " (you)"
             } else {

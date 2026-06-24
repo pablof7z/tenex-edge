@@ -80,6 +80,10 @@ pub struct Profile {
     pub host: String,
     /// Owner pubkeys this agent claims (the human's whitelisted pubkeys).
     pub owners: Vec<String>,
+    /// True when published by the tenex-edge backend process itself (not an AI
+    /// agent). Encoded as a `["backend"]` tag on the wire; used to suppress
+    /// backend identities from agent-facing context injections.
+    pub is_backend: bool,
 }
 
 /// A durable, append-only line of narrative: what the agent is doing / did.

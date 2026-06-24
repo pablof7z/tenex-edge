@@ -307,6 +307,7 @@ pub async fn run() -> Result<()> {
                     agent: crate::domain::AgentRef::new(backend_keys.public_key().to_hex(), name),
                     host: relay_state.host.clone(),
                     owners: relay_state.owners.clone(),
+                    is_backend: true,
                 });
                 let _ = relay_state.provider.publish(&ev, &backend_keys).await;
             }
@@ -3221,6 +3222,7 @@ async fn rpc_publish_profile(
         agent: crate::domain::AgentRef::new(id.pubkey_hex(), p.slug.clone()),
         host: state.host.clone(),
         owners: state.owners.clone(),
+        is_backend: false,
     });
     let event_id = state.provider.publish(&ev, &id.keys).await?;
 
@@ -3842,6 +3844,7 @@ async fn handle_orchestration(
             agent: crate::domain::AgentRef::new(agent_pk.clone(), slug.clone()),
             host: state.host.clone(),
             owners: state.owners.clone(),
+            is_backend: false,
         });
         let _ = state.provider.publish(&profile, &id.keys).await;
 

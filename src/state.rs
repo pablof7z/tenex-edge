@@ -169,7 +169,8 @@ CREATE TABLE IF NOT EXISTS profiles (
     pubkey     TEXT PRIMARY KEY,
     slug       TEXT NOT NULL,
     host       TEXT NOT NULL,
-    updated_at INTEGER NOT NULL
+    updated_at INTEGER NOT NULL,
+    is_backend INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS peer_sessions (
     session_id TEXT PRIMARY KEY,
@@ -581,6 +582,10 @@ impl Store {
             "ALTER TABLE turn_state ADD COLUMN last_check_at INTEGER NOT NULL DEFAULT 0",
             [],
         );
+        let _ = conn.execute(
+            "ALTER TABLE profiles ADD COLUMN is_backend INTEGER NOT NULL DEFAULT 0",
+            [],
+        );
         Ok(Self { conn })
     }
 
@@ -978,13 +983,27 @@ impl Store {
 
     // ── peer directory ───────────────────────────────────────────────────
 
-    pub fn upsert_profile(&self, pubkey: &str, slug: &str, host: &str, ts: u64) -> Result<()> {
+    pub fn upsert_profile(&self, pubkey: &str, slug: &str, host: &str, is_backend: bool, ts: u64) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO profiles (pubkey, slug, host, updated_at) VALUES (?1,?2,?3,?4)
-             ON CONFLICT(pubkey) DO UPDATE SET slug=?2, host=?3, updated_at=?4",
-            params![pubkey, slug, host, ts],
+            "INSERT INTO profiles (pubkey, slug, host, is_backend, updated_at) VALUES (?1,?2,?3,?4,?5)
+             ON CONFLICT(pubkey) DO UPDATE SET slug=?2, host=?3, is_backend=?4, updated_at=?5",
+            params![pubkey, slug, host, is_backend as i64, ts],
         )?;
         Ok(())
+    }
+
+    /// Returns `true` if the stored profile for `pubkey` is a tenex-edge backend
+    /// (published with a `["backend"]` tag). Used to suppress backends from the
+    /// agent-facing channel member context.
+    pub fn is_backend_profile(&self, pubkey: &str) -> bool {
+        self.conn
+            .query_row(
+                "SELECT is_backend FROM profiles WHERE pubkey=?1 LIMIT 1",
+                params![pubkey],
+                |r| r.get::<_, i64>(0),
+            )
+            .map(|v| v != 0)
+            .unwrap_or(false)
     }
 
     /// The cached kind:0 display name for `pubkey` and when it was last written,
@@ -3308,7 +3327,7 @@ impl Store {
 
     /// Upsert a peer profile (kind:0).  Wraps `upsert_profile`.
     pub fn materialize_profile(&self, pubkey: &str, slug: &str, host: &str, ts: u64) -> Result<()> {
-        self.upsert_profile(pubkey, slug, host, ts)
+        self.upsert_profile(pubkey, slug, host, false, ts)
     }
 
     /// Record / refresh a peer presence session (kind:0 + relay presence).
@@ -3673,7 +3692,7 @@ mod tests {
                 .as_deref(),
             Some("pk-from-presence")
         );
-        s.upsert_profile("pk-from-profile", "reviewer", "host", 2)
+        s.upsert_profile("pk-from-profile", "reviewer", "host", false, 2)
             .unwrap();
         assert_eq!(
             s.resolve_agent_pubkey("reviewer", Some("proj"))

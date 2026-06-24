@@ -79,6 +79,14 @@ fn first_tag<'a>(event: &'a Event, name: &str) -> Option<&'a str> {
     })
 }
 
+/// True if any tag has `name` as its sole element (no value — a bare marker tag).
+fn has_bare_tag(event: &Event, name: &str) -> bool {
+    event.tags.iter().any(|t| {
+        let s = t.as_slice();
+        s.first().map(String::as_str) == Some(name)
+    })
+}
+
 /// All values (`slice[1]`) of every tag named `name`.
 fn all_tag_values(event: &Event, name: &str) -> Vec<String> {
     event
@@ -113,11 +121,15 @@ impl Nip29WireCodec {
                 agent,
                 host,
                 owners,
+                is_backend,
             }) => {
                 let content = serde_json::json!({ "name": agent.slug }).to_string();
                 let mut tags = vec![tag(&["host", host])?];
                 for o in owners {
                     tags.push(tag(&["p", o])?); // declare the human owner(s)
+                }
+                if *is_backend {
+                    tags.push(tag(&["backend"])?);
                 }
                 EventBuilder::new(kind(KIND_PROFILE), content)
                     .tags(tags)
@@ -226,6 +238,7 @@ impl Nip29WireCodec {
                 agent: AgentRef::new(pubkey, name_from_metadata(&event.content)),
                 host: first_tag(event, "host").unwrap_or_default().to_string(),
                 owners: all_tag_values(event, "p"),
+                is_backend: has_bare_tag(event, "backend"),
             })),
             KIND_STATUS => {
                 // Per-group addressable status: d must equal h (the group_id).

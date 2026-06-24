@@ -52,6 +52,7 @@ async fn publishes_and_decodes_all_event_types() {
             agent: aref.clone(),
             host: "test-host".into(),
             owners: vec![reader_pk.clone()],
+            is_backend: false,
         }),
         DomainEvent::Status(Status {
             agent: aref.clone(),

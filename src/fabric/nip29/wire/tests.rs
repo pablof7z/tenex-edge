@@ -32,6 +32,7 @@ fn profile_roundtrip() {
         agent: agent(&keys, "coder"),
         host: "pablos' laptop".into(),
         owners: vec!["09d4".repeat(16)],
+        is_backend: false,
     });
     assert_eq!(roundtrip(ev.clone(), &keys), ev);
 }

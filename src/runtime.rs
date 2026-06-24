@@ -109,6 +109,7 @@ pub async fn run_session_in_daemon(
         agent: aref.clone(),
         host: p.host.clone(),
         owners: owners.clone(),
+        is_backend: false,
     }))
     .await;
 
@@ -127,6 +128,7 @@ pub async fn run_session_in_daemon(
                     agent: session_aref,
                     host: p.host.clone(),
                     owners: owners.clone(),
+                    is_backend: false,
                 }),
                 sk,
             )

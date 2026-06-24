@@ -171,8 +171,9 @@ async fn fetch_and_cache(state: &Arc<DaemonState>, pubkey: &str, now: u64) -> Op
     let event = events.into_iter().max_by_key(|e| e.created_at)?;
     let name = display_name_from_metadata(&event.content)?;
     let host = host_tag(&event).unwrap_or_default();
+    let is_backend = backend_tag(&event);
 
-    state.with_store(|s| s.upsert_profile(pubkey, &name, &host, now).ok());
+    state.with_store(|s| s.upsert_profile(pubkey, &name, &host, is_backend, now).ok());
     Some(name)
 }
 
@@ -200,6 +201,15 @@ fn host_tag(event: &nostr_sdk::Event) -> Option<String> {
             .then(|| s.get(1).cloned())
             .flatten()
     })
+}
+
+/// Returns `true` when the kind:0 carries a bare `["backend"]` tag, marking the
+/// publisher as a tenex-edge backend process rather than an AI agent.
+fn backend_tag(event: &nostr_sdk::Event) -> bool {
+    event
+        .tags
+        .iter()
+        .any(|t| t.as_slice().first().map(String::as_str) == Some("backend"))
 }
 
 #[cfg(test)]
