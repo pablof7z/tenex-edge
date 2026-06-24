@@ -176,11 +176,20 @@ pub fn load_who_snapshot(
     // `session_state`, peer rows project `peer_session_state`, and BOTH run through
     // the one `derive_status` projection — there is no local-vs-peer busy fork.
     let mine = store.live_session_snapshots(None, since)?;
-    // Identity is (pubkey, group) now — a peer row that shares a live local
-    // session's (pubkey, project) IS that session's own relay echo, so drop it.
+    // Identity is (signing pubkey, group) now. A normal session signs with the
+    // durable agent key; a collision-fallback duplicate signs with its
+    // session_pubkey. Peer rows sharing that selected local identity are our own
+    // relay echoes, so drop them.
     let my_keys: std::collections::HashSet<(String, String)> = mine
         .iter()
-        .map(|s| (s.agent_pubkey.clone(), s.project.clone()))
+        .map(|s| {
+            (
+                store
+                    .session_pubkey_for_session(s.session_id.as_str())
+                    .unwrap_or_else(|| s.agent_pubkey.clone()),
+                s.project.clone(),
+            )
+        })
         .collect();
     let local_agent_pubkeys: std::collections::HashSet<String> = store
         .list_local_agent_pubkeys()
@@ -214,10 +223,19 @@ pub fn load_who_snapshot(
             // Derived projection: busy/liveness/title/activity all come from the
             // one `derive_status` so idle/freshness can never diverge per source.
             let d = derive_status(s, now);
+            let session_pubkey = store.session_pubkey_for_session(sid);
+            let display_pubkey = session_pubkey
+                .clone()
+                .unwrap_or_else(|| s.agent_pubkey.clone());
+            let display_slug = if session_pubkey.is_some() {
+                format!("{} ({})", session_codename(sid), s.agent_slug)
+            } else {
+                s.agent_slug.clone()
+            };
             rows.push(WhoRow {
                 source: WhoSource::Local,
                 fresh: d.liveness.is_live(),
-                slug: s.agent_slug.clone(),
+                slug: display_slug,
                 project: s.project.clone(),
                 status: d.title,
                 activity: d.activity,
@@ -231,9 +249,7 @@ pub fn load_who_snapshot(
                 work_root: store
                     .work_root_for_scope(&s.project)
                     .unwrap_or_else(|_| s.project.clone()),
-                // The durable agent key is the session's wire identity now;
-                // never prefer a stale per-session derived pubkey.
-                pubkey: s.agent_pubkey.clone(),
+                pubkey: display_pubkey,
             });
         } else if store.is_root_project(&s.project) {
             other_agents
@@ -346,10 +362,10 @@ fn channel_status_map(
         .live_session_snapshots(Some(channel), since)
         .unwrap_or_default()
     {
-        map.insert(
-            snap.agent_pubkey.clone(),
-            crate::session::derive_status(&snap, now),
-        );
+        let pubkey = store
+            .session_pubkey_for_session(snap.session_id.as_str())
+            .unwrap_or_else(|| snap.agent_pubkey.clone());
+        map.insert(pubkey, crate::session::derive_status(&snap, now));
     }
     map
 }
