@@ -99,6 +99,13 @@ struct TmuxSpawnParams {
     /// `project_paths` row so subsequent spawns without `cwd` still find it.
     #[serde(default)]
     cwd: Option<String>,
+    /// NIP-29 channel (group h-value) to scope the spawned session into.
+    /// Forwarded from `tenex-edge launch --channel <id>`.  Sets
+    /// `TENEX_EDGE_CHANNEL` in the pane env so the session publishes into this
+    /// group instead of its per-session room.  The daemon's tenexPrivateKey
+    /// adds the agent as a member on session-start via `open_project`.
+    #[serde(default)]
+    channel: Option<String>,
 }
 
 pub(super) async fn rpc_tmux_spawn(
@@ -113,8 +120,9 @@ pub(super) async fn rpc_tmux_spawn(
     } else {
         Some(p.base_command)
     };
+    let group = p.channel.as_deref();
     let pane_id =
-        crate::tmux::spawn_agent(state, &p.agent, &p.project, p.command, base_override, None, client_cwd).await?;
+        crate::tmux::spawn_agent(state, &p.agent, &p.project, p.command, base_override, group, client_cwd).await?;
     Ok(serde_json::json!({ "pane_id": pane_id, "agent": p.agent, "project": p.project }))
 }
 

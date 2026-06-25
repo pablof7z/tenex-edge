@@ -252,6 +252,14 @@ enum Cmd {
         /// Project slug; defaults to project resolved from current directory.
         #[arg(long)]
         project: Option<String>,
+        /// NIP-29 channel (group h-value) to scope this agent into instead of its
+        /// per-session room.  Omit the value (`--channel` with no argument) to
+        /// open an interactive fuzzy picker over all known rooms for the project.
+        /// The daemon's tenexPrivateKey adds the agent as a member; if the same
+        /// derived pubkey is already in the group a fresh session produces a
+        /// distinct key via a new anchor, acting as a second personality.
+        #[arg(long, num_args(0..=1), default_missing_value = "")]
+        channel: Option<String>,
         /// Override the entire launch command (shell-word split). Replaces the command
         /// stored in the agent file. Example: `-c 'ollama launch claude -- --dangerously-skip-permissions'`
         #[arg(short = 'c', long = "command", value_name = "COMMAND")]
@@ -622,13 +630,14 @@ pub async fn run(cli: Cli) -> Result<()> {
         Cmd::Launch {
             slug,
             project,
+            channel,
             command_str,
             extra_args,
         } => {
             let override_command = command_str
                 .map(|s| shlex::split(&s).unwrap_or_else(|| vec![s]))
                 .unwrap_or_default();
-            tmux_cli::launch(slug, project, override_command, extra_args).await
+            tmux_cli::launch(slug, project, channel, override_command, extra_args).await
         }
         Cmd::Daemon => crate::daemon::server::run().await,
         Cmd::Install {

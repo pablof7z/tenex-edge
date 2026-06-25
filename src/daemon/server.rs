@@ -576,6 +576,7 @@ async fn dispatch(state: &Arc<DaemonState>, req: &Request) -> Response {
         "turn_check" => rpc_turn_check(state, &req.params),
         "turn_end" => rpc_turn_end(state, &req.params).await,
         "doctor" => rpc_doctor(state).await,
+        "local_backend" => rpc_local_backend(state),
         "project_list" => rpc_project_list(state).await,
         "project_edit" => rpc_project_edit(state, &req.params).await,
         "project_members" => rpc_project_members(state, &req.params).await,
@@ -2350,6 +2351,19 @@ async fn rpc_doctor(state: &Arc<DaemonState>) -> Result<serde_json::Value> {
         "publish": publish,
         "readback": readback,
     }))
+}
+
+// ── local_backend ────────────────────────────────────────────────────────────
+
+/// Return the local daemon's backend pubkey (hex) and host slug so callers can
+/// construct `slug@backend` agent specs without guessing the hostname format.
+fn rpc_local_backend(state: &Arc<DaemonState>) -> Result<serde_json::Value> {
+    let pubkey = state
+        .backend_pubkey
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("no signing key (tenexPrivateKey) configured"))?;
+    let host_slug = crate::util::slugify_host(&state.host);
+    Ok(serde_json::json!({ "pubkey": pubkey, "host_slug": host_slug }))
 }
 
 // ── project_list ─────────────────────────────────────────────────────────────
