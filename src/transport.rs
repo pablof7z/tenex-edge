@@ -271,10 +271,21 @@ impl Transport {
 
     /// Open long-lived subscriptions (one per filter). Incoming events arrive on
     /// [`Transport::notifications`].
+    ///
+    /// Each filter is subscribed under a DETERMINISTIC [`SubscriptionId`] derived
+    /// from its content, so re-subscribing the same filter REPLACES the existing
+    /// relay subscription (the pool keys `SubscriptionData` by id) instead of
+    /// opening a new one. `Client::subscribe(f, None)` mints a fresh random id on
+    /// every call; the daemon's `resubscribe` runs on every session_start/spawn,
+    /// so random ids leaked an unbounded number of subscriptions into the relay
+    /// pool — each retaining a full clone of the filter (BTreeMaps of tag/pubkey/
+    /// kind sets) — growing the process to tens of GB over a day. Stable ids cap
+    /// the live set at the actual working set (projects × agents × kinds).
     pub async fn subscribe(&self, filters: Vec<Filter>) -> Result<()> {
         for f in filters {
+            let id = stable_subscription_id(&f);
             self.client
-                .subscribe(f, None)
+                .subscribe_with_id(id, f, None)
                 .await
                 .context("subscribing")?;
         }
@@ -290,11 +301,40 @@ impl Transport {
     }
 }
 
+/// Deterministic [`SubscriptionId`] for a filter: same filter → same id, so a
+/// repeated `subscribe` updates the existing relay subscription in place rather
+/// than minting a new random-id one. `DefaultHasher` is fixed-seed (no per-run
+/// randomization), so the id is stable across daemon restarts. A 64-bit hash is
+/// ample for the few hundred distinct filters a daemon ever holds.
+fn stable_subscription_id(filter: &Filter) -> SubscriptionId {
+    use std::hash::{Hash, Hasher};
+    let json = serde_json::to_string(filter).unwrap_or_default();
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    json.hash(&mut hasher);
+    SubscriptionId::new(format!("te-{:016x}", hasher.finish()))
+}
+
 // ── tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── stable subscription id ────────────────────────────────────────────────
+
+    #[test]
+    fn stable_subscription_id_is_deterministic_and_distinct() {
+        let pk = Keys::generate().public_key();
+        let a1 = Filter::new().kind(Kind::from(0u16)).author(pk);
+        let a2 = Filter::new().kind(Kind::from(0u16)).author(pk);
+        let b = Filter::new().kind(Kind::from(9u16)).author(pk);
+
+        // Same filter content → identical id, so resubscribe REPLACES rather than
+        // accumulating a fresh random-id subscription (the leak this guards).
+        assert_eq!(stable_subscription_id(&a1), stable_subscription_id(&a2));
+        // Distinct filters → distinct ids, so coverage isn't collapsed.
+        assert_ne!(stable_subscription_id(&a1), stable_subscription_id(&b));
+    }
 
     // ── assert_relay_accepted unit tests ──────────────────────────────────────
 
