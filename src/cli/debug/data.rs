@@ -36,7 +36,7 @@ pub struct SessionPane {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct HookTailSnapshot {
+pub(super) struct HookTailSnapshot {
     pub panes: Vec<SessionPane>,
     pub unscoped: Vec<DebugLine>,
     pub projects: Vec<String>,

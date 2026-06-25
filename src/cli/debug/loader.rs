@@ -3,7 +3,7 @@ use super::util::*;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
-pub fn load_hook_tail_snapshot(
+pub(super) fn load_hook_tail_snapshot(
     project_filters: &BTreeSet<String>,
     session_filter: &Option<String>,
 ) -> HookTailSnapshot {

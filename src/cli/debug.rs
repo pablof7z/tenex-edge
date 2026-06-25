@@ -6,10 +6,6 @@ mod util;
 
 // Re-export public items for cli.rs to use
 pub use data::HookTailOpts;
-#[allow(unused_imports)]
-pub(crate) use data::HookTailSnapshot;
-#[allow(unused_imports)]
-pub(crate) use loader::load_hook_tail_snapshot;
 
 // Wrapper to match the original signature
 pub(super) fn hook_tail(opts: HookTailOpts) -> anyhow::Result<()> {
