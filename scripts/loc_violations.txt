@@ -1,6 +1,5 @@
 src/state.rs
 src/daemon/server.rs
-src/cli/tmux_cli.rs
 src/cli/debug.rs
 src/cli.rs
 src/tmux.rs
