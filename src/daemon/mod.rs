@@ -13,6 +13,8 @@ pub mod protocol;
 pub mod server;
 pub mod tail_event;
 
+mod spawn;
+
 use crate::config;
 use std::path::PathBuf;
 
