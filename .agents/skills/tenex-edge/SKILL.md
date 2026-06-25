@@ -48,7 +48,7 @@ Message bodies can be positional, passed with `--message`, or piped on stdin.
 Depth lives in `reference/` — load only what the task needs:
 
 - [reference/cli-reference.md](reference/cli-reference.md) — full command + flag cheat-sheet.
-- [reference/communications.md](reference/communications.md) — chat/threads/propose and awareness (who/whoami/tail).
+- [reference/communications.md](reference/communications.md) — chat/publish and awareness (who/whoami/tail).
 - [reference/projects.md](reference/projects.md) — project groups, membership, slug resolution.
 - [reference/groups.md](reference/groups.md) — NIP-29 subgroup task rooms.
 - [reference/installation.md](reference/installation.md) — install, configuration, and the agent keystore.
