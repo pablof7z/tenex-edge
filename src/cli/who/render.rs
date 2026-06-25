@@ -1,3 +1,4 @@
+use super::snapshot::WhoRow;
 use super::*;
 
 pub(super) fn render_who_once(snapshot: &WhoSnapshot) -> String {

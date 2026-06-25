@@ -1,4 +1,6 @@
+use super::channel::channel_status_map;
 use super::render::{render_who_once, render_who_plain, render_whoami};
+use super::snapshot::{OtherProjectSummary, SpawnableRow, WhoRow, WhoSnapshot, WhoSource};
 use super::*;
 use crate::session::{Harness, PeerStatusObservation, SessionObservation};
 use crate::util::session_codename;
