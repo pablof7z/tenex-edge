@@ -9,6 +9,7 @@
 
 use super::protocol::{protocol_version, PleaseExit};
 use super::socket_path;
+use super::spawn::spawn_detached_daemon;
 use crate::config;
 use anyhow::{bail, Context, Result};
 use std::io::{BufRead, BufReader, Write};
@@ -160,5 +161,3 @@ fn spawn_if_absent() -> Result<()> {
 fn daemon_answers_ping() -> bool {
     matches!(try_call("ping", &serde_json::json!({})), Ok(Outcome::Ok(_)))
 }
-
-use super::spawn::spawn_detached_daemon;

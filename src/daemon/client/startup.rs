@@ -1,4 +1,5 @@
 use super::*;
+use super::super::spawn::spawn_detached_daemon;
 
 const SPAWN_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 const HANDSHAKE_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
@@ -80,9 +81,6 @@ async fn probe_handshake() -> bool {
     };
     true
 }
-
-/// Fork a detached `tenex-edge __daemon`: own session (`setsid` via
-use super::super::spawn::spawn_detached_daemon;
 
 /// RAII wrapper over an exclusive `flock` on `daemon.lock`. The lock is released
 /// when the `Flock` guard drops (i.e. when this `StartupLock` drops).
