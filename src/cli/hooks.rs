@@ -22,9 +22,9 @@ enum HookOutputFormat {
     JsonSystemMessage,
 }
 
-pub(crate) struct HostDef {
+pub(super) struct HostDef {
     /// Canonical harness name used in --host.
-    pub(crate) name: &'static str,
+    pub(super) name: &'static str,
     /// Default agent slug (used when neither TENEX_EDGE_AGENT nor
     /// TENEX_EDGE_AGENT_FALLBACK is set).
     agent_slug: &'static str,
