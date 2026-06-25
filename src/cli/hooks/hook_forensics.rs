@@ -35,7 +35,7 @@ impl HookCallLog {
             "process": process_snapshot(),
             "parent_chain": parent_chain(),
             "stdin": {
-                "bytes": stdin.as_bytes().len(),
+                "bytes": stdin.len(),
                 "is_empty": stdin.is_empty(),
                 "read_error": read_error,
                 "parse_error": parse_error,

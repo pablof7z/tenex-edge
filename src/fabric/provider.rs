@@ -349,7 +349,14 @@ impl Nip29Provider {
             }
         };
         match crate::fabric::nip29::lifecycle::group_put_admin(group, mgmt_pubkey) {
-            Ok(b) => self.publish_group_management(b, &user_keys, "9000 put-admin (self-grant via userNsec)").await,
+            Ok(b) => {
+                self.publish_group_management(
+                    b,
+                    &user_keys,
+                    "9000 put-admin (self-grant via userNsec)",
+                )
+                .await
+            }
             Err(e) => {
                 eprintln!("[daemon] try_grant_mgmt_admin: build event failed: {e}");
                 false
@@ -463,7 +470,9 @@ impl Nip29Provider {
             // normally; if it fails (no userNsec, relay rejects) bail loudly.
             if roles.get(&mgmt_pubkey).map(String::as_str) != Some("admin") {
                 let short = crate::util::pubkey_short(&mgmt_pubkey);
-                let granted = self.try_grant_mgmt_admin_via_user_nsec(project, &mgmt_pubkey).await;
+                let granted = self
+                    .try_grant_mgmt_admin_via_user_nsec(project, &mgmt_pubkey)
+                    .await;
                 if !granted {
                     eprintln!(
                         "[daemon] ERROR: management key ({short}) is not an admin of \
@@ -475,7 +484,9 @@ impl Nip29Provider {
                     ));
                     return;
                 }
-                progress(format!("self-granted admin for management key {short} via userNsec"));
+                progress(format!(
+                    "self-granted admin for management key {short} via userNsec"
+                ));
                 // Re-fetch roles so the admin backfill loop below sees the updated set.
                 let (_, roles_after, _) = self.fetch_group_state(project).await;
                 if roles_after.get(&mgmt_pubkey).map(String::as_str) != Some("admin") {

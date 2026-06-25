@@ -508,6 +508,7 @@ pub(super) fn render_channel_context(
 /// first turn, or "changes since your last turn" afterward. This is the single
 /// source of truth — both the CLI `turn_start` and the daemon's `turn_start` RPC
 /// call it, so the injected text is identical.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn push_turn_fabric_block(
     store: &std::sync::Mutex<Store>,
     blocks: &mut Vec<String>,

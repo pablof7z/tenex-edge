@@ -153,6 +153,7 @@ pub fn list_local_pubkeys(edge_home: &Path) -> Vec<String> {
 /// All agents in the local keystore with their configured harness command (if
 /// any) and display byline. Used by the spawn machinery: command from the agent
 /// file takes priority over SPAWN_DEFS.
+#[allow(clippy::type_complexity)]
 pub fn list_local_agents(
     edge_home: &Path,
 ) -> Vec<(
@@ -346,10 +347,10 @@ fn hkdf_sha256_32(ikm: &[u8], salt: &[u8], info: &[u8]) -> [u8; 32] {
 /// - `project_slug` — logical project identifier.
 /// - `agent_slug`   — agent role within the project.
 /// - `harness_kind` — harness type string, e.g. `"claude"`, `"codex"`,
-///                    `"opencode"`.
+///   `"opencode"`.
 /// - `anchor`       — native harness session id (claude/codex) or canonical
-///                    daemon SessionId (opencode).  Stage 1 is anchor-agnostic;
-///                    the caller decides which value to pass.
+///   daemon SessionId (opencode).  Stage 1 is anchor-agnostic;
+///   the caller decides which value to pass.
 pub fn derive_session_keys(
     tenex_secret: &SecretKey,
     project_slug: &str,

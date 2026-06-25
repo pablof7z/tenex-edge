@@ -973,7 +973,14 @@ impl Store {
 
     // ── peer directory ───────────────────────────────────────────────────
 
-    pub fn upsert_profile(&self, pubkey: &str, slug: &str, host: &str, is_backend: bool, ts: u64) -> Result<()> {
+    pub fn upsert_profile(
+        &self,
+        pubkey: &str,
+        slug: &str,
+        host: &str,
+        is_backend: bool,
+        ts: u64,
+    ) -> Result<()> {
         self.conn.execute(
             "INSERT INTO profiles (pubkey, slug, host, is_backend, updated_at) VALUES (?1,?2,?3,?4,?5)
              ON CONFLICT(pubkey) DO UPDATE SET slug=?2, host=?3, is_backend=?4, updated_at=?5",
@@ -1010,6 +1017,7 @@ impl Store {
             .ok()
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn upsert_peer_session(
         &self,
         session_id: &str,
@@ -2024,10 +2032,11 @@ impl Store {
     /// keyed by `(pubkey, project)` — one row per agent per group; a newer
     /// heartbeat from the same agent replaces the older one. Bumps `state_version`
     /// + `updated_at` only when public content changed (title/activity/busy/host/
-    /// rel_cwd/slug); advances `last_seen` only on a newer `emitted_at` so
-    /// out-of-order refetches never resurrect a finished peer. `first_seen` is set
-    /// once on insert. No native_session_id (issue #5 §4).
+    ///   rel_cwd/slug); advances `last_seen` only on a newer `emitted_at` so
+    ///   out-of-order refetches never resurrect a finished peer. `first_seen` is set
+    ///   once on insert. No native_session_id (issue #5 §4).
     pub fn record_peer_status(&self, obs: &PeerStatusObservation) -> Result<()> {
+        #[allow(clippy::type_complexity)]
         let existing: Option<(String, String, i64, String, String, String, u64, i64)> = self
             .conn
             .query_row(
@@ -2864,6 +2873,7 @@ impl Store {
     /// `project = None` spans all projects. Each row is `(created_at, body,
     /// from_pubkey, project, from_session)` — enough to render a `Msg` event
     /// without a relay round-trip.
+    #[allow(clippy::type_complexity)]
     pub fn recent_chat_for_backfill(
         &self,
         project: Option<&str>,
@@ -3808,7 +3818,7 @@ mod tests {
     fn status_delta_since_dedups_local_session_peer_echo() {
         use crate::session::{Harness, PeerStatusObservation, SessionObservation};
         let s = Store::open_memory().unwrap();
-        let local = s
+        let _local = s
             .register_or_reassert_session(&SessionObservation {
                 agent_slug: "alpha".into(),
                 agent_pubkey: "pk-a".into(),

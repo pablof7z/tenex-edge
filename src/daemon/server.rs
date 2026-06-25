@@ -351,8 +351,7 @@ pub async fn run() -> Result<()> {
         // new memberships discovered from 39002 events extend coverage dynamically.
         {
             let edge = crate::config::edge_home();
-            let local_pks: Vec<String> =
-                crate::identity::list_local_pubkeys(&edge);
+            let local_pks: Vec<String> = crate::identity::list_local_pubkeys(&edge);
             let member_groups: Vec<String> = relay_state.with_store(|s| {
                 let mut groups = Vec::new();
                 for pk in &local_pks {
@@ -735,16 +734,18 @@ fn rpc_who(state: &Arc<DaemonState>, params: &serde_json::Value) -> Result<serde
             || p.agent.as_deref().filter(|s| !s.is_empty()).is_some()
             || p.group.as_deref().filter(|s| !s.is_empty()).is_some())
     {
-        Some(resolve_session_inner(
-            state,
-            None,
-            p.env_session.as_deref(),
-            p.cwd.as_deref(),
-            p.agent.as_deref(),
-            p.group.as_deref(),
-            false,
+        Some(
+            resolve_session_inner(
+                state,
+                None,
+                p.env_session.as_deref(),
+                p.cwd.as_deref(),
+                p.agent.as_deref(),
+                p.group.as_deref(),
+                false,
+            )
+            .map(|rec| rec.route_scope().to_string())?,
         )
-        .map(|rec| rec.route_scope().to_string())?)
     } else {
         Some(p.project.clone().unwrap_or_else(|| {
             let cwd = p
@@ -3282,14 +3283,7 @@ async fn rpc_channels_switch(
         .as_deref()
         .filter(|s| !s.is_empty())
         .context("channels switch must be run from within a tenex-edge agent session (TENEX_EDGE_SESSION is not set)")?;
-    let rec = resolve_session(
-        state,
-        None,
-        Some(env_session),
-        None,
-        None,
-        None,
-    )?;
+    let rec = resolve_session(state, None, Some(env_session), None, None, None)?;
     let new_channel = p.channel.clone();
     // Validate the channel exists in local state before switching.
     let exists: bool =
@@ -3688,13 +3682,13 @@ async fn handle_tail<W: AsyncWriteExt + Unpin>(
     loop {
         match rx.recv().await {
             Ok(ev) => {
-                if tail_event_matches_project(&ev, project.as_deref()) && ev.ts() >= since {
-                    if write_json(writer, &Response::item(id, serde_json::to_value(&ev)?))
+                if tail_event_matches_project(&ev, project.as_deref())
+                    && ev.ts() >= since
+                    && write_json(writer, &Response::item(id, serde_json::to_value(&ev)?))
                         .await
                         .is_err()
-                    {
-                        break;
-                    }
+                {
+                    break;
                 }
             }
             Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
@@ -3942,11 +3936,7 @@ fn handle_incoming(state: &Arc<DaemonState>, event: &Event) {
 /// Delivery: `rpc_session_start` calls `ensure_subscription`, which triggers a
 /// relay replay of recent kind:9 events; those are re-materialized against the
 /// now-alive session and delivered via `ring_doorbells`.
-async fn handle_offline_agent_mention(
-    state: &Arc<DaemonState>,
-    mentioned_pk: &str,
-    project: &str,
-) {
+async fn handle_offline_agent_mention(state: &Arc<DaemonState>, mentioned_pk: &str, project: &str) {
     let has_alive = state.with_store(|s| {
         s.list_alive_sessions()
             .unwrap_or_default()
@@ -3974,7 +3964,8 @@ async fn handle_offline_agent_mention(
     }
 
     let work_root = state.with_store(|s| {
-        s.work_root_for_scope(project).unwrap_or_else(|_| project.to_string())
+        s.work_root_for_scope(project)
+            .unwrap_or_else(|_| project.to_string())
     });
 
     let has_path = state.with_store(|s| s.get_project_path(&work_root).ok().flatten().is_some());
@@ -3983,9 +3974,23 @@ async fn handle_offline_agent_mention(
         return;
     }
 
-    let group_arg: Option<&str> = if project != work_root { Some(project) } else { None };
+    let group_arg: Option<&str> = if project != work_root {
+        Some(project)
+    } else {
+        None
+    };
     eprintln!("[spawn-on-mention] spawning {agent_slug} into {project} (work_root={work_root})");
-    match crate::tmux::spawn_agent(state, &agent_slug, &work_root, Vec::new(), None, group_arg, None).await {
+    match crate::tmux::spawn_agent(
+        state,
+        &agent_slug,
+        &work_root,
+        Vec::new(),
+        None,
+        group_arg,
+        None,
+    )
+    .await
+    {
         Ok(pane_id) => eprintln!("[spawn-on-mention] {agent_slug} spawned pane={pane_id}"),
         Err(e) => eprintln!("[spawn-on-mention] spawn failed: {e:#}"),
     }
@@ -4810,6 +4815,7 @@ async fn reconcile_sessions(state: &Arc<DaemonState>) {
     state.status_outbox_notify.notify_waiters();
 }
 
+#[allow(clippy::too_many_arguments)]
 fn engine_params_for(
     cfg: &Config,
     id: &AgentIdentity,

@@ -1,5 +1,5 @@
-use super::*;
 use super::super::spawn::spawn_detached_daemon;
+use super::*;
 
 const SPAWN_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 const HANDSHAKE_PROBE_TIMEOUT: Duration = Duration::from_secs(2);

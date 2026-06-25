@@ -24,7 +24,6 @@ struct DebugLine {
     label: String,   // event type, e.g. "user-prompt-submit", "inject", "inbox send"
     summary: String, // smart one-liner shown in the timeline
     detail: String,  // full content for the detail panel (real newlines)
-
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -430,10 +429,8 @@ fn tail_read(path: &std::path::Path, max_bytes: u64) -> String {
     };
     let len = f.metadata().map(|m| m.len()).unwrap_or(0);
     let partial = len > max_bytes;
-    if partial {
-        if f.seek(SeekFrom::Start(len - max_bytes)).is_err() {
-            return String::new();
-        }
+    if partial && f.seek(SeekFrom::Start(len - max_bytes)).is_err() {
+        return String::new();
     }
     let mut buf = String::new();
     let _ = f.read_to_string(&mut buf);
@@ -849,7 +846,7 @@ fn truncate_str(s: &str, max: usize) -> String {
         }
     }
     if chars.next().is_some() {
-        out.push_str("…");
+        out.push('…');
     }
     out
 }

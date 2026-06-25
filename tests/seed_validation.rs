@@ -200,7 +200,7 @@ async fn seed_session_with_thread_root_link() {
     eprintln!("\n[seed] ===== SEED COMPLETE — open tenex-off and find this session =====");
     eprintln!("[seed] Look for the session titled: {title:?}");
 
-    assert!(statuses.iter().count() >= 1, "status must be retrievable");
+    assert!(!statuses.is_empty(), "status must be retrievable");
 
     admin_c.disconnect().await;
     agent_c.disconnect().await;

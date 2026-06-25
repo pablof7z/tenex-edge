@@ -17,7 +17,9 @@ impl Nip29Materializer {
     /// delivered by our scoped subscription, persist it for identity resolution.
     pub fn materialize_profile(store: &Store, pf: &Profile, now: u64) {
         let pk = &pf.agent.pubkey;
-        store.upsert_profile(pk, &pf.agent.slug, &pf.host, pf.is_backend, now).ok();
+        store
+            .upsert_profile(pk, &pf.agent.slug, &pf.host, pf.is_backend, now)
+            .ok();
     }
 
     /// Apply a decoded peer `Status` (kind:30315) to `peer_session_state`.

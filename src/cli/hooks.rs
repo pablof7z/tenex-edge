@@ -334,7 +334,7 @@ async fn hook_dispatch(
                         "host": host.name,
                         "hook_type": hook_type,
                         "session": sid,
-                        "bytes": ctx.as_bytes().len(),
+                        "bytes": ctx.len(),
                         "text": ctx,
                     }),
                 );
@@ -364,7 +364,7 @@ async fn hook_dispatch(
                         "host": host.name,
                         "hook_type": hook_type,
                         "session": explicit,
-                        "bytes": ctx.as_bytes().len(),
+                        "bytes": ctx.len(),
                         "text": ctx,
                     }),
                 );

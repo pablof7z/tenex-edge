@@ -252,7 +252,7 @@ mod tests {
     // the tests must run serially. This guard enforces that.
     static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-    struct Guard<'a>(std::sync::MutexGuard<'a, ()>);
+    struct Guard<'a>(#[allow(dead_code)] std::sync::MutexGuard<'a, ()>);
     fn lock() -> Guard<'static> {
         Guard(TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner()))
     }
@@ -310,7 +310,7 @@ mod tests {
         // tempdir is outside any repo, so this should be Err.
         // (If the tempdir happens to be inside a git repo on CI, skip.)
         if git_toplevel(&abs).is_none() {
-            assert!(matches!(result, Err(_)));
+            assert!(result.is_err());
         }
     }
 

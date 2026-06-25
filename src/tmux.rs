@@ -553,18 +553,15 @@ fn apply_agent_def_args(
 ) -> Vec<String> {
     let Some(def) = agent_def else { return cmd };
     let bin = cmd.first().map(String::as_str).unwrap_or("");
-    match bin {
-        "claude" => {
-            let mut wrapper = serde_json::Map::new();
-            wrapper.insert(slug.to_string(), def);
-            if let Ok(json) = serde_json::to_string(&serde_json::Value::Object(wrapper)) {
-                cmd.push("--agents".to_string());
-                cmd.push(json);
-                cmd.push("--agent".to_string());
-                cmd.push(slug.to_string());
-            }
+    if bin == "claude" {
+        let mut wrapper = serde_json::Map::new();
+        wrapper.insert(slug.to_string(), def);
+        if let Ok(json) = serde_json::to_string(&serde_json::Value::Object(wrapper)) {
+            cmd.push("--agents".to_string());
+            cmd.push(json);
+            cmd.push("--agent".to_string());
+            cmd.push(slug.to_string());
         }
-        _ => {}
     }
     cmd
 }
@@ -961,6 +958,27 @@ pub struct EndpointStatus {
     pub last_verified: u64,
 }
 
+/// List all registered tmux endpoints with liveness.
+pub fn list_endpoint_statuses(state: &Arc<DaemonState>) -> Vec<EndpointStatus> {
+    let endpoints =
+        state.with_store(|s| s.list_session_endpoints_of_kind("tmux").unwrap_or_default());
+
+    endpoints
+        .into_iter()
+        .map(|ep| {
+            let cmd_opt = pane_alive(&ep.target);
+            EndpointStatus {
+                session_id: ep.session_id,
+                pane_id: ep.target,
+                pane_command: cmd_opt.clone().unwrap_or_default(),
+                alive: cmd_opt.is_some(),
+                registered_at: ep.registered_at,
+                last_verified: ep.last_verified,
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod resume_command_tests {
     use super::*;
@@ -1084,25 +1102,4 @@ mod resume_command_tests {
         assert!(!prompt.contains("tenex-edge inbox"));
         assert!(!prompt.contains("project chat - write"));
     }
-}
-
-/// List all registered tmux endpoints with liveness.
-pub fn list_endpoint_statuses(state: &Arc<DaemonState>) -> Vec<EndpointStatus> {
-    let endpoints =
-        state.with_store(|s| s.list_session_endpoints_of_kind("tmux").unwrap_or_default());
-
-    endpoints
-        .into_iter()
-        .map(|ep| {
-            let cmd_opt = pane_alive(&ep.target);
-            EndpointStatus {
-                session_id: ep.session_id,
-                pane_id: ep.target,
-                pane_command: cmd_opt.clone().unwrap_or_default(),
-                alive: cmd_opt.is_some(),
-                registered_at: ep.registered_at,
-                last_verified: ep.last_verified,
-            }
-        })
-        .collect()
 }
