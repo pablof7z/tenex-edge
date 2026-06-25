@@ -114,12 +114,18 @@ async fn tmux_spawn(agent: String, project: Option<String>) -> Result<()> {
 pub(super) async fn launch(
     agent: String,
     project: Option<String>,
+    channel: Option<String>,
     override_command: Vec<String>,
     extra_args: Vec<String>,
 ) -> Result<()> {
     let project = match project {
         Some(p) => p,
         None => crate::project::resolve_or_bail(&std::env::current_dir().unwrap_or_default())?,
+    };
+    // `--channel` with no value → open the interactive picker.
+    let channel = match channel {
+        Some(ref s) if s.is_empty() => Some(pick_channel(&project, &agent).await?),
+        other => other,
     };
     let cwd = std::env::current_dir()
         .ok()
@@ -129,6 +135,7 @@ pub(super) async fn launch(
         serde_json::json!({
             "agent": agent,
             "project": project,
+            "channel": channel,
             "command": extra_args,
             "base_command": override_command,
             "cwd": cwd,
@@ -140,6 +147,91 @@ pub(super) async fn launch(
         .as_str()
         .context("tmux_spawn response did not include pane_id")?;
     attach_pane(pane_id)
+}
+
+/// Fetch all rooms under `project` and present an interactive fuzzy picker.
+/// Includes a "＋ Create new channel…" entry at the top; selecting it prompts
+/// for a name, creates the channel via the daemon, and returns the new id.
+/// `agent_slug` is used as the default agent spec when creating.
+async fn pick_channel(project: &str, agent_slug: &str) -> Result<String> {
+    let v = super::daemon_call_async(
+        "channels_list",
+        serde_json::json!({ "project": project }),
+    )
+    .await?;
+
+    let rooms = v["rooms"].as_array().map(|a| a.as_slice()).unwrap_or(&[]);
+
+    // "＋ Create…" is always the first item so it's reachable by typing its name.
+    const CREATE: &str = "＋  Create new channel…";
+    let mut ids: Vec<Option<String>> = vec![None]; // None = create sentinel
+    let mut labels: Vec<String> = vec![CREATE.to_string()];
+
+    for r in rooms {
+        let id = r["child_h"].as_str().unwrap_or("").to_string();
+        let name = r["name"].as_str().unwrap_or("").to_string();
+        let depth = r["depth"].as_u64().unwrap_or(0) as usize;
+        let indent = "  ".repeat(depth);
+        let label = if name.is_empty() {
+            format!("{indent}{id}")
+        } else {
+            format!("{indent}{name}  ({})", &id[..id.len().min(12)])
+        };
+        labels.push(label);
+        ids.push(Some(id));
+    }
+
+    let theme = dialoguer::theme::ColorfulTheme::default();
+    let idx = dialoguer::FuzzySelect::with_theme(&theme)
+        .with_prompt("Select channel")
+        .items(&labels)
+        .default(0)
+        .interact()?;
+
+    match &ids[idx] {
+        Some(id) => Ok(id.clone()),
+        None => create_channel_interactive(project, agent_slug, &theme).await,
+    }
+}
+
+/// Prompt for a channel name, then create it via the daemon using the agent
+/// being launched and the local backend pubkey. Returns the new channel id.
+async fn create_channel_interactive(
+    project: &str,
+    agent_slug: &str,
+    theme: &dialoguer::theme::ColorfulTheme,
+) -> Result<String> {
+    let name: String = dialoguer::Input::with_theme(theme)
+        .with_prompt("Channel name")
+        .interact_text()?;
+
+    // Resolve the local backend pubkey from the daemon so we don't have to
+    // guess the hostname format the daemon uses internally.
+    let backend_v = super::daemon_call_async("local_backend", serde_json::json!({})).await?;
+    let backend_pubkey = backend_v["pubkey"]
+        .as_str()
+        .context("local_backend did not return pubkey")?;
+
+    let v = super::daemon_call_async(
+        "channels_create",
+        serde_json::json!({
+            "parent": project,
+            "name": name,
+            "agents": [{ "slug": agent_slug, "backend": backend_pubkey }],
+            "brief": "",
+            "agent": crate::cli::agent_env_slug(),
+            "env_session": std::env::var("TENEX_EDGE_SESSION").ok(),
+            "cwd": std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()),
+        }),
+    )
+    .await?;
+
+    let child_h = v["child_h"]
+        .as_str()
+        .context("channels_create did not return child_h")?
+        .to_string();
+    eprintln!("created channel {child_h}");
+    Ok(child_h)
 }
 
 // ── attach ────────────────────────────────────────────────────────────────────
