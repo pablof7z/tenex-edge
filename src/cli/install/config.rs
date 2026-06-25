@@ -56,11 +56,11 @@ fn bin_on_path(bin: &str) -> bool {
 }
 
 /// The hook signature we dedupe by: `tenex-edge hook --host <host> --type <type>`.
-pub fn sig(host: &str, ty: &str) -> String {
+fn sig(host: &str, ty: &str) -> String {
     format!("tenex-edge hook --host {host} --type {ty}")
 }
 
-pub fn claude_hook_entries() -> Vec<(&'static str, serde_json::Value)> {
+fn claude_hook_entries() -> Vec<(&'static str, serde_json::Value)> {
     let mk = |ty: &str, timeout: u64| {
         serde_json::json!({
             "hooks": [{
@@ -104,7 +104,7 @@ pub fn codex_hook_entries() -> Vec<(&'static str, serde_json::Value)> {
     ]
 }
 
-pub fn grok_hook_entries() -> Vec<(&'static str, serde_json::Value)> {
+fn grok_hook_entries() -> Vec<(&'static str, serde_json::Value)> {
     let mk = |ty: &str, timeout: u64| {
         serde_json::json!({
             "hooks": [{

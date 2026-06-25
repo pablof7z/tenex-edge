@@ -11,7 +11,7 @@ pub fn read_json_or_default(path: &Path) -> Result<serde_json::Value> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => serde_json::json!({}),
         Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
     };
-    super::hooks::ensure_hooks_object(&mut root);
+    super::hooks::ensure_object(&mut root);
     Ok(root)
 }
 

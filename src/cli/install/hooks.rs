@@ -6,7 +6,7 @@ const CODEX_ROOT_HOOK_EVENTS: &[&str] =
     &["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop"];
 
 /// Does a hook group contain a tenex-edge command for `host`?
-pub fn group_is_ours(group: &serde_json::Value, host: &str) -> bool {
+fn group_is_ours(group: &serde_json::Value, host: &str) -> bool {
     let needle = format!("tenex-edge hook --host {host} --type ");
     group
         .get("hooks")
@@ -21,7 +21,7 @@ pub fn group_is_ours(group: &serde_json::Value, host: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn ensure_object(v: &mut serde_json::Value) {
+pub(super) fn ensure_object(v: &mut serde_json::Value) {
     if !v.is_object() {
         *v = serde_json::json!({});
     }
@@ -101,7 +101,7 @@ pub fn merge_hooks(
     removed
 }
 
-pub fn is_json_harness_installed(h: &Harness) -> bool {
+fn is_json_harness_installed(h: &Harness) -> bool {
     let Ok(content) = std::fs::read_to_string(&h.config_path) else {
         return false;
     };
