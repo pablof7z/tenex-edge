@@ -1,4 +1,4 @@
-use super::*;
+use super::tui_model::{compute_project_tabs, row_project_for_tabs, LiveRow, TuiData};
 
 #[test]
 fn row_project_for_tabs_prefers_work_root_over_routing_scope() {
