@@ -34,8 +34,9 @@ cli ── runtime ── { domain · fabric/nip29/wire · transport · state ·
 - `domain` — pure model (`Profile`, `Presence`, `Activity`, `Status`, `Mention`).
   Names no kind and no tag.
 - `fabric/nip29/wire` — maps every domain event ⇄ wire envelope + owns subscription filters.
-  The `kind1` shape is NIP-29-aware today: project traffic is anchored with the
-  `h` tag, using the project slug as the group id.
+  The wire shapes are NIP-29-aware today (chat on kind:9, activity on kind:1,
+  status on kind:30315): project traffic is anchored with the `h` tag, using the
+  project slug as the group id.
 - `transport` — thin adapter over `nostr-sdk` (publish/subscribe/AUTH/fetch).
 - `state` — SQLite: my sessions, the peer directory, per-session chat inbox rows.
   Opened by ONE process only — the daemon — so there is a single writer by construction.
