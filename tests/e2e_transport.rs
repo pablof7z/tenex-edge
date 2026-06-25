@@ -25,7 +25,7 @@ async fn publishes_and_decodes_all_event_types() {
     let project = "tenex-edge".to_string();
 
     // Reader subscribes FIRST (presence is ephemeral — must be listening live).
-    let reader = Transport::connect(&[relay.url.clone()], reader_keys)
+    let reader = Transport::connect(std::slice::from_ref(&relay.url), reader_keys)
         .await
         .expect("reader connects");
     let scope = Scope {
@@ -42,7 +42,7 @@ async fn publishes_and_decodes_all_event_types() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     // Agent connects and publishes one of each.
-    let agent = Transport::connect(&[relay.url.clone()], agent_keys)
+    let agent = Transport::connect(std::slice::from_ref(&relay.url), agent_keys)
         .await
         .expect("agent connects");
     let aref = AgentRef::new(agent_pk.clone(), "coder");

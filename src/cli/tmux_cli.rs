@@ -163,11 +163,8 @@ pub(super) async fn launch(
 /// for a name, creates the channel via the daemon, and returns the new id.
 /// `agent_slug` is used as the default agent spec when creating.
 async fn pick_channel(project: &str, agent_slug: &str) -> Result<String> {
-    let v = super::daemon_call_async(
-        "channels_list",
-        serde_json::json!({ "project": project }),
-    )
-    .await?;
+    let v = super::daemon_call_async("channels_list", serde_json::json!({ "project": project }))
+        .await?;
 
     let rooms = v["rooms"].as_array().map(|a| a.as_slice()).unwrap_or(&[]);
 
@@ -338,7 +335,7 @@ fn compute_project_tabs(data: &TuiData) -> ProjectTabs {
     ProjectTabs { visible, hidden }
 }
 
-fn tab_project<'a>(tabs: &'a [String], tab_idx: usize) -> Option<&'a str> {
+fn tab_project(tabs: &[String], tab_idx: usize) -> Option<&str> {
     tabs.get(tab_idx).map(|s| s.as_str())
 }
 
@@ -1378,42 +1375,36 @@ pub(super) fn tmux_tui(popup: bool) -> Result<()> {
                                                     }
                                                 }
                                             } else {
-                                                match selected_resume_sid(
+                                                if let Some(sid) = selected_resume_sid(
                                                     &fl,
                                                     data.spawnable.len(),
                                                     &fr,
                                                     selected,
                                                 ) {
-                                                    Some(sid) => {
-                                                        status_msg = "Resuming...".to_string();
-                                                        // Render the status immediately before blocking.
-                                                        let tabs_snap = pt.visible.clone();
-                                                        let status_snap = status_msg.clone();
-                                                        let _ = ratatui_term.draw(|f| {
-                                                            render_main(
-                                                                f,
-                                                                &data,
-                                                                selected,
-                                                                &status_snap,
-                                                                &tabs_snap,
-                                                                tab_idx,
-                                                                exited_opt,
-                                                            )
-                                                        });
-                                                        match resume_in_tui(&sid) {
-                                                            Ok(pane) => {
-                                                                pending_attach =
-                                                                    Some(PendingAttach {
-                                                                        pane,
-                                                                        resume_sid: Some(
-                                                                            sid.clone(),
-                                                                        ),
-                                                                    })
-                                                            }
-                                                            Err(msg) => status_msg = msg,
+                                                    status_msg = "Resuming...".to_string();
+                                                    // Render the status immediately before blocking.
+                                                    let tabs_snap = pt.visible.clone();
+                                                    let status_snap = status_msg.clone();
+                                                    let _ = ratatui_term.draw(|f| {
+                                                        render_main(
+                                                            f,
+                                                            &data,
+                                                            selected,
+                                                            &status_snap,
+                                                            &tabs_snap,
+                                                            tab_idx,
+                                                            exited_opt,
+                                                        )
+                                                    });
+                                                    match resume_in_tui(&sid) {
+                                                        Ok(pane) => {
+                                                            pending_attach = Some(PendingAttach {
+                                                                pane,
+                                                                resume_sid: Some(sid.clone()),
+                                                            })
                                                         }
+                                                        Err(msg) => status_msg = msg,
                                                     }
-                                                    None => {}
                                                 }
                                             }
                                         }

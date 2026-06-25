@@ -121,8 +121,16 @@ pub(super) async fn rpc_tmux_spawn(
         Some(p.base_command)
     };
     let group = p.channel.as_deref();
-    let pane_id =
-        crate::tmux::spawn_agent(state, &p.agent, &p.project, p.command, base_override, group, client_cwd).await?;
+    let pane_id = crate::tmux::spawn_agent(
+        state,
+        &p.agent,
+        &p.project,
+        p.command,
+        base_override,
+        group,
+        client_cwd,
+    )
+    .await?;
     Ok(serde_json::json!({ "pane_id": pane_id, "agent": p.agent, "project": p.project }))
 }
 

@@ -151,10 +151,11 @@ pub fn assemble_turn_start_context(
 ///      Delta-gated and debounced: shown once per arrival, not on every tool call.
 ///   3. Sibling-session delta — project-scoped title/status changes since the
 ///      last check, excluding this session.
-/// Ambient chat and sibling deltas are present only when `delta_since` is
-/// `Some` (the daemon's rate-limit floor passed) and there is something new
-/// past the cursor.
-/// `now` is the shared timestamp.
+///
+///   Ambient chat and sibling deltas are present only when `delta_since` is
+///   `Some` (the daemon's rate-limit floor passed) and there is something new
+///   past the cursor.
+///   `now` is the shared timestamp.
 pub fn assemble_turn_check_context(
     store: &std::sync::Mutex<Store>,
     rec: &crate::state::SessionRecord,

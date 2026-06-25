@@ -41,6 +41,7 @@ impl Harness {
             Harness::Unknown => "unknown",
         }
     }
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Self {
         match s {
             "claude-code" | "claude" => Harness::ClaudeCode,
@@ -104,6 +105,7 @@ impl TitleSource {
             TitleSource::Peer => "peer",
         }
     }
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Self {
         match s {
             "seed" => TitleSource::Seed,
@@ -167,7 +169,7 @@ impl SessionObservation {
             harness_session_id: self.harness_session_id.clone(),
             resume_id: self.resume_id.clone(),
             tmux_pane: self.tmux_pane.clone(),
-            watch_pid: self.watch_pid.clone(),
+            watch_pid: self.watch_pid,
         }
     }
 }

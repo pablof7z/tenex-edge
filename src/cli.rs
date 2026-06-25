@@ -7,7 +7,6 @@ use crate::util::{
     slugify_host, SessionId,
 };
 use anyhow::{bail, Context, Result};
-use shlex;
 use clap::{Parser, Subcommand};
 use crossterm::{
     cursor::{Hide, MoveTo, Show},
@@ -16,6 +15,7 @@ use crossterm::{
     terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use owo_colors::OwoColorize;
+use shlex;
 use std::fmt::Write as _;
 use std::io::{self, IsTerminal as _, Read as _, Write as _};
 use std::path::PathBuf;
@@ -742,6 +742,7 @@ mod turn_context_tests {
     /// Register a busy local session carrying a distilled title + activity line.
     /// Appears at `reg_ts` (so a cursor after it sees a *change*, not an appear)
     /// and the distill lands at `change_ts`.
+    #[allow(clippy::too_many_arguments)]
     fn register_busy(
         store: &Store,
         slug: &str,
@@ -861,7 +862,9 @@ mod turn_context_tests {
     #[test]
     fn turn_check_delta_shows_siblings_with_activity_excludes_self() {
         let store = Store::open_memory().unwrap();
-        store.upsert_profile("pk-sib", "sib", "laptop", false, 1).unwrap();
+        store
+            .upsert_profile("pk-sib", "sib", "laptop", false, 1)
+            .unwrap();
         // Sibling registered before the cursor (10), then changed after it (180)
         // and is still live at now=200 → surfaces as a Changed delta.
         let sib_id = register_busy(
@@ -917,7 +920,9 @@ mod turn_context_tests {
     #[test]
     fn turn_check_delta_shows_idle_transition() {
         let store = Store::open_memory().unwrap();
-        store.upsert_profile("pk-sib", "sib", "laptop", false, 1).unwrap();
+        store
+            .upsert_profile("pk-sib", "sib", "laptop", false, 1)
+            .unwrap();
         // Sibling appeared before the cursor (10), then opened+finished a turn at
         // 180 → idle, title retained, still live at now=200 → Changed delta.
         register_idle(
@@ -945,7 +950,9 @@ mod turn_context_tests {
     #[test]
     fn turn_check_delta_suppresses_repeated_idle_noop() {
         let store = Store::open_memory().unwrap();
-        store.upsert_profile("pk-sib", "sib", "laptop", false, 1).unwrap();
+        store
+            .upsert_profile("pk-sib", "sib", "laptop", false, 1)
+            .unwrap();
         let sib_id = register_idle(&store, "sib", "pk-sib", "sess-sib", "Refactor tmux", 10, 20);
         store.end_turn(&sib_id, 180).unwrap().unwrap();
         let m = Mutex::new(store);
@@ -963,7 +970,9 @@ mod turn_context_tests {
     #[test]
     fn turn_check_delta_suppresses_identical_session_reassert() {
         let store = Store::open_memory().unwrap();
-        store.upsert_profile("pk-sib", "sib", "laptop", false, 1).unwrap();
+        store
+            .upsert_profile("pk-sib", "sib", "laptop", false, 1)
+            .unwrap();
         register_local(&store, "sib", "pk-sib", "sess-sib", 10);
         register_local(&store, "sib", "pk-sib", "sess-sib", 180);
         let m = Mutex::new(store);
@@ -1098,7 +1107,9 @@ mod turn_context_tests {
     #[test]
     fn turn_check_delta_suppressed_when_not_due() {
         let store = Store::open_memory().unwrap();
-        store.upsert_profile("pk-sib", "sib", "laptop", false, 1).unwrap();
+        store
+            .upsert_profile("pk-sib", "sib", "laptop", false, 1)
+            .unwrap();
         register_busy(
             &store,
             "sib",

@@ -24,6 +24,7 @@ fn strip_ansi(input: &str) -> String {
 /// Register a local session into `session_state` and return its minted canonical
 /// id. The daemon mints the id, so callers capture it from the returned snapshot
 /// rather than asserting a fixed string.
+#[allow(clippy::too_many_arguments)]
 fn register_local(
     store: &Store,
     slug: &str,
@@ -536,7 +537,9 @@ fn render_labels_session_room_as_channel_with_parent_project() {
 #[test]
 fn who_snapshot_exposes_work_root_for_session_room_rows() {
     let store = Store::open_memory().unwrap();
-    store.mark_session_room("session-room", "proj", 1_000).unwrap();
+    store
+        .mark_session_room("session-room", "proj", 1_000)
+        .unwrap();
     register_local(
         &store,
         "coder",

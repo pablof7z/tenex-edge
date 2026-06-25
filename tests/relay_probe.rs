@@ -75,11 +75,9 @@ async fn one_authed_conn_receives_mentions_to_other_pubkeys() {
             Ok(Ok(RelayPoolNotification::Message {
                 message: RelayMessage::Event { event, .. },
                 ..
-            })) => {
-                if event.content == marker {
-                    got = true;
-                    break;
-                }
+            })) if event.content == marker => {
+                got = true;
+                break;
             }
             _ => {}
         }

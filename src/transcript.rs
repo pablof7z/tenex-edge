@@ -196,14 +196,11 @@ fn extract(content: Option<&Value>, _role: &str) -> String {
         Some(Value::Array(blocks)) => {
             let mut parts = Vec::new();
             for b in blocks {
-                match b.get("type").and_then(|x| x.as_str()) {
-                    Some("text") => {
-                        if let Some(t) = b.get("text").and_then(|x| x.as_str()) {
-                            parts.push(t.to_string());
-                        }
+                // tool_use, tool_result, and others are noise for distillation.
+                if let Some("text") = b.get("type").and_then(|x| x.as_str()) {
+                    if let Some(t) = b.get("text").and_then(|x| x.as_str()) {
+                        parts.push(t.to_string());
                     }
-                    // tool_use, tool_result, and others are noise for distillation.
-                    _ => {}
                 }
             }
             parts.join(" ")

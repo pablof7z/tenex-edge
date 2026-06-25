@@ -33,6 +33,7 @@ fn free_port() -> u16 {
 /// group semantics (9007/9002 creates, 39001 admin reflection), so any test
 /// that owns groups or mints subgroups must run against a real NIP-29 relay.
 /// Override with `$NIP29_RELAY_BIN`.
+#[allow(dead_code)]
 fn nip29_relay_bin() -> PathBuf {
     if let Ok(p) = std::env::var("NIP29_RELAY_BIN") {
         return PathBuf::from(p);
@@ -44,6 +45,7 @@ fn nip29_relay_bin() -> PathBuf {
 impl TestRelay {
     /// Spawn a real NIP-29 relay on an ephemeral port with an isolated data dir.
     /// Use for daemon tests that exercise group ownership / subgroup minting.
+    #[allow(dead_code)]
     pub fn start_nip29_relay() -> Self {
         let port = free_port();
         let bin = nip29_relay_bin();

@@ -531,7 +531,8 @@ pub(super) fn parse_since(s: &str) -> u64 {
             "h" | "H" => n * 3600,
             "m" | "M" => n * 60,
             "d" | "D" => n * 86400,
-            "s" | "S" | _ => n,
+            "s" | "S" => n,
+            _ => n,
         };
         return now.saturating_sub(secs);
     }
