@@ -21,8 +21,10 @@ pub mod util;
 
 pub mod cli;
 pub mod daemon;
+pub mod retry_queue;
 pub mod distill;
 pub mod fabric;
+pub mod relay_log;
 pub mod runtime;
 pub mod state;
 pub mod tmux;

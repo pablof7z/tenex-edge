@@ -281,6 +281,7 @@ pub async fn run() -> Result<()> {
     spawn_idle_watcher(state.clone());
     spawn_status_outbox_drainer(state.clone());
     spawn_status_heartbeat_publisher(state.clone());
+    spawn_retry_drainer(state.clone());
 
     let accept_state = state.clone();
     let accept = tokio::spawn(async move {
@@ -1447,6 +1448,32 @@ fn spawn_chat_publish_retry(
     });
 }
 
+fn spawn_retry_drainer(state: Arc<DaemonState>) {
+    let queue = state.transport.retry_queue.clone();
+    let transport = state.transport.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            let due = queue.drain_due();
+            for retry in due {
+                let id_short = {
+                    let h = retry.event.id.to_hex();
+                    h[..8.min(h.len())].to_string()
+                };
+                let kind = retry.event.kind.as_u16();
+                if transport.retry_publish(&retry.event).await {
+                    eprintln!(
+                        "[retry] event {id_short} kind:{kind} accepted on attempt {}",
+                        retry.attempt + 1
+                    );
+                } else {
+                    queue.requeue(retry, "relay rejected on retry");
+                }
+            }
+        }
+    });
+}
+
 fn spawn_group_name_retry(state: Arc<DaemonState>, group: String, title: String) {
     tokio::spawn(async move {
         for attempt in 0..60 {
@@ -2525,9 +2552,25 @@ fn rpc_statusline(
     params: &serde_json::Value,
 ) -> Result<serde_json::Value> {
     let p: StatuslineParams = serde_json::from_value(params.clone()).unwrap_or_default();
+    // A stale @te_session (written at spawn time, orphaned after a daemon
+    // restart or state.db recovery) must fall through to agent+cwd resolution
+    // rather than erroring — otherwise the status bar goes blank until the
+    // session re-registers its session-start hook.
+    let explicit_exists = p
+        .session
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .map(|id| {
+            state
+                .with_store(|s| s.get_session(id))
+                .ok()
+                .flatten()
+                .is_some()
+        })
+        .unwrap_or(false);
     let rec = resolve_session(
         state,
-        p.session.as_deref(),
+        if explicit_exists { p.session.as_deref() } else { None },
         p.env_session.as_deref(),
         p.cwd.as_deref(),
         p.agent.as_deref(),

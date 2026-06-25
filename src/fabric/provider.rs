@@ -293,6 +293,38 @@ impl Nip29Provider {
         Ok(())
     }
 
+    /// The `child` group ids listed in `group`'s relay-authored kind:39000.
+    /// Returns the empty vec when the group has no metadata yet or carries no
+    /// `child` tags. Used to build the complete child set before publishing a
+    /// kind:9002 that confirms a new subgroup (read-modify-write).
+    pub async fn fetch_group_children(&self, group: &str) -> Vec<String> {
+        use crate::fabric::nip29::wire::KIND_GROUP_METADATA;
+        use nostr_sdk::prelude::Filter;
+        let filter = Filter::new()
+            .kind(crate::fabric::nip29::wire::kind(KIND_GROUP_METADATA))
+            .identifier(group);
+        let evs = self
+            .transport
+            .fetch(filter, Duration::from_secs(5))
+            .await
+            .unwrap_or_default();
+        let Some(newest) = evs.iter().max_by_key(|e| e.created_at.as_secs()) else {
+            return vec![];
+        };
+        newest
+            .tags
+            .iter()
+            .filter_map(|t| {
+                let s = t.as_slice();
+                if s.first().map(String::as_str) == Some("child") {
+                    s.get(1).cloned()
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
     /// The `parent` group id declared in `group`'s relay-authored kind:39000
     /// metadata, if any. `None` when the group has no metadata yet (brand-new,
     /// not echoed) or carries no `parent` tag. Used to verify a subgroup actually
@@ -438,6 +470,9 @@ impl Nip29Provider {
                 "create-group was not accepted; will retry on next session".to_string()
             });
             let locked = if created {
+                // Relay must settle the new group before accepting admin commands:
+                // 9002/9000 events sent immediately after 9007 are rejected on most relays.
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                 progress("publishing kind:9002 closed/public group lock".to_string());
                 match crate::fabric::nip29::lifecycle::group_lock_closed(project) {
                     Ok(b) => {
@@ -615,26 +650,20 @@ impl Nip29Provider {
         match self.transport.publish_signed_checked(builder, keys).await {
             Ok(_) => true,
             Err(e) => {
-                let benign = {
-                    let s = e.to_string();
-                    // A NIP-29 group create that says the group already exists, or a
-                    // moderation action the relay reports as a no-op because its
-                    // target is ALREADY in the desired state, are both idempotent
-                    // successes — the relay's authoritative in-memory state already
-                    // reflects what we asked for. nip29.f7z.io phrases the put-user
-                    // no-op as "all targets are members already" / "already a member"
-                    // and the put-admin/create cases as "already exists"/"duplicate".
-                    // Treating these as failures makes a confirm-retry loop spin
-                    // forever (the relay keeps rejecting a redundant add), so a
-                    // genuinely-applied membership can look unconfirmed.
-                    s.contains("already exists")
-                        || s.contains("duplicate")
-                        || s.contains("members already")
-                        || s.contains("already a member")
-                };
+                let s = e.to_string();
+                // Idempotent relay responses: the relay's in-memory state already
+                // reflects what we asked for, so treat as success.
+                // nip29.f7z.io phrases the put-user no-op as "all targets are members
+                // already" / "already a member"; create as "already exists"/"duplicate".
+                let benign = s.contains("already exists")
+                    || s.contains("duplicate")
+                    || s.contains("members already")
+                    || s.contains("already a member");
+                // On non-benign rejection the event was pushed to transport.retry_queue
+                // by publish_signed_checked; the retry drainer will re-attempt it.
                 if !benign && std::env::var("TENEX_EDGE_DEBUG").is_ok() {
                     eprintln!(
-                        "[daemon] NIP-29 {label} publish failed (will retry next session): {e:#}"
+                        "[daemon] NIP-29 {label} rejected, queued for retry: {e:#}"
                     );
                 }
                 benign
@@ -669,12 +698,7 @@ impl Nip29Provider {
         let Some(mgmt_keys) = self.parse_management_keys() else {
             return false;
         };
-        Self::log_group_role_decision(
-            project,
-            pubkey_hex,
-            "member",
-            "provider.nip29_add_member builds kind:9000 bare p tag",
-        );
+        Self::log_group_role_decision(project, pubkey_hex, "member", "add member");
         match crate::fabric::nip29::lifecycle::group_put_user(project, pubkey_hex) {
             Ok(b) => {
                 self.publish_group_management(b, &mgmt_keys, "9000 put-user (session)")
@@ -692,6 +716,7 @@ impl Nip29Provider {
         let Some(mgmt_keys) = self.parse_management_keys() else {
             return false;
         };
+        eprintln!("[daemon] nip29 set-name h={group} name={name:?}");
         match crate::fabric::nip29::lifecycle::group_edit_name(group, name) {
             Ok(b) => {
                 self.publish_group_management(b, &mgmt_keys, "9002 edit-metadata (name)")
@@ -707,12 +732,7 @@ impl Nip29Provider {
         let Some(mgmt_keys) = self.parse_management_keys() else {
             return false;
         };
-        Self::log_group_role_decision(
-            project,
-            pubkey_hex,
-            "admin",
-            "provider.nip29_add_admin builds kind:9000 p-tag role=admin",
-        );
+        Self::log_group_role_decision(project, pubkey_hex, "admin", "add admin");
         match crate::fabric::nip29::lifecycle::group_put_admin(project, pubkey_hex) {
             Ok(b) => {
                 self.publish_group_management(b, &mgmt_keys, "9000 put-user (admin)")
@@ -731,6 +751,7 @@ impl Nip29Provider {
         let Some(mgmt_keys) = self.parse_management_keys() else {
             return false;
         };
+        eprintln!("[daemon] nip29 create-subgroup h={child_h} name={name:?} parent={parent_h}");
         let created =
             match crate::fabric::nip29::lifecycle::group_create_subgroup(child_h, parent_h) {
                 Ok(b) => {
@@ -742,15 +763,43 @@ impl Nip29Provider {
         if !created {
             return false;
         }
-        match crate::fabric::nip29::lifecycle::group_lock_closed_with_parent(
-            child_h, name, parent_h,
-        ) {
-            Ok(b) => {
-                self.publish_group_management(b, &mgmt_keys, "9002 lock-with-parent")
-                    .await
-            }
-            Err(_) => false,
+        let locked =
+            match crate::fabric::nip29::lifecycle::group_lock_closed_with_parent(
+                child_h, name, parent_h,
+            ) {
+                Ok(b) => {
+                    self.publish_group_management(b, &mgmt_keys, "9002 lock-with-parent")
+                        .await
+                }
+                Err(_) => false,
+            };
+        if !locked {
+            return false;
         }
+        // Confirm the bidirectional relationship on the parent group. Relay
+        // behaviour for incremental child-tag additions is unspecified, so we
+        // do a read-modify-write: fetch the current child set, add the new one
+        // (dedup), and publish the full list. Safe whether the relay accumulates
+        // or replaces on each kind:9002.
+        let mut existing = self.fetch_group_children(parent_h).await;
+        if !existing.iter().any(|c| c == child_h) {
+            existing.push(child_h.to_string());
+        }
+        let all_children: Vec<&str> = existing.iter().map(String::as_str).collect();
+        match crate::fabric::nip29::lifecycle::group_set_children(parent_h, &all_children) {
+            Ok(b) => {
+                let confirmed = self
+                    .publish_group_management(b, &mgmt_keys, "9002 parent-set-children")
+                    .await;
+                if !confirmed {
+                    eprintln!(
+                        "[daemon] nip29 parent-set-children failed: parent={parent_h} child={child_h}"
+                    );
+                }
+            }
+            Err(_) => {}
+        }
+        true
     }
 
     /// Admin-remove `pubkey_hex` from `project`.
@@ -764,6 +813,10 @@ impl Nip29Provider {
         let Some(mgmt_keys) = self.parse_management_keys() else {
             return false;
         };
+        eprintln!(
+            "[daemon] nip29 remove-member h={project} p={}",
+            crate::util::pubkey_short(pubkey_hex)
+        );
         match crate::fabric::nip29::lifecycle::group_remove_user(project, pubkey_hex) {
             Ok(b) => {
                 self.publish_group_management(b, &mgmt_keys, "9001 remove-user (session)")

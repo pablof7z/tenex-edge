@@ -270,26 +270,38 @@ pub async fn distill_session(
     // (a) explicit external-command override. The command sees SESSION_SYSTEM_PROMPT
     // semantics by convention (it is the LLM seam); we parse its two-line output.
     if let Some(cmd) = CommandDistiller::resolve() {
+        eprintln!("[distill] using TENEX_EDGE_DISTILL_CMD override");
         if let Some(out) = cmd.summarize_full(&input) {
             if let Some(labels) = assemble(parse_labels(&out), current_title) {
                 return (Some(labels), None);
             }
         }
+        eprintln!("[distill] TENEX_EDGE_DISTILL_CMD produced no usable output");
     }
     // (b) native rig via the edge-distillation role, with the combined preamble.
     let mut rig_error: Option<String> = None;
-    if let Some(resolved) = crate::llmconfig::resolve_role("edge-distillation") {
-        match complete_via_rig(&resolved, &input).await {
-            Ok(Some(out)) => {
-                if let Some(labels) = assemble(parse_labels(&out), current_title) {
-                    return (Some(labels), None);
+    match crate::llmconfig::resolve_role("edge-distillation") {
+        None => eprintln!("[distill] edge-distillation role not resolved (check llms.json + providers.json)"),
+        Some(resolved) => {
+            eprintln!("[distill] calling {}/{}", resolved.provider, resolved.model);
+            match complete_via_rig(&resolved, &input).await {
+                Ok(Some(out)) => {
+                    eprintln!("[distill] rig response: {out:?}");
+                    if let Some(labels) = assemble(parse_labels(&out), current_title) {
+                        return (Some(labels), None);
+                    }
+                    eprintln!("[distill] parse/assemble produced no labels from rig response");
+                }
+                Ok(None) => eprintln!("[distill] rig returned empty output (unsupported provider or blank)"),
+                Err(e) => {
+                    eprintln!("[distill] rig error: {e}");
+                    rig_error = Some(e);
                 }
             }
-            Ok(None) => {}
-            Err(e) => rig_error = Some(e),
         }
     }
     // (c) no model / empty output → keep the existing title (nudge-to-keep).
+    eprintln!("[distill] falling back to nudge-to-keep current_title={current_title:?}");
     let labels = current_title
         .map(str::trim)
         .filter(|t| !t.is_empty())

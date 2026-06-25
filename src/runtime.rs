@@ -192,6 +192,10 @@ pub async fn run_session_in_daemon(
                 // duplicate runtime cannot flip the title.
                 if distill_task.as_ref().is_some_and(|h| h.is_finished()) {
                     let (result, error) = distill_task.take().unwrap().await.ok().unwrap_or((None, None));
+                    eprintln!("[distill] task finished session={} result={} error={:?}",
+                        &p.session_id[..8.min(p.session_id.len())],
+                        result.as_ref().map(|l| format!("title={:?} activity={:?}", l.title, l.activity)).unwrap_or_else(|| "None".into()),
+                        error);
                     if let Some(labels) = result {
                         // Capture the pre-apply title to decide whether to broadcast
                         // a new Activity note (a social kind:1, separate from status).
@@ -205,6 +209,9 @@ pub async fn run_session_in_daemon(
                             &labels.activity,
                             now,
                         )).ok().flatten();
+                        eprintln!("[distill] apply_distill_result session={} applied={}",
+                            &p.session_id[..8.min(p.session_id.len())],
+                            applied.as_ref().map(|s| format!("title={:?}", s.title)).unwrap_or_else(|| "stale/rejected".into()));
                         if let Some(snap) = applied {
                             if !snap.title.is_empty() && snap.title != prev_title {
                                 publish_de(DomainEvent::Activity(Activity {
@@ -220,6 +227,8 @@ pub async fn run_session_in_daemon(
                                 // Only publishes on an actual title change (above), so
                                 // this stays low-churn — no debounce needed.
                                 let is_room = st!(|s: &Store| s.is_session_room(&p.project)).unwrap_or(false);
+                                eprintln!("[distill] title changed {:?} → {:?} project={} is_room={is_room}",
+                                    prev_title, snap.title, p.project);
                                 if is_room {
                                     // Bounded: this runs in the engine loop that also
                                     // owns heartbeat/distill, so a relay stall must not
@@ -228,6 +237,7 @@ pub async fn run_session_in_daemon(
                                     let renamed = tokio::time::timeout(std::time::Duration::from_secs(3), rename)
                                         .await
                                         .unwrap_or(false);
+                                    eprintln!("[distill] nip29 rename group={} title={:?} accepted={renamed}", p.project, snap.title);
                                     if renamed {
                                         let parent = st!(|s: &Store| s.group_parent(&p.project)).ok().flatten().unwrap_or_default();
                                         st!(|s: &Store| s.upsert_group_metadata(&p.project, &snap.title, &parent, now).ok());
@@ -313,9 +323,19 @@ pub async fn run_session_in_daemon(
                                 now.saturating_sub(last_distill_attempt) >= turn_first
                             };
                             if due {
-                                let ctx = st!(|s: &Store| s.get_session_transcript(&p.session_id).ok().flatten())
-                                    .and_then(|path| crate::transcript::read_recent(std::path::Path::new(&path), 14, 2500));
+                                let transcript_path = st!(|s: &Store| s.get_session_transcript(&p.session_id).ok().flatten());
+                                eprintln!("[distill] due session={} transcript_path={:?}",
+                                    &p.session_id[..8.min(p.session_id.len())], transcript_path);
+                                let ctx = transcript_path.and_then(|path| {
+                                    let result = crate::transcript::read_recent(std::path::Path::new(&path), 14, 2500);
+                                    if result.is_none() {
+                                        eprintln!("[distill] read_recent returned None for path={path}");
+                                    }
+                                    result
+                                });
                                 if let Some(ctx) = ctx {
+                                    eprintln!("[distill] spawning task session={} ctx_len={} current_title={:?}",
+                                        &p.session_id[..8.min(p.session_id.len())], ctx.len(), snap.title);
                                     let current = (!snap.title.trim().is_empty()).then(|| snap.title.clone());
                                     last_distill_attempt = now;
                                     distill_task_turn_id = snap.turn_id;

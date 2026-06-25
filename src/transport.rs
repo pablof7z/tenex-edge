@@ -12,13 +12,14 @@
 use anyhow::{Context, Result};
 use nostr_sdk::prelude::*;
 use regex::Regex;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tokio::sync::broadcast;
 
 pub struct Transport {
     client: Client,
     pub pubkey: PublicKey,
+    pub retry_queue: Arc<crate::retry_queue::RetryQueue>,
 }
 
 // ── secret scrubbing ──────────────────────────────────────────────────────────
@@ -110,9 +111,12 @@ fn assert_relay_accepted(output: &Output<EventId>) -> Result<()> {
         .cloned()
         .collect();
     if reasons.is_empty() {
+        crate::relay_log::log_relay_rejection("no relay returned OK (timeout)");
         anyhow::bail!("no relay accepted the event (timeout or no OK received)");
     }
-    anyhow::bail!("relay rejected event: {}", reasons.join("; "));
+    let msg = reasons.join("; ");
+    crate::relay_log::log_relay_rejection(&msg);
+    anyhow::bail!("relay rejected event: {msg}");
 }
 
 // ── Transport ─────────────────────────────────────────────────────────────────
@@ -135,7 +139,11 @@ impl Transport {
         // (`who`, `tmux`, chat/inbox reads) serve instantly even when the relay
         // is slow or unreachable.
         client.connect().await;
-        Ok(Self { client, pubkey })
+        Ok(Self {
+            client,
+            pubkey,
+            retry_queue: Arc::new(crate::retry_queue::RetryQueue::default()),
+        })
     }
 
     /// Block (bounded) until the relay connection is established, then force
@@ -190,6 +198,7 @@ impl Transport {
         let mut unsigned = builder.build(keys.public_key());
         scrub_unsigned(&mut unsigned);
         let signed = keys.sign_event(unsigned).await.context("signing event")?;
+        crate::relay_log::log_outgoing_event(&signed);
         let out = self
             .client
             .send_event(&signed)
@@ -213,12 +222,16 @@ impl Transport {
         let mut unsigned = builder.build(keys.public_key());
         scrub_unsigned(&mut unsigned);
         let signed = keys.sign_event(unsigned).await.context("signing event")?;
+        crate::relay_log::log_outgoing_event(&signed);
         let out = self
             .client
             .send_event(&signed)
             .await
             .context("publishing signed event")?;
-        assert_relay_accepted(&out)?;
+        if let Err(e) = assert_relay_accepted(&out) {
+            self.retry_queue.push_failed(signed);
+            return Err(e);
+        }
         Ok(out.val)
     }
 
@@ -234,6 +247,7 @@ impl Transport {
 
     /// Publish an already-signed event (see [`sign`]).
     pub async fn publish_event(&self, signed: &Event) -> Result<EventId> {
+        crate::relay_log::log_outgoing_event(signed);
         let out = self
             .client
             .send_event(signed)
@@ -250,13 +264,33 @@ impl Transport {
     /// `channels_create`, which returns `orchestration_event_id` to the operator
     /// and drives a local fast-path handler off the same event.
     pub async fn publish_event_checked(&self, signed: &Event) -> Result<EventId> {
+        crate::relay_log::log_outgoing_event(signed);
         let out = self
             .client
             .send_event(signed)
             .await
             .context("publishing signed event")?;
-        assert_relay_accepted(&out)?;
+        if let Err(e) = assert_relay_accepted(&out) {
+            self.retry_queue.push_failed(signed.clone());
+            return Err(e);
+        }
         Ok(out.val)
+    }
+
+    /// Retry a previously-failed signed event. Treats relay "duplicate" responses
+    /// as success (the event is already stored). Used exclusively by the retry
+    /// drainer — does NOT re-enqueue on failure so the drainer controls backoff.
+    pub async fn retry_publish(&self, event: &Event) -> bool {
+        crate::relay_log::log_outgoing_event(event);
+        let out = match self.client.send_event(event).await {
+            Ok(o) => o,
+            Err(_) => return false,
+        };
+        if !out.success.is_empty() {
+            return true;
+        }
+        // "duplicate" means the relay already has the event — treat as success.
+        out.failed.values().any(|r| r.contains("duplicate"))
     }
 
     /// One-shot query (used for resolution — e.g. fetch a `kind:0` profile).
