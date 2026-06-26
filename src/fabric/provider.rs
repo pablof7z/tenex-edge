@@ -1053,7 +1053,11 @@ fn ensure_channel_ready_inner<'a>(
 
         // Ensure parent exists first (recursive). Use the mgmt pubkey as the
         // member since the parent is the operator's project group.
-        if let Some(parent) = ctx.parent_hint {
+        //
+        // After the recursive call, collect the parent's admin set from the
+        // local store (populated during the recursive ensure) so we can
+        // propagate it into this channel — child.admins ⊇ parent.admins.
+        let parent_admins: Vec<String> = if let Some(parent) = ctx.parent_hint {
             // Look up grandparent from the local store so we never lose the
             // hierarchy when recursing more than one level.
             let grandparent = provider.with_store(|s| s.group_parent(parent).unwrap_or(None));
@@ -1070,7 +1074,19 @@ fn ensure_channel_ready_inner<'a>(
                 );
                 return ChannelGate::Degraded;
             }
-        }
+            // Read parent's admins from the local cache (just populated by the
+            // recursive call). These must also be admins in this child channel.
+            provider.with_store(|s| {
+                s.list_group_members(parent)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|(_, role)| role == "admin")
+                    .map(|(pk, _)| pk)
+                    .collect()
+            })
+        } else {
+            vec![]
+        };
 
         let (group_exists, roles, members) = provider.fetch_group_state(ctx.channel).await;
         let mut repaired = false;
@@ -1146,20 +1162,44 @@ fn ensure_channel_ready_inner<'a>(
             }
         }
 
-        // Backfill whitelisted human pubkeys as admins (only when we just created
-        // the group or the mgmt key just became admin — skip on subsequent runs
-        // since the relay-side 39001 snapshot keeps us in sync via the
-        // materializer subscription; do a local check to avoid redundant fetches).
-        if !group_exists {
-            for pk in &provider.whitelisted_pubkeys {
-                if roles.get(pk).map(String::as_str) != Some("admin") {
-                    provider.nip29_add_admin(ctx.channel, pk).await;
+        // Invariant for ALL channels: mgmt_pubkey + all whitelisted pubkeys.
+        // Invariant for child channels: also every admin of the immediate parent.
+        // Run unconditionally so a re-run repairs any gap (new machine,
+        // whitelist change, relay state drift, parent admin set grew).
+        {
+            let mut required_admins: Vec<String> = vec![mgmt_pubkey.clone()];
+            required_admins.extend(provider.whitelisted_pubkeys.iter().cloned());
+            // Propagate parent admins into child (child.admins ⊇ parent.admins).
+            for pk in &parent_admins {
+                if !required_admins.contains(pk) {
+                    required_admins.push(pk.clone());
+                }
+            }
+            for pk in &required_admins {
+                if roles.get(pk.as_str()).map(String::as_str) != Some("admin") {
+                    let added = provider.nip29_add_admin(ctx.channel, pk).await;
+                    if added {
+                        provider.with_store(|s| {
+                            s.upsert_group_member(ctx.channel, pk, "admin", now_secs()).ok();
+                        });
+                        repaired = true;
+                    }
                 }
             }
         }
 
-        // Add expect_member if absent.
-        if !members.contains(ctx.expect_member) && !roles.contains_key(ctx.expect_member) {
+        // Add expect_member as plain member if not already covered by the admin
+        // set above (avoids redundant member-add for anyone granted admin above).
+        let expect_already_admin = mgmt_pubkey == ctx.expect_member
+            || provider
+                .whitelisted_pubkeys
+                .iter()
+                .any(|pk| pk == ctx.expect_member)
+            || parent_admins.iter().any(|pk| pk == ctx.expect_member);
+        if !expect_already_admin
+            && !members.contains(ctx.expect_member)
+            && !roles.contains_key(ctx.expect_member)
+        {
             let added = provider.nip29_add_member(ctx.channel, ctx.expect_member).await;
             if added {
                 provider.with_store(|s| {
