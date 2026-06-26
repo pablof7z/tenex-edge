@@ -84,8 +84,24 @@ pub(crate) fn wait_until(timeout: Duration, mut pred: impl FnMut() -> bool) -> b
 /// SYNCHRONOUS blocking client (`daemon::blocking`) + real CLI dispatch + the
 /// actual stdout bytes the hooks parse.
 pub(crate) fn run_cli(home: &Home, args: &[&str]) -> std::process::Output {
-    std::process::Command::new(bin())
-        .args(args)
+    cli_command(home, args).output().expect("run tenex-edge")
+}
+
+pub(crate) fn run_cli_with_env(
+    home: &Home,
+    args: &[&str],
+    env: &[(&str, &str)],
+) -> std::process::Output {
+    let mut cmd = cli_command(home, args);
+    for (key, value) in env {
+        cmd.env(key, value);
+    }
+    cmd.output().expect("run tenex-edge")
+}
+
+fn cli_command(home: &Home, args: &[&str]) -> std::process::Command {
+    let mut cmd = std::process::Command::new(bin());
+    cmd.args(args)
         // Isolate from the invoking shell's tenex-edge env (a live claude/codex
         // shell exports these), so agent/session resolution is deterministic.
         .env_remove("TENEX_EDGE_AGENT")
@@ -94,25 +110,29 @@ pub(crate) fn run_cli(home: &Home, args: &[&str]) -> std::process::Output {
         .env("TENEX_EDGE_HOME", home.dir.path())
         .env("TENEX_CONFIG", home.dir.path().join("config.json"))
         .env("TENEX_EDGE_BIN", bin())
-        .env("TENEX_EDGE_DAEMON_GRACE_S", "30")
-        .output()
-        .expect("run tenex-edge")
+        .env("TENEX_EDGE_DAEMON_GRACE_S", "30");
+    cmd
 }
 
 // Like run_cli, but pipes `stdin` to the child — used to drive the `hook`
 // subcommand, which reads its harness payload from stdin (there are no longer
 // any session/turn subcommands to call directly).
 pub(crate) fn run_cli_stdin(home: &Home, args: &[&str], stdin: &str) -> std::process::Output {
+    run_cli_stdin_with_env(home, args, stdin, &[])
+}
+
+pub(crate) fn run_cli_stdin_with_env(
+    home: &Home,
+    args: &[&str],
+    stdin: &str,
+    env: &[(&str, &str)],
+) -> std::process::Output {
     use std::io::Write as _;
-    let mut child = std::process::Command::new(bin())
-        .args(args)
-        .env_remove("TENEX_EDGE_AGENT")
-        .env_remove("TENEX_EDGE_AGENT_FALLBACK")
-        .env_remove("TENEX_EDGE_SESSION")
-        .env("TENEX_EDGE_HOME", home.dir.path())
-        .env("TENEX_CONFIG", home.dir.path().join("config.json"))
-        .env("TENEX_EDGE_BIN", bin())
-        .env("TENEX_EDGE_DAEMON_GRACE_S", "30")
+    let mut cmd = cli_command(home, args);
+    for (key, value) in env {
+        cmd.env(key, value);
+    }
+    let mut child = cmd
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())

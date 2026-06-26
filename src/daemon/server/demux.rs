@@ -169,11 +169,7 @@ async fn handle_offline_agent_mention(state: &Arc<DaemonState>, mentioned_pk: &s
         return;
     }
 
-    let group_arg: Option<&str> = if project != work_root {
-        Some(project)
-    } else {
-        None
-    };
+    let group_arg = Some(project);
     eprintln!("[spawn-on-mention] spawning {agent_slug} into {project} (work_root={work_root})");
     match crate::tmux::spawn_agent(
         state,

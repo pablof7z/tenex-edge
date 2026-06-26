@@ -151,14 +151,22 @@ fn chat_write_stdin_enqueues_live_project_chat_for_receiver() {
             r["session_id"].as_str().unwrap().to_string(),
         )
     });
+    let receiver_scope = Store::open(&home.store_path())
+        .unwrap()
+        .get_session(&receiver_canon)
+        .unwrap()
+        .expect("receiver session row")
+        .route_scope()
+        .to_string();
 
     // Mention is now inline in the body as `@<codename>` — no --mention flag.
     let receiver_codename = session_codename(&receiver_canon);
     let body = format!("hello @{receiver_codename} from redirected stdin");
-    let out = run_cli_stdin(
+    let out = run_cli_stdin_with_env(
         &home,
-        &["chat", "write", "--session", "chat-sender-session"],
+        &["chat", "write"],
         &format!("{body}\n"),
+        &[("TENEX_EDGE_SESSION", "chat-sender-session")],
     );
     assert!(
         out.status.success(),
@@ -166,7 +174,11 @@ fn chat_write_stdin_enqueues_live_project_chat_for_receiver() {
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
-    let out = run_cli(&home, &["chat", "read", "--project", "tmp", "--limit", "1"]);
+    let out = run_cli_with_env(
+        &home,
+        &["chat", "read", "--channel", &receiver_scope, "--limit", "1"],
+        &[("TENEX_EDGE_SESSION", "chat-sender-session")],
+    );
     assert!(
         out.status.success(),
         "chat read failed\nstdout: {}\nstderr: {}",
