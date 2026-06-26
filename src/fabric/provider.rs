@@ -10,6 +10,7 @@
 
 use crate::domain::DomainEvent;
 use crate::fabric::group_management::{classify_group_publish_error, GroupPublishOutcome};
+use crate::fabric::nip29::readiness::{ChannelCtx, ChannelGate, ChannelReadiness};
 use crate::fabric::nip29::wire::Nip29WireCodec;
 use crate::fabric::nostr_delivery::NostrDelivery;
 use crate::fabric::{MaterializationOutcome, RawEnvelope, WireCodec};
@@ -19,7 +20,9 @@ use crate::util::now_secs;
 use anyhow::Result;
 use nostr_sdk::EventBuilder;
 use std::collections::hash_map::DefaultHasher;
+use std::future::Future;
 use std::hash::{Hash, Hasher};
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -72,6 +75,10 @@ pub struct Nip29Provider {
     /// column in canonical origin rows, making them deterministic across daemon
     /// restarts. Derived once at construction from `cfg.relays`.
     pub provider_instance: String,
+    /// TTL'd in-process cache of which channels are known-ready (exist on the
+    /// relay with at least the expected member). All domain publishes check this
+    /// before hitting the wire.
+    pub readiness: Arc<ChannelReadiness>,
 }
 
 impl Nip29Provider {
@@ -95,6 +102,7 @@ impl Nip29Provider {
             user_nsec,
             whitelisted_pubkeys,
             provider_instance,
+            readiness: Arc::new(ChannelReadiness::default()),
         }
     }
 
@@ -124,6 +132,16 @@ impl Nip29Provider {
         ev: &DomainEvent,
         keys: &nostr_sdk::prelude::Keys,
     ) -> Result<nostr_sdk::prelude::EventId> {
+        if let Some(ch) = ev.channel() {
+            let agent_pubkey = keys.public_key().to_hex();
+            let parent = self.with_store(|s| s.group_parent(ch).unwrap_or(None));
+            let ctx = ChannelCtx {
+                channel: ch,
+                expect_member: &agent_pubkey,
+                parent_hint: parent.as_deref(),
+            };
+            self.ensure_channel_ready(ctx).await;
+        }
         let builder = self.wire.encode(ev)?;
         self.transport.publish_signed(builder, keys).await
     }
@@ -137,6 +155,16 @@ impl Nip29Provider {
         ev: &DomainEvent,
         keys: &nostr_sdk::prelude::Keys,
     ) -> Result<nostr_sdk::prelude::EventId> {
+        if let Some(ch) = ev.channel() {
+            let agent_pubkey = keys.public_key().to_hex();
+            let parent = self.with_store(|s| s.group_parent(ch).unwrap_or(None));
+            let ctx = ChannelCtx {
+                channel: ch,
+                expect_member: &agent_pubkey,
+                parent_hint: parent.as_deref(),
+            };
+            self.ensure_channel_ready(ctx).await;
+        }
         let builder = self.wire.encode(ev)?;
         self.transport.publish_signed_checked(builder, keys).await
     }
@@ -883,6 +911,14 @@ impl Nip29Provider {
         status: &crate::domain::Status,
         keys: &nostr_sdk::prelude::Keys,
     ) -> Result<nostr_sdk::prelude::EventId> {
+        let agent_pubkey = keys.public_key().to_hex();
+        let parent = self.with_store(|s| s.group_parent(&status.project).unwrap_or(None));
+        let ctx = ChannelCtx {
+            channel: &status.project,
+            expect_member: &agent_pubkey,
+            parent_hint: parent.as_deref(),
+        };
+        self.ensure_channel_ready(ctx).await;
         let builder = self.wire.encode(&DomainEvent::Status(status.clone()))?;
         self.transport.publish_signed(builder, keys).await
     }
@@ -939,12 +975,229 @@ impl Nip29Provider {
         crate::fabric::materialize(env, hosted, now, &self.provider_instance, store)
     }
 
+    // ── channel readiness gate ────────────────────────────────────────────────
+
+    /// Ensure `ctx.channel` exists on the relay, has `ctx.expect_member` as a
+    /// member, and (when `ctx.parent_hint` is set and the channel doesn't yet
+    /// exist) is created as a subgroup of the hint rather than standalone.
+    /// Parents are ensured first, recursively.
+    ///
+    /// Fail-open: always returns (never propagates relay errors); the publish
+    /// proceeds even on `Degraded`. TTL-cached so steady-state heartbeats cost
+    /// only an in-memory check.
+    pub async fn ensure_channel_ready<'a>(&'a self, ctx: ChannelCtx<'a>) -> ChannelGate {
+        ensure_channel_ready_inner(self, ctx, 0).await
+    }
+
     // ── private helpers ───────────────────────────────────────────────────────
 
     fn with_store<R>(&self, f: impl FnOnce(&Store) -> R) -> R {
         let g = self.store.lock().expect("store mutex poisoned");
         f(&g)
     }
+}
+
+// ── ensure_channel_ready_inner ────────────────────────────────────────────────
+
+/// Boxed-future helper for recursive async channel-readiness checks.
+/// Rust doesn't allow direct async recursion; this free function returns a
+/// `Pin<Box<dyn Future>>` so the call can recurse safely.
+fn ensure_channel_ready_inner<'a>(
+    provider: &'a Nip29Provider,
+    ctx: ChannelCtx<'a>,
+    depth: u8,
+) -> Pin<Box<dyn Future<Output = ChannelGate> + Send + 'a>> {
+    Box::pin(async move {
+        if depth > 3 {
+            eprintln!(
+                "[daemon] ensure_channel_ready: recursion depth limit reached for {:?}",
+                ctx.channel
+            );
+            return ChannelGate::Degraded;
+        }
+
+        // ── fast path: TTL cache ──────────────────────────────────────────────
+
+        let (is_ready, inflight) = provider.readiness.check(ctx.channel);
+        if is_ready {
+            return ChannelGate::Ready;
+        }
+
+        // Single-flight: acquire the per-channel lock so concurrent callers
+        // for the same channel coalesce onto one relay fetch.
+        let _guard = inflight.lock().await;
+
+        // Re-check after acquiring — another task may have repaired it.
+        let (is_ready, _) = provider.readiness.check(ctx.channel);
+        if is_ready {
+            return ChannelGate::Ready;
+        }
+
+        // ── local store check (no relay I/O) ─────────────────────────────────
+
+        let locally_member = provider.with_store(|s| {
+            s.is_group_member(ctx.channel, ctx.expect_member)
+                .unwrap_or(false)
+        });
+        if locally_member {
+            provider.readiness.mark_ready(ctx.channel);
+            return ChannelGate::Ready;
+        }
+
+        // ── slow path: relay fetch + repair ──────────────────────────────────
+
+        let Some(mgmt_keys) = provider.parse_management_keys() else {
+            return ChannelGate::Degraded;
+        };
+        let mgmt_pubkey = mgmt_keys.public_key().to_hex();
+
+        // Ensure parent exists first (recursive). Use the mgmt pubkey as the
+        // member since the parent is the operator's project group.
+        if let Some(parent) = ctx.parent_hint {
+            // Look up grandparent from the local store so we never lose the
+            // hierarchy when recursing more than one level.
+            let grandparent = provider.with_store(|s| s.group_parent(parent).unwrap_or(None));
+            let parent_ctx = ChannelCtx {
+                channel: parent,
+                expect_member: &mgmt_pubkey,
+                parent_hint: grandparent.as_deref(),
+            };
+            let parent_gate = ensure_channel_ready_inner(provider, parent_ctx, depth + 1).await;
+            if matches!(parent_gate, ChannelGate::Degraded) {
+                eprintln!(
+                    "[daemon] ensure_channel_ready: parent {:?} is degraded; aborting for {:?}",
+                    parent, ctx.channel
+                );
+                return ChannelGate::Degraded;
+            }
+        }
+
+        let (group_exists, roles, members) = provider.fetch_group_state(ctx.channel).await;
+        let mut repaired = false;
+
+        if !group_exists {
+            // Parent hint wins when the channel doesn't exist on the relay yet.
+            let created = if let Some(parent) = ctx.parent_hint {
+                let name = provider.with_store(|s| {
+                    s.group_display_name(ctx.channel).unwrap_or_default()
+                });
+                let name = if name.is_empty() { ctx.channel } else { &name };
+                let ok = provider.nip29_create_subgroup(ctx.channel, name, parent).await;
+                if ok {
+                    provider.with_store(|s| {
+                        s.mark_group_owned(ctx.channel, now_secs()).ok();
+                        s.upsert_group_metadata(ctx.channel, name, parent, now_secs()).ok();
+                    });
+                }
+                ok
+            } else {
+                // Top-level group: create + lock.
+                let ok = match crate::fabric::nip29::lifecycle::group_create(ctx.channel) {
+                    Ok(b) => {
+                        provider
+                            .publish_group_management(b, &mgmt_keys, "9007 create-group")
+                            .await
+                    }
+                    Err(_) => false,
+                };
+                if ok {
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                    let locked = match crate::fabric::nip29::lifecycle::group_lock_closed(ctx.channel) {
+                        Ok(b) => {
+                            provider
+                                .publish_group_management(b, &mgmt_keys, "9002 lock-closed")
+                                .await
+                        }
+                        Err(_) => false,
+                    };
+                    if locked {
+                        provider.with_store(|s| {
+                            s.mark_group_owned(ctx.channel, now_secs()).ok();
+                        });
+                    }
+                }
+                ok
+            };
+
+            if !created {
+                eprintln!(
+                    "[daemon] ensure_channel_ready: failed to create {:?}",
+                    ctx.channel
+                );
+                return ChannelGate::Degraded;
+            }
+            repaired = true;
+            // Give the relay a moment to settle before member-add.
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        } else {
+            // Channel exists — ensure our management key is admin.
+            if roles.get(&mgmt_pubkey).map(String::as_str) != Some("admin") {
+                let granted = provider
+                    .try_grant_mgmt_admin_via_user_nsec(ctx.channel, &mgmt_pubkey)
+                    .await;
+                if !granted {
+                    eprintln!(
+                        "[daemon] ensure_channel_ready: management key is not admin of {:?} \
+                         and self-grant failed",
+                        ctx.channel
+                    );
+                    return ChannelGate::Degraded;
+                }
+            }
+        }
+
+        // Backfill whitelisted human pubkeys as admins (only when we just created
+        // the group or the mgmt key just became admin — skip on subsequent runs
+        // since the relay-side 39001 snapshot keeps us in sync via the
+        // materializer subscription; do a local check to avoid redundant fetches).
+        if !group_exists {
+            for pk in &provider.whitelisted_pubkeys {
+                if roles.get(pk).map(String::as_str) != Some("admin") {
+                    provider.nip29_add_admin(ctx.channel, pk).await;
+                }
+            }
+        }
+
+        // Add expect_member if absent.
+        if !members.contains(ctx.expect_member) && !roles.contains_key(ctx.expect_member) {
+            let added = provider.nip29_add_member(ctx.channel, ctx.expect_member).await;
+            if added {
+                provider.with_store(|s| {
+                    s.upsert_group_member(
+                        ctx.channel,
+                        ctx.expect_member,
+                        "member",
+                        now_secs(),
+                    )
+                    .ok();
+                });
+                repaired = true;
+            }
+        } else {
+            // Already in relay roster — mirror into local cache if missing.
+            let locally = provider.with_store(|s| {
+                s.is_group_member(ctx.channel, ctx.expect_member)
+                    .unwrap_or(false)
+            });
+            if !locally {
+                let role = roles
+                    .get(ctx.expect_member)
+                    .map(String::as_str)
+                    .unwrap_or("member");
+                provider.with_store(|s| {
+                    s.upsert_group_member(ctx.channel, ctx.expect_member, role, now_secs())
+                        .ok();
+                });
+            }
+        }
+
+        provider.readiness.mark_ready(ctx.channel);
+        if repaired {
+            ChannelGate::Repaired
+        } else {
+            ChannelGate::Ready
+        }
+    })
 }
 
 // ── module-level helpers ──────────────────────────────────────────────────────

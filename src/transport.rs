@@ -100,7 +100,7 @@ fn scrub_unsigned(unsigned: &mut UnsignedEvent) {
 /// rejected the event (or the connection timed out before any OK arrived), so a
 /// caller reporting "published" off the bare `Ok` would be lying. This converts
 /// that into a hard error carrying the relay's stated reason.
-fn assert_relay_accepted(output: &Output<EventId>) -> Result<()> {
+fn assert_relay_accepted(output: &Output<EventId>, event: Option<&Event>) -> Result<()> {
     if !output.success.is_empty() {
         return Ok(());
     }
@@ -111,11 +111,11 @@ fn assert_relay_accepted(output: &Output<EventId>) -> Result<()> {
         .cloned()
         .collect();
     if reasons.is_empty() {
-        crate::relay_log::log_relay_rejection("no relay returned OK (timeout)");
+        crate::relay_log::log_relay_rejection("no relay returned OK (timeout)", event);
         anyhow::bail!("no relay accepted the event (timeout or no OK received)");
     }
     let msg = reasons.join("; ");
-    crate::relay_log::log_relay_rejection(&msg);
+    crate::relay_log::log_relay_rejection(&msg, event);
     anyhow::bail!("relay rejected event: {msg}");
 }
 
@@ -184,7 +184,7 @@ impl Transport {
             .send_event_builder(builder)
             .await
             .context("publishing event")?;
-        assert_relay_accepted(&out)?;
+        assert_relay_accepted(&out, None)?;
         Ok(out.val)
     }
 
@@ -231,7 +231,7 @@ impl Transport {
             .send_event(&signed)
             .await
             .context("publishing signed event")?;
-        assert_relay_accepted(&out)?;
+        assert_relay_accepted(&out, Some(&signed))?;
         Ok(out.val)
     }
 
@@ -271,7 +271,7 @@ impl Transport {
             .send_event(signed)
             .await
             .context("publishing signed event")?;
-        assert_relay_accepted(&out)?;
+        assert_relay_accepted(&out, Some(signed))?;
         Ok(out.val)
     }
 
@@ -389,13 +389,13 @@ mod tests {
     #[test]
     fn accepted_when_any_relay_succeeds() {
         let out = output_with(&["wss://ok.relay"], &[("wss://bad.relay", "blocked")]);
-        assert!(assert_relay_accepted(&out).is_ok());
+        assert!(assert_relay_accepted(&out, None).is_ok());
     }
 
     #[test]
     fn rejected_surfaces_relay_reason() {
         let out = output_with(&[], &[("wss://nip29.relay", "blocked: unknown member")]);
-        let err = assert_relay_accepted(&out).unwrap_err().to_string();
+        let err = assert_relay_accepted(&out, None).unwrap_err().to_string();
         assert!(err.contains("blocked: unknown member"), "got: {err}");
     }
 
@@ -403,7 +403,7 @@ mod tests {
     fn no_accept_no_reason_reports_timeout() {
         // Every relay silent: send_event resolved Ok but no OK,true ever arrived.
         let out = output_with(&[], &[]);
-        let err = assert_relay_accepted(&out).unwrap_err().to_string();
+        let err = assert_relay_accepted(&out, None).unwrap_err().to_string();
         assert!(err.contains("no relay accepted"), "got: {err}");
     }
 
