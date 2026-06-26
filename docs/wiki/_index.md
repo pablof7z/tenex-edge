@@ -2,7 +2,7 @@
 
 > Derived cache — do not hand-edit. Rebuilt by proactive-context after each capture.
 
-Last updated: 2026-06-23
+Last updated: 2026-06-26
 
 ## agent-configuration (1 guide)
 
@@ -227,7 +227,7 @@ Last updated: 2026-06-23
 | [tenex-edge-session-resume](guides/tenex-edge-session-resume.md) | tenex-edge Session Resume | Session resume is local-only: resuming a remote machine's session requires SSH and is out of scope | capture | warm | 2026-06-14 | tenex-edge |
 | [tenex-edge-session-spawn-race](guides/tenex-edge-session-spawn-race.md) | Tenex-Edge Session Spawn Race Condition | A race condition in `spawn_session` allows two runtime tasks to be alive for the same `session_id`, causing the published kind:30315 event to flip-flop between | capture | warm | 2026-06-16 | tenex-edge |
 | [tenex-edge-session-state](guides/tenex-edge-session-state.md) | Tenex-Edge Session State | The core architectural defect is that session state has no single owner; one logical fact (session S is about TITLE, doing ACTIVITY, busy B) physically lives in | capture | warm | 2026-06-16 | tenex-edge |
-| [tenex-edge-session-title](guides/tenex-edge-session-title.md) | Tenex-Edge Session Title | The current session title is held in `cur_title: Option<String>`, a local variable in the per-session engine loop in `src/runtime.rs:149`, which is the single i | capture | warm | 2026-06-16 | tenex-edge |
+| [tenex-edge-session-title](guides/tenex-edge-session-title.md) | Tenex-Edge Session Title | Claude Code has no native session title field, so the tenex-edge runtime synthesizes and maintains one in memory via prompt seeding and LLM distillation. | capture | warm | 2026-06-16 | tenex-edge |
 | [tenex-edge-statusline](guides/tenex-edge-statusline.md) | tenex-edge Statusline | The statusline format is: `claude@host [session-id] â¬¡{member_count} â{session_count} {activity} {distill_error} {inbox_segment}`, where â¬¡ is count of NIP- | capture | warm | 2026-06-12 | tenex-edge |
 | [tenex-edge-strategic-posture](guides/tenex-edge-strategic-posture.md) | tenex-edge Strategic Posture | The Tenex Edge distribution mechanism is strictly an adapter that external systems depend on, never the reverseâthe word 'plugin' must not leak into tenex-edg | capture | warm | 2026-06-07 | tenex-edge |
 | [tenex-edge-tail-design](guides/tenex-edge-tail-design.md) | Tenex-Edge Tail Design | The tail v2 command provides a structured TailEvent stream with 9 variants (Msg, Sync, Turn, Join, Leave, Sess, Status, Proj, Profile), heartbeatâjoin/leave d | capture | warm | 2026-06-09 | tenex-edge |
@@ -256,15 +256,16 @@ Last updated: 2026-06-23
 |------|-------|---------|------|------------|----------|-------|
 | [tenex-branch-management](guides/tenex-branch-management.md) | Branch Management | Divergent branches must be resolved through a proper merge that preserves all work from both sides, not via a force-push. | capture | warm | 2026-06-13 | version-control |
 
-## Research Records (3 records)
+## Research Records (4 records)
 
 | Record | Date | Finding | Agent |
 |--------|------|---------|-------|
 | [2026-06-12-1-review-of-fabric-architecture-branch-verdict](research/2026-06-12-1-review-of-fabric-architecture-branch-verdict.md) | 2026-06-12 | Review of fabric-architecture branch: verdict is refactor is complete, working, and well-tested but no longer cleanly mergeable due to master divergence (~29 conflict hunks) | main |
 | [2026-06-18-1-experiment-comparing-session-title-generation-with](research/2026-06-18-1-experiment-comparing-session-title-generation-with.md) | 2026-06-18 | Experiment comparing session title generation with vs without tool_use in distillation context, finding that stripping tool_use makes titles anchor on user intent instead of agent actions | main |
 | [2026-06-18-1-verification-and-severity-triaging-of-codex](research/2026-06-18-1-verification-and-severity-triaging-of-codex.md) | 2026-06-18 | Verification and severity-triaging of codex review findings on session-state rearchitecture, confirming critical harness-id vs canonical-id alias mismatch and heartbeat expiration bugs | main |
+| [AGENTS](research/AGENTS.md) |  |  |  |
 
-## Episode Cards (212 cards)
+## Episode Cards (217 cards)
 
 | Card | Date | Title | Salience | Status |
 |------|------|-------|----------|--------|
@@ -328,11 +329,11 @@ Last updated: 2026-06-23
 | [2026-06-09-3-relay29-authorizes-group-writes-by-event](episodes/2026-06-09-3-relay29-authorizes-group-writes-by-event.md) | 2026-06-09 | Relay29 authorizes group writes by event author, not connection AUTH identity | root-cause | active |
 | [2026-06-09-3-session-aware-routing-fixes-sibling-session](episodes/2026-06-09-3-session-aware-routing-fixes-sibling-session.md) | 2026-06-09 | Session-aware routing fixes sibling-session mention delivery | root-cause | active |
 | [2026-06-09-3-session-aware-routing-local-delivery-per](episodes/2026-06-09-3-session-aware-routing-local-delivery-per.md) | 2026-06-09 | Session-aware routing: local delivery, per-session dedup, agent-scoped resolution | root-cause | active |
-| [2026-06-09-3-session-short-ids-changed-from-uuid](episodes/2026-06-09-3-session-short-ids-changed-from-uuid.md) | 2026-06-09 | Session short IDs changed from UUID prefixes to hash-based codes to avoid confusion | product | active |
+| [2026-06-09-3-session-short-ids-changed-from-uuid](episodes/2026-06-09-3-session-short-ids-changed-from-uuid.md) | 2026-06-09 | Session short IDs changed from UUID prefixes to hash-based codes to avoid confusion | product | superseded |
 | [2026-06-09-4-cwd-who-8e-correct-implementation-replaces](episodes/2026-06-09-4-cwd-who-8e-correct-implementation-replaces.md) | 2026-06-09 | cwd/who §8e: correct implementation replaces buggy partial | product | active |
 | [2026-06-09-4-who-output-redesigned-with-rel-cwd](episodes/2026-06-09-4-who-output-redesigned-with-rel-cwd.md) | 2026-06-09 | who output redesigned with rel_cwd and correct remote annotation | product | active |
 | [2026-06-10-1-subscription-fanout-causes-duplicate-events-in](episodes/2026-06-10-1-subscription-fanout-causes-duplicate-events-in.md) | 2026-06-10 | Subscription fanout causes duplicate events in tail | root-cause | superseded |
-| [2026-06-10-2-sessionid-newtype-enforces-correct-display-formatting](episodes/2026-06-10-2-sessionid-newtype-enforces-correct-display-formatting.md) | 2026-06-10 | SessionId newtype enforces correct display formatting by construction | architecture | active |
+| [2026-06-10-2-sessionid-newtype-enforces-correct-display-formatting](episodes/2026-06-10-2-sessionid-newtype-enforces-correct-display-formatting.md) | 2026-06-10 | SessionId newtype enforces correct display formatting by construction | architecture | superseded |
 | [2026-06-10-3-restore-accidentally-deleted-propose-command-without](episodes/2026-06-10-3-restore-accidentally-deleted-propose-command-without.md) | 2026-06-10 | Restore accidentally-deleted propose command without agent tags or session requirement | reversal | active |
 | [2026-06-12-1-add-project-add-cli-command-for](episodes/2026-06-12-1-add-project-add-cli-command-for.md) | 2026-06-12 | Add `project add` CLI command for NIP-29 group membership | product | active |
 | [2026-06-12-1-add-tenex-edge-project-add-cli](episodes/2026-06-12-1-add-tenex-edge-project-add-cli.md) | 2026-06-12 | Add `tenex-edge project add` CLI command for NIP-29 group membership | product | active |
@@ -481,3 +482,30 @@ Last updated: 2026-06-23
 | [2026-06-17-2-strategy-reversal-replies-first-corpus-first](episodes/2026-06-17-2-strategy-reversal-replies-first-corpus-first.md) | 2026-06-17 | Strategy reversal: replies-first → corpus-first | reversal | active |
 | [2026-06-19-1-hook-binary-resolution-switched-from-hardcoded](episodes/2026-06-19-1-hook-binary-resolution-switched-from-hardcoded.md) | 2026-06-19 | Hook binary resolution switched from hardcoded path to PATH lookup | architecture | active |
 | [2026-06-19-1-session-display-identity-replaced-6-char](episodes/2026-06-19-1-session-display-identity-replaced-6-char.md) | 2026-06-19 | Session display identity replaced: 6-char hex hash → NATO phonetic codename | reversal | active |
+| [2026-06-26-1-format-variable-quoting-mismatch-causes-silent](episodes/2026-06-26-1-format-variable-quoting-mismatch-causes-silent.md) | 2026-06-26 | Format variable quoting mismatch causes silent statusline failure when session identifier is unset | root-cause | active |
+| [2026-06-26-1-relay-rejection-logs-include-event-context](episodes/2026-06-26-1-relay-rejection-logs-include-event-context.md) | 2026-06-26 | Relay rejection logs include event context | product | active |
+| [2026-06-26-2-outgoing-relay-logs-include-event-id](episodes/2026-06-26-2-outgoing-relay-logs-include-event-id.md) | 2026-06-26 | Outgoing relay logs include event ID for server correlation | product | active |
+| [2026-06-26-3-channel-readiness-unified-into-publish-funnel](episodes/2026-06-26-3-channel-readiness-unified-into-publish-funnel.md) | 2026-06-26 | Channel readiness unified into publish-funnel gate | architecture | active |
+
+## Nouns (17 entities)
+
+| Noun | Name | Origin | Definition |
+|------|------|--------|------------|
+| [channel-readiness-gate](nouns/channel-readiness-gate.md) | channel readiness gate | extracted | idempotent `ensure_channel_ready(ctx: ChannelCtx)` method on `Nip29Provider` in `src/fabric/nip29/readiness.rs` that all three domain publish methods (`publish`, `publish_checked`, `set_status`) converge on; uses TTL-cached fast path, per-channel single-flight mutex, local SQLite read-model checks, and recursive parent ensures before provisioning a channel |
+| [domain-publish](nouns/domain-publish.md) | domain publish | extracted | publish above the codec seam: DomainEvent publishes that converge on three methods (publish, publish_checked, set_status) on Nip29Provider and encode via the wire codec |
+| [h-tag](nouns/h-tag.md) | h tag | extracted | the NIP-29 group identifier, derived inside the codec from the DomainEvent's project field, which is always SessionRecord::route_scope() — either the channel (if set) or the per-session room |
+| [nip-29-channel](nouns/nip-29-channel.md) | NIP-29 channel | extracted | the NIP-29 group a session publishes to: for a subgroup task room, the child h supplied via TENEX_EDGE_CHANNEL; otherwise, the working-directory project |
+| [normalized-session-observation](nouns/normalized-session-observation.md) | normalized session observation | extracted | a hook observation describing the harness, harness-owned external ID, resume token, tmux pane, watched PID, and CWD, reported to the daemon which resolves the canonical session ID — minting new, reattaching via alias, or superseding stale |
+| [per-session-room](nouns/per-session-room.md) | per-session room | extracted | a NIP-29 subgroup room_h parented under the work-root project that a human-initiated session lives in; minted idempotently per session |
+| [project-session-context](nouns/project-session-context.md) | project (session context) | extracted | For a subgroup task room, the child h supplied via TENEX_EDGE_CHANNEL; otherwise, the working-directory project |
+| [project-skill](nouns/project-skill.md) | project skill | extracted | a verified, committed record of what works to launch the app: exact package commands, environment variables, patches, and drivers |
+| [rejection-log-format](nouns/rejection-log-format.md) | rejection log format | extracted | includes event context prefix `kind:N  id=<12-hex>  h=<group>  ` when event is available, enabling correlation with relay server logs |
+| [relay-log](nouns/relay-log.md) | relay log | extracted | persistent log of every outgoing relay event and every relay rejection, appended to ~/.tenex-edge/relay.log |
+| [running](nouns/running.md) | Running | extracted | launching and interacting with the app as a user would (CLI at its command, server at its socket, GUI at its window), not just executing code |
+| [statusline](nouns/statusline.md) | statusline | extracted | renders the awareness floor for a host status bar, displaying agent name, project name, session identifier, channel title, and live activity |
+| [subgroup-session](nouns/subgroup-session.md) | subgroup session | extracted | a session stored under its child group id (h), not the working-directory project |
+| [te-session](nouns/te-session.md) | @te_session | extracted | a tmux user option that stores the session identifier for tenex-edge statusline |
+| [tmux-pane](nouns/tmux-pane.md) | TMUX_PANE | extracted | a stable tmux pane ID from the $TMUX_PANE environment variable (e.g. "%5"), present only when the hook fires inside a tmux session |
+| [tmuxstatuscommand](nouns/tmuxstatuscommand.md) | tmuxStatusCommand | extracted | custom tmux status-format string for agent sessions that overrides the default tenex-edge statusline command, using tmux format variables #{q:@te_session}, #{@te_agent}, and #{q:@te_cwd} to reference session identity |
+| [working-directory-project](nouns/working-directory-project.md) | working-directory project | extracted | the repo this harness runs in (resolved from the current working directory) |
+

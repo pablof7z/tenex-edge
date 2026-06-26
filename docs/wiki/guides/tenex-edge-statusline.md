@@ -8,7 +8,7 @@ tags:
 volatility: warm
 confidence: medium
 created: 2026-06-12
-updated: 2026-06-17
+updated: 2026-06-26
 verified: 2026-06-12
 compiled-from: conversation
 sources:
@@ -17,6 +17,7 @@ sources:
   - session:633f8f7f-37f8-409c-90a9-ef64b0dc3216
   - session:e4d3c252-a2ff-40fe-b18d-a608f557322b
   - session:rollout-2026-06-16T14-03-13-019ed019-80ea-7e31-aa11-7302f859b853
+  - session:fb3a3db1-26e3-4a15-9745-056690b09083
 ---
 
 # tenex-edge Statusline
@@ -49,3 +50,7 @@ A `delivered_at` column on the inbox table supports the 30-second 'recently cons
 ## Integration with ccstatusline
 
 The existing `pc` statusline (specifically `pc hook statusline`) and the tenex-edge statusline both run via ccstatusline as a multi-line multiplexer — line 1 is the proactive-context line, line 2 is the fabric line. ccstatusline is installed globally via npm (not bun, which produced a dangling symlink), and the settings.json statusLine command points to `/Users/pablofernandez/.bun/bin/ccstatusline`. The ccstatusline refresh interval is set to 3 seconds. <!-- [^e42f0-5] -->
+
+## Overview
+
+The tenex-edge statusline is a command that outputs session status information to the tmux status bar via the ccstatusline multiplexer. <!-- [^fb3a3-2bb55] -->
