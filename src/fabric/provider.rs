@@ -1018,33 +1018,27 @@ fn ensure_channel_ready_inner<'a>(
 
         // ── fast path: TTL cache ──────────────────────────────────────────────
 
-        let (is_ready, inflight) = provider.readiness.check(ctx.channel);
+        let (is_ready, inflight) = provider.readiness.check(ctx.channel, ctx.expect_member);
         if is_ready {
             return ChannelGate::Ready;
         }
 
-        // Single-flight: acquire the per-channel lock so concurrent callers
-        // for the same channel coalesce onto one relay fetch.
+        // Single-flight: acquire the per-channel+member lock so concurrent
+        // callers for the same (channel, member) pair coalesce onto one relay
+        // fetch.
         let _guard = inflight.lock().await;
 
         // Re-check after acquiring — another task may have repaired it.
-        let (is_ready, _) = provider.readiness.check(ctx.channel);
+        let (is_ready, _) = provider.readiness.check(ctx.channel, ctx.expect_member);
         if is_ready {
-            return ChannelGate::Ready;
-        }
-
-        // ── local store check (no relay I/O) ─────────────────────────────────
-
-        let locally_member = provider.with_store(|s| {
-            s.is_group_member(ctx.channel, ctx.expect_member)
-                .unwrap_or(false)
-        });
-        if locally_member {
-            provider.readiness.mark_ready(ctx.channel);
             return ChannelGate::Ready;
         }
 
         // ── slow path: relay fetch + repair ──────────────────────────────────
+        // The TTL cache (keyed by channel+member) is the ONLY fast path.
+        // Any TTL miss goes through the full relay fetch so the admin invariant
+        // (mgmt_pubkey + whitelisted_pubkeys must all be admins) is always
+        // verified, not just the local member presence.
 
         let Some(mgmt_keys) = provider.parse_management_keys() else {
             return ChannelGate::Degraded;
@@ -1166,6 +1160,7 @@ fn ensure_channel_ready_inner<'a>(
         // Invariant for child channels: also every admin of the immediate parent.
         // Run unconditionally so a re-run repairs any gap (new machine,
         // whitelist change, relay state drift, parent admin set grew).
+        let mut invariant_ok = true;
         {
             let mut required_admins: Vec<String> = vec![mgmt_pubkey.clone()];
             required_admins.extend(provider.whitelisted_pubkeys.iter().cloned());
@@ -1176,16 +1171,27 @@ fn ensure_channel_ready_inner<'a>(
                 }
             }
             for pk in &required_admins {
-                if roles.get(pk.as_str()).map(String::as_str) != Some("admin") {
+                let already_admin = roles.get(pk.as_str()).map(String::as_str) == Some("admin");
+                if !already_admin {
                     let added = provider.nip29_add_admin(ctx.channel, pk).await;
                     if added {
                         provider.with_store(|s| {
                             s.upsert_group_member(ctx.channel, pk, "admin", now_secs()).ok();
                         });
                         repaired = true;
+                    } else {
+                        eprintln!(
+                            "[daemon] ensure_channel_ready: admin grant failed for {pk} in {:?}",
+                            ctx.channel
+                        );
+                        invariant_ok = false;
                     }
                 }
             }
+        }
+
+        if !invariant_ok {
+            return ChannelGate::Degraded;
         }
 
         // Add expect_member as plain member if not already covered by the admin
@@ -1212,6 +1218,12 @@ fn ensure_channel_ready_inner<'a>(
                     .ok();
                 });
                 repaired = true;
+            } else {
+                eprintln!(
+                    "[daemon] ensure_channel_ready: member add failed for {} in {:?}",
+                    ctx.expect_member, ctx.channel
+                );
+                invariant_ok = false;
             }
         } else {
             // Already in relay roster — mirror into local cache if missing.
@@ -1231,7 +1243,11 @@ fn ensure_channel_ready_inner<'a>(
             }
         }
 
-        provider.readiness.mark_ready(ctx.channel);
+        if !invariant_ok {
+            return ChannelGate::Degraded;
+        }
+
+        provider.readiness.mark_ready(ctx.channel, ctx.expect_member);
         if repaired {
             ChannelGate::Repaired
         } else {

@@ -82,6 +82,12 @@ pub fn materialize(
         return MaterializationOutcome::default();
     }
 
+    // NIP-29 admins snapshot (kind:39001, relay-authored).
+    if event.kind.as_u16() == 39001 {
+        Nip29Materializer::materialize_admins_snapshot(store, event);
+        return MaterializationOutcome::default();
+    }
+
     // NIP-29 membership snapshot (kind:39002, relay-authored).
     if event.kind.as_u16() == 39002 {
         Nip29Materializer::materialize_membership_snapshot(store, event);

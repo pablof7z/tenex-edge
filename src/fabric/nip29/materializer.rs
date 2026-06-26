@@ -78,11 +78,11 @@ impl Nip29Materializer {
         }
     }
 
-    /// Materialise kind:39002 — NIP-29 membership snapshot.
+    /// Materialise kind:39002 — NIP-29 plain-membership snapshot.
     ///
     /// Collects all `p` tags (pubkey + optional role, defaulting to "member")
-    /// and replaces the group member set using the event's creation timestamp.
-    /// Byte-identical to the 39002 branch in `handle_incoming`.
+    /// and replaces only the non-admin rows for this group so that admin rows
+    /// written by `materialize_admins_snapshot` (kind:39001) are preserved.
     pub fn materialize_membership_snapshot(store: &Store, event: &Event) {
         if let Some(project) = super::nostr_tag(event, "d") {
             let members: Vec<(String, String)> = event
@@ -106,7 +106,40 @@ impl Nip29Materializer {
                 })
                 .collect();
             store
-                .replace_group_members(project, &members, event.created_at.as_secs())
+                .replace_group_plain_members(project, &members, event.created_at.as_secs())
+                .ok();
+        }
+    }
+
+    /// Materialise kind:39001 — NIP-29 admins snapshot.
+    ///
+    /// Collects all `p` tags (pubkey + optional role, defaulting to "admin")
+    /// and replaces only the admin rows for this group, leaving plain-member
+    /// rows intact.
+    pub fn materialize_admins_snapshot(store: &Store, event: &Event) {
+        if let Some(project) = super::nostr_tag(event, "d") {
+            let admins: Vec<(String, String)> = event
+                .tags
+                .iter()
+                .filter_map(|t| {
+                    let s = t.as_slice();
+                    if s.first().map(String::as_str) == Some("p") {
+                        s.get(1).map(|pk| {
+                            let role = s.get(2).cloned().unwrap_or_else(|| "admin".to_string());
+                            eprintln!(
+                                "[daemon] nip29-role-decision group={project} target={} role={} reason=materialize relay 39001 admins snapshot",
+                                crate::util::pubkey_short(pk),
+                                role
+                            );
+                            (pk.clone(), role)
+                        })
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            store
+                .replace_group_admins(project, &admins, event.created_at.as_secs())
                 .ok();
         }
     }

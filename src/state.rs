@@ -2348,6 +2348,7 @@ impl Store {
 
     /// Apply a relay-authoritative 39002 members snapshot for one group: replace
     /// the cached membership wholesale so we self-heal if our optimistic writes drifted.
+    /// Kept for back-compat and test use; deletes ALL rows including admins.
     pub fn replace_group_members(
         &self,
         project: &str,
@@ -2359,6 +2360,57 @@ impl Store {
             params![project],
         )?;
         for (pubkey, role) in members {
+            self.conn.execute(
+                "INSERT INTO group_members (project, pubkey, role, updated_at) VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(project, pubkey) DO UPDATE SET role=?3, updated_at=?4",
+                params![project, pubkey, role, ts],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Apply a relay-authoritative 39002 plain-member snapshot for one group.
+    ///
+    /// Unlike `replace_group_members`, this only deletes rows where
+    /// `role != 'admin'` so that admin rows written by the 39001 materializer
+    /// (or by optimistic `upsert_group_member` calls) are preserved. Use this
+    /// when handling kind:39002 events, which carry the plain-member list only.
+    pub fn replace_group_plain_members(
+        &self,
+        project: &str,
+        members: &[(String, String)],
+        ts: u64,
+    ) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM group_members WHERE project=?1 AND role != 'admin'",
+            params![project],
+        )?;
+        for (pubkey, role) in members {
+            self.conn.execute(
+                "INSERT INTO group_members (project, pubkey, role, updated_at) VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(project, pubkey) DO UPDATE SET role=?3, updated_at=?4",
+                params![project, pubkey, role, ts],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Apply a relay-authoritative 39001 admin snapshot for one group.
+    ///
+    /// Deletes only `role='admin'` rows and re-inserts from the provided list,
+    /// leaving plain-member rows intact. Use this when handling kind:39001
+    /// events, which carry the admin list only.
+    pub fn replace_group_admins(
+        &self,
+        project: &str,
+        admins: &[(String, String)],
+        ts: u64,
+    ) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM group_members WHERE project=?1 AND role = 'admin'",
+            params![project],
+        )?;
+        for (pubkey, role) in admins {
             self.conn.execute(
                 "INSERT INTO group_members (project, pubkey, role, updated_at) VALUES (?1, ?2, ?3, ?4)
                  ON CONFLICT(project, pubkey) DO UPDATE SET role=?3, updated_at=?4",

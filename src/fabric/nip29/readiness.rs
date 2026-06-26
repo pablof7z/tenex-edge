@@ -39,8 +39,13 @@ struct ChannelSlot {
 }
 
 /// In-process TTL'd cache tracking which channels are known-ready.
+///
+/// The cache key is `(channel, expect_member)` so that different agents
+/// publishing to the same channel each get an independent readiness slot.
+/// Without this, the first agent to mark a channel ready would suppress
+/// provisioning for subsequent agents that may not yet be members.
 pub struct ChannelReadiness {
-    inner: Mutex<HashMap<String, ChannelSlot>>,
+    inner: Mutex<HashMap<(String, String), ChannelSlot>>,
 }
 
 impl Default for ChannelReadiness {
@@ -52,13 +57,14 @@ impl Default for ChannelReadiness {
 }
 
 impl ChannelReadiness {
-    /// Returns `(is_ready_right_now, inflight_lock_for_this_channel)`.
+    /// Returns `(is_ready_right_now, inflight_lock_for_this_channel_and_member)`.
     /// The caller acquires the inflight lock before doing any relay I/O, then
     /// calls this again after acquiring to double-check (another task may have
     /// repaired it while we waited for the lock).
-    pub(crate) fn check(&self, channel: &str) -> (bool, Arc<AsyncMutex<()>>) {
+    pub(crate) fn check(&self, channel: &str, expect_member: &str) -> (bool, Arc<AsyncMutex<()>>) {
         let mut map = self.inner.lock().expect("readiness map poisoned");
-        let slot = map.entry(channel.to_string()).or_insert_with(|| ChannelSlot {
+        let key = (channel.to_string(), expect_member.to_string());
+        let slot = map.entry(key).or_insert_with(|| ChannelSlot {
             verified_at: None,
             inflight: Arc::new(AsyncMutex::new(())),
         });
@@ -69,20 +75,22 @@ impl ChannelReadiness {
         (ready, slot.inflight.clone())
     }
 
-    pub(crate) fn mark_ready(&self, channel: &str) {
+    pub(crate) fn mark_ready(&self, channel: &str, expect_member: &str) {
         let mut map = self.inner.lock().expect("readiness map poisoned");
-        let slot = map.entry(channel.to_string()).or_insert_with(|| ChannelSlot {
+        let key = (channel.to_string(), expect_member.to_string());
+        let slot = map.entry(key).or_insert_with(|| ChannelSlot {
             verified_at: None,
             inflight: Arc::new(AsyncMutex::new(())),
         });
         slot.verified_at = Some(Instant::now());
     }
 
-    /// Invalidate a channel (e.g. after an observed relay-side roster change),
-    /// forcing a re-verify on the next publish.
-    pub fn invalidate(&self, channel: &str) {
+    /// Invalidate a channel+member pair (e.g. after an observed relay-side
+    /// roster change), forcing a re-verify on the next publish.
+    pub fn invalidate(&self, channel: &str, expect_member: &str) {
         if let Ok(mut map) = self.inner.lock() {
-            if let Some(slot) = map.get_mut(channel) {
+            let key = (channel.to_string(), expect_member.to_string());
+            if let Some(slot) = map.get_mut(&key) {
                 slot.verified_at = None;
             }
         }
