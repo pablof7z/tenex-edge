@@ -20,6 +20,7 @@ sources:
   - session:081ec521-c99b-42fb-9aa7-4a109519a62f
   - session:rollout-2026-06-14T13-17-10-019ec5a2-a38e-7403-906f-836d766d9291
   - session:019f031b-b7f7-7602-b6a4-e67e2bc3a6e2
+  - session:019f058f-7ab2-7a13-bfbd-728e68beb774
 ---
 
 # Tenex-Edge NIP-29 Groups
@@ -33,3 +34,7 @@ The singleton daemon maintains an open subscription to NIP-29 groups it owns at 
 ## Admin Membership and Inheritance
 
 Every NIP-29 group must have mgmt_pubkey and all whitelisted_pubkeys as admins unconditionally. Child groups inherit all admins from their immediate parent group. <!-- [^019f0-2a222] -->
+
+## Per-Session NIP-29 Groups
+
+Per-session NIP-29 room creation is controlled by an optional configuration flag that defaults to disabled. When the per-session rooms flag is disabled and a session runs without `tenex-edge launch` and has no channel resolved, the system uses the top-level project group instead of minting a per-session subgroup. When the per-session rooms flag is enabled, the system preserves current behavior by minting per-session subgroups. <!-- [^019f0-53b46] -->

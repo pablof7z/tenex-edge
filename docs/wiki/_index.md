@@ -149,7 +149,7 @@ Last updated: 2026-06-26
 |------|-------|---------|------|------------|----------|-------|
 | [tenex-overview](guides/tenex-overview.md) | TENEX Overview | TENEX is a multi-agent AI coordination system for software development built on the Nostr protocol, treating AI context as the primary artifact, with agent-to-a | capture | warm | 2026-06-07 | tenex |
 
-## tenex-edge (96 guides)
+## tenex-edge (97 guides)
 
 | Slug | Title | Summary | Tags | Volatility | Verified | Topic |
 |------|-------|---------|------|------------|----------|-------|
@@ -198,6 +198,7 @@ Last updated: 2026-06-26
 | [tenex-edge-nip29-groups](guides/tenex-edge-nip29-groups.md) | Tenex-Edge NIP-29 Groups | The singleton daemon maintains an open subscription to NIP-29 groups it owns at all times, scoped by `#d` for owned project slugs, covering relay-authored group | capture | warm | 2026-06-09 | tenex-edge |
 | [tenex-edge-nip29-materializer](guides/tenex-edge-nip29-materializer.md) | tenex-edge NIP-29 Materializer | NIP-29 39000/39002 events hydrate state exclusively through Nip29Materializer into store-level materializer methods | capture | warm | 2026-06-16 | tenex-edge |
 | [tenex-edge-nostr-guarantees](guides/tenex-edge-nostr-guarantees.md) | tenex-edge Nostr Guarantees | Nostr is an AP (available, partition-tolerant) system; relays are an eventually-consistent gossip bus with no compare-and-swap, no broadcast guarantee, and no e | capture | warm | 2026-06-07 | tenex-edge |
+| [tenex-edge-per-session-rooms](guides/tenex-edge-per-session-rooms.md) | Tenex-Edge Per-Session Rooms | Per-session rooms can be disabled via a configuration flag. | capture | warm | 2026-06-26 | tenex-edge |
 | [tenex-edge-phased-build](guides/tenex-edge-phased-build.md) | Tenex-Edge Phased Build | The fabric-architecture refactor is implemented across 9 sequential phases (0â8) in a git worktree at /Users/pablofernandez/src/tenex-edge-fabric on branch 'f | capture | warm | 2026-06-09 | tenex-edge |
 | [tenex-edge-phasing-and-vision](guides/tenex-edge-phasing-and-vision.md) | tenex-edge Phasing and Vision | There are two categorically different products here: (A) a nervous system for your own fleet (single-player, your keys, your machines, safe, immediately valuabl | capture | warm | 2026-06-07 | tenex-edge |
 | [tenex-edge-platform-bet](guides/tenex-edge-platform-bet.md) | tenex-edge Platform Bet | The platform bet for tenex-edge is a thin open adapter on Nostr where the protocol is the product; any host emits and consumes signed events, and tenex-edge own | capture | warm | 2026-06-07 | tenex-edge |
@@ -268,7 +269,7 @@ Last updated: 2026-06-26
 | [2026-06-26-2-updated-design-document-for-durable-ordinal](research/2026-06-26-2-updated-design-document-for-durable-ordinal.md) | 2026-06-26 | Updated design document for durable ordinal agent identities integrated with subscription consolidation, showing identity model architecture and code grounding | codex |
 | [AGENTS](research/AGENTS.md) |  |  |  |
 
-## Episode Cards (220 cards)
+## Episode Cards (223 cards)
 
 | Card | Date | Title | Salience | Status |
 |------|------|-------|----------|--------|
@@ -486,18 +487,22 @@ Last updated: 2026-06-26
 | [2026-06-19-1-hook-binary-resolution-switched-from-hardcoded](episodes/2026-06-19-1-hook-binary-resolution-switched-from-hardcoded.md) | 2026-06-19 | Hook binary resolution switched from hardcoded path to PATH lookup | architecture | active |
 | [2026-06-19-1-session-display-identity-replaced-6-char](episodes/2026-06-19-1-session-display-identity-replaced-6-char.md) | 2026-06-19 | Session display identity replaced: 6-char hex hash → NATO phonetic codename | reversal | active |
 | [2026-06-26-1-chat-write-route-to-agent-s](episodes/2026-06-26-1-chat-write-route-to-agent-s.md) | 2026-06-26 | chat write: Route to agent's active channel, remove --session flag | product | active |
+| [2026-06-26-1-distillation-system-prompt-delivery-temp-file](episodes/2026-06-26-1-distillation-system-prompt-delivery-temp-file.md) | 2026-06-26 | Distillation system prompt delivery: temp file → inline argument | root-cause | active |
+| [2026-06-26-1-eager-channel-provisioning-moved-to-tenex](episodes/2026-06-26-1-eager-channel-provisioning-moved-to-tenex.md) | 2026-06-26 | Eager channel provisioning moved to tenex-edge launch time | architecture | active |
 | [2026-06-26-1-format-variable-quoting-mismatch-causes-silent](episodes/2026-06-26-1-format-variable-quoting-mismatch-causes-silent.md) | 2026-06-26 | Format variable quoting mismatch causes silent statusline failure when session identifier is unset | root-cause | active |
 | [2026-06-26-1-operator-signed-prompts-echo-suppression](episodes/2026-06-26-1-operator-signed-prompts-echo-suppression.md) | 2026-06-26 | operator-signed-prompts-echo-suppression | root-cause | active |
+| [2026-06-26-1-per-session-rooms-made-optional-disabled](episodes/2026-06-26-1-per-session-rooms-made-optional-disabled.md) | 2026-06-26 | Per-session rooms made optional, disabled by default | product | active |
 | [2026-06-26-1-relay-rejection-logs-include-event-context](episodes/2026-06-26-1-relay-rejection-logs-include-event-context.md) | 2026-06-26 | Relay rejection logs include event context | product | active |
 | [2026-06-26-1-subscription-model-kind-specific-expansion-entity](episodes/2026-06-26-1-subscription-model-kind-specific-expansion-entity.md) | 2026-06-26 | Subscription model: kind-specific expansion → entity-based consolidation | architecture | active |
 | [2026-06-26-2-outgoing-relay-logs-include-event-id](episodes/2026-06-26-2-outgoing-relay-logs-include-event-id.md) | 2026-06-26 | Outgoing relay logs include event ID for server correlation | product | active |
 | [2026-06-26-3-channel-readiness-unified-into-publish-funnel](episodes/2026-06-26-3-channel-readiness-unified-into-publish-funnel.md) | 2026-06-26 | Channel readiness unified into publish-funnel gate | architecture | active |
 
-## Nouns (52 entities)
+## Nouns (56 entities)
 
 | Noun | Name | Origin | Definition |
 |------|------|--------|------------|
 | [activity](nouns/activity.md) | Activity | extracted | Used for social Activity notes (kind:1 without p tag) |
+| [activity-distillation](nouns/activity-distillation.md) | Activity distillation | extracted | the process of distilling the agent's recent conversation transcript into a one-line intent that becomes its Activity note and live Status; it is LLM-only with no heuristic fallback and intent is not recoverable from tool calls by rule |
 | [agent-identity-pubkey](nouns/agent-identity-pubkey.md) | agent identity / pubkey | extracted | durable, ordinal-keyed (agent, ordinal); base agent at ordinal 0, higher ordinals for concurrent instances of same agent; reused deterministically across rooms |
 | [backend-orchestration](nouns/backend-orchestration.md) | backend orchestration | extracted | kind:9 subscription p-tagged to the backend's identity, independent of any project, maintaining one global subscription per backend |
 | [channel-readiness-gate](nouns/channel-readiness-gate.md) | channel readiness gate | extracted | idempotent `ensure_channel_ready(ctx: ChannelCtx)` method on `Nip29Provider` in `src/fabric/nip29/readiness.rs` that all three domain publish methods (`publish`, `publish_checked`, `set_status`) converge on; uses TTL-cached fast path, per-channel single-flight mutex, local SQLite read-model checks, and recursive parent ensures before provisioning a channel |
@@ -508,7 +513,9 @@ Last updated: 2026-06-26
 | [domainevent](nouns/domainevent.md) | DomainEvent | extracted | The closed set of things that travel on the fabric. A codec encodes each of these to a wire envelope and decodes wire envelopes back into these. |
 | [explicit-channel-scope](nouns/explicit-channel-scope.md) | explicit channel scope | extracted | a session where project != work_root, created with the channel as a subgroup of the root project |
 | [h-tag](nouns/h-tag.md) | h tag | extracted | the NIP-29 group identifier, derived inside the codec from the DomainEvent's project field, which is always SessionRecord::route_scope() — either the channel (if set) or the per-session room |
+| [identity](nouns/identity.md) | Identity | extracted | (agent, machine) — the same slug on another machine is a different key |
 | [live-session](nouns/live-session.md) | live session | extracted | at most one per (ordinal-pubkey, channel); binds to native harness session id via (pubkey, channel) → native_id resume key |
+| [members](nouns/members.md) | members | extracted | the kind:39002 p-tag set, keyed by #d == group |
 | [ms-server-1](nouns/ms-server-1.md) | MS-server-1 | extracted | extraction of 5 project RPC handlers (list, edit, members, add, remove) from server.rs into server/rpc/project.rs |
 | [ms-server-2](nouns/ms-server-2.md) | MS-server-2 | extracted | extraction of demux functionality (handle_incoming, derive_and_emit_tail_events) from server.rs into server/demux.rs |
 | [ms-server-3](nouns/ms-server-3.md) | MS-server-3 | extracted | extraction of background spawn tasks (spawn_pruner, spawn_idle_watcher) from server.rs into server/background/ |
@@ -542,6 +549,7 @@ Last updated: 2026-06-26
 | [subscription-redesigned](nouns/subscription-redesigned.md) | subscription (redesigned) | extracted | three entity-keyed aggregate REQs: #h[channels] kinds[9,30315,30023], #p[pubkeys] kinds[9,30023], #d[groups] kinds[39000,39001,39002]; narrow add-REQs for new entities; compacted at daemon start |
 | [subscriptionid](nouns/subscriptionid.md) | SubscriptionId | extracted | deterministically derived from the filter's content; re-subscribing the same filter replaces the existing relay subscription instead of opening a new one |
 | [te-session](nouns/te-session.md) | @te_session | extracted | a tmux user option that stores the session identifier for tenex-edge statusline |
+| [tenex-edge-channel](nouns/tenex-edge-channel.md) | TENEX_EDGE_CHANNEL | extracted | present only for sessions launched into a subgroup task |
 | [tenex-edge-statusline](nouns/tenex-edge-statusline.md) | tenex-edge statusline | extracted | the one-line status bar rendering showing identity, project, session ID, channel title, and live activity; reads harness statusline JSON from stdin and fails open (exits 0 with empty output when daemon is down) |
 | [tmux](nouns/tmux.md) | $TMUX | extracted | environment variable containing three comma-separated values: socket_path,server_pid,session_id |
 | [tmux-pane](nouns/tmux-pane.md) | TMUX_PANE | extracted | a stable tmux pane ID from the $TMUX_PANE environment variable (e.g. "%5"), present only when the hook fires inside a tmux session |
