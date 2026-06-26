@@ -1,13 +1,12 @@
 use super::*;
 
-pub(super) async fn chat_write(message: String, session: Option<String>) -> Result<()> {
+pub(super) async fn chat_write(message: String, channel: Option<String>) -> Result<()> {
     let params = serde_json::json!({
         "message": message,
-        "session": session,
         "env_session": std::env::var("TENEX_EDGE_SESSION").ok(),
         "agent": agent_env_slug(),
         "cwd": std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()),
-        "group": crate::cli::channel_env(),
+        "group": channel.or_else(crate::cli::channel_env),
     });
     let v = daemon_call_async("chat_write", params).await?;
     let event_id = v["event_id"].as_str().unwrap_or("?");

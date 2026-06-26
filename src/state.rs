@@ -2141,7 +2141,10 @@ impl Store {
         self.conn.execute(
             "INSERT INTO project_meta (project, about, name, parent, updated_at)
              VALUES (?1, '', ?2, ?3, ?4)
-             ON CONFLICT(project) DO UPDATE SET name=?2, parent=?3, updated_at=?4",
+             ON CONFLICT(project) DO UPDATE SET
+               name=?2,
+               parent=CASE WHEN ?3='' THEN parent ELSE ?3 END,
+               updated_at=?4",
             params![project, name, parent, ts],
         )?;
         Ok(())

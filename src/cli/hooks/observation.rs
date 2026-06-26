@@ -29,7 +29,11 @@ pub(super) async fn report_observation(
     watch_pid: Option<i32>,
 ) -> Result<String> {
     let tmux_pane = std::env::var("TMUX_PANE").ok().filter(|s| !s.is_empty());
-    let tmux_socket = std::env::var("TMUX").ok().filter(|s| !s.is_empty());
+    // $TMUX is "socket_path,server_pid,session_id" — extract only the socket path.
+    let tmux_socket = std::env::var("TMUX")
+        .ok()
+        .and_then(|v| v.split(',').next().map(str::to_string))
+        .filter(|s| !s.is_empty());
     let params = serde_json::json!({
         "agent": agent_slug,
         "harness": host.name,

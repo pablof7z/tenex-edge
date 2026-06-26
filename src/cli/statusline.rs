@@ -45,8 +45,25 @@ pub(super) fn statusline(session: Option<String>, tmux_fmt: bool) -> Result<()> 
     let session_id = raw
         .get("session_id")
         .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
         .map(str::to_string)
-        .or(session);
+        .or_else(|| session.filter(|s| !s.is_empty()));
+
+    // No session ID from either source — the daemon hasn't stamped @te_session
+    // yet (or the format string is wrong). Show a loud error instead of silently
+    // querying with null and hiding behind "@unknown".
+    let session_id = match session_id {
+        Some(id) => id,
+        None => {
+            let msg = if tmux_fmt {
+                "#[fg=colour1,bold][te: @te_session not set — check tenex-edge launch]#[default]"
+            } else {
+                "[te: no session id — @te_session not set]"
+            };
+            println!("{msg}");
+            return Ok(());
+        }
+    };
 
     let params = serde_json::json!({ "session": session_id });
     let v = match crate::daemon::blocking::call_no_spawn("statusline", params) {
@@ -58,8 +75,17 @@ pub(super) fn statusline(session: Option<String>, tmux_fmt: bool) -> Result<()> 
             return Ok(());
         }
     };
-    let Ok(view) = serde_json::from_value::<StatuslineView>(v) else {
-        return Ok(());
+    let view = match serde_json::from_value::<StatuslineView>(v) {
+        Ok(v) => v,
+        Err(e) => {
+            let msg = if tmux_fmt {
+                format!("#[fg=colour1,bold][te: bad daemon response: {e}]#[default]")
+            } else {
+                format!("[te: bad daemon response: {e}]")
+            };
+            println!("{msg}");
+            return Ok(());
+        }
     };
     let line = if tmux_fmt {
         render_statusline_tmux(&view)

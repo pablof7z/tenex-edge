@@ -1126,6 +1126,14 @@ async fn rpc_session_start(
         } else {
             None
         };
+        // Stamp the parent relationship immediately into the local DB so
+        // `work_root_for_scope` returns the right project without waiting for
+        // the relay to send back the kind:39000 with the `parent` tag.
+        if let Some(ref parent) = parent_hint {
+            state
+                .with_store(|s| s.upsert_group_metadata(&project, &project, parent, now_secs()))
+                .ok();
+        }
         let open = async {
             if parent_hint.is_some() {
                 // Explicit channel: use the gate so the parent project is
@@ -1400,13 +1408,13 @@ async fn admit_transient_signer(
 struct ChatWriteParams {
     message: String,
     #[serde(default)]
-    session: Option<String>,
-    #[serde(default)]
     env_session: Option<String>,
     #[serde(default)]
     cwd: Option<String>,
     #[serde(default)]
     agent: Option<String>,
+    #[serde(default)]
+    group: Option<String>,
 }
 
 #[derive(Clone)]
@@ -1730,11 +1738,11 @@ async fn rpc_chat_write(
         serde_json::from_value(params.clone()).context("parsing chat_write params")?;
     let rec = resolve_session(
         state,
-        p.session.as_deref(),
+        None,
         p.env_session.as_deref(),
         p.cwd.as_deref(),
         p.agent.as_deref(),
-        None,
+        p.group.as_deref(),
     )?;
     let id = identity::load_or_create(&config::edge_home(), &rec.agent_slug, now_secs())?;
     let durable_pubkey = id.pubkey_hex();
@@ -2558,10 +2566,14 @@ fn rpc_statusline(
         // session is in its own per-session room (issue #6: the room is renamed
         // to the distilled title via kind:9002 edit-metadata; the local cache
         // may lag by one refresh).
-        let mut channel_title = s.group_display_name(&scope).unwrap_or_default();
-        if channel_title.is_empty() {
-            channel_title = title.clone();
-        }
+        // Session's distilled title always wins when available — it's more
+        // up-to-date than the relay-authored channel name.  Fall back to the
+        // channel's display name only when no title has been produced yet.
+        let channel_title = if !title.is_empty() {
+            title.clone()
+        } else {
+            s.group_display_name(&scope).unwrap_or_default()
+        };
         // `work_root` is the parent project a per-session room or task channel
         // hangs under, or the project itself for an ordinary project session.
         // This is the "Project" line in `who`, surfaced as `project-name`.

@@ -292,16 +292,17 @@ enum Cmd {
 #[derive(Subcommand)]
 enum ChatAction {
     /// Publish a project chat line. Reads body from arg, --message, or stdin.
-    /// Write to the current project/channel chat.
+    /// Targets the current agent's active channel; use --channel to override.
     Write {
         /// Message body. Positional, or via --message, or piped on stdin.
         #[arg(value_name = "MESSAGE")]
         message: Option<String>,
         #[arg(long = "message", value_name = "MESSAGE")]
         message_flag: Option<String>,
-        /// My session id; if omitted, resolved from the current directory.
+        /// Channel (NIP-29 group h-value) to write to; defaults to this
+        /// agent's active channel (TENEX_EDGE_CHANNEL → TENEX_EDGE_SESSION → cwd).
         #[arg(long)]
-        session: Option<String>,
+        channel: Option<String>,
     },
     /// Read project chat history.
     Read {
@@ -588,10 +589,10 @@ pub async fn run(cli: Cli) -> Result<()> {
             ChatAction::Write {
                 message,
                 message_flag,
-                session,
+                channel,
             } => {
                 let message = messaging::resolve_send_message_body(message_flag.or(message))?;
-                messaging::chat_write(message, session).await
+                messaging::chat_write(message, channel).await
             }
             ChatAction::Read {
                 since,

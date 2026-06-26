@@ -797,7 +797,7 @@ fn make_session_transparent(
     let statusline_cmd = status_cmd_override
         .map(|s| s.to_string())
         .unwrap_or_else(|| {
-            format!("#({bin} statusline --tmux --session #{{@te_session}})")
+            format!("#({bin} statusline --tmux #{{?@te_session,--session #{{q:@te_session}},}})")
         });
     let options: Vec<(&str, String)> = vec![
         // Session identity for the status bar: stored as user options so the
