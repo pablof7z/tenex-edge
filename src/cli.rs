@@ -603,10 +603,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                 channel,
             } => messaging::chat_read(since, limit, offset, tail, live, channel).await,
         },
-        Cmd::Statusline {
-            session,
-            tmux,
-        } => statusline::statusline(session, tmux),
+        Cmd::Statusline { session, tmux } => statusline::statusline(session, tmux),
         Cmd::Project { action } => admin::project(action).await,
         Cmd::Channels { action } => admin::channels(action).await,
         Cmd::Agent { action } => admin::agent(action).await,
@@ -831,15 +828,23 @@ mod turn_context_tests {
     }
 
     #[test]
-    fn first_turn_intro_names_channel_not_session_code() {
+    fn first_turn_renders_awareness_snapshot_not_session_code() {
         let store = Store::open_memory().unwrap();
         let rec = test_session("sess-intro");
         let m = Mutex::new(store);
 
         let text = assemble_turn_start_context(&m, &rec, 0).expect("first-turn intro expected");
         assert!(
-            text.contains("You are coder on #proj"),
-            "intro should name the agent and channel; got: {text:?}"
+            text.contains("[tenex-edge] Fabric context"),
+            "first turn should render fabric awareness; got: {text:?}"
+        );
+        assert!(
+            text.contains("Channel: #proj"),
+            "awareness should name the channel; got: {text:?}"
+        );
+        assert!(
+            text.contains("@coder (you)"),
+            "awareness should identify this agent; got: {text:?}"
         );
         assert!(
             !text.contains("[session"),
@@ -900,13 +905,12 @@ mod turn_context_tests {
         let text = assemble_turn_check_context(&m, &test_session(&me_id), "laptop", Some(50), 200)
             .expect("delta block expected when a sibling changed");
         assert!(
-            text.contains("changes on #proj since your last check"),
-            "delta header expected; got: {text:?}"
+            text.contains("[tenex-edge] Fabric updates since your last check"),
+            "awareness update header expected; got: {text:?}"
         );
-        // Changed renders as an agent/host presence line.
         assert!(
-            text.contains("sib (laptop) — editing hooks.rs"),
-            "sibling activity expected as an agent/host presence line; got: {text:?}"
+            text.contains("@sib - Refactor tmux — editing hooks.rs"),
+            "sibling activity expected as a member work line; got: {text:?}"
         );
         assert!(
             !text.contains("My own work"),
@@ -920,6 +924,8 @@ mod turn_context_tests {
             !text.contains(sib_id.as_str()),
             "raw session id must not leak; got: {text:?}"
         );
+        assert!(!text.contains("joined"), "got: {text:?}");
+        assert!(!text.contains("left"), "got: {text:?}");
     }
 
     /// Mid-turn delta: a sibling that went idle renders with the `· idle` marker
@@ -947,9 +953,11 @@ mod turn_context_tests {
             assemble_turn_check_context(&m, &test_session("sess-me"), "laptop", Some(50), 200)
                 .expect("delta block expected for idle transition");
         assert!(
-            text.contains("sib (laptop) — idle"),
-            "idle marker expected in the agent/host presence line; got: {text:?}"
+            text.contains("@sib - Refactor tmux · idle"),
+            "idle marker expected in the member work line; got: {text:?}"
         );
+        assert!(!text.contains("joined"), "got: {text:?}");
+        assert!(!text.contains("left"), "got: {text:?}");
     }
 
     /// Repeated idle/end observations are liveness refreshes, not user-visible

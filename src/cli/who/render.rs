@@ -252,18 +252,6 @@ fn agent_name_counts_for_scope(
     counts
 }
 
-pub(super) fn display_agent_name(
-    slug: &str,
-    session_id: &str,
-    name_counts: &std::collections::BTreeMap<String, usize>,
-) -> String {
-    if name_counts.get(slug).copied().unwrap_or(0) > 1 {
-        format!("{}-{}", slug, session_codename(session_id))
-    } else {
-        slug.to_string()
-    }
-}
-
 fn display_row_agent_name(
     row: &WhoRow,
     name_counts: &std::collections::BTreeMap<String, usize>,

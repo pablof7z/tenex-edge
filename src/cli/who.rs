@@ -1,14 +1,16 @@
 use super::*;
-use crate::session::{derive_status, DeltaKind, SessionSnapshot, StatusDeltaItem};
+use crate::session::{derive_status, SessionSnapshot};
 
+mod awareness;
 mod channel;
-mod delta;
 mod render;
 mod snapshot;
 
 // Public re-exports for the crate and cli module
-pub(super) use channel::render_channel_context;
-pub(super) use delta::{build_status_delta, push_turn_fabric_block};
+pub(super) use awareness::{
+    render_awareness_snapshot, render_awareness_update_since_check,
+    render_awareness_update_since_turn,
+};
 pub use snapshot::{load_who_snapshot, WhoSnapshot};
 
 // ── who ──────────────────────────────────────────────────────────────────────

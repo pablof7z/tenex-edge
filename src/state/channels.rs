@@ -1,6 +1,6 @@
 use super::Store;
 use anyhow::Result;
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 
 impl Store {
     /// Returns true if `project` is a known root (non-subgroup) project.
@@ -104,6 +104,44 @@ impl Store {
         }
     }
 
+    /// The known human title for a channel from NIP-29 metadata. Unlike
+    /// `group_display_name`, this intentionally does not fall back to `about`;
+    /// hook awareness should not manufacture titles from descriptions.
+    pub fn channel_title(&self, id: &str) -> Result<Option<String>> {
+        let title = self
+            .conn
+            .query_row(
+                "SELECT name FROM project_meta WHERE project=?1",
+                params![id],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()?
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        Ok(title)
+    }
+
+    /// Latest non-empty local or peer work title for a channel. This is the
+    /// fallback for per-session rooms whose display name is the distilled
+    /// session title rather than a relay-authored group name.
+    pub fn latest_channel_work_title(&self, id: &str) -> Result<Option<String>> {
+        self.conn
+            .query_row(
+                "SELECT title FROM (
+                   SELECT title, updated_at FROM session_state
+                   WHERE project=?1 AND title <> ''
+                   UNION ALL
+                   SELECT title, updated_at FROM presence_state
+                   WHERE project=?1 AND title <> ''
+                 )
+                 ORDER BY updated_at DESC LIMIT 1",
+                params![id],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
     /// The channel breadcrumb from the top-level project down to `leaf`, as
     /// `(id, label)` pairs in root→leaf order. Walks the `parent` chain
     /// (`group_parent`); a top-level project returns a single element. Bounded
@@ -193,6 +231,52 @@ impl Store {
             }
         }
         Ok(n)
+    }
+
+    /// Channels with semantic activity at or after `cutoff`, newest first.
+    /// Heartbeat-only presence is intentionally ignored.
+    pub fn semantic_active_channels_since(
+        &self,
+        cutoff: u64,
+        exclude: &[String],
+    ) -> Result<Vec<(String, u64)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT project, MAX(latest) AS latest FROM (
+               SELECT project, MAX(created_at) AS latest
+               FROM chat_messages
+               WHERE created_at>=?1
+               GROUP BY project
+               UNION ALL
+               SELECT project, MAX(updated_at) AS latest
+               FROM session_state
+               WHERE updated_at>=?1 AND (title<>'' OR activity<>'')
+               GROUP BY project
+               UNION ALL
+               SELECT project, MAX(updated_at) AS latest
+               FROM presence_state
+               WHERE updated_at>=?1 AND (title<>'' OR activity<>'')
+               GROUP BY project
+               UNION ALL
+               SELECT project, MAX(updated_at) AS latest
+               FROM project_meta
+               WHERE updated_at>=?1 AND name<>''
+               GROUP BY project
+             )
+             GROUP BY project
+             ORDER BY latest DESC, project ASC",
+        )?;
+        let excl: std::collections::HashSet<&str> = exclude.iter().map(|s| s.as_str()).collect();
+        let rows = stmt.query_map(params![cutoff], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, u64>(1)?))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (project, latest) = row?;
+            if !excl.contains(project.as_str()) {
+                out.push((project, latest));
+            }
+        }
+        Ok(out)
     }
 
     /// True if `project` is a per-session room (minted at session birth), as

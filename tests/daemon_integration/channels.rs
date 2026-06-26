@@ -89,16 +89,18 @@ fn first_turn_injects_channel_context_block() {
         v.get("context").and_then(|c| c.as_str()).unwrap_or("").to_string()
     });
 
-    // The injected context is the channel-hierarchy block (rendered daemon-side
-    // by render_channel_context), naming the session's identity, its channel
-    // breadcrumb, and the messaging convention.
-    assert!(ctx.contains("You are coder on #"), "context was: {ctx}");
+    // The injected context is the fabric awareness snapshot, naming the current
+    // channel and this agent without exposing an internal session code.
+    assert!(
+        ctx.contains("[tenex-edge] Fabric context"),
+        "context was: {ctx}"
+    );
     assert!(
         !ctx.contains("[session"),
         "must not expose a session code; context was: {ctx}"
     );
     assert!(ctx.contains("Channel: #"), "context was: {ctx}");
-    assert!(ctx.contains("mention its `@name`"), "context was: {ctx}");
+    assert!(ctx.contains("@coder (you)"), "context was: {ctx}");
 
     stop_daemon(&home);
 }

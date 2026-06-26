@@ -1,4 +1,7 @@
-use super::who::{build_status_delta, push_turn_fabric_block};
+use super::who::{
+    render_awareness_snapshot, render_awareness_update_since_check,
+    render_awareness_update_since_turn,
+};
 use super::*;
 
 /// How a context block is emitted to the harness on stdout. Selected per
@@ -75,10 +78,6 @@ pub fn assemble_turn_start_context(
     let mut blocks: Vec<String> = Vec::new();
 
     if first_turn {
-        // The agent's identity, orientation, and messaging conventions are now
-        // carried by the channel-hierarchy block (push_turn_fabric_block →
-        // render_channel_context) appended below — no separate static preamble.
-
         // Warn only when this daemon is not the local owner for the group. If it
         // owns the group, session-start/room-minting is responsible for signing
         // the member-add itself; a cache miss here is a transient local state,
@@ -122,19 +121,23 @@ pub fn assemble_turn_start_context(
         blocks.push(block);
     }
 
-    // Peer presence — full roster on the first turn; deltas on subsequent turns.
-    push_turn_fabric_block(
-        store,
-        &mut blocks,
-        first_turn,
-        prev_turn_started_at,
-        &scope,
-        now_secs(),
-        &rec.host,
-        &rec.session_id,
-        &rec.agent_slug,
-        &rec.agent_pubkey,
-    );
+    let awareness = {
+        let s = store.lock().expect("store mutex poisoned");
+        if first_turn {
+            render_awareness_snapshot(&s, &scope, now, &rec.agent_slug, &rec.agent_pubkey)
+        } else {
+            render_awareness_update_since_turn(
+                &s,
+                prev_turn_started_at,
+                &scope,
+                now,
+                Some(&rec.session_id),
+            )
+        }
+    };
+    if let Some(block) = awareness {
+        blocks.push(block);
+    }
 
     if blocks.is_empty() {
         None
@@ -159,7 +162,7 @@ pub fn assemble_turn_start_context(
 pub fn assemble_turn_check_context(
     store: &std::sync::Mutex<Store>,
     rec: &crate::state::SessionRecord,
-    self_host: &str,
+    _self_host: &str,
     delta_since: Option<u64>,
     now: u64,
 ) -> Option<String> {
@@ -169,7 +172,11 @@ pub fn assemble_turn_check_context(
     // key on this so mid-turn context reflects the room the session is actually
     // publishing into after a switch.
     let scope = rec.route_scope().to_string();
-    let channel = channel_label(&scope);
+    let channel = if scope.starts_with('#') {
+        scope.clone()
+    } else {
+        format!("#{scope}")
+    };
 
     let direct_mentions = {
         let s = store.lock().expect("store mutex poisoned");
@@ -215,12 +222,10 @@ pub fn assemble_turn_check_context(
         }
 
         let s = store.lock().expect("store mutex poisoned");
-        let delta = build_status_delta(&s, since, &scope, now, self_host, Some(&rec.session_id));
-        if !delta.is_empty() {
-            blocks.push(format!(
-                "tenex-edge fabric — changes on {channel} since your last check:\n{}",
-                delta.join("\n")
-            ));
+        if let Some(block) =
+            render_awareness_update_since_check(&s, since, &scope, now, Some(&rec.session_id))
+        {
+            blocks.push(block);
         }
     }
 
@@ -228,17 +233,6 @@ pub fn assemble_turn_check_context(
         None
     } else {
         Some(blocks.join("\n\n"))
-    }
-}
-
-fn channel_label(project: &str) -> String {
-    let p = project.trim();
-    if p.is_empty() {
-        "#unknown".to_string()
-    } else if p.starts_with('#') {
-        p.to_string()
-    } else {
-        format!("#{p}")
     }
 }
 
