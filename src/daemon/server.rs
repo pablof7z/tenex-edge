@@ -2340,11 +2340,11 @@ async fn rpc_turn_end(
 
         let rec = state.with_store(|s| s.get_session(&session).ok().flatten());
 
-        // Publish the agent's turn output as kind:9 chat into the session's
-        // room (issue #6). Gated to per-session rooms via the local
-        // `is_session_room` flag (robust against the relay materializer, unlike
-        // `project_meta.parent`), so we never spam the bare project group.
-        // Signed by the durable agent key (the room member).
+        // Publish the agent's turn output as kind:9 chat into the room where it
+        // worked: per-session rooms and explicit task channels publish final
+        // replies; bare project sessions still do not spam the root group.
+        // Signed by the durable agent key (or the selected transient session key
+        // when a duplicate same-agent signer is active in this route scope).
         //
         // Gated on `was_working` so it is IDEMPOTENT against duplicate stop hooks
         // and client retries: `end_turn` above clears the turn, so a second
@@ -2355,9 +2355,10 @@ async fn rpc_turn_end(
         if was_working {
             if let (Some(rec), Some(reply)) = (rec.as_ref(), p.reply.as_deref()) {
                 let reply = reply.trim();
-                let is_room = state
-                    .with_store(|s| s.is_session_room(&rec.project))
-                    .unwrap_or(false);
+                let publish_reply = !rec.channel.is_empty()
+                    || state
+                        .with_store(|s| s.is_session_room(&rec.project))
+                        .unwrap_or(false);
                 // Skip when the reply equals the turn-start baseline — the
                 // transcript's last assistant text is unchanged, so this turn
                 // produced no new response (e.g. a tool-only turn) and mirroring
@@ -2365,7 +2366,7 @@ async fn rpc_turn_end(
                 let baseline =
                     state.with_store(|s| s.get_last_assistant_text_at_turn_start(&session));
                 let is_fresh = reply != baseline.trim();
-                if !reply.is_empty() && is_room && is_fresh {
+                if !reply.is_empty() && publish_reply && is_fresh {
                     // Idempotency against duplicate stop hooks / client retries is
                     // provided by the `was_working` gate above (a retry sees the
                     // turn already ended), so the timeout only needs to bound a

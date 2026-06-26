@@ -2,6 +2,9 @@ use crate::daemon_harness::*;
 use tenex_edge::daemon::client::Client;
 use tenex_edge::state::Store;
 
+#[path = "channels/replies.rs"]
+mod replies;
+
 // ── NIP-29 daemon-owned channels ─────────────────────────────────────────────
 
 /// A valid (throwaway) operator nsec for the local relay — the HUMAN's key.
