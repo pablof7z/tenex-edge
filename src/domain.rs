@@ -209,6 +209,20 @@ pub enum DomainEvent {
     Proposal(Proposal),
 }
 
+impl DomainEvent {
+    /// The NIP-29 group h-tag this event targets, if any.
+    /// `Profile` (kind:0) is not scoped to a group and returns `None`.
+    pub fn channel(&self) -> Option<&str> {
+        match self {
+            DomainEvent::Profile(_) => None,
+            DomainEvent::Activity(a) => Some(&a.project),
+            DomainEvent::Status(s) => Some(&s.project),
+            DomainEvent::ChatMessage(m) => Some(&m.project),
+            DomainEvent::Proposal(p) => Some(&p.project),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

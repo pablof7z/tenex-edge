@@ -75,11 +75,13 @@ pub(crate) fn log_outgoing_event(event: &Event) {
     let ps = p_tags.join(",");
     let h = tv("h");
 
+    let id = &event.id.to_hex()[..12];
+
     let line = match k {
         // kind:0 is published to the indexer relay (purplepag.es) for profile
         // discovery — not meaningful relay traffic for the configured relay log.
         0 => return,
-        9 => format!("[→relay] kind:{k:<5}  orchestration  h={h}  →{ps}"),
+        9 => format!("[→relay] kind:{k:<5}  id={id}  orchestration  h={h}  →{ps}"),
         9000 => {
             let role = event
                 .tags
@@ -90,37 +92,37 @@ pub(crate) fn log_outgoing_event(event: &Event) {
                         .then(|| s[2].as_str())
                 })
                 .unwrap_or("member");
-            format!("[→relay] kind:{k:<5}  put-user  h={h}  p={ps}  role={role}")
+            format!("[→relay] kind:{k:<5}  id={id}  put-user  h={h}  p={ps}  role={role}")
         }
-        9001 => format!("[→relay] kind:{k:<5}  remove-user  h={h}  p={ps}"),
+        9001 => format!("[→relay] kind:{k:<5}  id={id}  remove-user  h={h}  p={ps}"),
         9002 => {
             let name = tv("name");
             let parent = tv("parent");
             if parent != "-" {
-                format!("[→relay] kind:{k:<5}  edit-metadata  h={h}  name={name:?}  parent={parent}")
+                format!("[→relay] kind:{k:<5}  id={id}  edit-metadata  h={h}  name={name:?}  parent={parent}")
             } else {
-                format!("[→relay] kind:{k:<5}  edit-metadata  h={h}  name={name:?}")
+                format!("[→relay] kind:{k:<5}  id={id}  edit-metadata  h={h}  name={name:?}")
             }
         }
         9007 => {
             let parent = tv("parent");
             if parent != "-" {
-                format!("[→relay] kind:{k:<5}  create-group  h={h}  parent={parent}")
+                format!("[→relay] kind:{k:<5}  id={id}  create-group  h={h}  parent={parent}")
             } else {
-                format!("[→relay] kind:{k:<5}  create-group  h={h}")
+                format!("[→relay] kind:{k:<5}  id={id}  create-group  h={h}")
             }
         }
         30023 => format!(
-            "[→relay] kind:{k:<5}  proposal  h={h}  title={:?}",
+            "[→relay] kind:{k:<5}  id={id}  proposal  h={h}  title={:?}",
             tv("title")
         ),
         30315 => format!(
-            "[→relay] kind:{k:<5}  status  h={h}  {}  title={:?}",
+            "[→relay] kind:{k:<5}  id={id}  status  h={h}  {}  title={:?}",
             tv("status"),
             tv("title")
         ),
         _ => format!(
-            "[→relay] kind:{k:<5}  h={h}  author={}",
+            "[→relay] kind:{k:<5}  id={id}  h={h}  author={}",
             &event.pubkey.to_hex()[..8]
         ),
     };
@@ -129,6 +131,26 @@ pub(crate) fn log_outgoing_event(event: &Event) {
 }
 
 /// Log a rejection before [`Transport`] returns the error to its caller.
-pub(crate) fn log_relay_rejection(reason: &str) {
-    log_entry(&format!("[relay✗] rejected: {reason}"));
+/// If `event` is provided, the kind, id prefix, and h-tag are included.
+pub(crate) fn log_relay_rejection(reason: &str, event: Option<&Event>) {
+    let event_info = event
+        .map(|e| {
+            let h = e
+                .tags
+                .iter()
+                .find_map(|t| {
+                    let s = t.as_slice();
+                    (s.first().map(String::as_str) == Some("h"))
+                        .then(|| s.get(1).cloned())
+                        .flatten()
+                })
+                .unwrap_or_default();
+            format!(
+                "kind:{}  id={}  h={h}  ",
+                e.kind.as_u16(),
+                &e.id.to_hex()[..12]
+            )
+        })
+        .unwrap_or_default();
+    log_entry(&format!("[relay✗] rejected: {event_info}{reason}"));
 }

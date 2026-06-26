@@ -1114,8 +1114,29 @@ async fn rpc_session_start(
         // is a member. Bounded so a hung relay can't block session start (and the
         // hook that awaits it). On timeout the session still starts; membership
         // converges on the next start/heartbeat. Best-effort, fail-open.
+        //
+        // When the session has an explicit channel scope (project != work_root),
+        // the readiness gate is used directly with work_root as parent_hint so
+        // the project group is created first and the channel is created as a
+        // subgroup — not a standalone top-level group. For the bare-project path
+        // (project == work_root) open_project_with_progress is kept to preserve
+        // the existing progress-reporting behaviour.
+        let parent_hint = if project != work_root && !work_root.is_empty() {
+            Some(work_root.clone())
+        } else {
+            None
+        };
         let open = async {
-            if let Some(init_progress) = progress.clone() {
+            if parent_hint.is_some() {
+                // Explicit channel: use the gate so the parent project is
+                // created first, and the channel becomes a proper subgroup.
+                let ctx = crate::fabric::nip29::readiness::ChannelCtx {
+                    channel: &project,
+                    expect_member: &id.pubkey_hex(),
+                    parent_hint: parent_hint.as_deref(),
+                };
+                state.provider.ensure_channel_ready(ctx).await;
+            } else if let Some(init_progress) = progress.clone() {
                 state
                     .provider
                     .open_project_with_progress(&project, &id.pubkey_hex(), move |message| {
