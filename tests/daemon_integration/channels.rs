@@ -2,8 +2,12 @@ use crate::daemon_harness::*;
 use tenex_edge::daemon::client::Client;
 use tenex_edge::state::Store;
 
+#[path = "channels/launch_mentions.rs"]
+mod launch_mentions;
 #[path = "channels/replies.rs"]
 mod replies;
+#[path = "channels/session_rooms.rs"]
+mod session_rooms;
 
 // ── NIP-29 daemon-owned channels ─────────────────────────────────────────────
 
@@ -25,6 +29,14 @@ fn pubkey_of(sec: &str) -> String {
 }
 
 fn rewrite_config_with_user_nsec(home: &Home) {
+    // These tests exercise the per-session-room feature, which is opt-in
+    // (`perSessionRooms`, default off) — so enable it here.
+    write_config(home, true);
+}
+
+/// Write the daemon config, choosing whether human-initiated sessions mint a
+/// per-session room (`per_session_rooms`).
+fn write_config(home: &Home, per_session_rooms: bool) {
     // NIP-29 ownership/minting needs a NIP-29-aware relay; nak can't do it.
     // The user's pubkey is whitelisted (so it's granted admin in every group),
     // and the backend key signs group management. The two keys are ALWAYS
@@ -35,8 +47,10 @@ fn rewrite_config_with_user_nsec(home: &Home) {
         "whitelistedPubkeys": [user_pk],
         "backendName": "test-host",
         "relays": [shared_nip29_relay_url()],
+        "indexerRelay": shared_nip29_relay_url(),
         "userNsec": EXAMPLE_USER_NSEC,
         "tenexPrivateKey": EXAMPLE_BACKEND_SEC_HEX,
+        "perSessionRooms": per_session_rooms,
     });
     std::fs::write(&cfg, serde_json::to_string(&body).unwrap()).unwrap();
 }
@@ -67,179 +81,45 @@ fn unique_session(prefix: &str) -> String {
     format!("{prefix}-{nanos}")
 }
 
-/// e2e: a human-initiated session's first turn gets the channel-hierarchy
-/// context block, rendered through the real daemon (session_start mints the
-/// room + metadata, turn_start assembles + returns the injected context).
+/// `channels_create` (the launch channel picker's "create new channel" path)
+/// must auto-create the parent project group when it doesn't exist on the relay
+/// yet. With per-session rooms off (the default), the picker can be the FIRST
+/// thing to touch a project, so the parent isn't guaranteed to exist; without
+/// the parent-ensure the relay rejects the 9007 with "parent group doesn't
+/// exist". Regression for that path.
 #[test]
-fn first_turn_injects_channel_context_block() {
+fn channels_create_auto_creates_missing_parent_project() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let home = Home::new();
     rewrite_config_with_user_nsec(&home);
+    // A fresh parent project that has NEVER been opened on the relay.
+    let parent = unique_session("freshproj");
+    let backend_pk = pubkey_of(EXAMPLE_BACKEND_SEC_HEX);
 
-    let ctx = rt().block_on(async {
+    let child_h = rt().block_on(async {
         let mut c = Client::connect_or_spawn().await.expect("connect");
-        c.call(
-            "session_start",
-            serde_json::json!({"agent": "coder", "session_id": "sess-ctx-1", "cwd": "/tmp", "watch_pid": std::process::id()}),
-        )
-        .await
-        .expect("session_start");
-        // First turn → the daemon assembles + returns the turn-start context.
         let v = c
-            .call("turn_start", serde_json::json!({"session": "sess-ctx-1"}))
+            .call(
+                "channels_create",
+                serde_json::json!({
+                    "parent": parent,
+                    "name": "tester",
+                    "agents": [{ "slug": "coder", "backend": backend_pk }],
+                    "brief": "",
+                }),
+            )
             .await
-            .expect("turn_start");
-        v.get("context").and_then(|c| c.as_str()).unwrap_or("").to_string()
+            .expect("channels_create should succeed even when the parent is new");
+        v["child_h"].as_str().expect("child_h returned").to_string()
     });
 
-    // The injected context is the fabric awareness snapshot, naming the current
-    // channel and this agent without exposing an internal session code.
-    assert!(
-        ctx.contains("[tenex-edge] Fabric context"),
-        "context was: {ctx}"
-    );
-    assert!(
-        !ctx.contains("[session"),
-        "must not expose a session code; context was: {ctx}"
-    );
-    assert!(ctx.contains("Channel: #"), "context was: {ctx}");
-    assert!(ctx.contains("@coder (you)"), "context was: {ctx}");
+    assert!(!child_h.is_empty(), "channels_create returned a child id");
 
-    stop_daemon(&home);
-}
-
-#[test]
-fn session_start_with_user_nsec_owns_group_and_adds_member() {
-    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let home = Home::new();
-    rewrite_config_with_user_nsec(&home); // daemon reads this at spawn
-
-    rt().block_on(async {
-        let mut c = Client::connect_or_spawn().await.expect("connect");
-        c.call(
-            "session_start",
-            // Supply a live watch_pid (this test process) so the daemon engine's
-            // pid-watcher sees a running process and the session stays alive.
-            // Real hooks always send the harness pid; omitting it lets the engine
-            // self-terminate (no live process to watch) and race the store read.
-            serde_json::json!({"agent": "coder", "session_id": "sess-grp-1", "cwd": "/tmp", "watch_pid": std::process::id()}),
-        )
-        .await
-        .expect("session_start");
-    });
-
-    // ensure_group_and_membership runs (and writes the cache) before session_start
-    // returns, so by now the store records ownership + membership for this project.
+    // The parent project group was created + locked, so it's now owned locally.
     let store = Store::open(&home.store_path()).unwrap();
-    let rec = store
-        .get_session("sess-grp-1")
-        .unwrap()
-        .expect("session row");
-    assert!(rec.alive);
-    assert_eq!(
-        store.session_room_parent(&rec.project).unwrap().as_deref(),
-        Some("tmp"),
-        "session start should record the local-only room parent"
-    );
-    stop_daemon(&home);
-}
-
-/// A human-initiated session (no `channel` override — someone ran `claude` /
-/// `tenex-edge launch` directly) mints its OWN per-session room: a child
-/// subgroup of the work-root project, not the bare project. (Issue #6.)
-#[test]
-fn human_initiated_session_mints_per_session_room() {
-    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let home = Home::new();
-    rewrite_config_with_user_nsec(&home);
-    let sid = unique_session("sess-room");
-
-    rt().block_on(async {
-        let mut c = Client::connect_or_spawn().await.expect("connect");
-        c.call(
-            "session_start",
-            serde_json::json!({"agent": "coder", "session_id": sid, "cwd": "/tmp"}),
-        )
-        .await
-        .expect("session_start");
-    });
-
-    let store = Store::open(&home.store_path()).unwrap();
-    let rec = store
-        .get_session(&sid)
-        .unwrap()
-        .expect("session row");
-    // The session must live in a freshly-minted room (`session-<hash>`), not the
-    // bare work-root project "tmp".
-    assert_ne!(
-        rec.project, "tmp",
-        "human-initiated session should mint a per-session room, not use the bare project"
-    );
     assert!(
-        rec.project.starts_with("session-"),
-        "room id should be a project-agnostic session room: got {}",
-        rec.project
-    );
-    let breadcrumb = store.channel_breadcrumb(&rec.project).unwrap();
-    assert_eq!(
-        breadcrumb.last().map(|(_, label)| label.as_str()),
-        Some(rec.project.as_str()),
-        "session room display label should be the room id, not the agent slug"
-    );
-    // Membership lands via the background mint.
-    materialize_member_snapshot(&home, &rec.project, &rec.agent_pubkey);
-    assert!(
-        wait_until(std::time::Duration::from_secs(20), || Store::open(
-            &home.store_path()
-        )
-        .map(|s| {
-            refresh_project_members(&rec.project);
-            s.is_group_member(&rec.project, &rec.agent_pubkey)
-                .unwrap_or(false)
-        })
-        .unwrap_or(false)),
-        "the agent should be a member of its per-session room"
-    );
-
-    stop_daemon(&home);
-}
-
-/// An opencode-style human session — no harness/resume id, only a watched pid —
-/// still mints a per-session room (anchored on the pid), rather than being left
-/// in the bare project. (Issue #6; regression for the codex-flagged opencode gap.)
-#[test]
-fn opencode_style_session_without_id_mints_room_via_pid() {
-    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let home = Home::new();
-    rewrite_config_with_user_nsec(&home);
-
-    rt().block_on(async {
-        let mut c = Client::connect_or_spawn().await.expect("connect");
-        // No session_id / resume_id — exactly what the opencode plugin sends.
-        c.call(
-            "session_start",
-            serde_json::json!({"agent": "opencoder", "cwd": "/tmp", "watch_pid": std::process::id()}),
-        )
-        .await
-        .expect("session_start");
-    });
-
-    let store = Store::open(&home.store_path()).unwrap();
-    // The opencode session has no harness id; find it by agent slug.
-    let rec = store
-        .list_alive_sessions()
-        .unwrap()
-        .into_iter()
-        .find(|r| r.agent_slug == "opencoder")
-        .expect("opencode session row");
-    assert!(
-        rec.project.starts_with("session-"),
-        "opencode session must mint a per-session room, not stay in the bare project: got {}",
-        rec.project
-    );
-    assert!(
-        store.is_session_room(&rec.project).unwrap(),
-        "minted group must be flagged as a per-session room"
+        store.is_group_owned(&parent).unwrap(),
+        "parent project {parent} should be owned after channels_create created it"
     );
 
     stop_daemon(&home);

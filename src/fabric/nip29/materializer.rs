@@ -302,8 +302,18 @@ mod tests {
         let sibling_agent = Keys::generate();
         let project = "session-room";
 
-        alive_session(&store, "origin", &origin_agent.public_key().to_hex(), project);
-        alive_session(&store, "sibling", &sibling_agent.public_key().to_hex(), project);
+        alive_session(
+            &store,
+            "origin",
+            &origin_agent.public_key().to_hex(),
+            project,
+        );
+        alive_session(
+            &store,
+            "sibling",
+            &sibling_agent.public_key().to_hex(),
+            project,
+        );
 
         let chat = ChatMessage {
             from: AgentRef::new(operator.public_key().to_hex(), "operator"),
@@ -336,7 +346,11 @@ mod tests {
             "origin session must not receive its own prompt back"
         );
         let sibling = store.peek_chat("sibling").unwrap();
-        assert_eq!(sibling.len(), 1, "sibling in same scope still gets the prompt");
+        assert_eq!(
+            sibling.len(),
+            1,
+            "sibling in same scope still gets the prompt"
+        );
         assert_eq!(sibling[0].body, "plan this");
         assert_eq!(sibling[0].from_session, "origin");
     }
@@ -349,8 +363,18 @@ mod tests {
         let store = Store::open_memory().unwrap();
         let operator = Keys::generate();
         let project = "session-room";
-        alive_session(&store, "a", &Keys::generate().public_key().to_hex(), project);
-        alive_session(&store, "b", &Keys::generate().public_key().to_hex(), project);
+        alive_session(
+            &store,
+            "a",
+            &Keys::generate().public_key().to_hex(),
+            project,
+        );
+        alive_session(
+            &store,
+            "b",
+            &Keys::generate().public_key().to_hex(),
+            project,
+        );
 
         let chat = ChatMessage {
             from: AgentRef::new(operator.public_key().to_hex(), "operator"),
@@ -374,7 +398,12 @@ mod tests {
         let sender_agent = Keys::generate();
         let other_agent = Keys::generate();
         let project = "session-room";
-        alive_session(&store, "sender", &sender_agent.public_key().to_hex(), project);
+        alive_session(
+            &store,
+            "sender",
+            &sender_agent.public_key().to_hex(),
+            project,
+        );
         alive_session(&store, "other", &other_agent.public_key().to_hex(), project);
 
         let chat = ChatMessage {

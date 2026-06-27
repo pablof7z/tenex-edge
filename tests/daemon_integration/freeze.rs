@@ -28,6 +28,9 @@ fn rewrite_config_with_user_nsec(home: &Home) {
         "relays": [shared_relay_url()],
         "userNsec": EXAMPLE_USER_NSEC,
         "tenexPrivateKey": EXAMPLE_BACKEND_SEC_HEX,
+        // This test asserts the minted per-session room parent, so opt into the
+        // per-session-room feature (default off).
+        "perSessionRooms": true,
     });
     std::fs::write(&cfg, serde_json::to_string(&body).unwrap()).unwrap();
 }

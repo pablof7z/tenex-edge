@@ -121,6 +121,13 @@ pub(super) async fn rpc_tmux_spawn(
         Some(p.base_command)
     };
     let group = p.channel.as_deref();
+
+    // Proactively provision the channel/project BEFORE opening the pane so the
+    // relay already has the group and the agent as a member when the first
+    // session-start event arrives. Best-effort with an 8-second cap — a slow
+    // relay must never block the spawn. Session-start repeats this idempotently.
+    provision_before_spawn(state, &p.agent, &p.project, group).await;
+
     let pane_id = crate::tmux::spawn_agent(
         state,
         &p.agent,
@@ -132,6 +139,68 @@ pub(super) async fn rpc_tmux_spawn(
     )
     .await?;
     Ok(serde_json::json!({ "pane_id": pane_id, "agent": p.agent, "project": p.project }))
+}
+
+/// Resolve the agent's durable pubkey and call `ensure_channel_ready` for the
+/// launch scope (the channel if given, else the project root) before the pane is
+/// opened.
+///
+/// If the same agent slug already has a live session in the scope, logs a note
+/// about the concurrent launch — ordinal-keyed second-instance pubkeys are a
+/// future extension; for now both instances share the same durable key.
+async fn provision_before_spawn(
+    state: &Arc<DaemonState>,
+    slug: &str,
+    project: &str,
+    channel: Option<&str>,
+) {
+    let edge = crate::config::edge_home();
+    let id = match crate::identity::load_or_create(&edge, slug, crate::util::now_secs()) {
+        Ok(id) => id,
+        Err(e) => {
+            eprintln!("[daemon] tmux_spawn: could not resolve identity for {slug}: {e:#}");
+            return;
+        }
+    };
+    let pubkey = id.pubkey_hex();
+
+    // Detect concurrent instances of the same agent in this scope.
+    let scope = channel.filter(|g| !g.is_empty()).unwrap_or(project);
+    let already_live = state
+        .with_store(|s| s.latest_alive_session_for_agent_in_project(slug, scope))
+        .ok()
+        .flatten()
+        .is_some();
+    if already_live {
+        eprintln!(
+            "[daemon] tmux_spawn: {slug} already has a live session in {scope}; \
+             launching concurrent instance (shared pubkey {}; ordinal keys are a future extension)",
+            crate::util::pubkey_short(&pubkey),
+        );
+    }
+
+    let timeout = std::time::Duration::from_secs(8);
+    // One primitive provisions every channel: a top-level project is the ROOT
+    // channel (parent_hint None); an explicit channel is a subgroup under the
+    // project (parent_hint = project). `ensure_channel_ready` ensures existence +
+    // admin invariants + membership either way, so the session-start that follows
+    // finds the scope ready (with a valid parent when a per-session room is minted).
+    let parent_hint = channel.filter(|g| !g.is_empty()).map(|_| project);
+    eprintln!(
+        "[daemon] tmux_spawn: pre-provisioning channel {scope} for {slug} ({})",
+        crate::util::pubkey_short(&pubkey),
+    );
+    let ctx = crate::fabric::nip29::readiness::ChannelCtx {
+        channel: scope,
+        expect_member: &pubkey,
+        parent_hint,
+    };
+    if tokio::time::timeout(timeout, state.provider.ensure_channel_ready(ctx))
+        .await
+        .is_err()
+    {
+        eprintln!("[daemon] tmux_spawn: channel provisioning timed out for {scope}; proceeding");
+    }
 }
 
 // ── tmux_attach ───────────────────────────────────────────────────────────────

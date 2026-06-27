@@ -50,6 +50,22 @@ impl Home {
         .unwrap();
         Home { dir }
     }
+    /// Rewrite the config to include a backend signing key (`tenexPrivateKey`).
+    /// Needed by tests that start multiple CONCURRENT same-agent sessions in one
+    /// project: with per-session rooms off (the default) they share the project
+    /// channel and thus the durable signer slot, so the second session derives a
+    /// transient "second-personality" key — which requires a backend key.
+    pub(crate) fn with_backend_key(self) -> Self {
+        let cfg = self.dir.path().join("config.json");
+        let body = serde_json::json!({
+            "whitelistedPubkeys": [],
+            "backendName": "test-host",
+            "relays": [shared_relay_url()],
+            "tenexPrivateKey": "b53809614e9c41b923dd5546e438e48e9bcbee04b9c7c50bae0b085954e03422",
+        });
+        std::fs::write(&cfg, serde_json::to_string(&body).unwrap()).unwrap();
+        self
+    }
     pub(crate) fn store_path(&self) -> PathBuf {
         self.dir.path().join("state.db")
     }

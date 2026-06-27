@@ -96,19 +96,29 @@ pub(crate) async fn launch(
         Some(p) => p,
         None => crate::project::resolve_or_bail(&std::env::current_dir().unwrap_or_default())?,
     };
-    // `--channel` with no value → open the interactive picker.
-    let channel = match channel {
-        Some(ref s) if s.is_empty() => {
-            use std::io::IsTerminal;
-            if !std::io::stdin().is_terminal() {
-                anyhow::bail!(
-                    "--channel with no value opens an interactive picker that needs a TTY; \
-                     pass --channel <id> to scope into a specific channel non-interactively"
-                );
-            }
-            Some(pick_channel(&project, &agent).await?)
+    // When to open the interactive picker:
+    //   • `--channel` with no value (explicit `Some("")`), always; or
+    //   • no `--channel` at all while per-session rooms are disabled — the
+    //     default — so a bare `tenex-edge launch <agent>` scopes into a chosen
+    //     channel instead of minting a per-session room.
+    // With per-session rooms enabled, a bare launch passes `None` through and
+    // the daemon mints the per-session room as before.
+    let per_session_rooms = crate::config::Config::load()
+        .map(|c| c.per_session_rooms)
+        .unwrap_or(false);
+    let want_picker =
+        matches!(channel, Some(ref s) if s.is_empty()) || (channel.is_none() && !per_session_rooms);
+    let channel = if want_picker {
+        use std::io::IsTerminal;
+        if !std::io::stdin().is_terminal() {
+            anyhow::bail!(
+                "channel selection needs a TTY to open the interactive picker; \
+                 pass --channel <id> to scope into a specific channel non-interactively"
+            );
         }
-        other => other,
+        Some(pick_channel(&project, &agent).await?)
+    } else {
+        channel
     };
     let cwd = std::env::current_dir()
         .ok()

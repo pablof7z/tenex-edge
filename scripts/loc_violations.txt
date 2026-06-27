@@ -1,8 +1,0 @@
-src/cli.rs
-src/cli/who/tests.rs
-src/daemon/server.rs
-src/fabric/provider.rs
-src/identity.rs
-src/session.rs
-src/state.rs
-src/tmux.rs

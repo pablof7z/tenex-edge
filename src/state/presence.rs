@@ -11,7 +11,7 @@ const PRESENCE_COLS: &str = "pubkey, project, local_session_id, agent_slug, host
      last_seen, resume_id, state_version, lifecycle, first_seen, updated_at";
 
 impl Store {
-    pub(super) fn presence_snapshots(
+    pub(in crate::state) fn presence_snapshots(
         &self,
         project: Option<&str>,
         since: u64,
@@ -26,7 +26,7 @@ impl Store {
         Ok(rows.filter_map(|r| r.ok()).collect())
     }
 
-    pub(super) fn presence_delta_snapshots(
+    pub(in crate::state) fn presence_delta_snapshots(
         &self,
         project: &str,
         since: u64,
@@ -80,7 +80,7 @@ impl Store {
         )
     }
 
-    pub(super) fn record_relay_presence(
+    pub(in crate::state) fn record_relay_presence(
         &self,
         obs: &PeerStatusObservation,
         native_event_id: Option<&str>,

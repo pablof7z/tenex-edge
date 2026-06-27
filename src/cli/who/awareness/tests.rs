@@ -279,7 +279,10 @@ fn update_activity_does_not_echo_current_session_prompt() {
         .expect("other activity should still render");
 
     assert_has(&block, "Activity in #child:");
-    assert_has(&block, "[@claude, just now] I validated it through the real hook.");
+    assert_has(
+        &block,
+        "[@claude, just now] I validated it through the real hook.",
+    );
     assert_lacks(&block, "did you validate it with real usage?");
     assert_lacks(&block, "@operator");
 }

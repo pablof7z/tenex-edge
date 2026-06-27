@@ -12,10 +12,14 @@ pub(super) fn hook_tail(opts: HookTailOpts) -> anyhow::Result<()> {
     state::hook_tail(opts)
 }
 
-pub(super) async fn outbox(live: bool, limit: u64, refresh: std::time::Duration) -> anyhow::Result<()> {
+pub(super) async fn outbox(
+    live: bool,
+    limit: u64,
+    refresh: std::time::Duration,
+) -> anyhow::Result<()> {
     loop {
-        let v = super::daemon_call_async("debug_outbox", serde_json::json!({ "limit": limit }))
-            .await?;
+        let v =
+            super::daemon_call_async("debug_outbox", serde_json::json!({ "limit": limit })).await?;
         render_outbox(&v);
         if !live {
             break;

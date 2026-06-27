@@ -46,7 +46,11 @@ impl Store {
     }
 
     /// Enqueue an outbox row for the session's CURRENT `state_version`.
-    pub(super) fn enqueue_status_outbox_current(&self, session_id: &str, ts: u64) -> Result<()> {
+    pub(in crate::state) fn enqueue_status_outbox_current(
+        &self,
+        session_id: &str,
+        ts: u64,
+    ) -> Result<()> {
         let version: Option<i64> = self
             .conn
             .query_row(
@@ -61,7 +65,7 @@ impl Store {
         Ok(())
     }
 
-    pub(super) fn enqueue_status_outbox(
+    pub(in crate::state) fn enqueue_status_outbox(
         &self,
         session_id: &str,
         state_version: i64,

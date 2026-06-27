@@ -36,6 +36,12 @@ pub struct Config {
     pub tenex_private_key: Option<String>,
     /// Custom tmux status-format string. None means use the default.
     pub tmux_status_command: Option<String>,
+    /// Whether human-initiated sessions (no `TENEX_EDGE_CHANNEL` override) mint
+    /// their own per-session NIP-29 subgroup. Default `false`: such sessions
+    /// land in the bare project channel, and `tenex-edge launch` (without
+    /// `--channel`) opens the interactive channel picker instead of minting.
+    /// When `true`, the legacy behavior is restored (mint a per-session room).
+    pub per_session_rooms: bool,
 }
 
 impl Config {
@@ -99,6 +105,10 @@ struct RawConfig {
     /// are fallbacks for the brief window before the hook fires.
     #[serde(default, rename = "tmuxStatusCommand")]
     tmux_status_command: Option<String>,
+    /// Opt-in: mint a per-session subgroup for human-initiated sessions.
+    /// Defaults to `false` (use the project channel; `launch` opens the picker).
+    #[serde(default, rename = "perSessionRooms")]
+    per_session_rooms: bool,
 }
 
 impl Config {
@@ -126,6 +136,7 @@ impl Config {
             user_nsec: raw.user_nsec,
             tenex_private_key: raw.tenex_private_key,
             tmux_status_command: raw.tmux_status_command,
+            per_session_rooms: raw.per_session_rooms,
         })
     }
 
@@ -250,6 +261,18 @@ mod tests {
         let json = r#"{"indexerRelay":"wss://my-indexer.example"}"#;
         let c = Config::from_json_str(json, "host").unwrap();
         assert_eq!(c.indexer_relay, "wss://my-indexer.example");
+    }
+
+    #[test]
+    fn per_session_rooms_defaults_off_and_parses_when_set() {
+        let off = Config::from_json_str(r#"{"whitelistedPubkeys":[]}"#, "host").unwrap();
+        assert!(!off.per_session_rooms);
+        let on = Config::from_json_str(
+            r#"{"whitelistedPubkeys":[],"perSessionRooms":true}"#,
+            "host",
+        )
+        .unwrap();
+        assert!(on.per_session_rooms);
     }
 
     #[test]

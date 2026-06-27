@@ -1,5 +1,5 @@
 use super::unique_session;
-use crate::daemon_harness::{ENV_LOCK, Home, rt, stop_daemon};
+use crate::daemon_harness::{rt, stop_daemon, Home, ENV_LOCK};
 use tenex_edge::daemon::client::Client;
 use tenex_edge::state::Store;
 

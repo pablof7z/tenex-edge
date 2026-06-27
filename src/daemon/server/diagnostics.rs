@@ -1,0 +1,137 @@
+use super::*;
+
+pub(in crate::daemon::server) async fn rpc_doctor(
+    state: &Arc<DaemonState>,
+) -> Result<serde_json::Value> {
+    let relays = state.cfg.relays.clone();
+    let probe = state
+        .keys_for(&state.hosted_pubkeys().first().cloned().unwrap_or_default())
+        .map(|k| k.public_key().to_hex());
+    // The probe's wire shape lives in the provider; readers only see strings.
+    let (publish, readback) = state.provider.doctor_probe().await;
+    Ok(serde_json::json!({
+        "relays": relays,
+        "probe_pubkey": probe,
+        "publish": publish,
+        "readback": readback,
+    }))
+}
+
+// ── local_backend ────────────────────────────────────────────────────────────
+
+/// Return the local daemon's backend pubkey (hex) and host slug so callers can
+/// construct `slug@backend` agent specs without guessing the hostname format.
+pub(in crate::daemon::server) fn rpc_local_backend(
+    state: &Arc<DaemonState>,
+) -> Result<serde_json::Value> {
+    let pubkey = state
+        .backend_pubkey
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("no signing key (tenexPrivateKey) configured"))?;
+    let host_slug = crate::util::slugify_host(&state.host);
+    Ok(serde_json::json!({ "pubkey": pubkey, "host_slug": host_slug }))
+}
+
+pub(in crate::daemon::server) async fn refresh_project_members_cache(
+    state: &Arc<DaemonState>,
+    project: &str,
+) -> bool {
+    use crate::fabric::nip29::wire::{kind, KIND_GROUP_MEMBERS};
+    use nostr_sdk::prelude::Filter;
+
+    let filter = Filter::new()
+        .kind(kind(KIND_GROUP_MEMBERS))
+        .identifier(project)
+        .limit(5);
+    let Ok(events) = state.transport.fetch(filter, Duration::from_secs(5)).await else {
+        return false;
+    };
+    let Some(ev) = events.iter().max_by_key(|e| e.created_at.as_secs()) else {
+        return false;
+    };
+    let members = ev
+        .tags
+        .iter()
+        .filter_map(|t| {
+            let s = t.as_slice();
+            if s.first().map(String::as_str) != Some("p") {
+                return None;
+            }
+            let pubkey = s.get(1)?.clone();
+            let role = s.get(2).cloned().unwrap_or_else(|| "member".to_string());
+            Some((pubkey, role))
+        })
+        .collect::<Vec<_>>();
+    state.with_store(|s| {
+        s.replace_group_members(project, &members, now_secs()).ok();
+    });
+    true
+}
+
+pub(in crate::daemon::server) async fn wait_for_project_member_cache(
+    state: &Arc<DaemonState>,
+    project: &str,
+    pubkey: &str,
+    present: bool,
+) -> bool {
+    for _ in 0..20 {
+        let refreshed = refresh_project_members_cache(state, project).await;
+        let has = state.with_store(|s| s.is_group_member(project, pubkey).unwrap_or(false));
+        if refreshed && has == present {
+            return true;
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    false
+}
+
+pub(in crate::daemon::server) fn log_nip29_role_decision(
+    group: &str,
+    pubkey: &str,
+    role: &str,
+    reason: &str,
+) {
+    eprintln!(
+        "[daemon] nip29-role-decision group={group} target={} role={role} reason={reason}",
+        crate::util::pubkey_short(pubkey)
+    );
+}
+
+pub(in crate::daemon::server) fn rpc_debug_outbox(
+    state: &Arc<DaemonState>,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value> {
+    #[derive(serde::Deserialize)]
+    struct P {
+        #[serde(default = "default_debug_outbox_limit")]
+        limit: u64,
+    }
+    let p: P = serde_json::from_value(params.clone()).unwrap_or(P {
+        limit: default_debug_outbox_limit(),
+    });
+    let rows = state.with_store(|s| s.list_status_outbox_debug(p.limit))?;
+    let rows = rows
+        .into_iter()
+        .map(|r| {
+            serde_json::json!({
+                "session_id": r.session_id,
+                "state_version": r.state_version,
+                "publish_state": r.publish_state,
+                "retries": r.retries,
+                "native_event_id": r.native_event_id,
+                "last_error": r.last_error,
+                "enqueued_at": r.enqueued_at,
+                "agent_slug": r.agent_slug,
+                "project": r.project,
+                "title": r.title,
+                "activity": r.activity,
+                "busy": r.busy,
+            })
+        })
+        .collect::<Vec<_>>();
+    Ok(serde_json::json!({ "rows": rows }))
+}
+
+pub(in crate::daemon::server) fn default_debug_outbox_limit() -> u64 {
+    50
+}

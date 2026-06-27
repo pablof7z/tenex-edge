@@ -81,11 +81,24 @@ pub async fn rpc_project_members(
     let p: P = serde_json::from_value(params.clone()).context("project_members params")?;
     refresh_project_members_cache(state, &p.project).await;
 
+    let member_pubkeys = state
+        .with_store(|s| s.list_group_members(&p.project))
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(pubkey, _)| pubkey)
+        .collect::<Vec<_>>();
+    crate::profile::warm(state, &member_pubkeys).await;
+
     let members = state
         .with_store(|s| s.list_group_members(&p.project))
         .unwrap_or_default()
         .into_iter()
-        .map(|(pubkey, role)| serde_json::json!({ "pubkey": pubkey, "role": role }))
+        .map(|(pubkey, role)| {
+            let slug = state
+                .with_store(|s| s.resolve_slug_for_pubkey(&pubkey).ok().flatten())
+                .unwrap_or_default();
+            serde_json::json!({ "pubkey": pubkey, "slug": slug, "role": role })
+        })
         .collect::<Vec<_>>();
 
     Ok(serde_json::json!({
