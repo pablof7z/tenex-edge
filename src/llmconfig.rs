@@ -30,9 +30,9 @@ pub struct ResolvedModel {
     pub base_url: String,
 }
 
-/// Resolve a role using the default `tenex_dir()`.
+/// Resolve a role using the default `edge_home()`.
 pub fn resolve_role(role: &str) -> Option<ResolvedModel> {
-    resolve_role_in(&crate::config::tenex_dir(), role)
+    resolve_role_in(&crate::config::edge_home(), role)
 }
 
 /// Pure core: resolve `role` against the `providers.json` + `llms.json` found in

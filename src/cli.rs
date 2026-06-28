@@ -66,6 +66,13 @@ pub(crate) fn channel_env() -> Option<String> {
 }
 
 pub async fn run(cli: Cli) -> Result<()> {
+    {
+        let relays = crate::config::Config::load()
+            .map(|c| c.relays.join(", "))
+            .unwrap_or_else(|_| "none".to_string());
+        let home = crate::config::edge_home();
+        eprintln!("[tenex-edge] home={} relays={}", home.display(), relays);
+    }
     match cli.cmd {
         Cmd::Publish {
             title,

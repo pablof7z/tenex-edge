@@ -20,7 +20,7 @@ static LOG_FILE: OnceLock<Option<Mutex<File>>> = OnceLock::new();
 fn log_file() -> Option<&'static Mutex<File>> {
     LOG_FILE
         .get_or_init(|| {
-            let dir = crate::config::tenex_dir();
+            let dir = crate::config::edge_home();
             let _ = std::fs::create_dir_all(&dir);
             OpenOptions::new()
                 .create(true)

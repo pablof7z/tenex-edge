@@ -153,7 +153,7 @@ pub fn config_path() -> PathBuf {
     if let Ok(p) = std::env::var("TENEX_CONFIG") {
         return PathBuf::from(p);
     }
-    home_dir().join(".tenex-edge").join("config.json")
+    edge_home().join("config.json")
 }
 
 /// tenex-edge's own writable root. Override with `$TENEX_EDGE_HOME` (tests use
@@ -165,13 +165,6 @@ pub fn edge_home() -> PathBuf {
     home_dir().join(".tenex-edge")
 }
 
-/// The shared `~/.tenex-edge` directory (override with `$TENEX_DIR`, for tests).
-pub fn tenex_dir() -> PathBuf {
-    if let Ok(p) = std::env::var("TENEX_DIR") {
-        return PathBuf::from(p);
-    }
-    home_dir().join(".tenex-edge")
-}
 
 pub fn ensure_dir(p: &Path) -> Result<()> {
     std::fs::create_dir_all(p).with_context(|| format!("creating {}", p.display()))?;

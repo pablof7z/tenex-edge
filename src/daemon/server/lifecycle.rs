@@ -216,7 +216,10 @@ pub(in crate::daemon::server) fn bind_socket() -> Result<UnixListener> {
 
 pub(in crate::daemon::server) fn cleanup() {
     let _ = std::fs::remove_file(socket_path());
-    let _ = std::fs::remove_file(lock_path());
+    // Do NOT remove the lock file here — deleting it while the flock is still
+    // held lets a racing spawner open a *new* file (different inode) and acquire
+    // an independent lock, causing two daemons to overlap and fight over state.db.
+    // The lock is implicitly released when the process exits and the fd is closed.
 }
 
 // ── connection handling ──────────────────────────────────────────────────────
