@@ -163,6 +163,46 @@ pub(crate) fn run_cli_stdin_with_env(
     child.wait_with_output().expect("run tenex-edge")
 }
 
+/// Chat (kind:9/11) events materialized in a channel, oldest-first. Replaces the
+/// removed `Store::list_chat_messages`/`peek_chat` channel reader — chat now lives
+/// verbatim in `relay_events`, read back via `chat_for_channel`. Row fields map:
+/// `.body` → `.content`, `.from_pubkey` → `.pubkey`.
+pub(crate) fn chat_in_channel(
+    store: &tenex_edge::state::Store,
+    channel_h: &str,
+) -> Vec<tenex_edge::state::RelayEvent> {
+    store.chat_for_channel(channel_h, 0, u32::MAX).unwrap()
+}
+
+/// The transient (non-durable) signer pubkey bound to a session, or `None` when
+/// the session signs with its durable ordinal-0 base key. Replaces the removed
+/// `session_pubkey_for_session`: per-session identities now live in `identities`
+/// (ordinal 0 == the base agent key, ordinal > 0 == a durable derived signer).
+pub(crate) fn session_transient_pubkey(
+    store: &tenex_edge::state::Store,
+    session_id: &str,
+) -> Option<String> {
+    store
+        .identity_for_session(session_id)
+        .unwrap()
+        .filter(|i| i.ordinal > 0)
+        .map(|i| i.pubkey)
+}
+
+/// The tmux pane id bound to a session via its `tmux_pane` alias, if any.
+/// Replaces the removed `get_session_endpoint(session, "tmux")`.
+pub(crate) fn tmux_pane_for_session(
+    store: &tenex_edge::state::Store,
+    session_id: &str,
+) -> Option<String> {
+    store
+        .aliases_for_session(session_id)
+        .unwrap()
+        .into_iter()
+        .find(|a| a.external_id_kind == "tmux_pane")
+        .map(|a| a.external_id)
+}
+
 /// Stop the daemon by sending the version-skew please_exit and waiting for the
 /// socket to disappear (keeps tests from leaking daemons).
 pub(crate) fn stop_daemon(home: &Home) {

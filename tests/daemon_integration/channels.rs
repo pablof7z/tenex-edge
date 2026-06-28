@@ -65,11 +65,7 @@ fn refresh_project_members(project: &str) {
 fn materialize_member_snapshot(home: &Home, project: &str, pubkey: &str) {
     Store::open(&home.store_path())
         .unwrap()
-        .replace_group_members(
-            project,
-            &[(pubkey.to_string(), "member".to_string())],
-            9_000_000,
-        )
+        .replace_channel_members(project, &[pubkey.to_string()], 9_000_000)
         .unwrap();
 }
 
@@ -115,11 +111,13 @@ fn channels_create_auto_creates_missing_parent_project() {
 
     assert!(!child_h.is_empty(), "channels_create returned a child id");
 
-    // The parent project group was created + locked, so it's now owned locally.
+    // The parent project group was created + locked, so the backend management
+    // key is now an admin of it. (Manageability = `is_channel_admin`; the old
+    // `is_group_owned` ownership flag no longer exists.)
     let store = Store::open(&home.store_path()).unwrap();
     assert!(
-        store.is_group_owned(&parent).unwrap(),
-        "parent project {parent} should be owned after channels_create created it"
+        store.is_channel_admin(&parent, &backend_pk).unwrap(),
+        "parent project {parent} should be managed (backend admin) after channels_create created it"
     );
 
     stop_daemon(&home);
@@ -150,7 +148,7 @@ fn orchestration_session_uses_existing_group_without_minting() {
         .unwrap()
         .expect("session row");
     assert_eq!(
-        rec.project, "issue-42",
+        rec.channel_h, "issue-42",
         "with a channel override the session joins it; it must not mint a child room"
     );
 
@@ -184,19 +182,19 @@ fn user_prompt_publishes_kind9_chat_into_room() {
         .get_session(&sid)
         .unwrap()
         .expect("session row");
-    materialize_member_snapshot(&home, &rec.project, &rec.agent_pubkey);
+    materialize_member_snapshot(&home, &rec.channel_h, &rec.agent_pubkey);
     assert!(
         wait_until(std::time::Duration::from_secs(20), || Store::open(
             &home.store_path()
         )
         .map(|s| {
-            refresh_project_members(&rec.project);
-            s.is_group_member(&rec.project, &rec.agent_pubkey)
+            refresh_project_members(&rec.channel_h);
+            s.is_channel_member(&rec.channel_h, &rec.agent_pubkey)
                 .unwrap_or(false)
         })
         .unwrap_or(false)),
         "room {} not live in time",
-        rec.project
+        rec.channel_h
     );
 
     rt().block_on(async {
@@ -210,14 +208,12 @@ fn user_prompt_publishes_kind9_chat_into_room() {
     });
 
     let store = Store::open(&home.store_path()).unwrap();
-    let msgs = store
-        .list_chat_messages(&rec.project, 0, None, 0, false)
-        .unwrap();
+    let msgs = chat_in_channel(&store, &rec.channel_h);
     assert!(
-        msgs.iter().any(|m| m.body == "build me a thing"),
+        msgs.iter().any(|m| m.content == "build me a thing"),
         "user prompt should be recorded as chat in room {}; got {:?}",
-        rec.project,
-        msgs.iter().map(|m| &m.body).collect::<Vec<_>>()
+        rec.channel_h,
+        msgs.iter().map(|m| &m.content).collect::<Vec<_>>()
     );
 
     stop_daemon(&home);
@@ -249,19 +245,19 @@ fn agent_reply_publishes_kind9_chat_into_room() {
         .get_session(&sid)
         .unwrap()
         .expect("session row");
-    materialize_member_snapshot(&home, &rec.project, &rec.agent_pubkey);
+    materialize_member_snapshot(&home, &rec.channel_h, &rec.agent_pubkey);
     assert!(
         wait_until(std::time::Duration::from_secs(20), || Store::open(
             &home.store_path()
         )
         .map(|s| {
-            refresh_project_members(&rec.project);
-            s.is_group_member(&rec.project, &rec.agent_pubkey)
+            refresh_project_members(&rec.channel_h);
+            s.is_channel_member(&rec.channel_h, &rec.agent_pubkey)
                 .unwrap_or(false)
         })
         .unwrap_or(false)),
         "room {} not live in time",
-        rec.project
+        rec.channel_h
     );
 
     rt().block_on(async {
@@ -279,20 +275,18 @@ fn agent_reply_publishes_kind9_chat_into_room() {
     });
 
     let store = Store::open(&home.store_path()).unwrap();
-    let msgs = store
-        .list_chat_messages(&rec.project, 0, None, 0, false)
-        .unwrap();
-    let reply = msgs.iter().find(|m| m.body == "I fixed the bug in auth.rs");
+    let msgs = chat_in_channel(&store, &rec.channel_h);
+    let reply = msgs.iter().find(|m| m.content == "I fixed the bug in auth.rs");
     assert!(
         reply.is_some(),
         "agent reply should be chat in room {}; got {:?}",
-        rec.project,
-        msgs.iter().map(|m| &m.body).collect::<Vec<_>>()
+        rec.channel_h,
+        msgs.iter().map(|m| &m.content).collect::<Vec<_>>()
     );
     // The reply is signed by the durable agent identity (the room member), so
     // chat and presence stay on one identity.
     assert_eq!(
-        reply.unwrap().from_pubkey,
+        reply.unwrap().pubkey,
         rec.agent_pubkey,
         "agent reply must be signed by the durable agent identity"
     );
@@ -322,8 +316,16 @@ fn session_start_without_tenex_private_key_still_starts_unmanaged() {
         .unwrap()
         .expect("session row");
     assert!(rec.alive, "session must start even without tenexPrivateKey");
+    // Manageability is now "has an admin member" (relay_channel_members, role
+    // 'admin'); the old `is_group_owned` ownership flag no longer exists. Without
+    // tenexPrivateKey the daemon can't sign group management, so no admin is
+    // materialized — the channel stays unmanaged.
     assert!(
-        !store.is_group_owned(&rec.project).unwrap(),
+        store
+            .list_channel_members(&rec.channel_h)
+            .unwrap()
+            .iter()
+            .all(|m| m.role != "admin"),
         "without tenexPrivateKey the daemon must not claim/own the group"
     );
 

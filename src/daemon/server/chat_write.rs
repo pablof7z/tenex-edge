@@ -1,4 +1,6 @@
+use super::resolution::work_root_for;
 use super::*;
+use crate::state::{RelayEvent, Store};
 
 #[derive(serde::Deserialize, Default)]
 pub(in crate::daemon::server) struct ChatWriteParams {
@@ -11,6 +13,33 @@ pub(in crate::daemon::server) struct ChatWriteParams {
     agent: Option<String>,
     #[serde(default)]
     group: Option<String>,
+}
+
+/// Build a verbatim kind:9 chat row for the `relay_events` log from the fields we
+/// already know about a freshly-published chat line (the relay rarely echoes a
+/// publish back to the same connection, so the log is seeded locally).
+pub(in crate::daemon::server) fn chat_relay_event(
+    id: &str,
+    pubkey: &str,
+    created_at: u64,
+    channel_h: &str,
+    body: &str,
+    mentioned: Option<&str>,
+) -> RelayEvent {
+    let mut tags: Vec<Vec<String>> = vec![vec!["h".to_string(), channel_h.to_string()]];
+    if let Some(pk) = mentioned {
+        tags.push(vec!["p".to_string(), pk.to_string()]);
+    }
+    RelayEvent {
+        id: id.to_string(),
+        kind: crate::fabric::nip29::wire::KIND_CHAT as u32,
+        pubkey: pubkey.to_string(),
+        created_at,
+        channel_h: channel_h.to_string(),
+        d_tag: String::new(),
+        content: body.to_string(),
+        tags_json: serde_json::to_string(&tags).unwrap_or_else(|_| "[]".to_string()),
+    }
 }
 
 pub(in crate::daemon::server) async fn rpc_chat_write(
@@ -29,56 +58,34 @@ pub(in crate::daemon::server) async fn rpc_chat_write(
     )?;
     let id = identity::load_or_create(&config::edge_home(), &rec.agent_slug, now_secs())?;
     let durable_pubkey = id.pubkey_hex();
-    // Routing scope: the NIP-29 group this session currently publishes into —
-    // its `channel` when set (a `channels switch` moved it to a subgroup), else
-    // its per-session room (`project`). All chat routing + the wire `h` tag key
-    // on this so a switched session's chat lands in the new room, not the old
-    // one it minted at spawn.
-    let scope = rec.route_scope().to_string();
+    // Routing scope: the channel this session currently publishes into. All chat
+    // routing + the wire `h` tag key on this so a switched session's chat lands in
+    // the new channel.
+    let scope = rec.channel_h.clone();
 
     // Explicit-destination redirect (issue #47): `chat write --channel #dst` from
     // inside a session publishes INTO #dst even though `env_session` resolved the
-    // SENDER to its own room. `resolve_session` uses `group` only to LOCATE the
-    // sender (env_session wins); here it becomes the publish TARGET when it
-    // differs from the sender's own scope. The canonical case is the
-    // channel-switch redirect: a blocked instance messages the instance already
-    // active in #dst — accepted because it signs as the same ordinal pubkey,
-    // which IS a member there. The daemon injects an authoritative provenance
-    // prefix the agent cannot spoof (it is added here, not taken from content).
+    // SENDER to its own channel. The daemon injects an authoritative provenance
+    // prefix the agent cannot spoof.
     let explicit_dest = p
         .group
         .as_deref()
         .filter(|g| !g.is_empty() && *g != scope.as_str())
         .map(str::to_string);
-    // Body actually published/recorded: provenance-prefixed on a redirect.
     let body_to_send = match &explicit_dest {
-        Some(_) => {
-            let label = state
-                .with_store(|s| s.identity_route_for_session(&rec.session_id))
-                .map(|r| r.label)
-                .unwrap_or_else(|| rec.agent_slug.clone());
-            format!("[from @{label} working in #{scope}]: {}", p.message)
-        }
+        Some(_) => format!("[from @{} working in #{scope}]: {}", rec.agent_slug, p.message),
         None => p.message.clone(),
     };
     // Sessions to deliver to + the wire `h`: the explicit destination on a
     // redirect, else the sender's own scope.
     let deliver_scope = explicit_dest.clone().unwrap_or_else(|| scope.clone());
 
-    // Mention target: the FIRST inline `@codename` found in the message body,
-    // so `chat write "hey @bravo4217"` highlights that session. Only codename-
-    // shaped tokens (`<nato-word><digits>`) are recognized — `@` means host in
-    // every other tenex-edge identifier, so `@codex` / `@codex@laptop` are NOT
-    // mentions. See `idref::extract_mentions`.
-    // A redirect (`--channel #dst`) is a plain channel post, not a mention — skip
-    // mention resolution so it can't rewrite the publish scope or fail
-    // cross-room validation.
+    // Mention target: the FIRST inline `@codename` in the body. A redirect is a
+    // plain channel post, not a mention.
     let mention_token: Option<String> = if explicit_dest.is_some() {
         None
     } else {
-        crate::idref::extract_mentions(&p.message)
-            .into_iter()
-            .next()
+        crate::idref::extract_mentions(&p.message).into_iter().next()
     };
     let mention = if let Some(raw) = mention_token {
         let target = state.with_store(|s| resolve_recipient(s, &scope, &state.host, &raw))?;
@@ -88,10 +95,8 @@ pub(in crate::daemon::server) async fn rpc_chat_write(
             );
         };
         let same_work_root = state.with_store(|s| {
-            let source_root = s.work_root_for_scope(&scope)?;
-            let target_root = s.work_root_for_scope(&target.project)?;
-            Ok::<bool, anyhow::Error>(source_root == target_root)
-        })?;
+            work_root_for(s, &scope) == work_root_for(s, &target.project)
+        });
         if target.project != scope && !same_work_root {
             anyhow::bail!(
                 "mention target is in project {:?}, but this chat is for project {:?}",
@@ -132,26 +137,21 @@ pub(in crate::daemon::server) async fn rpc_chat_write(
     let created_at = now_secs();
 
     // Local live delivery: relays often don't echo an event back to the same
-    // connection that published it, and chat intentionally does not catch up old
-    // history. Route now to sessions already alive in the same routing scope
-    // (channel when set, else the per-session room) so a `channels switch` is
-    // reflected immediately, not only once the relay echoes back.
+    // connection that published it. Seed the verbatim log and park inbox rows for
+    // sessions already alive in the same routing scope.
     let routed = state.with_store(|s| {
-        let _ = s.record_chat(&ChatLogRow {
-            chat_event_id: event_id.clone(),
-            from_pubkey: from_pubkey.clone(),
-            from_slug: rec.agent_slug.clone(),
-            host: state.host.clone(),
-            project: deliver_scope.clone(),
-            body: body_to_send.clone(),
+        let _ = s.insert_event(&chat_relay_event(
+            &event_id,
+            &from_pubkey,
             created_at,
-            from_session: rec.session_id.clone(),
-            mentioned_session: mentioned_session.clone().unwrap_or_default(),
-        });
+            &deliver_scope,
+            &body_to_send,
+            mentioned_pubkey.as_deref(),
+        ));
         let mut routed = false;
         for target in s.list_alive_sessions().unwrap_or_default() {
             let is_direct_target = mentioned_session.as_deref() == Some(target.session_id.as_str());
-            if !is_direct_target && target.route_scope() != deliver_scope {
+            if !is_direct_target && target.channel_h != deliver_scope {
                 continue;
             }
             if target.created_at > created_at {
@@ -161,30 +161,21 @@ pub(in crate::daemon::server) async fn rpc_chat_write(
             if target.agent_pubkey == durable_pubkey || target.agent_pubkey == from_pubkey {
                 continue;
             }
-            // Preserve local mention routing: if the resolved mention targets
-            // this session, mark it as a direct mention in the inbox row.
-            let row_mentioned = if is_direct_target {
-                target.session_id.clone()
-            } else {
-                String::new()
-            };
-            let row_project = if is_direct_target {
-                target.route_scope().to_string()
+            let row_channel = if is_direct_target {
+                target.channel_h.clone()
             } else {
                 deliver_scope.clone()
             };
-            let row = ChatInboxRow {
-                chat_event_id: event_id.clone(),
-                target_session: target.session_id,
-                from_pubkey: from_pubkey.clone(),
-                from_slug: rec.agent_slug.clone(),
-                project: row_project,
-                body: body_to_send.clone(),
+            if s.enqueue_inbox(
+                &event_id,
+                &target.session_id,
+                &from_pubkey,
+                &row_channel,
+                &body_to_send,
                 created_at,
-                from_session: rec.session_id.clone(),
-                mentioned_session: row_mentioned,
-            };
-            if s.enqueue_chat(&row).unwrap_or(false) {
+            )
+            .unwrap_or(false)
+            {
                 routed = true;
             }
         }
@@ -227,6 +218,10 @@ pub(in crate::daemon::server) struct ResolvedRecipient {
 ///   - 64-hex / npub → raw pubkey.
 ///   - a session     → by canonical id, harness alias, id prefix, or codename.
 ///   - a bare slug   → that agent on the LOCAL host (`slug@<local_host>`).
+///
+/// Sessions are local-only in the new model (session ids never travel the wire),
+/// so session-prefix / codename matching searches the local `sessions` table; a
+/// remote agent is addressed only by `agent@host` or pubkey.
 pub(in crate::daemon::server) fn resolve_recipient(
     store: &Store,
     my_project: &str,
@@ -235,14 +230,14 @@ pub(in crate::daemon::server) fn resolve_recipient(
 ) -> Result<ResolvedRecipient> {
     use crate::idref::{parse_ref, Ref};
 
-    // A session target scopes local delivery and p-tags the session's selected
-    // fabric identity: durable by default, transient for collision-fallback
-    // duplicates.
     let session_recipient =
         |store: &Store, session_id: String, fallback_pk: String, project: String| {
             ResolvedRecipient {
                 pubkey: store
-                    .session_pubkey_for_session(&session_id)
+                    .get_session(&session_id)
+                    .ok()
+                    .flatten()
+                    .map(|s| s.agent_pubkey)
                     .unwrap_or(fallback_pk),
                 target_session: Some(session_id),
                 project,
@@ -250,18 +245,16 @@ pub(in crate::daemon::server) fn resolve_recipient(
         };
 
     match parse_ref(target) {
-        // `agent@host` — durable agent on a specific machine.
         Ref::Agent { slug, host } => {
             let pk = store
-                .pubkey_for_agent_on_host(&slug, &host)?
-                .with_context(|| format!("can't resolve {slug}@{host} (no presence/profile seen yet — try `tenex-edge who`)"))?;
+                .resolve_agent_pubkey(&slug, &host)?
+                .with_context(|| format!("can't resolve {slug}@{host} (no profile seen yet — try `tenex-edge who`)"))?;
             Ok(ResolvedRecipient {
                 pubkey: pk,
                 target_session: None,
                 project: my_project.to_string(),
             })
         }
-        // 64-hex or npub.
         Ref::Pubkey(raw) => {
             let pubkey = nostr_sdk::prelude::PublicKey::parse(&raw)
                 .map(|pk| pk.to_hex())
@@ -272,39 +265,20 @@ pub(in crate::daemon::server) fn resolve_recipient(
                 project: my_project.to_string(),
             })
         }
-        // A session (id / alias / prefix / codename) OR a bare agent slug.
         Ref::Token(tok) => {
             // 1. Exact canonical id or harness alias.
             if let Some(s) = store.get_session(&tok)? {
-                return Ok(session_recipient(
-                    store,
-                    s.session_id,
-                    s.agent_pubkey,
-                    s.project,
-                ));
+                return Ok(session_recipient(store, s.session_id, s.agent_pubkey, s.channel_h));
             }
-            // 2. Session id prefix (peer presence, then own sessions).
+            // 2. Local session id prefix.
             if tok.len() >= 6 {
-                if let Some(ps) = store
-                    .peer_session_snapshots(None, 0)
+                if let Some(s) = store
+                    .list_alive_sessions()
                     .unwrap_or_default()
                     .into_iter()
-                    .find(|ps| ps.session_id.as_str().starts_with(&tok))
+                    .find(|s| s.session_id.starts_with(&tok))
                 {
-                    return Ok(session_recipient(
-                        store,
-                        ps.session_id.as_str().to_string(),
-                        ps.agent_pubkey,
-                        ps.project,
-                    ));
-                }
-                if let Some(s) = store.find_session_by_prefix(&tok)? {
-                    return Ok(session_recipient(
-                        store,
-                        s.session_id,
-                        s.agent_pubkey,
-                        s.project,
-                    ));
+                    return Ok(session_recipient(store, s.session_id, s.agent_pubkey, s.channel_h));
                 }
             }
             // 3. Session codename (e.g. `bravo4217` from `who`).
@@ -318,7 +292,7 @@ pub(in crate::daemon::server) fn resolve_recipient(
             }
             // 4. Bare agent slug → that agent on the LOCAL host.
             if let Some(pk) =
-                store.pubkey_for_agent_on_host(&tok, &crate::util::slugify_host(local_host))?
+                store.resolve_agent_pubkey(&tok, &crate::util::slugify_host(local_host))?
             {
                 return Ok(ResolvedRecipient {
                     pubkey: pk,
@@ -337,43 +311,22 @@ pub(in crate::daemon::server) struct SessionMatch {
     project: String,
 }
 
-/// Try to find a session (peer or own) matching the given codename.
-/// Codenames are what `who` displays for sessions (e.g. `bravo4217`).
+/// Try to find a LOCAL session matching the given codename (what `who` displays,
+/// e.g. `bravo4217`). Remote agents have no local session and are addressed by
+/// `agent@host`/pubkey instead.
 pub(in crate::daemon::server) fn find_session_by_codename(
     store: &Store,
     codename: &str,
 ) -> Result<Option<SessionMatch>> {
     let target_code = codename.to_lowercase();
-
-    // Search peer sessions. Production peer presence lives in `peer_session_state`
-    // (written by `record_peer_status`), surfaced via `peer_session_snapshots`;
-    // the `peer_sessions` table is only populated by tests. The snapshot's
-    // `agent_pubkey` is the peer's SESSION pubkey (peer status is session-signed),
-    // which is exactly the wire address we want to p-tag.
-    if let Ok(peers) = store.peer_session_snapshots(None, 0) {
-        for peer in peers {
-            if session_codename(peer.session_id.as_str()).to_lowercase() == target_code {
-                return Ok(Some(SessionMatch {
-                    pubkey: peer.agent_pubkey,
-                    session_id: peer.session_id.as_str().to_string(),
-                    project: peer.project,
-                }));
-            }
+    for session in store.list_alive_sessions().unwrap_or_default() {
+        if session_codename(&session.session_id).to_lowercase() == target_code {
+            return Ok(Some(SessionMatch {
+                pubkey: session.agent_pubkey,
+                session_id: session.session_id,
+                project: session.channel_h,
+            }));
         }
     }
-
-    // Search own sessions
-    if let Ok(sessions) = store.list_my_live_sessions(0) {
-        for session in sessions {
-            if session_codename(&session.session_id).to_lowercase() == target_code {
-                return Ok(Some(SessionMatch {
-                    pubkey: session.agent_pubkey,
-                    session_id: session.session_id,
-                    project: session.project,
-                }));
-            }
-        }
-    }
-
     Ok(None)
 }

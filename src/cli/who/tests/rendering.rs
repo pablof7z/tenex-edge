@@ -35,17 +35,27 @@ fn live_renderer_same_as_once_with_hint() {
 #[test]
 fn who_renderer_summarizes_other_projects() {
     let store = Store::open_memory().unwrap();
-    record_peer(
-        &store, "pk-a", "a", "proj", "s1", "laptop", "", "", false, 1_000,
-    );
-    record_peer(
-        &store, "pk-b", "b", "other", "s2", "laptop", "", "", false, 1_000,
-    );
-    record_peer(
-        &store, "pk-b", "b", "other", "s3", "laptop", "worktree", "", false, 1_001,
-    );
+    // An idle agent in the current project.
+    record_peer(&store, "pk-a", "a", "laptop", "", false, 1_000);
+    // A root project "other" with its own about + one live agent.
     store
-        .upsert_project_meta("other", "Other work", 1_000)
+        .upsert_channel("other", "other", "Other work", "", 1_000)
+        .unwrap();
+    store
+        .upsert_profile("pk-b", "b", "b", "laptop", false, 1)
+        .unwrap();
+    store
+        .upsert_status(&Status {
+            pubkey: "pk-b".to_string(),
+            channel_h: "other".to_string(),
+            slug: "b".to_string(),
+            title: String::new(),
+            activity: String::new(),
+            busy: false,
+            last_seen: 1_000,
+            updated_at: 1_000,
+            expiration: 1_090,
+        })
         .unwrap();
 
     let snap = load_who_snapshot(&store, Some("proj"), 1_000, "laptop").unwrap();
@@ -224,19 +234,11 @@ fn render_labels_session_room_as_channel_with_parent_project() {
 #[test]
 fn who_snapshot_exposes_work_root_for_session_room_rows() {
     let store = Store::open_memory().unwrap();
+    // A session/task channel nested under project "proj" (parent set).
     store
-        .mark_session_room("session-room", "proj", 1_000)
+        .upsert_channel("session-room", "session-room", "", "proj", 1_000)
         .unwrap();
-    register_local(
-        &store,
-        "coder",
-        "pk-coder",
-        "session-room",
-        "laptop",
-        "",
-        "sid-coder",
-        1_000,
-    );
+    register_local_in(&store, "coder", "pk-coder", "session-room", "sid-coder", 1_000);
 
     let snapshot = load_who_snapshot(&store, Some("session-room"), 1_000, "laptop").unwrap();
     let row = snapshot.rows.first().expect("session-room row");

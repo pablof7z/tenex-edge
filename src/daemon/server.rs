@@ -21,7 +21,7 @@ use crate::fabric::provider::Nip29Provider;
 use crate::identity::{self, AgentIdentity};
 use crate::runtime::{self, EngineParams};
 use crate::session::{derive_status, Harness, SessionObservation, SessionSnapshot};
-use crate::state::{ChatInboxRow, ChatLogRow, Store};
+use crate::state::{InboxRow, Store};
 use crate::transport::Transport;
 use crate::util::{now_secs, pubkey_short, session_codename};
 use anyhow::{Context, Result};
@@ -109,7 +109,7 @@ pub struct DaemonState {
     /// event even though the persistent title text is unchanged.
     last_status: Mutex<HashMap<(String, String), (String, bool)>>,
     /// Wakes the status-outbox drainer the instant a transition enqueues a publish.
-    status_outbox_notify: Notify,
+    outbox_notify: Notify,
     /// Per-session derived keypairs for duplicate live signers. The durable
     /// agent key remains the default; this map is populated only when a second
     /// live session of the same durable agent joins the same routing scope.
@@ -225,7 +225,7 @@ use resolution::{resolve_session, resolve_session_inner};
 use session_end::rpc_session_end;
 use session_signing::{admit_transient_signer, select_session_signer};
 use session_start::rpc_session_start;
-use status_publish::{spawn_status_heartbeat_publisher, spawn_status_outbox_drainer};
+use status_publish::{spawn_status_heartbeat_publisher, spawn_outbox_drainer};
 use statusline::{rpc_statusline, StatuslineParams};
 use turns::{rpc_turn_check, rpc_turn_end, rpc_turn_start};
 use who::{rpc_who, rpc_whoami};
@@ -300,18 +300,25 @@ impl DaemonState {
     }
 }
 
-fn chat_rows_to_json(rows: &[ChatInboxRow]) -> Vec<serde_json::Value> {
+fn chat_rows_to_json(store: &Store, rows: &[InboxRow]) -> Vec<serde_json::Value> {
     rows.iter()
         .map(|r| {
+            // Sender slug is no longer stored on the row; resolve it from the
+            // profile cache (empty -> host falls back to the short pubkey).
+            let from_slug = store
+                .resolve_slug_for_pubkey(&r.from_pubkey)
+                .ok()
+                .flatten()
+                .unwrap_or_default();
             serde_json::json!({
-                "from_slug": r.from_slug,
-                "project": r.project,
-                "from_session": r.from_session,
+                "from_slug": from_slug,
+                "project": r.channel_h,
+                "from_session": "",
                 "host": "",
                 "subject": "",
                 "created_at": r.created_at,
-                "id": crate::cli::mention_short_id(&r.chat_event_id),
-                "mention_event_id": r.chat_event_id,
+                "id": crate::cli::mention_short_id(&r.event_id),
+                "mention_event_id": r.event_id,
                 "body": r.body,
             })
         })

@@ -38,11 +38,11 @@ const FETCH_TIMEOUT: Duration = Duration::from_secs(4);
 /// be fetched.
 pub async fn resolve_name(state: &Arc<DaemonState>, pubkey: &str) -> Option<String> {
     let now = now_secs();
-    let cached = state.with_store(|s| s.cached_profile(pubkey));
+    let cached = state.with_store(|s| s.get_profile(pubkey).ok().flatten());
 
-    if let Some((name, updated_at)) = &cached {
-        if !name.is_empty() && now.saturating_sub(*updated_at) < PROFILE_TTL_SECS {
-            return Some(name.clone());
+    if let Some(p) = &cached {
+        if !p.name.is_empty() && now.saturating_sub(p.updated_at) < PROFILE_TTL_SECS {
+            return Some(p.name.clone());
         }
     }
 
@@ -51,7 +51,7 @@ pub async fn resolve_name(state: &Arc<DaemonState>, pubkey: &str) -> Option<Stri
     }
 
     // Relay miss/failure: fall back to whatever stale name we had.
-    cached.map(|(name, _)| name).filter(|n| !n.is_empty())
+    cached.map(|p| p.name).filter(|n| !n.is_empty())
 }
 
 /// Warm the cache for several pubkeys at once (e.g. every distinct sender of a
@@ -72,12 +72,10 @@ pub async fn warm(state: &Arc<DaemonState>, pubkeys: &[String]) {
 ///
 /// Every referenced pubkey is resolved once (cache→relay via [`warm`]); then the
 /// labels and body rewrites are applied synchronously from the now-warm cache.
-pub async fn label_chat_senders(state: &Arc<DaemonState>, rows: &mut [crate::state::ChatInboxRow]) {
+pub async fn label_chat_senders(state: &Arc<DaemonState>, rows: &mut [crate::state::InboxRow]) {
     let mut pubkeys: Vec<String> = Vec::new();
     for row in rows.iter() {
-        if row.from_slug.is_empty() {
-            pubkeys.push(row.from_pubkey.clone());
-        }
+        pubkeys.push(row.from_pubkey.clone());
         pubkeys.extend(body_mention_pubkeys(&row.body));
     }
     pubkeys.sort();
@@ -86,11 +84,6 @@ pub async fn label_chat_senders(state: &Arc<DaemonState>, rows: &mut [crate::sta
 
     state.with_store(|s| {
         for row in rows.iter_mut() {
-            if row.from_slug.is_empty() {
-                if let Some(name) = s.resolve_slug_for_pubkey(&row.from_pubkey).ok().flatten() {
-                    row.from_slug = name;
-                }
-            }
             row.body = rewrite_body_mentions(s, &row.body);
         }
     });
@@ -173,7 +166,9 @@ async fn fetch_and_cache(state: &Arc<DaemonState>, pubkey: &str, now: u64) -> Op
     let host = host_tag(&event).unwrap_or_default();
     let is_backend = backend_tag(&event);
 
-    state.with_store(|s| s.upsert_profile(pubkey, &name, &host, is_backend, now).ok());
+    // The kind:0 `name` doubles as the agent slug in our wire shape (mirrors the
+    // materializer), so both columns carry it.
+    state.with_store(|s| s.upsert_profile(pubkey, &name, &name, &host, is_backend, now).ok());
     Some(name)
 }
 

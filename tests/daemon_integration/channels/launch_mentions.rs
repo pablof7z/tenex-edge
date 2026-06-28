@@ -8,7 +8,7 @@ use tenex_edge::daemon::client::Client as DaemonClient;
 use tenex_edge::domain::{AgentRef, ChatMessage, DomainEvent};
 use tenex_edge::fabric::nip29::wire::Nip29WireCodec;
 use tenex_edge::identity;
-use tenex_edge::state::{SessionRecord, Store};
+use tenex_edge::state::{Session, Store};
 
 fn add_project_mapping(home: &Home, project: &str, path: &Path) {
     std::fs::create_dir_all(path).unwrap();
@@ -49,16 +49,16 @@ fn kill_pane(pane_id: &str) {
         .status();
 }
 
-fn find_alive_session(home: &Home, slug: &str, scope: &str) -> Option<SessionRecord> {
+fn find_alive_session(home: &Home, slug: &str, scope: &str) -> Option<Session> {
     Store::open(&home.store_path())
         .ok()?
         .list_alive_sessions()
         .ok()?
         .into_iter()
-        .find(|rec| rec.agent_slug == slug && rec.route_scope() == scope)
+        .find(|rec| rec.agent_slug == slug && rec.channel_h == scope)
 }
 
-fn wait_for_alive_session(home: &Home, slug: &str, scope: &str) -> SessionRecord {
+fn wait_for_alive_session(home: &Home, slug: &str, scope: &str) -> Session {
     let mut found = None;
     assert!(
         wait_until(Duration::from_secs(25), || {
@@ -75,7 +75,7 @@ fn wait_for_group_member(home: &Home, project: &str, pubkey: &str) {
         wait_until(Duration::from_secs(25), || Store::open(&home.store_path())
             .map(|s| {
                 refresh_project_members(project);
-                s.is_group_member(project, pubkey).unwrap_or(false)
+                s.is_channel_member(project, pubkey).unwrap_or(false)
             })
             .unwrap_or(false)),
         "{pubkey} was not visible as a member of {project}"
@@ -175,13 +175,11 @@ fn operator_kind9_injects_into_running_launch_session() {
     wait_for_injected_log(&log, &body);
 
     let store = Store::open(&home.store_path()).unwrap();
-    let messages = store
-        .list_chat_messages(&project, 0, None, 0, false)
-        .unwrap();
+    let messages = chat_in_channel(&store, &project);
     assert!(
         messages
             .iter()
-            .any(|m| m.body == body && m.from_pubkey == pubkey_of(EXAMPLE_USER_NSEC)),
+            .any(|m| m.content == body && m.pubkey == pubkey_of(EXAMPLE_USER_NSEC)),
         "operator kind:9 should be materialized as user-authored chat"
     );
 
@@ -244,12 +242,9 @@ fn operator_kind9_to_offline_local_agent_spawns_and_injects() {
     assert_eq!(rec.agent_pubkey, agent_pubkey);
     wait_for_injected_log(&log, &body);
 
-    let pane_id = Store::open(&home.store_path())
-        .unwrap()
-        .get_session_endpoint(&rec.session_id, "tmux")
-        .unwrap()
-        .expect("spawned tmux endpoint")
-        .target;
+    let store = Store::open(&home.store_path()).unwrap();
+    let pane_id =
+        tmux_pane_for_session(&store, &rec.session_id).expect("spawned tmux endpoint");
     kill_pane(&pane_id);
     stop_daemon(&home);
 }

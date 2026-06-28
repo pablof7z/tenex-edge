@@ -8,13 +8,14 @@ tags:
 volatility: warm
 confidence: medium
 created: 2026-06-16
-updated: 2026-06-26
+updated: 2026-06-28
 verified: 2026-06-16
 compiled-from: conversation
 sources:
   - session:rollout-2026-06-16T13-17-27-019ecfef-9ab6-7432-baf2-079ef85fac09
   - session:ses_12dba0c28ffemnH9SjXBPg5jkP
   - session:9b219490-9752-4956-ad2a-eb6b743b23dc
+  - session:b07a57a3-67a1-4c44-a8fc-58a1bb97860a
 ---
 
 # tenex-edge Chat Commands
@@ -36,3 +37,7 @@ Chat read output format is `<$agentSlug@$hostName> message [timestamp]`. When ra
 ## Chat Delivery and Storage
 
 Chat is delivered live-only; sessions created after a chat event are not backfilled and only receive messages going forward. Chat history is stored separately in a durable local log (`chat_messages`) from the live-only per-session hook delivery queue (`chat_inbox`). Agents see chat messages in a separate hook block from direct inbox; turn-start drains it and turn-check peeks it mid-turn. Explicit chat mentions via an inline `@<codename>` ring the idle tmux doorbell; ambient chat waits for normal hook flow. <!-- [^rollo-64] -->
+
+## Launch
+
+The `--channel` flag in `tenex-edge launch` accepts only existing NIP-29 group h-values and does not auto-create new channels. <!-- [^b07a5-9e4c3] -->

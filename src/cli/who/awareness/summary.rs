@@ -1,25 +1,76 @@
-use crate::session::{DeltaKind, StatusDeltaItem};
-use crate::state::{ChatLogRow, Store};
+use crate::session::DerivedStatus;
+use crate::state::{RelayEvent, Store};
 use crate::util::{pubkey_short, relative_time};
 use std::collections::BTreeSet;
 
-const ACTIVITY_LIMIT: u64 = 5;
+const ACTIVITY_LIMIT: u32 = 5;
+/// Max parent links to walk when building a channel breadcrumb (cycle guard).
+const MAX_BREADCRUMB_DEPTH: usize = 16;
+
+/// One agent whose live status changed (updated_at > since) within a channel.
+/// Replaces the old cross-module `StatusDeltaItem`: the awareness layer only
+/// needs the channel, the agent slug, and the derived view.
+pub(super) struct StatusChange {
+    pub(super) channel_h: String,
+    pub(super) slug: String,
+    pub(super) derived: DerivedStatus,
+}
+
+// ── channel topology (reconstructed from relay_channels primitives) ───────────
+
+/// Breadcrumb from the root project down to `project`, as `(channel_h, name)`
+/// pairs (root first). Empty when the channel is not yet materialized — the
+/// caller treats that as "no fabric context to show".
+pub(super) fn channel_breadcrumb(store: &Store, project: &str) -> Vec<(String, String)> {
+    if store.get_channel(project).ok().flatten().is_none() {
+        return Vec::new();
+    }
+    let mut chain = Vec::new();
+    let mut cur = project.to_string();
+    for _ in 0..MAX_BREADCRUMB_DEPTH {
+        let name = store
+            .get_channel(&cur)
+            .ok()
+            .flatten()
+            .map(|c| c.name)
+            .unwrap_or_default();
+        chain.push((cur.clone(), name));
+        match store.channel_parent(&cur).ok().flatten() {
+            Some(parent) if !parent.is_empty() => cur = parent,
+            _ => break,
+        }
+    }
+    chain.reverse();
+    chain
+}
+
+/// Direct child channels of `project` as `(channel_h, name, member_count)`.
+pub(super) fn subchannels_of(store: &Store, project: &str) -> Vec<(String, String, usize)> {
+    store
+        .list_channels()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|c| c.parent == project)
+        .map(|c| {
+            let count = store.count_channel_members(&c.channel_h).unwrap_or(0) as usize;
+            (c.channel_h, c.name, count)
+        })
+        .collect()
+}
+
+// ── line builders ─────────────────────────────────────────────────────────────
 
 pub(super) fn project_line(store: &Store, project: &str) -> String {
-    store
-        .get_project_meta(project)
-        .ok()
-        .flatten()
-        .map(|s| s.trim().to_string())
+    channel_about(store, project)
         .filter(|s| !s.is_empty())
         .map(|about| format!("{project} -- {about}"))
         .unwrap_or_else(|| project.to_string())
 }
 
-pub(super) fn breadcrumb_line(store: &Store, breadcrumb: &[(String, String)]) -> String {
+pub(super) fn breadcrumb_line(store: &Store, breadcrumb: &[(String, String)], now: u64) -> String {
     breadcrumb
         .iter()
-        .map(|(id, _)| titled_channel_ref(store, id))
+        .map(|(id, _)| titled_channel_ref(store, id, now))
         .collect::<Vec<_>>()
         .join(" > ")
 }
@@ -28,7 +79,7 @@ pub(super) fn channel_summary_line(store: &Store, id: &str, now: u64) -> String 
     let count = channel_member_count(store, id, now);
     format!(
         "{} [{}]",
-        titled_channel_ref(store, id),
+        titled_channel_ref(store, id, now),
         member_count_label(count)
     )
 }
@@ -49,7 +100,12 @@ pub(super) fn member_lines(
     self_pubkey: &str,
 ) -> Vec<String> {
     let status_map = super::super::channel::channel_status_map(store, project, now);
-    let mut members = store.list_group_members(project).unwrap_or_default();
+    let mut members: Vec<(String, String)> = store
+        .list_channel_members(project)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|m| (m.pubkey, m.role))
+        .collect();
     let mut seen = members
         .iter()
         .map(|(pubkey, _)| pubkey.clone())
@@ -65,7 +121,7 @@ pub(super) fn member_lines(
     }
     members
         .into_iter()
-        .filter(|(pubkey, _)| !store.is_backend_profile(pubkey))
+        .filter(|(pubkey, _)| !is_backend(store, pubkey))
         .map(|(pubkey, role)| {
             let slug = if pubkey == self_pubkey {
                 self_slug.to_string()
@@ -87,25 +143,38 @@ pub(super) fn changed_status_items(
     since: u64,
     project: &str,
     now: u64,
-    exclude_session: Option<&str>,
-) -> Vec<StatusDeltaItem> {
-    let subs = store.subchannels_of(project).unwrap_or_default();
+    exclude_pubkey: Option<&str>,
+) -> Vec<StatusChange> {
+    let subs = subchannels_of(store, project);
     let mut channels = vec![project.to_string()];
     channels.extend(subs.iter().map(|(id, _, _)| id.clone()));
-    store
-        .status_delta_since_in(&channels, since, now, exclude_session)
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|item| item.kind != DeltaKind::Gone && item.derived.liveness.is_live())
-        .collect()
+    let mut out = Vec::new();
+    for ch in &channels {
+        for st in store.live_status_for_channel(ch, now).unwrap_or_default() {
+            // The viewer's own status (same signing pubkey) is never echoed back.
+            if exclude_pubkey == Some(st.pubkey.as_str()) {
+                continue;
+            }
+            // Only rows that actually changed since the cursor are "new".
+            if st.updated_at <= since {
+                continue;
+            }
+            out.push(StatusChange {
+                channel_h: ch.clone(),
+                slug: peer_slug(store, &st),
+                derived: super::super::channel::derive_from_status(&st, now),
+            });
+        }
+    }
+    out
 }
 
-pub(super) fn changed_member_lines(project: &str, items: &[StatusDeltaItem]) -> Vec<String> {
+pub(super) fn changed_member_lines(project: &str, items: &[StatusChange]) -> Vec<String> {
     items
         .iter()
-        .filter(|item| item.snapshot.project == project)
+        .filter(|item| item.channel_h == project)
         .filter_map(|item| useful_work_text(item).map(|status| (item, status)))
-        .map(|(item, status)| format!("@{} - {status}", item.snapshot.agent_slug))
+        .map(|(item, status)| format!("@{} - {status}", item.slug))
         .collect()
 }
 
@@ -115,17 +184,12 @@ pub(super) fn changed_subchannel_lines(
     project: &str,
     now: u64,
     subs: &[(String, String, usize)],
-    items: &[StatusDeltaItem],
+    items: &[StatusChange],
 ) -> Vec<String> {
-    let active: BTreeSet<String> = store
-        .semantic_active_channels_since(since, &[project.to_string()])
-        .unwrap_or_default()
-        .into_iter()
-        .map(|(id, _)| id)
-        .collect();
+    let active: BTreeSet<String> = active_channels_since(store, since, &[project.to_string()]);
     let changed: BTreeSet<String> = items
         .iter()
-        .map(|item| item.snapshot.project.clone())
+        .map(|item| item.channel_h.clone())
         .filter(|id| id != project)
         .collect();
     subs.iter()
@@ -144,12 +208,14 @@ pub(super) fn other_active_channel_lines(
 ) -> Vec<String> {
     let mut exclude = vec![project.to_string()];
     exclude.extend(subs.iter().map(|(id, _, _)| id.clone()));
-    store
-        .semantic_active_channels_since(cutoff, &exclude)
-        .unwrap_or_default()
+    let mut channels: Vec<String> = active_channels_since(store, cutoff, &exclude)
+        .into_iter()
+        .collect();
+    channels.sort();
+    channels
         .into_iter()
         .take(5)
-        .map(|(id, _)| channel_summary_line(store, &id, now))
+        .map(|id| channel_summary_line(store, &id, now))
         .collect()
 }
 
@@ -158,50 +224,77 @@ pub(super) fn current_activity_lines(
     project: &str,
     since: u64,
     now: u64,
-    exclude_session: Option<&str>,
+    exclude_pubkey: Option<&str>,
 ) -> Vec<String> {
     store
-        .list_chat_messages(project, since, None, 0, false)
+        .chat_for_channel(project, since, ACTIVITY_LIMIT)
         .unwrap_or_default()
         .into_iter()
-        .filter(|row| exclude_session != Some(row.from_session.as_str()))
-        .take(ACTIVITY_LIMIT as usize)
+        .filter(|row| exclude_pubkey != Some(row.pubkey.as_str()))
         .map(|row| activity_line(store, row, now))
         .collect()
 }
 
-fn titled_channel_ref(store: &Store, id: &str) -> String {
+// ── helpers ───────────────────────────────────────────────────────────────────
+
+/// Channels (other than `exclude`) whose status changed since `cutoff`.
+fn active_channels_since(store: &Store, cutoff: u64, exclude: &[String]) -> BTreeSet<String> {
+    let excl: BTreeSet<&str> = exclude.iter().map(String::as_str).collect();
+    store
+        .active_channels_since(cutoff)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|id| !excl.contains(id.as_str()))
+        .collect()
+}
+
+fn channel_about(store: &Store, id: &str) -> Option<String> {
+    store
+        .get_channel(id)
+        .ok()
+        .flatten()
+        .map(|c| c.about.trim().to_string())
+}
+
+fn titled_channel_ref(store: &Store, id: &str, now: u64) -> String {
     let base = channel_ref(id);
-    match known_channel_title(store, id) {
+    match known_channel_title(store, id, now) {
         Some(title) if title != id => format!("{base} -- {title}"),
         _ => base,
     }
 }
 
-fn known_channel_title(store: &Store, id: &str) -> Option<String> {
-    match store
-        .channel_title(id)
-        .ok()
-        .flatten()
-        .or_else(|| store.latest_channel_work_title(id).ok().flatten())
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-    {
-        Some(title) if title != id => Some(title),
-        _ => store
-            .latest_channel_work_title(id)
-            .ok()
-            .flatten()
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty() && s != id),
+/// Title for a channel reference. A real kind:39000 `name` wins; when the channel
+/// exists but carries no meaningful name (empty or == its own id, as session
+/// rooms do), fall back to the live work title of whoever is active there. No
+/// channel record at all → no title (avoids labelling transient/transport
+/// channels we have never materialized).
+fn known_channel_title(store: &Store, id: &str, now: u64) -> Option<String> {
+    let channel = store.get_channel(id).ok().flatten()?;
+    let name = channel.name.trim().to_string();
+    if !name.is_empty() && name != id {
+        return Some(name);
     }
+    latest_channel_work_title(store, id, now)
+}
+
+/// Most-recently-updated live status title in a channel (the agent's current work
+/// text), used as the channel's display title when it has no proper name.
+fn latest_channel_work_title(store: &Store, id: &str, now: u64) -> Option<String> {
+    store
+        .live_status_for_channel(id, now)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|s| s.title.trim().to_string())
+        .find(|t| !t.is_empty() && t != id)
 }
 
 fn channel_member_count(store: &Store, id: &str, now: u64) -> usize {
-    let members = store.list_group_members(id).unwrap_or_default();
-    let n = members
-        .iter()
-        .filter(|(pubkey, _)| !store.is_backend_profile(pubkey))
+    let n = store
+        .list_channel_members(id)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|m| !is_backend(store, &m.pubkey))
         .count();
     if n > 0 {
         return n;
@@ -227,7 +320,7 @@ fn offline_label(role: &str) -> String {
     }
 }
 
-fn useful_work_text(item: &StatusDeltaItem) -> Option<String> {
+fn useful_work_text(item: &StatusChange) -> Option<String> {
     if item.derived.title.is_empty() && item.derived.activity.is_empty() {
         return None;
     }
@@ -238,17 +331,29 @@ fn useful_work_text(item: &StatusDeltaItem) -> Option<String> {
     ))
 }
 
-fn activity_line(store: &Store, row: ChatLogRow, now: u64) -> String {
-    let from = if row.from_slug.is_empty() {
-        slug_for_pubkey(store, &row.from_pubkey)
-    } else {
-        row.from_slug
-    };
+fn activity_line(store: &Store, row: RelayEvent, now: u64) -> String {
+    let from = slug_for_pubkey(store, &row.pubkey);
     format!(
         "[@{from}, {}] {}",
         relative_time(row.created_at, now),
-        row.body
+        row.content
     )
+}
+
+fn is_backend(store: &Store, pubkey: &str) -> bool {
+    store
+        .get_profile(pubkey)
+        .ok()
+        .flatten()
+        .map(|p| p.is_backend)
+        .unwrap_or(false)
+}
+
+fn peer_slug(store: &Store, st: &crate::state::Status) -> String {
+    if !st.slug.is_empty() {
+        return st.slug.clone();
+    }
+    slug_for_pubkey(store, &st.pubkey)
 }
 
 fn slug_for_pubkey(store: &Store, pubkey: &str) -> String {

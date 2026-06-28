@@ -306,28 +306,34 @@ fn turn_lifecycle_by_harness_alias_drives_canonical_row() {
         canonical, "harness-xyz",
         "daemon must MINT a canonical id; the harness id is only an alias"
     );
-    // ...and the harness id must NOT be its own canonical session_state row.
-    assert!(
+    // ...and the harness id must be an ALIAS that resolves to the canonical row,
+    // not a second canonical session. (`get_session` is alias-resolving, so the
+    // raw harness id returns the SAME canonical row — proving it's an alias.
+    // `local_session_snapshot` → `get_session`.)
+    assert_eq!(
         store
-            .local_session_snapshot("harness-xyz")
+            .get_session("harness-xyz")
             .unwrap()
-            .is_none(),
-        "harness id must be an alias, not a second canonical row"
+            .expect("harness id resolves to a session")
+            .session_id,
+        canonical,
+        "harness id must be an alias onto the canonical row, not a second row"
     );
 
-    // turn_start via the harness alias must have moved the CANONICAL row: busy,
-    // turn_id advanced from 0 to 1. (The pre-fix bug left it idle at turn_id 0.)
+    // turn_start via the harness alias must have moved the CANONICAL row: working,
+    // with a turn start timestamp. (The pre-fix bug left it idle. The new schema
+    // tracks `working`/`turn_started_at`; there is no turn_id counter.)
     let started = store
-        .local_session_snapshot(&canonical)
+        .get_session(&canonical)
         .unwrap()
-        .expect("canonical session_state row");
+        .expect("canonical session row");
     assert!(
-        started.busy,
-        "turn_start via harness alias must set the CANONICAL row busy"
+        started.working,
+        "turn_start via harness alias must set the CANONICAL row working"
     );
-    assert_eq!(
-        started.turn_id, 1,
-        "turn_id must advance exactly once (single owner: rpc_turn_start)"
+    assert!(
+        started.turn_started_at > 0,
+        "turn_start via harness alias must stamp the CANONICAL turn start time"
     );
 
     // turn_end via the harness alias must close the CANONICAL turn.
@@ -338,16 +344,12 @@ fn turn_lifecycle_by_harness_alias_drives_canonical_row() {
             .expect("turn_end");
     });
     let ended = store
-        .local_session_snapshot(&canonical)
+        .get_session(&canonical)
         .unwrap()
-        .expect("canonical session_state row");
+        .expect("canonical session row");
     assert!(
-        !ended.busy,
-        "turn_end via harness alias must clear busy on the CANONICAL row"
-    );
-    assert_eq!(
-        ended.turn_id, 1,
-        "turn_id must not double-advance (no duplicate transition owner)"
+        !ended.working,
+        "turn_end via harness alias must clear working on the CANONICAL row"
     );
 
     stop_daemon(&home);

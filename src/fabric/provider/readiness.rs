@@ -42,7 +42,7 @@ fn ensure_channel_ready_inner<'a>(
         let mgmt_pubkey = mgmt_keys.public_key().to_hex();
 
         let parent_admins: Vec<String> = if let Some(parent) = ctx.parent_hint {
-            let grandparent = provider.with_store(|s| s.group_parent(parent).unwrap_or(None));
+            let grandparent = provider.with_store(|s| s.channel_parent(parent).unwrap_or(None));
             let parent_ctx = ChannelCtx {
                 channel: parent,
                 expect_member: &mgmt_pubkey,
@@ -57,11 +57,11 @@ fn ensure_channel_ready_inner<'a>(
                 return ChannelGate::Degraded;
             }
             provider.with_store(|s| {
-                s.list_group_members(parent)
+                s.list_channel_members(parent)
                     .unwrap_or_default()
                     .into_iter()
-                    .filter(|(_, role)| role == "admin")
-                    .map(|(pk, _)| pk)
+                    .filter(|m| m.role == "admin")
+                    .map(|m| m.pubkey)
                     .collect()
             })
         } else {
@@ -73,16 +73,23 @@ fn ensure_channel_ready_inner<'a>(
 
         if !group_exists {
             let created = if let Some(parent) = ctx.parent_hint {
-                let name =
-                    provider.with_store(|s| s.group_display_name(ctx.channel).unwrap_or_default());
+                let name = provider.with_store(|s| {
+                    s.get_channel(ctx.channel)
+                        .ok()
+                        .flatten()
+                        .map(|c| c.name)
+                        .unwrap_or_default()
+                });
                 let name = if name.is_empty() { ctx.channel } else { &name };
                 let ok = provider
                     .nip29_create_subgroup(ctx.channel, name, parent)
                     .await;
                 if ok {
+                    // Materialize the just-created subgroup's metadata locally; its
+                    // parent is non-empty (this is a task/session channel). Ownership
+                    // is relay-derived (admin membership), recorded below.
                     provider.with_store(|s| {
-                        s.mark_group_owned(ctx.channel, now_secs()).ok();
-                        s.upsert_group_metadata(ctx.channel, name, parent, now_secs())
+                        s.upsert_channel(ctx.channel, name, "", parent, now_secs())
                             .ok();
                     });
                 }
@@ -108,8 +115,10 @@ fn ensure_channel_ready_inner<'a>(
                             Err(_) => false,
                         };
                     if locked {
+                        // Materialize the root channel locally. Ownership is
+                        // relay-derived (admin membership materialized below).
                         provider.with_store(|s| {
-                            s.mark_group_owned(ctx.channel, now_secs()).ok();
+                            s.upsert_channel(ctx.channel, "", "", "", now_secs()).ok();
                         });
                     }
                 }
@@ -164,7 +173,7 @@ fn ensure_channel_ready_inner<'a>(
                 }
                 if confirm_role_grant(provider, ctx.channel, pk, true).await {
                     provider.with_store(|s| {
-                        s.upsert_group_member(ctx.channel, pk, "admin", now_secs())
+                        s.upsert_channel_member(ctx.channel, pk, "admin", now_secs())
                             .ok();
                     });
                     repaired = true;
@@ -194,7 +203,7 @@ fn ensure_channel_ready_inner<'a>(
         {
             if confirm_role_grant(provider, ctx.channel, ctx.expect_member, false).await {
                 provider.with_store(|s| {
-                    s.upsert_group_member(ctx.channel, ctx.expect_member, "member", now_secs())
+                    s.upsert_channel_member(ctx.channel, ctx.expect_member, "member", now_secs())
                         .ok();
                 });
                 repaired = true;
@@ -207,7 +216,7 @@ fn ensure_channel_ready_inner<'a>(
             }
         } else {
             let locally = provider.with_store(|s| {
-                s.is_group_member(ctx.channel, ctx.expect_member)
+                s.is_channel_member(ctx.channel, ctx.expect_member)
                     .unwrap_or(false)
             });
             if !locally {
@@ -216,7 +225,7 @@ fn ensure_channel_ready_inner<'a>(
                     .map(String::as_str)
                     .unwrap_or("member");
                 provider.with_store(|s| {
-                    s.upsert_group_member(ctx.channel, ctx.expect_member, role, now_secs())
+                    s.upsert_channel_member(ctx.channel, ctx.expect_member, role, now_secs())
                         .ok();
                 });
             }

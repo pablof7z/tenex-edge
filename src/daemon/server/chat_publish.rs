@@ -1,3 +1,4 @@
+use super::chat_write::chat_relay_event;
 use super::*;
 
 pub(in crate::daemon::server) struct ChatRecordDraft {
@@ -24,17 +25,14 @@ pub(in crate::daemon::server) async fn publish_chat_checked(
     let created_at = now_secs();
 
     state.with_store(|s| {
-        let _ = s.record_chat(&ChatLogRow {
-            chat_event_id: event_id.clone(),
-            from_pubkey: draft.from_pubkey.clone(),
-            from_slug: draft.from_slug.clone(),
-            host: draft.host.clone(),
-            project: draft.project.clone(),
-            body: draft.body.clone(),
+        let _ = s.insert_event(&chat_relay_event(
+            &event_id,
+            &draft.from_pubkey,
             created_at,
-            from_session: draft.from_session.clone(),
-            mentioned_session: draft.mentioned_session.clone(),
-        });
+            &draft.project,
+            &draft.body,
+            None,
+        ));
     });
 
     state.transport.publish_event(&signed).await?;
@@ -98,23 +96,36 @@ pub(in crate::daemon::server) async fn apply_room_name_update(
     if title.is_empty() {
         return false;
     }
+    // Manageability is relay-materialized authority: the backend must be an admin
+    // of the channel. Only sub-channels (a task/session room, i.e. parent set) are
+    // renamed after their distilled title; a top-level project channel keeps its
+    // operator-chosen name.
+    let backend = state.backend_pubkey().map(|s| s.to_string());
     let should_publish = state.with_store(|s| {
-        let owned =
-            s.is_session_room(room).unwrap_or(false) && s.is_group_owned(room).unwrap_or(false);
-        let current = s.group_display_name(room).unwrap_or_default();
-        owned && current.trim() != title
+        let manage = backend
+            .as_deref()
+            .map(|pk| s.is_channel_admin(room, pk).unwrap_or(false))
+            .unwrap_or(false);
+        let is_sub = !s.is_root_channel(room).unwrap_or(true);
+        let current = s
+            .get_channel(room)
+            .ok()
+            .flatten()
+            .map(|c| c.name)
+            .unwrap_or_default();
+        manage && is_sub && current.trim() != title
     });
     if !should_publish {
         return false;
     }
     let renamed = state.provider.nip29_set_group_name(room, title).await;
     if renamed {
-        let parent = state
-            .with_store(|s| s.session_room_parent(room).ok().flatten())
-            .unwrap_or_default();
         state.with_store(|s| {
-            s.upsert_group_metadata(room, title, &parent, now_secs())
-                .ok();
+            let existing = s.get_channel(room).ok().flatten();
+            let parent = existing.as_ref().map(|c| c.parent.clone()).unwrap_or_default();
+            let about = existing.as_ref().map(|c| c.about.clone()).unwrap_or_default();
+            let created = existing.map(|c| c.created_at).unwrap_or_else(now_secs);
+            s.upsert_channel(room, title, &about, &parent, created).ok();
         });
     }
     renamed
@@ -136,7 +147,7 @@ pub(in crate::daemon::server) fn spawn_room_name_update(
 /// local record, minus mention handling.
 pub(in crate::daemon::server) async fn publish_agent_reply(
     state: &Arc<DaemonState>,
-    rec: &crate::state::SessionRecord,
+    rec: &crate::state::Session,
     reply: &str,
 ) -> Result<()> {
     let id = identity::load_or_create(&config::edge_home(), &rec.agent_slug, now_secs())?;
@@ -147,10 +158,9 @@ pub(in crate::daemon::server) async fn publish_agent_reply(
         .keys_for_session(&rec.session_id)
         .unwrap_or_else(|| id.keys.clone());
     let from_pubkey = signing.public_key().to_hex();
-    // Route into the session's CURRENT scope (channel when set, else the
-    // per-session room) so a `channels switch` moves the agent's turn replies
-    // to the new room without restarting.
-    let scope = rec.route_scope().to_string();
+    // Route into the session's CURRENT channel so a `channels switch` moves the
+    // agent's turn replies to the new channel without restarting.
+    let scope = rec.channel_h.clone();
 
     let chat = ChatMessage {
         from: crate::domain::AgentRef::new(from_pubkey.clone(), rec.agent_slug.clone()),
@@ -234,57 +244,43 @@ pub(in crate::daemon::server) async fn rpc_user_prompt(
         None,
     )?;
 
-    // Only mirror prompts into a per-session room. A human start with no resume
-    // anchor (or no operator key) keeps `project == work_root`; mirroring there
-    // would spam the bare project group, so skip it (fail-open). Gate on the
-    // local `is_session_room` flag — set synchronously at mint and never touched
-    // by the relay materializer (unlike `project_meta.parent`, which a relay that
-    // doesn't re-emit the NIP-29 parent tag can clobber to empty).
-    let is_room = state
-        .with_store(|s| s.is_session_room(&rec.project))
-        .unwrap_or(false);
+    // Only mirror prompts into a sub-channel (a task/session room). A human start
+    // with no resume anchor keeps the session on the top-level project channel;
+    // mirroring there would spam the bare project group, so skip it (fail-open).
+    // A sub-channel is one whose materialized 39000 carries a parent.
+    let is_room = !state
+        .with_store(|s| s.is_root_channel(&rec.channel_h))
+        .unwrap_or(true);
     if !is_room {
         return Ok(serde_json::json!({ "skipped": "session not in a room" }));
     }
 
-    // Seed the canonical session title once, from the real user prompt, so the
+    // Seed the local pre-publish title once, from the real user prompt, so the
     // status pipeline has an immediate title before the runtime transcript read
-    // catches up. Room metadata is a consequence of a title transition, not a
-    // per-hook mirror: publish a room-name update only when this call actually
-    // changed session_state.
-    let seeded_title = state
-        .with_store(|s| s.local_session_snapshot(&rec.session_id).ok().flatten())
-        .and_then(|snap| {
-            if snap.title_source == crate::session::TitleSource::None {
-                let seed = crate::util::titleize_prompt(&p.prompt);
-                if seed.is_empty() {
-                    return None;
-                }
-                state
-                    .with_store(|s| {
-                        s.seed_title_if_empty(&rec.session_id, snap.turn_id, &seed, now_secs())
-                            .ok()
-                            .flatten()
-                    })
-                    .and_then(|updated| {
-                        let title = updated.title.trim();
-                        (!title.is_empty()).then(|| title.to_string())
-                    })
-            } else {
-                None
-            }
-        });
+    // catches up. Room metadata is a consequence of a title transition: publish a
+    // room-name update only when this call actually set the title.
+    let session_id = rec.session_id.clone();
+    let seeded_title = state.with_store(|s| {
+        let sess = s.get_session(&session_id).ok().flatten()?;
+        if !sess.title.trim().is_empty() {
+            return None;
+        }
+        let seed = crate::util::titleize_prompt(&p.prompt);
+        if seed.is_empty() {
+            return None;
+        }
+        s.set_session_distill(&session_id, &seed, &sess.activity, now_secs())
+            .ok()?;
+        Some(seed)
+    });
     if let Some(room_title) = seeded_title {
-        state.status_outbox_notify.notify_waiters();
-        spawn_room_name_update(state.clone(), rec.project.clone(), room_title);
+        state.outbox_notify.notify_waiters();
+        spawn_room_name_update(state.clone(), rec.channel_h.clone(), room_title);
     }
 
-    // Publish into the session's CURRENT routing scope — its channel when set
-    // (a `channels switch` moved it to a subgroup), else its per-session room.
-    // The `is_room` gate above still keys on `project` (the minted room flag is
-    // stable across a switch), but the wire `h` tag must follow the channel so
-    // the prompt lands where the rest of the session's chat now goes.
-    let scope = rec.route_scope().to_string();
+    // Publish into the session's CURRENT channel so the prompt lands where the
+    // rest of the session's chat now goes.
+    let scope = rec.channel_h.clone();
     let chat = ChatMessage {
         from: crate::domain::AgentRef::new(op_pubkey.clone(), "operator".to_string()),
         project: scope.clone(),

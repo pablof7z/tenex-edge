@@ -164,10 +164,13 @@ fn session_start_with_user_nsec_owns_group_and_adds_member() {
         .unwrap()
         .expect("session row");
     assert!(rec.alive);
+    // The minted session room's parent is the work-root project channel. (Parent
+    // now lives in `relay_channels`; `session_room_parent` was renamed to
+    // `channel_parent`.)
     assert_eq!(
-        store.session_room_parent(&rec.project).unwrap().as_deref(),
+        store.channel_parent(&rec.channel_h).unwrap().as_deref(),
         Some("tmp"),
-        "session start should record the local-only room parent"
+        "session start should record the room's parent project channel"
     );
 
     stop_daemon(&home);
@@ -195,29 +198,25 @@ fn human_initiated_session_mints_per_session_room() {
     let store = Store::open(&home.store_path()).unwrap();
     let rec = store.get_session(&sid).unwrap().expect("session row");
     assert_ne!(
-        rec.project, "tmp",
+        rec.channel_h, "tmp",
         "human-initiated session should mint a per-session room, not use the bare project"
     );
     assert!(
-        rec.project.starts_with("session-"),
+        rec.channel_h.starts_with("session-"),
         "room id should be project-agnostic: got {}",
-        rec.project
+        rec.channel_h
     );
-    let breadcrumb = store.channel_breadcrumb(&rec.project).unwrap();
-    assert_eq!(
-        breadcrumb.last().map(|(_, label)| label.as_str()),
-        Some(rec.project.as_str()),
-        "session room display label should be the room id"
-    );
+    // removed: `channel_breadcrumb` no longer exists — channel hierarchy labels
+    // are derived from `relay_channels` (name/parent), not a breadcrumb reader.
 
-    materialize_member_snapshot(&home, &rec.project, &rec.agent_pubkey);
+    materialize_member_snapshot(&home, &rec.channel_h, &rec.agent_pubkey);
     assert!(
         wait_until(std::time::Duration::from_secs(20), || Store::open(
             &home.store_path()
         )
         .map(|s| {
-            refresh_project_members(&rec.project);
-            s.is_group_member(&rec.project, &rec.agent_pubkey)
+            refresh_project_members(&rec.channel_h);
+            s.is_channel_member(&rec.channel_h, &rec.agent_pubkey)
                 .unwrap_or(false)
         })
         .unwrap_or(false)),
@@ -249,16 +248,19 @@ fn human_initiated_session_uses_project_when_per_session_rooms_disabled() {
     let store = Store::open(&home.store_path()).unwrap();
     let rec = store.get_session(&sid).unwrap().expect("session row");
     assert_eq!(
-        rec.project, "tmp",
+        rec.channel_h, "tmp",
         "with per-session rooms disabled, the session should use the project channel"
     );
     assert!(
-        !rec.project.starts_with("session-"),
+        !rec.channel_h.starts_with("session-"),
         "no per-session room should be minted: got {}",
-        rec.project
+        rec.channel_h
     );
+    // A session room is a channel with a non-empty parent; the work-root project
+    // is a root channel. (`is_session_room` was removed; the distinction is
+    // `is_root_channel`.)
     assert!(
-        !store.is_session_room(&rec.project).unwrap(),
+        store.is_root_channel(&rec.channel_h).unwrap(),
         "the work-root project is not a session room"
     );
 
@@ -291,13 +293,15 @@ fn opencode_style_session_without_id_mints_room_via_pid() {
         .find(|r| r.agent_slug == "opencoder")
         .expect("opencode session row");
     assert!(
-        rec.project.starts_with("session-"),
+        rec.channel_h.starts_with("session-"),
         "opencode session must mint a per-session room: got {}",
-        rec.project
+        rec.channel_h
     );
+    // A minted session room is a non-root channel (it has a parent project).
+    // (`is_session_room` was removed; the distinction is `!is_root_channel`.)
     assert!(
-        store.is_session_room(&rec.project).unwrap(),
-        "minted group must be flagged as a per-session room"
+        !store.is_root_channel(&rec.channel_h).unwrap(),
+        "minted group must be a per-session room (non-root channel)"
     );
 
     stop_daemon(&home);

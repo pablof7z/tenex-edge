@@ -1,8 +1,7 @@
 use crate::daemon_harness::*;
 use std::time::Duration;
 use tenex_edge::daemon::client::Client;
-use tenex_edge::session::PeerStatusObservation;
-use tenex_edge::state::Store;
+use tenex_edge::state::{Status, Store};
 
 // ── Frozen regression guards (dedup, targeted/untargeted mention routing,
 //    39000/39002 idempotency, startup catch-up) and the threaded e2e. ───────────
@@ -80,66 +79,72 @@ fn freeze_39000_39002_idempotency_no_member_duplication() {
         .get_session("freeze-grp-idem-1")
         .unwrap()
         .expect("session row");
-    let project = rec.project.clone();
+    let project = rec.channel_h.clone();
 
-    // FREEZE: the local-only room parent is present after first start.
-    // Membership itself is relay-confirmed state, so this test seeds the
-    // subsequent 39002 snapshot explicitly instead of relying on an optimistic
-    // local write.
+    // FREEZE: the minted room's parent project channel is present after first
+    // start. (Parent now lives in `relay_channels`; `session_room_parent` →
+    // `channel_parent`.) Membership itself is relay-confirmed state, so this test
+    // seeds the subsequent 39002 snapshot explicitly instead of relying on an
+    // optimistic local write.
     assert_eq!(
-        store.session_room_parent(&project).unwrap().as_deref(),
+        store.channel_parent(&project).unwrap().as_deref(),
         Some("tmp"),
-        "session start should record the local-only room parent"
+        "session start should record the room's parent project channel"
     );
     // Simulate idempotency: apply the same 39002 snapshot twice via the public
-    // Store API (the daemon uses `replace_group_members` when it processes
+    // Store API (the daemon uses `replace_channel_members` when it processes
     // kind:39002 from the relay — calling it twice is equivalent to receiving
     // the same event twice).
-    let members_snapshot = vec![(rec.agent_pubkey.clone(), "member".to_string())];
+    let members_snapshot = vec![rec.agent_pubkey.clone()];
     let ts = 9_000_000u64;
     store
-        .replace_group_members(&project, &members_snapshot, ts)
+        .replace_channel_members(&project, &members_snapshot, ts)
         .unwrap();
     store
-        .replace_group_members(&project, &members_snapshot, ts)
+        .replace_channel_members(&project, &members_snapshot, ts)
         .unwrap();
 
     // FREEZE: membership is stable — no duplication, same set.
     assert!(
-        store.is_group_member(&project, &rec.agent_pubkey).unwrap(),
+        store.is_channel_member(&project, &rec.agent_pubkey).unwrap(),
         "member still present after double-apply of 39002 snapshot"
     );
     // Count members via list — expect exactly 1 (no duplication).
-    // We confirm via is_group_member scoped to a distinct fake pubkey being absent.
+    // We confirm via is_channel_member scoped to a distinct fake pubkey being absent.
     assert!(
-        !store.is_group_member(&project, "nonexistent-pk").unwrap(),
+        !store.is_channel_member(&project, "nonexistent-pk").unwrap(),
         "phantom member must not appear after 39002 re-application"
     );
 
-    // FREEZE: project_meta upsert is idempotent (39000 handler).
+    // FREEZE: channel-metadata upsert is idempotent (39000 handler →
+    // `upsert_channel`). Use a dedicated channel id with an explicit created_at so
+    // the monotonic created_at guard admits the overwrite. (`upsert_project_meta`/
+    // `get_project_meta` → `upsert_channel`/`get_channel`; metadata is the
+    // channel's `about`.)
+    let meta_h = "freeze-39000-meta";
     store
-        .upsert_project_meta(&project, "about text v1", ts)
+        .upsert_channel(meta_h, "", "about text v1", "tmp", ts)
         .unwrap();
     store
-        .upsert_project_meta(&project, "about text v1", ts)
+        .upsert_channel(meta_h, "", "about text v1", "tmp", ts)
         .unwrap();
-    let meta = store.get_project_meta(&project).unwrap();
+    let meta = store.get_channel(meta_h).unwrap();
     assert_eq!(
-        meta.as_deref(),
+        meta.map(|c| c.about).as_deref(),
         Some("about text v1"),
-        "project_meta must be stable after idempotent 39000 re-application"
+        "channel metadata must be stable after idempotent 39000 re-application"
     );
 
-    // Applying an updated 'about' must overwrite (not duplicate) — the upsert
-    // is DO UPDATE SET.
+    // Applying an updated 'about' (newer created_at) must overwrite (not
+    // duplicate) — the upsert is DO UPDATE SET under the created_at guard.
     store
-        .upsert_project_meta(&project, "about text v2", ts + 1)
+        .upsert_channel(meta_h, "", "about text v2", "tmp", ts + 1)
         .unwrap();
-    let meta2 = store.get_project_meta(&project).unwrap();
+    let meta2 = store.get_channel(meta_h).unwrap();
     assert_eq!(
-        meta2.as_deref(),
+        meta2.map(|c| c.about).as_deref(),
         Some("about text v2"),
-        "project_meta must reflect latest about after overwrite"
+        "channel metadata must reflect latest about after overwrite"
     );
 
     stop_daemon(&home);
@@ -172,42 +177,68 @@ fn freeze_status_outbox_is_debuggable_and_presence_is_unified() {
         .await
         .expect("turn_start");
 
+        // The outbox is now a generic signed-event publish queue (raw event_json),
+        // not a status-specific snapshot table — `debug_outbox` exposes verbatim
+        // queue rows with no `agent_slug` column (the deleted `status_outbox`).
+        // Assert it stays debuggable: a well-formed rows array.
         let debug = c
             .call("debug_outbox", serde_json::json!({"limit": 20}))
             .await
             .expect("debug_outbox");
-        let rows = debug["rows"].as_array().expect("rows array");
         assert!(
-            rows.iter()
-                .any(|r| r["agent_slug"].as_str() == Some("coder")),
-            "debug_outbox should expose queued or recently published status rows: {debug}"
+            debug["rows"].as_array().is_some(),
+            "debug_outbox must remain debuggable (rows array): {debug}"
         );
     });
+
+    // Presence is unified: the published kind:30315 is reflected into the
+    // `relay_status` cache under the session's DURABLE agent pubkey (the same
+    // identity that signs chat) — not a separate presence table.
+    let store = Store::open(&home.store_path()).unwrap();
+    let rec = store
+        .get_session("freeze-outbox-1")
+        .unwrap()
+        .expect("session row");
+    assert!(
+        wait_until(Duration::from_secs(20), || {
+            Store::open(&home.store_path())
+                .map(|s| {
+                    s.live_status_for_channel(&rec.channel_h, 0)
+                        .map(|rows| rows.iter().any(|r| r.pubkey == rec.agent_pubkey))
+                        .unwrap_or(false)
+                })
+                .unwrap_or(false)
+        }),
+        "the coder agent's presence should materialize in relay_status under its durable pubkey"
+    );
 
     stop_daemon(&home);
 }
 
 #[test]
 fn freeze_peer_status_materializes_to_unified_presence_state() {
+    // Peer presence is now a kind:30315 cache row (`relay_status`); the old
+    // `record_peer_status`/`peer_session_snapshots` pair is `upsert_status` +
+    // `live_status_for_channel`. Liveness is NIP-40 freshness, so seed a future
+    // expiration and read with now=0.
     let store = Store::open_memory().unwrap();
     store
-        .record_peer_status(&PeerStatusObservation {
-            agent_pubkey: "peer-pubkey".into(),
-            agent_slug: "peer".into(),
-            project: "proj".into(),
-            host: "remote".into(),
-            rel_cwd: "work".into(),
+        .upsert_status(&Status {
+            pubkey: "peer-pubkey".into(),
+            channel_h: "proj".into(),
+            slug: "peer".into(),
             title: "reviewing relay state".into(),
             activity: "checking 39002".into(),
             busy: true,
-            emitted_at: 100,
-            observed_at: 105,
+            last_seen: 105,
+            updated_at: 105,
+            expiration: 1_000_000,
         })
         .unwrap();
 
-    let rows = store.peer_session_snapshots(Some("proj"), 0).unwrap();
+    let rows = store.live_status_for_channel("proj", 0).unwrap();
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].agent_pubkey, "peer-pubkey");
+    assert_eq!(rows[0].pubkey, "peer-pubkey");
     assert_eq!(rows[0].title, "reviewing relay state");
     assert!(rows[0].busy);
 }

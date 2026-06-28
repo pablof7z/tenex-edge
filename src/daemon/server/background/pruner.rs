@@ -23,17 +23,25 @@ pub fn spawn_pruner(state: Arc<DaemonState>) {
                 map.keys().cloned().collect()
             };
 
-            // Which (pubkey, project) pairs are still live in the store.
-            let still_alive: std::collections::HashSet<(String, String)> = state
-                .with_store(|s| s.list_peer_sessions(None, before).unwrap_or_default())
-                .into_iter()
-                .map(|p| (p.pubkey, p.project))
-                .collect();
-
-            // Prune from DB.
-            state.with_store(|s| {
-                let _ = s.prune_peer_sessions(before);
+            // Which (pubkey, project) pairs are still live. Peer presence is now
+            // read from the relay_status cache (NIP-40 liveness), not a dedicated
+            // peer-sessions table: a pair is alive while its kind:30315 has not
+            // expired. The cache is relay-materialized, so there is nothing to
+            // manually prune — expired rows simply read as not-live.
+            let still_alive: std::collections::HashSet<(String, String)> = state.with_store(|s| {
+                tracked_keys
+                    .iter()
+                    .filter(|(pubkey, project)| {
+                        s.get_status(pubkey, project)
+                            .ok()
+                            .flatten()
+                            .map(|st| st.expiration >= now)
+                            .unwrap_or(false)
+                    })
+                    .cloned()
+                    .collect()
             });
+            let _ = before;
 
             // Emit Leave for pairs that were in our map but are now expired.
             let to_leave: Vec<((String, String), PeerTracked)> = {

@@ -145,20 +145,20 @@ pub struct EndpointStatus {
 
 /// List all registered tmux endpoints with liveness.
 pub fn list_endpoint_statuses(state: &Arc<DaemonState>) -> Vec<EndpointStatus> {
-    let endpoints =
-        state.with_store(|s| s.list_session_endpoints_of_kind("tmux").unwrap_or_default());
+    // tmux endpoints are now `tmux_pane` alias rows (the alias IS the endpoint).
+    let aliases = state.with_store(|s| s.list_aliases_of_kind("tmux_pane").unwrap_or_default());
 
-    endpoints
+    aliases
         .into_iter()
-        .map(|ep| {
-            let cmd_opt = pane_alive(&ep.target);
+        .map(|a| {
+            let cmd_opt = pane_alive(&a.external_id);
             EndpointStatus {
-                session_id: ep.session_id,
-                pane_id: ep.target,
+                session_id: a.session_id,
+                pane_id: a.external_id,
                 pane_command: cmd_opt.clone().unwrap_or_default(),
                 alive: cmd_opt.is_some(),
-                registered_at: ep.registered_at,
-                last_verified: ep.last_verified,
+                registered_at: a.created_at,
+                last_verified: a.created_at,
             }
         })
         .collect()

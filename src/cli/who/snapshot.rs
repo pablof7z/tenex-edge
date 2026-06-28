@@ -92,138 +92,74 @@ pub fn load_who_snapshot(
     daemon_host: &str,
 ) -> Result<WhoSnapshot> {
     // §8e: "remote" is computed DAEMON-side by comparing each peer's host to the
-    // daemon's own host, so all rendering stays client-side and can't diverge via
-    // a second Config::load(). Local sessions are on this machine by construction
-    // → never remote. A peer is remote ONLY when its host differs from ours.
+    // daemon's own host, so all rendering stays client-side. Local sessions are
+    // on this machine by construction → never remote. A peer is remote ONLY when
+    // its host differs from ours.
     let local_host = slugify_host(daemon_host);
-    let since = now.saturating_sub(PEER_FRESH_SECS);
 
-    // Single source of truth: the session-state read facade. Local rows project
-    // `session_state`, peer rows project `peer_session_state`, and BOTH run through
-    // the one `derive_status` projection — there is no local-vs-peer busy fork.
-    let mine = store.live_session_snapshots(None, since)?;
-    // Identity is (signing pubkey, group) now. A normal session signs with the
-    // durable agent key; a collision-fallback duplicate signs with its
-    // session_pubkey. Peer rows sharing that selected local identity are our own
-    // relay echoes, so drop them.
-    let my_keys: std::collections::HashSet<(String, String)> = mine
-        .iter()
-        .map(|s| {
-            (
-                store
-                    .session_pubkey_for_session(s.session_id.as_str())
-                    .unwrap_or_else(|| s.agent_pubkey.clone()),
-                s.project.clone(),
-            )
-        })
-        .collect();
-    let local_agent_pubkeys: std::collections::HashSet<String> = store
-        .list_local_agent_pubkeys()
+    // Pubkeys this daemon signs as — used to drop our own relay echoes from the
+    // peer set so a local session isn't double-counted as a remote one.
+    let my_pubkeys: std::collections::HashSet<String> = store
+        .list_identity_pubkeys()
         .unwrap_or_default()
         .into_iter()
-        .collect();
-    let all_peers: Vec<SessionSnapshot> = store
-        .peer_session_snapshots(None, since)?
-        .into_iter()
-        .filter(|p| !my_keys.contains(&(p.agent_pubkey.clone(), p.project.clone())))
-        .filter(|p| {
-            !(slugify_host(&p.host) == local_host && local_agent_pubkeys.contains(&p.agent_pubkey))
-        })
-        .collect();
-
-    // Sessions that have a tmux endpoint registered (for attachable flag).
-    let tmux_sessions: std::collections::HashSet<String> = store
-        .list_session_endpoints_of_kind("tmux")
-        .unwrap_or_default()
-        .into_iter()
-        .map(|ep| ep.session_id)
         .collect();
 
     let mut rows = Vec::new();
     let mut other_agents: std::collections::BTreeMap<String, std::collections::BTreeSet<String>> =
         std::collections::BTreeMap::new();
 
-    for s in &mine {
-        let sid = s.session_id.as_str();
-        if current_project.map(|p| p == s.project).unwrap_or(true) {
-            // Derived projection: busy/liveness/title/activity all come from the
-            // one `derive_status` so idle/freshness can never diverge per source.
-            let d = derive_status(s, now);
-            let session_pubkey = store.session_pubkey_for_session(sid);
-            let display_pubkey = session_pubkey
-                .clone()
-                .unwrap_or_else(|| s.agent_pubkey.clone());
-            let display_slug = if session_pubkey.is_some() {
-                format!("{} ({})", session_codename(sid), s.agent_slug)
-            } else {
-                s.agent_slug.clone()
-            };
-            rows.push(WhoRow {
-                source: WhoSource::Local,
-                fresh: d.liveness.is_live(),
-                slug: display_slug,
-                project: s.project.clone(),
-                status: d.title,
-                activity: d.activity,
-                active: d.busy,
-                host: s.host.clone(),
-                session_id: sid.to_string(),
-                age_secs: Some(d.age_secs),
-                rel_cwd: s.rel_cwd.clone(),
-                remote: false,
-                attachable: tmux_sessions.contains(sid),
-                work_root: store
-                    .work_root_for_scope(&s.project)
-                    .unwrap_or_else(|_| s.project.clone()),
-                pubkey: display_pubkey,
-            });
-        } else if store.is_root_project(&s.project) {
+    // ── local sessions on this machine ─────────────────────────────────────────
+    for s in store.list_alive_sessions().unwrap_or_default() {
+        let scope = s.channel_h.clone();
+        if current_project.map(|p| p == scope).unwrap_or(true) {
+            rows.push(local_row(store, &s, &local_host, now));
+        } else if is_root_channel(store, &scope) {
             other_agents
-                .entry(s.project.clone())
+                .entry(scope)
                 .or_default()
                 .insert(s.agent_slug.clone());
         }
     }
 
-    for p in &all_peers {
-        let sid = p.session_id.as_str();
-        if current_project.map(|cp| cp == p.project).unwrap_or(true) {
-            // Identical derivation path as local rows — the fork is gone.
-            let d = derive_status(p, now);
-            rows.push(WhoRow {
-                source: WhoSource::Peer,
-                fresh: d.liveness.is_live(),
-                slug: p.agent_slug.clone(),
-                project: p.project.clone(),
-                status: d.title,
-                activity: d.activity,
-                active: d.busy,
-                host: p.host.clone(),
-                session_id: sid.to_string(),
-                age_secs: Some(d.age_secs),
-                rel_cwd: p.rel_cwd.clone(),
-                remote: slugify_host(&p.host) != local_host,
-                attachable: false,
-                work_root: store
-                    .work_root_for_scope(&p.project)
-                    .unwrap_or_else(|_| p.project.clone()),
-                // Peer status is session-signed, so agent_pubkey IS the peer's
-                // session pubkey — the address to route to.
-                pubkey: p.agent_pubkey.clone(),
-            });
-        } else if store.is_root_project(&p.project) {
-            other_agents
-                .entry(p.project.clone())
-                .or_default()
-                .insert(p.agent_slug.clone());
+    // ── peers: relay_status across all channels, minus our own keys ────────────
+    // Scan every channel even when a `current_project` is set: in-scope statuses
+    // become rows, root channels out of scope feed the other-projects summary.
+    let mut channels: Vec<String> = store
+        .list_channels()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|c| c.channel_h)
+        .collect();
+    if let Some(p) = current_project {
+        if !channels.iter().any(|c| c == p) {
+            channels.push(p.to_string());
+        }
+    }
+    for ch in &channels {
+        for st in store.live_status_for_channel(ch, now).unwrap_or_default() {
+            if my_pubkeys.contains(&st.pubkey) {
+                continue;
+            }
+            let in_scope = current_project.map(|p| p == ch.as_str()).unwrap_or(true);
+            if in_scope {
+                rows.push(peer_row(store, &st, &local_host, now));
+            } else if is_root_channel(store, ch) {
+                let slug = peer_slug(store, &st);
+                other_agents.entry(ch.clone()).or_default().insert(slug);
+            }
         }
     }
 
     let other_projects = other_agents
         .into_iter()
         .map(|(project, agents)| {
-            // Route through the read-model method so Phase 8 can swap the source.
-            let about = store.project_meta_read_model(&project).ok().flatten();
+            let about = store
+                .get_channel(&project)
+                .ok()
+                .flatten()
+                .map(|c| c.about)
+                .filter(|a| !a.is_empty());
             let agents: Vec<String> = agents.into_iter().collect();
             OtherProjectSummary {
                 project,
@@ -244,9 +180,16 @@ pub fn load_who_snapshot(
         })
         .collect();
 
-    // If the current scope is a per-session room, surface its work-root parent
-    // so the renderer can label it as the channel (not the project).
-    let channel_parent = current_project.and_then(|p| store.session_room_parent(p).ok().flatten());
+    // If the current scope is a session/task channel, surface its parent so the
+    // renderer can label it as the channel (not the project). `parent` empty (or
+    // unknown) ⇒ a top-level project, so `None`.
+    let channel_parent = current_project.and_then(|p| {
+        store
+            .channel_parent(p)
+            .ok()
+            .flatten()
+            .filter(|parent| !parent.is_empty())
+    });
 
     Ok(WhoSnapshot {
         project: current_project.unwrap_or("*").to_string(),
@@ -256,6 +199,115 @@ pub fn load_who_snapshot(
         spawnable,
         channel_parent,
     })
+}
+
+/// Top-level work-root for `scope`: walk `parent` links up to the first channel
+/// whose parent is empty/unknown. Bounded to avoid cycles in malformed data.
+fn work_root_for(store: &Store, scope: &str) -> String {
+    let mut cur = scope.to_string();
+    for _ in 0..16 {
+        match store.channel_parent(&cur).ok().flatten() {
+            Some(parent) if !parent.is_empty() => cur = parent,
+            _ => break,
+        }
+    }
+    cur
+}
+
+fn is_root_channel(store: &Store, scope: &str) -> bool {
+    store.is_root_channel(scope).unwrap_or(true)
+}
+
+/// Build a local-session row. Title/activity/busy come from the agent's own
+/// relay_status row when published, else the local pre-publish draft on the
+/// session.
+fn local_row(store: &Store, s: &crate::state::Session, local_host: &str, now: u64) -> WhoRow {
+    let live = store
+        .get_status(&s.agent_pubkey, &s.channel_h)
+        .ok()
+        .flatten()
+        .filter(|st| st.expiration == 0 || st.expiration >= now);
+    let (title, activity, busy) = match live {
+        Some(st) => (
+            st.title,
+            if st.busy { st.activity } else { String::new() },
+            st.busy,
+        ),
+        None => (
+            s.title.clone(),
+            if s.working {
+                s.activity.clone()
+            } else {
+                String::new()
+            },
+            s.working,
+        ),
+    };
+    let fresh = now.saturating_sub(s.last_seen) <= crate::session::STATUS_TTL_SECS;
+    WhoRow {
+        source: WhoSource::Local,
+        fresh,
+        slug: s.agent_slug.clone(),
+        project: s.channel_h.clone(),
+        status: title,
+        activity,
+        active: busy,
+        host: local_host.to_string(),
+        session_id: s.session_id.clone(),
+        age_secs: Some(now.saturating_sub(s.last_seen)),
+        rel_cwd: String::new(),
+        remote: false,
+        attachable: false,
+        work_root: work_root_for(store, &s.channel_h),
+        pubkey: s.agent_pubkey.clone(),
+    }
+}
+
+/// Build a peer row from a relay-confirmed status. Host (and thus remoteness)
+/// comes from the peer's kind:0 profile; an unknown host is treated as local.
+fn peer_row(store: &Store, st: &crate::state::Status, local_host: &str, now: u64) -> WhoRow {
+    let host = store
+        .get_profile(&st.pubkey)
+        .ok()
+        .flatten()
+        .map(|p| p.host)
+        .filter(|h| !h.is_empty())
+        .unwrap_or_else(|| local_host.to_string());
+    let remote = slugify_host(&host) != local_host;
+    WhoRow {
+        source: WhoSource::Peer,
+        fresh: true, // live_status_for_channel only returns unexpired rows
+        slug: peer_slug(store, st),
+        project: st.channel_h.clone(),
+        status: st.title.clone(),
+        activity: if st.busy {
+            st.activity.clone()
+        } else {
+            String::new()
+        },
+        active: st.busy,
+        host,
+        session_id: String::new(),
+        age_secs: Some(now.saturating_sub(st.last_seen)),
+        rel_cwd: String::new(),
+        remote,
+        attachable: false,
+        work_root: work_root_for(store, &st.channel_h),
+        // Peer status is session-signed, so the status pubkey IS the address to
+        // route to.
+        pubkey: st.pubkey.clone(),
+    }
+}
+
+fn peer_slug(store: &Store, st: &crate::state::Status) -> String {
+    if !st.slug.is_empty() {
+        return st.slug.clone();
+    }
+    store
+        .resolve_slug_for_pubkey(&st.pubkey)
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| crate::util::pubkey_short(&st.pubkey))
 }
 
 impl WhoSnapshot {

@@ -7,13 +7,18 @@ pub(in crate::daemon::server) async fn ensure_session_room(
     parent: &str,
     agent_pubkey: &str,
 ) -> bool {
-    // Record the session-room marker + hierarchy in the local read-model FIRST so
-    // the `is_session_room`/`group_parent` gates (prompt+reply mirroring) and
-    // `groups list` recognize the room even before — or if — the relay mint lands.
+    // Materialize the channel + its hierarchy in the local cache FIRST so the
+    // sub-channel gates (prompt+reply mirroring) and `channels list` recognize the
+    // room even before — or if — the relay mint lands. A non-empty `parent` is what
+    // marks this as a task/session room (vs a top-level project channel).
     state.with_store(|s| {
-        s.mark_session_room(room_h, parent, now_secs()).ok();
-        s.upsert_group_metadata(room_h, name, parent, now_secs())
-            .ok();
+        let created = s
+            .get_channel(room_h)
+            .ok()
+            .flatten()
+            .map(|c| c.created_at)
+            .unwrap_or_else(now_secs);
+        s.upsert_channel(room_h, name, "", parent, created).ok();
     });
 
     // Provision the room through the SAME shared primitive every channel uses
@@ -32,9 +37,14 @@ pub(in crate::daemon::server) async fn ensure_session_room(
         .await;
     let _ = ensure_subscription(state, room_h).await;
 
-    // Name the room after the session's latest distilled title, if one exists.
-    let latest_title =
-        state.with_store(|s| s.latest_session_title_for_project(room_h).ok().flatten());
+    // Name the room after a live session's distilled title, if one exists.
+    let latest_title = state.with_store(|s| {
+        s.list_alive_sessions()
+            .unwrap_or_default()
+            .into_iter()
+            .find(|r| r.channel_h == room_h && !r.title.trim().is_empty())
+            .map(|r| r.title)
+    });
     if let Some(title) = latest_title {
         apply_room_name_update(state, room_h, &title).await;
     }
@@ -121,8 +131,7 @@ pub(in crate::daemon::server) async fn rpc_channels_create(
     // names the new subgroup correctly when it creates it on the relay (it reads
     // the display name from the local store).
     state.with_store(|s| {
-        s.upsert_group_metadata(&child_h, &p.name, &p.parent, now_secs())
-            .ok();
+        s.upsert_channel(&child_h, &p.name, "", &p.parent, now_secs()).ok();
     });
 
     // ONE shared primitive provisions EVERY channel — per-session rooms,
@@ -153,11 +162,11 @@ pub(in crate::daemon::server) async fn rpc_channels_create(
     // The confirmed admin roster, read back from the local cache the shared
     // primitive just populated (parent admins + whitelist + backend pubkey).
     let granted: Vec<String> = state.with_store(|s| {
-        s.list_group_members(&child_h)
+        s.list_channel_members(&child_h)
             .unwrap_or_default()
             .into_iter()
-            .filter(|(_, role)| role == "admin")
-            .map(|(pk, _)| pk)
+            .filter(|m| m.role == "admin")
+            .map(|m| m.pubkey)
             .collect()
     });
 
@@ -182,7 +191,7 @@ pub(in crate::daemon::server) async fn rpc_channels_create(
 
     // Local fast-path: relays don't reliably echo to the publishing connection,
     // so drive the same listener directly for roles targeted at THIS backend.
-    // Idempotency is enforced inside handle_orchestration via processed_orchestration.
+    // Idempotency is enforced inside handle_orchestration via the inbox ledger.
     if let Some(op) = crate::fabric::nip29::orchestration::parse_orchestration(&signed) {
         handle_orchestration(state, &signed, op).await;
     }
@@ -210,24 +219,24 @@ pub(in crate::daemon::server) fn rpc_channels_list(
     }
     let p: P = serde_json::from_value(params.clone()).context("channels_list params")?;
 
-    // (group_id, about, name, parent) for every group the daemon knows about.
-    let rows = state.with_store(|s| s.list_group_metadata())?;
+    // Every channel the daemon has materialized.
+    let rows = state.with_store(|s| s.list_channels())?;
     // parent id -> children (id, display name). Sorted for stable output.
     let mut children: std::collections::BTreeMap<String, Vec<(String, String)>> =
         std::collections::BTreeMap::new();
-    for (id, about, name, parent) in &rows {
-        if parent.is_empty() {
+    for ch in &rows {
+        if ch.parent.is_empty() {
             continue;
         }
-        let display = if name.is_empty() {
-            about.clone()
+        let display = if ch.name.is_empty() {
+            ch.about.clone()
         } else {
-            name.clone()
+            ch.name.clone()
         };
         children
-            .entry(parent.clone())
+            .entry(ch.parent.clone())
             .or_default()
-            .push((id.clone(), display));
+            .push((ch.channel_h.clone(), display));
     }
     for v in children.values_mut() {
         v.sort();
@@ -271,14 +280,13 @@ pub(in crate::daemon::server) fn preorder_rooms(
     out
 }
 
-/// `channels_switch`: move a running session to a different NIP-29 subgroup
-/// without restarting. Writes `sessions.channel`, re-points `session_state.
-/// project` at the new scope (so the status drainer, `who`/`statusline`
-/// scoping, and `status_delta_since` all key on it), bumps the state version,
-/// and enqueues a status_outbox row so a fresh kind:30315 publishes into the
-/// new room. All fabric publishing (chat/mentions/proposals), local chat
-/// routing, and turn-context deltas follow the new scope via `route_scope()`.
-/// Fails if the channel does not exist in local state.
+/// `channels_switch`: move a running session to a different NIP-29 channel
+/// without restarting. Sets `sessions.channel_h` (the single route scope) and
+/// re-homes the session's identity at the new channel, then nudges the status
+/// drainer so a fresh kind:30315 publishes into the new channel. All fabric
+/// publishing (chat/mentions/proposals), local chat routing, and turn-context
+/// deltas follow the new scope via `channel_h`. Fails if the channel does not
+/// exist in local state.
 pub(in crate::daemon::server) async fn rpc_channels_switch(
     state: &Arc<DaemonState>,
     params: &serde_json::Value,
@@ -301,18 +309,18 @@ pub(in crate::daemon::server) async fn rpc_channels_switch(
     let rec = resolve_session(state, None, Some(env_session), None, None, None)?;
     let new_channel = p.channel.clone();
     // Validate the channel exists in local state before switching.
-    let exists: bool =
-        state.with_store(|s| Ok::<bool, anyhow::Error>(s.channel_exists(&new_channel)))?;
+    let exists = state
+        .with_store(|s| s.get_channel(&new_channel))
+        .unwrap_or(None)
+        .is_some();
     if !exists {
         anyhow::bail!("channel {:?} does not exist", new_channel);
     }
     refresh_project_members_cache(state, &new_channel).await;
     let is_member = state.with_store(|s| {
-        Ok::<bool, anyhow::Error>(
-            s.is_group_member(&new_channel, &rec.agent_pubkey)
-                .unwrap_or(false),
-        )
-    })?;
+        s.is_channel_member(&new_channel, &rec.agent_pubkey)
+            .unwrap_or(false)
+    });
     if !is_member {
         anyhow::bail!(
             "agent {} is not a member of channel {:?}",
@@ -320,16 +328,15 @@ pub(in crate::daemon::server) async fn rpc_channels_switch(
             new_channel
         );
     }
-    // Occupancy reject (issue #47): a session's ordinal identity is fixed for
-    // life; it cannot switch INTO a room where another live session already holds
-    // the same ordinal pubkey. Redirect the agent to message that instance — the
-    // redirect lands in that instance's context because both sign as this pubkey.
-    let my_pubkey = state
-        .with_store(|s| s.identity_route_for_session(&rec.session_id))
-        .map(|r| r.pubkey)
-        .unwrap_or_else(|| rec.agent_pubkey.clone());
-    if let Some(occupant) = state.with_store(|s| s.live_identity_route(&my_pubkey, &new_channel)) {
-        if occupant.session_id != rec.session_id {
+    // Occupancy reject (issue #47): a session's identity is fixed for life; it
+    // cannot switch INTO a channel where another live session already signs as the
+    // same pubkey. Redirect the agent to message that instance — the redirect lands
+    // in that instance's context because both sign as this pubkey.
+    let my_pubkey = rec.agent_pubkey.clone();
+    if let Some(occupant) =
+        state.with_store(|s| s.resolve_identity_for_channel(&my_pubkey, &new_channel).ok().flatten())
+    {
+        if occupant.alive && occupant.session_id != rec.session_id {
             anyhow::bail!(
                 "Another instance of you is already active in #{new_channel}, so you cannot join it. \
 Send it a message instead: tenex-edge chat write --channel {new_channel} --message \"...\" \
@@ -338,22 +345,26 @@ Send it a message instead: tenex-edge chat write --channel {new_channel} --messa
         }
     }
     ensure_subscription(state, &new_channel).await?;
-    let prev_channel = rec.channel.clone();
-    // Apply the switch in ONE store transaction: update `sessions.channel`,
-    // move `session_state.project` to the new scope (so the status drainer, who
-    // snapshot, and status_delta all key on it), bump the version, and enqueue
-    // a status_outbox row so a fresh kind:30315 publishes into the new room.
-    // Without this, `channels switch` only flipped a column and the session
-    // kept routing into its old per-session room.
-    state.with_store(|s| s.set_session_channel(&rec.session_id, &new_channel, now_secs()))?;
-    // Move the (pubkey, h) identity route to the new room — the ordinal pubkey is
-    // fixed, only `h` changes; `(pubkey, new_channel)` becomes the resume key.
-    state.with_store(|s| s.move_identity_route(&rec.session_id, &new_channel, now_secs()).ok());
+    let prev_channel = rec.channel_h.clone();
+    // Move the session's route scope to the new channel. Every fabric publish,
+    // local chat routing, status, and turn-context delta keys on `channel_h`, so
+    // this is the whole switch.
+    state.with_store(|s| s.set_session_channel(&rec.session_id, &new_channel))?;
+    // Re-home the session's identity at the new channel — the pubkey is fixed,
+    // only `channel_h` changes; `(pubkey, new_channel)` becomes the resume key.
+    state.with_store(|s| {
+        if let Some(mut idn) = s.get_identity(&my_pubkey).ok().flatten() {
+            idn.channel_h = new_channel.clone();
+            idn.session_id = rec.session_id.clone();
+            idn.alive = true;
+            s.upsert_identity(&idn).ok();
+        }
+    });
     // Nudge the drainer so the scope-changed status publishes immediately
     // rather than waiting for the next heartbeat tick. The kind:30315 it
     // publishes carries the new `h` tag, so peers in the channel see the
     // session's presence without a separate profile push.
-    state.status_outbox_notify.notify_waiters();
+    state.outbox_notify.notify_waiters();
     Ok(serde_json::json!({
         "session_id": rec.session_id,
         "prev_channel": prev_channel,

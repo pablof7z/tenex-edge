@@ -60,7 +60,7 @@ pub(in crate::daemon::server) async fn rpc_propose(
     // `tenex-edge publish` from the repo root).
     let project = session_rec
         .as_ref()
-        .map(|r| r.route_scope().to_string())
+        .map(|r| r.channel_h.clone())
         .unwrap_or_else(|| crate::project::resolve(&cwd).unwrap_or_default());
     let agent_slug = session_rec
         .as_ref()

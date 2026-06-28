@@ -75,41 +75,48 @@ fn shape_is_keyed_by_binary_not_slug() {
     assert!(resume_shape_for_bin("npx").is_none());
 }
 
-fn sample_session() -> crate::state::SessionRecord {
-    crate::state::SessionRecord {
+fn sample_session() -> crate::state::Session {
+    crate::state::Session {
         session_id: "sess-target".into(),
-        agent_slug: "claude".into(),
         agent_pubkey: "pk-target".into(),
-        project: "proj".into(),
-        host: "host-a".into(),
+        agent_slug: "claude".into(),
+        channel_h: "proj".into(),
+        harness: "claude".into(),
         child_pid: None,
-        watch_pid: None,
-        created_at: 1000,
+        transcript_path: None,
         alive: true,
-        rel_cwd: String::new(),
-        channel: String::new(),
+        created_at: 1000,
+        last_seen: 0,
+        working: false,
+        turn_started_at: 0,
+        last_distill_at: 0,
+        seen_cursor: 0,
+        title: String::new(),
+        activity: String::new(),
+        resume_id: String::new(),
     }
 }
 
 #[test]
 fn pending_message_prompt_contains_the_actual_message_body() {
     let rec = sample_session();
-    let row = crate::state::ChatInboxRow {
-        chat_event_id: "abcdef123456".into(),
+    // Slug is intentionally no longer carried on the inbox row; the renderer
+    // shows the short sender pubkey instead.
+    let row = crate::state::InboxRow {
+        event_id: "abcdef123456".into(),
         target_session: rec.session_id.clone(),
+        state: "pending".into(),
         from_pubkey: "pk-sender".into(),
-        from_slug: "codex".into(),
-        project: "proj".into(),
+        channel_h: "proj".into(),
         body: "please review the tmux delivery path".into(),
         created_at: 100,
-        from_session: "sender-session".into(),
-        mentioned_session: rec.session_id.clone(),
+        delivered_at: 0,
     };
 
     let prompt = crate::injection::render_direct_mention_prompt(&[row], 120).unwrap();
 
     assert!(prompt.contains("Incoming message mentioning this agent"));
-    assert!(prompt.contains("Mention in #proj from codex"));
+    assert!(prompt.contains("Mention in #proj from pk-sende"));
     assert!(prompt.contains("please review the tmux delivery path"));
     assert!(!prompt.contains("tenex-edge inbox"));
     assert!(!prompt.contains("project chat - write"));

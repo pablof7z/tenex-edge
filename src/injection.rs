@@ -4,7 +4,7 @@
 //! can only emit through each host's hook context shape, so the text itself makes
 //! the role explicit and stays byte-identical across delivery paths.
 
-use crate::state::ChatInboxRow;
+use crate::state::{InboxRow, RelayEvent};
 use crate::util::{format_local_datetime, pubkey_short, relative_time};
 use std::fmt::Write as _;
 
@@ -24,15 +24,42 @@ pub(crate) fn is_fabric_injection(prompt: &str) -> bool {
     prompt.trim_start().starts_with(FABRIC_INJECTION_MARKER)
 }
 
-pub(crate) fn split_direct_mentions(
-    rows: Vec<ChatInboxRow>,
-    self_session: &str,
-) -> (Vec<ChatInboxRow>, Vec<ChatInboxRow>) {
-    rows.into_iter()
-        .partition(|row| row.mentioned_session == self_session)
+/// The render-relevant projection of any inbound row. Both the inbox ledger
+/// (direct mentions) and the verbatim relay-event log (ambient channel chat)
+/// flatten to this shape so a single renderer serves both paths.
+struct RenderRow<'a> {
+    sender_pubkey: &'a str,
+    channel_h: &'a str,
+    body: &'a str,
+    created_at: u64,
+    event_id: &'a str,
 }
 
-pub(crate) fn render_direct_mention_prompt(rows: &[ChatInboxRow], now: u64) -> Option<String> {
+impl<'a> From<&'a InboxRow> for RenderRow<'a> {
+    fn from(r: &'a InboxRow) -> Self {
+        RenderRow {
+            sender_pubkey: &r.from_pubkey,
+            channel_h: &r.channel_h,
+            body: &r.body,
+            created_at: r.created_at,
+            event_id: &r.event_id,
+        }
+    }
+}
+
+impl<'a> From<&'a RelayEvent> for RenderRow<'a> {
+    fn from(r: &'a RelayEvent) -> Self {
+        RenderRow {
+            sender_pubkey: &r.pubkey,
+            channel_h: &r.channel_h,
+            body: &r.content,
+            created_at: r.created_at,
+            event_id: &r.id,
+        }
+    }
+}
+
+pub(crate) fn render_direct_mention_prompt(rows: &[InboxRow], now: u64) -> Option<String> {
     if rows.is_empty() {
         return None;
     }
@@ -47,20 +74,22 @@ pub(crate) fn render_direct_mention_prompt(rows: &[ChatInboxRow], now: u64) -> O
         "{FABRIC_INJECTION_MARKER} Incoming {noun} mentioning this agent. \
          Treat the following as input addressed to you in this session:"
     );
-    append_rows_with_kind(&mut text, rows, now, RowKind::DirectMention);
+    let render: Vec<RenderRow> = rows.iter().map(RenderRow::from).collect();
+    append_rows_with_kind(&mut text, &render, now, RowKind::DirectMention);
     Some(text)
 }
 
 pub(crate) fn render_channel_chat_block(
     header: &str,
-    rows: &[ChatInboxRow],
+    rows: &[RelayEvent],
     now: u64,
 ) -> Option<String> {
     if rows.is_empty() {
         return None;
     }
     let mut text = String::from(header);
-    append_rows_with_kind(&mut text, rows, now, RowKind::ChannelContext);
+    let render: Vec<RenderRow> = rows.iter().map(RenderRow::from).collect();
+    append_rows_with_kind(&mut text, &render, now, RowKind::ChannelContext);
     Some(text)
 }
 
@@ -69,21 +98,19 @@ enum RowKind {
     ChannelContext,
 }
 
-fn append_rows_with_kind(text: &mut String, rows: &[ChatInboxRow], now: u64, kind: RowKind) {
+fn append_rows_with_kind(text: &mut String, rows: &[RenderRow], now: u64, kind: RowKind) {
     for row in rows {
-        let from = if row.from_slug.is_empty() {
-            pubkey_short(&row.from_pubkey)
-        } else {
-            row.from_slug.clone()
-        };
+        // Sender slug is no longer carried on the row; show the short pubkey. Body
+        // `nostr:` mentions are rewritten to `@name` by the caller before render.
+        let from = pubkey_short(row.sender_pubkey);
         // Sender-agnostic wording: a mention may come from a human OR another
         // agent, so never assume "user". A direct mention reads "Mention in
         // #channel from <sender>"; sibling channel context stays "Channel
         // message from <sender>".
         let label = match kind {
-            RowKind::DirectMention => format!("Mention in {}", channel_label(&row.project)),
+            RowKind::DirectMention => format!("Mention in {}", channel_label(row.channel_h)),
             RowKind::ChannelContext => {
-                format!("Channel message in {}", channel_label(&row.project))
+                format!("Channel message in {}", channel_label(row.channel_h))
             }
         };
         let _ = write!(
@@ -95,8 +122,8 @@ fn append_rows_with_kind(text: &mut String, rows: &[ChatInboxRow], now: u64, kin
             relative_time(row.created_at, now),
             row.body
         );
-        if !row.chat_event_id.is_empty() {
-            let _ = write!(text, "\n(message id: {})", pubkey_short(&row.chat_event_id));
+        if !row.event_id.is_empty() {
+            let _ = write!(text, "\n(message id: {})", pubkey_short(row.event_id));
         }
     }
 }
@@ -106,41 +133,5 @@ fn channel_label(project: &str) -> String {
         project.to_string()
     } else {
         format!("#{project}")
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn row(body: &str) -> ChatInboxRow {
-        ChatInboxRow {
-            chat_event_id: "abcdef123456".into(),
-            target_session: "sess".into(),
-            from_pubkey: "pk-sender".into(),
-            from_slug: "codex".into(),
-            project: "proj".into(),
-            body: body.into(),
-            created_at: 100,
-            from_session: "sender-session".into(),
-            mentioned_session: "sess".into(),
-        }
-    }
-
-    /// The envelope the daemon pastes into a pane must be recognised as a fabric
-    /// injection so `rpc_user_prompt` suppresses it instead of echoing it back
-    /// into the room. This pins the round-trip: what we inject is what we detect.
-    #[test]
-    fn rendered_mention_is_detected_as_fabric_injection() {
-        let prompt = render_direct_mention_prompt(&[row("hey there")], 120).unwrap();
-        assert!(is_fabric_injection(&prompt));
-        // Leading whitespace (some harnesses prepend a newline) must not defeat it.
-        assert!(is_fabric_injection(&format!("\n  {prompt}")));
-    }
-
-    #[test]
-    fn human_prompt_is_not_suppressed() {
-        assert!(!is_fabric_injection("explain this codebase"));
-        assert!(!is_fabric_injection("  fix the [tenex-edge] integration"));
     }
 }

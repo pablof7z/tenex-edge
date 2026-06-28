@@ -2,7 +2,7 @@
 
 > Derived cache — do not hand-edit. Rebuilt by proactive-context after each capture.
 
-Last updated: 2026-06-27
+Last updated: 2026-06-28
 
 ## agent-configuration (1 guide)
 
@@ -119,6 +119,12 @@ Last updated: 2026-06-27
 | [opencode-plugin-setup](guides/opencode-plugin-setup.md) | OpenCode Plugin Setup | The opencode plugin dependency @opencode-ai/plugin must match the installed opencode version (1.16.2) to prevent the plugin from failing to load and opencode fr | capture | warm | 2026-06-08 | opencode-integration |
 | [opencode-sqlite-schema-recovery](guides/opencode-sqlite-schema-recovery.md) | OpenCode SQLite Schema Recovery | When the opencode SQLite database has an older schema missing a `name` column, the process fails at startup with `no such column: name` | capture | warm | 2026-06-08 | opencode-integration |
 
+## relay-materialization (1 guide)
+
+| Slug | Title | Summary | Tags | Volatility | Verified | Topic |
+|------|-------|---------|------|------------|----------|-------|
+| [relay-materialized-schema](guides/relay-materialized-schema.md) | Relay-Materialized Database Schema | The database must contain only relay-materialized state, with no local tables or columns that deviate from relay events. | capture | warm | 2026-06-28 | relay-materialization |
+
 ## security (1 guide)
 
 | Slug | Title | Summary | Tags | Volatility | Verified | Topic |
@@ -198,7 +204,7 @@ Last updated: 2026-06-27
 | [tenex-edge-nip29-groups](guides/tenex-edge-nip29-groups.md) | Tenex-Edge NIP-29 Groups | The singleton daemon maintains an open subscription to NIP-29 groups it owns at all times, scoped by `#d` for owned project slugs, covering relay-authored group | capture | warm | 2026-06-09 | tenex-edge |
 | [tenex-edge-nip29-materializer](guides/tenex-edge-nip29-materializer.md) | tenex-edge NIP-29 Materializer | NIP-29 39000/39002 events hydrate state exclusively through Nip29Materializer into store-level materializer methods | capture | warm | 2026-06-16 | tenex-edge |
 | [tenex-edge-nostr-guarantees](guides/tenex-edge-nostr-guarantees.md) | tenex-edge Nostr Guarantees | Nostr is an AP (available, partition-tolerant) system; relays are an eventually-consistent gossip bus with no compare-and-swap, no broadcast guarantee, and no e | capture | warm | 2026-06-07 | tenex-edge |
-| [tenex-edge-per-session-rooms](guides/tenex-edge-per-session-rooms.md) | Tenex-Edge Per-Session Rooms | Per-session rooms can be disabled via a configuration flag. | capture | warm | 2026-06-26 | tenex-edge |
+| [tenex-edge-per-session-rooms](guides/tenex-edge-per-session-rooms.md) | Tenex-Edge Per-Session Rooms | When per-session rooms are disabled: | capture | warm | 2026-06-26 | tenex-edge |
 | [tenex-edge-phased-build](guides/tenex-edge-phased-build.md) | Tenex-Edge Phased Build | The fabric-architecture refactor is implemented across 9 sequential phases (0â8) in a git worktree at /Users/pablofernandez/src/tenex-edge-fabric on branch 'f | capture | warm | 2026-06-09 | tenex-edge |
 | [tenex-edge-phasing-and-vision](guides/tenex-edge-phasing-and-vision.md) | tenex-edge Phasing and Vision | There are two categorically different products here: (A) a nervous system for your own fleet (single-player, your keys, your machines, safe, immediately valuabl | capture | warm | 2026-06-07 | tenex-edge |
 | [tenex-edge-platform-bet](guides/tenex-edge-platform-bet.md) | tenex-edge Platform Bet | The platform bet for tenex-edge is a thin open adapter on Nostr where the protocol is the product; any host emits and consumes signed events, and tenex-edge own | capture | warm | 2026-06-07 | tenex-edge |
@@ -257,7 +263,7 @@ Last updated: 2026-06-27
 |------|-------|---------|------|------------|----------|-------|
 | [tenex-branch-management](guides/tenex-branch-management.md) | Branch Management | Divergent branches must be resolved through a proper merge that preserves all work from both sides, not via a force-push. | capture | warm | 2026-06-13 | version-control |
 
-## Research Records (7 records)
+## Research Records (13 records)
 
 | Record | Date | Finding | Agent |
 |--------|------|---------|-------|
@@ -267,9 +273,15 @@ Last updated: 2026-06-27
 | [2026-06-26-1-design-validation-report-verdict-that-subscription](research/2026-06-26-1-design-validation-report-verdict-that-subscription.md) | 2026-06-26 | Design validation report: verdict that subscription consolidation approach is sound, but #p set must include durable ordinal identities not singletons | codex |
 | [2026-06-26-1-validation-report-of-nip-29-admin](research/2026-06-26-1-validation-report-of-nip-29-admin.md) | 2026-06-26 | Validation report of NIP-29 admin invariant implementation across three test scenarios: top-level channel creation, subgroup admin inheritance, multi-agent join | main |
 | [2026-06-26-2-updated-design-document-for-durable-ordinal](research/2026-06-26-2-updated-design-document-for-durable-ordinal.md) | 2026-06-26 | Updated design document for durable ordinal agent identities integrated with subscription consolidation, showing identity model architecture and code grounding | codex |
+| [2026-06-27-1-baseline-regression-verification-run-master-3x](research/2026-06-27-1-baseline-regression-verification-run-master-3x.md) | 2026-06-27 | Baseline regression verification: run master 3x to establish consistency (all ~1.8s passes), confirming regression is real not environmental | main |
+| [2026-06-27-2-root-cause-investigation-pre-registered-diagnostic](research/2026-06-27-2-root-cause-investigation-pre-registered-diagnostic.md) | 2026-06-27 | Root cause investigation: pre-registered diagnostic questions about daemon socket isolation and background processes → identified leaked test daemons as confound → clean re-runs revealed injection-path regression (not publish timeout) with structured verdict table | main |
+| [2026-06-28-1-database-table-audit-systematically-identifies-phase](research/2026-06-28-1-database-table-audit-systematically-identifies-phase.md) | 2026-06-28 | Database table audit: systematically identifies Phase-1 tables that are write-only dead code vs. actually read in live paths; produces structured verdict table; concludes target schema should consolidate to relay_* caches + minimal local plumbing | main |
+| [2026-06-28-1-investigated-29er-absence-from-local-cache](research/2026-06-28-1-investigated-29er-absence-from-local-cache.md) | 2026-06-28 | Investigated #29er absence from local cache and traced owns_group flag misuse across three code paths; verdict: owns_group (local-creation marker) incorrectly gates management operations, but relay admin status is the true authority; proposed fix: check relay role instead | main |
+| [2026-06-28-1-investigation-of-owns-group-flag-diverging](research/2026-06-28-1-investigation-of-owns-group-flag-diverging.md) | 2026-06-28 | Investigation of `owns_group` flag diverging from relay admin authority: code-traced three call sites of misuse, documented #29er failure case, proposed four-step fix to align with relay-as-truth | main |
+| [2026-06-28-1-schema-rewrite-verification-independent-build-and](research/2026-06-28-1-schema-rewrite-verification-independent-build-and.md) | 2026-06-28 | Schema rewrite verification: independent build and test validation — 255/0 lib tests passing, −5,785 LOC removed, 11 tables confirmed, but 77 integration test errors remain unresolved | main |
 | [AGENTS](research/AGENTS.md) |  |  |  |
 
-## Episode Cards (223 cards)
+## Episode Cards (225 cards)
 
 | Card | Date | Title | Salience | Status |
 |------|------|-------|----------|--------|
@@ -296,7 +308,7 @@ Last updated: 2026-06-27
 | [2026-06-09-1-codex-sessionstart-hook-must-output-json](episodes/2026-06-09-1-codex-sessionstart-hook-must-output-json.md) | 2026-06-09 | Codex SessionStart hook must output JSON, not plain text | root-cause | active |
 | [2026-06-09-1-colorize-pc-debug-transcript-extract-with](episodes/2026-06-09-1-colorize-pc-debug-transcript-extract-with.md) | 2026-06-09 | Colorize pc debug transcript/extract with role-aware ANSI styling | product | active |
 | [2026-06-09-1-cqrs-read-model-is-contract-replaces](episodes/2026-06-09-1-cqrs-read-model-is-contract-replaces.md) | 2026-06-09 | CQRS read-model-is-contract replaces provider-through-reads | architecture | active |
-| [2026-06-09-1-daemon-actively-owns-nip-29-group](episodes/2026-06-09-1-daemon-actively-owns-nip-29-group.md) | 2026-06-09 | Daemon actively owns NIP-29 group per project (closed+public, userNsec-signed) | product | active |
+| [2026-06-09-1-daemon-actively-owns-nip-29-group](episodes/2026-06-09-1-daemon-actively-owns-nip-29-group.md) | 2026-06-09 | Daemon actively owns NIP-29 group per project (closed+public, userNsec-signed) | product | superseded |
 | [2026-06-09-1-git-worktree-project-slug-unification-via](episodes/2026-06-09-1-git-worktree-project-slug-unification-via.md) | 2026-06-09 | Git worktree project slug unification via --git-common-dir | root-cause | active |
 | [2026-06-09-1-kind-1-mention-vs-activity-disambiguation](episodes/2026-06-09-1-kind-1-mention-vs-activity-disambiguation.md) | 2026-06-09 | Kind:1 Mention vs Activity disambiguation by agent tag | product | active |
 | [2026-06-09-1-mcp-channel-adapter-replaces-wait-for](episodes/2026-06-09-1-mcp-channel-adapter-replaces-wait-for.md) | 2026-06-09 | MCP channel adapter replaces wait-for-mention polling hack | architecture | active |
@@ -496,26 +508,43 @@ Last updated: 2026-06-27
 | [2026-06-26-1-subscription-model-kind-specific-expansion-entity](episodes/2026-06-26-1-subscription-model-kind-specific-expansion-entity.md) | 2026-06-26 | Subscription model: kind-specific expansion → entity-based consolidation | architecture | active |
 | [2026-06-26-2-outgoing-relay-logs-include-event-id](episodes/2026-06-26-2-outgoing-relay-logs-include-event-id.md) | 2026-06-26 | Outgoing relay logs include event ID for server correlation | product | active |
 | [2026-06-26-3-channel-readiness-unified-into-publish-funnel](episodes/2026-06-26-3-channel-readiness-unified-into-publish-funnel.md) | 2026-06-26 | Channel readiness unified into publish-funnel gate | architecture | active |
+| [2026-06-27-1-spawn-on-mention-message-delivery-via](episodes/2026-06-27-1-spawn-on-mention-message-delivery-via.md) | 2026-06-27 | spawn-on-mention message delivery via conditional relay replay | root-cause | active |
+| [2026-06-28-1-relay-admin-role-as-authoritative-source](episodes/2026-06-28-1-relay-admin-role-as-authoritative-source.md) | 2026-06-28 | Relay admin role as authoritative source for group management | architecture | active |
 
-## Nouns (63 entities)
+## Nouns (100 entities)
 
 | Noun | Name | Origin | Definition |
 |------|------|--------|------------|
 | [activity](nouns/activity.md) | Activity | extracted | Used for social Activity notes (kind:1 without p tag) |
 | [activity-distillation](nouns/activity-distillation.md) | Activity distillation | extracted | the process of distilling the agent's recent conversation transcript into a one-line intent that becomes its Activity note and live Status; it is LLM-only with no heuristic fallback and intent is not recoverable from tool calls by rule |
+| [agent](nouns/agent.md) | agent | extracted | an entity running locally or remotely with no schema-level distinction; local agents need OS handles, remote agents are visible only through relay events |
 | [agent-identity-pubkey](nouns/agent-identity-pubkey.md) | agent identity / pubkey | extracted | durable, ordinal-keyed (agent, ordinal); base agent at ordinal 0, higher ordinals for concurrent instances of same agent; reused deterministically across rooms |
+| [aggregate-reqs](nouns/aggregate-reqs.md) | aggregate REQs | extracted | Three stable broad Nostr subscriptions replacing the old per-(project×kind) narrow-filter model: #h (all channels), #p (all durable ordinal pubkeys), and group-state by #d. Each aggregate backfills a large stored-event backlog down the relay connection. |
 | [backend-orchestration](nouns/backend-orchestration.md) | backend orchestration | extracted | kind:9 subscription p-tagged to the backend's identity, independent of any project, maintaining one global subscription per backend |
 | [channel](nouns/channel.md) | channel | extracted | in this project, a channel and a project are the same abstraction—a NIP-29 group that may or may not have a parent; the only distinction is whether parent_hint is set |
+| [channel-members](nouns/channel-members.md) | channel_members | extracted | membership table including a role field with values 'admin' or 'member' |
 | [channel-readiness-gate](nouns/channel-readiness-gate.md) | channel readiness gate | extracted | idempotent `ensure_channel_ready(ctx: ChannelCtx)` method on `Nip29Provider` in `src/fabric/nip29/readiness.rs` that all three domain publish methods (`publish`, `publish_checked`, `set_status`) converge on; uses TTL-cached fast path, per-channel single-flight mutex, local SQLite read-model checks, and recursive parent ensures before provisioning a channel |
 | [channel-traffic](nouns/channel-traffic.md) | channel traffic | extracted | signed by session keys but received via #h tag, regardless of signer |
+| [channels](nouns/channels.md) | channels | extracted | just channels, whether a top-level channel (belongs to a project), a session channel, or whatever — all the same concept, only the parent differs |
 | [chatmessage](nouns/chatmessage.md) | ChatMessage | extracted | scoped to the project group by its `h` tag. It is ambient project context; live sessions see it going forward only. Chat fans out to every alive project session — routing is by pubkey + current channel, no session IDs on the wire. |
+| [database](nouns/database.md) | database | extracted | a read-through cache of relay state |
 | [distillation](nouns/distillation.md) | distillation | extracted | LLM-driven process triggered on each new user message (turn-start) that generates a session title and activity line |
 | [domain-publish](nouns/domain-publish.md) | domain publish | extracted | publish above the codec seam: DomainEvent publishes that converge on three methods (publish, publish_checked, set_status) on Nip29Provider and encode via the wire codec |
 | [domainevent](nouns/domainevent.md) | DomainEvent | extracted | The closed set of things that travel on the fabric. A codec encodes each of these to a wire envelope and decodes wire envelopes back into these. |
+| [durable-ordinal-identity](nouns/durable-ordinal-identity.md) | durable ordinal identity | extracted | A deterministic identity series where ordinal 0 = base key (e.g., smith), ordinal N = HKDF-SHA256 tweak of the base secret (e.g., smith1, smith2...) |
 | [ensure-channel-ready](nouns/ensure-channel-ready.md) | ensure_channel_ready | extracted | the unified NIP-29 channel-provisioning primitive: recursively ensures parent groups exist, creates/confirms target channels, propagates admin roles downward, and adds agents as members with roster confirmation retry—used for per-session rooms, orchestration, explicit channels, and project provisioning |
+| [entity-based-subscription-registry](nouns/entity-based-subscription-registry.md) | entity-based subscription registry | extracted | subscription model that plans the daemon's relay subscriptions around entities (channels via #h, ordinal pubkeys via #p, groups via #d) with narrow add-REQs for new entities, replacing the previous per-(project×kind) model; introduces real CLOSE/unsubscribe to prevent subscription leaks and drops kind:0 profiles to fetch-on-demand |
+| [events-table](nouns/events-table.md) | events table | extracted | the relay cache (single source of truth); verbatim store of every Nostr event observed, with NIP-01 replacement applied on insert |
 | [explicit-channel-scope](nouns/explicit-channel-scope.md) | explicit channel scope | extracted | a session where project != work_root, created with the channel as a subgroup of the root project |
+| [group-members](nouns/group-members.md) | group_members | extracted | A table materializing kind:39001 (admin snapshots) and kind:39002 (membership snapshots) from the relay, with rows for each (project, pubkey, role) tuple |
 | [h-tag](nouns/h-tag.md) | h tag | extracted | the NIP-29 group identifier, derived inside the codec from the DomainEvent's project field, which is always SessionRecord::route_scope() — either the channel (if set) or the per-session room |
+| [identities](nouns/identities.md) | identities | extracted | derived signing keys the daemon publishes as (ordinal + per-session pubkeys) mapping to owning agent/session + resume binding; bounds subscription and allows mention to offline agent to resume right session |
+| [identities-table](nouns/identities-table.md) | identities table | extracted | derived signing keys; local crypto inventory of ordinal and per-session pubkeys the daemon publishes as |
 | [identity](nouns/identity.md) | Identity | extracted | (agent, machine) — the same slug on another machine is a different key |
+| [identityroute](nouns/identityroute.md) | IdentityRoute | extracted | A data structure representing a durable ordinal identity's binding to a NIP-29 room. One row per (pubkey, h) tuple; records the ordinal number, agent slug, label, bound harness kind, native harness session id, and liveness state. |
+| [inbox](nouns/inbox.md) | inbox | extracted | inbound routing ledger where event idempotency is tracked—one row per inbound event addressed to a local agent and its delivery outcome, replacing the need for a separate processed_orchestration table |
+| [inbox-table](nouns/inbox-table.md) | inbox table | extracted | inbound routing ledger; one row per inbound event addressed to a locally-hosted agent, with its routing outcome (pending or delivered) |
+| [is-session-room](nouns/is-session-room.md) | is_session_room | extracted | marks per-session rooms (issue #6) where only the owning session auto-renames the room to its distilled title |
 | [live-session](nouns/live-session.md) | live session | extracted | at most one per (ordinal-pubkey, channel); binds to native harness session id via (pubkey, channel) → native_id resume key |
 | [members](nouns/members.md) | members | extracted | the kind:39002 p-tag set, keyed by #d == group |
 | [ms-server-1](nouns/ms-server-1.md) | MS-server-1 | extracted | extraction of 5 project RPC handlers (list, edit, members, add, remove) from server.rs into server/rpc/project.rs |
@@ -529,31 +558,53 @@ Last updated: 2026-06-27
 | [nip-29-channel](nouns/nip-29-channel.md) | NIP-29 channel | extracted | the NIP-29 group a session publishes to: for a subgroup task room, the child h supplied via TENEX_EDGE_CHANNEL; otherwise, the working-directory project |
 | [normalized-session-observation](nouns/normalized-session-observation.md) | normalized session observation | extracted | a hook observation describing the harness, harness-owned external ID, resume token, tmux pane, watched PID, and CWD, reported to the daemon which resolves the canonical session ID — minting new, reattaching via alias, or superseding stale |
 | [nostrdelivery](nouns/nostrdelivery.md) | NostrDelivery | extracted | raw Nostr delivery that subscribes to relay streams for a given Scope |
+| [ordinal](nouns/ordinal.md) | Ordinal | extracted | A deterministic identity series for an agent where ordinal 0 is the base key (e.g., 'smith'), ordinal N is an HKDF-SHA256 tweak of the base secret (e.g., 'smith1', 'smith2'), with the same pubkey reused across rooms |
 | [ordinal-durable-pubkeys](nouns/ordinal-durable-pubkeys.md) | ordinal-durable pubkeys | extracted | durable keys keyed by (agent, ordinal); allocated as lowest ordinal not already live for agent in room; same pubkey reused across rooms |
+| [outbox](nouns/outbox.md) | outbox | extracted | durable queue of events the daemon intends to publish (status, chat, group mgmt) with retry/last-error; survives a crash between 'decide to publish' and 'relay ack' |
+| [outbox-table](nouns/outbox-table.md) | outbox table | extracted | outbound publish queue; durable queue of events the daemon intends to publish with retry state and last-error tracking |
+| [owned-groups](nouns/owned-groups.md) | owned_groups | extracted | the local routing table for NIP-29 groups this daemon created and manages on the relay |
+| [owns-group](nouns/owns-group.md) | owns_group | extracted | a flag: 1 when this group is owned/managed by this daemon instance, 0 when the daemon records local routing metadata without claiming relay admin |
 | [parent](nouns/parent.md) | parent | extracted | parent group id in project_meta from relay-authored kind:39000 'parent' tag, empty for top-level projects |
 | [parent-hint](nouns/parent-hint.md) | parent_hint | extracted | a parameter to the channel-provisioning primitive: None creates a top-level project (root channel), Some(parent) creates a subgroup under that parent |
 | [per-session-room](nouns/per-session-room.md) | per-session room | extracted | a NIP-29 subgroup room_h parented under the work-root project that a human-initiated session lives in; minted idempotently per session |
 | [persessionrooms](nouns/persessionrooms.md) | perSessionRooms | extracted | a boolean configuration field in ~/.tenex-edge/config.json controlling whether sessions mint per-session rooms (true) or use the project channel (false, the default) |
 | [profile-identity-resolution](nouns/profile-identity-resolution.md) | profile/identity resolution | extracted | replaceable lookup data that should be performed on-demand via fetch and cache rather than maintained as a long-lived subscription |
 | [project-channel](nouns/project-channel.md) | project channel | extracted | the bare work-root project group where sessions land their fabric events when per-session rooms are disabled (the default behavior); no subgroup is minted |
+| [project-meta](nouns/project-meta.md) | project_meta | extracted | caches group metadata seen arriving from the relay (kind:39000 events), regardless of who owns them |
+| [project-roots](nouns/project-roots.md) | project_roots | extracted | local filesystem map of channel id to absolute path on this machine, so a session can spawn into a project before any session exists |
+| [project-roots-table](nouns/project-roots-table.md) | project_roots table | extracted | local filesystem map; channel/project id to absolute path on this machine, enabling session spawn into a project before any session exists |
 | [project-session-context](nouns/project-session-context.md) | project (session context) | extracted | For a subgroup task room, the child h supplied via TENEX_EDGE_CHANNEL; otherwise, the working-directory project |
 | [project-skill](nouns/project-skill.md) | project skill | extracted | a verified, committed record of what works to launch the app: exact package commands, environment variables, patches, and drivers |
 | [pubkey](nouns/pubkey.md) | pubkey | extracted | durable identifier created only when a second agent is added to a channel — no longer transient, not exploded per-session |
 | [rejection-log-format](nouns/rejection-log-format.md) | rejection log format | extracted | includes event context prefix `kind:N  id=<12-hex>  h=<group>  ` when event is available, enabling correlation with relay server logs |
+| [relay-channel-members](nouns/relay-channel-members.md) | relay_channel_members | extracted | materialized membership + admin cache (kind:39001 + 39002); the only authority on management—can pubkey X manage channel H is role='admin' |
+| [relay-channels](nouns/relay-channels.md) | relay_channels | extracted | materialized NIP-29 groups (kind:39000) where parent empty means top-level project channel, set parent means session/task channel nested underneath |
 | [relay-connection](nouns/relay-connection.md) | relay connection | extracted | one per daemon; single nostr-sdk Client/pool that all agent identities' subscriptions multiplex onto |
+| [relay-events](nouns/relay-events.md) | relay_events | extracted | verbatim store of all other event kinds (chat 9/11, notes 1, orchestration 9, etc.); NIP-01 replacement applied for replaceable kinds; regular events append |
 | [relay-log](nouns/relay-log.md) | relay log | extracted | persistent log of every outgoing relay event and every relay rejection, appended to ~/.tenex-edge/relay.log |
+| [relay-profiles](nouns/relay-profiles.md) | relay_profiles | extracted | materialized kind:0 events (profile metadata) |
+| [relay-status](nouns/relay-status.md) | relay_status | extracted | current activity per agent per channel (kind:30315); a pubkey appears at most once per channel since the same pubkey is not allowed to exist in the same channel more than once |
+| [resume-key](nouns/resume-key.md) | resume key | extracted | The (pubkey, h) tuple that serves as the authoritative identity for resuming a durable ordinal's harness session in a room. The native harness session id is stored as an attribute of this route, inverting the previous derivation pattern. |
 | [roomdecision](nouns/roomdecision.md) | RoomDecision | extracted | an enum determining where a newly-born session's fabric events land: Mint creates a per-session NIP-29 subgroup under a parent, UseExisting routes to an existing group (via orchestration override or the default project) |
 | [route-scope](nouns/route-scope.md) | route_scope | extracted | The NIP-29 group id this session currently routes under — its channel when set, else its per-session room (`project`). All fabric publishing (chat/mentions/proposals), local chat routing, `who`/statusline scoping, and turn-context deltas key on this so `channels switch` actually moves the session to a different room without restarting. `project` alone is stale the moment `channel` is set. |
 | [routing-model](nouns/routing-model.md) | routing model | extracted | pubkey-based routing where p-tags carry the receiver's durable pubkey; no session-derived keys or session-specific wire tags |
 | [routing-scope](nouns/routing-scope.md) | routing scope | extracted | The NIP-29 group id this session currently routes under — its channel when set (a `channels switch` moved it to a subgroup), else its per-session room (`project`) |
 | [running](nouns/running.md) | Running | extracted | launching and interacting with the app as a user would (CLI at its command, server at its socket, GUI at its window), not just executing code |
 | [scope](nouns/scope.md) | Scope | extracted | subscription scope that Delivery implementations convert into wire-level |
+| [session-aliases](nouns/session-aliases.md) | session_aliases | extracted | many harness-native ids (claude/codex id, tmux pane, watch pid, resume token) map to one canonical session_id; allows an inbound hook that only knows its harness id to find the canonical session |
+| [session-aliases-table](nouns/session-aliases-table.md) | session_aliases table | extracted | harness-native id to canonical session mapping; many external ids (claude/codex/tmux/pid) map to one daemon-canonical session_id |
+| [session-room-id](nouns/session-room-id.md) | session_room_id | extracted | A deterministic ID for a per-session room: 'session-' followed by six base36 alphanumeric chars derived from a stable hash of the session's anchor (resume token/harness id/pid); the 'session-' prefix is the explicit, canonical marker |
+| [session-rooms](nouns/session-rooms.md) | session rooms | extracted | just rooms; no longer a special concept distinct from regular channels |
+| [sessions](nouns/sessions.md) | sessions | extracted | local agent processes—OS handles to drive and reach a local process, never agent identity; includes the seen_cursor (last event timestamp shown to session) so next hook renders only the delta |
+| [sessions-table](nouns/sessions-table.md) | sessions table | extracted | local agent processes; one row only for agent sessions this daemon hosts, holding only OS handles (PIDs, paths, sockets) needed to drive and reach a local process |
+| [spawn-on-mention](nouns/spawn-on-mention.md) | spawn-on-mention | extracted | the daemon's process of spawning an offline agent when that agent is mentioned in a kind:9 message; the mention triggers membership provisioning via mgmt key (kind:9000) and harness session launch, with the message re-delivered to the newly-alive session via subscription replay |
 | [status](nouns/status.md) | Status | extracted | addressed by `(author pubkey, group id)` |
 | [statusline](nouns/statusline.md) | statusline | extracted | renders the awareness floor for a host status bar, displaying agent name, project name, session identifier, channel title, and live activity |
 | [subgroup-session](nouns/subgroup-session.md) | subgroup session | extracted | a session stored under its child group id (h), not the working-directory project |
 | [subscription-ceiling](nouns/subscription-ceiling.md) | subscription ceiling | extracted | the number of concurrent subscriptions (REQs) a relay allows per connection; acts as bottleneck limiting relay scalability |
 | [subscription-redesigned](nouns/subscription-redesigned.md) | subscription (redesigned) | extracted | three entity-keyed aggregate REQs: #h[channels] kinds[9,30315,30023], #p[pubkeys] kinds[9,30023], #d[groups] kinds[39000,39001,39002]; narrow add-REQs for new entities; compacted at daemon start |
 | [subscriptionid](nouns/subscriptionid.md) | SubscriptionId | extracted | deterministically derived from the filter's content; re-subscribing the same filter replaces the existing relay subscription instead of opening a new one |
+| [subscriptionregistry](nouns/subscriptionregistry.md) | SubscriptionRegistry | extracted | Registry planning the three stable aggregate REQs plus narrow add-REQs, replacing per-(project×kind) Scope expansion that hit the relay's REQ ceiling |
 | [te-session](nouns/te-session.md) | @te_session | extracted | a tmux user option that stores the session identifier for tenex-edge statusline |
 | [tenex-edge-channel](nouns/tenex-edge-channel.md) | TENEX_EDGE_CHANNEL | extracted | present only for sessions launched into a subgroup task |
 | [tenex-edge-statusline](nouns/tenex-edge-statusline.md) | tenex-edge statusline | extracted | the one-line status bar rendering showing identity, project, session ID, channel title, and live activity; reads harness statusline JSON from stdin and fails open (exits 0 with empty output when daemon is down) |

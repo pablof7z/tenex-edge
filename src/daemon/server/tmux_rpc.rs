@@ -1,6 +1,26 @@
 use super::resolve_session;
 use super::*;
 
+/// The tmux pane id bound to a session, via the `tmux_pane` alias rows. Reused OS
+/// panes repoint their alias to the newest owner, so the alias IS the endpoint.
+fn tmux_pane_for_session(state: &Arc<DaemonState>, session_id: &str) -> Option<String> {
+    let aliases = state
+        .with_store(|s| s.aliases_for_session(session_id))
+        .ok()?;
+    aliases
+        .into_iter()
+        .find(|a| a.external_id_kind == "tmux_pane")
+        .map(|a| a.external_id)
+}
+
+/// The parent project a channel hangs under ('' parent = the channel itself).
+fn work_root_for(state: &Arc<DaemonState>, scope: &str) -> String {
+    match state.with_store(|s| s.channel_parent(scope)).ok().flatten() {
+        Some(p) if !p.is_empty() => p,
+        _ => scope.to_string(),
+    }
+}
+
 // ── tmux_status ───────────────────────────────────────────────────────────────
 
 pub(super) fn rpc_tmux_status(state: &Arc<DaemonState>) -> Result<serde_json::Value> {
@@ -39,12 +59,8 @@ pub(super) async fn rpc_tmux_send(
     let rec = resolve_session(state, Some(&p.session), None, None, None, None)
         .with_context(|| format!("no session matching {:?}", p.session))?;
 
-    let ep = state
-        .with_store(|s| s.get_session_endpoint(&rec.session_id, "tmux"))
-        .context("store error")?;
-
-    let ep = match ep {
-        Some(e) => e,
+    let pane_id = match tmux_pane_for_session(state, &rec.session_id) {
+        Some(p) => p,
         None => {
             return Ok(serde_json::json!({
                 "injected": false,
@@ -53,20 +69,14 @@ pub(super) async fn rpc_tmux_send(
         }
     };
 
-    let pane_id = ep.target.clone();
     if crate::tmux::pane_alive_pub(&pane_id).is_none() {
-        state.with_store(|s| s.delete_session_endpoint(&rec.session_id, "tmux").ok());
         return Ok(serde_json::json!({
             "injected": false,
-            "reason": format!("pane {pane_id} is gone; endpoint removed")
+            "reason": format!("pane {pane_id} is gone")
         }));
     }
 
     let injected = crate::tmux::inject_pending_messages_pub(state, &rec, &pane_id).await?;
-    state.with_store(|s| {
-        s.touch_session_endpoint_verified(&rec.session_id, "tmux", crate::util::now_secs())
-            .ok()
-    });
 
     if injected {
         Ok(serde_json::json!({ "injected": true, "pane_id": pane_id }))
@@ -95,8 +105,8 @@ struct TmuxSpawnParams {
     /// The client's cwd, forwarded so the daemon spawns the agent in the
     /// directory the user actually invoked `tenex-edge launch` from — NOT the
     /// daemon's own cwd (which is sticky and never matches the client's). When
-    /// present, this wins over `project_paths` lookup and also updates the
-    /// `project_paths` row so subsequent spawns without `cwd` still find it.
+    /// present, this wins over `project_roots` lookup and also updates the
+    /// `project_roots` row so subsequent spawns without `cwd` still find it.
     #[serde(default)]
     cwd: Option<String>,
     /// NIP-29 channel (group h-value) to scope the spawned session into.
@@ -168,10 +178,10 @@ async fn provision_before_spawn(
     // Detect concurrent instances of the same agent in this scope.
     let scope = channel.filter(|g| !g.is_empty()).unwrap_or(project);
     let already_live = state
-        .with_store(|s| s.latest_alive_session_for_agent_in_project(slug, scope))
-        .ok()
-        .flatten()
-        .is_some();
+        .with_store(|s| s.list_alive_sessions())
+        .unwrap_or_default()
+        .iter()
+        .any(|r| r.agent_slug == slug && r.channel_h == scope);
     if already_live {
         eprintln!(
             "[daemon] tmux_spawn: {slug} already has a live session in {scope}; \
@@ -219,11 +229,8 @@ pub(super) fn rpc_tmux_attach(
         serde_json::from_value(params.clone()).context("parsing tmux_attach params")?;
     let rec = resolve_session(state, Some(&p.session), None, None, None, None)
         .with_context(|| format!("no session matching {:?}", p.session))?;
-    let ep = state
-        .with_store(|s| s.get_session_endpoint(&rec.session_id, "tmux"))
-        .context("store error")?;
-    match ep {
-        Some(e) => Ok(serde_json::json!({ "pane_id": e.target, "session_id": rec.session_id })),
+    match tmux_pane_for_session(state, &rec.session_id) {
+        Some(pane) => Ok(serde_json::json!({ "pane_id": pane, "session_id": rec.session_id })),
         None => Ok(serde_json::json!({
             "error": "no tmux endpoint registered for this session"
         })),
@@ -244,13 +251,9 @@ struct TmuxResumeParams {
 /// the session id, so it IS the resume token. Only our own synthetic `te-*` ids
 /// (generated when a host supplies none, e.g. opencode without a captured id)
 /// are not resume tokens, so those fall through to `None`.
-fn resume_token_for(state: &Arc<DaemonState>, rec: &crate::state::SessionRecord) -> Option<String> {
-    if let Some(id) = state
-        .with_store(|s| s.get_session_resume_id(&rec.session_id))
-        .ok()
-        .flatten()
-    {
-        return Some(id);
+fn resume_token_for(rec: &crate::state::Session) -> Option<String> {
+    if !rec.resume_id.is_empty() {
+        return Some(rec.resume_id.clone());
     }
     if rec.session_id.starts_with("te-") {
         return None;
@@ -284,15 +287,10 @@ pub(super) async fn rpc_tmux_resume(
             .with_context(|| format!("no session matching {:?}", p.session))?,
     };
 
-    // Only resume sessions owned by THIS machine — a remote session's harness
-    // lives on another host and can't be replayed locally.
-    if rec.host != state.host {
-        return Ok(serde_json::json!({
-            "error": format!("session lives on host {:?}, not resumable from here", rec.host)
-        }));
-    }
+    // All sessions in the `sessions` table are hosted by THIS machine, so a
+    // resolved row is always locally resumable — no cross-host guard needed.
 
-    let resume_id = match resume_token_for(state, &rec) {
+    let resume_id = match resume_token_for(&rec) {
         Some(id) => id,
         None => {
             return Ok(serde_json::json!({
@@ -301,12 +299,10 @@ pub(super) async fn rpc_tmux_resume(
         }
     };
 
-    // Re-scope the resumed session to the SAME routing scope it had when it
-    // exited — its channel when set (a `channels switch` had moved it to a
-    // subgroup), else its per-session room. Passing the scope as the group
-    // override sets `TENEX_EDGE_CHANNEL` so the resumed session publishes into
-    // the right room without restarting.
-    let scope = rec.route_scope().to_string();
+    // Re-scope the resumed session to the SAME channel it had when it exited.
+    // Passing the scope as the group override sets `TENEX_EDGE_CHANNEL` so the
+    // resumed session publishes into the right channel without restarting.
+    let scope = rec.channel_h.clone();
     match crate::tmux::resume_agent(state, &rec.agent_slug, &scope, &resume_id).await {
         Ok(pane_id) => Ok(serde_json::json!({
             "pane_id": pane_id,
@@ -320,19 +316,14 @@ pub(super) async fn rpc_tmux_resume(
 /// Resolve a session by the codename the TUI displays (e.g. `bravo4217`), scanning
 /// recent local sessions (including dead rows) so a user can copy `[session
 /// bravo4217]` straight into `tmux resume`. Case-insensitive; first match wins.
-fn resume_by_codename(
-    state: &Arc<DaemonState>,
-    target: &str,
-) -> Option<crate::state::SessionRecord> {
+fn resume_by_codename(state: &Arc<DaemonState>, target: &str) -> Option<crate::state::Session> {
     let want = target.to_lowercase();
-    let host = state.host.clone();
-    state.with_store(|s| {
-        s.list_resumable_sessions(&host, 200)
-            .unwrap_or_default()
-            .into_iter()
-            .map(|(rec, _)| rec)
-            .find(|rec| crate::util::session_codename(&rec.session_id).to_lowercase() == want)
-    })
+    state
+        .with_store(|s| s.list_resumable_sessions(200))
+        .ok()
+        .unwrap_or_default()
+        .into_iter()
+        .find(|rec| crate::util::session_codename(&rec.session_id).to_lowercase() == want)
 }
 
 // ── tmux_resumable ────────────────────────────────────────────────────────────
@@ -342,51 +333,39 @@ fn resume_by_codename(
 /// and are resumable from there via `[r]`; this section is the longer tail of
 /// sessions that have exited entirely. Newest first.
 pub(super) fn rpc_tmux_resumable(state: &Arc<DaemonState>) -> Result<serde_json::Value> {
-    const LIMIT: usize = 60;
-    let host = state.host.clone();
-    let candidates =
-        state.with_store(|s| s.list_resumable_sessions(&host, LIMIT).unwrap_or_default());
+    const LIMIT: u32 = 60;
+    let candidates = state
+        .with_store(|s| s.list_resumable_sessions(LIMIT))
+        .unwrap_or_default();
 
     let arr: Vec<serde_json::Value> = candidates
         .into_iter()
-        .filter_map(|(rec, _resume_id)| {
+        .filter_map(|rec| {
             // Must have a usable resume token (claude/codex: the session id;
             // opencode: a captured ses_*; our synthetic te-* ids: not resumable).
-            resume_token_for(state, &rec)?;
+            resume_token_for(&rec)?;
             // Alive sessions are shown in the live list (resume them with [r]
             // there); keep this section to fully-exited ones to avoid dupes.
             if rec.alive {
                 return None;
             }
             // Skip sessions with a live pane — those are attachable, not resume
-            // candidates. A missing/dead endpoint means the harness is gone.
-            let ep = state
-                .with_store(|s| s.get_session_endpoint(&rec.session_id, "tmux"))
-                .ok()
-                .flatten();
-            let live_pane = ep
-                .as_ref()
-                .is_some_and(|e| crate::tmux::pane_alive_pub(&e.target).is_some());
+            // candidates. A missing/dead alias means the harness is gone.
+            let live_pane = tmux_pane_for_session(state, &rec.session_id)
+                .is_some_and(|p| crate::tmux::pane_alive_pub(&p).is_some());
             if live_pane {
                 return None;
             }
-            let title = state
-                .with_store(|s| s.local_session_snapshot(&rec.session_id).ok().flatten())
-                .map(|snap| snap.title)
-                .unwrap_or_default();
-            let work_root = state.with_store(|s| {
-                s.work_root_for_scope(rec.route_scope())
-                    .unwrap_or_else(|_| rec.route_scope().to_string())
-            });
+            let work_root = work_root_for(state, &rec.channel_h);
             Some(serde_json::json!({
                 "session_id": rec.session_id,
                 "slug": rec.agent_slug,
-                "project": rec.route_scope(),
+                "project": rec.channel_h,
                 "work_root": work_root,
-                "rel_cwd": rec.rel_cwd,
+                "rel_cwd": "",
                 "alive": rec.alive,
                 "created_at": rec.created_at,
-                "title": title,
+                "title": rec.title,
             }))
         })
         .collect();

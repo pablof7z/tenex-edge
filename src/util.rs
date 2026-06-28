@@ -266,11 +266,11 @@ pub fn child_group_id(name: &str) -> String {
 /// six `[a-z0-9]` chars (base36) derived from a stable hash of the session's
 /// `anchor` (resume token / harness id / pid).
 ///
-/// The id does NOT prefix the work-root project name: a per-session room is
+/// The id does NOT prefix the work-root project name: a session channel is
 /// already nested under its project via the NIP-29 `parent` tag, so repeating
-/// the project in the id is redundant. The room→project link is stored
-/// explicitly (`owned_groups.room_parent`) rather than inferred from the id, so
-/// host-side resolution doesn't depend on the id's shape.
+/// the project in the id is redundant. The child→parent link is the relay's
+/// kind:39000 `parent` tag, materialized into `relay_channels.parent` — never
+/// inferred from the id's shape.
 ///
 /// The short hash keeps the room id readable while the `session-` prefix makes
 /// the scope explicit in prompts, status lines, and injected mentions.

@@ -5,18 +5,21 @@ use super::super::*;
 /// List NIP-29 groups: refresh the local cache via the provider (which fetches
 /// kind:39000 from the relay), then return the read-model list.
 pub async fn rpc_project_list(state: &Arc<DaemonState>) -> Result<serde_json::Value> {
-    // Provider fetches kind:39000 from the relay and upserts project_meta.
+    // Provider fetches kind:39000 from the relay and upserts relay_channels.
     // Best-effort: a relay timeout must not prevent returning cached results.
     state.provider.refresh_project_list().await.ok();
 
-    // Read the current read-model (backed by project_meta — retained storage).
+    // Read the current read-model from the relay_channels cache: a "project" is a
+    // root channel (empty parent); its slug is the channel_h and its about is the
+    // kind:39000 description.
     let local = state
-        .with_store(|s| s.list_projects_read_model())
+        .with_store(|s| s.list_channels())
         .unwrap_or_default();
 
     let mut projects: Vec<serde_json::Value> = local
         .into_iter()
-        .map(|(slug, about)| serde_json::json!({ "slug": slug, "about": about }))
+        .filter(|c| c.parent.is_empty())
+        .map(|c| serde_json::json!({ "slug": c.channel_h, "about": c.about }))
         .collect();
     projects.sort_by(|a, b| {
         a["slug"]
@@ -56,7 +59,7 @@ pub async fn rpc_project_edit(
     let builder = crate::fabric::nip29::lifecycle::group_edit_metadata(&p.project, &p.description)?;
     let event_id = state.transport.publish_signed(builder, &user_keys).await?;
 
-    let confirmed = wait_for_project_meta(state, &p.project, &p.description).await;
+    let confirmed = wait_for_channel_about(state, &p.project, &p.description).await;
 
     Ok(serde_json::json!({
         "event_id": event_id.to_hex(),
@@ -82,22 +85,22 @@ pub async fn rpc_project_members(
     refresh_project_members_cache(state, &p.project).await;
 
     let member_pubkeys = state
-        .with_store(|s| s.list_group_members(&p.project))
+        .with_store(|s| s.list_channel_members(&p.project))
         .unwrap_or_default()
         .into_iter()
-        .map(|(pubkey, _)| pubkey)
+        .map(|m| m.pubkey)
         .collect::<Vec<_>>();
     crate::profile::warm(state, &member_pubkeys).await;
 
     let members = state
-        .with_store(|s| s.list_group_members(&p.project))
+        .with_store(|s| s.list_channel_members(&p.project))
         .unwrap_or_default()
         .into_iter()
-        .map(|(pubkey, role)| {
+        .map(|m| {
             let slug = state
-                .with_store(|s| s.resolve_slug_for_pubkey(&pubkey).ok().flatten())
+                .with_store(|s| s.resolve_slug_for_pubkey(&m.pubkey).ok().flatten())
                 .unwrap_or_default();
-            serde_json::json!({ "pubkey": pubkey, "slug": slug, "role": role })
+            serde_json::json!({ "pubkey": m.pubkey, "slug": slug, "role": m.role })
         })
         .collect::<Vec<_>>();
 
@@ -107,11 +110,11 @@ pub async fn rpc_project_members(
     }))
 }
 
-async fn wait_for_project_meta(state: &Arc<DaemonState>, project: &str, description: &str) -> bool {
+async fn wait_for_channel_about(state: &Arc<DaemonState>, project: &str, description: &str) -> bool {
     for _ in 0..20 {
         state.provider.refresh_project_list().await.ok();
         let matches = state.with_store(|s| {
-            s.get_project_meta(project).ok().flatten().as_deref() == Some(description)
+            s.get_channel(project).ok().flatten().map(|c| c.about).as_deref() == Some(description)
         });
         if matches {
             return true;

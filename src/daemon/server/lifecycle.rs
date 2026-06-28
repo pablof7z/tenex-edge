@@ -79,28 +79,18 @@ pub async fn run() -> Result<()> {
         )),
         seen_profiles: Mutex::new(std::collections::HashSet::new()),
         last_status: Mutex::new(HashMap::new()),
-        status_outbox_notify: Notify::new(),
+        outbox_notify: Notify::new(),
         session_keys: Mutex::new(HashMap::new()),
         session_signers: Mutex::new(HashMap::new()),
         backend_pubkey,
     });
-
-    // Idempotent read-model backfill: populate canonical `projects` + `membership`
-    // tables from legacy data so readers have a consistent origin on every start.
-    // Best-effort: a backfill error must not prevent startup.
-    {
-        let pi = state.provider.provider_instance.clone();
-        state.with_store(|s| {
-            s.backfill_nip29_origins(&pi, now_secs()).ok();
-        });
-    }
 
     // These tolerate a not-yet-connected relay (demux just waits for events;
     // publishers/subscribers are best-effort and queue), so they start now.
     spawn_demux(state.clone());
     spawn_pruner(state.clone());
     spawn_idle_watcher(state.clone());
-    spawn_status_outbox_drainer(state.clone());
+    spawn_outbox_drainer(state.clone());
     spawn_status_heartbeat_publisher(state.clone());
     spawn_retry_drainer(state.clone());
 
@@ -164,7 +154,7 @@ pub async fn run() -> Result<()> {
             let member_groups: Vec<String> = relay_state.with_store(|s| {
                 let mut groups = Vec::new();
                 for pk in &local_pks {
-                    if let Ok(gs) = s.list_groups_for_member(pk) {
+                    if let Ok(gs) = s.list_channels_where_member(pk) {
                         groups.extend(gs);
                     }
                 }

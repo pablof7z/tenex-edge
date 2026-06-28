@@ -1,5 +1,4 @@
 use super::*;
-use crate::session::{derive_status, SessionSnapshot};
 
 mod awareness;
 mod channel;

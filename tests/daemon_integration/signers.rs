@@ -77,9 +77,11 @@ fn assert_who_lists_claude(home: &Home) {
         String::from_utf8_lossy(&out.stderr)
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
+    // `who` now renders a markdown agent table (the old `<codename> (claude)`
+    // line format is gone); the claude agent appears in the Agent column.
     assert!(
-        stdout.contains("(claude)"),
-        "who should display codename rows with the claude agent: {stdout}"
+        stdout.contains("claude"),
+        "who should list the claude agent: {stdout}"
     );
     eprintln!("who evidence:\n{stdout}");
 }
@@ -114,18 +116,17 @@ fn duplicate_same_agent_same_channel_gets_transient_signer() {
         .expect("first session")
         .agent_pubkey;
     assert!(
-        store.session_pubkey_for_session(&first_id).is_none(),
+        session_transient_pubkey(&store, &first_id).is_none(),
         "first same-agent/channel session should keep durable signer"
     );
-    let transient_pubkey = store
-        .session_pubkey_for_session(&second_id)
+    let transient_pubkey = session_transient_pubkey(&store, &second_id)
         .expect("second same-agent/channel session should get transient signer");
     assert_ne!(
         transient_pubkey, durable_pubkey,
         "transient signer must differ from durable agent pubkey"
     );
     assert!(
-        store.session_pubkey_for_session(&other_id).is_none(),
+        session_transient_pubkey(&store, &other_id).is_none(),
         "same durable agent in a different channel should keep durable signer"
     );
 
@@ -172,10 +173,9 @@ fn nak_relay_observes_transient_duplicate_status_author() {
         .unwrap()
         .expect("first session")
         .agent_pubkey;
-    assert!(store.session_pubkey_for_session(&first_id).is_none());
-    assert!(store.session_pubkey_for_session(&other_id).is_none());
-    let transient_pubkey = store
-        .session_pubkey_for_session(&second_id)
+    assert!(session_transient_pubkey(&store, &first_id).is_none());
+    assert!(session_transient_pubkey(&store, &other_id).is_none());
+    let transient_pubkey = session_transient_pubkey(&store, &second_id)
         .expect("duplicate session should use transient pubkey");
     assert_eq!(
         whoami_pubkey, transient_pubkey,
@@ -242,10 +242,11 @@ fn duplicate_resume_reassert_preserves_transient_pubkey() {
             whoami["npub"].as_str().unwrap().to_string(),
         )
     });
-    let before = Store::open(&home.store_path())
-        .unwrap()
-        .session_pubkey_for_session(&duplicate_id)
-        .expect("duplicate session should have transient pubkey");
+    let before = session_transient_pubkey(
+        &Store::open(&home.store_path()).unwrap(),
+        &duplicate_id,
+    )
+    .expect("duplicate session should have transient pubkey");
     let expected_npub = {
         use nostr_sdk::prelude::ToBech32;
         nostr_sdk::PublicKey::from_hex(&before)
@@ -275,8 +276,7 @@ fn duplicate_resume_reassert_preserves_transient_pubkey() {
     });
 
     let store = Store::open(&home.store_path()).unwrap();
-    let after = store
-        .session_pubkey_for_session(&duplicate_id_after)
+    let after = session_transient_pubkey(&store, &duplicate_id_after)
         .expect("reasserted duplicate should keep transient pubkey");
     assert_eq!(
         duplicate_id, duplicate_id_after,

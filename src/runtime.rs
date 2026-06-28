@@ -1,29 +1,35 @@
 //! The per-session engine (M1 §5, §7).
 //!
-//! Runs as a daemon-hosted task. It is a STATELESS driver over the canonical
-//! `session_state` aggregate (the single source of truth): it holds no cached
-//! title/activity and never builds a `Status`. It:
+//! Runs as a daemon-hosted task. It is a thin driver over the local `sessions`
+//! row (the canonical local process record). It:
 //!   - publishes the agent's `kind:0` profile once,
-//!   - refreshes liveness each heartbeat (`heartbeat_session` bumps `last_seen`,
-//!     whose freshness the kind:30315 NIP-40 expiration encodes) — no version
-//!     bump, no outbox; the relay re-arm is the drainer/heartbeat-publisher's job,
-//!   - drives turn transitions (`start_turn`/`seed_title_if_empty`/`end_turn`) on
-//!     the rising/falling edges of `turn_state`, and schedules background
-//!     distillation that applies via `apply_distill_result` under a versioned
-//!     guard (a stale distill structurally no-ops),
-//!   - broadcasts a social Activity note when a distill changes the title,
-//!   - watches the host PID and finishes the session (`end_session`, title
-//!     retained) when it dies or on `cancel` (the `session-end` path). Status
-//!     publication is entirely the outbox drainer's responsibility.
+//!   - heartbeats liveness each beat (`touch_session` bumps `last_seen`) and
+//!     enqueues a fresh kind:30315 status onto the `outbox` so the relay event's
+//!     NIP-40 `expiration` is re-armed (the outbox drainer publishes it),
+//!   - schedules background distillation; an applied distill writes
+//!     `sessions.title`/`activity` (`set_session_distill`) and enqueues a status
+//!     publish so the new title reaches the relay,
+//!   - broadcasts a social Activity note when a distill changes the title and,
+//!     when this agent is an admin of the route channel (`is_channel_admin`),
+//!     renames that channel (kind:9002 → relay re-emits kind:39000),
+//!   - watches the host PID and marks the session dead (`mark_dead`, title
+//!     retained on the relay until its status ages off) when it dies or on
+//!     `cancel` (the `session-end` path).
+//!
+//! There is no per-session-room branching: the only channel distinction is
+//! `parent` (`is_root_channel`/`channel_parent`), and management authority is
+//! `is_channel_admin`, never a local owns-group flag.
 
 use crate::distill;
-use crate::domain::{Activity, AgentRef, DomainEvent, Profile};
+use crate::domain::{Activity, AgentRef, DomainEvent, Profile, Status, STATUS_TTL_SECS};
 use crate::fabric::provider::Nip29Provider;
-use crate::state::Store;
+use crate::state::{Session, Store};
 use crate::util::now_secs;
 use anyhow::Result;
+use nostr_sdk::prelude::{Keys, JsonUtil, NostrSigner};
 use std::io::Write as _;
 use std::path::PathBuf;
+use std::sync::Mutex;
 use std::time::Duration;
 
 fn slog(session_id: &str, msg: &str) {
@@ -48,12 +54,12 @@ fn slog(session_id: &str, msg: &str) {
 pub struct EngineParams {
     pub agent_slug: String,
     pub agent_pubkey: String,
-    pub keys: nostr_sdk::prelude::Keys,
+    pub keys: Keys,
     /// Collision fallback signer. When `Some`, this session is a duplicate live
     /// instance of the same durable agent in the same routing scope, so it signs
     /// live events with a deterministic transient key. `None` is the default:
     /// sign as the durable agent.
-    pub session_keys: Option<nostr_sdk::prelude::Keys>,
+    pub session_keys: Option<Keys>,
     pub project: String,
     pub session_id: String,
     pub host: String,
@@ -69,42 +75,102 @@ pub struct EngineParams {
     pub obs_interval: Duration,
     pub status_ttl: Duration,
     /// Delay from turn-start to the first title distillation (default 30s) —
-    /// short turns that finish before this never cost an LLM call. The title is
-    /// re-distilled at each new turn (new user message) with the current title
-    /// fed back, so it stays stable unless the work substantively changes.
+    /// short turns that finish before this never cost an LLM call.
     pub turn_first: Duration,
     /// Safety re-distillation interval WITHIN a single long-running turn that has
-    /// no new user message (default 0 = disabled). Cheap thanks to nudge-to-keep.
+    /// no new user message (default 0 = disabled).
     pub turn_repeat: Duration,
+}
+
+impl EngineParams {
+    /// Keys used to SIGN this session's live events: the transient session key for
+    /// a duplicate live instance, otherwise the durable agent key.
+    fn signing_keys(&self) -> &Keys {
+        self.session_keys.as_ref().unwrap_or(&self.keys)
+    }
+}
+
+/// Route scope for this session: the session's current `channel_h` if set,
+/// otherwise the launch project channel.
+fn route_channel<'a>(p: &'a EngineParams, session: &'a Session) -> &'a str {
+    if session.channel_h.is_empty() {
+        &p.project
+    } else {
+        &session.channel_h
+    }
+}
+
+/// Build the kind:30315 the engine publishes for the current local draft. Idle
+/// sessions clear the live activity line (only the persistent title survives);
+/// the NIP-40 `expiration` re-arms liveness to `now + STATUS_TTL_SECS`.
+fn status_for(p: &EngineParams, status_pubkey: &str, session: &Session, now: u64) -> Status {
+    let busy = session.working;
+    Status {
+        agent: AgentRef::new(status_pubkey.to_string(), p.agent_slug.clone()),
+        project: route_channel(p, session).to_string(),
+        session_id: p.session_id.clone().into(),
+        host: p.host.clone(),
+        title: session.title.clone(),
+        activity: if busy {
+            session.activity.clone()
+        } else {
+            String::new()
+        },
+        busy,
+        rel_cwd: p.rel_cwd.clone(),
+        expires_at: Some(now + STATUS_TTL_SECS),
+    }
+}
+
+/// Encode + sign the status and park the signed JSON on the `outbox`. The drainer
+/// publishes it (and records the relay-confirmed event); the engine never talks to
+/// the relay for status.
+async fn enqueue_status(
+    provider: &Nip29Provider,
+    keys: &Keys,
+    store: &Mutex<Store>,
+    status: Status,
+    now: u64,
+) {
+    let builder = match provider.encode(&DomainEvent::Status(status)) {
+        Ok(b) => b,
+        Err(_) => return,
+    };
+    let unsigned = builder.build(keys.public_key());
+    let signed = match keys.sign_event(unsigned).await {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    let json = signed.as_json();
+    if let Ok(g) = store.lock() {
+        let _ = g.enqueue_outbox(&json, now);
+    }
 }
 
 // ── daemon-hosted session task (the relocated engine) ────────────────────────
 
 /// Run the per-session engine INSIDE the daemon, using the SHARED relay
-/// connection and the SHARED store (single writer). Unlike `run_session`, this
-/// does NOT open its own store/transport and does NOT subscribe or demux: the
-/// daemon owns one union subscription and demuxes incoming events centrally,
-/// routing mentions to the right agent's inbox. This task only:
-///   - publishes profile once + an initial Status (signed with the agent's keys),
-///   - heartbeats the per-session Status (refreshing the store's `last_seen`,
-///     which is what tracks liveness — the event itself never expires),
-///   - distills turn activity → Activity + Status,
-///   - watches the host pid and exits cleanly (idle, title RETAINED) on pid
-///     death or on `cancel` (the `session-end` path) — a finished session keeps
-///     its title.
+/// connection and the SHARED store (single writer). The daemon owns one union
+/// subscription and demuxes incoming events centrally; this task only:
+///   - publishes the profile once (signed with the agent's keys),
+///   - heartbeats `last_seen` and enqueues a re-armed kind:30315 onto the outbox,
+///   - distills turn activity → `sessions.title`/`activity` + an outbox status,
+///   - watches the host pid and marks the session dead (title RETAINED) on pid
+///     death or `cancel` (the `session-end` path).
 ///
 /// Store access goes through the shared `Arc<Mutex<Store>>`; the guard is held
 /// only across the synchronous rusqlite calls, NEVER across `.await`.
 pub async fn run_session_in_daemon(
     p: EngineParams,
     provider: std::sync::Arc<Nip29Provider>,
-    store: std::sync::Arc<std::sync::Mutex<Store>>,
+    store: std::sync::Arc<Mutex<Store>>,
     cancel: std::sync::Arc<tokio::sync::Notify>,
 ) -> Result<()> {
     let me = p.agent_pubkey.clone();
-    let keys = p.keys.clone();
     let aref = AgentRef::new(me.clone(), p.agent_slug.clone());
     let owners = p.owners.clone();
+    let status_keys = p.signing_keys().clone();
+    let status_pubkey = status_keys.public_key().to_hex();
 
     macro_rules! st {
         ($f:expr) => {{
@@ -116,7 +182,7 @@ pub async fn run_session_in_daemon(
 
     let publish_de = |ev: DomainEvent| {
         let provider = provider.clone();
-        let keys = keys.clone();
+        let keys = p.keys.clone();
         async move {
             let _ = provider.publish(&ev, &keys).await;
         }
@@ -132,11 +198,9 @@ pub async fn run_session_in_daemon(
     }))
     .await;
 
-    // Duplicate-session fallback: also publish a session-keyed kind:0 so peers
-    // can resolve the transient pubkey to a display name ("<codename>
-    // (<agent_slug>)"). The durable kind:0 above remains the default identity.
+    // Duplicate-session fallback: also publish a session-keyed kind:0 so peers can
+    // resolve the transient pubkey to a display name.
     if let Some(ref sk) = p.session_keys {
-        // Canonical session display name: `codename (agent@host)`.
         let session_display = crate::idref::session_label(&p.session_id, &p.agent_slug, &p.host);
         let session_aref = AgentRef::new(sk.public_key().to_hex(), session_display);
         let _ = provider
@@ -152,36 +216,31 @@ pub async fn run_session_in_daemon(
             .await;
     }
 
-    // This loop is a STATELESS driver: it holds NO cur_title/cur_activity and
-    // never builds a `Status` nor writes any status table. The canonical
-    // `session_state` row is the single source of truth; the engine only applies
-    // transitions (start_turn/seed_title_if_empty/apply_distill_result/end_turn/
-    // end_session) and refreshes liveness (heartbeat_session). Publication of the
-    // resulting kind:30315 is the outbox drainer's responsibility.
     let turn_first = p.turn_first.as_secs();
     let turn_repeat = p.turn_repeat.as_secs();
 
-    // The ONLY locals are scheduling bookkeeping (not session status):
-    //   - the in-flight distill task + the (turn_id, state_version) it was based on
-    //     so its result is applied with the versioned guard (stale → store no-ops),
+    // Scheduling bookkeeping (not session status):
+    //   - the in-flight distill task,
     //   - last_distill_attempt: wall-clock retry gate (success time lives in the
-    //     store's last_distill_at),
-    //   - cur_turn_started / prev_working: edge detection against turn_state.
+    //     session row's last_distill_at),
+    //   - cur_turn_started / prev_working: edge detection against the session's
+    //     working/turn_started_at columns,
+    //   - title_from_distill: whether the current title came from the LLM (fed
+    //     back to nudge-to-keep) vs a raw user-prompt seed.
     let mut distill_task: Option<
         tokio::task::JoinHandle<(Option<distill::SessionLabels>, Option<String>)>,
     > = None;
-    let mut distill_task_turn_id: i64 = 0;
-    let mut distill_task_base_version: i64 = 0;
     let mut last_distill_attempt: u64 = 0;
     let mut cur_turn_started: u64 = 0;
     let mut prev_working = false;
+    let mut title_from_distill = false;
 
-    // Assert liveness immediately (refreshes session_state.last_seen + the legacy
-    // `sessions` registry used by mention routing). No version bump, no outbox.
-    st!(|s: &Store| {
-        s.heartbeat_session(&p.session_id, now_secs()).ok();
-        s.touch_session(&p.session_id, now_secs()).ok();
-    });
+    // Assert liveness immediately and arm the first status.
+    st!(|s: &Store| s.touch_session(&p.session_id, now_secs()).ok());
+    if let Some(session) = st!(|s: &Store| s.get_session(&p.session_id).ok().flatten()) {
+        let now = now_secs();
+        enqueue_status(&provider, &status_keys, &store, status_for(&p, &status_pubkey, &session, now), now).await;
+    }
 
     let mut hb = tokio::time::interval(p.heartbeat);
     let mut obs = tokio::time::interval(p.obs_interval);
@@ -192,161 +251,130 @@ pub async fn run_session_in_daemon(
                 if let Some(pid) = p.watch_pid {
                     if !pid_alive(pid) { break; }
                 }
-                // Liveness re-arm ONLY: bump last_seen in the canonical row (the
-                // freshness that the kind:30315 NIP-40 expiration encodes) and the
-                // legacy `sessions` registry. The relay re-publish that re-arms the
-                // expiration is the drainer/heartbeat-publisher's job — the engine
-                // never builds a Status. No version bump, no outbox.
-                st!(|s: &Store| {
-                    s.heartbeat_session(&p.session_id, now_secs()).ok();
-                    s.touch_session(&p.session_id, now_secs()).ok();
-                });
+                // Liveness re-arm: bump last_seen and enqueue a fresh status so the
+                // relay event's NIP-40 expiration is pushed forward even for an
+                // idle session that produces no state change.
+                let now = now_secs();
+                st!(|s: &Store| s.touch_session(&p.session_id, now).ok());
+                if let Some(session) = st!(|s: &Store| s.get_session(&p.session_id).ok().flatten()) {
+                    enqueue_status(&provider, &status_keys, &store, status_for(&p, &status_pubkey, &session, now), now).await;
+                }
             }
             _ = obs.tick() => {
                 let now = now_secs();
 
                 // ── collect a finished background distillation ────────────
-                // apply_distill_result is the versioned gate: it no-ops (returns
-                // None) unless the session's current (turn_id, state_version) still
-                // equals the base the task captured, so a stale distill or a
-                // duplicate runtime cannot flip the title.
                 if distill_task.as_ref().is_some_and(|h| h.is_finished()) {
                     let (result, error) = distill_task.take().unwrap().await.ok().unwrap_or((None, None));
                     slog(&p.session_id, &format!("[distill] task finished result={} error={:?}",
                         result.as_ref().map(|l| format!("title={:?} activity={:?}", l.title, l.activity)).unwrap_or_else(|| "None".into()),
                         error));
                     if let Some(labels) = result {
-                        // Capture the pre-apply title to decide whether to broadcast
-                        // a new Activity note (a social kind:1, separate from status).
-                        let prev_title = st!(|s: &Store| s.local_session_snapshot(&p.session_id))
-                            .ok().flatten().map(|snap| snap.title).unwrap_or_default();
-                        let applied = st!(|s: &Store| s.apply_distill_result(
-                            &p.session_id,
-                            distill_task_turn_id,
-                            distill_task_base_version,
-                            &labels.title,
-                            &labels.activity,
-                            now,
-                        )).ok().flatten();
-                        slog(&p.session_id, &format!("[distill] apply result={}",
-                            applied.as_ref().map(|s| format!("title={:?}", s.title)).unwrap_or_else(|| "stale/rejected".into())));
-                        if let Some(snap) = applied {
-                            if !snap.title.is_empty() && snap.title != prev_title {
+                        let prev_title = st!(|s: &Store| s.get_session(&p.session_id))
+                            .ok().flatten().map(|s| s.title).unwrap_or_default();
+                        st!(|s: &Store| s.set_session_distill(
+                            &p.session_id, &labels.title, &labels.activity, now,
+                        ).ok());
+                        title_from_distill = true;
+                        slog(&p.session_id, &format!("[distill] applied title={:?}", labels.title));
+
+                        // Read back the freshly-applied draft and publish it.
+                        if let Some(session) = st!(|s: &Store| s.get_session(&p.session_id).ok().flatten()) {
+                            enqueue_status(&provider, &status_keys, &store, status_for(&p, &status_pubkey, &session, now), now).await;
+
+                            if !session.title.is_empty() && session.title != prev_title {
                                 publish_de(DomainEvent::Activity(Activity {
                                     agent: aref.clone(),
                                     project: p.project.clone(),
-                                    text: format!("{} #{}", snap.title, p.project),
+                                    text: format!("{} #{}", session.title, p.project),
                                 })).await;
-                                // Issue #6: rename THIS session's room to the new
-                                // distilled title (kind:9002 edit-metadata, admin-
-                                // signed by the provider's operator key; the relay
-                                // re-emits kind:39000). Gated to per-session rooms so
-                                // a shared task room is never renamed by one member.
-                                // Only publishes on an actual title change (above), and
-                                // only after the async session-room create is confirmed
-                                // on the relay. If distill wins the race, the room-mint
-                                // path catches up from session_state after create/lock.
-                                let is_owned_room = st!(|s: &Store| {
-                                    s.is_session_room(&p.project).unwrap_or(false)
-                                        && s.is_group_owned(&p.project).unwrap_or(false)
-                                });
-                                slog(&p.session_id, &format!("[distill] title changed {:?} → {:?} project={} is_owned_room={is_owned_room}",
-                                    prev_title, snap.title, p.project));
-                                if is_owned_room {
-                                    // Bounded: this runs in the engine loop that also
-                                    // owns heartbeat/distill, so a relay stall must not
-                                    // block it. Best-effort — the next title change retries.
-                                    let rename = provider.nip29_set_group_name(&p.project, &snap.title);
-                                    let renamed = tokio::time::timeout(std::time::Duration::from_secs(3), rename)
+
+                                // Rename the route channel to the new distilled
+                                // title — ONLY when this agent is an admin of that
+                                // channel (the relay enforces this too; the gate
+                                // avoids futile publishes). No per-session-room
+                                // branching: the channel's `parent` is irrelevant
+                                // to who may rename it.
+                                let channel = route_channel(&p, &session).to_string();
+                                let can_rename = st!(|s: &Store| s.is_channel_admin(&channel, &me).unwrap_or(false));
+                                slog(&p.session_id, &format!("[distill] title changed {:?} → {:?} channel={channel} can_rename={can_rename}",
+                                    prev_title, session.title));
+                                if can_rename {
+                                    let rename = provider.nip29_set_group_name(&channel, &session.title);
+                                    let renamed = tokio::time::timeout(Duration::from_secs(3), rename)
                                         .await
                                         .unwrap_or(false);
-                                    slog(&p.session_id, &format!("[distill] nip29 rename group={} title={:?} accepted={renamed}", p.project, snap.title));
+                                    slog(&p.session_id, &format!("[distill] nip29 rename channel={channel} title={:?} accepted={renamed}", session.title));
                                     if renamed {
-                                        let parent = st!(|s: &Store| s.group_parent(&p.project)).ok().flatten().unwrap_or_default();
-                                        st!(|s: &Store| s.upsert_group_metadata(&p.project, &snap.title, &parent, now).ok());
+                                        let existing = st!(|s: &Store| s.get_channel(&channel).ok().flatten());
+                                        let about = existing.as_ref().map(|c| c.about.clone()).unwrap_or_default();
+                                        let parent = existing.map(|c| c.parent)
+                                            .or_else(|| st!(|s: &Store| s.channel_parent(&channel).ok().flatten()))
+                                            .unwrap_or_default();
+                                        st!(|s: &Store| s.upsert_channel(&channel, &session.title, &about, &parent, now).ok());
                                     }
                                 }
                             }
                         }
-                        // On a rejected apply (stale base) nothing changes; the next
-                        // due-check re-reads the fresh base and reschedules.
                     } else if let Some(err_msg) = error {
-                        let now = now_secs();
-                        // Append to per-session log file for post-mortem inspection.
-                        let log_dir = crate::config::edge_home().join("logs");
-                        if crate::config::ensure_dir(&log_dir).is_ok() {
-                            use std::io::Write as _;
-                            let short = crate::util::session_codename(&p.session_id);
-                            let log_path = log_dir.join(format!("{short}.log"));
-                            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&log_path) {
-                                let _ = writeln!(f, "{} [distill] ERROR: {}", crate::util::format_local_datetime(now), err_msg);
-                            }
-                        }
-                        // Store in DB so the statusline can flash it for this session.
-                        st!(|s: &Store| { s.record_session_error(&p.session_id, &err_msg, now).ok(); });
+                        // Append to the per-session log for post-mortem inspection.
+                        // (No DB error table in the new schema.)
+                        slog(&p.session_id, &format!("[distill] ERROR: {err_msg}"));
                     }
                 }
 
-                let (working, turn_started_at) = st!(|s: &Store| s.get_turn_state(&p.session_id).unwrap_or((false, 0)));
+                let session = st!(|s: &Store| s.get_session(&p.session_id).ok().flatten());
+                let (working, turn_started_at) = session
+                    .as_ref()
+                    .map(|s| (s.working, s.turn_started_at))
+                    .unwrap_or((false, 0));
+
                 if working {
                     // ── rising edge / new user message ────────────────────
                     if turn_started_at != cur_turn_started {
-                        // The turn was OPENED by rpc_turn_start (the single owner of
-                        // the start_turn transition). The engine only OBSERVES it:
-                        // read the post-start snapshot for turn_id/title, seed a
-                        // provisional title, and (re)schedule distillation. Calling
-                        // start_turn here too would double-bump turn_id/version.
-                        let snap = st!(|s: &Store| s.local_session_snapshot(&p.session_id)).ok().flatten();
-                        if let Some(snap) = snap {
-                            cur_turn_started = snap.turn_started_at;
-                            let turn_id = snap.turn_id;
-                            // Seed a provisional title from the user's prompt so the
-                            // TUI shows something before the LLM distiller fires.
-                            // seed_title_if_empty self-guards (only when title_source
-                            // is 'none' and turn_id still matches), so this is safe to
-                            // attempt unconditionally when the title is empty.
-                            if snap.title.trim().is_empty() {
-                                let quick = st!(|s: &Store| s.get_session_transcript(&p.session_id).ok().flatten())
-                                    .and_then(|path| crate::transcript::read_last_user_prompt(std::path::Path::new(&path)))
+                        cur_turn_started = turn_started_at;
+                        // Seed a provisional title from the user's prompt so the TUI
+                        // shows something before the LLM distiller fires. A seed is
+                        // NOT a distill: it writes last_distill_at=0 so the due-check
+                        // still schedules a real distillation this turn.
+                        if let Some(sess) = session.as_ref() {
+                            if sess.title.trim().is_empty() {
+                                let quick = sess.transcript_path.as_deref()
+                                    .and_then(|path| crate::transcript::read_last_user_prompt(std::path::Path::new(path)))
                                     .and_then(|prompt| {
                                         let t = crate::util::titleize_prompt(&prompt);
                                         if t.is_empty() { None } else { Some(t) }
                                     });
                                 if let Some(qt) = quick {
-                                    st!(|s: &Store| s.seed_title_if_empty(&p.session_id, turn_id, &qt, now)).ok();
+                                    st!(|s: &Store| s.set_session_distill(&p.session_id, &qt, "", 0).ok());
+                                    title_from_distill = false;
+                                    if let Some(seeded) = st!(|s: &Store| s.get_session(&p.session_id).ok().flatten()) {
+                                        enqueue_status(&provider, &status_keys, &store, status_for(&p, &status_pubkey, &seeded, now), now).await;
+                                    }
                                 }
+                            } else {
+                                title_from_distill = true;
                             }
-                        } else {
-                            // No canonical row (shouldn't happen mid-session); record
-                            // the raw cursor so we don't spin on it.
-                            cur_turn_started = turn_started_at;
                         }
                         // Fresh turn → reset distill scheduling.
                         last_distill_attempt = 0;
                         distill_task = None;
-                        distill_task_turn_id = 0;
-                        distill_task_base_version = 0;
                     }
 
                     // ── schedule background distillation ──────────────────
-                    // Timing is derived from the canonical row (turn_started_at /
-                    // last_distill_at), not cached locally. due = no task running AND
-                    // (first-attempt window OR retry-after-failure OR turn_repeat
-                    // refresh after a success this turn).
                     if distill_task.is_none() {
-                        if let Some(snap) = st!(|s: &Store| s.local_session_snapshot(&p.session_id)).ok().flatten() {
+                        if let Some(sess) = session.as_ref() {
                             let succeeded_this_turn =
-                                snap.turn_started_at > 0 && snap.last_distill_at >= snap.turn_started_at;
+                                sess.turn_started_at > 0 && sess.last_distill_at >= sess.turn_started_at;
                             let due = if last_distill_attempt == 0 {
-                                now.saturating_sub(snap.turn_started_at) >= turn_first
+                                now.saturating_sub(sess.turn_started_at) >= turn_first
                             } else if succeeded_this_turn {
-                                turn_repeat > 0 && now.saturating_sub(snap.last_distill_at) >= turn_repeat
+                                turn_repeat > 0 && now.saturating_sub(sess.last_distill_at) >= turn_repeat
                             } else {
-                                // Last attempt failed/timed out: retry after another window.
                                 now.saturating_sub(last_distill_attempt) >= turn_first
                             };
                             if due {
-                                let transcript_path = st!(|s: &Store| s.get_session_transcript(&p.session_id).ok().flatten());
+                                let transcript_path = sess.transcript_path.clone();
                                 slog(&p.session_id, &format!("[distill] due transcript_path={:?}", transcript_path));
                                 let ctx = transcript_path.and_then(|path| {
                                     let result = crate::transcript::read_recent(std::path::Path::new(&path), 14, 2500);
@@ -356,17 +384,13 @@ pub async fn run_session_in_daemon(
                                     result
                                 });
                                 if let Some(ctx) = ctx {
-                                    // Only feed a prior title back to the model when it
-                                    // came from distillation — a seed title is the raw
-                                    // user prompt and nudge-to-keep would just preserve it
-                                    // verbatim instead of generating a real title.
-                                    let current = (snap.title_source == crate::session::TitleSource::Distill
-                                        && !snap.title.trim().is_empty())
-                                        .then(|| snap.title.clone());
-                                    slog(&p.session_id, &format!("[distill] spawning task ctx_len={} current_title={:?} source={:?}", ctx.len(), current, snap.title_source));
+                                    // Only feed a prior title back when it came from
+                                    // distillation — a seed is the raw prompt and
+                                    // nudge-to-keep would just preserve it verbatim.
+                                    let current = (title_from_distill && !sess.title.trim().is_empty())
+                                        .then(|| sess.title.clone());
+                                    slog(&p.session_id, &format!("[distill] spawning task ctx_len={} current_title={:?}", ctx.len(), current));
                                     last_distill_attempt = now;
-                                    distill_task_turn_id = snap.turn_id;
-                                    distill_task_base_version = snap.state_version;
                                     let sid = p.session_id.clone();
                                     distill_task = Some(tokio::spawn(async move {
                                         match tokio::time::timeout(
@@ -384,15 +408,14 @@ pub async fn run_session_in_daemon(
                         }
                     }
                 } else if prev_working {
-                    // Falling edge: the turn was CLOSED by rpc_turn_end (single owner
-                    // of end_turn). The engine only resets its local distill
-                    // scheduling bookkeeping — calling end_turn here would
-                    // double-bump version and re-enqueue the outbox.
+                    // Falling edge: turn closed. Reset local distill scheduling and
+                    // publish an idle status (activity cleared).
                     cur_turn_started = 0;
                     last_distill_attempt = 0;
                     distill_task = None;
-                    distill_task_turn_id = 0;
-                    distill_task_base_version = 0;
+                    if let Some(sess) = session.as_ref() {
+                        enqueue_status(&provider, &status_keys, &store, status_for(&p, &status_pubkey, sess, now), now).await;
+                    }
                 }
                 prev_working = working;
             }
@@ -400,15 +423,10 @@ pub async fn run_session_in_daemon(
         }
     }
 
-    // Clean exit: finish the session in the canonical aggregate (lifecycle='ended',
-    // TITLE retained; the final status — with a fresh expiration — is enqueued to
-    // the outbox and published by the drainer, then ages off the relay as beats
-    // stop). Also mark the legacy `sessions` row dead so mention routing
-    // (list_alive_sessions) drops it. The engine itself publishes no Status.
-    st!(|s: &Store| {
-        s.end_session(&p.session_id, now_secs()).ok();
-        s.mark_session_dead(&p.session_id).ok();
-    });
+    // Clean exit: mark the session dead (alive=0, working=0). The TITLE is retained
+    // in the row; the relay status ages off as heartbeats stop (no fresh outbox
+    // re-arm). Mention routing (list_alive_sessions) drops it immediately.
+    st!(|s: &Store| s.mark_dead(&p.session_id).ok());
     Ok(())
 }
 

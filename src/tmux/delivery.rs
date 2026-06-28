@@ -54,9 +54,9 @@ struct PendingTmuxPrompt {
 
 async fn collect_pending_prompt(
     state: &Arc<DaemonState>,
-    rec: &crate::state::SessionRecord,
+    rec: &crate::state::Session,
 ) -> Result<Option<PendingTmuxPrompt>> {
-    let mut chat_rows = state.with_store(|s| s.peek_chat_mentions(&rec.session_id))?;
+    let mut chat_rows = state.with_store(|s| s.drain_pending_for_session(&rec.session_id))?;
     if chat_rows.is_empty() {
         return Ok(None);
     }
@@ -69,21 +69,20 @@ async fn collect_pending_prompt(
 
     Ok(Some(PendingTmuxPrompt {
         text,
-        chat_ids: chat_rows
-            .iter()
-            .map(|row| row.chat_event_id.clone())
-            .collect(),
+        chat_ids: chat_rows.iter().map(|row| row.event_id.clone()).collect(),
     }))
 }
 
 fn mark_prompt_delivered(
     state: &Arc<DaemonState>,
-    rec: &crate::state::SessionRecord,
+    rec: &crate::state::Session,
     prompt: &PendingTmuxPrompt,
 ) -> Result<()> {
     let delivered_at = now_secs();
     state.with_store(|s| -> Result<()> {
-        s.mark_chat_rows_delivered(&rec.session_id, &prompt.chat_ids, delivered_at)?;
+        for event_id in &prompt.chat_ids {
+            s.mark_delivered(event_id, &rec.session_id, delivered_at)?;
+        }
         Ok(())
     })
 }
@@ -92,7 +91,7 @@ fn mark_prompt_delivered(
 /// prompt. Returns false if another path consumed the rows before we injected.
 pub async fn inject_pending_messages_pub(
     state: &Arc<DaemonState>,
-    rec: &crate::state::SessionRecord,
+    rec: &crate::state::Session,
     pane_id: &str,
 ) -> Result<bool> {
     let Some(prompt) = collect_pending_prompt(state, rec).await? else {
@@ -123,13 +122,16 @@ async fn ring_doorbells_inner(state: &Arc<DaemonState>) -> Result<()> {
         return Ok(());
     }
 
-    let sessions_with_chat: Vec<crate::state::SessionRecord> = state.with_store(|s| {
+    let sessions_with_chat: Vec<crate::state::Session> = state.with_store(|s| {
         s.list_alive_sessions()
             .unwrap_or_default()
             .into_iter()
             .filter(|rec| {
-                s.count_unread_chat_mentions(&rec.session_id).unwrap_or(0) > 0
-                    && !s.is_session_working(&rec.session_id)
+                !rec.working
+                    && !s
+                        .drain_pending_for_session(&rec.session_id)
+                        .unwrap_or_default()
+                        .is_empty()
             })
             .collect()
     });
@@ -140,24 +142,28 @@ async fn ring_doorbells_inner(state: &Arc<DaemonState>) -> Result<()> {
             continue;
         }
 
-        let endpoint = state.with_store(|s| s.get_session_endpoint(&sid, "tmux"));
-        let ep = match endpoint {
-            Ok(Some(ep)) => ep,
-            _ => continue,
+        // The tmux pane is the session's `tmux_pane` alias (reused panes repoint to
+        // the newest owner), so the alias IS the endpoint.
+        let pane_id = match state.with_store(|s| {
+            s.aliases_for_session(&sid)
+                .unwrap_or_default()
+                .into_iter()
+                .find(|a| a.external_id_kind == "tmux_pane")
+                .map(|a| a.external_id)
+        }) {
+            Some(p) => p,
+            None => continue,
         };
 
-        let pane_id = ep.target.clone();
         if pane_alive(&pane_id).is_none() {
             if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
                 eprintln!("[tmux] pane {pane_id} gone; removing endpoint for {sid}");
             }
-            state.with_store(|s| s.delete_session_endpoint(&sid, "tmux").ok());
+            state.with_store(|s| s.clear_tmux_pane(&sid).ok());
             continue;
         }
 
         record_message_injection(&sid);
-        let ts = now_secs();
-        state.with_store(|s| s.touch_session_endpoint_verified(&sid, "tmux", ts).ok());
 
         match inject_pending_messages_pub(state, &rec, &pane_id).await {
             Ok(true) => {

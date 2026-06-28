@@ -1,4 +1,9 @@
 use super::*;
+use crate::state::RelayEvent;
+
+/// Upper bound on chat-log rows pulled per channel for a read (the slicing below
+/// narrows to the requested window).
+const CHAT_READ_CAP: u32 = 10_000;
 
 #[derive(serde::Deserialize, Default)]
 pub(in crate::daemon::server) struct ChatReadParams {
@@ -35,17 +40,18 @@ pub(in crate::daemon::server) async fn handle_chat_read<W: AsyncWriteExt + Unpin
     let p: ChatReadParams = serde_json::from_value(params.clone()).unwrap_or_default();
     let scope = match p.channel.filter(|s| !s.trim().is_empty()) {
         Some(channel) => channel,
-        None => resolve_session_inner(
-            state,
-            p.session.as_deref(),
-            p.env_session.as_deref(),
-            p.cwd.as_deref(),
-            p.agent.as_deref(),
-            p.group.as_deref(),
-            false,
-        )?
-        .route_scope()
-        .to_string(),
+        None => {
+            resolve_session_inner(
+                state,
+                p.session.as_deref(),
+                p.env_session.as_deref(),
+                p.cwd.as_deref(),
+                p.agent.as_deref(),
+                p.group.as_deref(),
+                false,
+            )?
+            .channel_h
+        }
     };
     let since = p.since.unwrap_or(0);
     let offset = p.offset.unwrap_or(0);
@@ -59,22 +65,22 @@ pub(in crate::daemon::server) async fn handle_chat_read<W: AsyncWriteExt + Unpin
     let live_started_at = now_secs();
 
     let rows = state.with_store(|s| {
+        // A top-level project channel folds in chat from its sub-channels.
         let mut scopes = vec![scope.clone()];
-        if s.session_room_parent(&scope).ok().flatten().is_none() {
-            scopes.extend(s.session_rooms_under(&scope).unwrap_or_default());
-        }
-        let mut rows: Vec<ChatLogRow> = scopes
-            .iter()
-            .flat_map(|scope| {
-                s.list_chat_messages(scope, since, None, 0, false)
+        if s.is_root_channel(&scope).unwrap_or(true) {
+            scopes.extend(
+                s.list_channels()
                     .unwrap_or_default()
-            })
+                    .into_iter()
+                    .filter(|c| c.parent == scope)
+                    .map(|c| c.channel_h),
+            );
+        }
+        let mut rows: Vec<RelayEvent> = scopes
+            .iter()
+            .flat_map(|sc| s.chat_for_channel(sc, since, CHAT_READ_CAP).unwrap_or_default())
             .collect();
-        rows.sort_by(|a, b| {
-            a.created_at
-                .cmp(&b.created_at)
-                .then_with(|| a.chat_event_id.cmp(&b.chat_event_id))
-        });
+        rows.sort_by(|a, b| a.created_at.cmp(&b.created_at).then_with(|| a.id.cmp(&b.id)));
         if p.tail {
             let limit = p.limit.unwrap_or(10) as usize;
             let start = rows
@@ -93,8 +99,7 @@ pub(in crate::daemon::server) async fn handle_chat_read<W: AsyncWriteExt + Unpin
         }
         rows
     });
-    let mut seen: std::collections::HashSet<String> =
-        rows.iter().map(|r| r.chat_event_id.clone()).collect();
+    let mut seen: std::collections::HashSet<String> = rows.iter().map(|r| r.id.clone()).collect();
     let mut cursor = rows
         .iter()
         .map(|r| r.created_at)
@@ -102,10 +107,8 @@ pub(in crate::daemon::server) async fn handle_chat_read<W: AsyncWriteExt + Unpin
         .unwrap_or(live_started_at.max(since));
 
     for row in rows {
-        if write_json(writer, &Response::item(id, chat_log_row_to_json(&row)))
-            .await
-            .is_err()
-        {
+        let json = chat_row_to_json(state, &row);
+        if write_json(writer, &Response::item(id, json)).await.is_err() {
             let _ = write_json(writer, &Response::end(id)).await;
             return Ok(());
         }
@@ -123,18 +126,16 @@ pub(in crate::daemon::server) async fn handle_chat_read<W: AsyncWriteExt + Unpin
                 ..
             }) if ev_project == scope => {
                 let rows = state.with_store(|s| {
-                    s.list_chat_messages(&scope, cursor, None, 0, false)
+                    s.chat_for_channel(&scope, cursor, CHAT_READ_CAP)
                         .unwrap_or_default()
                 });
                 for row in rows {
-                    if !seen.insert(row.chat_event_id.clone()) {
+                    if !seen.insert(row.id.clone()) {
                         continue;
                     }
                     cursor = cursor.max(row.created_at);
-                    if write_json(writer, &Response::item(id, chat_log_row_to_json(&row)))
-                        .await
-                        .is_err()
-                    {
+                    let json = chat_row_to_json(state, &row);
+                    if write_json(writer, &Response::item(id, json)).await.is_err() {
                         let _ = write_json(writer, &Response::end(id)).await;
                         return Ok(());
                     }
@@ -149,17 +150,31 @@ pub(in crate::daemon::server) async fn handle_chat_read<W: AsyncWriteExt + Unpin
     Ok(())
 }
 
-pub(in crate::daemon::server) fn chat_log_row_to_json(row: &ChatLogRow) -> serde_json::Value {
+/// Render a verbatim chat `RelayEvent` into the CLI's chat-line JSON, resolving
+/// the author's slug from the materialized profile cache.
+fn chat_row_to_json(state: &Arc<DaemonState>, row: &RelayEvent) -> serde_json::Value {
+    let from_slug = state
+        .with_store(|s| s.resolve_slug_for_pubkey(&row.pubkey))
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| pubkey_short(&row.pubkey));
+    chat_log_row_to_json(row, &from_slug)
+}
+
+pub(in crate::daemon::server) fn chat_log_row_to_json(
+    row: &RelayEvent,
+    from_slug: &str,
+) -> serde_json::Value {
     serde_json::json!({
-        "event_id": &row.chat_event_id,
-        "from_pubkey": &row.from_pubkey,
-        "from_slug": &row.from_slug,
-        "host": &row.host,
-        "project": &row.project,
-        "body": &row.body,
+        "event_id": &row.id,
+        "from_pubkey": &row.pubkey,
+        "from_slug": from_slug,
+        "host": "",
+        "project": &row.channel_h,
+        "body": &row.content,
         "created_at": row.created_at,
-        "from_session": &row.from_session,
-        "mentioned_session": &row.mentioned_session,
+        "from_session": "",
+        "mentioned_session": "",
     })
 }
 
@@ -261,10 +276,11 @@ pub(in crate::daemon::server) fn tail_event_matches_project(
     ev_project == pr
 }
 
-/// Build the backfill event list from the canonical read model.
+/// Build the backfill event list from the materialized caches.
 ///
-/// Returns recent messages as `Msg` events + a roster snapshot of live sessions
-/// as synthetic `Join`/`Turn`/`Status` events, sorted by timestamp ascending.
+/// Returns recent chat lines from `relay_events` as `Msg` events + a roster
+/// snapshot built from live `relay_status` rows (peers AND local agents read
+/// identically) and this daemon's own live sessions, sorted ascending by time.
 pub(in crate::daemon::server) fn build_backfill(
     state: &Arc<DaemonState>,
     project: Option<&str>,
@@ -272,79 +288,87 @@ pub(in crate::daemon::server) fn build_backfill(
     since: u64,
 ) -> Vec<TailEvent> {
     let mut events: Vec<TailEvent> = Vec::new();
+    let now = now_secs();
+    let cap = limit.min(u32::MAX as u64) as u32;
 
-    // ── Recent chat lines from chat_messages ───────────────────────────────────
-    let raw_msgs: Vec<(u64, String, String, String, Option<String>)> = state.with_store(|s| {
-        s.recent_chat_for_backfill(project, since, limit)
-            .unwrap_or_default()
+    // ── Recent chat lines from relay_events ──────────────────────────────────
+    let chat_rows: Vec<RelayEvent> = state.with_store(|s| match project {
+        Some(pr) => s.chat_for_channel(pr, since, cap).unwrap_or_default(),
+        None => {
+            let mut rows = s
+                .events_by_kind(crate::fabric::nip29::wire::KIND_CHAT as u32, cap)
+                .unwrap_or_default();
+            rows.retain(|r| r.created_at >= since);
+            rows
+        }
     });
-
-    for (ts, body, author_pubkey, proj, author_session) in raw_msgs {
-        // Resolve slug from pubkey.
+    for row in chat_rows {
         let from_slug = state
-            .with_store(|s| s.resolve_slug_for_pubkey(&author_pubkey))
+            .with_store(|s| s.resolve_slug_for_pubkey(&row.pubkey))
             .ok()
             .flatten()
-            .unwrap_or_else(|| pubkey_short(&author_pubkey));
+            .unwrap_or_else(|| pubkey_short(&row.pubkey));
         events.push(TailEvent::Msg {
-            ts,
-            project: proj,
+            ts: row.created_at,
+            project: row.channel_h.clone(),
             from: from_slug,
-            from_session: author_session,
-            to: String::new(), // backfill: recipient not stored inline
+            from_session: None,
+            to: String::new(),
             to_session: None,
-            body: body.chars().take(200).collect(),
+            body: row.content.chars().take(200).collect(),
         });
     }
 
-    // ── Roster snapshot: live sessions ──────────────────────────────────────
-    let now = now_secs();
-    let since_peer = now.saturating_sub(PRUNE_PEER_AFTER_SECS);
-
-    // Peer sessions as synthetic Join events, status via the SHARED projection.
-    let peers = state.with_store(|s| {
-        s.peer_session_snapshots(project, since_peer)
-            .unwrap_or_default()
-    });
-    for snap in peers {
-        let d = derive_status(&snap, now);
-        events.push(TailEvent::Join {
-            ts: snap.last_seen,
-            project: snap.project.clone(),
-            agent: snap.agent_slug.clone(),
-            host: snap.host.clone(),
-            session: snap.session_id.as_str().to_owned(),
-            rel_cwd: snap.rel_cwd.clone(),
-        });
-        if !d.title.is_empty() || d.busy {
-            events.push(TailEvent::Status {
-                ts: snap.last_seen,
-                project: snap.project.clone(),
-                agent: snap.agent_slug.clone(),
-                text: d.title.clone(),
-                active: d.busy,
+    // ── Roster snapshot: live status rows (peers + local agents) ─────────────
+    if let Some(pr) = project {
+        let statuses = state.with_store(|s| s.live_status_for_channel(pr, now).unwrap_or_default());
+        for st in statuses {
+            let host = state
+                .with_store(|s| s.get_profile(&st.pubkey))
+                .ok()
+                .flatten()
+                .map(|p| p.host)
+                .unwrap_or_default();
+            events.push(TailEvent::Join {
+                ts: st.last_seen,
+                project: st.channel_h.clone(),
+                agent: st.slug.clone(),
+                host,
+                session: st.pubkey.clone(),
+                rel_cwd: String::new(),
             });
+            if !st.title.is_empty() || st.busy {
+                events.push(TailEvent::Status {
+                    ts: st.last_seen,
+                    project: st.channel_h.clone(),
+                    agent: st.slug.clone(),
+                    text: st.title.clone(),
+                    active: st.busy,
+                });
+            }
         }
     }
 
-    // Own live sessions as synthetic Sess events, busy via the SHARED projection.
-    let mine = state.with_store(|s| s.live_session_snapshots(project, 0).unwrap_or_default());
-    for snap in mine {
-        let d = derive_status(&snap, now);
+    // ── This daemon's own live sessions as synthetic Sess/Turn events ────────
+    let mine = state.with_store(|s| s.list_alive_sessions().unwrap_or_default());
+    for rec in mine {
+        if project.map(|pr| rec.channel_h != pr).unwrap_or(false) {
+            continue;
+        }
         events.push(TailEvent::Sess {
-            ts: snap.first_seen,
-            project: snap.project.clone(),
-            agent: snap.agent_slug.clone(),
-            session: snap.session_id.as_str().to_owned(),
+            ts: rec.created_at,
+            project: rec.channel_h.clone(),
+            agent: rec.agent_slug.clone(),
+            session: rec.session_id.clone(),
             state: "start".into(),
-            rel_cwd: snap.rel_cwd.clone(),
+            rel_cwd: String::new(),
         });
-        if d.busy {
+        if rec.working {
             events.push(TailEvent::Turn {
-                ts: snap.turn_started_at,
-                project: snap.project.clone(),
-                agent: snap.agent_slug.clone(),
-                session: snap.session_id.as_str().to_owned(),
+                ts: rec.turn_started_at,
+                project: rec.channel_h.clone(),
+                agent: rec.agent_slug.clone(),
+                session: rec.session_id.clone(),
                 state: "working".into(),
                 elapsed_s: None,
             });

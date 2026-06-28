@@ -61,13 +61,24 @@ pub struct MaterializationOutcome {
 
 /// Decode one raw envelope and apply all store side-effects.
 ///
-/// Tail is emitted for every decoded event (including is_self).
-/// `wake_mentions` is set only when a chat message is routed to a live session.
+/// Every observed event is materialized into exactly one cache by kind:
+///   * 39000 → relay_channels, 39001/39002 → relay_channel_members,
+///   * 0 → relay_profiles, 30315 → relay_status,
+///   * every other kind → relay_events (verbatim log, NIP-01 replacement).
+/// Chat (kind:9) is additionally routed into the inbox ledger for the local
+/// sessions in its channel — the inbox row is the idempotency record.
 ///
+/// Tail is emitted for every decoded domain event. `wake_mentions` is set only
+/// when a chat message is newly routed to a live local session.
+///
+/// `_hosted` and `_now` are retained for call-site compatibility: caches now key
+/// off the event's own `created_at` (NIP-01 newest-wins) and read identically for
+/// local and remote agents, so neither the hosted set nor wall-clock `now` gate
+/// materialization.
 pub fn materialize(
     env: &RawEnvelope,
-    hosted: &[String],
-    now: u64,
+    _hosted: &[String],
+    _now: u64,
     _provider_instance: &str,
     store: &crate::state::Store,
 ) -> MaterializationOutcome {
@@ -77,60 +88,58 @@ pub fn materialize(
 
     let RawEnvelope::Nostr(event) = env;
 
-    // NIP-29 group metadata cache (kind:39000, relay-authored).
-    if event.kind.as_u16() == 39000 {
-        Nip29Materializer::materialize_group_metadata(store, event);
-        return MaterializationOutcome::default();
+    // Relay-authored NIP-29 state events go straight to their dedicated caches and
+    // never decode into a domain event (no tail).
+    match event.kind.as_u16() {
+        39000 => {
+            Nip29Materializer::materialize_channel(store, event);
+            return MaterializationOutcome::default();
+        }
+        39001 => {
+            Nip29Materializer::materialize_admins(store, event);
+            return MaterializationOutcome::default();
+        }
+        39002 => {
+            Nip29Materializer::materialize_members(store, event);
+            return MaterializationOutcome::default();
+        }
+        _ => {}
     }
 
-    // NIP-29 admins snapshot (kind:39001, relay-authored).
-    if event.kind.as_u16() == 39001 {
-        Nip29Materializer::materialize_admins_snapshot(store, event);
-        return MaterializationOutcome::default();
-    }
-
-    // NIP-29 membership snapshot (kind:39002, relay-authored).
-    if event.kind.as_u16() == 39002 {
-        Nip29Materializer::materialize_membership_snapshot(store, event);
-        return MaterializationOutcome::default();
-    }
-
-    // Decode via the NIP-29 wire codec.
+    // Decode via the NIP-29 wire codec. Kinds the codec does not recognise are
+    // still cached verbatim in relay_events (e.g. reactions, foreign kinds) —
+    // EXCEPT the dedicated-cache kinds (0, 30315), which must never land in the
+    // verbatim log. A kind:30315 that fails to decode (e.g. malformed `d != h`) is
+    // simply dropped rather than cached as a generic event.
     let codec = Nip29WireCodec;
     let Some(de) = codec.decode(env) else {
-        eprintln!(
-            "[demux] kind:{} id:{} decode→None (no handler)",
-            event.kind.as_u16(),
-            &event.id.to_hex()[..8],
-        );
+        let k = event.kind.as_u16();
+        if k != 0 && k != 30315 {
+            Nip29Materializer::materialize_event(store, event);
+        }
         return MaterializationOutcome::default();
     };
 
-    // Tail is sent for EVERY decoded event, including is_self (matches original).
+    let created_at = event.created_at.as_secs();
     let mut outcome = MaterializationOutcome {
         tail: Some(de.clone()),
         wake_mentions: false,
     };
 
-    let is_self = hosted.contains(&event.pubkey.to_hex());
-
     match de {
-        // is_self guard: skip materializing our OWN kind:0 profile echo (local
-        // identity is authoritative). The guard is no longer needed for Status:
-        // `materialize_status` writes ONLY to `peer_session_state`, never the
-        // authoritative `session_state`, so a self-status echo cannot corrupt
-        // local truth. Activity has no positive handler either way (catch-all).
-        DomainEvent::Profile(_) if is_self => {}
-
         DomainEvent::Profile(ref pf) => {
-            Nip29Materializer::materialize_profile(store, pf, now);
+            Nip29Materializer::materialize_profile(store, pf, created_at);
         }
 
         DomainEvent::Status(ref st) => {
-            Nip29Materializer::materialize_status(store, st, event.created_at.as_secs(), now);
+            Nip29Materializer::materialize_status(store, st, created_at);
         }
 
         DomainEvent::ChatMessage(ref chat) => {
+            // Cache the chat line in the verbatim log, then route it into the
+            // inbox ledger for the local sessions occupying its channel.
+            Nip29Materializer::materialize_event(store, event);
+
             let sender_pk = event.pubkey.to_hex();
             let resolved_slug = store
                 .resolve_slug_for_pubkey(&sender_pk)
@@ -145,14 +154,15 @@ pub fn materialize(
                     ..chat.clone()
                 })
             };
-            if Nip29Materializer::materialize_chat_message(store, &enriched, event) {
-                outcome.wake_mentions = true;
-            }
+            outcome.wake_mentions = Nip29Materializer::route_chat(store, event, &enriched);
             outcome.tail = Some(DomainEvent::ChatMessage(enriched.into_owned()));
         }
 
-        // Activity (always) and non-hosted Mention → no-op, matching original.
-        _ => {}
+        // Activity (kind:1) and Proposal (kind:30023) carry no inbox routing; they
+        // are cached verbatim in relay_events alongside every other kind.
+        DomainEvent::Activity(_) | DomainEvent::Proposal(_) => {
+            Nip29Materializer::materialize_event(store, event);
+        }
     }
 
     outcome
@@ -163,14 +173,13 @@ pub fn materialize(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::Store;
+    use crate::state::{RegisterSession, Store};
     use nostr_sdk::prelude::{EventBuilder, Keys, Kind, Tag};
 
     fn make_tag(parts: &[&str]) -> Tag {
         Tag::parse(parts.iter().copied()).unwrap()
     }
 
-    /// Build and sign a raw kind:1 event using the given keys and tags.
     fn build_event(keys: &Keys, kind_n: u16, content: &str, tags: Vec<Tag>) -> nostr_sdk::Event {
         EventBuilder::new(Kind::from(kind_n), content)
             .tags(tags)
@@ -178,68 +187,85 @@ mod tests {
             .unwrap()
     }
 
+    fn register(store: &Store, pubkey: &str, channel_h: &str, external_id: &str) -> String {
+        store
+            .register_session(&RegisterSession {
+                harness: "claude-code".into(),
+                external_id_kind: "harness_session".into(),
+                external_id: external_id.into(),
+                agent_pubkey: pubkey.into(),
+                agent_slug: "agent".into(),
+                channel_h: channel_h.into(),
+                child_pid: None,
+                transcript_path: None,
+                resume_id: String::new(),
+                now: 1,
+            })
+            .unwrap()
+    }
+
     #[test]
-    fn chat_message_routes_only_to_sessions_alive_at_event_time() {
+    fn chat_routes_to_channel_session_via_inbox_and_skips_sender() {
         let store = Store::open_memory().unwrap();
         let sender_keys = Keys::generate();
         let receiver_keys = Keys::generate();
-        let future_keys = Keys::generate();
         let sender_pk = sender_keys.public_key().to_hex();
         let receiver_pk = receiver_keys.public_key().to_hex();
-        let future_pk = future_keys.public_key().to_hex();
 
-        // Routing is pubkey-based: event is signed with the sender's durable key
-        // and the p-tag carries the receiver's durable pubkey. No session-derived
-        // keys, no session-specific wire tags.
+        let sender_sid = register(&store, &sender_pk, "myproject", "sender-ext");
+        let receiver_sid = register(&store, &receiver_pk, "myproject", "receiver-ext");
+
         let event = build_event(
             &sender_keys,
             9,
             "heads up: I pushed the parser fix",
-            vec![
-                make_tag(&["h", "myproject"]),
-                make_tag(&["p", &receiver_pk]),
-            ],
+            vec![make_tag(&["h", "myproject"])],
         );
         let event_ts = event.created_at.as_secs();
 
-        for (session_id, slug, pubkey, created_at) in [
-            ("sender-sess", "sender", sender_pk.clone(), 1),
-            ("receiver-sess", "receiver", receiver_pk.clone(), 1),
-            ("future-sess", "future", future_pk.clone(), event_ts + 1),
-        ] {
-            store
-                .upsert_session(&crate::state::SessionRecord {
-                    session_id: session_id.to_string(),
-                    agent_slug: slug.to_string(),
-                    agent_pubkey: pubkey,
-                    project: "myproject".to_string(),
-                    host: "laptop".to_string(),
-                    child_pid: None,
-                    watch_pid: None,
-                    created_at,
-                    alive: true,
-                    rel_cwd: String::new(),
-                    channel: String::new(),
-                })
-                .unwrap();
-        }
-
-        let hosted = vec![sender_pk, receiver_pk, future_pk];
-        let env = RawEnvelope::Nostr(event);
+        let hosted = vec![sender_pk, receiver_pk];
+        let env = RawEnvelope::Nostr(event.clone());
         let outcome = materialize(&env, &hosted, event_ts, "test-pi", &store);
 
         assert!(outcome.wake_mentions, "live receiver should wake");
-        assert!(
-            store.drain_chat("sender-sess").unwrap().is_empty(),
-            "sender session should not receive its own chat line"
-        );
-        let receiver_rows = store.drain_chat("receiver-sess").unwrap();
+        let receiver_rows = store.drain_pending_for_session(&receiver_sid).unwrap();
         assert_eq!(receiver_rows.len(), 1);
         assert_eq!(receiver_rows[0].body, "heads up: I pushed the parser fix");
-        assert_eq!(receiver_rows[0].mentioned_session, "receiver-sess");
         assert!(
-            store.drain_chat("future-sess").unwrap().is_empty(),
-            "sessions created after the event must not receive chat backfill"
+            store
+                .drain_pending_for_session(&sender_sid)
+                .unwrap()
+                .is_empty(),
+            "sender session should not receive its own chat line"
         );
+        // The chat line is also cached verbatim in the relay_events log.
+        assert!(store.has_event(&event.id.to_hex()).unwrap());
+    }
+
+    #[test]
+    fn group_metadata_materializes_into_relay_channels() {
+        let store = Store::open_memory().unwrap();
+        let relay = Keys::generate();
+        let event = build_event(
+            &relay,
+            39000,
+            "",
+            vec![make_tag(&["d", "proj"]), make_tag(&["name", "Project"])],
+        );
+        let env = RawEnvelope::Nostr(event);
+        let outcome = materialize(&env, &[], 0, "test-pi", &store);
+        assert!(outcome.tail.is_none(), "relay-authored state has no tail");
+        assert_eq!(store.get_channel("proj").unwrap().unwrap().name, "Project");
+    }
+
+    #[test]
+    fn unknown_kind_is_cached_verbatim() {
+        let store = Store::open_memory().unwrap();
+        let agent = Keys::generate();
+        // kind:7 (reaction) is not decoded by the codec but must still be cached.
+        let event = build_event(&agent, 7, "+", vec![make_tag(&["h", "proj"])]);
+        let env = RawEnvelope::Nostr(event.clone());
+        materialize(&env, &[], 0, "test-pi", &store);
+        assert!(store.has_event(&event.id.to_hex()).unwrap());
     }
 }

@@ -7,9 +7,9 @@
 //! NO I/O — `state.rs` owns the SQLite side, `domain.rs` owns the wire-facing
 //! `Status`. Everything here is deterministic and table-testable.
 //!
-//! Local-only runtime truth lives in `sessions` / `session_state` (pid, harness
-//! ids, transcript, current draft status to publish). Published actor status is
-//! projected into `presence_state` from relay-confirmed kind:30315 events. A
+//! Local-only runtime truth lives in the `sessions` table (pid, harness ids,
+//! transcript, current draft status to publish). Published actor status is
+//! projected into `relay_status` from relay-confirmed kind:30315 events. A
 //! `SessionSnapshot` is the shared in-memory projection of both, so one
 //! `derive_status` serves local and relay-confirmed readers identically.
 
@@ -175,8 +175,8 @@ impl SessionObservation {
     }
 }
 
-/// What `Store::record_peer_status` receives from the kind:30315 materializer.
-/// Mirrors a relay-confirmed self-contained status signal into `presence_state`.
+/// What `Store::upsert_status` receives from the kind:30315 materializer.
+/// Mirrors a relay-confirmed self-contained status signal into `relay_status`.
 /// Keyed by `(agent_pubkey, project)` — one row per actor per group.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PeerStatusObservation {
@@ -207,7 +207,7 @@ pub enum SnapshotSource {
 }
 
 /// The complete public state of ONE actor — the unified projection of both a
-/// local `session_state` row and a relay-confirmed `presence_state` row. Every
+/// local `sessions` row and a relay-confirmed `relay_status` row. Every
 /// reader (`who`, statusline, turn deltas, the outbox drainer) consumes this
 /// exact shape and runs `derive_status` over it, so the busy/liveness fork is
 /// structurally impossible.
@@ -237,7 +237,7 @@ pub struct SessionSnapshot {
     /// Harness resume token (empty for peers / non-resumable).
     pub resume_id: String,
     /// Bumped on every public-content change (NOT on heartbeat). Pairs with the
-    /// status_outbox PK and the distill base-version guard.
+    /// outbox row and the distill base-version guard.
     pub state_version: i64,
     pub lifecycle: Lifecycle,
     /// Set ONLY on insert; lets readers detect "appeared since X".
@@ -331,7 +331,7 @@ pub struct StatusDeltaItem {
 
 /// The closed set of mutations the canonical aggregate accepts. Each variant
 /// corresponds 1:1 to a `Store` transition method and is the unit a
-/// `status_outbox` row represents. Carried for tests/telemetry; the methods are
+/// `outbox` row represents. Carried for tests/telemetry; the methods are
 /// the executable form.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Transition {

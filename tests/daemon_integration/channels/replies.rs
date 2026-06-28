@@ -1,5 +1,5 @@
 use super::unique_session;
-use crate::daemon_harness::{rt, stop_daemon, Home, ENV_LOCK};
+use crate::daemon_harness::{chat_in_channel, rt, stop_daemon, Home, ENV_LOCK};
 use tenex_edge::daemon::client::Client;
 use tenex_edge::state::Store;
 
@@ -32,8 +32,7 @@ fn agent_reply_publishes_kind9_chat_into_explicit_channel() {
         .get_session(&sid)
         .unwrap()
         .expect("session row");
-    assert_eq!(rec.route_scope(), channel);
-    assert_eq!(rec.project, channel);
+    assert_eq!(rec.channel_h, channel);
 
     rt().block_on(async {
         let mut c = Client::connect_or_spawn().await.expect("connect");
@@ -49,16 +48,14 @@ fn agent_reply_publishes_kind9_chat_into_explicit_channel() {
     });
 
     let store = Store::open(&home.store_path()).unwrap();
-    let msgs = store
-        .list_chat_messages(&channel, 0, None, 0, false)
-        .unwrap();
-    let published = msgs.iter().find(|m| m.body == reply);
+    let msgs = chat_in_channel(&store, &channel);
+    let published = msgs.iter().find(|m| m.content == reply);
     assert!(
         published.is_some(),
         "agent reply should be chat in channel {channel}; got {:?}",
-        msgs.iter().map(|m| &m.body).collect::<Vec<_>>()
+        msgs.iter().map(|m| &m.content).collect::<Vec<_>>()
     );
-    assert_eq!(published.unwrap().from_pubkey, rec.agent_pubkey);
+    assert_eq!(published.unwrap().pubkey, rec.agent_pubkey);
 
     stop_daemon(&home);
 }

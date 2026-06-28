@@ -37,9 +37,10 @@ pub(in crate::daemon::server) async fn spawn_session(
                 eprintln!("[daemon] session {sid} task error: {e:#}");
             }
         }
-        // Engine self-exit path: remove a transient duplicate signer from the
-        // NIP-29 group. The Mutex pop is atomic: if rpc_session_end already
-        // removed the key, this finds None and avoids a duplicate publish.
+        // Engine self-exit path: remove an ordinal (>0) signer from the NIP-29
+        // group. The Mutex pop is atomic: if rpc_session_end already removed the
+        // key, this finds None and avoids a duplicate publish. Membership is relay-
+        // materialized, so only the relay-side remove is issued.
         {
             let maybe_key = st.release_session_signer(&sid);
             if let Some(sk) = maybe_key {
@@ -47,17 +48,11 @@ pub(in crate::daemon::server) async fn spawn_session(
                 st.provider
                     .nip29_remove_member(&proj, &session_pubkey)
                     .await;
-                st.with_store(|s| {
-                    s.remove_group_member(&proj, &session_pubkey).ok();
-                });
             }
         }
-        // Clear the legacy DB routing row regardless of whether the in-memory key
-        // was still present, and mark the (pubkey, h) route dead but keep it for
-        // resume (issue #47).
+        // Mark the bound identity dead but keep the row for resume (issue #47).
         st.with_store(|s| {
-            s.remove_session_pubkeys_for_session(&sid).ok();
-            s.mark_identity_route_dead(&sid, now_secs()).ok();
+            s.mark_identity_dead_for_session(&sid).ok();
         });
         st.sessions.lock().unwrap().remove(&sid);
         prune_hosted(&st);
@@ -204,21 +199,21 @@ fn build_entity_coverage(
     let mut pubkeys: BTreeSet<String> = local_pks.iter().cloned().collect();
 
     state.with_store(|s| {
-        let ordinals = s.list_agent_ordinal_pubkeys();
+        let ordinals = s.list_identity_pubkeys().unwrap_or_default();
         pubkeys.extend(ordinals.iter().cloned());
-        // Groups any local/ordinal pubkey is a member of (spawn-on-mention path).
+        // Channels any local/ordinal pubkey is a member of (spawn-on-mention path),
+        // plus channels it manages (admin = the old "owned groups").
         for pk in local_pks.iter().chain(ordinals.iter()) {
-            if let Ok(gs) = s.list_groups_for_member(pk) {
+            if let Ok(gs) = s.list_channels_where_member(pk) {
+                channels.extend(gs);
+            }
+            if let Ok(gs) = s.list_channels_where_admin(pk) {
                 channels.extend(gs);
             }
         }
-        // Groups this daemon created.
-        if let Ok(owned) = s.list_owned_groups() {
-            channels.extend(owned);
-        }
-        // Channels live sessions currently route under (channel or per-session room).
+        // Channels live sessions currently route under.
         for sess in s.list_alive_sessions().unwrap_or_default() {
-            channels.insert(sess.route_scope().to_string());
+            channels.insert(sess.channel_h.clone());
         }
     });
 
@@ -267,68 +262,31 @@ pub(in crate::daemon::server) async fn resubscribe(state: &Arc<DaemonState>) -> 
 }
 
 /// Revive sessions a previous daemon left behind (skew re-exec / crash),
-/// rebuilding from the canonical `session_state` aggregate. For each ACTIVE
-/// session: respawn the engine task if its watched pid is still alive, else end
-/// the canonical session AND mark the runtime row dead (so `who`/presence don't
-/// lie after a restart). `watch_pid` lives in the kept `sessions` runtime table
-/// (session_state carries no pid), so it is joined per session.
+/// rebuilding from the `sessions` table. For each ALIVE session: respawn the
+/// engine task if its `child_pid` is still alive, else mark it dead (so
+/// `who`/presence don't lie after a restart) and crash-GC its ordinal member.
 pub(in crate::daemon::server) async fn reconcile_sessions(state: &Arc<DaemonState>) {
     let now = now_secs();
-    let snaps = state.with_store(|s| s.live_session_snapshots(None, 0).unwrap_or_default());
+    let snaps = state.with_store(|s| s.list_alive_sessions().unwrap_or_default());
     for snap in snaps {
-        let session_id = snap.session_id.as_str().to_owned();
-        let watch_pid = state
-            .with_store(|s| s.get_session(&session_id).ok().flatten())
-            .and_then(|r| r.watch_pid);
-        let pid_ok = watch_pid.map(pid_alive).unwrap_or(false);
+        let session_id = snap.session_id.clone();
+        let pid_ok = snap.child_pid.map(pid_alive).unwrap_or(false);
         if !pid_ok {
-            // Read the persisted session pubkey BEFORE deleting its row — it is
-            // the authoritative value. Re-deriving from session_aliases is only a
-            // fallback for rows written before this column existed; preferring the
-            // stored pubkey avoids any chance of removing the wrong key (and thus
-            // stranding the real one as a live member) if the recovered anchor
-            // ever diverges from what session_start used.
-            let stored_pubkey = state.with_store(|s| s.session_pubkey_for_session(&session_id));
+            // Read the bound identity BEFORE marking dead so we know the ordinal
+            // pubkey (if any) to remove from the channel.
+            let identity = state.with_store(|s| s.identity_for_session(&session_id).ok().flatten());
             state.with_store(|s| {
-                s.end_session(&session_id, now).ok();
-                s.mark_session_dead(&session_id).ok();
-                // Clear DB routing row for the dead session's transient pubkey.
-                s.remove_session_pubkeys_for_session(&session_id).ok();
+                s.mark_dead(&session_id).ok();
+                s.mark_identity_dead_for_session(&session_id).ok();
             });
-            // Crash-GC: remove the session pubkey from the NIP-29 group.
-            if let Some(nsec) = state.cfg.session_ikm_nsec().cloned() {
-                if let Ok(op_keys) = nostr_sdk::prelude::Keys::parse(&nsec) {
-                    let session_pubkey = stored_pubkey.unwrap_or_else(|| {
-                        // Fallback: re-derive. Anchor recovered from session_aliases:
-                        //   claude-code / codex → (harness, native_id)
-                        //   opencode → anchor = session_id (resume alias only)
-                        //   unknown / no rows → ("unknown", session_id)
-                        let (harness_kind, anchor) =
-                            state.with_store(|s| s.get_session_derivation_anchor(&session_id));
-                        identity::derive_session_keys(
-                            op_keys.secret_key(),
-                            &snap.project,
-                            &snap.agent_slug,
-                            &harness_kind,
-                            &anchor,
-                        )
-                        .public_key()
-                        .to_hex()
-                    });
-                    let provider = state.provider.clone();
-                    let store = state.store.clone();
-                    let project = snap.project.clone();
-                    tokio::spawn(async move {
-                        provider
-                            .nip29_remove_member(&project, &session_pubkey)
-                            .await;
-                        store
-                            .lock()
-                            .unwrap()
-                            .remove_group_member(&project, &session_pubkey)
-                            .ok();
-                    });
-                }
+            // Crash-GC: remove an ordinal (>0) member from the NIP-29 channel.
+            // Membership is relay-materialized, so only the relay remove is issued.
+            if let Some(id) = identity.filter(|i| i.ordinal > 0) {
+                let provider = state.provider.clone();
+                let channel = snap.channel_h.clone();
+                tokio::spawn(async move {
+                    provider.nip29_remove_member(&channel, &id.pubkey).await;
+                });
             }
             continue;
         }
@@ -336,33 +294,31 @@ pub(in crate::daemon::server) async fn reconcile_sessions(state: &Arc<DaemonStat
             Ok(i) => i,
             Err(_) => continue,
         };
-        // Re-establish ownership/membership + the group-state subscription for
-        // revived sessions, through the one channel-provisioning primitive. The
-        // session's scope may be a top-level project (root channel) or a subgroup;
-        // its stored parent (if any) is the readiness gate's parent_hint.
-        // Idempotent: the owned_groups/group_members cache persists across
-        // restarts, so already-ready channels fast-path.
-        let parent_hint = state.with_store(|s| s.group_parent(&snap.project).unwrap_or(None));
+        // Re-establish membership + the group-state subscription through the one
+        // channel-provisioning primitive. The scope may be a top-level project
+        // (root channel) or a subgroup; its stored parent (if any) is the
+        // readiness gate's parent_hint. Idempotent: the relay_channel* cache
+        // persists across restarts, so already-ready channels fast-path.
+        let parent_hint = state
+            .with_store(|s| s.channel_parent(&snap.channel_h).ok().flatten())
+            .filter(|p| !p.is_empty());
         state
             .provider
             .ensure_channel_ready(crate::fabric::nip29::readiness::ChannelCtx {
-                channel: &snap.project,
+                channel: &snap.channel_h,
                 expect_member: &id.pubkey_hex(),
                 parent_hint: parent_hint.as_deref(),
             })
             .await;
 
-        let (harness_kind, native_id) =
-            state.with_store(|s| s.get_session_derivation_anchor(&session_id));
         let signer = match select_session_signer(
             state,
             &session_id,
             &id.keys,
             &id.pubkey_hex(),
             &snap.agent_slug,
-            &snap.project,
-            &harness_kind,
-            &native_id,
+            &snap.channel_h,
+            &snap.resume_id,
             None,
         ) {
             Ok(signer) => signer,
@@ -377,7 +333,7 @@ pub(in crate::daemon::server) async fn reconcile_sessions(state: &Arc<DaemonStat
             }
         };
         if let Some(member_pubkey) = signer.member_pubkey_to_admit() {
-            if let Err(e) = admit_transient_signer(state, &snap.project, member_pubkey).await {
+            if let Err(e) = admit_transient_signer(state, &snap.channel_h, member_pubkey).await {
                 if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
                     eprintln!(
                         "[daemon] ordinal signer admission failed while reconciling {}: {e:#}",
@@ -385,20 +341,14 @@ pub(in crate::daemon::server) async fn reconcile_sessions(state: &Arc<DaemonStat
                     );
                 }
                 state.release_session_signer(&session_id);
-                state.with_store(|s| {
-                    s.remove_session_pubkeys_for_session(&session_id).ok();
-                    s.mark_identity_route_dead(&session_id, now_secs()).ok();
-                });
+                state.with_store(|s| s.mark_identity_dead_for_session(&session_id).ok());
                 continue;
             }
         }
 
-        if let Err(e) = ensure_subscription(state, &snap.project).await {
+        if let Err(e) = ensure_subscription(state, &snap.channel_h).await {
             if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
-                eprintln!(
-                    "[daemon] ensure_subscription({}) failed: {e:#}",
-                    snap.project
-                );
+                eprintln!("[daemon] ensure_subscription({}) failed: {e:#}", snap.channel_h);
             }
         }
         let ep = engine_params_for(
@@ -406,15 +356,15 @@ pub(in crate::daemon::server) async fn reconcile_sessions(state: &Arc<DaemonStat
             &id,
             &snap.agent_slug,
             &session_id,
-            &snap.project,
-            &snap.rel_cwd,
-            watch_pid,
+            &snap.channel_h,
+            "",
+            snap.child_pid,
             signer.session_keys(),
         );
         let _ = spawn_session(state, ep).await;
     }
     // Any registration/end transitions above enqueued publishes.
-    state.status_outbox_notify.notify_waiters();
+    state.outbox_notify.notify_waiters();
 }
 
 #[allow(clippy::too_many_arguments)]

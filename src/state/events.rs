@@ -1,0 +1,144 @@
+//! `relay_events` — verbatim cache of every relay event except the kinds that
+//! have dedicated caches (0, 39xxx, 30315).
+//!
+//! NIP-01 replacement is applied ON INSERT:
+//!   * addressable  (30000 <= kind < 40000): replace older by (kind, pubkey, d_tag)
+//!   * replaceable  (kind == 0 || kind == 3 || 10000 <= kind < 20000): replace by (kind, pubkey)
+//!   * regular: append.
+
+use super::*;
+
+fn row_to_event(row: &rusqlite::Row) -> rusqlite::Result<RelayEvent> {
+    Ok(RelayEvent {
+        id: row.get(0)?,
+        kind: row.get::<_, i64>(1)? as u32,
+        pubkey: row.get(2)?,
+        created_at: row.get(3)?,
+        channel_h: row.get(4)?,
+        d_tag: row.get(5)?,
+        content: row.get(6)?,
+        tags_json: row.get(7)?,
+    })
+}
+
+const COLS: &str = "id, kind, pubkey, created_at, channel_h, d_tag, content, tags_json";
+
+fn is_addressable(kind: u32) -> bool {
+    (30000..40000).contains(&kind)
+}
+
+fn is_replaceable(kind: u32) -> bool {
+    kind == 0 || kind == 3 || (10000..20000).contains(&kind)
+}
+
+impl Store {
+    /// Insert a relay event applying NIP-01 replacement. Returns `true` if the
+    /// event was stored (it was new and not superseded by a newer cached event),
+    /// `false` if it was an older duplicate that lost the replacement race.
+    pub fn insert_event(&self, ev: &RelayEvent) -> Result<bool> {
+        // Replacement: an existing newer event for the same coordinate wins.
+        if is_addressable(ev.kind) {
+            let newer: bool = self
+                .conn
+                .query_row(
+                    "SELECT 1 FROM relay_events
+                     WHERE kind=?1 AND pubkey=?2 AND d_tag=?3 AND created_at >= ?4 LIMIT 1",
+                    params![ev.kind as i64, ev.pubkey, ev.d_tag, ev.created_at],
+                    |_| Ok(()),
+                )
+                .optional()?
+                .is_some();
+            if newer {
+                return Ok(false);
+            }
+            self.conn.execute(
+                "DELETE FROM relay_events WHERE kind=?1 AND pubkey=?2 AND d_tag=?3",
+                params![ev.kind as i64, ev.pubkey, ev.d_tag],
+            )?;
+        } else if is_replaceable(ev.kind) {
+            let newer: bool = self
+                .conn
+                .query_row(
+                    "SELECT 1 FROM relay_events
+                     WHERE kind=?1 AND pubkey=?2 AND created_at >= ?3 LIMIT 1",
+                    params![ev.kind as i64, ev.pubkey, ev.created_at],
+                    |_| Ok(()),
+                )
+                .optional()?
+                .is_some();
+            if newer {
+                return Ok(false);
+            }
+            self.conn.execute(
+                "DELETE FROM relay_events WHERE kind=?1 AND pubkey=?2",
+                params![ev.kind as i64, ev.pubkey],
+            )?;
+        }
+        let n = self.conn.execute(
+            "INSERT OR IGNORE INTO relay_events
+                 (id, kind, pubkey, created_at, channel_h, d_tag, content, tags_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                ev.id,
+                ev.kind as i64,
+                ev.pubkey,
+                ev.created_at,
+                ev.channel_h,
+                ev.d_tag,
+                ev.content,
+                ev.tags_json
+            ],
+        )?;
+        Ok(n > 0)
+    }
+
+    /// Fetch one event by id.
+    pub fn get_event(&self, id: &str) -> Result<Option<RelayEvent>> {
+        Ok(self
+            .conn
+            .query_row(
+                &format!("SELECT {COLS} FROM relay_events WHERE id=?1"),
+                params![id],
+                row_to_event,
+            )
+            .optional()?)
+    }
+
+    /// True if an event id is already cached.
+    pub fn has_event(&self, id: &str) -> Result<bool> {
+        Ok(self
+            .conn
+            .query_row("SELECT 1 FROM relay_events WHERE id=?1", params![id], |_| {
+                Ok(())
+            })
+            .optional()?
+            .is_some())
+    }
+
+    /// Chat log for a channel: events with `created_at > since`, oldest-first,
+    /// capped at `limit`. Caller filters by kind if it only wants chat kinds.
+    pub fn chat_for_channel(
+        &self,
+        channel_h: &str,
+        since: u64,
+        limit: u32,
+    ) -> Result<Vec<RelayEvent>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {COLS} FROM relay_events
+             WHERE channel_h=?1 AND created_at > ?2
+             ORDER BY created_at ASC, id ASC LIMIT ?3"
+        ))?;
+        let rows = stmt.query_map(params![channel_h, since, limit], row_to_event)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Most recent events of a given kind, newest-first, capped at `limit`.
+    pub fn events_by_kind(&self, kind: u32, limit: u32) -> Result<Vec<RelayEvent>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {COLS} FROM relay_events WHERE kind=?1
+             ORDER BY created_at DESC, id DESC LIMIT ?2"
+        ))?;
+        let rows = stmt.query_map(params![kind as i64, limit], row_to_event)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+}

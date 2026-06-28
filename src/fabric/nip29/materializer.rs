@@ -1,37 +1,91 @@
-//! NIP-29 group materializer: handles kind:39000 and kind:39002 relay events.
+//! NIP-29 inbound materializer.
 //!
-//! These are relay-authored state events; materialize them into the local store
-//! without touching the tail channel or mention routing.
+//! The single intake point for every relay event the daemon observes. Each event
+//! is routed by kind into exactly one of the `relay_*` caches (channels, members,
+//! profiles, status) or, for every other kind, the verbatim `relay_events` log.
+//! Chat (kind:9) is additionally routed into the `inbox` delivery ledger for the
+//! local sessions occupying the event's channel — the inbox row's existence IS
+//! the idempotency record (no `processed_orchestration` table).
+//!
+//! None of these writes touch authoritative local truth: `relay_*` are caches,
+//! identical for local and remote agents, rebuildable from the relay at any time.
 
-use crate::domain::{ChatMessage, Profile, Status};
-use crate::session::PeerStatusObservation;
-use crate::state::{ChatInboxRow, ChatLogRow, Store};
+use crate::domain::{ChatMessage, Profile};
+use crate::state::{RelayEvent, Store};
 use nostr_sdk::Event;
 
 pub struct Nip29Materializer;
 
 impl Nip29Materializer {
-    /// Apply a decoded `Profile` (kind:0) to the store.
-    ///
-    /// NIP-29 admission happens at the relay/group layer. If a profile event is
-    /// delivered by our scoped subscription, persist it for identity resolution.
-    pub fn materialize_profile(store: &Store, pf: &Profile, now: u64) {
-        let pk = &pf.agent.pubkey;
+    // ── relay_channels (kind:39000) ──────────────────────────────────────────
+
+    /// Materialise kind:39000 group metadata into `relay_channels`. The group id
+    /// is the event's `d` tag; `parent` (empty for top-level project channels)
+    /// distinguishes a session/task channel from a project channel.
+    pub fn materialize_channel(store: &Store, event: &Event) {
+        let Some(channel_h) = super::nostr_tag(event, "d") else {
+            return;
+        };
+        let name = super::nostr_tag(event, "name").unwrap_or("");
+        let about = super::nostr_tag(event, "about").unwrap_or("");
+        let parent = super::nostr_tag(event, "parent").unwrap_or("");
         store
-            .upsert_profile(pk, &pf.agent.slug, &pf.host, pf.is_backend, now)
+            .upsert_channel(channel_h, name, about, parent, event.created_at.as_secs())
             .ok();
     }
 
-    /// Apply a decoded peer `Status` (kind:30315) to `peer_session_state`.
-    ///
-    /// Local sessions live in `session_state`, written exclusively by daemon
-    /// transitions. This path only mirrors peer status observed on the relay.
-    pub fn materialize_status(store: &Store, st: &Status, seen_at: u64, now: u64) {
-        if let Some(exp) = st.expires_at {
-            if exp <= now {
-                return;
-            }
-        }
+    // ── relay_channel_members (kind:39001 admins / 39002 members) ─────────────
+
+    /// Materialise kind:39001 — replace the admin rows for the channel, preserving
+    /// member rows.
+    pub fn materialize_admins(store: &Store, event: &Event) {
+        let Some(channel_h) = super::nostr_tag(event, "d") else {
+            return;
+        };
+        let admins = collect_p_pubkeys(event);
+        store
+            .replace_channel_admins(channel_h, &admins, event.created_at.as_secs())
+            .ok();
+    }
+
+    /// Materialise kind:39002 — replace the member rows for the channel, preserving
+    /// admin rows.
+    pub fn materialize_members(store: &Store, event: &Event) {
+        let Some(channel_h) = super::nostr_tag(event, "d") else {
+            return;
+        };
+        let members = collect_p_pubkeys(event);
+        store
+            .replace_channel_members(channel_h, &members, event.created_at.as_secs())
+            .ok();
+    }
+
+    // ── relay_profiles (kind:0) ──────────────────────────────────────────────
+
+    /// Materialise a decoded kind:0 profile into `relay_profiles`. Newer
+    /// `updated_at` wins. The kind:0 `name` doubles as the agent slug in our wire
+    /// shape, so both columns carry it.
+    pub fn materialize_profile(store: &Store, pf: &Profile, updated_at: u64) {
+        let slug = pf.agent.slug.as_str();
+        store
+            .upsert_profile(
+                &pf.agent.pubkey,
+                slug,
+                slug,
+                &pf.host,
+                pf.is_backend,
+                updated_at,
+            )
+            .ok();
+    }
+
+    // ── relay_status (kind:30315) ────────────────────────────────────────────
+
+    /// Materialise a decoded kind:30315 status into `relay_status`, one row per
+    /// `(pubkey, channel_h)`. Liveness is computed on READ from the NIP-40
+    /// `expiration`; the row is stored regardless of freshness (older `updated_at`
+    /// writes are dropped by the store).
+    pub fn materialize_status(store: &Store, st: &crate::domain::Status, updated_at: u64) {
         let slug = if !st.agent.slug.is_empty() {
             st.agent.slug.clone()
         } else {
@@ -42,509 +96,288 @@ impl Nip29Materializer {
                 .unwrap_or_default()
         };
         store
-            .record_peer_status(&PeerStatusObservation {
-                agent_pubkey: st.agent.pubkey.clone(),
-                agent_slug: slug,
-                project: st.project.clone(),
-                host: st.host.clone(),
-                rel_cwd: st.rel_cwd.clone(),
+            .upsert_status(&crate::state::Status {
+                pubkey: st.agent.pubkey.clone(),
+                channel_h: st.project.clone(),
+                slug,
                 title: st.title.clone(),
                 activity: st.activity.clone(),
                 busy: st.busy,
-                emitted_at: seen_at,
-                observed_at: now,
+                last_seen: updated_at,
+                updated_at,
+                expiration: st.expires_at.unwrap_or(0),
             })
             .ok();
     }
 
-    /// Materialise kind:39000 — NIP-29 group metadata.
-    ///
-    /// Reads the `d` (project slug) and `about` tags and upserts the project
-    /// metadata record using the event's creation timestamp. Byte-identical to
-    /// the 39000 branch in `handle_incoming`.
-    pub fn materialize_group_metadata(store: &Store, event: &Event) {
-        if let Some(project) = super::nostr_tag(event, "d") {
-            let ts = event.created_at.as_secs();
-            let about = super::nostr_tag(event, "about").unwrap_or("");
-            store.upsert_project_meta(project, about, ts).ok();
-            // NIP-29 subgroup hierarchy (issue #3): capture the display name and
-            // the parent relationship so `groups list` can render the tree from
-            // local state. `parent` is empty for top-level project groups.
-            let name = super::nostr_tag(event, "name").unwrap_or("");
-            let parent = super::nostr_tag(event, "parent").unwrap_or("");
-            if !name.is_empty() || !parent.is_empty() {
-                store.upsert_group_metadata(project, name, parent, ts).ok();
-            }
-        }
+    // ── relay_events (every other kind, verbatim) ────────────────────────────
+
+    /// Cache one relay event verbatim in `relay_events` (NIP-01 replacement is
+    /// applied inside the store). Used for every kind that has no dedicated cache:
+    /// chat (9), notes/activity (1), proposals (30023), orchestration, etc.
+    pub fn materialize_event(store: &Store, event: &Event) -> bool {
+        store.insert_event(&to_relay_event(event)).unwrap_or(false)
     }
 
-    /// Materialise kind:39002 — NIP-29 plain-membership snapshot.
-    ///
-    /// Collects all `p` tags (pubkey + optional role, defaulting to "member")
-    /// and replaces only the non-admin rows for this group so that admin rows
-    /// written by `materialize_admins_snapshot` (kind:39001) are preserved.
-    pub fn materialize_membership_snapshot(store: &Store, event: &Event) {
-        if let Some(project) = super::nostr_tag(event, "d") {
-            let members: Vec<(String, String)> = event
-                .tags
-                .iter()
-                .filter_map(|t| {
-                    let s = t.as_slice();
-                    if s.first().map(String::as_str) == Some("p") {
-                        s.get(1).map(|pk| {
-                            let role = s.get(2).cloned().unwrap_or_else(|| "member".to_string());
-                            eprintln!(
-                                "[daemon] nip29-role-decision group={project} target={} role={} reason=materialize relay 39002 membership snapshot",
-                                crate::util::pubkey_short(pk),
-                                role
-                            );
-                            (pk.clone(), role)
-                        })
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-            store
-                .replace_group_plain_members(project, &members, event.created_at.as_secs())
-                .ok();
-        }
-    }
-
-    /// Materialise kind:39001 — NIP-29 admins snapshot.
-    ///
-    /// Collects all `p` tags (pubkey + optional role, defaulting to "admin")
-    /// and replaces only the admin rows for this group, leaving plain-member
-    /// rows intact.
-    pub fn materialize_admins_snapshot(store: &Store, event: &Event) {
-        if let Some(project) = super::nostr_tag(event, "d") {
-            let admins: Vec<(String, String)> = event
-                .tags
-                .iter()
-                .filter_map(|t| {
-                    let s = t.as_slice();
-                    if s.first().map(String::as_str) == Some("p") {
-                        s.get(1).map(|pk| {
-                            let role = s.get(2).cloned().unwrap_or_else(|| "admin".to_string());
-                            eprintln!(
-                                "[daemon] nip29-role-decision group={project} target={} role={} reason=materialize relay 39001 admins snapshot",
-                                crate::util::pubkey_short(pk),
-                                role
-                            );
-                            (pk.clone(), role)
-                        })
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-            store
-                .replace_group_admins(project, &admins, event.created_at.as_secs())
-                .ok();
-        }
-    }
-
-    /// Route one NIP-29 group chat message into the live chat queue for sessions
-    /// that were already alive when the event was created. This is deliberately
-    /// not a historical catch-up path: sessions started after the chat line was
-    /// published do not receive it.
-    pub fn materialize_chat_message(store: &Store, chat: &ChatMessage, event: &Event) -> bool {
-        let created_at = event.created_at.as_secs();
+    /// Route a chat message into the `inbox` ledger for every alive local session
+    /// occupying the chat's channel, skipping the sender's own session (matched by
+    /// agent pubkey). Returns `true` if at least one new inbox row was enqueued, so
+    /// the caller can wake live delivery surfaces. Idempotent: a duplicate
+    /// `(event_id, target_session)` is ignored by the store.
+    pub fn route_chat(store: &Store, event: &Event, chat: &ChatMessage) -> bool {
+        let channel_h = chat.project.as_str();
         let from_pubkey = event.pubkey.to_hex();
-        let from_slug = if chat.from.slug.is_empty() {
-            store
-                .resolve_slug_for_pubkey(&from_pubkey)
-                .ok()
-                .flatten()
-                .unwrap_or_default()
-        } else {
-            chat.from.slug.clone()
-        };
-        let from_session = store
-            // Room-aware first (issue #47): a durable ordinal pubkey is REUSED
-            // across rooms, so the SAME signer maps to a DIFFERENT session per
-            // `h`. Key the resolution on `(pubkey, chat.project)` — `chat.project`
-            // IS the NIP-29 group id — so the self-skip below targets the session
-            // that actually occupies THIS room, not a same-pubkey session in
-            // another room.
-            .live_identity_route(&from_pubkey, &chat.project)
-            .map(|r| r.session_id)
-            .filter(|sid| !sid.is_empty())
-            // Dual path: fall back to the bare-pubkey session map for legacy and
-            // transient (non-ordinal) sessions that have no route row yet.
-            .or_else(|| {
-                store
-                    .session_pubkey_info(&from_pubkey)
-                    .map(|(sid, _, _)| sid)
-                    .filter(|sid| !sid.is_empty())
-            })
-            // Operator-signed user prompts carry no session pubkey, so the
-            // signer can't be mapped to a session and the self-skip below would
-            // miss — re-injecting the operator's own prompt back into the very
-            // session that produced it. Recover the originating session recorded
-            // locally at publish time so the echo is suppressed for that session
-            // while channel siblings still receive it. Resolved before host
-            // resolution so all downstream row data uses the effective origin.
-            .or_else(|| store.chat_origin_session(&event.id.to_hex()))
-            .unwrap_or_default();
-        let mentioned_session = chat
-            .mentioned_pubkey
-            .as_deref()
-            .and_then(|pk| {
-                // Room-aware first (see above): resolve the mentioned ordinal
-                // pubkey to the session occupying THIS room, then fall back to
-                // the bare-pubkey session map for non-ordinal sessions.
-                store
-                    .live_identity_route(pk, &chat.project)
-                    .map(|r| r.session_id)
-                    .filter(|sid| !sid.is_empty())
-                    .or_else(|| store.session_pubkey_info(pk).map(|(sid, _, _)| sid))
-            })
-            .unwrap_or_default();
-        let host = store
-            .resolve_chat_host(
-                &from_pubkey,
-                if from_session.is_empty() {
-                    None
-                } else {
-                    Some(from_session.as_str())
-                },
-            )
-            .ok()
-            .flatten()
-            .unwrap_or_default();
-
-        let _ = store.record_chat(&ChatLogRow {
-            chat_event_id: event.id.to_hex(),
-            from_pubkey: from_pubkey.clone(),
-            from_slug: from_slug.clone(),
-            host,
-            project: chat.project.clone(),
-            body: chat.body.clone(),
-            created_at,
-            from_session: from_session.clone(),
-            mentioned_session: mentioned_session.clone(),
-        });
-
-        let mut routed = false;
-        for rec in store.list_alive_sessions().unwrap_or_default() {
-            // Match on the session's CURRENT routing scope (channel when set,
-            // else the per-session room) so a `channels switch` is reflected
-            // immediately for inbound chat — otherwise a switched session keeps
-            // receiving chat in its old room and misses everything published to
-            // the channel it moved to.
-            if rec.route_scope() != chat.project {
+        let event_id = event.id.to_hex();
+        let created_at = event.created_at.as_secs();
+        let mut woke = false;
+        for sess in store.list_alive_sessions().unwrap_or_default() {
+            if sess.channel_h != channel_h || sess.agent_pubkey == from_pubkey {
                 continue;
             }
-            // Allow direct p-tagged mentions to reach sessions born after the
-            // event — a spawned-on-mention session is always newer than the
-            // triggering message. Ambient channel chat stays live-only.
-            let direct_to_rec = mentioned_session == rec.session_id
-                || chat.mentioned_pubkey.as_deref() == Some(rec.agent_pubkey.as_str());
-            if rec.created_at > created_at && !direct_to_rec {
-                continue;
-            }
-            // Skip sender's own session by session pubkey when available, then
-            // durable pubkey for emitters that still sign chat with durable keys.
-            if (!from_session.is_empty() && rec.session_id == from_session)
-                || rec.agent_pubkey == from_pubkey
+            if store
+                .enqueue_inbox(
+                    &event_id,
+                    &sess.session_id,
+                    &from_pubkey,
+                    channel_h,
+                    &chat.body,
+                    created_at,
+                )
+                .unwrap_or(false)
             {
-                continue;
-            }
-            // A `p` tag may carry either a session pubkey or a durable agent
-            // pubkey. Resolve session pubkeys through the local map, and keep a
-            // durable-pubkey fallback for agent-level mentions.
-            let row_mentioned = if mentioned_session == rec.session_id
-                || chat.mentioned_pubkey.as_deref() == Some(rec.agent_pubkey.as_str())
-            {
-                rec.session_id.clone()
-            } else {
-                String::new()
-            };
-            let row = ChatInboxRow {
-                chat_event_id: event.id.to_hex(),
-                target_session: rec.session_id,
-                from_pubkey: from_pubkey.clone(),
-                from_slug: from_slug.clone(),
-                project: chat.project.clone(),
-                body: chat.body.clone(),
-                created_at,
-                from_session: from_session.clone(),
-                mentioned_session: row_mentioned,
-            };
-            if store.enqueue_chat(&row).unwrap_or(false) {
-                routed = true;
+                woke = true;
             }
         }
-        routed
+        woke
     }
+}
+
+/// All `p`-tag pubkey values (`slice[1]`) on the event.
+fn collect_p_pubkeys(event: &Event) -> Vec<String> {
+    event
+        .tags
+        .iter()
+        .filter_map(|t| {
+            let s = t.as_slice();
+            if s.first().map(String::as_str) == Some("p") {
+                s.get(1).cloned()
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+/// Project a raw Nostr event onto the verbatim `relay_events` row shape.
+fn to_relay_event(event: &Event) -> RelayEvent {
+    RelayEvent {
+        id: event.id.to_hex(),
+        kind: event.kind.as_u16() as u32,
+        pubkey: event.pubkey.to_hex(),
+        created_at: event.created_at.as_secs(),
+        channel_h: super::nostr_tag(event, "h").unwrap_or("").to_string(),
+        d_tag: super::nostr_tag(event, "d").unwrap_or("").to_string(),
+        content: event.content.clone(),
+        tags_json: tags_to_json(event),
+    }
+}
+
+/// Serialise the event tags as a JSON array of string arrays (NIP-01 shape).
+fn tags_to_json(event: &Event) -> String {
+    let raw: Vec<Vec<String>> = event.tags.iter().map(|t| t.as_slice().to_vec()).collect();
+    serde_json::to_string(&raw).unwrap_or_else(|_| "[]".to_string())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{AgentRef, DomainEvent};
-    use crate::fabric::nip29::wire::Nip29WireCodec;
-    use crate::state::{IdentityRoute, SessionRecord};
-    use nostr_sdk::Keys;
+    use crate::state::{RegisterSession, Store};
+    use nostr_sdk::prelude::{EventBuilder, Keys, Kind, Tag};
 
-    /// Bind a durable ordinal identity LIVE into room `h` as `session` (issue
-    /// #47). One row per `(pubkey, h)`, so the same `pubkey` can occupy several
-    /// rooms at once via distinct sessions.
-    fn ordinal_route(store: &Store, pubkey: &str, h: &str, session: &str) {
-        store
-            .upsert_identity_route(
-                &IdentityRoute {
-                    pubkey: pubkey.into(),
-                    h: h.into(),
-                    session_id: session.into(),
-                    base_pubkey: "base-smith".into(),
-                    agent_slug: "smith".into(),
-                    ordinal: 1,
-                    label: "smith1".into(),
-                    harness_kind: "claude-code".into(),
-                    native_id: format!("native-{session}"),
-                    alive: true,
-                },
-                100,
-            )
-            .unwrap();
+    fn make_tag(parts: &[&str]) -> Tag {
+        Tag::parse(parts.iter().copied()).unwrap()
     }
 
-    fn alive_session(store: &Store, session_id: &str, agent_pubkey: &str, project: &str) {
+    fn build(keys: &Keys, kind_n: u16, content: &str, tags: Vec<Tag>) -> Event {
+        EventBuilder::new(Kind::from(kind_n), content)
+            .tags(tags)
+            .sign_with_keys(keys)
+            .unwrap()
+    }
+
+    fn register(store: &Store, pubkey: &str, channel_h: &str, external_id: &str) -> String {
         store
-            .upsert_session(&SessionRecord {
-                session_id: session_id.into(),
+            .register_session(&RegisterSession {
+                harness: "claude-code".into(),
+                external_id_kind: "harness_session".into(),
+                external_id: external_id.into(),
+                agent_pubkey: pubkey.into(),
                 agent_slug: "agent".into(),
-                agent_pubkey: agent_pubkey.into(),
-                project: project.into(),
-                host: "host".into(),
+                channel_h: channel_h.into(),
                 child_pid: None,
-                watch_pid: None,
-                created_at: 100,
-                alive: true,
-                rel_cwd: String::new(),
-                channel: String::new(),
+                transcript_path: None,
+                resume_id: String::new(),
+                now: 100,
             })
-            .unwrap();
+            .unwrap()
     }
 
-    fn sign_chat(signer: &Keys, chat: &ChatMessage) -> Event {
-        let builder = Nip29WireCodec
-            .encode_event(&DomainEvent::ChatMessage(chat.clone()))
-            .expect("encode");
-        builder.sign_with_keys(signer).expect("sign")
-    }
-
-    // The reported bug: a prompt the operator typed into a session comes straight
-    // back to that session as an injected "message since your last check". The
-    // operator key maps to no session, so the signer-pubkey self-skip misses;
-    // the origin recorded locally at publish time must be recovered to suppress it.
     #[test]
-    fn operator_prompt_is_not_echoed_back_to_origin_session() {
+    fn channel_metadata_materializes() {
         let store = Store::open_memory().unwrap();
-        let operator = Keys::generate();
-        let origin_agent = Keys::generate();
-        let sibling_agent = Keys::generate();
-        let project = "session-room";
-
-        alive_session(
-            &store,
-            "origin",
-            &origin_agent.public_key().to_hex(),
-            project,
+        let relay = Keys::generate();
+        let event = build(
+            &relay,
+            39000,
+            "",
+            vec![
+                make_tag(&["d", "proj"]),
+                make_tag(&["name", "Project"]),
+                make_tag(&["about", "the thing"]),
+                make_tag(&["parent", ""]),
+            ],
         );
-        alive_session(
-            &store,
-            "sibling",
-            &sibling_agent.public_key().to_hex(),
-            project,
+        Nip29Materializer::materialize_channel(&store, &event);
+        let ch = store.get_channel("proj").unwrap().unwrap();
+        assert_eq!(ch.name, "Project");
+        assert_eq!(ch.about, "the thing");
+        assert!(store.is_root_channel("proj").unwrap());
+    }
+
+    #[test]
+    fn admins_and_members_preserve_each_other() {
+        let store = Store::open_memory().unwrap();
+        let relay = Keys::generate();
+        let admin = Keys::generate().public_key().to_hex();
+        let member = Keys::generate().public_key().to_hex();
+
+        let admins = build(
+            &relay,
+            39001,
+            "",
+            vec![make_tag(&["d", "proj"]), make_tag(&["p", &admin])],
         );
-
-        let chat = ChatMessage {
-            from: AgentRef::new(operator.public_key().to_hex(), "operator"),
-            project: project.into(),
-            body: "plan this".into(),
-            mentioned_pubkey: None,
-        };
-        let event = sign_chat(&operator, &chat);
-
-        // publish_chat_checked records the origin session before the wire send.
-        store
-            .record_chat(&ChatLogRow {
-                chat_event_id: event.id.to_hex(),
-                from_pubkey: operator.public_key().to_hex(),
-                from_slug: "operator".into(),
-                host: "host".into(),
-                project: project.into(),
-                body: "plan this".into(),
-                created_at: 150,
-                from_session: "origin".into(),
-                mentioned_session: String::new(),
-            })
-            .unwrap();
-
-        let routed = Nip29Materializer::materialize_chat_message(&store, &chat, &event);
-
-        assert!(routed, "should still reach the sibling session");
-        assert!(
-            store.peek_chat("origin").unwrap().is_empty(),
-            "origin session must not receive its own prompt back"
+        let members = build(
+            &relay,
+            39002,
+            "",
+            vec![make_tag(&["d", "proj"]), make_tag(&["p", &member])],
         );
-        let sibling = store.peek_chat("sibling").unwrap();
+        Nip29Materializer::materialize_admins(&store, &admins);
+        Nip29Materializer::materialize_members(&store, &members);
+
+        assert!(store.is_channel_admin("proj", &admin).unwrap());
+        assert!(store.is_channel_member("proj", &member).unwrap());
+        assert!(!store.is_channel_admin("proj", &member).unwrap());
+    }
+
+    #[test]
+    fn profile_materializes_to_relay_profiles() {
+        let store = Store::open_memory().unwrap();
+        let agent = Keys::generate();
+        let pk = agent.public_key().to_hex();
+        let event = build(
+            &agent,
+            0,
+            r#"{"name":"smith"}"#,
+            vec![make_tag(&["host", "laptop"])],
+        );
+        let de = crate::fabric::nip29::wire::Nip29WireCodec.decode_event(&event);
+        if let Some(crate::domain::DomainEvent::Profile(pf)) = de {
+            Nip29Materializer::materialize_profile(&store, &pf, event.created_at.as_secs());
+        }
         assert_eq!(
-            sibling.len(),
-            1,
-            "sibling in same scope still gets the prompt"
+            store.resolve_slug_for_pubkey(&pk).unwrap().as_deref(),
+            Some("smith")
         );
-        assert_eq!(sibling[0].body, "plan this");
-        assert_eq!(sibling[0].from_session, "origin");
     }
 
-    // Without a local origin record (e.g. the operator published from another
-    // machine), there is nothing to suppress: it is not a self-echo for any
-    // local session, so every session in scope receives it.
     #[test]
-    fn remote_operator_prompt_routes_to_all_local_sessions() {
+    fn status_materializes_and_reads_live() {
         let store = Store::open_memory().unwrap();
-        let operator = Keys::generate();
-        let project = "session-room";
-        alive_session(
-            &store,
-            "a",
-            &Keys::generate().public_key().to_hex(),
-            project,
+        let agent = Keys::generate();
+        let pk = agent.public_key().to_hex();
+        let exp = 10_000u64;
+        let event = build(
+            &agent,
+            30315,
+            "compiling",
+            vec![
+                make_tag(&["d", "proj"]),
+                make_tag(&["h", "proj"]),
+                make_tag(&["title", "build"]),
+                make_tag(&["status", "busy"]),
+                make_tag(&["slug", "smith"]),
+                make_tag(&["expiration", &exp.to_string()]),
+            ],
         );
-        alive_session(
-            &store,
-            "b",
-            &Keys::generate().public_key().to_hex(),
-            project,
-        );
-
-        let chat = ChatMessage {
-            from: AgentRef::new(operator.public_key().to_hex(), "operator"),
-            project: project.into(),
-            body: "hi".into(),
-            mentioned_pubkey: None,
-        };
-        let event = sign_chat(&operator, &chat);
-
-        Nip29Materializer::materialize_chat_message(&store, &chat, &event);
-
-        assert_eq!(store.peek_chat("a").unwrap().len(), 1);
-        assert_eq!(store.peek_chat("b").unwrap().len(), 1);
+        let de = crate::fabric::nip29::wire::Nip29WireCodec.decode_event(&event);
+        if let Some(crate::domain::DomainEvent::Status(st)) = de {
+            Nip29Materializer::materialize_status(&store, &st, event.created_at.as_secs());
+        }
+        let raw = store.get_status(&pk, "proj").unwrap().unwrap();
+        assert_eq!(raw.title, "build");
+        assert!(raw.busy);
+        assert_eq!(store.live_status_for_channel("proj", exp - 1).unwrap().len(), 1);
+        assert!(store
+            .live_status_for_channel("proj", exp + 1)
+            .unwrap()
+            .is_empty());
     }
 
-    // Regression: agent-signed chat is still self-skipped by signer pubkey and
-    // routes to the other session in scope.
     #[test]
-    fn agent_signed_chat_skips_own_session_by_pubkey() {
-        let store = Store::open_memory().unwrap();
-        let sender_agent = Keys::generate();
-        let other_agent = Keys::generate();
-        let project = "session-room";
-        alive_session(
-            &store,
-            "sender",
-            &sender_agent.public_key().to_hex(),
-            project,
-        );
-        alive_session(&store, "other", &other_agent.public_key().to_hex(), project);
-
-        let chat = ChatMessage {
-            from: AgentRef::new(sender_agent.public_key().to_hex(), "agent"),
-            project: project.into(),
-            body: "hello".into(),
-            mentioned_pubkey: None,
-        };
-        let event = sign_chat(&sender_agent, &chat);
-
-        Nip29Materializer::materialize_chat_message(&store, &chat, &event);
-
-        assert!(store.peek_chat("sender").unwrap().is_empty());
-        assert_eq!(store.peek_chat("other").unwrap().len(), 1);
-    }
-
-    // Issue #47: a durable ordinal pubkey is REUSED across rooms, so resolving
-    // the FROM session by bare pubkey is ambiguous. The SAME signer must map to
-    // its `#a` session for an `#a` chat and its `#b` session for a `#b` chat —
-    // proven by the room-specific `from_session` stamped on the routed row.
-    #[test]
-    fn ordinal_chat_resolves_from_session_per_room() {
-        let store = Store::open_memory().unwrap();
-        let smith = Keys::generate();
-        let smith_pk = smith.public_key().to_hex();
-
-        // One ordinal pubkey, live in two rooms as two different sessions.
-        ordinal_route(&store, &smith_pk, "#a", "smith-a");
-        ordinal_route(&store, &smith_pk, "#b", "smith-b");
-        alive_session(&store, "smith-a", &smith_pk, "#a");
-        alive_session(&store, "smith-b", &smith_pk, "#b");
-        // A sibling recipient in each room so the message has somewhere to land.
-        alive_session(&store, "other-a", &Keys::generate().public_key().to_hex(), "#a");
-        alive_session(&store, "other-b", &Keys::generate().public_key().to_hex(), "#b");
-
-        let chat_a = ChatMessage {
-            from: AgentRef::new(smith_pk.clone(), "smith"),
-            project: "#a".into(),
-            body: "from a".into(),
-            mentioned_pubkey: None,
-        };
-        Nip29Materializer::materialize_chat_message(&store, &chat_a, &sign_chat(&smith, &chat_a));
-
-        // The signer's OWN #a session is self-skipped; the #a sibling gets it
-        // stamped with the #a-specific origin.
-        assert!(store.peek_chat("smith-a").unwrap().is_empty());
-        let inbox_a = store.peek_chat("other-a").unwrap();
-        assert_eq!(inbox_a.len(), 1);
-        assert_eq!(inbox_a[0].from_session, "smith-a");
-
-        let chat_b = ChatMessage {
-            from: AgentRef::new(smith_pk.clone(), "smith"),
-            project: "#b".into(),
-            body: "from b".into(),
-            mentioned_pubkey: None,
-        };
-        Nip29Materializer::materialize_chat_message(&store, &chat_b, &sign_chat(&smith, &chat_b));
-
-        // SAME pubkey, room #b → resolves to the #b session instead.
-        assert!(store.peek_chat("smith-b").unwrap().is_empty());
-        let inbox_b = store.peek_chat("other-b").unwrap();
-        assert_eq!(inbox_b.len(), 1);
-        assert_eq!(inbox_b[0].from_session, "smith-b");
-    }
-
-    // Issue #47: mentioning a durable ordinal pubkey must resolve to the session
-    // occupying THIS room. A mention in `#a` lands on the `#a` occupant and
-    // stamps that session id; the same-pubkey `#b` occupant is untouched.
-    #[test]
-    fn ordinal_mention_resolves_session_per_room() {
+    fn chat_routes_to_channel_sessions_and_skips_sender() {
         let store = Store::open_memory().unwrap();
         let sender = Keys::generate();
-        let smith = Keys::generate();
-        let smith_pk = smith.public_key().to_hex();
+        let receiver = Keys::generate();
+        let sender_pk = sender.public_key().to_hex();
+        let receiver_pk = receiver.public_key().to_hex();
 
-        ordinal_route(&store, &smith_pk, "#a", "smith-a");
-        ordinal_route(&store, &smith_pk, "#b", "smith-b");
-        alive_session(&store, "smith-a", &smith_pk, "#a");
-        alive_session(&store, "smith-b", &smith_pk, "#b");
-        alive_session(&store, "sender-a", &sender.public_key().to_hex(), "#a");
+        let sender_sid = register(&store, &sender_pk, "proj", "sender-ext");
+        let receiver_sid = register(&store, &receiver_pk, "proj", "receiver-ext");
 
+        let event = build(
+            &sender,
+            9,
+            "ship it",
+            vec![make_tag(&["h", "proj"])],
+        );
         let chat = ChatMessage {
-            from: AgentRef::new(sender.public_key().to_hex(), "sender"),
-            project: "#a".into(),
-            body: "ping smith".into(),
-            mentioned_pubkey: Some(smith_pk.clone()),
+            from: crate::domain::AgentRef::new(sender_pk, String::new()),
+            project: "proj".into(),
+            body: "ship it".into(),
+            mentioned_pubkey: None,
         };
-        Nip29Materializer::materialize_chat_message(&store, &chat, &sign_chat(&sender, &chat));
 
-        // The #a occupant of the ordinal receives the mention, stamped with the
-        // room-specific session id resolved through the route table.
-        let inbox = store.peek_chat("smith-a").unwrap();
-        assert_eq!(inbox.len(), 1);
-        assert_eq!(inbox[0].mentioned_session, "smith-a");
-        // The #b occupant of the SAME pubkey is out of room and untouched.
-        assert!(store.peek_chat("smith-b").unwrap().is_empty());
+        // Verbatim log + directed delivery.
+        assert!(Nip29Materializer::materialize_event(&store, &event));
+        assert!(Nip29Materializer::route_chat(&store, &event, &chat));
+
+        let pending = store.drain_pending_for_session(&receiver_sid).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].body, "ship it");
+        assert!(store
+            .drain_pending_for_session(&sender_sid)
+            .unwrap()
+            .is_empty());
+        // The chat line is also in the verbatim relay_events log.
+        assert!(store.has_event(&event.id.to_hex()).unwrap());
+    }
+
+    #[test]
+    fn other_kind_lands_in_relay_events() {
+        let store = Store::open_memory().unwrap();
+        let agent = Keys::generate();
+        let event = build(
+            &agent,
+            1,
+            "a social note",
+            vec![make_tag(&["h", "proj"])],
+        );
+        assert!(Nip29Materializer::materialize_event(&store, &event));
+        let stored = store.get_event(&event.id.to_hex()).unwrap().unwrap();
+        assert_eq!(stored.kind, 1);
+        assert_eq!(stored.channel_h, "proj");
+        assert_eq!(stored.content, "a social note");
     }
 }

@@ -18,7 +18,7 @@ pub const HEARTBEAT_SECS: u64 = 30;
 
 /// The lifecycle of a session aggregate. PURE marker (never on the wire — there
 /// are no tombstone events): a stopped session is detected by its status event
-/// expiring, not by an `ended`/`superseded` signal. Stored on `session_state` so
+/// expiring, not by an `ended`/`superseded` signal. Stored on `sessions` so
 /// readers and `derive_status` can suppress a finished session locally before its
 /// relay event ages out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -141,9 +141,9 @@ pub struct Proposal {
 /// }
 /// ```
 ///
-/// The daemon's status-outbox drainer builds a `Status` from each pending
+/// The daemon's outbox drainer builds a `Status` from each pending
 /// `SessionSnapshot` (setting `expires_at = now + STATUS_TTL_SECS`), calls
-/// `set_status`, then marks the `status_outbox` row published with the returned
+/// `set_status`, then marks the `outbox` row published with the returned
 /// id. The per-heartbeat liveness re-arm re-publishes the latest snapshot the
 /// same way (it does NOT enqueue an outbox row). Nothing above the provider
 /// builds a kind:30315 event directly.

@@ -11,7 +11,27 @@
 //! module calls them (the accept-loop bootstrap and the channels_create local
 //! fast-path); everything else is private to this module.
 
+use super::resolution::work_root_for;
 use super::*;
+
+/// Add one pubkey as a channel member without disturbing existing rows. Reads the
+/// current member set, appends, and re-materializes via `replace_channel_members`
+/// (which preserves admins and won't demote an existing admin).
+fn add_channel_member(state: &Arc<DaemonState>, channel: &str, pubkey: &str) {
+    state.with_store(|s| {
+        let mut members: Vec<String> = s
+            .list_channel_members(channel)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|m| m.role == "member")
+            .map(|m| m.pubkey)
+            .collect();
+        if !members.iter().any(|p| p == pubkey) {
+            members.push(pubkey.to_string());
+        }
+        s.replace_channel_members(channel, &members, now_secs()).ok();
+    });
+}
 
 pub(super) fn spawn_demux(state: Arc<DaemonState>) {
     tokio::spawn(async move {
@@ -57,7 +77,7 @@ fn handle_incoming(state: &Arc<DaemonState>, event: &Event) {
         // Durable ordinal pubkeys (issue #47) are local identities too: a mention
         // p-tagged to e.g. `smith1` must be recognized as self so the routing gate
         // and self-skip treat it like a hosted agent, not a foreign peer.
-        h.extend(state.with_store(|s| s.list_agent_ordinal_pubkeys()));
+        h.extend(state.with_store(|s| s.list_identity_pubkeys().unwrap_or_default()));
         h.sort_unstable();
         h.dedup();
         h
@@ -142,34 +162,35 @@ async fn handle_offline_agent_mention(state: &Arc<DaemonState>, mentioned_pk: &s
         s.list_alive_sessions()
             .unwrap_or_default()
             .into_iter()
-            .any(|rec| rec.agent_pubkey == mentioned_pk && rec.route_scope() == project)
+            .any(|rec| rec.agent_pubkey == mentioned_pk && rec.channel_h == project)
     });
     if has_alive {
         return;
     }
 
     // Resolve the mentioned pubkey to (agent_slug, ordinal). It may be a base
-    // agent key (ordinal 0, in the keystore) OR a durable ordinal key like
-    // `smith1` (issue #47), which lives in `agent_ordinals`, not the keystore —
-    // the old keystore-only lookup silently dropped mentions to ordinals.
+    // agent key (ordinal 0, in the keystore) OR a durable ordinal key (issue #47)
+    // recorded in the `identities` table.
     let edge = crate::config::edge_home();
     let local_agents = crate::identity::list_local_agent_details(&edge);
-    let (agent_slug, ordinal) = match local_agents.iter().find(|a| a.pubkey == mentioned_pk) {
-        Some(a) => (a.slug.clone(), 0u32),
-        None => match state.with_store(|s| s.local_agent_ordinal_for_pubkey(mentioned_pk)) {
-            Some((_, slug, ord)) => (slug, ord),
-            None => return,
-        },
-    };
+    let (agent_slug, ordinal, base_pubkey) =
+        match local_agents.iter().find(|a| a.pubkey == mentioned_pk) {
+            Some(a) => (a.slug.clone(), 0u32, mentioned_pk.to_string()),
+            None => match state.with_store(|s| s.get_identity(mentioned_pk).ok().flatten()) {
+                Some(idn) => (idn.agent_slug, idn.ordinal, idn.base_pubkey),
+                None => return,
+            },
+        };
 
-    // Resume vs fresh: if this ordinal previously ran in this room and left a
+    // Resume vs fresh: if this identity previously ran in this channel and left a
     // bound native session, RESUME that harness (restores its conversation);
     // otherwise spawn fresh with the exact ordinal.
-    let bound = state.with_store(|s| s.bound_identity_route(mentioned_pk, project));
+    let bound =
+        state.with_store(|s| s.resolve_identity_for_channel(&base_pubkey, project).ok().flatten());
     if let Some(route) = bound.filter(|r| !r.native_id.is_empty()) {
         eprintln!(
-            "[spawn-on-mention] resuming {} ({}) in {project} via native {}",
-            route.label, route.harness_kind, route.native_id
+            "[spawn-on-mention] resuming {} in {project} via native {}",
+            route.agent_slug, route.native_id
         );
         if let Err(e) = crate::tmux::resume_agent(state, &agent_slug, project, &route.native_id).await
         {
@@ -179,7 +200,8 @@ async fn handle_offline_agent_mention(state: &Arc<DaemonState>, mentioned_pk: &s
         }
     }
 
-    let is_member = state.with_store(|s| s.is_group_member(project, mentioned_pk).unwrap_or(false));
+    let is_member =
+        state.with_store(|s| s.is_channel_member(project, mentioned_pk).unwrap_or(false));
     if !is_member {
         let (_, _, members) = state.provider.fetch_group_state(project).await;
         if !members.contains(mentioned_pk) {
@@ -199,18 +221,12 @@ async fn handle_offline_agent_mention(state: &Arc<DaemonState>, mentioned_pk: &s
                 eprintln!("[spawn-on-mention] mgmt-key add_member failed for {project}, skip");
                 return;
             }
-            state.with_store(|s| {
-                s.upsert_group_member(project, mentioned_pk, "member", crate::util::now_secs())
-                    .ok()
-            });
+            add_channel_member(state, project, mentioned_pk);
         }
     }
 
-    let work_root = state.with_store(|s| {
-        s.work_root_for_scope(project)
-            .unwrap_or_else(|_| project.to_string())
-    });
-    let has_path = state.with_store(|s| s.get_project_path(&work_root).ok().flatten().is_some());
+    let work_root = state.with_store(|s| work_root_for(s, project));
+    let has_path = state.with_store(|s| s.project_root(&work_root).ok().flatten().is_some());
     if !has_path {
         eprintln!("[spawn-on-mention] no local path for {work_root}, cannot spawn");
         return;
@@ -240,7 +256,8 @@ async fn handle_offline_agent_mention(state: &Arc<DaemonState>, mentioned_pk: &s
 /// React to a subgroup add-agents orchestration event: authorize the signer,
 /// provision the agents addressed to THIS backend (mint identity, publish
 /// kind:0, add as member), and spawn each agent's harness into the child group.
-/// Best-effort and idempotent (durable `processed_orchestration` guard).
+/// Best-effort and idempotent: the durable claim is an `inbox` ledger row keyed
+/// by (event_id, backend pubkey), so duplicate relay deliveries are dropped.
 pub(super) async fn handle_orchestration(
     state: &Arc<DaemonState>,
     event: &Event,
@@ -300,18 +317,21 @@ pub(super) async fn handle_orchestration(
         }
     }
 
-    // Atomically CLAIM the event now that all pre-checks passed. Only the first
-    // of the relay's duplicate deliveries wins; the rest return here. Placed
-    // AFTER auth/parent checks (transient-safe) but BEFORE any mutating work, so
-    // concurrent tasks never race on identity minting or member-adds.
-    if !state.with_store(|s| s.try_claim_orchestration(&event_id, now_secs())) {
+    // Atomically CLAIM the event now that all pre-checks passed. Idempotency lives
+    // in the inbox ledger (no separate processed table): a row keyed by
+    // (event_id, this backend) means "handled". `enqueue_inbox` returns true only
+    // for the FIRST insert, so duplicate relay deliveries return here. Placed AFTER
+    // auth/parent checks (transient-safe) but BEFORE any mutating work.
+    let claimed = state.with_store(|s| {
+        s.enqueue_inbox(&event_id, &backend_pk, &signer, &op.child_h, "", now_secs())
+            .unwrap_or(false)
+    });
+    if !claimed {
         return;
     }
 
-    // Subscribe + own the child so we receive its state and can manage it.
-    state.with_store(|s| {
-        s.mark_group_owned(&op.child_h, now_secs()).ok();
-    });
+    // Subscribe to the child so we receive its state; management authority is the
+    // relay-materialized admin role, not a local owned flag.
     let _ = ensure_subscription(state, &op.child_h).await;
 
     let edge = config::edge_home();
@@ -321,7 +341,6 @@ pub(super) async fn handle_orchestration(
             Ok(id) => id,
             Err(e) => {
                 eprintln!("[daemon] orchestration: minting agent {slug:?} failed: {e:#}");
-                state.with_store(|s| s.unclaim_orchestration(&event_id));
                 return;
             }
         };
@@ -383,16 +402,12 @@ pub(super) async fn handle_orchestration(
         if !confirmed {
             eprintln!(
                 "[daemon] orchestration: member-add for agent {slug:?} in {} not confirmed on the \
-                 relay after retries; skipping spawn (will retry on re-delivery)",
+                 relay after retries; skipping spawn",
                 op.child_h
             );
-            state.with_store(|s| s.unclaim_orchestration(&event_id));
             return;
         }
-        state.with_store(|s| {
-            s.upsert_group_member(&op.child_h, &agent_pk, "member", now_secs())
-                .ok();
-        });
+        add_channel_member(state, &op.child_h, &agent_pk);
 
         // Spawn the harness in the PARENT project's working directory but scoped
         // to the child channel (TENEX_EDGE_CHANNEL). The spawned session's

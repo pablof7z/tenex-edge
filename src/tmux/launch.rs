@@ -15,11 +15,11 @@ fn project_abs_path(
     if let Some(cwd) = client_cwd {
         let abs = cwd.to_string_lossy().to_string();
         let now = crate::util::now_secs();
-        let _ = state.with_store(|s| s.upsert_project_path(project, &abs, now));
+        let _ = state.with_store(|s| s.upsert_project_root(project, &abs, now));
         return abs;
     }
     state
-        .with_store(|s| s.get_project_path(project))
+        .with_store(|s| s.project_root(project))
         .unwrap_or(None)
         .unwrap_or_else(|| {
             std::env::current_dir()

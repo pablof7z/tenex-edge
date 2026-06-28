@@ -1,0 +1,282 @@
+//! `sessions` — the local agent processes THIS daemon hosts.
+//!
+//! Canonical session identity is daemon-minted and stable. Harness-native ids are
+//! aliases (see `aliases.rs`) that repoint to the newest live owner. EVERY
+//! turn/session mutation resolves a raw external id to the canonical id BEFORE
+//! writing — a known prior bug mutated by raw id and silently no-op'd.
+
+use super::*;
+
+const COLS: &str = "session_id, agent_pubkey, agent_slug, channel_h, harness, child_pid, \
+     transcript_path, alive, created_at, last_seen, working, turn_started_at, last_distill_at, \
+     seen_cursor, title, activity, resume_id";
+
+fn row_to_session(row: &rusqlite::Row) -> rusqlite::Result<Session> {
+    Ok(Session {
+        session_id: row.get(0)?,
+        agent_pubkey: row.get(1)?,
+        agent_slug: row.get(2)?,
+        channel_h: row.get(3)?,
+        harness: row.get(4)?,
+        child_pid: row.get(5)?,
+        transcript_path: row.get(6)?,
+        alive: row.get::<_, i64>(7)? != 0,
+        created_at: row.get(8)?,
+        last_seen: row.get(9)?,
+        working: row.get::<_, i64>(10)? != 0,
+        turn_started_at: row.get(11)?,
+        last_distill_at: row.get(12)?,
+        seen_cursor: row.get(13)?,
+        title: row.get(14)?,
+        activity: row.get(15)?,
+        resume_id: row.get(16)?,
+    })
+}
+
+impl Store {
+    /// Resolve any id (canonical session_id OR a harness-native external id) to
+    /// the canonical session_id. Checks `sessions` first, then the newest alias
+    /// pointing at it. The single chokepoint every session mutation funnels
+    /// through so writes never miss a rotated id.
+    pub(super) fn resolve_canonical_id(&self, id: &str) -> Result<Option<String>> {
+        let direct: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT session_id FROM sessions WHERE session_id=?1",
+                params![id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if direct.is_some() {
+            return Ok(direct);
+        }
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT session_id FROM session_aliases WHERE external_id=?1
+                 ORDER BY created_at DESC LIMIT 1",
+                params![id],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()?)
+    }
+
+    /// Register or reassert a local session. If the `(harness, external_id_kind,
+    /// external_id)` alias already points at a session, that session is reasserted
+    /// (alive=1, handles/channel refreshed, last_seen bumped) and its canonical id
+    /// returned. Otherwise a fresh canonical id is minted, the session inserted,
+    /// and the alias pointed at it. Returns the canonical session_id.
+    pub fn register_session(&self, r: &RegisterSession) -> Result<String> {
+        let existing =
+            self.resolve_session_by_alias(&r.harness, &r.external_id_kind, &r.external_id)?;
+        let session_id = match existing {
+            Some(id) if self.session_exists(&id)? => {
+                self.conn.execute(
+                    "UPDATE sessions SET agent_pubkey=?2, agent_slug=?3, channel_h=?4, harness=?5,
+                         child_pid=?6, transcript_path=?7, resume_id=?8, alive=1, last_seen=?9
+                     WHERE session_id=?1",
+                    params![
+                        id,
+                        r.agent_pubkey,
+                        r.agent_slug,
+                        r.channel_h,
+                        r.harness,
+                        r.child_pid,
+                        r.transcript_path,
+                        r.resume_id,
+                        r.now
+                    ],
+                )?;
+                id
+            }
+            _ => {
+                let id = mint_session_id();
+                self.conn.execute(
+                    "INSERT INTO sessions
+                         (session_id, agent_pubkey, agent_slug, channel_h, harness, child_pid,
+                          transcript_path, alive, created_at, last_seen, resume_id)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, ?8, ?8, ?9)",
+                    params![
+                        id,
+                        r.agent_pubkey,
+                        r.agent_slug,
+                        r.channel_h,
+                        r.harness,
+                        r.child_pid,
+                        r.transcript_path,
+                        r.now,
+                        r.resume_id
+                    ],
+                )?;
+                id
+            }
+        };
+        // (Re)point the external id at the resolved canonical session.
+        self.put_alias(
+            &r.harness,
+            &r.external_id_kind,
+            &r.external_id,
+            &session_id,
+            r.now,
+        )?;
+        Ok(session_id)
+    }
+
+    fn session_exists(&self, session_id: &str) -> Result<bool> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT 1 FROM sessions WHERE session_id=?1",
+                params![session_id],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some())
+    }
+
+    /// Fetch a session by any id (canonical or alias). Resolves the external id to
+    /// the canonical session first.
+    pub fn get_session(&self, id: &str) -> Result<Option<Session>> {
+        let Some(canonical) = self.resolve_canonical_id(id)? else {
+            return Ok(None);
+        };
+        Ok(self
+            .conn
+            .query_row(
+                &format!("SELECT {COLS} FROM sessions WHERE session_id=?1"),
+                params![canonical],
+                row_to_session,
+            )
+            .optional()?)
+    }
+
+    /// All alive sessions on this machine, newest first.
+    pub fn list_alive_sessions(&self) -> Result<Vec<Session>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {COLS} FROM sessions WHERE alive=1 ORDER BY created_at DESC"
+        ))?;
+        let rows = stmt.query_map([], row_to_session)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Recent sessions (alive OR dead), newest first, capped. The resume picker's
+    /// candidate set — a dead row with a resume token can be reconstituted.
+    pub fn list_resumable_sessions(&self, limit: u32) -> Result<Vec<Session>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {COLS} FROM sessions ORDER BY created_at DESC LIMIT ?1"
+        ))?;
+        let rows = stmt.query_map(params![limit], row_to_session)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Find a session (alive or dead) whose canonical id starts with `prefix`,
+    /// newest first. Used by `tmux resume` to accept a short id prefix.
+    pub fn find_session_by_prefix(&self, prefix: &str) -> Result<Option<Session>> {
+        let pattern = format!("{}%", prefix.replace('%', "").replace('_', ""));
+        Ok(self
+            .conn
+            .query_row(
+                &format!(
+                    "SELECT {COLS} FROM sessions WHERE session_id LIKE ?1
+                     ORDER BY created_at DESC LIMIT 1"
+                ),
+                params![pattern],
+                row_to_session,
+            )
+            .optional()?)
+    }
+
+    /// Set the working/turn flag for a session (resolves id first). When entering
+    /// a turn, pass the start timestamp; when leaving, pass `working=false`.
+    pub fn set_working(&self, id: &str, working: bool, turn_started_at: u64) -> Result<()> {
+        let Some(canonical) = self.resolve_canonical_id(id)? else {
+            return Ok(());
+        };
+        self.conn.execute(
+            "UPDATE sessions SET working=?2, turn_started_at=?3 WHERE session_id=?1",
+            params![canonical, working as i64, turn_started_at],
+        )?;
+        Ok(())
+    }
+
+    /// Advance the awareness delta high-water mark for a session (resolves first).
+    pub fn set_seen_cursor(&self, id: &str, cursor: u64) -> Result<()> {
+        let Some(canonical) = self.resolve_canonical_id(id)? else {
+            return Ok(());
+        };
+        self.conn.execute(
+            "UPDATE sessions SET seen_cursor=?2 WHERE session_id=?1",
+            params![canonical, cursor],
+        )?;
+        Ok(())
+    }
+
+    /// Update the locally-distilled pre-publish draft (title/activity) and stamp
+    /// the distill time (resolves first).
+    pub fn set_session_distill(
+        &self,
+        id: &str,
+        title: &str,
+        activity: &str,
+        last_distill_at: u64,
+    ) -> Result<()> {
+        let Some(canonical) = self.resolve_canonical_id(id)? else {
+            return Ok(());
+        };
+        self.conn.execute(
+            "UPDATE sessions SET title=?2, activity=?3, last_distill_at=?4 WHERE session_id=?1",
+            params![canonical, title, activity, last_distill_at],
+        )?;
+        Ok(())
+    }
+
+    /// Bump a session's last_seen heartbeat (resolves first).
+    pub fn touch_session(&self, id: &str, last_seen: u64) -> Result<()> {
+        let Some(canonical) = self.resolve_canonical_id(id)? else {
+            return Ok(());
+        };
+        self.conn.execute(
+            "UPDATE sessions SET last_seen=?2 WHERE session_id=?1",
+            params![canonical, last_seen],
+        )?;
+        Ok(())
+    }
+
+    /// Update a session's transcript path (resolves first). Set on turn start when
+    /// the harness reports where its transcript lives.
+    pub fn set_session_transcript(&self, id: &str, transcript_path: &str) -> Result<()> {
+        let Some(canonical) = self.resolve_canonical_id(id)? else {
+            return Ok(());
+        };
+        self.conn.execute(
+            "UPDATE sessions SET transcript_path=?2 WHERE session_id=?1",
+            params![canonical, transcript_path],
+        )?;
+        Ok(())
+    }
+
+    /// Move a session to a different channel/route scope (resolves first).
+    pub fn set_session_channel(&self, id: &str, channel_h: &str) -> Result<()> {
+        let Some(canonical) = self.resolve_canonical_id(id)? else {
+            return Ok(());
+        };
+        self.conn.execute(
+            "UPDATE sessions SET channel_h=?2 WHERE session_id=?1",
+            params![canonical, channel_h],
+        )?;
+        Ok(())
+    }
+
+    /// Mark a session dead (process exited). Resolves the id first; clears the
+    /// working flag.
+    pub fn mark_dead(&self, id: &str) -> Result<()> {
+        let Some(canonical) = self.resolve_canonical_id(id)? else {
+            return Ok(());
+        };
+        self.conn.execute(
+            "UPDATE sessions SET alive=0, working=0 WHERE session_id=?1",
+            params![canonical],
+        )?;
+        Ok(())
+    }
+}

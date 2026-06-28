@@ -52,8 +52,8 @@ pub(in crate::daemon::server) async fn resolve_backend_pubkey(
         });
     }
 
-    // Remote peer: scan profiles / peer_sessions.
-    if let Some(pk) = state.with_store(|s| s.pubkey_for_host_slug(token)) {
+    // Remote peer: resolve host/slug against relay_profiles + relay_status.
+    if let Some(pk) = state.with_store(|s| s.pubkey_for_host_slug(token).ok().flatten()) {
         return Ok(pk);
     }
 

@@ -4,7 +4,7 @@ date: 2026-06-09
 session: d8cffade-a4c3-48ab-9f29-50e8fc7e8e58
 transcript: /Users/pablofernandez/.claude/projects/-Users-pablofernandez-src-tenex-edge/d8cffade-a4c3-48ab-9f29-50e8fc7e8e58.jsonl
 salience: product
-status: active
+status: superseded
 subjects:
   - nip29-group-ownership
   - daemon-group-management

@@ -41,7 +41,7 @@ pub(in crate::daemon::server) fn rpc_who(
                 p.group.as_deref(),
                 false,
             )
-            .map(|rec| rec.route_scope().to_string())?,
+            .map(|rec| rec.channel_h.clone())?,
         )
     } else {
         Some(p.project.clone().unwrap_or_else(|| {
@@ -79,28 +79,31 @@ pub(in crate::daemon::server) fn rpc_whoami(
         None,
         false,
     )?;
-    let now = now_secs();
     let host = state.host.clone();
-    // Routing scope: channel when set (a `channels switch` moved the session),
-    // else the per-session room. `whoami` answers "which agent am I on the
-    // fabric" — the scope it currently publishes into is the relevant one, and
-    // the is_member check must key on it so a switched session doesn't report
-    // a stale membership in the room it minted at spawn.
-    let scope = rec.route_scope().to_string();
+    // Routing scope: the session's channel (a `channels switch` moves the
+    // session by repointing channel_h). `whoami` answers "which agent am I on
+    // the fabric" — the channel it currently publishes into is the relevant
+    // scope, and the is_member check keys on it.
+    let scope = rec.channel_h.clone();
     state.with_store(|s| {
         // Report the session's DURABLE ORDINAL identity (issue #47): its ordinal
-        // pubkey + label (`smith`, `smith1`, …) — that is the identity peers see
-        // on the wire. Falls back to the legacy session pubkey, then the base
-        // agent pubkey, for sessions predating the route table.
-        let route = s.identity_route_for_session(&rec.session_id);
-        let pubkey = route
+        // pubkey + label (`smith`, `smith1`, …) — the identity peers see on the
+        // wire — from the identities table. Falls back to the base agent pubkey
+        // for sessions with no derived identity bound yet.
+        let identity = s.identity_for_session(&rec.session_id).ok().flatten();
+        let pubkey = identity
             .as_ref()
-            .map(|r| r.pubkey.clone())
-            .or_else(|| s.session_pubkey_for_session(&rec.session_id))
+            .map(|i| i.pubkey.clone())
             .unwrap_or_else(|| rec.agent_pubkey.clone());
-        let label = route
+        let label = identity
             .as_ref()
-            .map(|r| r.label.clone())
+            .map(|i| {
+                if i.ordinal == 0 {
+                    i.agent_slug.clone()
+                } else {
+                    format!("{}{}", i.agent_slug, i.ordinal)
+                }
+            })
             .unwrap_or_else(|| rec.agent_slug.clone());
         let npub = {
             use nostr_sdk::prelude::ToBech32;
@@ -108,18 +111,13 @@ pub(in crate::daemon::server) fn rpc_whoami(
                 .ok()
                 .and_then(|pk| pk.to_bech32().ok())
         };
-        let is_member = s.is_group_member(&scope, &pubkey).unwrap_or(true);
-        let (working, status) = s
-            .local_session_snapshot(&rec.session_id)
-            .ok()
-            .flatten()
-            .map(|snap| {
-                let d = derive_status(&snap, now);
-                (d.busy, d.title)
-            })
-            .unwrap_or((false, String::new()));
+        let is_member = s.is_channel_member(&scope, &pubkey).unwrap_or(true);
+        // Busy + title come straight off the local session row (the pre-publish
+        // draft the distiller maintains), no separate read-model projection.
+        let working = rec.working;
+        let status = rec.title.clone();
         let pending = s
-            .peek_chat_mentions(&rec.session_id)
+            .drain_pending_for_session(&rec.session_id)
             .unwrap_or_default()
             .len();
         Ok(serde_json::json!({
@@ -129,7 +127,7 @@ pub(in crate::daemon::server) fn rpc_whoami(
             "codename": crate::util::session_codename(&rec.session_id),
             "project": scope,
             "host": host,
-            "rel_cwd": rec.rel_cwd,
+            "rel_cwd": "",
             "pubkey": pubkey,
             "npub": npub,
             "is_member": is_member,

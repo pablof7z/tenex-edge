@@ -49,21 +49,27 @@ pub(in crate::daemon::server) async fn refresh_project_members_cache(
     let Some(ev) = events.iter().max_by_key(|e| e.created_at.as_secs()) else {
         return false;
     };
-    let members = ev
-        .tags
-        .iter()
-        .filter_map(|t| {
-            let s = t.as_slice();
-            if s.first().map(String::as_str) != Some("p") {
-                return None;
-            }
-            let pubkey = s.get(1)?.clone();
-            let role = s.get(2).cloned().unwrap_or_else(|| "member".to_string());
-            Some((pubkey, role))
-        })
-        .collect::<Vec<_>>();
+    let mut admins: Vec<String> = Vec::new();
+    let mut members: Vec<String> = Vec::new();
+    for t in ev.tags.iter() {
+        let s = t.as_slice();
+        if s.first().map(String::as_str) != Some("p") {
+            continue;
+        }
+        let Some(pubkey) = s.get(1).cloned() else {
+            continue;
+        };
+        let role = s.get(2).map(String::as_str).unwrap_or("member");
+        if role == "admin" {
+            admins.push(pubkey);
+        } else {
+            members.push(pubkey);
+        }
+    }
+    let now = now_secs();
     state.with_store(|s| {
-        s.replace_group_members(project, &members, now_secs()).ok();
+        s.replace_channel_admins(project, &admins, now).ok();
+        s.replace_channel_members(project, &members, now).ok();
     });
     true
 }
@@ -76,7 +82,7 @@ pub(in crate::daemon::server) async fn wait_for_project_member_cache(
 ) -> bool {
     for _ in 0..20 {
         let refreshed = refresh_project_members_cache(state, project).await;
-        let has = state.with_store(|s| s.is_group_member(project, pubkey).unwrap_or(false));
+        let has = state.with_store(|s| s.is_channel_member(project, pubkey).unwrap_or(false));
         if refreshed && has == present {
             return true;
         }
@@ -109,23 +115,19 @@ pub(in crate::daemon::server) fn rpc_debug_outbox(
     let p: P = serde_json::from_value(params.clone()).unwrap_or(P {
         limit: default_debug_outbox_limit(),
     });
-    let rows = state.with_store(|s| s.list_status_outbox_debug(p.limit))?;
+    // The outbox is now a generic signed-event publish queue (raw event_json),
+    // not status-specific snapshots — dump the pending queue rows verbatim.
+    let rows = state.with_store(|s| s.drain_outbox(p.limit as u32))?;
     let rows = rows
         .into_iter()
         .map(|r| {
             serde_json::json!({
-                "session_id": r.session_id,
-                "state_version": r.state_version,
-                "publish_state": r.publish_state,
+                "local_id": r.local_id,
+                "state": r.state,
                 "retries": r.retries,
-                "native_event_id": r.native_event_id,
                 "last_error": r.last_error,
                 "enqueued_at": r.enqueued_at,
-                "agent_slug": r.agent_slug,
-                "project": r.project,
-                "title": r.title,
-                "activity": r.activity,
-                "busy": r.busy,
+                "event_json": r.event_json,
             })
         })
         .collect::<Vec<_>>();

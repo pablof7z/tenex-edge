@@ -97,7 +97,7 @@ impl Nip29Provider {
     ) -> Result<nostr_sdk::prelude::EventId> {
         if let Some(ch) = ev.channel() {
             let agent_pubkey = keys.public_key().to_hex();
-            let parent = self.with_store(|s| s.group_parent(ch).unwrap_or(None));
+            let parent = self.with_store(|s| s.channel_parent(ch).unwrap_or(None));
             let ctx = ChannelCtx {
                 channel: ch,
                 expect_member: &agent_pubkey,
@@ -117,7 +117,7 @@ impl Nip29Provider {
     ) -> Result<nostr_sdk::prelude::EventId> {
         if let Some(ch) = ev.channel() {
             let agent_pubkey = keys.public_key().to_hex();
-            let parent = self.with_store(|s| s.group_parent(ch).unwrap_or(None));
+            let parent = self.with_store(|s| s.channel_parent(ch).unwrap_or(None));
             let ctx = ChannelCtx {
                 channel: ch,
                 expect_member: &agent_pubkey,
@@ -281,7 +281,7 @@ impl Nip29Provider {
         keys: &nostr_sdk::prelude::Keys,
     ) -> Result<nostr_sdk::prelude::EventId> {
         let agent_pubkey = keys.public_key().to_hex();
-        let parent = self.with_store(|s| s.group_parent(&status.project).unwrap_or(None));
+        let parent = self.with_store(|s| s.channel_parent(&status.project).unwrap_or(None));
         let ctx = ChannelCtx {
             channel: &status.project,
             expect_member: &agent_pubkey,
@@ -292,8 +292,10 @@ impl Nip29Provider {
         self.transport.publish_signed(builder, keys).await
     }
 
-    /// Fetch all kind:39000 events from the relay and upsert project metadata.
+    /// Fetch all kind:39000 events from the relay and materialize them into the
+    /// `relay_channels` cache via the single inbound materializer.
     pub async fn refresh_project_list(&self) -> Result<()> {
+        use crate::fabric::nip29::materializer::Nip29Materializer;
         use nostr_sdk::prelude::{Filter, Kind};
         let filter = Filter::new().kind(Kind::from(39000u16)).limit(200);
         let events = self
@@ -301,20 +303,8 @@ impl Nip29Provider {
             .fetch(filter, Duration::from_secs(5))
             .await
             .unwrap_or_default();
-        let now = now_secs();
-        let pi = self.provider_instance.clone();
         for ev in &events {
-            let Some(slug) = crate::fabric::nip29::nostr_tag(ev, "d") else {
-                continue;
-            };
-            let slug = slug.to_string();
-            let about = crate::fabric::nip29::nostr_tag(ev, "about")
-                .unwrap_or("")
-                .to_string();
-            self.with_store(|s| {
-                s.upsert_project_meta(&slug, &about, now).ok();
-                s.ensure_project_origin(FABRIC, &pi, &slug, &slug, now).ok();
-            });
+            self.with_store(|s| Nip29Materializer::materialize_channel(s, ev));
         }
         Ok(())
     }

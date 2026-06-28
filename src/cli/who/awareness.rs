@@ -5,8 +5,8 @@ mod summary;
 
 use summary::{
     breadcrumb_line, changed_member_lines, changed_status_items, changed_subchannel_lines,
-    channel_ref, channel_summary_line, current_activity_lines, member_lines,
-    other_active_channel_lines, project_line,
+    channel_breadcrumb, channel_ref, channel_summary_line, current_activity_lines, member_lines,
+    other_active_channel_lines, project_line, subchannels_of,
 };
 
 const RECENT_SEMANTIC_WINDOW_SECS: u64 = 10 * 60;
@@ -18,19 +18,19 @@ pub(crate) fn render_awareness_snapshot(
     self_slug: &str,
     self_pubkey: &str,
 ) -> Option<String> {
-    let breadcrumb = store.channel_breadcrumb(project).ok()?;
+    let breadcrumb = channel_breadcrumb(store, project);
     if breadcrumb.is_empty() {
         return None;
     }
 
     let mut out = String::from("[tenex-edge] Fabric context\n\n");
     let _ = writeln!(out, "Project: {}", project_line(store, &breadcrumb[0].0));
-    let _ = writeln!(out, "Channel: {}", breadcrumb_line(store, &breadcrumb));
+    let _ = writeln!(out, "Channel: {}", breadcrumb_line(store, &breadcrumb, now));
 
     let members = member_lines(store, project, now, self_slug, self_pubkey);
     write_section(&mut out, "Members:", &members);
 
-    let subs = store.subchannels_of(project).unwrap_or_default();
+    let subs = subchannels_of(store, project);
     if !subs.is_empty() {
         let lines = subs
             .iter()
@@ -56,9 +56,9 @@ pub(crate) fn render_awareness_update_since_turn(
     since: u64,
     project: &str,
     now: u64,
-    exclude_session: Option<&str>,
+    exclude_pubkey: Option<&str>,
 ) -> Option<String> {
-    render_awareness_update(store, since, project, now, exclude_session, "last turn")
+    render_awareness_update(store, since, project, now, exclude_pubkey, "last turn")
 }
 
 pub(crate) fn render_awareness_update_since_check(
@@ -66,9 +66,9 @@ pub(crate) fn render_awareness_update_since_check(
     since: u64,
     project: &str,
     now: u64,
-    exclude_session: Option<&str>,
+    exclude_pubkey: Option<&str>,
 ) -> Option<String> {
-    render_awareness_update(store, since, project, now, exclude_session, "last check")
+    render_awareness_update(store, since, project, now, exclude_pubkey, "last check")
 }
 
 fn render_awareness_update(
@@ -76,11 +76,11 @@ fn render_awareness_update(
     since: u64,
     project: &str,
     now: u64,
-    exclude_session: Option<&str>,
+    exclude_pubkey: Option<&str>,
     label: &str,
 ) -> Option<String> {
-    let subs = store.subchannels_of(project).unwrap_or_default();
-    let changed = changed_status_items(store, since, project, now, exclude_session);
+    let subs = subchannels_of(store, project);
+    let changed = changed_status_items(store, since, project, now, exclude_pubkey);
 
     let members = changed_member_lines(project, &changed);
     let subchannels = changed_subchannel_lines(store, since, project, now, &subs, &changed);
@@ -91,7 +91,7 @@ fn render_awareness_update(
         since.max(now.saturating_sub(RECENT_SEMANTIC_WINDOW_SECS)),
         now,
     );
-    let activity = current_activity_lines(store, project, since, now, exclude_session);
+    let activity = current_activity_lines(store, project, since, now, exclude_pubkey);
 
     if members.is_empty() && subchannels.is_empty() && other.is_empty() && activity.is_empty() {
         return None;

@@ -3,6 +3,10 @@ use super::who::{
     render_awareness_update_since_turn,
 };
 use super::*;
+use crate::state::{InboxRow, RelayEvent, Session};
+
+/// Cap on ambient channel-chat rows pulled from the relay-event log per turn.
+const AMBIENT_CHAT_LIMIT: u32 = 50;
 
 /// How a context block is emitted to the harness on stdout. Selected per
 /// (host, hook-type): plain text is injected directly by Claude Code's
@@ -38,55 +42,74 @@ pub(super) async fn turn_start(
     Ok(None)
 }
 
-/// Backfill a display label for chat rows whose `from_slug` is empty — a sender
-/// whose agent slug we never learned (a human operator or an unseen remote
-/// agent). Reads the profile cache synchronously; the daemon warms it from
-/// `kind:0` (see [`crate::profile`]) before assembling context. Rows that
-/// already carry a slug are left untouched; any still unresolved fall back to a
-/// short pubkey at render time.
-fn fill_sender_labels(s: &Store, rows: &mut [crate::state::ChatInboxRow]) {
+/// Resolve `nostr:npub1…` mentions in inbox bodies to `@<name>` from the warm
+/// profile cache (the daemon warms it from `kind:0` in `rpc_turn_start` before
+/// assembly). Sender slugs are no longer stored on the row — readers resolve
+/// them from `from_pubkey` at render time via [`crate::profile`].
+fn rewrite_inbox_bodies(s: &Store, rows: &mut [InboxRow]) {
     for row in rows.iter_mut() {
-        if row.from_slug.is_empty() {
-            if let Some(name) = s.resolve_slug_for_pubkey(&row.from_pubkey).ok().flatten() {
-                row.from_slug = name;
-            }
-        }
-        // Resolve `nostr:npub1…` mentions in the body to `@<name>` from the warm
-        // cache (the daemon warms it in `rpc_turn_start` before assembly).
         row.body = crate::profile::rewrite_body_mentions(s, &row.body);
     }
 }
 
+/// Drain the pending inbound routing ledger for this session and mark each row
+/// delivered (idempotency lives in the inbox row's state, not a separate
+/// processed table). Bodies get mention-rewritten before they reach the
+/// injector.
+fn take_inbox(s: &Store, session_id: &str, now: u64) -> Vec<InboxRow> {
+    let mut rows = s.drain_pending_for_session(session_id).unwrap_or_default();
+    for row in &rows {
+        s.mark_delivered(&row.event_id, session_id, now).ok();
+    }
+    rewrite_inbox_bodies(s, &mut rows);
+    rows
+}
+
+/// Ambient channel chat from the relay-event log since `since`, oldest-first,
+/// excluding events authored by this agent. Replaces the old `peek_chat`
+/// inbox-derived ambient stream with the verbatim `relay_events` log.
+fn ambient_chat(s: &Store, scope: &str, since: u64, self_pubkey: &str) -> Vec<RelayEvent> {
+    s.chat_for_channel(scope, since, AMBIENT_CHAT_LIMIT)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|ev| ev.pubkey != self_pubkey)
+        .collect()
+}
+
 /// The full turn-start context assembly, shared by the daemon's `turn_start` RPC
-/// (the only caller now). Mutating reads (mark_turn_start, drain, set_transcript)
-/// happen here under the shared store; the relay self-fetch is done by the
-/// caller beforehand. Single source of truth → injected text cannot drift.
+/// (the only caller now). Mutating reads (drain inbox → mark delivered, advance
+/// `seen_cursor`) happen here under the shared store; the relay self-fetch is
+/// done by the caller beforehand. Single source of truth → injected text cannot
+/// drift.
 ///
-/// `prev_turn_started_at` is the turn_state value BEFORE this turn's mark; the
-/// caller passes it so first-turn detection matches the old behavior.
+/// `backend_pubkey` is this daemon's signing pubkey, used to decide whether we
+/// manage (admin) the channel. `prev_turn_started_at` is the `turn_started_at`
+/// value BEFORE this turn's mark; the caller passes it so first-turn detection
+/// matches the old behavior.
 pub fn assemble_turn_start_context(
     store: &std::sync::Mutex<Store>,
-    rec: &crate::state::SessionRecord,
+    rec: &Session,
+    backend_pubkey: &str,
     prev_turn_started_at: u64,
 ) -> Option<String> {
     let first_turn = prev_turn_started_at == 0;
-    // Routing scope: channel when set (a `channels switch` moved the session
-    // to a subgroup), else the per-session room (`rec.project`). All fabric
+    // Routing scope is the session's `channel_h` — a project channel, or the
+    // session/task channel a `channels switch` moved it into. All fabric
     // presence/deltas key on this so a switched session's turn context reflects
-    // the new room, not the one it minted at spawn.
-    let scope = rec.route_scope().to_string();
+    // the channel it actually publishes into.
+    let scope = rec.channel_h.clone();
+    let now = now_secs();
     let mut blocks: Vec<String> = Vec::new();
 
     if first_turn {
-        // Warn only when this daemon is not the local owner for the group. If it
-        // owns the group, session-start/room-minting is responsible for signing
-        // the member-add itself; a cache miss here is a transient local state,
-        // not a user action item.
+        // Warn only when this daemon does not manage the channel. If it is an
+        // admin, channel/room-minting is responsible for signing the member-add
+        // itself; a cache miss here is transient local state, not a user action.
         let should_warn_not_member = {
             let s = store.lock().expect("store mutex poisoned");
-            let not_member = !s.is_group_member(&scope, &rec.agent_pubkey).unwrap_or(true);
-            let locally_owned = s.is_group_owned(&scope).unwrap_or(false);
-            not_member && !locally_owned
+            let not_member = !s.is_channel_member(&scope, &rec.agent_pubkey).unwrap_or(true);
+            let locally_managed = s.is_channel_admin(&scope, backend_pubkey).unwrap_or(false);
+            not_member && !locally_managed
         };
         if should_warn_not_member {
             blocks.push(format!(
@@ -102,14 +125,15 @@ pub fn assemble_turn_start_context(
         }
     }
 
-    let chat_rows = {
+    // Direct deliveries (mentions/DMs routed to this session) come from the
+    // inbox ledger; ambient channel chat comes from the relay-event log gated by
+    // the session's awareness high-water mark (`seen_cursor`).
+    let (mentions, ambient) = {
         let s = store.lock().expect("store mutex poisoned");
-        let mut rows = s.drain_chat(&rec.session_id).unwrap_or_default();
-        fill_sender_labels(&s, &mut rows);
-        rows
+        let mentions = take_inbox(&s, &rec.session_id, now);
+        let ambient = ambient_chat(&s, &scope, rec.seen_cursor, &rec.agent_pubkey);
+        (mentions, ambient)
     };
-    let (mentions, ambient) = crate::injection::split_direct_mentions(chat_rows, &rec.session_id);
-    let now = now_secs();
     if let Some(block) = crate::injection::render_direct_mention_prompt(&mentions, now) {
         blocks.push(block);
     }
@@ -131,12 +155,19 @@ pub fn assemble_turn_start_context(
                 prev_turn_started_at,
                 &scope,
                 now,
-                Some(&rec.session_id),
+                Some(&rec.agent_pubkey),
             )
         }
     };
     if let Some(block) = awareness {
         blocks.push(block);
+    }
+
+    // Advance the awareness high-water mark so the next hook renders only the
+    // delta past what we just surfaced.
+    {
+        let s = store.lock().expect("store mutex poisoned");
+        s.set_seen_cursor(&rec.session_id, now).ok();
     }
 
     if blocks.is_empty() {
@@ -161,58 +192,40 @@ pub fn assemble_turn_start_context(
 ///   `now` is the shared timestamp.
 pub fn assemble_turn_check_context(
     store: &std::sync::Mutex<Store>,
-    rec: &crate::state::SessionRecord,
+    rec: &Session,
     _self_host: &str,
     delta_since: Option<u64>,
     now: u64,
 ) -> Option<String> {
     let mut blocks: Vec<String> = Vec::new();
-    // Routing scope: channel when set (a `channels switch` moved the session
-    // to a subgroup), else the per-session room. The status delta + chat label
-    // key on this so mid-turn context reflects the room the session is actually
-    // publishing into after a switch.
-    let scope = rec.route_scope().to_string();
+    // Routing scope is the session's `channel_h`. The status delta + chat label
+    // key on this so mid-turn context reflects the channel the session is
+    // actually publishing into after a switch.
+    let scope = rec.channel_h.clone();
     let channel = if scope.starts_with('#') {
         scope.clone()
     } else {
         format!("#{scope}")
     };
 
+    // Mentions that arrived mid-turn land as fresh pending inbox rows. Draining
+    // them (and marking delivered) is the new "notify once" — there is no
+    // separate notified flag; the inbox state IS the idempotency record.
     let direct_mentions = {
         let s = store.lock().expect("store mutex poisoned");
-        let mut rows = s
-            .peek_unnotified_chat_mentions(&rec.session_id)
-            .unwrap_or_default();
-        fill_sender_labels(&s, &mut rows);
-        rows
+        take_inbox(&s, &rec.session_id, now)
     };
     if let Some(block) = crate::injection::render_direct_mention_prompt(&direct_mentions, now) {
-        let ids: Vec<String> = direct_mentions
-            .iter()
-            .map(|row| row.chat_event_id.clone())
-            .collect();
-        if !ids.is_empty() {
-            let s = store.lock().expect("store mutex poisoned");
-            s.mark_chat_rows_notified(&rec.session_id, &ids, now).ok();
-        }
         blocks.push(block);
     }
 
     // Ambient chat and sibling-delta remain gated by the daemon's rate-limit
     // floor and cursored off the same `since` so nothing re-emits per tool call.
     if let Some(since) = delta_since {
-        let chat_rows: Vec<_> = {
+        let chat_rows = {
             let s = store.lock().expect("store mutex poisoned");
-            let mut rows = s.peek_chat(&rec.session_id).unwrap_or_default();
-            fill_sender_labels(&s, &mut rows);
-            rows
-        }
-        .into_iter()
-        .filter(|r| r.mentioned_session != rec.session_id)
-        // Only chat newer than the cursor is "new since the last check"; older
-        // rows were already surfaced this turn (peek leaves them undelivered).
-        .filter(|r| r.created_at > since)
-        .collect();
+            ambient_chat(&s, &scope, since, &rec.agent_pubkey)
+        };
         if let Some(block) = crate::injection::render_channel_chat_block(
             &format!("[tenex-edge] Messages on {channel} since your last check:"),
             &chat_rows,
@@ -223,7 +236,7 @@ pub fn assemble_turn_check_context(
 
         let s = store.lock().expect("store mutex poisoned");
         if let Some(block) =
-            render_awareness_update_since_check(&s, since, &scope, now, Some(&rec.session_id))
+            render_awareness_update_since_check(&s, since, &scope, now, Some(&rec.agent_pubkey))
         {
             blocks.push(block);
         }

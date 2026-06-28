@@ -156,8 +156,8 @@ fn chat_write_stdin_enqueues_live_project_chat_for_receiver() {
         .get_session(&receiver_canon)
         .unwrap()
         .expect("receiver session row")
-        .route_scope()
-        .to_string();
+        .channel_h
+        .clone();
 
     // Mention is now inline in the body as `@<codename>` — no --mention flag.
     let receiver_codename = session_codename(&receiver_canon);
@@ -186,18 +186,32 @@ fn chat_write_stdin_enqueues_live_project_chat_for_receiver() {
         String::from_utf8_lossy(&out.stderr)
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
+    // The author slug/host now resolves from the relay-cached `relay_profiles`
+    // (materialized from kind:0). A local agent whose kind:0 isn't materialized in
+    // this nak-relay env renders the short-pubkey fallback, so assert the body and
+    // timestamp render (the sender identity is checked deterministically below via
+    // the inbox `from_pubkey`).
     assert!(
-        stdout.contains(&format!("<chat-sender@test-host> {body} [")),
-        "chat read should render sender, host, body, and timestamp; got: {stdout}"
+        stdout.contains(&format!("> {body} [")),
+        "chat read should render the body and a timestamp; got: {stdout}"
     );
 
+    // The sender's authoring pubkey (its ordinal-0 durable agent key) is what the
+    // inbox records as `from_pubkey` — the inbox no longer stores a `from_session`.
+    let sender_pubkey = Store::open(&home.store_path())
+        .unwrap()
+        .get_session(&sender_canon)
+        .unwrap()
+        .expect("sender session row")
+        .agent_pubkey;
     let mut received = false;
     for _ in 0..12 {
         let store = Store::open(&home.store_path()).unwrap();
-        let rows = store.peek_chat(&receiver_canon).unwrap();
+        // peek_chat → the inbound routing ledger; pending rows for the receiver.
+        let rows = store.drain_pending_for_session(&receiver_canon).unwrap();
         if let Some(row) = rows.iter().find(|row| row.body == body) {
-            assert_eq!(row.mentioned_session, receiver_canon);
-            assert_eq!(row.from_session, sender_canon);
+            assert_eq!(row.target_session, receiver_canon);
+            assert_eq!(row.from_pubkey, sender_pubkey);
             received = true;
             break;
         }
@@ -215,10 +229,11 @@ fn chat_write_stdin_enqueues_live_project_chat_for_receiver() {
             .await
             .expect("statusline");
         let pending = statusline["pending"].as_array().expect("pending array");
+        // `from_slug` is resolved from the relay-cached profile; the local sender's
+        // kind:0 isn't materialized in this nak env, so match on body (the delivery
+        // is the invariant; sender identity is checked above via inbox from_pubkey).
         assert!(
-            pending
-                .iter()
-                .any(|row| { row["from_slug"] == "chat-sender" && row["body"] == body }),
+            pending.iter().any(|row| { row["body"] == body }),
             "statusline should surface explicit chat mentions as pending: {statusline}"
         );
 
@@ -237,16 +252,17 @@ fn chat_write_stdin_enqueues_live_project_chat_for_receiver() {
             .expect("statusline after drain");
         let recent = statusline["recent"].as_array().expect("recent array");
         assert!(
-            recent
-                .iter()
-                .any(|row| { row["from_slug"] == "chat-sender" && row["body"] == body }),
+            recent.iter().any(|row| { row["body"] == body }),
             "statusline should briefly linger drained chat mentions: {statusline}"
         );
     });
 
     let store = Store::open(&home.store_path()).unwrap();
     assert!(
-        store.peek_chat(&sender_canon).unwrap().is_empty(),
+        store
+            .drain_pending_for_session(&sender_canon)
+            .unwrap()
+            .is_empty(),
         "sender should not receive its own chat row"
     );
 

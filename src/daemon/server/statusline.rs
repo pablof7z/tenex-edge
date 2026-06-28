@@ -1,8 +1,6 @@
 use super::*;
 
 pub(in crate::daemon::server) const STATUSLINE_RECENT_SECS: u64 = 30;
-/// How long a distillation error stays visible in the statusline before expiring.
-pub(in crate::daemon::server) const DISTILL_ERROR_TTL_SECS: u64 = 300;
 
 #[derive(serde::Deserialize, Default)]
 pub(in crate::daemon::server) struct StatuslineParams {
@@ -41,61 +39,50 @@ pub(in crate::daemon::server) fn rpc_statusline(
     };
     let now = now_secs();
     let host = state.host.clone();
-    // Routing scope (channel when set, else the per-session room) — the member
-    // count and is_member check key on it so a `channels switch` is reflected in
-    // the statusline without restarting.
-    let scope = rec.route_scope().to_string();
+    // Routing scope is the session's channel — the member count and is_member
+    // check key on it so a `channels switch` (which repoints channel_h) is
+    // reflected in the statusline without restarting.
+    let scope = rec.channel_h.clone();
     state.with_store(|s| {
-        let member_count = s.count_group_members(&scope).unwrap_or(0);
-        let is_member = s.is_group_member(&scope, &rec.agent_pubkey).unwrap_or(true);
-        // Read busy + title + live activity from the canonical aggregate via
-        // the SHARED projection (derive_status), so the statusline agrees with
-        // `who`/turn-deltas. Pure read: no drains, no touches. The statusline
-        // shows the activity line (the live "doing now" signal from kind:30315),
-        // not the persistent title (the channel title segment carries that).
-        let (working, title, activity) = s
-            .local_session_snapshot(&rec.session_id)
-            .ok()
-            .flatten()
-            .map(|snap| {
-                let d = derive_status(&snap, now);
-                (d.busy, d.title, d.activity)
-            })
-            .unwrap_or((false, String::new(), String::new()));
-        // `channel_title` is the display name of the routing scope (channel or
-        // per-session room) from the relay-authored kind:39000 metadata cache
-        // (== the channel's title on the relay == what the relay renders as the
-        // room's name). Falls back to the distilled session title when the
-        // session is in its own per-session room (issue #6: the room is renamed
-        // to the distilled title via kind:9002 edit-metadata; the local cache
-        // may lag by one refresh).
-        // Session's distilled title always wins when available — it's more
-        // up-to-date than the relay-authored channel name.  Fall back to the
-        // channel's display name only when no title has been produced yet.
+        let member_count = s.count_channel_members(&scope).unwrap_or(0);
+        let is_member = s.is_channel_member(&scope, &rec.agent_pubkey).unwrap_or(true);
+        // Busy + title + live activity come straight off the local session row
+        // (the pre-publish draft the distiller maintains). Pure read: no drains,
+        // no touches. The statusline shows the activity line (the live "doing
+        // now" signal), not the persistent title.
+        let working = rec.working;
+        let title = rec.title.clone();
+        let activity = rec.activity.clone();
+        // `channel_title` is the display name of the channel from the
+        // relay-authored kind:39000 metadata cache (relay_channels). The
+        // session's distilled title wins when available — it is more up to date
+        // than the relay-authored channel name; fall back to the channel name
+        // only when no title has been produced yet.
         let channel_title = if !title.is_empty() {
             title.clone()
         } else {
-            s.group_display_name(&scope).unwrap_or_default()
+            s.get_channel(&scope)
+                .ok()
+                .flatten()
+                .map(|c| c.name)
+                .unwrap_or_default()
         };
-        // `work_root` is the parent project a per-session room or task channel
-        // hangs under, or the project itself for an ordinary project session.
-        // This is the "Project" line in `who`, surfaced as `project-name`.
-        let work_root = s
-            .work_root_for_scope(&scope)
-            .unwrap_or_else(|_| rec.project.clone());
-        let pending_chat = s.peek_chat_mentions(&rec.session_id).unwrap_or_default();
+        // `work_root` is the parent project a task channel hangs under, or the
+        // channel itself for a top-level project session ('' parent). This is
+        // the "Project" line in `who`, surfaced as `project-name`.
+        let work_root = match s.channel_parent(&scope).ok().flatten() {
+            Some(p) if !p.is_empty() => p,
+            _ => scope.clone(),
+        };
+        let pending_chat = s.drain_pending_for_session(&rec.session_id).unwrap_or_default();
         let recent_since = now.saturating_sub(STATUSLINE_RECENT_SECS);
         let recent_chat = s
-            .list_recently_delivered_chat_mentions(&rec.session_id, recent_since)
+            .recently_delivered_for_session(&rec.session_id, recent_since)
             .unwrap_or_default();
-        let mut pending_json = chat_rows_to_json(&pending_chat);
+        let mut pending_json = chat_rows_to_json(s, &pending_chat);
         sort_message_json(&mut pending_json);
-        let mut recent_json = chat_rows_to_json(&recent_chat);
+        let mut recent_json = chat_rows_to_json(s, &recent_chat);
         sort_message_json(&mut recent_json);
-        let distill_error = s
-            .get_recent_session_error(&rec.session_id, now.saturating_sub(DISTILL_ERROR_TTL_SECS))
-            .ok()
-            .flatten();
         Ok(serde_json::json!({
             "agent": rec.agent_slug,
             "host": host,
@@ -110,7 +97,7 @@ pub(in crate::daemon::server) fn rpc_statusline(
             "activity": activity,
             "pending": pending_json,
             "recent": recent_json,
-            "distill_error": distill_error,
+            "distill_error": serde_json::Value::Null,
         }))
     })
 }

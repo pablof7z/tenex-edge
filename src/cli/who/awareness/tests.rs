@@ -1,97 +1,56 @@
 use super::*;
-use crate::session::{Harness, PeerStatusObservation, SessionObservation};
-use crate::state::{ChatLogRow, Store};
+use crate::state::{RelayEvent, Status, Store};
 
-fn register_local(
-    store: &Store,
-    slug: &str,
-    pubkey: &str,
-    project: &str,
-    session: &str,
-    ts: u64,
-) -> String {
-    store
-        .register_or_reassert_session(&SessionObservation {
-            agent_slug: slug.to_string(),
-            agent_pubkey: pubkey.to_string(),
-            project: project.to_string(),
-            host: "laptop".to_string(),
-            rel_cwd: String::new(),
-            harness: Harness::ClaudeCode,
-            harness_session_id: Some(session.to_string()),
-            resume_id: None,
-            tmux_pane: None,
-            watch_pid: None,
-            observed_at: ts,
-        })
-        .unwrap()
-        .session_id
-        .as_str()
-        .to_string()
+const NOW: u64 = 1_000;
+
+/// Materialize a kind:39000 channel.
+fn chan(store: &Store, id: &str, name: &str, about: &str, parent: &str) {
+    store.upsert_channel(id, name, about, parent, 1).unwrap();
 }
 
-fn seed_title(store: &Store, session: &str, title: &str, ts: u64) {
-    let turn = store.start_turn(session, ts).unwrap().unwrap();
-    store
-        .seed_title_if_empty(session, turn.turn_id, title, ts)
-        .unwrap();
+/// Replace a channel's member roster (kind:39002).
+fn members(store: &Store, project: &str, pubkeys: &[&str]) {
+    let v: Vec<String> = pubkeys.iter().map(|s| s.to_string()).collect();
+    store.replace_channel_members(project, &v, 1).unwrap();
 }
 
-fn record_peer(store: &Store, slug: &str, pubkey: &str, project: &str, title: &str, ts: u64) {
+/// Publish a live kind:30315 status for an agent in a channel.
+fn status(store: &Store, pubkey: &str, slug: &str, channel: &str, title: &str, busy: bool, ts: u64) {
     store
-        .upsert_profile(pubkey, slug, "tower", false, ts)
+        .upsert_profile(pubkey, slug, slug, "tower", false, 1)
         .unwrap();
     store
-        .record_peer_status(&PeerStatusObservation {
-            agent_pubkey: pubkey.to_string(),
-            agent_slug: slug.to_string(),
-            project: project.to_string(),
-            host: "tower".to_string(),
-            rel_cwd: String::new(),
+        .upsert_status(&Status {
+            pubkey: pubkey.to_string(),
+            channel_h: channel.to_string(),
+            slug: slug.to_string(),
             title: title.to_string(),
             activity: String::new(),
-            busy: true,
-            emitted_at: ts,
-            observed_at: ts,
+            busy,
+            last_seen: ts,
+            updated_at: ts,
+            expiration: NOW + 90,
         })
         .unwrap();
 }
 
-fn record_chat(store: &Store, id: &str, project: &str, from: &str, body: &str, ts: u64) {
-    record_chat_from_session(store, id, project, from, &format!("sid-{from}"), body, ts);
-}
-
-fn record_chat_from_session(
-    store: &Store,
-    id: &str,
-    project: &str,
-    from: &str,
-    from_session: &str,
-    body: &str,
-    ts: u64,
-) {
+/// Append a kind:9 chat event to a channel's relay-event log.
+fn chat(store: &Store, id: &str, channel: &str, from_slug: &str, body: &str, ts: u64) {
+    let pubkey = format!("pk-{from_slug}");
     store
-        .record_chat(&ChatLogRow {
-            chat_event_id: id.to_string(),
-            from_pubkey: format!("pk-{from}"),
-            from_slug: from.to_string(),
-            host: "host".to_string(),
-            project: project.to_string(),
-            body: body.to_string(),
+        .upsert_profile(&pubkey, from_slug, from_slug, "host", false, 1)
+        .unwrap();
+    store
+        .insert_event(&RelayEvent {
+            id: id.to_string(),
+            kind: 9,
+            pubkey,
             created_at: ts,
-            from_session: from_session.to_string(),
-            mentioned_session: String::new(),
+            channel_h: channel.to_string(),
+            d_tag: String::new(),
+            content: body.to_string(),
+            tags_json: "[]".to_string(),
         })
-        .unwrap();
-}
-
-fn group(store: &Store, id: &str, name: &str, parent: &str) {
-    store.upsert_group_metadata(id, name, parent, 1).unwrap();
-}
-
-fn member(store: &Store, project: &str, pubkey: &str) {
-    store
-        .upsert_group_member(project, pubkey, "member", 1)
         .unwrap();
 }
 
@@ -109,59 +68,66 @@ fn assert_lacks(block: &str, needle: &str) {
 #[test]
 fn snapshot_renders_awareness_without_transport_events() {
     let store = Store::open_memory().unwrap();
-    group(&store, "tenex-edge", "Core repo", "");
-    store
-        .upsert_project_meta("tenex-edge", "Agent coordination substrate", 1)
-        .unwrap();
-    group(&store, "child", "Channel awareness hook", "tenex-edge");
-    group(
+    chan(
+        &store,
+        "tenex-edge",
+        "Core repo",
+        "Agent coordination substrate",
+        "",
+    );
+    chan(&store, "child", "Channel awareness hook", "", "tenex-edge");
+    chan(
         &store,
         "ci-flake",
         "Debugging runner trust-cache failures",
+        "",
         "child",
     );
-    group(
+    chan(
         &store,
         "session-a9f2",
         "Investigating duplicate session rooms",
         "",
+        "",
     );
-    for (project, pubkey) in [
-        ("child", "pk-codex"),
-        ("child", "pk-claude"),
-        ("ci-flake", "pk-a"),
-        ("ci-flake", "pk-b"),
-        ("session-a9f2", "pk-other"),
-    ] {
-        member(&store, project, pubkey);
-    }
+    members(&store, "child", &["pk-codex", "pk-claude"]);
+    members(&store, "ci-flake", &["pk-a", "pk-b"]);
+    members(&store, "session-a9f2", &["pk-other"]);
 
-    let me = register_local(&store, "codex", "pk-codex", "child", "sid-codex", 990);
-    seed_title(&store, &me, "Designing channel awareness injection", 995);
-    record_peer(
+    // Self (codex) and a peer (claude) are both live in #child; an unrelated
+    // channel (session-a9f2) is active via its own member's status.
+    status(
         &store,
-        "claude",
+        "pk-codex",
+        "codex",
+        "child",
+        "Designing channel awareness injection",
+        true,
+        995,
+    );
+    status(
+        &store,
         "pk-claude",
+        "claude",
         "child",
         "Tracing current status delta behavior",
+        true,
         996,
     );
-    record_chat(
+    status(
         &store,
-        "chat-other",
+        "pk-other",
+        "other",
         "session-a9f2",
-        "claude",
-        "semantic ping",
+        "Investigating duplicate session rooms",
+        true,
         997,
     );
 
-    let block = render_awareness_snapshot(&store, "child", 1_000, "codex", "pk-codex").unwrap();
+    let block = render_awareness_snapshot(&store, "child", NOW, "codex", "pk-codex").unwrap();
 
     assert_has(&block, "[tenex-edge] Fabric context");
-    assert_has(
-        &block,
-        "Project: tenex-edge -- Agent coordination substrate",
-    );
+    assert_has(&block, "Project: tenex-edge -- Agent coordination substrate");
     assert_has(
         &block,
         "Channel: #tenex-edge -- Core repo > #child -- Channel awareness hook",
@@ -184,30 +150,35 @@ fn snapshot_renders_awareness_without_transport_events() {
 }
 
 #[test]
-fn update_renders_state_activity_and_omits_gone_sessions() {
+fn update_renders_state_activity_and_omits_unchanged_sessions() {
     let store = Store::open_memory().unwrap();
-    group(&store, "child", "Channel awareness hook", "");
-    group(&store, "ci-flake", "Runner issue isolated", "child");
-    for (project, pubkey) in [
-        ("child", "pk-claude"),
-        ("child", "pk-old"),
-        ("ci-flake", "pk-a"),
-        ("ci-flake", "pk-b"),
-        ("session-a9f2", "pk-other"),
-    ] {
-        member(&store, project, pubkey);
-    }
-    let old = register_local(&store, "old", "pk-old", "child", "sid-old", 800);
-    store.end_session(&old, 950).unwrap();
-    record_peer(
+    chan(&store, "child", "Channel awareness hook", "", "");
+    chan(&store, "ci-flake", "Runner issue isolated", "", "child");
+    members(&store, "child", &["pk-claude"]);
+    members(&store, "ci-flake", &["pk-a", "pk-b"]);
+
+    // Peer claude changed after the cursor (960 > 900).
+    status(
         &store,
-        "claude",
         "pk-claude",
+        "claude",
         "child",
         "Found the stale routing scope after channel switch",
+        true,
         960,
     );
-    record_chat(
+    // A subchannel and another channel saw status changes too.
+    status(&store, "pk-a", "a", "ci-flake", "fixing runner", true, 975);
+    status(
+        &store,
+        "pk-other",
+        "other",
+        "session-a9f2",
+        "other channel changed",
+        true,
+        980,
+    );
+    chat(
         &store,
         "chat-child",
         "child",
@@ -215,25 +186,9 @@ fn update_renders_state_activity_and_omits_gone_sessions() {
         "The stale scope read is in turn_check.",
         970,
     );
-    record_chat(
-        &store,
-        "chat-sub",
-        "ci-flake",
-        "claude",
-        "subchannel changed",
-        975,
-    );
-    record_chat(
-        &store,
-        "chat-other",
-        "session-a9f2",
-        "codex",
-        "other channel changed",
-        980,
-    );
 
     let block =
-        render_awareness_update_since_check(&store, 900, "child", 1_000, Some(&old)).unwrap();
+        render_awareness_update_since_check(&store, 900, "child", NOW, Some("pk-old")).unwrap();
 
     assert_has(&block, "[tenex-edge] Fabric updates since your last check");
     assert_has(
@@ -247,26 +202,24 @@ fn update_renders_state_activity_and_omits_gone_sessions() {
         &block,
         "[@claude, just now] The stale scope read is in turn_check.",
     );
-    assert_lacks(&block, "@old");
     assert_lacks(&block, "joined");
     assert_lacks(&block, "left");
 }
 
 #[test]
-fn update_activity_does_not_echo_current_session_prompt() {
+fn update_activity_excludes_viewers_own_chat() {
     let store = Store::open_memory().unwrap();
-    group(&store, "child", "Channel awareness hook", "");
-    let me = register_local(&store, "codex", "pk-codex", "child", "sid-me", 900);
-    record_chat_from_session(
+    chan(&store, "child", "Channel awareness hook", "", "");
+    // The viewer (codex) authored a chat; it must not echo back to them.
+    chat(
         &store,
         "chat-self",
         "child",
-        "operator",
-        &me,
+        "codex",
         "did you validate it with real usage?",
         960,
     );
-    record_chat(
+    chat(
         &store,
         "chat-other",
         "child",
@@ -275,7 +228,7 @@ fn update_activity_does_not_echo_current_session_prompt() {
         970,
     );
 
-    let block = render_awareness_update_since_check(&store, 900, "child", 1_000, Some(&me))
+    let block = render_awareness_update_since_check(&store, 900, "child", NOW, Some("pk-codex"))
         .expect("other activity should still render");
 
     assert_has(&block, "Activity in #child:");
@@ -284,62 +237,64 @@ fn update_activity_does_not_echo_current_session_prompt() {
         "[@claude, just now] I validated it through the real hook.",
     );
     assert_lacks(&block, "did you validate it with real usage?");
-    assert_lacks(&block, "@operator");
 }
 
 #[test]
 fn other_active_channels_use_status_titles_without_repeating_old_activity() {
     let store = Store::open_memory().unwrap();
-    group(&store, "child", "Channel awareness hook", "");
-    group(&store, "session-a9f2", "session-a9f2", "");
-    record_peer(
+    chan(&store, "child", "Channel awareness hook", "", "");
+    chan(&store, "session-a9f2", "session-a9f2", "", "");
+    status(
         &store,
-        "codex",
         "pk-codex",
+        "codex",
         "session-a9f2",
         "Investigating duplicate session rooms",
+        true,
         980,
     );
 
-    let block = render_awareness_update_since_check(&store, 900, "child", 1_000, None).unwrap();
+    let block = render_awareness_update_since_check(&store, 900, "child", NOW, None).unwrap();
     assert_has(
         &block,
         "- #session-a9f2 -- Investigating duplicate session rooms [1 member]",
     );
 
-    let later = render_awareness_update_since_check(&store, 990, "child", 1_000, None);
+    // No new status since 990 → nothing to repeat.
+    let later = render_awareness_update_since_check(&store, 990, "child", NOW, None);
     assert!(
         later.is_none(),
-        "old active channel state must not repeat without new semantic activity; got: {later:?}"
+        "old active channel state must not repeat without new activity; got: {later:?}"
     );
 }
 
 #[test]
 fn appeared_member_without_work_text_is_not_announced() {
     let store = Store::open_memory().unwrap();
-    group(&store, "child", "Channel awareness hook", "");
-    record_peer(&store, "empty", "pk-empty", "child", "", 980);
+    chan(&store, "child", "Channel awareness hook", "", "");
+    status(&store, "pk-empty", "empty", "child", "", false, 980);
 
-    let block = render_awareness_update_since_check(&store, 900, "child", 1_000, None);
+    let block = render_awareness_update_since_check(&store, 900, "child", NOW, None);
     assert!(
         block.is_none(),
-        "appearance without title/activity should not become joined/noise; got: {block:?}"
+        "appearance without title/activity should not become noise; got: {block:?}"
     );
 }
 
 #[test]
 fn snapshot_includes_live_peer_even_when_roster_is_not_hydrated() {
     let store = Store::open_memory().unwrap();
-    group(&store, "child", "Channel awareness hook", "");
-    record_peer(
+    chan(&store, "child", "Channel awareness hook", "", "");
+    status(
         &store,
-        "claude",
         "pk-claude",
+        "claude",
         "child",
         "Tracing current status delta behavior",
+        true,
         980,
     );
 
-    let block = render_awareness_snapshot(&store, "child", 1_000, "codex", "pk-codex").unwrap();
+    let block = render_awareness_snapshot(&store, "child", NOW, "codex", "pk-codex").unwrap();
     assert_has(&block, "- @claude - Tracing current status delta behavior");
 }
