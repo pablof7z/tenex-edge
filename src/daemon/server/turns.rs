@@ -105,8 +105,18 @@ pub(in crate::daemon::server) fn rpc_turn_check(
     )?;
     let now = now_secs();
     // The sibling-session delta is rendered from the awareness high-water mark
-    // (`seen_cursor`); only emit it mid-turn.
-    let delta_since = rec.working.then_some(rec.seen_cursor);
+    // (`seen_cursor`). We advance the cursor atomically — only the first of any
+    // concurrent PostToolUse hooks wins the CAS; the rest get delta_since=None
+    // and emit nothing, preventing duplicate injections from parallel tool calls.
+    let delta_since = if rec.working {
+        let old = rec.seen_cursor;
+        let won = state
+            .with_store(|s| s.try_advance_seen_cursor(&rec.session_id, old, now))
+            .unwrap_or(false);
+        won.then_some(old)
+    } else {
+        None
+    };
     let context =
         crate::cli::assemble_turn_check_context(&state.store, &rec, &state.host, delta_since, now)
             .map(serde_json::Value::String)
