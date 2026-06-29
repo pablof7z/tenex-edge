@@ -114,6 +114,18 @@ pub(super) enum Cmd {
         #[command(subcommand)]
         action: AgentAction,
     },
+    /// List the agents you can invite into a channel — the local keystore, with
+    /// each agent's "when to use" byline. Pull one in with `tenex-edge invite
+    /// <slug>`, which spawns a fresh session for it in your current channel.
+    Agents,
+    /// Invite an agent into your CURRENT channel by spawning a fresh session for
+    /// it (the explicit alternative to @-mentioning, which never auto-spawns).
+    Invite {
+        /// `slug` of a local agent, or `slug@backend` where `backend` is the hex
+        /// pubkey/npub of the target backend (defaults to the local backend).
+        /// List options with `tenex-edge agents`.
+        agent: String,
+    },
     /// Render the one-line fabric statusline for a host's status bar.
     /// Reads the harness's statusline JSON payload on stdin (for `session_id`),
     /// prints one line, and always exits 0 — fails open when the daemon is down

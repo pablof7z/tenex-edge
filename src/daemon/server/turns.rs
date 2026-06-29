@@ -69,11 +69,41 @@ pub(in crate::daemon::server) async fn rpc_turn_start(
     // Assemble via the SHARED cli.rs function so the injected text is byte-identical
     // to the pre-daemon CLI and cannot drift.
     let backend_pubkey = state.backend_pubkey.clone().unwrap_or_default();
-    let context =
-        crate::cli::assemble_turn_start_context(&state.store, &rec, &backend_pubkey, prev_started)
+    let base = crate::cli::assemble_turn_start_context(
+        &state.store,
+        &rec,
+        &backend_pubkey,
+        &state.host,
+        prev_started,
+    );
+    // Surface newly-available invitable agents (decision D) on a DELTA turn only
+    // (never the first turn), keyed off the same per-session high-water mark so a
+    // given new agent is announced once.
+    let merged = if prev_started != 0 {
+        merge_new_agents(base, prev_started, now)
+    } else {
+        base
+    };
+    let context = merged
         .map(serde_json::Value::String)
         .unwrap_or(serde_json::Value::Null);
     Ok(serde_json::json!({ "context": context }))
+}
+
+/// Append the "new agents available" delta section (decision D) to an assembled
+/// context. Reads the LOCAL keystore (daemon-only — never on a unit-tested code
+/// path) and surfaces agents created in `(since, now]`. Standalone → labelled
+/// with the `[tenex-edge]` prefix; folded into an existing delta as a section.
+fn merge_new_agents(base: Option<String>, since: u64, now: u64) -> Option<String> {
+    let edge = crate::config::edge_home();
+    let roster = crate::identity::list_invitable_agents(&edge);
+    let section = crate::cli::new_agent_block(&roster, since, now);
+    match (base, section) {
+        (Some(b), Some(s)) => Some(format!("{b}\n\n{s}")),
+        (Some(b), None) => Some(b),
+        (None, Some(s)) => Some(format!("[tenex-edge] {s}")),
+        (None, None) => None,
+    }
 }
 
 #[derive(serde::Deserialize, Default)]
@@ -117,10 +147,16 @@ pub(in crate::daemon::server) fn rpc_turn_check(
     } else {
         None
     };
-    let context =
-        crate::cli::assemble_turn_check_context(&state.store, &rec, &state.host, delta_since, now)
-            .map(serde_json::Value::String)
-            .unwrap_or(serde_json::Value::Null);
+    let base =
+        crate::cli::assemble_turn_check_context(&state.store, &rec, &state.host, delta_since, now);
+    // Same roster-on-change surfacing as turn_start, gated on the delta window.
+    let merged = match delta_since {
+        Some(since) => merge_new_agents(base, since, now),
+        None => base,
+    };
+    let context = merged
+        .map(serde_json::Value::String)
+        .unwrap_or(serde_json::Value::Null);
     Ok(serde_json::json!({ "context": context }))
 }
 

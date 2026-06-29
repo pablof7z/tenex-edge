@@ -193,16 +193,54 @@ pub async fn channels(action: ChannelsAction) -> Result<()> {
                 .ok()
                 .filter(|s| !s.is_empty())
                 .context("channels switch must be run from within a tenex-edge agent session (TENEX_EDGE_SESSION is not set)")?;
-            daemon_call_async(
+            let v = daemon_call_async(
                 "channels_switch",
                 serde_json::json!({
-                    "channel": channel,
+                    "channel": channel.clone(),
                     "env_session": env_session,
                 }),
             )
             .await?;
+            // Ambiguous reference: the daemon returns the candidate paths instead
+            // of switching. Print them as copy-paste-ready re-runs and exit 2 so a
+            // calling agent can branch on the code without parsing prose.
+            if let Some(refs) = v["ambiguous"].as_array() {
+                let name = v["reference"].as_str().unwrap_or(&channel);
+                eprintln!("'{name}' is ambiguous — re-run with an exact path:");
+                for r in refs.iter().filter_map(|r| r.as_str()) {
+                    eprintln!("  tenex-edge channels switch {r}");
+                }
+                std::process::exit(2);
+            }
             println!("switched to channel {}", channel);
         }
     }
+    Ok(())
+}
+
+// ── invite (spawn a fresh session into the current channel) ──────────────────
+
+/// `tenex-edge invite <slug[@backend]>` — spawn a fresh session for an agent into
+/// the channel this command runs in. Forwards the caller's session-env signals so
+/// the daemon can pin the spawn to the inviter's current `channel_h`.
+pub async fn invite(agent: String) -> Result<()> {
+    let v = daemon_call_async(
+        "invite",
+        serde_json::json!({
+            "agent": agent,
+            "env_session": std::env::var("TENEX_EDGE_SESSION").ok(),
+            "cwd": std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()),
+            "agent_slug": crate::cli::agent_env_slug(),
+        }),
+    )
+    .await?;
+    let slug = v["agent"].as_str().unwrap_or(&agent);
+    let pane = v["pane_id"].as_str().unwrap_or("?");
+    // Never print the opaque channel_h (same no-leak rule as the fabric format).
+    println!(
+        "invited {} into your current channel — fresh session spawned (pane {})",
+        slug.bold(),
+        pane.dimmed()
+    );
     Ok(())
 }

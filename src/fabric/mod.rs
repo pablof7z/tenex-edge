@@ -65,6 +65,7 @@ pub struct MaterializationOutcome {
 ///   * 39000 → relay_channels, 39001/39002 → relay_channel_members,
 ///   * 0 → relay_profiles, 30315 → relay_status,
 ///   * every other kind → relay_events (verbatim log, NIP-01 replacement).
+///
 /// Chat (kind:9) is additionally routed into the inbox ledger for the local
 /// sessions in its channel — the inbox row is the idempotency record.
 ///

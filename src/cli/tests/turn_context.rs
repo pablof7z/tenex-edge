@@ -75,7 +75,8 @@ fn turn_start_context_returns_none_when_empty_non_first_turn() {
     let rec = test_session("sess-freeze-2");
     let m = Mutex::new(store);
 
-    let ctx = assemble_turn_start_context(&m, &rec, BACKEND, /* prev_turn_started_at */ 42);
+    let ctx =
+        assemble_turn_start_context(&m, &rec, BACKEND, "laptop", /* prev_turn_started_at */ 42);
     assert!(
         ctx.is_none(),
         "turn_start with no inbox, non-first turn, no peers must return None; got: {ctx:?}"
@@ -89,8 +90,8 @@ fn first_turn_renders_awareness_snapshot_not_session_code() {
     let rec = test_session("sess-intro");
     let m = Mutex::new(store);
 
-    let text =
-        assemble_turn_start_context(&m, &rec, BACKEND, 0).expect("first-turn intro expected");
+    let text = assemble_turn_start_context(&m, &rec, BACKEND, "laptop", 0)
+        .expect("first-turn intro expected");
     assert!(
         text.contains("[tenex-edge] Fabric context"),
         "first turn should render fabric awareness; got: {text:?}"

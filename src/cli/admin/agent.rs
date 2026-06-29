@@ -92,6 +92,30 @@ pub async fn agent(action: AgentAction) -> Result<()> {
     Ok(())
 }
 
+/// `tenex-edge agents` — the invitable roster: every local-keystore agent with
+/// its "when to use" byline, plus the gesture to pull one in. Distinct from
+/// `agent list` (a keystore-management view of pubkeys/commands): this is the
+/// recruiting screen an agent or human consults before an `invite`. Reads the
+/// local store directly — no daemon round-trip.
+pub async fn agents_roster() -> Result<()> {
+    let edge_home = crate::config::edge_home();
+    let rows = crate::identity::list_local_agents(&edge_home);
+    if rows.is_empty() {
+        println!("No agents to invite (none in {}).", edge_home.join("agents").display());
+        println!("Add one with: tenex-edge agent add <slug> [-- <command>]");
+        return Ok(());
+    }
+    println!("Agents you can invite (spawns a fresh session in your current channel):");
+    for (slug, _command, _agent_def, byline) in &rows {
+        match byline.as_deref().map(str::trim).filter(|b| !b.is_empty()) {
+            Some(b) => println!("  @{} — {}", slug.bold(), b),
+            None => println!("  @{}", slug.bold()),
+        }
+    }
+    println!("\nInvite one with: tenex-edge invite <slug>");
+    Ok(())
+}
+
 /// Publish an agent's kind:0 identity card via the daemon (which owns the
 /// transport pool including the indexer relay). Best effort: failures are
 /// reported but never abort agent creation.

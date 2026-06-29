@@ -1,0 +1,26 @@
+[
+  [
+    "user",
+    "do we remove agents from channels? when?"
+  ],
+  [
+    "assistant",
+    "Agents are removed on `session_end` via nip29_remove_member, but the DB row is kept for session resume via ordinal reuse."
+  ],
+  [
+    "user",
+    "it shouldn't remove it on session end"
+  ],
+  [
+    "assistant",
+    "Clean. Agent stays in the channel across session boundaries; kind:30315 TTL is the only liveness signal."
+  ],
+  [
+    "user",
+    "commit your work"
+  ],
+  [
+    "assistant",
+    "Done."
+  ]
+]

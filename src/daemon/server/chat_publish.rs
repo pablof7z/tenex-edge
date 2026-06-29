@@ -3,12 +3,8 @@ use super::*;
 
 pub(in crate::daemon::server) struct ChatRecordDraft {
     from_pubkey: String,
-    from_slug: String,
-    host: String,
     project: String,
     body: String,
-    from_session: String,
-    mentioned_session: String,
 }
 
 pub(in crate::daemon::server) async fn publish_chat_checked(
@@ -116,12 +112,8 @@ pub(in crate::daemon::server) async fn publish_agent_reply(
     };
     let draft = ChatRecordDraft {
         from_pubkey,
-        from_slug: rec.agent_slug.clone(),
-        host: state.host.clone(),
         project: scope,
         body: reply.to_string(),
-        from_session: rec.session_id.clone(),
-        mentioned_session: String::new(),
     };
     let publish = publish_chat_checked(state, &chat, &signing, &draft);
     match tokio::time::timeout(std::time::Duration::from_secs(3), publish).await {
@@ -235,12 +227,8 @@ pub(in crate::daemon::server) async fn rpc_user_prompt(
     };
     let draft = ChatRecordDraft {
         from_pubkey: op_pubkey,
-        from_slug: "operator".to_string(),
-        host: state.host.clone(),
         project: scope.clone(),
         body: p.prompt.clone(),
-        from_session: rec.session_id.clone(),
-        mentioned_session: String::new(),
     };
     // Try once synchronously so local chat history exists when the hook/RPC
     // returns. If relay membership is still converging, fall back to a daemon

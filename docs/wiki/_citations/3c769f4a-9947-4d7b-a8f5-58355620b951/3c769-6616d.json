@@ -1,0 +1,6 @@
+{
+  "id": "3c769-6616d",
+  "ts": "2026-06-29T09:54:03Z",
+  "session": "3c769f4a-9947-4d7b-a8f5-58355620b951",
+  "text": "User: it shouldn't remove it on session end [...] Assistant: Clean. Agent stays in the channel across session boundaries; kind:30315 TTL is the only liveness signal."
+}

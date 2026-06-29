@@ -324,31 +324,20 @@ pub(in crate::daemon::server) async fn rpc_channels_switch(
         .filter(|s| !s.is_empty())
         .context("channels switch must be run from within a tenex-edge agent session (TENEX_EDGE_SESSION is not set)")?;
     let rec = resolve_session(state, None, Some(env_session), None, None, None)?;
-    // Resolve a channel NAME (or a literal id) to its opaque `channel_h` within
-    // the session's project scope before switching — never create on switch.
-    let parent = state.with_store(|s| {
-        s.channel_parent(&rec.channel_h)
-            .ok()
-            .flatten()
-            .filter(|p| !p.is_empty())
-            .unwrap_or_else(|| rec.channel_h.clone())
-    });
-    let new_channel = super::resolve_channel(
-        state,
-        &parent,
-        &p.channel,
-        Some(&rec.agent_slug),
-        false,
-    )
-    .await?;
-    // Validate the channel exists in local state before switching.
-    let exists = state
-        .with_store(|s| s.get_channel(&new_channel))
-        .unwrap_or(None)
-        .is_some();
-    if !exists {
-        anyhow::bail!("channel {:?} does not exist", new_channel);
-    }
+    // Resolve a PROJECT-RELATIVE reference (name, `parent/child` path, or `@<id>`
+    // escape hatch) to one opaque `channel_h` within this session's project
+    // subtree — never create on switch, never reach across projects. Ambiguity is
+    // returned to the agent as candidate paths to re-run with, not a prompt.
+    let root = state.with_store(|s| super::project_root(s, &rec.channel_h));
+    let new_channel = match state.with_store(|s| super::resolve_channel_ref(s, &root, &p.channel)) {
+        super::ChannelResolution::Unique(h) => h,
+        super::ChannelResolution::Ambiguous(refs) => {
+            return Ok(serde_json::json!({ "ambiguous": refs, "reference": p.channel }));
+        }
+        super::ChannelResolution::NotFound => {
+            anyhow::bail!("no channel matching {:?} in this project", p.channel)
+        }
+    };
     refresh_project_members_cache(state, &new_channel).await;
     let is_member = state.with_store(|s| {
         s.is_channel_member(&new_channel, &rec.agent_pubkey)

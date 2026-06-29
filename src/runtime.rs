@@ -168,11 +168,10 @@ pub async fn run_session_in_daemon(
     store: std::sync::Arc<Mutex<Store>>,
     cancel: std::sync::Arc<tokio::sync::Notify>,
 ) -> Result<()> {
-    let me = p.agent_pubkey.clone();
-    let aref = AgentRef::new(me.clone(), p.agent_label.clone());
     let owners = p.owners.clone();
-    let status_keys = p.signing_keys().clone();
-    let status_pubkey = status_keys.public_key().to_hex();
+    let signing_keys = p.signing_keys().clone();
+    let status_pubkey = signing_keys.public_key().to_hex();
+    let aref = AgentRef::new(status_pubkey.clone(), p.agent_label.clone());
 
     macro_rules! st {
         ($f:expr) => {{
@@ -184,14 +183,14 @@ pub async fn run_session_in_daemon(
 
     let publish_de = |ev: DomainEvent| {
         let provider = provider.clone();
-        let keys = p.keys.clone();
+        let keys = signing_keys.clone();
         async move {
             let _ = provider.publish(&ev, &keys).await;
         }
     };
 
-    // Identity card (the one publish the engine still owns; status publication is
-    // the outbox drainer's job).
+    // Publish identity card signed with this session's own key: base key for
+    // ordinal 0 ("haiku"), derived key for ordinal N ("haiku1", etc.).
     publish_de(DomainEvent::Profile(Profile {
         agent: aref.clone(),
         host: p.host.clone(),
@@ -199,24 +198,6 @@ pub async fn run_session_in_daemon(
         is_backend: false,
     }))
     .await;
-
-    // Ordinal session: publish a kind:0 for the ordinal pubkey so peers resolve
-    // it to "claude1", "claude2", etc. — matching what `who` and the statusline
-    // display — rather than a raw pubkey or an opaque session label.
-    if let Some(ref sk) = p.session_keys {
-        let session_aref = AgentRef::new(sk.public_key().to_hex(), p.agent_label.clone());
-        let _ = provider
-            .publish(
-                &DomainEvent::Profile(Profile {
-                    agent: session_aref,
-                    host: p.host.clone(),
-                    owners: owners.clone(),
-                    is_backend: false,
-                }),
-                sk,
-            )
-            .await;
-    }
 
     let turn_first = p.turn_first.as_secs();
     let turn_repeat = p.turn_repeat.as_secs();
@@ -241,7 +222,7 @@ pub async fn run_session_in_daemon(
     st!(|s: &Store| s.touch_session(&p.session_id, now_secs()).ok());
     if let Some(session) = st!(|s: &Store| s.get_session(&p.session_id).ok().flatten()) {
         let now = now_secs();
-        enqueue_status(&provider, &status_keys, &store, status_for(&p, &status_pubkey, &session, now), now).await;
+        enqueue_status(&provider, &signing_keys, &store, status_for(&p, &status_pubkey, &session, now), now).await;
     }
 
     let mut hb = tokio::time::interval(p.heartbeat);
@@ -259,7 +240,7 @@ pub async fn run_session_in_daemon(
                 let now = now_secs();
                 st!(|s: &Store| s.touch_session(&p.session_id, now).ok());
                 if let Some(session) = st!(|s: &Store| s.get_session(&p.session_id).ok().flatten()) {
-                    enqueue_status(&provider, &status_keys, &store, status_for(&p, &status_pubkey, &session, now), now).await;
+                    enqueue_status(&provider, &signing_keys, &store, status_for(&p, &status_pubkey, &session, now), now).await;
                 }
             }
             _ = obs.tick() => {
@@ -280,7 +261,7 @@ pub async fn run_session_in_daemon(
 
                         // Read back the freshly-applied draft and publish it.
                         if let Some(session) = st!(|s: &Store| s.get_session(&p.session_id).ok().flatten()) {
-                            enqueue_status(&provider, &status_keys, &store, status_for(&p, &status_pubkey, &session, now), now).await;
+                            enqueue_status(&provider, &signing_keys, &store, status_for(&p, &status_pubkey, &session, now), now).await;
                             // The distilled title feeds the kind:30315 status above;
                             // it NEVER renames the route channel. A channel `name`
                             // is set only at create (or an explicit edit).
@@ -318,7 +299,7 @@ pub async fn run_session_in_daemon(
                                     st!(|s: &Store| s.set_session_distill(&p.session_id, &qt, "", 0).ok());
                                     title_from_distill = false;
                                     if let Some(seeded) = st!(|s: &Store| s.get_session(&p.session_id).ok().flatten()) {
-                                        enqueue_status(&provider, &status_keys, &store, status_for(&p, &status_pubkey, &seeded, now), now).await;
+                                        enqueue_status(&provider, &signing_keys, &store, status_for(&p, &status_pubkey, &seeded, now), now).await;
                                     }
                                 }
                             } else {
@@ -383,7 +364,7 @@ pub async fn run_session_in_daemon(
                     last_distill_attempt = 0;
                     distill_task = None;
                     if let Some(sess) = session.as_ref() {
-                        enqueue_status(&provider, &status_keys, &store, status_for(&p, &status_pubkey, sess, now), now).await;
+                        enqueue_status(&provider, &signing_keys, &store, status_for(&p, &status_pubkey, sess, now), now).await;
                     }
                 }
                 prev_working = working;

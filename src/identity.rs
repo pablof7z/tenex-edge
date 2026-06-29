@@ -194,6 +194,31 @@ pub struct LocalAgent {
     pub command: Option<Vec<String>>,
 }
 
+/// The invitable roster as `(slug, byline, created_at)`, sorted by slug. The
+/// `created_at` lets the awareness delta surface only AGENTS THAT BECAME
+/// available since a session's last turn (decision D — roster shown on change,
+/// not every turn).
+pub fn list_invitable_agents(edge_home: &Path) -> Vec<(String, Option<String>, u64)> {
+    let dir = agents_dir(edge_home);
+    let mut out = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for e in entries.flatten() {
+            let path = e.path();
+            if path.extension().and_then(|x| x.to_str()) != Some("json") {
+                continue;
+            }
+            if let Ok(s) = std::fs::read_to_string(&path) {
+                if let Ok(k) = serde_json::from_str::<StoredKey>(&s) {
+                    let byline = k.effective_byline();
+                    out.push((k.slug, byline, k.created_at));
+                }
+            }
+        }
+    }
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
+}
+
 /// Every agent in the local keystore, with slug + pubkey + command, sorted by slug.
 pub fn list_local_agent_details(edge_home: &Path) -> Vec<LocalAgent> {
     let dir = agents_dir(edge_home);

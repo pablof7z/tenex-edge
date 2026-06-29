@@ -57,7 +57,42 @@ pub(in crate::daemon::server) fn rpc_who(
     let host = state.host.clone();
     let snapshot = state
         .with_store(|s| crate::cli::load_who_snapshot(s, current_project.as_deref(), now, &host))?;
-    Ok(serde_json::to_value(snapshot)?)
+    let mut out = serde_json::to_value(snapshot)?;
+
+    // Attach the UNIFIED fabric view (same format as the hook injection — decision
+    // A) whenever a single current channel resolves. `--all-projects` has no single
+    // scope, so it keeps the cross-project snapshot table. The caller (this session,
+    // when run inside an agent) is marked `(you)` and excluded from peer echoes.
+    if let Some(scope) = current_project.as_deref() {
+        let (self_slug, self_pubkey) = resolve_session_inner(
+            state,
+            None,
+            p.env_session.as_deref(),
+            p.cwd.as_deref(),
+            p.agent.as_deref(),
+            p.group.as_deref(),
+            false,
+        )
+        .ok()
+        .map(|rec| (rec.agent_slug, rec.agent_pubkey))
+        .unwrap_or_default();
+        let edge = crate::config::edge_home();
+        let fabric = state.with_store(|s| {
+            crate::cli::render_fabric_snapshot(
+                s,
+                scope,
+                now,
+                &self_slug,
+                &self_pubkey,
+                &host,
+                &edge,
+            )
+        });
+        if let Some(fabric) = fabric {
+            out["fabric"] = serde_json::Value::String(fabric);
+        }
+    }
+    Ok(out)
 }
 
 // ── session_start / session_end ──────────────────────────────────────────────

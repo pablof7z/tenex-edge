@@ -13,6 +13,9 @@ const MAX_BREADCRUMB_DEPTH: usize = 16;
 pub(super) struct StatusChange {
     pub(super) channel_h: String,
     pub(super) slug: String,
+    /// The agent's host (from its kind:0 profile), so a remote peer renders as
+    /// `@slug@host`. Empty when unknown → treated as local.
+    pub(super) host: String,
     pub(super) derived: DerivedStatus,
 }
 
@@ -116,6 +119,7 @@ pub(super) fn member_lines(
     now: u64,
     self_slug: &str,
     self_pubkey: &str,
+    local_host: &str,
 ) -> Vec<String> {
     let status_map = super::super::channel::channel_status_map(store, project, now);
     let mut members: Vec<(String, String)> = store
@@ -141,17 +145,18 @@ pub(super) fn member_lines(
         .into_iter()
         .filter(|(pubkey, _)| !is_backend(store, pubkey))
         .map(|(pubkey, role)| {
-            let slug = if pubkey == self_pubkey {
-                self_slug.to_string()
+            let (slug, host) = if pubkey == self_pubkey {
+                (self_slug.to_string(), local_host.to_string())
             } else {
-                slug_for_pubkey(store, &pubkey)
+                (slug_for_pubkey(store, &pubkey), host_for_pubkey(store, &pubkey))
             };
             let you = if pubkey == self_pubkey { " (you)" } else { "" };
             let status = status_map
                 .get(&pubkey)
                 .map(|s| super::super::render::status_plain(&s.title, &s.activity, s.busy))
                 .unwrap_or_else(|| offline_label(&role));
-            format!("@{slug}{you} - {status}")
+            let reference = crate::idref::agent_ref_from(&slug, &host, local_host);
+            format!("@{reference}{you} - {status}")
         })
         .collect()
 }
@@ -180,6 +185,7 @@ pub(super) fn changed_status_items(
             out.push(StatusChange {
                 channel_h: ch.clone(),
                 slug: peer_slug(store, &st),
+                host: host_for_pubkey(store, &st.pubkey),
                 derived: super::super::channel::derive_from_status(&st, now),
             });
         }
@@ -187,12 +193,19 @@ pub(super) fn changed_status_items(
     out
 }
 
-pub(super) fn changed_member_lines(project: &str, items: &[StatusChange]) -> Vec<String> {
+pub(super) fn changed_member_lines(
+    project: &str,
+    items: &[StatusChange],
+    local_host: &str,
+) -> Vec<String> {
     items
         .iter()
         .filter(|item| item.channel_h == project)
         .filter_map(|item| useful_work_text(item).map(|status| (item, status)))
-        .map(|(item, status)| format!("@{} - {status}", item.slug))
+        .map(|(item, status)| {
+            let reference = crate::idref::agent_ref_from(&item.slug, &item.host, local_host);
+            format!("@{reference} - {status}")
+        })
         .collect()
 }
 
@@ -243,13 +256,14 @@ pub(super) fn current_activity_lines(
     since: u64,
     now: u64,
     exclude_pubkey: Option<&str>,
+    local_host: &str,
 ) -> Vec<String> {
     store
         .chat_for_channel(project, since, ACTIVITY_LIMIT)
         .unwrap_or_default()
         .into_iter()
         .filter(|row| exclude_pubkey != Some(row.pubkey.as_str()))
-        .map(|row| activity_line(store, row, now))
+        .map(|row| activity_line(store, row, now, local_host))
         .collect()
 }
 
@@ -279,6 +293,7 @@ fn channel_about(store: &Store, id: &str) -> Option<String> {
 ///   - unnamed channel (a session room, name empty or == its own id) → (the live
 ///     work title of whoever is active there, else its `about`, else
 ///     `(unnamed channel)`; no description).
+///
 /// The full raw `channel_h` NEVER surfaces in either branch.
 fn channel_label(store: &Store, id: &str, now: u64) -> (String, Option<String>) {
     if let Some(channel) = store.get_channel(id).ok().flatten() {
@@ -364,13 +379,26 @@ fn useful_work_text(item: &StatusChange) -> Option<String> {
     ))
 }
 
-fn activity_line(store: &Store, row: RelayEvent, now: u64) -> String {
-    let from = slug_for_pubkey(store, &row.pubkey);
+fn activity_line(store: &Store, row: RelayEvent, now: u64, local_host: &str) -> String {
+    let slug = slug_for_pubkey(store, &row.pubkey);
+    let host = host_for_pubkey(store, &row.pubkey);
+    let from = crate::idref::agent_ref_from(&slug, &host, local_host);
     format!(
         "[@{from}, {}] {}",
         relative_time(row.created_at, now),
         row.content
     )
+}
+
+/// The agent's host from its cached kind:0 profile; empty when unknown (then the
+/// ref renderer treats it as local → bare slug).
+fn host_for_pubkey(store: &Store, pubkey: &str) -> String {
+    store
+        .get_profile(pubkey)
+        .ok()
+        .flatten()
+        .map(|p| p.host)
+        .unwrap_or_default()
 }
 
 fn is_backend(store: &Store, pubkey: &str) -> bool {

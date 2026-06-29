@@ -375,6 +375,25 @@ fn rel_cwd_bracket(rel_cwd: &str) -> Option<&str> {
     }
 }
 
+/// Live-redraw a pre-rendered fabric string (the unified `who` view) in the
+/// alternate screen, same chrome as [`draw_who_live`].
+pub(super) fn draw_fabric_live(text: &str, refresh: Duration) -> Result<()> {
+    let refresh_ms = refresh.as_millis();
+    let mut screen = text.to_string();
+    let _ = writeln!(
+        screen,
+        "\n{}",
+        format!("  --live  refresh {refresh_ms}ms  q/esc/ctrl-c to quit").dimmed()
+    );
+    let mut stdout = io::stdout();
+    execute!(stdout, MoveTo(0, 0), Clear(ClearType::All))?;
+    for line in screen.lines() {
+        write!(stdout, "{line}\r\n")?;
+    }
+    stdout.flush()?;
+    Ok(())
+}
+
 pub(super) fn draw_who_live(snapshot: &WhoSnapshot, refresh: Duration) -> Result<()> {
     let refresh_ms = refresh.as_millis();
     let mut screen = render_who_once(snapshot);

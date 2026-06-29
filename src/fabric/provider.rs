@@ -11,7 +11,6 @@ use crate::fabric::nostr_delivery::NostrDelivery;
 use crate::fabric::{MaterializationOutcome, RawEnvelope, WireCodec};
 use crate::state::Store;
 use crate::transport::Transport;
-use crate::util::now_secs;
 use anyhow::Result;
 use std::collections::{hash_map::DefaultHasher, HashMap, HashSet};
 use std::hash::{Hash, Hasher};

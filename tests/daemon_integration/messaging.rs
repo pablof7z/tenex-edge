@@ -268,3 +268,88 @@ fn chat_write_stdin_enqueues_live_project_chat_for_receiver() {
 
     stop_daemon(&home);
 }
+
+/// A chat message with NO `@mention` (no p-tag) must NOT route to any session's
+/// inbox — it stays in relay_events as ambient context only, never ringing the
+/// doorbell. Guards the p-tag-gate behaviour introduced alongside the first-turn
+/// compact-notice feature.
+#[test]
+fn non_mention_chat_does_not_route_to_inbox() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let home = Home::new();
+
+    let (sender_canon, receiver_canon) = rt().block_on(async {
+        let mut c = Client::connect_or_spawn().await.expect("connect");
+        let s = c
+            .call(
+                "session_start",
+                serde_json::json!({
+                    "agent": "ambient-sender",
+                    "session_id": "ambient-sender-sess",
+                    "cwd": "/tmp"
+                }),
+            )
+            .await
+            .unwrap();
+        let r = c
+            .call(
+                "session_start",
+                serde_json::json!({
+                    "agent": "ambient-receiver",
+                    "session_id": "ambient-receiver-sess",
+                    "cwd": "/tmp"
+                }),
+            )
+            .await
+            .unwrap();
+        (
+            s["session_id"].as_str().unwrap().to_string(),
+            r["session_id"].as_str().unwrap().to_string(),
+        )
+    });
+
+    // Write a plain channel message — no @mention in the body.
+    let body = "no-mention ambient message for routing test";
+    let out = run_cli_stdin_with_env(
+        &home,
+        &["chat", "write"],
+        &format!("{body}\n"),
+        &[("TENEX_EDGE_SESSION", "ambient-sender-sess")],
+    );
+    assert!(
+        out.status.success(),
+        "chat write failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    // Give the daemon a moment to process any local delivery.
+    std::thread::sleep(std::time::Duration::from_millis(200));
+
+    let store = Store::open(&home.store_path()).unwrap();
+
+    // Inbox for the receiver must be empty — no doorbell should ring.
+    assert!(
+        store
+            .drain_pending_for_session(&receiver_canon)
+            .unwrap()
+            .is_empty(),
+        "non-mention message must not route to receiver inbox"
+    );
+    // Sender never receives its own message either.
+    assert!(
+        store
+            .drain_pending_for_session(&sender_canon)
+            .unwrap()
+            .is_empty(),
+        "sender must not receive its own message"
+    );
+    // The message IS stored in relay_events for ambient context.
+    let events = chat_in_channel(&store, "tmp");
+    assert!(
+        events.iter().any(|e| e.content == body),
+        "non-mention message must be stored in relay_events; got {:?}",
+        events.iter().map(|e| &e.content).collect::<Vec<_>>()
+    );
+
+    stop_daemon(&home);
+}

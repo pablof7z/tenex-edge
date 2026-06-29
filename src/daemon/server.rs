@@ -14,13 +14,13 @@ use super::protocol::{
     protocol_version, Hello, PleaseExit, Request, Response, Welcome, ERR_PROTOCOL_SKEW,
 };
 use super::tail_event::TailEvent;
-use super::{lock_path, socket_path, store_path};
+use super::{socket_path, store_path};
 use crate::config::{self, Config};
 use crate::domain::{ChatMessage, DomainEvent};
 use crate::fabric::provider::Nip29Provider;
 use crate::identity::{self, AgentIdentity};
 use crate::runtime::{self, EngineParams};
-use crate::session::{derive_status, Harness, SessionObservation, SessionSnapshot};
+use crate::session::Harness;
 use crate::state::{InboxRow, Store};
 use crate::transport::Transport;
 use crate::util::{now_secs, pubkey_short, session_codename};
@@ -221,7 +221,9 @@ mod statusline;
 mod turns;
 mod who;
 
-use channel_resolve::{resolve_channel, rpc_channels_resolve};
+use channel_resolve::{
+    project_root, resolve_channel, resolve_channel_ref, rpc_channels_resolve, ChannelResolution,
+};
 use channels_rpc::{
     ensure_session_room, rpc_channels_create, rpc_channels_list, rpc_channels_switch,
 };
@@ -286,6 +288,7 @@ async fn dispatch(state: &Arc<DaemonState>, req: &Request) -> Response {
         "tmux_status" => tmux_rpc::rpc_tmux_status(state),
         "tmux_send" => tmux_rpc::rpc_tmux_send(state, &req.params).await,
         "tmux_spawn" => tmux_rpc::rpc_tmux_spawn(state, &req.params).await,
+        "invite" => tmux_rpc::rpc_invite(state, &req.params).await,
         "tmux_attach" => tmux_rpc::rpc_tmux_attach(state, &req.params),
         "tmux_resume" => tmux_rpc::rpc_tmux_resume(state, &req.params).await,
         "tmux_resumable" => tmux_rpc::rpc_tmux_resumable(state),

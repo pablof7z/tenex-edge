@@ -40,6 +40,7 @@ use args::{AgentAction, ChannelsAction, ChatAction, Cmd, DebugAction, ProjectAct
 pub use messaging::{format_envelope, mention_short_id, EnvelopeView};
 pub use turn::{assemble_turn_check_context, assemble_turn_start_context};
 pub use who::load_who_snapshot;
+pub(crate) use who::{new_agent_block, render_fabric_snapshot};
 
 pub(crate) fn select_agent_env(active: Option<String>, fallback: Option<String>) -> Option<String> {
     active
@@ -155,6 +156,8 @@ pub async fn run(cli: Cli) -> Result<()> {
         Cmd::Project { action } => admin::project(action).await,
         Cmd::Channels { action } => admin::channels(action).await,
         Cmd::Agent { action } => admin::agent(action).await,
+        Cmd::Agents => admin::agents_roster().await,
+        Cmd::Invite { agent } => admin::invite(agent).await,
         Cmd::Stop => stop_daemon(),
         Cmd::Doctor => admin::doctor().await,
         Cmd::Debug { action } => match action {
@@ -212,8 +215,6 @@ pub async fn run(cli: Cli) -> Result<()> {
     }
 }
 
-/// A peer is "live" only while heartbeats keep it fresh (3× the default 30s tick).
-const PEER_FRESH_SECS: u64 = 90;
 
 // Session resolution, session-id generation, recipient resolution, and the
 // store live INSIDE the daemon now (it is the sole writer). The CLI verbs below

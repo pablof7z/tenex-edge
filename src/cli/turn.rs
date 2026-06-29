@@ -90,6 +90,7 @@ pub fn assemble_turn_start_context(
     store: &std::sync::Mutex<Store>,
     rec: &Session,
     backend_pubkey: &str,
+    self_host: &str,
     prev_turn_started_at: u64,
 ) -> Option<String> {
     let first_turn = prev_turn_started_at == 0;
@@ -173,7 +174,14 @@ pub fn assemble_turn_start_context(
     let awareness = {
         let s = store.lock().expect("store mutex poisoned");
         if first_turn {
-            render_awareness_snapshot(&s, &scope, now, &rec.agent_slug, &rec.agent_pubkey)
+            render_awareness_snapshot(
+                &s,
+                &scope,
+                now,
+                &rec.agent_slug,
+                &rec.agent_pubkey,
+                self_host,
+            )
         } else {
             render_awareness_update_since_turn(
                 &s,
@@ -181,6 +189,7 @@ pub fn assemble_turn_start_context(
                 &scope,
                 now,
                 Some(&rec.agent_pubkey),
+                self_host,
             )
         }
     };
@@ -218,7 +227,7 @@ pub fn assemble_turn_start_context(
 pub fn assemble_turn_check_context(
     store: &std::sync::Mutex<Store>,
     rec: &Session,
-    _self_host: &str,
+    self_host: &str,
     delta_since: Option<u64>,
     now: u64,
 ) -> Option<String> {
@@ -262,9 +271,14 @@ pub fn assemble_turn_check_context(
             blocks.push(block);
         }
 
-        if let Some(block) =
-            render_awareness_update_since_check(&s, since, &scope, now, Some(&rec.agent_pubkey))
-        {
+        if let Some(block) = render_awareness_update_since_check(
+            &s,
+            since,
+            &scope,
+            now,
+            Some(&rec.agent_pubkey),
+            self_host,
+        ) {
             blocks.push(block);
         }
     }
@@ -315,6 +329,17 @@ fn emit_context(content: &str, emit: EmitFormat) {
             println!("{obj}");
         }
     }
+}
+
+pub(super) fn turn_end(session: String, reply: Option<String>) -> Result<()> {
+    if session.is_empty() || crate::daemon::is_inhibited() {
+        return Ok(());
+    }
+    crate::daemon::blocking::call(
+        "turn_end",
+        serde_json::json!({"session": session, "reply": reply}),
+    )?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -378,7 +403,7 @@ mod tests {
             let id = register(&s, SELF_PK, ch, 100); // session starts at t=100
             s.get_session(&id).unwrap().unwrap()
         };
-        let ctx = super::assemble_turn_start_context(&m, &rec, "", 0).unwrap_or_default();
+        let ctx = super::assemble_turn_start_context(&m, &rec, "", "", 0).unwrap_or_default();
         assert!(
             ctx.contains("3 message(s)") && ctx.contains("before you joined"),
             "pre-join history should be announced as a compact count; got:\n{ctx}"
@@ -404,7 +429,7 @@ mod tests {
             let s = m.lock().unwrap();
             insert_chat(&s, ch, OTHER_PK, 110, "post-join-message"); // after t=100
         }
-        let ctx = super::assemble_turn_start_context(&m, &rec, "", 0).unwrap_or_default();
+        let ctx = super::assemble_turn_start_context(&m, &rec, "", "", 0).unwrap_or_default();
         assert!(
             ctx.contains("post-join-message"),
             "post-join chat should appear in ambient; got:\n{ctx}"
@@ -427,7 +452,7 @@ mod tests {
             s.get_session(&id).unwrap().unwrap()
         };
         // No events at all — should return None (no context blocks).
-        let ctx = super::assemble_turn_start_context(&m, &rec, "", 0);
+        let ctx = super::assemble_turn_start_context(&m, &rec, "", "", 0);
         assert!(
             ctx.is_none()
                 || ctx
@@ -453,7 +478,7 @@ mod tests {
             let id = register(&s, SELF_PK, ch, 100);
             s.get_session(&id).unwrap().unwrap()
         };
-        let ctx = super::assemble_turn_start_context(&m, &rec, "", 0).unwrap_or_default();
+        let ctx = super::assemble_turn_start_context(&m, &rec, "", "", 0).unwrap_or_default();
         assert!(
             ctx.contains("1 message(s)") && ctx.contains("before you joined"),
             "self-authored pre-join messages should count toward notice; got:\n{ctx}"
@@ -478,7 +503,7 @@ mod tests {
         // First turn: consumes pre-join notice; seen_cursor → now_secs().
         {
             let rec = m.lock().unwrap().get_session(&sid).unwrap().unwrap();
-            let _ = super::assemble_turn_start_context(&m, &rec, "", 0);
+            let _ = super::assemble_turn_start_context(&m, &rec, "", "", 0);
         }
         // Manually peg the cursor at t=150 so the second turn only sees t>150.
         m.lock()
@@ -493,7 +518,7 @@ mod tests {
         let rec2 = m.lock().unwrap().get_session(&sid).unwrap().unwrap();
         assert_eq!(rec2.seen_cursor, 150, "cursor must be 150 for this test");
         let ctx2 =
-            super::assemble_turn_start_context(&m, &rec2, "", 1 /* non-zero = not first turn */)
+            super::assemble_turn_start_context(&m, &rec2, "", "", 1 /* non-zero = not first turn */)
                 .unwrap_or_default();
         assert!(
             ctx2.contains("second-turn-event"),
@@ -532,7 +557,7 @@ mod tests {
                 .unwrap();
         }
         let rec = m.lock().unwrap().get_session(&sid).unwrap().unwrap();
-        let ctx = super::assemble_turn_start_context(&m, &rec, "", 0).unwrap_or_default();
+        let ctx = super::assemble_turn_start_context(&m, &rec, "", "", 0).unwrap_or_default();
         assert!(
             ctx.contains("hey do the thing"),
             "inbox mention must appear in turn context; got:\n{ctx}"
@@ -561,7 +586,7 @@ mod tests {
                 .unwrap();
         }
         let rec = m.lock().unwrap().get_session(&sid).unwrap().unwrap();
-        let ctx = super::assemble_turn_start_context(&m, &rec, "", 0).unwrap_or_default();
+        let ctx = super::assemble_turn_start_context(&m, &rec, "", "", 0).unwrap_or_default();
         assert!(
             ctx.contains("start working on X"),
             "direct mention must appear; got:\n{ctx}"
@@ -571,15 +596,4 @@ mod tests {
             "post-join ambient chat must also appear; got:\n{ctx}"
         );
     }
-}
-
-pub(super) fn turn_end(session: String, reply: Option<String>) -> Result<()> {
-    if session.is_empty() || crate::daemon::is_inhibited() {
-        return Ok(());
-    }
-    crate::daemon::blocking::call(
-        "turn_end",
-        serde_json::json!({"session": session, "reply": reply}),
-    )?;
-    Ok(())
 }

@@ -109,3 +109,235 @@ pub(in crate::daemon::server) async fn rpc_channels_resolve(
     .await?;
     Ok(serde_json::json!({ "channel_h": channel_h }))
 }
+
+// ── project-relative `channels switch` resolution ─────────────────────────────
+//
+// `channels switch` (an AGENT-only gesture) resolves a project-RELATIVE reference
+// to one opaque `channel_h`. There is no cross-project switch — references are
+// scoped to the current project's subtree. On ambiguity the daemon returns the
+// candidate paths so the agent re-runs with an exact one (a structured error,
+// never an interactive prompt a hooks-only agent cannot answer).
+
+/// Outcome of resolving a project-relative channel reference.
+pub(in crate::daemon::server) enum ChannelResolution {
+    /// Exactly one channel matched → its opaque `channel_h`.
+    Unique(String),
+    /// Several matched → the exact re-run references (a unique relative path, or
+    /// the `@<id>` escape hatch when two siblings share a name), sorted.
+    Ambiguous(Vec<String>),
+    /// Nothing in the project subtree matched.
+    NotFound,
+}
+
+/// Max parent links to walk when finding a project root (cycle guard).
+const MAX_CHANNEL_DEPTH: usize = 16;
+
+/// Walk `parent` links up from `channel` to the top-level project root (the first
+/// channel whose parent is empty/unknown). Bounded against malformed cycles.
+pub(in crate::daemon::server) fn project_root(store: &crate::state::Store, channel: &str) -> String {
+    let mut cur = channel.to_string();
+    for _ in 0..MAX_CHANNEL_DEPTH {
+        match store.channel_parent(&cur).ok().flatten() {
+            Some(parent) if !parent.is_empty() => cur = parent,
+            _ => break,
+        }
+    }
+    cur
+}
+
+/// Resolve a project-relative `reference` within `root`'s subtree. Forms:
+///   - a literal known `channel_h` → returned unchanged (id passthrough);
+///   - `@<id-prefix>` → the channel whose opaque id starts with the prefix;
+///   - `name` / `parent/child` → suffix-matched against descendant NAME paths
+///     (the shortest unique suffix resolves; a full path disambiguates deeper).
+pub(in crate::daemon::server) fn resolve_channel_ref(
+    store: &crate::state::Store,
+    root: &str,
+    reference: &str,
+) -> ChannelResolution {
+    let reference = reference.trim();
+    if reference.is_empty() {
+        return ChannelResolution::NotFound;
+    }
+    // Id passthrough: a caller (tmux resume, launch picker) may pass a literal id.
+    if store.get_channel(reference).ok().flatten().is_some() {
+        return ChannelResolution::Unique(reference.to_string());
+    }
+    let paths = subtree_paths(store, root);
+
+    // `@<prefix>` escape hatch — match by opaque id prefix across the subtree.
+    if let Some(prefix) = reference.strip_prefix('@') {
+        if prefix.is_empty() {
+            return ChannelResolution::NotFound;
+        }
+        let hits: Vec<(String, Vec<String>)> = paths
+            .iter()
+            .filter(|(id, _)| id.starts_with(prefix))
+            .map(|(id, segs)| (id.clone(), segs.clone()))
+            .collect();
+        return finish_resolution(hits);
+    }
+
+    // Name path: suffix-match the requested segments against each descendant's
+    // relative NAME path (case-insensitive).
+    let want: Vec<String> = reference
+        .split('/')
+        .map(|s| s.trim().to_lowercase())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if want.is_empty() {
+        return ChannelResolution::NotFound;
+    }
+    let hits: Vec<(String, Vec<String>)> = paths
+        .into_iter()
+        .filter(|(_, segs)| path_ends_with(segs, &want))
+        .collect();
+    finish_resolution(hits)
+}
+
+/// Reduce raw `(channel_h, name_path)` hits to a [`ChannelResolution`]: dedup by
+/// id, then unique / ambiguous / none. Ambiguous entries render as their unique
+/// relative path, or `@<id-prefix>` when two share the same path (a same-level
+/// name collision that only the id can disambiguate).
+fn finish_resolution(mut hits: Vec<(String, Vec<String>)>) -> ChannelResolution {
+    hits.sort();
+    hits.dedup_by(|a, b| a.0 == b.0);
+    match hits.len() {
+        0 => ChannelResolution::NotFound,
+        1 => ChannelResolution::Unique(hits.remove(0).0),
+        _ => {
+            let mut refs: Vec<String> = hits
+                .iter()
+                .map(|(id, segs)| {
+                    let path = segs.join("/");
+                    let path_unique = hits.iter().filter(|(_, s)| s.join("/") == path).count() == 1;
+                    if path_unique && !path.is_empty() {
+                        path
+                    } else {
+                        format!("@{}", &id[..id.len().min(8)])
+                    }
+                })
+                .collect();
+            refs.sort();
+            ChannelResolution::Ambiguous(refs)
+        }
+    }
+}
+
+/// Every channel in `root`'s subtree (excluding root) as `(channel_h, name_path)`,
+/// where `name_path` is the chain of kind:39000 NAMES from root's child down to
+/// the channel. Unnamed nodes (name empty or == its own id, e.g. session rooms)
+/// are not path-referenceable, so they and their subtrees are skipped.
+fn subtree_paths(store: &crate::state::Store, root: &str) -> Vec<(String, Vec<String>)> {
+    use std::collections::BTreeMap;
+    let channels = store.list_channels().unwrap_or_default();
+    let mut by_parent: BTreeMap<String, Vec<crate::state::Channel>> = BTreeMap::new();
+    for c in channels {
+        by_parent.entry(c.parent.clone()).or_default().push(c);
+    }
+    let mut out: Vec<(String, Vec<String>)> = Vec::new();
+    let mut stack: Vec<(String, Vec<String>)> = vec![(root.to_string(), Vec::new())];
+    let mut guard = 0usize;
+    while let Some((id, path)) = stack.pop() {
+        guard += 1;
+        if guard > 10_000 {
+            break;
+        }
+        let Some(children) = by_parent.get(&id) else {
+            continue;
+        };
+        for c in children {
+            let name = c.name.trim();
+            if name.is_empty() || name == c.channel_h {
+                continue; // unnamed → not referenceable by path; skip its subtree
+            }
+            let mut child_path = path.clone();
+            child_path.push(name.to_lowercase());
+            out.push((c.channel_h.clone(), child_path.clone()));
+            stack.push((c.channel_h.clone(), child_path));
+        }
+    }
+    out
+}
+
+/// True when `segs` ends with `want` (both already lowercased), i.e. `want` is a
+/// path suffix of `segs`. `["epic999","planning"]` ends with `["planning"]`.
+fn path_ends_with(segs: &[String], want: &[String]) -> bool {
+    segs.len() >= want.len() && segs[segs.len() - want.len()..] == *want
+}
+
+#[cfg(test)]
+mod resolve_tests {
+    use super::{resolve_channel_ref, ChannelResolution};
+    use crate::state::Store;
+
+    fn chan(store: &Store, id: &str, name: &str, parent: &str) {
+        store.upsert_channel(id, name, "", parent, 1).unwrap();
+    }
+
+    #[test]
+    fn unique_relative_name_resolves() {
+        let store = Store::open_memory().unwrap();
+        chan(&store, "h-root", "proj", "");
+        chan(&store, "h-plan", "planning", "h-root");
+        match resolve_channel_ref(&store, "h-root", "planning") {
+            ChannelResolution::Unique(id) => assert_eq!(id, "h-plan"),
+            _ => panic!("expected unique match"),
+        }
+    }
+
+    #[test]
+    fn ambiguous_name_lists_relative_paths() {
+        let store = Store::open_memory().unwrap();
+        chan(&store, "h-root", "proj", "");
+        chan(&store, "h-plan", "planning", "h-root");
+        chan(&store, "h-epic", "epic999", "h-root");
+        chan(&store, "h-epic-plan", "planning", "h-epic");
+        match resolve_channel_ref(&store, "h-root", "planning") {
+            ChannelResolution::Ambiguous(refs) => {
+                assert_eq!(refs, vec!["epic999/planning".to_string(), "planning".to_string()]);
+            }
+            _ => panic!("expected ambiguous"),
+        }
+        // A fuller path disambiguates.
+        assert!(matches!(
+            resolve_channel_ref(&store, "h-root", "epic999/planning"),
+            ChannelResolution::Unique(ref id) if id == "h-epic-plan"
+        ));
+    }
+
+    #[test]
+    fn same_level_name_collision_falls_back_to_id_escape_hatch() {
+        let store = Store::open_memory().unwrap();
+        chan(&store, "h-root", "proj", "");
+        // Two siblings share the name "planning" — a path cannot disambiguate.
+        chan(&store, "h-aaaa1111", "planning", "h-root");
+        chan(&store, "h-bbbb2222", "planning", "h-root");
+        match resolve_channel_ref(&store, "h-root", "planning") {
+            ChannelResolution::Ambiguous(refs) => {
+                assert_eq!(refs, vec!["@h-aaaa11".to_string(), "@h-bbbb22".to_string()]);
+            }
+            _ => panic!("expected ambiguous id-escape-hatch"),
+        }
+        // The @id escape hatch then resolves uniquely.
+        assert!(matches!(
+            resolve_channel_ref(&store, "h-root", "@h-aaaa1"),
+            ChannelResolution::Unique(ref id) if id == "h-aaaa1111"
+        ));
+    }
+
+    #[test]
+    fn literal_id_passthrough_and_not_found() {
+        let store = Store::open_memory().unwrap();
+        chan(&store, "h-root", "proj", "");
+        chan(&store, "h-plan", "planning", "h-root");
+        assert!(matches!(
+            resolve_channel_ref(&store, "h-root", "h-plan"),
+            ChannelResolution::Unique(ref id) if id == "h-plan"
+        ));
+        assert!(matches!(
+            resolve_channel_ref(&store, "h-root", "nonexistent"),
+            ChannelResolution::NotFound
+        ));
+    }
+}

@@ -27,6 +27,22 @@ pub fn agent_label(slug: &str, host: &str) -> String {
     }
 }
 
+/// Host-aware agent reference as seen from `local_host`: bare `slug` when the
+/// agent is on the local machine (or its host is unknown), else `slug@host`.
+///
+/// This is the token an operator/agent TYPES to address the peer: `developer`
+/// names the local developer, while `developer@tower` singles out a same-slug
+/// agent on another machine. Display layers add the `@` mention sigil on top
+/// (`@developer` / `@developer@tower`).
+pub fn agent_ref_from(slug: &str, host: &str, local_host: &str) -> String {
+    let host = host.trim();
+    if host.is_empty() || slugify_host(host) == slugify_host(local_host) {
+        slug.to_string()
+    } else {
+        agent_label(slug, host)
+    }
+}
+
 /// Canonical display for a session: `codename (agent@host)`. Degrades to
 /// `codename (agent)` when host is unknown, or bare `codename` when slug is too.
 pub fn session_label(session_id: &str, slug: &str, host: &str) -> String {
@@ -111,6 +127,20 @@ mod tests {
             "codex@pablo-s-laptop"
         );
         assert_eq!(agent_label("claude", "laptop"), "claude@laptop");
+    }
+
+    #[test]
+    fn agent_ref_from_is_bare_local_and_qualified_remote() {
+        // Same host (after slugify) → bare slug; you'd type just `developer`.
+        assert_eq!(agent_ref_from("developer", "laptop", "laptop"), "developer");
+        assert_eq!(
+            agent_ref_from("developer", "Pablo's Laptop", "pablo-s-laptop"),
+            "developer"
+        );
+        // Unknown host → bare (can't qualify what we don't know).
+        assert_eq!(agent_ref_from("developer", "", "laptop"), "developer");
+        // Different host → host-qualified so a same-slug remote stays distinct.
+        assert_eq!(agent_ref_from("developer", "tower", "laptop"), "developer@tower");
     }
 
     #[test]

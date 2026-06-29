@@ -1,0 +1,26 @@
+[
+  [
+    "user",
+    "what data does the statusline use to show the current agent's name? because two different sessions show me both the base agent name, instead of showing me the kind:0 data of the current agent's pubkey"
+  ],
+  [
+    "assistant",
+    "Compiles clean (warnings are pre-existing, not from this change).\n\n**Root cause:** The statusline RPC was returning `rec.agent_slug` (the raw harness slug, e.g. \"claude\") for both sessions. The ordinal is stored in the `identities` table, not on the session row, and the statusline wasn't consulting it.\n\n**Fix:** Added the same `identity_for_session` lookup that `who` already uses — looks up the bound identity for the session, then renders `agent_slug` for ordinal 0 or `agent_slug{ordinal}` for higher ordinals (e.g., \"claude1\"). Also fixed `is_member` to check the ordinal pubkey rather than the base `agent_pubkey`."
+  ],
+  [
+    "user",
+    "the kind:0 we publish should also match that (e.g. claude1)"
+  ],
+  [
+    "assistant",
+    "Clean. Here's the full picture of what was wrong and what changed:\n\n**Root cause:** Two separate bugs sharing the same ancestry:\n\n1. **Statusline** (fixed earlier): returned `rec.agent_slug` (\"claude\") for every session — never consulted the `identities` table where the ordinal lives.\n\n2. **kind:0 publish** (this fix): for ordinal > 0 sessions, the engine published a kind:0 with `name: \"xray4217 (claude@host)\"` (from `session_label`) instead of `\"claude1\"`. The ordinal label was only ever computed inside `SelectedSigner.label` but never flowed into `EngineParams`.\n\n**Changes:**\n- Added `agent_label: String` to `EngineParams` — carries `signer.label` (\"claude\" for ordinal 0, \"claude1\"/\"claude2\" for higher ordinals)\n- Both callers of `engine_params_for` (`session_start.rs`, `engine_lifecycle.rs`) now pass `signer.label`\n- `runtime.rs` uses `p.agent_label` for both the base kind:0 `aref` and the ordinal session's kind:0 — the ordinal pubkey now publishes `\"claude1\"` as its `name`"
+  ],
+  [
+    "user",
+    "commit your work"
+  ],
+  [
+    "assistant",
+    "Done. Commit `67074b7b` covers all three surfaces: the statusline RPC, `EngineParams`/`engine_params_for`, and the kind:0 publish in the runtime."
+  ]
+]
