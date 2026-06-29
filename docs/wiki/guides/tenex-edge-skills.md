@@ -19,7 +19,7 @@ sources:
 
 ## Overview
 
-This guide governs the family of `tenex-edge` agent skills checked into `.agents/skills/tenex-edge`. The original skill taught agent operator commands (`who`, `chat`, `tail`, project groups, subgroup rooms, install, and keystore commands), but it has gone stale: it references `whoami` and `@<codename>` targeting, while live `tenex-edge --help` no longer lists `whoami` and identity work is moving to `who` agent-context and agent labels like `haiku` / `haiku1`. The current guide restructures that material into a set of focused skills, each kept short with volatile details in `reference/` files. <!-- [^019f1-7100b] -->
+This guide governs the family of `tenex-edge` agent skills checked into `.agents/skills/tenex-edge`. The original skill taught agent operator commands (`who`, `chat`, `tail`, project groups, subgroup rooms, install, and keystore commands), but it has gone stale: self-identity now lives in `who` agent-context output, and targeting uses agent labels like `haiku` / `haiku1`. The current guide restructures that material into a set of focused skills, each kept short with volatile details in `reference/` files. <!-- [^019f1-7100b] -->
 
 ## Skill Set
 
