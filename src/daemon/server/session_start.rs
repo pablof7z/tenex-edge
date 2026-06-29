@@ -437,6 +437,7 @@ pub(in crate::daemon::server) async fn rpc_session_start(
         &state.cfg,
         &id,
         &p.agent,
+        &signer.label,
         &signer.pubkey,
         &session_id,
         &project,

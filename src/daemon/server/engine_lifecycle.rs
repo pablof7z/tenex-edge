@@ -367,6 +367,7 @@ pub(in crate::daemon::server) async fn reconcile_sessions(state: &Arc<DaemonStat
             &state.cfg,
             &id,
             &snap.agent_slug,
+            &signer.label,
             &signer.pubkey,
             &session_id,
             &snap.channel_h,

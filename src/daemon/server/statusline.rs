@@ -45,7 +45,23 @@ pub(in crate::daemon::server) fn rpc_statusline(
     let scope = rec.channel_h.clone();
     state.with_store(|s| {
         let member_count = s.count_channel_members(&scope).unwrap_or(0);
-        let is_member = s.is_channel_member(&scope, &rec.agent_pubkey).unwrap_or(true);
+        // Resolve the ordinal label (e.g. "claude1" for the second concurrent
+        // Claude session) the same way `who` does — base slug when ordinal==0.
+        let identity = s.identity_for_session(&rec.session_id).ok().flatten();
+        let agent_label = identity
+            .as_ref()
+            .map(|i| {
+                if i.ordinal == 0 {
+                    i.agent_slug.clone()
+                } else {
+                    format!("{}{}", i.agent_slug, i.ordinal)
+                }
+            })
+            .unwrap_or_else(|| rec.agent_slug.clone());
+        let is_member = identity
+            .as_ref()
+            .map(|i| s.is_channel_member(&scope, &i.pubkey).unwrap_or(true))
+            .unwrap_or_else(|| s.is_channel_member(&scope, &rec.agent_pubkey).unwrap_or(true));
         // Busy + title + live activity come straight off the local session row
         // (the pre-publish draft the distiller maintains). Pure read: no drains,
         // no touches. The statusline shows the activity line (the live "doing
@@ -81,7 +97,7 @@ pub(in crate::daemon::server) fn rpc_statusline(
         let mut recent_json = chat_rows_to_json(s, &recent_chat);
         sort_message_json(&mut recent_json);
         Ok(serde_json::json!({
-            "agent": rec.agent_slug,
+            "agent": agent_label,
             "host": host,
             "session_id": rec.session_id,
             "work_root": work_root,

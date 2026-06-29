@@ -51,6 +51,10 @@ fn slog(session_id: &str, msg: &str) {
 
 pub struct EngineParams {
     pub agent_slug: String,
+    /// Ordinal-qualified display name for this session: "claude" for ordinal 0,
+    /// "claude1" for the second concurrent instance. This is what gets published
+    /// in the kind:0 `name` field for the session's signing identity.
+    pub agent_label: String,
     pub agent_pubkey: String,
     pub keys: Keys,
     /// Collision fallback signer. When `Some`, this session is a duplicate live
@@ -165,7 +169,7 @@ pub async fn run_session_in_daemon(
     cancel: std::sync::Arc<tokio::sync::Notify>,
 ) -> Result<()> {
     let me = p.agent_pubkey.clone();
-    let aref = AgentRef::new(me.clone(), p.agent_slug.clone());
+    let aref = AgentRef::new(me.clone(), p.agent_label.clone());
     let owners = p.owners.clone();
     let status_keys = p.signing_keys().clone();
     let status_pubkey = status_keys.public_key().to_hex();
@@ -196,11 +200,11 @@ pub async fn run_session_in_daemon(
     }))
     .await;
 
-    // Duplicate-session fallback: also publish a session-keyed kind:0 so peers can
-    // resolve the transient pubkey to a display name.
+    // Ordinal session: publish a kind:0 for the ordinal pubkey so peers resolve
+    // it to "claude1", "claude2", etc. — matching what `who` and the statusline
+    // display — rather than a raw pubkey or an opaque session label.
     if let Some(ref sk) = p.session_keys {
-        let session_display = crate::idref::session_label(&p.session_id, &p.agent_slug, &p.host);
-        let session_aref = AgentRef::new(sk.public_key().to_hex(), session_display);
+        let session_aref = AgentRef::new(sk.public_key().to_hex(), p.agent_label.clone());
         let _ = provider
             .publish(
                 &DomainEvent::Profile(Profile {
