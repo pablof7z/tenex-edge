@@ -170,7 +170,7 @@ async fn provision_before_spawn(
     let id = match crate::identity::load_or_create(&edge, slug, crate::util::now_secs()) {
         Ok(id) => id,
         Err(e) => {
-            eprintln!("[daemon] tmux_spawn: could not resolve identity for {slug}: {e:#}");
+            tracing::warn!(slug, error = %e, "tmux_spawn: could not resolve identity");
             return;
         }
     };
@@ -184,10 +184,11 @@ async fn provision_before_spawn(
         .iter()
         .any(|r| r.agent_slug == slug && r.channel_h == scope);
     if already_live {
-        eprintln!(
-            "[daemon] tmux_spawn: {slug} already has a live session in {scope}; \
-             launching concurrent instance (shared pubkey {}; ordinal keys are a future extension)",
-            crate::util::pubkey_short(&pubkey),
+        tracing::info!(
+            slug,
+            scope,
+            pubkey = %crate::util::pubkey_short(&pubkey),
+            "tmux_spawn: launching concurrent instance (agent already has live session)"
         );
     }
 
@@ -198,9 +199,11 @@ async fn provision_before_spawn(
     // admin invariants + membership either way, so the session-start that follows
     // finds the scope ready (with a valid parent when a per-session room is minted).
     let parent_hint = channel.filter(|g| !g.is_empty()).map(|_| project);
-    eprintln!(
-        "[daemon] tmux_spawn: pre-provisioning channel {scope} for {slug} ({})",
-        crate::util::pubkey_short(&pubkey),
+    tracing::info!(
+        slug,
+        scope,
+        pubkey = %crate::util::pubkey_short(&pubkey),
+        "tmux_spawn: pre-provisioning channel"
     );
     let ctx = crate::fabric::nip29::readiness::ChannelCtx {
         channel: scope,
@@ -211,7 +214,7 @@ async fn provision_before_spawn(
         .await
         .is_err()
     {
-        eprintln!("[daemon] tmux_spawn: channel provisioning timed out for {scope}; proceeding");
+        tracing::warn!(scope, "tmux_spawn: channel provisioning timed out; proceeding");
     }
 }
 

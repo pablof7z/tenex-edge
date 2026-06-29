@@ -123,6 +123,11 @@ pub struct DaemonState {
     /// and the address the subgroup orchestration listener matches `add` tags
     /// against. `None` only when no `tenexPrivateKey` is configured.
     backend_pubkey: Option<String>,
+    /// Suppresses re-publishing of tmux-pasted envelopes. The paste path records
+    /// what it typed; `rpc_user_prompt` consumes the match so an injected mention
+    /// is not echoed back into the channel. Replaces the old `[tenex-edge]` text
+    /// marker (see [`echo_guard`]).
+    echo_guard: echo_guard::EchoGuard,
 }
 
 impl DaemonState {
@@ -133,6 +138,22 @@ impl DaemonState {
     pub(crate) fn with_store<R>(&self, f: impl FnOnce(&Store) -> R) -> R {
         let g = self.store.lock().expect("store mutex poisoned");
         f(&g)
+    }
+    /// Record text the tmux paste path just typed into a session's pane, so the
+    /// resulting `user-prompt-submit` is recognized as an echo and not mirrored.
+    pub(crate) fn record_injection_echo(&self, session_id: &str, text: &str) {
+        self.echo_guard.record(session_id, text, now_secs());
+    }
+    /// True (and consumes the record) when this prompt is a daemon-injected
+    /// envelope rather than genuine human keyboard input.
+    pub(crate) fn is_injection_echo(&self, session_id: &str, text: &str) -> bool {
+        self.echo_guard.is_echo(session_id, text, now_secs())
+    }
+    /// The operator's whitelisted human pubkeys (config `whitelistedPubkeys`).
+    /// Used to classify a mention's sender as a human vs another agent, which
+    /// drives envelope presentation.
+    pub(crate) fn whitelisted_pubkeys(&self) -> &[String] {
+        &self.cfg.whitelisted_pubkeys
     }
     /// The shared relay connection. Used by the kind:0 profile resolver to
     /// one-shot fetch a pubkey's metadata on a cache miss.
@@ -186,6 +207,7 @@ mod chat_publish;
 mod chat_read_tail;
 mod chat_write;
 mod diagnostics;
+mod echo_guard;
 mod engine_lifecycle;
 mod lifecycle;
 mod profile_rpc;

@@ -113,14 +113,34 @@ fn pending_message_prompt_contains_the_actual_message_body() {
         delivered_at: 0,
     };
 
-    // The channel label renders the human NAME; with no channel record cached it
-    // falls back to the raw `channel_h` ("proj") — never a `#`-prefixed id.
+    // No whitelist → the sender is treated as another agent, so the paste form is
+    // the framed `[tenex-edge mention] <@name> body` line. With no cached slug the
+    // name falls back to the short sender pubkey ("pk-sende").
     let store = crate::state::Store::open_memory().unwrap();
-    let prompt = crate::injection::render_direct_mention_prompt(&store, &[row], 120).unwrap();
+    let prompt = crate::injection::render_tmux_mention(&store, &[row], &[], 120).unwrap();
 
-    assert!(prompt.contains("Incoming message mentioning this agent"));
-    assert!(prompt.contains("Mention in proj from pk-sende"));
-    assert!(prompt.contains("please review the tmux delivery path"));
-    assert!(!prompt.contains("tenex-edge inbox"));
-    assert!(!prompt.contains("project chat - write"));
+    assert_eq!(
+        prompt,
+        "[tenex-edge mention] <@pk-sende> please review the tmux delivery path"
+    );
+}
+
+#[test]
+fn whitelisted_human_mention_renders_bare_with_provenance() {
+    let rec = sample_session();
+    let row = crate::state::InboxRow {
+        event_id: "ev-human".into(),
+        target_session: rec.session_id.clone(),
+        state: "pending".into(),
+        from_pubkey: "human-pk".into(),
+        channel_h: "proj".into(),
+        body: "@developer hey there".into(),
+        created_at: 100,
+        delivered_at: 0,
+    };
+    let store = crate::state::Store::open_memory().unwrap();
+    // Sender is whitelisted → minimal provenance, no `[tenex-edge mention]` frame.
+    let prompt =
+        crate::injection::render_tmux_mention(&store, &[row], &["human-pk".into()], 120).unwrap();
+    assert_eq!(prompt, "<@human-pk> @developer hey there");
 }

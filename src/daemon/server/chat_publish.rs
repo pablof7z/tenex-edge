@@ -164,15 +164,6 @@ pub(in crate::daemon::server) async fn rpc_user_prompt(
         return Ok(serde_json::json!({ "skipped": "empty prompt" }));
     }
 
-    // A daemon-injected fabric envelope (a mention pasted into the pane by the
-    // tmux delivery path) is ALREADY a kind:9 event in the room. The harness
-    // re-submits it as a prompt, firing user-prompt-submit, but republishing it
-    // would echo the message back into the channel (and, on publish timeout +
-    // retry, twice). Only genuine human keyboard input is mirrored.
-    if crate::injection::is_fabric_injection(&p.prompt) {
-        return Ok(serde_json::json!({ "skipped": "fabric injection echo" }));
-    }
-
     // No operator key → nothing to sign with; fail open (session still runs).
     // `userNsec` is the ONLY signer for user prompts — the human is speaking.
     let Some(nsec) = state.cfg.user_nsec() else {
@@ -189,6 +180,16 @@ pub(in crate::daemon::server) async fn rpc_user_prompt(
         p.agent.as_deref(),
         None,
     )?;
+
+    // A daemon-injected fabric envelope (a mention the tmux delivery path pasted
+    // into this session's pane) is ALREADY a kind:9 event in the room. The
+    // harness re-submits it as a prompt, firing user-prompt-submit; republishing
+    // it would echo the message back into the channel (twice, on a publish
+    // retry). The echo guard recognizes — and consumes — what we just pasted, so
+    // only genuine human keyboard input is mirrored.
+    if state.is_injection_echo(&rec.session_id, &p.prompt) {
+        return Ok(serde_json::json!({ "skipped": "fabric injection echo" }));
+    }
 
     // Only mirror prompts into a sub-channel (a task/session room). A human start
     // with no resume anchor keeps the session on the top-level project channel;

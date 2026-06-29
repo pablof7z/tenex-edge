@@ -68,39 +68,35 @@ fn assert_lacks(block: &str, needle: &str) {
 #[test]
 fn snapshot_renders_awareness_without_transport_events() {
     let store = Store::open_memory().unwrap();
+    // Opaque ids (`h-*`, `session-*`) distinct from human names so the
+    // assertions below double as proof the raw channel_h never leaks.
     chan(
         &store,
+        "h-core",
         "tenex-edge",
-        "Core repo",
         "Agent coordination substrate",
         "",
     );
-    chan(&store, "child", "Channel awareness hook", "", "tenex-edge");
+    chan(&store, "h-aware", "awareness", "Channel awareness hook", "h-core");
     chan(
         &store,
+        "h-ciflake",
         "ci-flake",
-        "Debugging runner trust-cache failures",
-        "",
-        "child",
+        "runner trust-cache failures",
+        "h-aware",
     );
-    chan(
-        &store,
-        "session-a9f2",
-        "Investigating duplicate session rooms",
-        "",
-        "",
-    );
-    members(&store, "child", &["pk-codex", "pk-claude"]);
-    members(&store, "ci-flake", &["pk-a", "pk-b"]);
+    chan(&store, "session-a9f2", "session-a9f2", "", "");
+    members(&store, "h-aware", &["pk-codex", "pk-claude"]);
+    members(&store, "h-ciflake", &["pk-a", "pk-b"]);
     members(&store, "session-a9f2", &["pk-other"]);
 
-    // Self (codex) and a peer (claude) are both live in #child; an unrelated
-    // channel (session-a9f2) is active via its own member's status.
+    // Self (codex) and a peer (claude) are both live in #awareness; an unrelated
+    // unnamed session room is active via its own member's status.
     status(
         &store,
         "pk-codex",
         "codex",
-        "child",
+        "h-aware",
         "Designing channel awareness injection",
         true,
         995,
@@ -109,7 +105,7 @@ fn snapshot_renders_awareness_without_transport_events() {
         &store,
         "pk-claude",
         "claude",
-        "child",
+        "h-aware",
         "Tracing current status delta behavior",
         true,
         996,
@@ -124,27 +120,26 @@ fn snapshot_renders_awareness_without_transport_events() {
         997,
     );
 
-    let block = render_awareness_snapshot(&store, "child", NOW, "codex", "pk-codex").unwrap();
+    let block = render_awareness_snapshot(&store, "h-aware", NOW, "codex", "pk-codex").unwrap();
 
     assert_has(&block, "[tenex-edge] Fabric context");
     assert_has(&block, "Project: tenex-edge -- Agent coordination substrate");
-    assert_has(
-        &block,
-        "Channel: #tenex-edge -- Core repo > #child -- Channel awareness hook",
-    );
+    // Channel is the project-RELATIVE path (root prefix dropped) + description.
+    assert_has(&block, "Channel: awareness -- Channel awareness hook");
     assert_has(
         &block,
         "- @codex (you) - Designing channel awareness injection",
     );
     assert_has(&block, "- @claude - Tracing current status delta behavior");
-    assert_has(
-        &block,
-        "- #ci-flake -- Debugging runner trust-cache failures [2 members]",
-    );
-    assert_has(
-        &block,
-        "- #session-a9f2 -- Investigating duplicate session rooms [1 member]",
-    );
+    // Subchannel referenced by NAME, description after `--`.
+    assert_has(&block, "- #ci-flake -- runner trust-cache failures [2 members]");
+    // Unnamed session room: labelled by its live work title, no id.
+    assert_has(&block, "- Investigating duplicate session rooms [1 member]");
+    // The opaque channel_h ids must never appear in agent-facing text.
+    assert_lacks(&block, "h-core");
+    assert_lacks(&block, "h-aware");
+    assert_lacks(&block, "h-ciflake");
+    assert_lacks(&block, "session-a9f2");
     assert_lacks(&block, "joined");
     assert_lacks(&block, "left");
 }
@@ -152,23 +147,23 @@ fn snapshot_renders_awareness_without_transport_events() {
 #[test]
 fn update_renders_state_activity_and_omits_unchanged_sessions() {
     let store = Store::open_memory().unwrap();
-    chan(&store, "child", "Channel awareness hook", "", "");
-    chan(&store, "ci-flake", "Runner issue isolated", "", "child");
-    members(&store, "child", &["pk-claude"]);
-    members(&store, "ci-flake", &["pk-a", "pk-b"]);
+    chan(&store, "h-aware", "awareness", "", "");
+    chan(&store, "h-ciflake", "ci-flake", "Runner issue isolated", "h-aware");
+    members(&store, "h-aware", &["pk-claude"]);
+    members(&store, "h-ciflake", &["pk-a", "pk-b"]);
 
     // Peer claude changed after the cursor (960 > 900).
     status(
         &store,
         "pk-claude",
         "claude",
-        "child",
+        "h-aware",
         "Found the stale routing scope after channel switch",
         true,
         960,
     );
     // A subchannel and another channel saw status changes too.
-    status(&store, "pk-a", "a", "ci-flake", "fixing runner", true, 975);
+    status(&store, "pk-a", "a", "h-ciflake", "fixing runner", true, 975);
     status(
         &store,
         "pk-other",
@@ -181,14 +176,14 @@ fn update_renders_state_activity_and_omits_unchanged_sessions() {
     chat(
         &store,
         "chat-child",
-        "child",
+        "h-aware",
         "claude",
         "The stale scope read is in turn_check.",
         970,
     );
 
     let block =
-        render_awareness_update_since_check(&store, 900, "child", NOW, Some("pk-old")).unwrap();
+        render_awareness_update_since_check(&store, 900, "h-aware", NOW, Some("pk-old")).unwrap();
 
     assert_has(&block, "[tenex-edge] Fabric updates since your last check");
     assert_has(
@@ -196,12 +191,16 @@ fn update_renders_state_activity_and_omits_unchanged_sessions() {
         "- @claude - Found the stale routing scope after channel switch",
     );
     assert_has(&block, "- #ci-flake -- Runner issue isolated [2 members]");
-    assert_has(&block, "- #session-a9f2 [1 member]");
-    assert_has(&block, "Activity in #child:");
+    // Unnamed session room labelled by its live work title, never its id.
+    assert_has(&block, "- other channel changed [1 member]");
+    assert_has(&block, "Activity in #awareness:");
     assert_has(
         &block,
         "[@claude, just now] The stale scope read is in turn_check.",
     );
+    assert_lacks(&block, "h-aware");
+    assert_lacks(&block, "h-ciflake");
+    assert_lacks(&block, "session-a9f2");
     assert_lacks(&block, "joined");
     assert_lacks(&block, "left");
 }
@@ -209,12 +208,12 @@ fn update_renders_state_activity_and_omits_unchanged_sessions() {
 #[test]
 fn update_activity_excludes_viewers_own_chat() {
     let store = Store::open_memory().unwrap();
-    chan(&store, "child", "Channel awareness hook", "", "");
+    chan(&store, "h-aware", "awareness", "", "");
     // The viewer (codex) authored a chat; it must not echo back to them.
     chat(
         &store,
         "chat-self",
-        "child",
+        "h-aware",
         "codex",
         "did you validate it with real usage?",
         960,
@@ -222,16 +221,16 @@ fn update_activity_excludes_viewers_own_chat() {
     chat(
         &store,
         "chat-other",
-        "child",
+        "h-aware",
         "claude",
         "I validated it through the real hook.",
         970,
     );
 
-    let block = render_awareness_update_since_check(&store, 900, "child", NOW, Some("pk-codex"))
+    let block = render_awareness_update_since_check(&store, 900, "h-aware", NOW, Some("pk-codex"))
         .expect("other activity should still render");
 
-    assert_has(&block, "Activity in #child:");
+    assert_has(&block, "Activity in #awareness:");
     assert_has(
         &block,
         "[@claude, just now] I validated it through the real hook.",
@@ -242,7 +241,7 @@ fn update_activity_excludes_viewers_own_chat() {
 #[test]
 fn other_active_channels_use_status_titles_without_repeating_old_activity() {
     let store = Store::open_memory().unwrap();
-    chan(&store, "child", "Channel awareness hook", "", "");
+    chan(&store, "h-aware", "awareness", "", "");
     chan(&store, "session-a9f2", "session-a9f2", "", "");
     status(
         &store,
@@ -254,14 +253,13 @@ fn other_active_channels_use_status_titles_without_repeating_old_activity() {
         980,
     );
 
-    let block = render_awareness_update_since_check(&store, 900, "child", NOW, None).unwrap();
-    assert_has(
-        &block,
-        "- #session-a9f2 -- Investigating duplicate session rooms [1 member]",
-    );
+    let block = render_awareness_update_since_check(&store, 900, "h-aware", NOW, None).unwrap();
+    // Unnamed session room labelled by its work title; the opaque id never shows.
+    assert_has(&block, "- Investigating duplicate session rooms [1 member]");
+    assert_lacks(&block, "session-a9f2");
 
     // No new status since 990 → nothing to repeat.
-    let later = render_awareness_update_since_check(&store, 990, "child", NOW, None);
+    let later = render_awareness_update_since_check(&store, 990, "h-aware", NOW, None);
     assert!(
         later.is_none(),
         "old active channel state must not repeat without new activity; got: {later:?}"

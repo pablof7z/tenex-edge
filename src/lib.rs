@@ -11,6 +11,7 @@
 pub mod config;
 pub mod domain;
 pub mod identity;
+pub mod logging;
 pub mod idref;
 pub mod injection;
 pub mod llmconfig;

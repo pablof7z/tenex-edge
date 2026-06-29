@@ -56,41 +56,33 @@ async fn collect_pending_prompt(
     state: &Arc<DaemonState>,
     rec: &crate::state::Session,
 ) -> Result<Option<PendingTmuxPrompt>> {
-    let mut chat_rows = state.with_store(|s| s.drain_pending_for_session(&rec.session_id))?;
+    let now = now_secs();
+    // Atomic claim: this transitions the rows to `delivered` and returns them in
+    // one statement, so a racing hook can't also deliver them (atomicity IS the
+    // dedup). If the paste later fails, the caller re-enqueues them.
+    let mut chat_rows = state.with_store(|s| s.claim_pending_for_session(&rec.session_id, now))?;
     if chat_rows.is_empty() {
         return Ok(None);
     }
     crate::profile::label_chat_senders(state, &mut chat_rows).await;
 
-    let now = now_secs();
-    let rendered =
-        state.with_store(|s| crate::injection::render_direct_mention_prompt(s, &chat_rows, now));
+    let whitelisted = state.whitelisted_pubkeys().to_vec();
+    let chat_ids: Vec<String> = chat_rows.iter().map(|row| row.event_id.clone()).collect();
+    let rendered = state
+        .with_store(|s| crate::injection::render_tmux_mention(s, &chat_rows, &whitelisted, now));
     let Some(text) = rendered else {
+        // Defensive: nothing to paste though rows were claimed — give them back.
+        state.with_store(|s| s.reenqueue_pending(&chat_ids, &rec.session_id).ok());
         return Ok(None);
     };
 
-    Ok(Some(PendingTmuxPrompt {
-        text,
-        chat_ids: chat_rows.iter().map(|row| row.event_id.clone()).collect(),
-    }))
+    Ok(Some(PendingTmuxPrompt { text, chat_ids }))
 }
 
-fn mark_prompt_delivered(
-    state: &Arc<DaemonState>,
-    rec: &crate::state::Session,
-    prompt: &PendingTmuxPrompt,
-) -> Result<()> {
-    let delivered_at = now_secs();
-    state.with_store(|s| -> Result<()> {
-        for event_id in &prompt.chat_ids {
-            s.mark_delivered(event_id, &rec.session_id, delivered_at)?;
-        }
-        Ok(())
-    })
-}
-
-/// Paste pending inbox/chat content into a live pane and submit it as the next
-/// prompt. Returns false if another path consumed the rows before we injected.
+/// Paste pending mention content into a live pane and submit it as the next
+/// prompt. Returns false when no rows were pending. The rows are claimed
+/// atomically inside `collect_pending_prompt`; if the paste fails we roll them
+/// back to `pending` so a pane that died mid-flight doesn't eat the message.
 pub async fn inject_pending_messages_pub(
     state: &Arc<DaemonState>,
     rec: &crate::state::Session,
@@ -100,8 +92,13 @@ pub async fn inject_pending_messages_pub(
         return Ok(false);
     };
 
-    paste_text(pane_id, &prompt.text).await?;
-    mark_prompt_delivered(state, rec, &prompt)?;
+    if let Err(e) = paste_text(pane_id, &prompt.text).await {
+        state.with_store(|s| s.reenqueue_pending(&prompt.chat_ids, &rec.session_id).ok());
+        return Err(e);
+    }
+    // Record exactly what we pasted so the resulting user-prompt-submit hook is
+    // recognized as an echo and not republished into the channel.
+    state.record_injection_echo(&rec.session_id, &prompt.text);
     tokio::time::sleep(Duration::from_millis(200)).await;
     send_enter(pane_id).await?;
     Ok(true)

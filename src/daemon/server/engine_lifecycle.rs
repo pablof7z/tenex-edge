@@ -8,6 +8,13 @@ pub(in crate::daemon::server) async fn spawn_session(
     let pubkey = params.agent_pubkey.clone();
     let project = params.project.clone();
 
+    tracing::info!(
+        agent = %params.agent_slug,
+        channel = %project,
+        session = %session_id,
+        "spawning session engine"
+    );
+
     state.hosted.lock().unwrap().insert(
         pubkey.clone(),
         HostedAgent {
@@ -33,9 +40,7 @@ pub(in crate::daemon::server) async fn spawn_session(
     tokio::spawn(async move {
         let res = runtime::run_session_in_daemon(params, provider, store, cancel).await;
         if let Err(e) = res {
-            if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
-                eprintln!("[daemon] session {sid} task error: {e:#}");
-            }
+            tracing::warn!(session = %sid, error = %e, "session task exited with error");
         }
         // Engine self-exit path: remove an ordinal (>0) signer from the NIP-29
         // group. The Mutex pop is atomic: if rpc_session_end already removed the
@@ -45,6 +50,7 @@ pub(in crate::daemon::server) async fn spawn_session(
             let maybe_key = st.release_session_signer(&sid);
             if let Some(sk) = maybe_key {
                 let session_pubkey = sk.public_key().to_hex();
+                tracing::debug!(session = %sid, ordinal_pubkey = %session_pubkey, "removing ordinal member from channel on session exit");
                 st.provider
                     .nip29_remove_member(&proj, &session_pubkey)
                     .await;
@@ -56,6 +62,7 @@ pub(in crate::daemon::server) async fn spawn_session(
         });
         st.sessions.lock().unwrap().remove(&sid);
         prune_hosted(&st);
+        tracing::info!(session = %sid, "session engine exited");
         st.liveness_changed.notify_waiters();
     });
     Ok(())
@@ -106,6 +113,7 @@ pub(in crate::daemon::server) async fn ensure_subscription(
     if reqs.is_empty() {
         return Ok(());
     }
+    tracing::debug!(channel = project, req_count = reqs.len(), "opening narrow channel REQs");
     // Bounded: opening a relay subscription can hang on a slow/unreachable relay,
     // and this is awaited on hook-critical paths (session_start, spawn_session),
     // so a hang would block the editor. The intent (project recorded above +
@@ -113,9 +121,7 @@ pub(in crate::daemon::server) async fn ensure_subscription(
     match tokio::time::timeout(std::time::Duration::from_secs(5), apply_plan(state, reqs)).await {
         Ok(r) => r,
         Err(_) => {
-            if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
-                eprintln!("[daemon] subscription apply timed out for {project} (best-effort)");
-            }
+            tracing::warn!(channel = project, "subscription apply timed out; continuing best-effort");
             Ok(())
         }
     }
@@ -149,14 +155,14 @@ pub(in crate::daemon::server) async fn apply_plan(
 /// the now-alive session. Best-effort: a replay failure just means the session
 /// relies on subsequent live chat. Bounded so a slow relay can't block the hook.
 pub(in crate::daemon::server) async fn replay_channel_chat(state: &Arc<DaemonState>, h: &str) {
+    tracing::debug!(channel = h, "replaying channel chat (spawn-on-mention catch-up)");
     let req = crate::fabric::subscriptions::channel_chat_replay_req(h);
     let fut = apply_plan(state, vec![req]);
     if tokio::time::timeout(std::time::Duration::from_secs(5), fut)
         .await
         .is_err()
-        && std::env::var("TENEX_EDGE_DEBUG").is_ok()
     {
-        eprintln!("[daemon] channel chat replay timed out for {h} (best-effort)");
+        tracing::warn!(channel = h, "channel chat replay timed out (best-effort)");
     }
 }
 
@@ -268,10 +274,18 @@ pub(in crate::daemon::server) async fn resubscribe(state: &Arc<DaemonState>) -> 
 pub(in crate::daemon::server) async fn reconcile_sessions(state: &Arc<DaemonState>) {
     let now = now_secs();
     let snaps = state.with_store(|s| s.list_alive_sessions().unwrap_or_default());
+    tracing::info!(session_count = snaps.len(), "reconciling sessions from previous daemon instance");
     for snap in snaps {
         let session_id = snap.session_id.clone();
         let pid_ok = snap.child_pid.map(pid_alive).unwrap_or(false);
         if !pid_ok {
+            tracing::warn!(
+                session = %session_id,
+                agent = %snap.agent_slug,
+                channel = %snap.channel_h,
+                pid = ?snap.child_pid,
+                "session process dead; marking dead and GC-ing ordinal membership"
+            );
             // Read the bound identity BEFORE marking dead so we know the ordinal
             // pubkey (if any) to remove from the channel.
             let identity = state.with_store(|s| s.identity_for_session(&session_id).ok().flatten());
@@ -290,6 +304,13 @@ pub(in crate::daemon::server) async fn reconcile_sessions(state: &Arc<DaemonStat
             }
             continue;
         }
+        tracing::info!(
+            session = %session_id,
+            agent = %snap.agent_slug,
+            channel = %snap.channel_h,
+            pid = ?snap.child_pid,
+            "reviving session from previous daemon instance"
+        );
         let id = match identity::load_or_create(&config::edge_home(), &snap.agent_slug, now) {
             Ok(i) => i,
             Err(_) => continue,
@@ -323,23 +344,13 @@ pub(in crate::daemon::server) async fn reconcile_sessions(state: &Arc<DaemonStat
         ) {
             Ok(signer) => signer,
             Err(e) => {
-                if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
-                    eprintln!(
-                        "[daemon] signer selection failed while reconciling {}: {e:#}",
-                        session_id
-                    );
-                }
+                tracing::warn!(session = %session_id, error = %e, "signer selection failed during reconcile; skipping session");
                 continue;
             }
         };
         if let Some(member_pubkey) = signer.member_pubkey_to_admit() {
             if let Err(e) = admit_transient_signer(state, &snap.channel_h, member_pubkey).await {
-                if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
-                    eprintln!(
-                        "[daemon] ordinal signer admission failed while reconciling {}: {e:#}",
-                        session_id
-                    );
-                }
+                tracing::warn!(session = %session_id, error = %e, "ordinal signer admission failed during reconcile; skipping session");
                 state.release_session_signer(&session_id);
                 state.with_store(|s| s.mark_identity_dead_for_session(&session_id).ok());
                 continue;
@@ -347,9 +358,7 @@ pub(in crate::daemon::server) async fn reconcile_sessions(state: &Arc<DaemonStat
         }
 
         if let Err(e) = ensure_subscription(state, &snap.channel_h).await {
-            if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
-                eprintln!("[daemon] ensure_subscription({}) failed: {e:#}", snap.channel_h);
-            }
+            tracing::warn!(channel = %snap.channel_h, error = %e, "ensure_subscription failed during reconcile");
         }
         let ep = engine_params_for(
             &state.cfg,

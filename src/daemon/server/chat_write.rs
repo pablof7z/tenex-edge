@@ -168,6 +168,13 @@ pub(in crate::daemon::server) async fn rpc_chat_write(
             if target.agent_pubkey == durable_pubkey || target.agent_pubkey == from_pubkey {
                 continue;
             }
+            // Only ring the doorbell for explicitly mentioned sessions/pubkeys;
+            // channel-broadcast messages stay in relay_events for ambient context.
+            let is_mentioned = is_direct_target
+                || mentioned_pubkey.as_deref() == Some(target.agent_pubkey.as_str());
+            if !is_mentioned {
+                continue;
+            }
             let row_channel = if is_direct_target {
                 target.channel_h.clone()
             } else {

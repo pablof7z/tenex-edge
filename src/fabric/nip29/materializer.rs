@@ -120,18 +120,25 @@ impl Nip29Materializer {
     }
 
     /// Route a chat message into the `inbox` ledger for every alive local session
-    /// occupying the chat's channel, skipping the sender's own session (matched by
-    /// agent pubkey). Returns `true` if at least one new inbox row was enqueued, so
-    /// the caller can wake live delivery surfaces. Idempotent: a duplicate
-    /// `(event_id, target_session)` is ignored by the store.
+    /// whose agent is explicitly p-tagged in the event. Non-mention channel chat
+    /// stays in `relay_events` for ambient context but does not ring the tmux
+    /// doorbell. Returns `true` if at least one new inbox row was enqueued.
+    /// Idempotent: a duplicate `(event_id, target_session)` is ignored by the store.
     pub fn route_chat(store: &Store, event: &Event, chat: &ChatMessage) -> bool {
         let channel_h = chat.project.as_str();
         let from_pubkey = event.pubkey.to_hex();
         let event_id = event.id.to_hex();
         let created_at = event.created_at.as_secs();
+        let p_pubkeys = collect_p_pubkeys(event);
+        if p_pubkeys.is_empty() {
+            return false;
+        }
         let mut woke = false;
         for sess in store.list_alive_sessions().unwrap_or_default() {
             if sess.channel_h != channel_h || sess.agent_pubkey == from_pubkey {
+                continue;
+            }
+            if !p_pubkeys.contains(&sess.agent_pubkey) {
                 continue;
             }
             if store
@@ -336,22 +343,34 @@ mod tests {
         let sender_sid = register(&store, &sender_pk, "proj", "sender-ext");
         let receiver_sid = register(&store, &receiver_pk, "proj", "receiver-ext");
 
-        let event = build(
+        // Without a p-tag the message is ambient chat: stored in relay_events
+        // but does NOT route to any inbox (no doorbell).
+        let ambient_event = build(&sender, 9, "ambient", vec![make_tag(&["h", "proj"])]);
+        let ambient_chat = ChatMessage {
+            from: crate::domain::AgentRef::new(sender_pk.clone(), String::new()),
+            project: "proj".into(),
+            body: "ambient".into(),
+            mentioned_pubkey: None,
+        };
+        assert!(Nip29Materializer::materialize_event(&store, &ambient_event));
+        assert!(!Nip29Materializer::route_chat(&store, &ambient_event, &ambient_chat));
+        assert!(store.drain_pending_for_session(&receiver_sid).unwrap().is_empty());
+
+        // With a p-tag the message is a directed mention: routed to inbox.
+        let mention_event = build(
             &sender,
             9,
             "ship it",
-            vec![make_tag(&["h", "proj"])],
+            vec![make_tag(&["h", "proj"]), make_tag(&["p", &receiver_pk])],
         );
-        let chat = ChatMessage {
+        let mention_chat = ChatMessage {
             from: crate::domain::AgentRef::new(sender_pk, String::new()),
             project: "proj".into(),
             body: "ship it".into(),
-            mentioned_pubkey: None,
+            mentioned_pubkey: Some(receiver_pk),
         };
-
-        // Verbatim log + directed delivery.
-        assert!(Nip29Materializer::materialize_event(&store, &event));
-        assert!(Nip29Materializer::route_chat(&store, &event, &chat));
+        assert!(Nip29Materializer::materialize_event(&store, &mention_event));
+        assert!(Nip29Materializer::route_chat(&store, &mention_event, &mention_chat));
 
         let pending = store.drain_pending_for_session(&receiver_sid).unwrap();
         assert_eq!(pending.len(), 1);
@@ -360,8 +379,7 @@ mod tests {
             .drain_pending_for_session(&sender_sid)
             .unwrap()
             .is_empty());
-        // The chat line is also in the verbatim relay_events log.
-        assert!(store.has_event(&event.id.to_hex()).unwrap());
+        assert!(store.has_event(&mention_event.id.to_hex()).unwrap());
     }
 
     #[test]

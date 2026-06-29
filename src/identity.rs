@@ -101,6 +101,7 @@ pub fn load_or_create(edge_home: &Path, slug: &str, now: u64) -> Result<AgentIde
             serde_json::from_str(&s).with_context(|| format!("parsing key {}", path.display()))?;
         let keys = Keys::parse(&stored.secret_key)
             .with_context(|| format!("parsing secret key for {slug}"))?;
+        tracing::debug!(slug, pubkey = %&stored.public_key[..8], "agent key loaded");
         return Ok(AgentIdentity {
             slug: slug.to_string(),
             keys,
@@ -122,6 +123,7 @@ pub fn load_or_create(edge_home: &Path, slug: &str, now: u64) -> Result<AgentIde
         .with_context(|| format!("creating {}", agents_dir(edge_home).display()))?;
     let body = serde_json::to_string_pretty(&stored)?;
     atomic_write(&path, &body)?;
+    tracing::info!(slug, pubkey = %&stored.public_key[..8], path = %path.display(), "agent key created");
     Ok(AgentIdentity {
         slug: slug.to_string(),
         keys,

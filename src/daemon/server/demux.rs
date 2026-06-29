@@ -60,11 +60,11 @@ pub(super) fn spawn_demux(state: Arc<DaemonState>) {
 /// Thin dispatch to `provider.materialize` (Phase 5), then derives TailEvents
 /// from the domain event using the in-memory tracking maps.
 fn handle_incoming(state: &Arc<DaemonState>, event: &Event) {
-    eprintln!(
-        "[demux] incoming kind:{} id:{} from:{}",
-        event.kind.as_u16(),
-        &event.id.to_hex()[..8],
-        crate::util::pubkey_short(&event.pubkey.to_hex()),
+    tracing::debug!(
+        kind = event.kind.as_u16(),
+        id = %&event.id.to_hex()[..8],
+        from = %crate::util::pubkey_short(&event.pubkey.to_hex()),
+        "incoming event"
     );
     let env = crate::fabric::RawEnvelope::Nostr(event.clone());
     // Expand the hosted set to include live transient session pubkeys.
@@ -94,7 +94,15 @@ fn handle_incoming(state: &Arc<DaemonState>, event: &Event) {
     // Spawn-on-mention also runs inside first_sight so we attempt at most once
     // per run; has_alive check in the handler covers daemon-restart idempotency.
     if let Some(de) = outcome.tail {
+        let kind = event.kind.as_u16();
         if state.first_sight(&event.id.to_hex()) {
+            // Status heartbeats (kind:30315) fire every 30 s — too noisy for info.
+            let is_heartbeat = kind == 30315;
+            if is_heartbeat {
+                tracing::debug!(kind, id = %&event.id.to_hex()[..8], "first-sight");
+            } else {
+                tracing::info!(kind, id = %&event.id.to_hex()[..8], "first-sight");
+            }
             derive_and_emit_tail_events(state, &de, &hosted, now);
             if event.kind.as_u16() == crate::fabric::nip29::wire::KIND_CHAT {
                 if let DomainEvent::ChatMessage(ref chat) = de {
@@ -102,12 +110,23 @@ fn handle_incoming(state: &Arc<DaemonState>, event: &Event) {
                         let st = state.clone();
                         let mentioned_pk = mentioned_pk.clone();
                         let project = chat.project.clone();
+                        tracing::info!(
+                            mentioned_pk = %crate::util::pubkey_short(&mentioned_pk),
+                            project = %project,
+                            "dispatching offline-agent-mention handler"
+                        );
                         tokio::spawn(async move {
                             handle_offline_agent_mention(&st, &mentioned_pk, &project).await;
                         });
                     }
                 }
             }
+        } else {
+            tracing::debug!(
+                kind = event.kind.as_u16(),
+                id = %&event.id.to_hex()[..8],
+                "duplicate delivery — skipped"
+            );
         }
     }
     if outcome.wake_mentions {
@@ -142,6 +161,12 @@ fn handle_incoming(state: &Arc<DaemonState>, event: &Event) {
     // and would respawn agents after a daemon restart).
     if event.kind.as_u16() == crate::fabric::nip29::wire::KIND_CHAT {
         if let Some(op) = crate::fabric::nip29::orchestration::parse_orchestration(event) {
+            tracing::info!(
+                event_id = %&event.id.to_hex()[..8],
+                parent = %op.parent,
+                child = %op.child_h,
+                "dispatching orchestration handler"
+            );
             let st = state.clone();
             let ev = event.clone();
             tokio::spawn(async move {
@@ -165,6 +190,11 @@ async fn handle_offline_agent_mention(state: &Arc<DaemonState>, mentioned_pk: &s
             .any(|rec| rec.agent_pubkey == mentioned_pk && rec.channel_h == project)
     });
     if has_alive {
+        tracing::debug!(
+            mentioned_pk = %crate::util::pubkey_short(mentioned_pk),
+            project,
+            "agent already has alive session — skipping spawn"
+        );
         return;
     }
 
@@ -188,13 +218,15 @@ async fn handle_offline_agent_mention(state: &Arc<DaemonState>, mentioned_pk: &s
     let bound =
         state.with_store(|s| s.resolve_identity_for_channel(&base_pubkey, project).ok().flatten());
     if let Some(route) = bound.filter(|r| !r.native_id.is_empty()) {
-        eprintln!(
-            "[spawn-on-mention] resuming {} in {project} via native {}",
-            route.agent_slug, route.native_id
+        tracing::info!(
+            agent = %route.agent_slug,
+            project,
+            native_id = %route.native_id,
+            "resuming bound native session"
         );
         if let Err(e) = crate::tmux::resume_agent(state, &agent_slug, project, &route.native_id).await
         {
-            eprintln!("[spawn-on-mention] resume failed ({e:#}); falling through to fresh spawn");
+            tracing::warn!(agent = %agent_slug, project, error = %e, "session resume failed — falling through to fresh spawn");
         } else {
             return;
         }
@@ -207,18 +239,15 @@ async fn handle_offline_agent_mention(state: &Arc<DaemonState>, mentioned_pk: &s
         if !members.contains(mentioned_pk) {
             if ordinal == 0 {
                 // Base agent must already be a member to be mentioned here.
-                eprintln!("[spawn-on-mention] {agent_slug} not a member of {project}, skip");
+                tracing::debug!(agent = %agent_slug, project, "base agent not a member of channel — skipping spawn");
                 return;
             }
             // Mention-driven ordinal (issue #47): the mgmt key provisions this
             // ordinal's pubkey into the channel (kind:9000) before spawning, so a
             // mention to `smithN` in a room it has never joined wakes it.
-            eprintln!(
-                "[spawn-on-mention] provisioning ordinal {} ({}) into {project} via mgmt key",
-                ordinal, agent_slug
-            );
+            tracing::info!(agent = %agent_slug, ordinal, project, "provisioning ordinal pubkey into channel via mgmt key");
             if !state.provider.nip29_add_member(project, mentioned_pk).await {
-                eprintln!("[spawn-on-mention] mgmt-key add_member failed for {project}, skip");
+                tracing::warn!(agent = %agent_slug, ordinal, project, "mgmt-key add_member failed — skipping spawn");
                 return;
             }
             add_channel_member(state, project, mentioned_pk);
@@ -228,13 +257,17 @@ async fn handle_offline_agent_mention(state: &Arc<DaemonState>, mentioned_pk: &s
     let work_root = state.with_store(|s| work_root_for(s, project));
     let has_path = state.with_store(|s| s.project_root(&work_root).ok().flatten().is_some());
     if !has_path {
-        eprintln!("[spawn-on-mention] no local path for {work_root}, cannot spawn");
+        tracing::warn!(agent = %agent_slug, work_root = %work_root, project, "no local project root found — cannot spawn");
         return;
     }
 
     let group_arg = Some(project);
-    eprintln!(
-        "[spawn-on-mention] spawning {agent_slug} (ordinal {ordinal}) into {project} (work_root={work_root})"
+    tracing::info!(
+        agent = %agent_slug,
+        ordinal,
+        project,
+        work_root = %work_root,
+        "spawning agent on mention"
     );
     match crate::tmux::spawn_agent(
         state,
@@ -248,8 +281,8 @@ async fn handle_offline_agent_mention(state: &Arc<DaemonState>, mentioned_pk: &s
     )
     .await
     {
-        Ok(pane_id) => eprintln!("[spawn-on-mention] {agent_slug} spawned pane={pane_id}"),
-        Err(e) => eprintln!("[spawn-on-mention] spawn failed: {e:#}"),
+        Ok(pane_id) => tracing::info!(agent = %agent_slug, pane_id = %pane_id, project, "agent spawned successfully"),
+        Err(e) => tracing::warn!(agent = %agent_slug, project, error = %e, "agent spawn failed"),
     }
 }
 
@@ -290,15 +323,13 @@ pub(super) async fn handle_orchestration(
         is_authorized(&child_roles, &signer)
     };
     if !authorized {
-        if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
-            eprintln!(
-                "[daemon] orchestration {} from {} ignored: signer is not an admin of {} or {}",
-                &event_id[..event_id.len().min(8)],
-                crate::util::pubkey_short(&signer),
-                op.parent,
-                op.child_h
-            );
-        }
+        tracing::warn!(
+            event_id = %&event_id[..event_id.len().min(8)],
+            signer = %crate::util::pubkey_short(&signer),
+            parent = %op.parent,
+            child = %op.child_h,
+            "orchestration rejected: signer is not an admin"
+        );
         return;
     }
 
@@ -307,11 +338,12 @@ pub(super) async fn handle_orchestration(
     // brand-new child whose 39000 hasn't echoed yet (None) is allowed through.
     if let Some(declared) = state.provider.fetch_group_parent(&op.child_h).await {
         if declared != op.parent {
-            eprintln!(
-                "[daemon] orchestration {}: child {} declares parent {declared:?}, not {:?}; refusing",
-                &event_id[..event_id.len().min(8)],
-                op.child_h,
-                op.parent
+            tracing::warn!(
+                event_id = %&event_id[..event_id.len().min(8)],
+                child = %op.child_h,
+                declared_parent = %declared,
+                expected_parent = %op.parent,
+                "orchestration refused: child declares a different parent"
             );
             return;
         }
@@ -327,6 +359,7 @@ pub(super) async fn handle_orchestration(
             .unwrap_or(false)
     });
     if !claimed {
+        tracing::debug!(event_id = %&event_id[..event_id.len().min(8)], "orchestration already claimed by this backend — skipping");
         return;
     }
 
@@ -338,9 +371,12 @@ pub(super) async fn handle_orchestration(
     for target in &mine {
         let slug = &target.slug;
         let id = match crate::identity::load_or_create(&edge, slug, now_secs()) {
-            Ok(id) => id,
+            Ok(id) => {
+                tracing::info!(slug = %slug, child = %op.child_h, "minting/loading agent identity for orchestration target");
+                id
+            }
             Err(e) => {
-                eprintln!("[daemon] orchestration: minting agent {slug:?} failed: {e:#}");
+                tracing::error!(slug = %slug, error = %e, "failed to mint agent identity — aborting orchestration for this agent");
                 return;
             }
         };
@@ -400,10 +436,10 @@ pub(super) async fn handle_orchestration(
             tokio::time::sleep(std::time::Duration::from_millis(900)).await;
         }
         if !confirmed {
-            eprintln!(
-                "[daemon] orchestration: member-add for agent {slug:?} in {} not confirmed on the \
-                 relay after retries; skipping spawn",
-                op.child_h
+            tracing::warn!(
+                slug = %slug,
+                child = %op.child_h,
+                "member-add not confirmed after all retries — skipping spawn"
             );
             return;
         }
@@ -425,15 +461,10 @@ pub(super) async fn handle_orchestration(
         .await
         {
             Ok(pane) => {
-                if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
-                    eprintln!(
-                        "[daemon] orchestration: spawned agent {slug:?} into {} (pane {pane})",
-                        op.child_h
-                    );
-                }
+                tracing::info!(slug = %slug, child = %op.child_h, pane = %pane, "orchestration: agent spawned");
             }
             Err(e) => {
-                eprintln!("[daemon] orchestration: spawn agent {slug:?} failed: {e:#}");
+                tracing::error!(slug = %slug, child = %op.child_h, error = %e, "orchestration: agent spawn failed");
             }
         }
     }

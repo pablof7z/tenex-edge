@@ -146,6 +146,13 @@ pub(super) fn select_and_reserve(
         (s.base_pubkey == req.base_pubkey && s.h == req.h && owner.as_str() == req.session_id)
             .then_some(s.ordinal)
     }) {
+        tracing::debug!(
+            session = %req.session_id,
+            agent = %req.agent_slug,
+            h = %req.h,
+            ordinal = existing,
+            "ordinal reasserted"
+        );
         return Ok(finish(session_keys, &req, existing));
     }
 
@@ -154,14 +161,32 @@ pub(super) fn select_and_reserve(
         // Preferred ordinal is occupied by a different live session. Channel
         // switch rejects this upstream; at birth it should not happen, but fall
         // back to lowest-free to keep the session live rather than failing.
-        Some(_) => lowest_free(reservations, req.base_pubkey, req.h),
+        Some(preferred) => {
+            tracing::warn!(
+                session = %req.session_id,
+                agent = %req.agent_slug,
+                h = %req.h,
+                preferred,
+                "preferred ordinal occupied by another session; falling back to lowest-free"
+            );
+            lowest_free(reservations, req.base_pubkey, req.h)
+        }
         None => lowest_free(reservations, req.base_pubkey, req.h),
     };
     reservations.insert(
         slot(req.base_pubkey, req.h, ordinal),
         req.session_id.to_string(),
     );
-    Ok(finish(session_keys, &req, ordinal))
+    let signer = finish(session_keys, &req, ordinal);
+    tracing::info!(
+        session = %req.session_id,
+        agent = %req.agent_slug,
+        h = %req.h,
+        ordinal,
+        label = %signer.label,
+        "ordinal slot allocated"
+    );
+    Ok(signer)
 }
 
 /// Release a session's reservation + engine keys (session end / failure / GC).
@@ -171,7 +196,15 @@ pub(super) fn release(
     session_keys: &mut HashMap<String, Keys>,
     session_id: &str,
 ) -> Option<Keys> {
+    let freed: Vec<(String, u32)> = reservations
+        .iter()
+        .filter(|(_, owner)| owner.as_str() == session_id)
+        .map(|(s, _)| (s.h.clone(), s.ordinal))
+        .collect();
     reservations.retain(|_, owner| owner != session_id);
+    for (h, ordinal) in freed {
+        tracing::info!(session = %session_id, h = %h, ordinal, "ordinal slot released");
+    }
     session_keys.remove(session_id)
 }
 

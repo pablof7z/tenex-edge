@@ -4,8 +4,8 @@ use std::fmt::Write as _;
 mod summary;
 
 use summary::{
-    breadcrumb_line, changed_member_lines, changed_status_items, changed_subchannel_lines,
-    channel_breadcrumb, channel_ref, channel_summary_line, current_activity_lines, member_lines,
+    changed_member_lines, changed_status_items, changed_subchannel_lines, channel_breadcrumb,
+    channel_path_line, channel_ref, channel_summary_line, current_activity_lines, member_lines,
     other_active_channel_lines, project_line, subchannels_of,
 };
 
@@ -24,8 +24,8 @@ pub(crate) fn render_awareness_snapshot(
     }
 
     let mut out = String::from("[tenex-edge] Fabric context\n\n");
-    let _ = writeln!(out, "Project: {}", project_line(store, &breadcrumb[0].0));
-    let _ = writeln!(out, "Channel: {}", breadcrumb_line(store, &breadcrumb, now));
+    let _ = writeln!(out, "Project: {}", project_line(store, &breadcrumb, now));
+    let _ = writeln!(out, "Channel: {}", channel_path_line(store, &breadcrumb, now));
 
     let members = member_lines(store, project, now, self_slug, self_pubkey);
     write_section(&mut out, "Members:", &members);
@@ -104,7 +104,7 @@ fn render_awareness_update(
     if !activity.is_empty() {
         write_section(
             &mut out,
-            &format!("Activity in {}:", channel_ref(project)),
+            &format!("Activity in {}:", channel_ref(store, project, now)),
             &activity,
         );
     }

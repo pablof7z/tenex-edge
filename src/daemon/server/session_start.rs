@@ -120,6 +120,7 @@ pub(in crate::daemon::server) async fn rpc_session_start(
             }
         });
     let harness_str = harness.as_str();
+    tracing::debug!(agent = %p.agent, harness = %harness_str, channel = %project, "session_start hook received");
     let tmux_pane = p.tmux_pane.clone().filter(|s| !s.is_empty());
     // The harness-native id to bind for resume: opencode `ses_*`, else claude/codex
     // native id.
@@ -235,6 +236,14 @@ pub(in crate::daemon::server) async fn rpc_session_start(
                 state.with_store(|s| session_pane(s, &rec.session_id)).as_deref() == Some(pane)
             });
             if same_pid || same_pane {
+                let reason = if same_pid { "same_pid" } else { "same_pane" };
+                tracing::info!(
+                    stale_session = %rec.session_id,
+                    new_session = %session_id,
+                    agent = %p.agent,
+                    reason,
+                    "cancelling stale session on harness restart"
+                );
                 state.release_session_signer(&rec.session_id);
                 stale_ids.push(rec.session_id.clone());
             }
@@ -266,6 +275,12 @@ pub(in crate::daemon::server) async fn rpc_session_start(
 
     // Idempotent re-start (session reassert): the engine task already runs.
     if state.sessions.lock().unwrap().contains_key(&session_id) {
+        tracing::info!(
+            agent = %p.agent,
+            session = %session_id,
+            channel = %project,
+            "session re-assert: engine already running"
+        );
         if let Some(prog) = &progress {
             prog.emit("session_start", "existing engine is already running");
         }
@@ -339,9 +354,8 @@ pub(in crate::daemon::server) async fn rpc_session_start(
         if tokio::time::timeout(std::time::Duration::from_secs(8), open)
             .await
             .is_err()
-            && std::env::var("TENEX_EDGE_DEBUG").is_ok()
         {
-            eprintln!("[daemon] ensure_channel_ready({project}) timed out (best-effort)");
+            tracing::warn!(channel = %project, "ensure_channel_ready timed out (best-effort)");
         }
     }
 
@@ -387,9 +401,7 @@ pub(in crate::daemon::server) async fn rpc_session_start(
     // backlog to this (already-alive) session.
     let needs_chat_replay = state.subscriptions.lock().unwrap().covers_channel(&project);
     if let Err(e) = ensure_subscription(state, &project).await {
-        if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
-            eprintln!("[daemon] ensure_subscription({project}) failed: {e:#}");
-        }
+        tracing::warn!(channel = %project, error = %e, "subscription setup failed (session will continue)");
         if let Some(prog) = &progress {
             prog.emit(
                 "subscription",
@@ -418,6 +430,14 @@ pub(in crate::daemon::server) async fn rpc_session_start(
         prog.emit("engine", "starting session engine and initial publishers");
     }
     spawn_session(state, ep).await?;
+    tracing::info!(
+        agent = %p.agent,
+        channel = %project,
+        session = %session_id,
+        codename = %crate::util::session_codename(&session_id),
+        harness = %harness_str,
+        "session started"
+    );
     if let Some(prog) = &progress {
         prog.emit("engine", "session engine started");
     }

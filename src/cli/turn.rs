@@ -57,10 +57,10 @@ fn rewrite_inbox_bodies(s: &Store, rows: &mut [InboxRow]) {
 /// processed table). Bodies get mention-rewritten before they reach the
 /// injector.
 fn take_inbox(s: &Store, session_id: &str, now: u64) -> Vec<InboxRow> {
-    let mut rows = s.drain_pending_for_session(session_id).unwrap_or_default();
-    for row in &rows {
-        s.mark_delivered(&row.event_id, session_id, now).ok();
-    }
+    // Atomic claim (pending → delivered in one statement). Whoever drains the
+    // row first — this hook or the tmux paste path — wins; the other gets
+    // nothing. The atomicity IS the dedup: no separate notified flag or gate.
+    let mut rows = s.claim_pending_for_session(session_id, now).unwrap_or_default();
     rewrite_inbox_bodies(s, &mut rows);
     rows
 }
@@ -113,12 +113,12 @@ pub fn assemble_turn_start_context(
         };
         if should_warn_not_member {
             blocks.push(format!(
-                "[tenex-edge] WARNING: this agent ({slug}) \
+                "<tenex-edge>\nWARNING: this agent ({slug}) \
                  is not a member of the NIP-29 group for project \"{project}\". \
                  Messages published by this session may be rejected by the relay. \
                  Tell the user to run the following command from a machine that \
                  has relay admin access (e.g. where this project was first set up):\n\
-                 \n  tenex-edge project add {project} {slug}",
+                 \n  tenex-edge project add {project} {slug}\n</tenex-edge>",
                 slug = rec.agent_slug,
                 project = scope,
             ));
@@ -140,8 +140,8 @@ pub fn assemble_turn_start_context(
             if n > 0 {
                 let name = crate::injection::channel_display(&s, &scope);
                 Some(format!(
-                    "[tenex-edge] {n} message(s) in #{name} before you joined this session. \
-                     Run `tenex-edge chat read` to see them."
+                    "<tenex-edge>\n{n} message(s) in #{name} before you joined this session. \
+                     Run `tenex-edge chat read` to see them.\n</tenex-edge>"
                 ))
             } else {
                 None
@@ -156,22 +156,16 @@ pub fn assemble_turn_start_context(
     }
     {
         let s = store.lock().expect("store mutex poisoned");
-        if let Some(block) = crate::injection::render_direct_mention_prompt(&s, &mentions, now) {
+        let name = crate::injection::channel_display(&s, &scope);
+        if let Some(block) = crate::injection::render_hook_mention(&s, &name, &mentions, now) {
             blocks.push(block);
         }
-        let ambient_header: std::borrow::Cow<str> = if first_turn {
-            let name = crate::injection::channel_display(&s, &scope);
-            format!("[tenex-edge] Channel messages in #{name} since you joined:").into()
+        let ambient_header = if first_turn {
+            format!("Activity on #{name} since you joined:")
         } else {
-            "tenex-edge channel messages - reply with `tenex-edge chat write --message \"...\"`:"
-                .into()
+            format!("Activity on #{name} since you last looked:")
         };
-        if let Some(block) = crate::injection::render_channel_chat_block(
-            &s,
-            &ambient_header,
-            &ambient,
-            now,
-        ) {
+        if let Some(block) = crate::injection::render_ambient(&s, &ambient_header, &ambient, now) {
             blocks.push(block);
         }
     }
@@ -248,7 +242,7 @@ pub fn assemble_turn_check_context(
     };
     {
         let s = store.lock().expect("store mutex poisoned");
-        if let Some(block) = crate::injection::render_direct_mention_prompt(&s, &direct_mentions, now)
+        if let Some(block) = crate::injection::render_hook_mention(&s, &channel, &direct_mentions, now)
         {
             blocks.push(block);
         }
@@ -259,9 +253,9 @@ pub fn assemble_turn_check_context(
     if let Some(since) = delta_since {
         let s = store.lock().expect("store mutex poisoned");
         let chat_rows = ambient_chat(&s, &scope, since, &rec.agent_pubkey);
-        if let Some(block) = crate::injection::render_channel_chat_block(
+        if let Some(block) = crate::injection::render_ambient(
             &s,
-            &format!("[tenex-edge] Messages on {channel} since your last check:"),
+            &format!("Activity on #{channel} since your last check:"),
             &chat_rows,
             now,
         ) {

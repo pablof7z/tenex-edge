@@ -34,7 +34,9 @@ fn pub_status(
 
 /// Materialize the `proj` channel + roster so awareness has fabric context.
 fn seed_channel(store: &Store) {
-    store.upsert_channel("proj", "proj", "", "", 1).unwrap();
+    // Opaque id "proj" with a distinct human name "main" (production ids are
+    // random, never equal to the name).
+    store.upsert_channel("proj", "main", "", "", 1).unwrap();
     store
         .replace_channel_members("proj", &["pk-coder".to_string()], 1)
         .unwrap();
@@ -94,7 +96,9 @@ fn first_turn_renders_awareness_snapshot_not_session_code() {
         "first turn should render fabric awareness; got: {text:?}"
     );
     assert!(
-        text.contains("Channel: #proj"),
+        // The current channel renders as a bare project-relative path (no `#`),
+        // by its human name — never the opaque id.
+        text.contains("Channel: main"),
         "awareness should name the channel; got: {text:?}"
     );
     assert!(
@@ -197,7 +201,7 @@ fn turn_check_chat_shown_once_not_per_tool_call() {
         assemble_turn_check_context(&m, &test_session("sess-me"), "laptop", Some(50), 200)
             .expect("fresh chat past the cursor must surface");
     assert!(
-        text.contains("[tenex-edge] Messages on proj since your last check:"),
+        text.contains("Activity on #proj since your last check:"),
         "chat block expected; got: {text:?}"
     );
 

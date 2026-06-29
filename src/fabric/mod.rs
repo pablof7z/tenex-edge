@@ -215,31 +215,37 @@ mod tests {
         let sender_sid = register(&store, &sender_pk, "myproject", "sender-ext");
         let receiver_sid = register(&store, &receiver_pk, "myproject", "receiver-ext");
 
-        let event = build_event(
+        // Ambient message (no p-tag): stored in relay_events, inbox stays empty.
+        let ambient = build_event(
             &sender_keys,
             9,
             "heads up: I pushed the parser fix",
             vec![make_tag(&["h", "myproject"])],
         );
-        let event_ts = event.created_at.as_secs();
+        let ambient_ts = ambient.created_at.as_secs();
+        let hosted = vec![sender_pk.clone(), receiver_pk.clone()];
+        let outcome = materialize(&RawEnvelope::Nostr(ambient.clone()), &hosted, ambient_ts, "test-pi", &store);
+        assert!(!outcome.wake_mentions, "ambient message must not wake inbox");
+        assert!(store.drain_pending_for_session(&receiver_sid).unwrap().is_empty());
+        assert!(store.has_event(&ambient.id.to_hex()).unwrap());
 
-        let hosted = vec![sender_pk, receiver_pk];
-        let env = RawEnvelope::Nostr(event.clone());
-        let outcome = materialize(&env, &hosted, event_ts, "test-pi", &store);
-
-        assert!(outcome.wake_mentions, "live receiver should wake");
+        // Mention (p-tagged): routed to inbox and wakes doorbell.
+        let mention = build_event(
+            &sender_keys,
+            9,
+            "hey receiver, LGTM",
+            vec![make_tag(&["h", "myproject"]), make_tag(&["p", &receiver_pk])],
+        );
+        let mention_ts = mention.created_at.as_secs();
+        let outcome2 = materialize(&RawEnvelope::Nostr(mention.clone()), &hosted, mention_ts, "test-pi", &store);
+        assert!(outcome2.wake_mentions, "mention should wake inbox");
         let receiver_rows = store.drain_pending_for_session(&receiver_sid).unwrap();
         assert_eq!(receiver_rows.len(), 1);
-        assert_eq!(receiver_rows[0].body, "heads up: I pushed the parser fix");
+        assert_eq!(receiver_rows[0].body, "hey receiver, LGTM");
         assert!(
-            store
-                .drain_pending_for_session(&sender_sid)
-                .unwrap()
-                .is_empty(),
+            store.drain_pending_for_session(&sender_sid).unwrap().is_empty(),
             "sender session should not receive its own chat line"
         );
-        // The chat line is also cached verbatim in the relay_events log.
-        assert!(store.has_event(&event.id.to_hex()).unwrap());
     }
 
     #[test]

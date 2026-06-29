@@ -2,16 +2,17 @@ use super::*;
 
 pub async fn run() -> Result<()> {
     config::ensure_dir(&config::edge_home())?;
+    crate::logging::init_daemon_logging(&crate::daemon::log_path())?;
 
     let lock = match StartupLock::try_acquire()? {
         Some(l) => l,
         None => {
-            eprintln!("[daemon] another daemon already running; exiting");
+            tracing::info!("another daemon already running; exiting");
             return Ok(());
         }
     };
     let listener = bind_socket()?;
-    eprintln!("[daemon] listening on {}", socket_path().display());
+    tracing::info!(socket = %socket_path().display(), "daemon listening");
 
     let cfg = Config::load().context("loading config")?;
     let host = cfg.host.clone();
@@ -38,6 +39,7 @@ pub async fn run() -> Result<()> {
             .await
             .context("daemon relay connect")?,
     );
+    tracing::info!(relays = ?transport_relays, "relay pool connected");
 
     let store = Arc::new(Mutex::new(Store::open(&store_path())?));
     let provider = Arc::new(Nip29Provider::new(
@@ -83,6 +85,7 @@ pub async fn run() -> Result<()> {
         session_keys: Mutex::new(HashMap::new()),
         session_signers: Mutex::new(HashMap::new()),
         backend_pubkey,
+        echo_guard: Default::default(),
     });
 
     // These tolerate a not-yet-connected relay (demux just waits for events;
@@ -102,14 +105,12 @@ pub async fn run() -> Result<()> {
                     let st = accept_state.clone();
                     tokio::spawn(async move {
                         if let Err(e) = serve_connection(st, stream).await {
-                            if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
-                                eprintln!("[daemon] connection error: {e:#}");
-                            }
+                            tracing::debug!(error = %e, "connection error");
                         }
                     });
                 }
                 Err(e) => {
-                    eprintln!("[daemon] accept error: {e}");
+                    tracing::error!(error = %e, "accept loop error");
                     break;
                 }
             }
@@ -124,6 +125,7 @@ pub async fn run() -> Result<()> {
     let relay_state = state.clone();
     tokio::spawn(async move {
         relay_state.transport.warmup().await;
+        tracing::info!("relay warmup complete; opening subscriptions");
 
         // Publish the backend's own kind:0 so it is identifiable on the relay by
         // Nostr clients. Best-effort: failure deferred to next restart.
@@ -170,10 +172,10 @@ pub async fn run() -> Result<()> {
                     }
                 }
             }
-            eprintln!(
-                "[daemon] spawn-on-mention: {} local agents, {} member groups tracked",
-                local_pks.len(),
-                member_groups.len()
+            tracing::info!(
+                local_agents = local_pks.len(),
+                member_groups = member_groups.len(),
+                "spawn-on-mention coverage seeded"
             );
         }
 
@@ -182,9 +184,7 @@ pub async fn run() -> Result<()> {
         // backend orchestration REQ (the backend pubkey is now in the #p aggregate).
         // No kind:0 is subscribed — profiles resolve on demand via Transport::fetch.
         if let Err(e) = resubscribe(&relay_state).await {
-            if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
-                eprintln!("[daemon] initial resubscribe failed: {e:#}");
-            }
+            tracing::warn!(error = %e, "initial resubscribe failed");
         }
 
         // Revive sessions a previous daemon left behind + (re)open their project
@@ -198,7 +198,7 @@ pub async fn run() -> Result<()> {
         _ = state.shutdown.notified() => {}
         _ = async { match &mut sigterm { Some(s) => { s.recv().await; }, None => std::future::pending().await } } => {}
     }
-    eprintln!("[daemon] shutting down");
+    tracing::info!("daemon shutting down");
     accept.abort();
     cleanup();
     state.transport.shutdown().await;
@@ -251,10 +251,7 @@ pub(in crate::daemon::server) async fn serve_connection(
         if reader.read_line(&mut line).await? > 0
             && serde_json::from_str::<PleaseExit>(line.trim_end()).is_ok()
         {
-            eprintln!(
-                "[daemon] newer client (protocol {}); exiting for re-exec",
-                hello.protocol
-            );
+            tracing::info!(client_protocol = hello.protocol, "newer client; restarting daemon for re-exec");
             state.shutdown.notify_waiters();
         }
         let _ = write_json(

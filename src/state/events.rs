@@ -132,6 +132,17 @@ impl Store {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
+    /// Count kind:9 chat events in a channel with `created_at < before`. Used on
+    /// first turn to tell a newly-joined session how much history it can't see.
+    pub fn count_channel_events_before(&self, channel_h: &str, before: u64) -> Result<u32> {
+        let n: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM relay_events WHERE channel_h=?1 AND kind=9 AND created_at<?2",
+            params![channel_h, before],
+            |r| r.get(0),
+        )?;
+        Ok(n as u32)
+    }
+
     /// Most recent events of a given kind, newest-first, capped at `limit`.
     pub fn events_by_kind(&self, kind: u32, limit: u32) -> Result<Vec<RelayEvent>> {
         let mut stmt = self.conn.prepare(&format!(

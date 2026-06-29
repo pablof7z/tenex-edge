@@ -33,12 +33,13 @@ fn log_file() -> Option<&'static Mutex<File>> {
 }
 
 fn log_entry(line: &str) {
-    let ts = crate::util::format_local_datetime_ms(crate::util::now_millis());
-    let full = format!("{ts}  {line}");
-    eprintln!("{full}");
+    // Write to relay.log for forensics, and route through tracing at debug
+    // so it only appears in daemon stdout when RUST_LOG=tenex_edge=debug.
+    tracing::debug!("{line}");
     if let Some(mu) = log_file() {
+        let ts = crate::util::format_local_datetime_ms(crate::util::now_millis());
         if let Ok(mut f) = mu.lock() {
-            let _ = writeln!(f, "{full}");
+            let _ = writeln!(f, "{ts}  {line}");
         }
     }
 }

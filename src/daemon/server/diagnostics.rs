@@ -97,9 +97,12 @@ pub(in crate::daemon::server) fn log_nip29_role_decision(
     role: &str,
     reason: &str,
 ) {
-    eprintln!(
-        "[daemon] nip29-role-decision group={group} target={} role={role} reason={reason}",
-        crate::util::pubkey_short(pubkey)
+    tracing::debug!(
+        group,
+        target = %crate::util::pubkey_short(pubkey),
+        role,
+        reason,
+        "nip29 role decision"
     );
 }
 

@@ -15,10 +15,12 @@ pub fn spawn_idle_watcher(state: Arc<DaemonState>) {
         loop {
             state.liveness_changed.notified().await;
             if is_idle(&state) {
+                let grace_secs = grace().as_secs();
+                tracing::info!(grace_secs, "daemon idle; starting grace-period countdown");
                 tokio::select! {
                     _ = tokio::time::sleep(grace()) => {
                         if is_idle(&state) {
-                            eprintln!("[daemon] idle for grace period; exiting");
+                            tracing::info!("grace period elapsed; daemon exiting");
                             state.shutdown.notify_waiters();
                             return;
                         }

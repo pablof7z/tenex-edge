@@ -60,36 +60,54 @@ pub(super) fn subchannels_of(store: &Store, project: &str) -> Vec<(String, Strin
 
 // ── line builders ─────────────────────────────────────────────────────────────
 
-pub(super) fn project_line(store: &Store, project: &str) -> String {
-    channel_about(store, project)
-        .filter(|s| !s.is_empty())
-        .map(|about| format!("{project} -- {about}"))
-        .unwrap_or_else(|| project.to_string())
+/// `Project:` line: the ROOT channel's human name + its description. The raw
+/// opaque `channel_h` never appears here.
+pub(super) fn project_line(store: &Store, breadcrumb: &[(String, String)], now: u64) -> String {
+    let root = &breadcrumb[0].0;
+    let name = channel_name_bare(store, root, now);
+    match channel_about(store, root).filter(|s| !s.is_empty()) {
+        Some(about) => format!("{name} -- {about}"),
+        None => name,
+    }
 }
 
-pub(super) fn breadcrumb_line(store: &Store, breadcrumb: &[(String, String)], now: u64) -> String {
-    breadcrumb
+/// `Channel:` line: the current channel as a project-RELATIVE slash path (root
+/// prefix dropped) plus its description. A direct child of the project shows just
+/// its name; a deeper channel shows `parent/child`. When the current channel IS
+/// the project root, shows the root name.
+pub(super) fn channel_path_line(
+    store: &Store,
+    breadcrumb: &[(String, String)],
+    now: u64,
+) -> String {
+    let names: Vec<String> = breadcrumb
         .iter()
-        .map(|(id, _)| titled_channel_ref(store, id, now))
-        .collect::<Vec<_>>()
-        .join(" > ")
+        .map(|(id, _)| channel_name_bare(store, id, now))
+        .collect();
+    let path = if names.len() <= 1 {
+        names.last().cloned().unwrap_or_default()
+    } else {
+        names[1..].join("/")
+    };
+    let current = &breadcrumb[breadcrumb.len() - 1].0;
+    match channel_about(store, current).filter(|s| !s.is_empty()) {
+        Some(about) => format!("{path} -- {about}"),
+        None => path,
+    }
 }
 
 pub(super) fn channel_summary_line(store: &Store, id: &str, now: u64) -> String {
     let count = channel_member_count(store, id, now);
-    format!(
-        "{} [{}]",
-        titled_channel_ref(store, id, now),
-        member_count_label(count)
-    )
+    let (handle, desc) = channel_label(store, id, now);
+    match desc {
+        Some(d) => format!("{handle} -- {d} [{}]", member_count_label(count)),
+        None => format!("{handle} [{}]", member_count_label(count)),
+    }
 }
 
-pub(super) fn channel_ref(id: &str) -> String {
-    if id.starts_with('#') {
-        id.to_string()
-    } else {
-        format!("#{id}")
-    }
+/// `#<name>` reference for a channel — name-based, never the raw opaque id.
+pub(super) fn channel_ref(store: &Store, id: &str, now: u64) -> String {
+    channel_label(store, id, now).0
 }
 
 pub(super) fn member_lines(
@@ -256,26 +274,41 @@ fn channel_about(store: &Store, id: &str) -> Option<String> {
         .map(|c| c.about.trim().to_string())
 }
 
-fn titled_channel_ref(store: &Store, id: &str, now: u64) -> String {
-    let base = channel_ref(id);
-    match known_channel_title(store, id, now) {
-        Some(title) if title != id => format!("{base} -- {title}"),
-        _ => base,
+/// A channel's `(reference_handle, optional_description)`:
+///   - named channel → (`#<name>`, its kind:39000 `about`)
+///   - unnamed channel (a session room, name empty or == its own id) → (the live
+///     work title of whoever is active there, else its `about`, else
+///     `(unnamed channel)`; no description).
+/// The full raw `channel_h` NEVER surfaces in either branch.
+fn channel_label(store: &Store, id: &str, now: u64) -> (String, Option<String>) {
+    if let Some(channel) = store.get_channel(id).ok().flatten() {
+        let name = channel.name.trim();
+        if !name.is_empty() && name != id {
+            let about = channel.about.trim();
+            return (format!("#{name}"), (!about.is_empty()).then(|| about.to_string()));
+        }
     }
+    (unnamed_channel_label(store, id, now), None)
 }
 
-/// Title for a channel reference. A real kind:39000 `name` wins; when the channel
-/// exists but carries no meaningful name (empty or == its own id, as session
-/// rooms do), fall back to the live work title of whoever is active there. No
-/// channel record at all → no title (avoids labelling transient/transport
-/// channels we have never materialized).
-fn known_channel_title(store: &Store, id: &str, now: u64) -> Option<String> {
-    let channel = store.get_channel(id).ok().flatten()?;
-    let name = channel.name.trim().to_string();
-    if !name.is_empty() && name != id {
-        return Some(name);
+/// Bare handle used when joining a relative channel PATH: the kind:39000 name,
+/// else the unnamed-channel descriptive label. Never the raw opaque id.
+fn channel_name_bare(store: &Store, id: &str, now: u64) -> String {
+    if let Some(channel) = store.get_channel(id).ok().flatten() {
+        let name = channel.name.trim();
+        if !name.is_empty() && name != id {
+            return name.to_string();
+        }
     }
+    unnamed_channel_label(store, id, now)
+}
+
+/// Descriptive label for an unnamed channel (a session room): the live work
+/// title of whoever is active, else its `about`, else a generic placeholder.
+fn unnamed_channel_label(store: &Store, id: &str, now: u64) -> String {
     latest_channel_work_title(store, id, now)
+        .or_else(|| channel_about(store, id).filter(|s| !s.is_empty()))
+        .unwrap_or_else(|| "(unnamed channel)".to_string())
 }
 
 /// Most-recently-updated live status title in a channel (the agent's current work
