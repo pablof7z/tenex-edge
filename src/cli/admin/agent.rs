@@ -101,7 +101,10 @@ pub async fn agents_roster() -> Result<()> {
     let edge_home = crate::config::edge_home();
     let rows = crate::identity::list_local_agents(&edge_home);
     if rows.is_empty() {
-        println!("No agents to invite (none in {}).", edge_home.join("agents").display());
+        println!(
+            "No agents to invite (none in {}).",
+            edge_home.join("agents").display()
+        );
         println!("Add one with: tenex-edge agent add <slug> [-- <command>]");
         return Ok(());
     }

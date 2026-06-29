@@ -19,8 +19,8 @@
 //! / non-heartbeat contexts). There is no separate presence heartbeat.
 //!
 //! Chat (kind:9) is the sole agent-to-agent messaging mechanism. Direct messaging
-//! uses an inline `@<codename>` in the chat body, which adds a `p` tag for the
-//! mentioned session pubkey.
+//! uses an inline `@<agent-instance-label>` in the chat body, which adds a `p`
+//! tag for the mentioned instance pubkey.
 //!
 //! Slug is NOT carried on the wire; it is resolved downstream from the signer's
 //! kind:0 profile (authoritative) or the local `profiles` table. Authorization

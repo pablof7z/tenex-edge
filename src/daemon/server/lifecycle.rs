@@ -119,7 +119,7 @@ pub async fn run() -> Result<()> {
 
     // Relay-DEPENDENT startup runs in the background, OFF the accept path, so the
     // daemon serves store-only RPCs (`who`, `tmux`, chat/inbox reads, statusline,
-    // whoami) immediately even when the relay is slow or unreachable. We warm up
+    // who/statusline) immediately even when the relay is slow or unreachable. We warm up
     // the connection (await connectivity + NIP-42 auth) BEFORE opening any
     // subscription — a REQ opened pre-auth on an auth-gated relay never delivers.
     let relay_state = state.clone();
@@ -251,7 +251,10 @@ pub(in crate::daemon::server) async fn serve_connection(
         if reader.read_line(&mut line).await? > 0
             && serde_json::from_str::<PleaseExit>(line.trim_end()).is_ok()
         {
-            tracing::info!(client_protocol = hello.protocol, "newer client; restarting daemon for re-exec");
+            tracing::info!(
+                client_protocol = hello.protocol,
+                "newer client; restarting daemon for re-exec"
+            );
             state.shutdown.notify_waiters();
         }
         let _ = write_json(

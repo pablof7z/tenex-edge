@@ -22,7 +22,6 @@ fn project_tabs_do_not_show_session_room_after_normalization() {
             host: "laptop".to_string(),
             project: row_project_for_tabs(&session_room),
             session_id: "sess-a".to_string(),
-            session_codename: "alpha0001".to_string(),
             status: "working".to_string(),
             attachable: true,
         }],

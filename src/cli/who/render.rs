@@ -3,8 +3,6 @@ use super::*;
 
 pub(super) fn render_who_once(snapshot: &WhoSnapshot) -> String {
     let mut out = String::new();
-    let split_counts_by_project = snapshot.project == "*";
-    let name_counts = agent_name_counts_for_scope(&snapshot.rows, split_counts_by_project);
 
     let scope = if snapshot.project == "*" {
         "all projects".to_string()
@@ -18,11 +16,11 @@ pub(super) fn render_who_once(snapshot: &WhoSnapshot) -> String {
         let _ = writeln!(out, "(no live agents — start a session)");
     } else if snapshot.project == "*" {
         for row in &snapshot.rows {
-            render_who_row(&mut out, row, true, &name_counts, split_counts_by_project);
+            render_who_row(&mut out, row, true);
         }
     } else {
         for row in &snapshot.rows {
-            render_who_row(&mut out, row, false, &name_counts, split_counts_by_project);
+            render_who_row(&mut out, row, false);
         }
     }
 
@@ -61,71 +59,37 @@ pub(super) fn render_who_once(snapshot: &WhoSnapshot) -> String {
     out
 }
 
-/// Render the `whoami` identity card from the daemon's JSON. Auto-detects a TTY:
-/// terminal → a compact colorized block; piped/captured (the agent-facing case)
-/// → a plain markdown table so it parses cleanly when injected into context.
-pub(super) fn render_whoami(v: &serde_json::Value) -> String {
-    let s = |k: &str| v.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string();
-    let agent = s("agent");
-    let project = s("project");
-    let host = s("host");
-    let rel_cwd = s("rel_cwd");
-    let pubkey = s("pubkey");
-    let working = v.get("working").and_then(|x| x.as_bool()).unwrap_or(false);
-    let title = s("status");
-    let is_member = v.get("is_member").and_then(|x| x.as_bool()).unwrap_or(true);
-    let pending = v.get("pending").and_then(|x| x.as_u64()).unwrap_or(0);
-
-    let status = status_plain(&title, "", working);
-    // This is the selected fabric address: durable by default, or a transient
-    // session pubkey for a duplicate live signer. Never npub.
-    let key = pubkey;
-    let dir = if rel_cwd.trim().is_empty() || rel_cwd == "." {
-        host.clone()
-    } else {
-        format!("{host} [{rel_cwd}]")
-    };
-
-    if io::stdout().is_terminal() {
-        let mut out = String::new();
-        let _ = writeln!(out, "You are {} on {}.", agent.cyan().bold(), project);
-        let _ = writeln!(out);
-        let row = |k: &str, val: &str| format!("  {:<10} {}\n", format!("{k}:").dimmed(), val);
-        let _ = write!(out, "{}", row("agent", &agent));
-        let _ = write!(out, "{}", row("project", &project));
-        let _ = write!(out, "{}", row("host", &dir));
-        let _ = write!(out, "{}", row("pubkey", &key));
-        let _ = write!(out, "{}", row("status", &status));
-        let _ = write!(
-            out,
-            "{}",
-            row("member", if is_member { "yes" } else { "no" })
-        );
-        if pending > 0 {
-            let _ = write!(out, "{}", row("chat", &format!("{pending} pending")));
-        }
-        out
-    } else {
-        let mut out = String::new();
-        let _ = writeln!(out, "You are **{agent}** on **{project}**.");
-        let _ = writeln!(out);
-        let _ = writeln!(out, "| Field | Value |");
-        let _ = writeln!(out, "|---|---|");
-        let _ = writeln!(out, "| Agent | {} |", md_cell(&agent));
-        let _ = writeln!(out, "| Project | {} |", md_cell(&project));
-        let _ = writeln!(out, "| Host | {} |", md_cell(&dir));
-        let _ = writeln!(out, "| Pubkey | {} |", md_cell(&key));
-        let _ = writeln!(out, "| Status | {} |", md_cell(&status));
-        let _ = writeln!(
-            out,
-            "| Project member | {} |",
-            if is_member { "yes" } else { "no" }
-        );
-        if pending > 0 {
-            let _ = writeln!(out, "| Chat | {} pending |", pending);
-        }
-        out
+/// A concise self-identity header folded into `who` (issue #99): who you are on
+/// the fabric. Driven by `out["self"]`; `None` when `who` is not run inside an
+/// agent. The agent label is the user-facing identity.
+pub(super) fn render_self_header(v: &serde_json::Value) -> Option<String> {
+    let me = v.get("self")?;
+    let s = |k: &str| me.get(k).and_then(|x| x.as_str()).unwrap_or("");
+    let label = s("label");
+    if label.is_empty() {
+        return None;
     }
+    let channel = s("channel");
+    let host = s("host");
+    let pubkey = s("pubkey");
+    let working = me.get("working").and_then(|x| x.as_bool()).unwrap_or(false);
+    let status = status_plain(s("status"), "", working);
+    let is_member = me
+        .get("is_member")
+        .and_then(|x| x.as_bool())
+        .unwrap_or(true);
+    let pending = me.get("pending").and_then(|x| x.as_u64()).unwrap_or(0);
+
+    let mut out = format!("You are **{label}** on **{channel}** ({host}).");
+    let _ = write!(
+        out,
+        "\npubkey {pubkey} · status {status} · member {}",
+        if is_member { "yes" } else { "no" }
+    );
+    if pending > 0 {
+        let _ = write!(out, " · {pending} pending");
+    }
+    Some(out)
 }
 
 pub(super) fn render_who_for_stdout(snapshot: &WhoSnapshot) -> String {
@@ -138,8 +102,6 @@ pub(super) fn render_who_for_stdout(snapshot: &WhoSnapshot) -> String {
 
 pub(super) fn render_who_plain(snapshot: &WhoSnapshot) -> String {
     let mut out = String::new();
-    let split_counts_by_project = snapshot.project == "*";
-    let name_counts = agent_name_counts_for_scope(&snapshot.rows, split_counts_by_project);
 
     let _ = writeln!(out, "# tenex-edge who");
     let _ = writeln!(out);
@@ -172,13 +134,7 @@ pub(super) fn render_who_plain(snapshot: &WhoSnapshot) -> String {
             let _ = writeln!(out, "{line}");
         }
         for row in &snapshot.rows {
-            render_who_markdown_row(
-                &mut out,
-                row,
-                snapshot.project == "*",
-                &name_counts,
-                split_counts_by_project,
-            );
+            render_who_markdown_row(&mut out, row, snapshot.project == "*");
         }
     }
 
@@ -223,14 +179,10 @@ pub(super) fn render_who_plain(snapshot: &WhoSnapshot) -> String {
     out
 }
 
-fn render_who_markdown_row(
-    out: &mut String,
-    row: &WhoRow,
-    _include_project: bool,
-    name_counts: &std::collections::BTreeMap<String, usize>,
-    split_counts_by_project: bool,
-) {
-    let agent = display_row_agent_name(row, name_counts, split_counts_by_project);
+fn render_who_markdown_row(out: &mut String, row: &WhoRow, _include_project: bool) {
+    // Concurrent same-agent instances now carry DISTINCT ordinal slugs
+    // ("haiku"/"haiku1"), so the slug alone disambiguates.
+    let agent = row.slug.clone();
     let host = row_host_label(row);
     let title = row_title_label(row);
     let status = row_state_label(row);
@@ -242,39 +194,6 @@ fn render_who_markdown_row(
         md_cell(&title),
         md_cell(&status)
     );
-}
-
-fn agent_name_counts_for_scope(
-    rows: &[WhoRow],
-    split_counts_by_project: bool,
-) -> std::collections::BTreeMap<String, usize> {
-    let mut counts = std::collections::BTreeMap::new();
-    for row in rows {
-        let key = agent_count_key(split_counts_by_project, &row.project, &row.slug);
-        *counts.entry(key).or_insert(0) += 1;
-    }
-    counts
-}
-
-fn display_row_agent_name(
-    row: &WhoRow,
-    name_counts: &std::collections::BTreeMap<String, usize>,
-    split_counts_by_project: bool,
-) -> String {
-    let key = agent_count_key(split_counts_by_project, &row.project, &row.slug);
-    if name_counts.get(&key).copied().unwrap_or(0) > 1 {
-        format!("{}-{}", row.slug, session_codename(&row.session_id))
-    } else {
-        row.slug.clone()
-    }
-}
-
-fn agent_count_key(split_counts_by_project: bool, project: &str, slug: &str) -> String {
-    if split_counts_by_project {
-        format!("{project}\0{slug}")
-    } else {
-        slug.to_string()
-    }
 }
 
 fn row_host_label(row: &WhoRow) -> String {
@@ -327,13 +246,7 @@ fn md_text(input: &str) -> String {
         .join(" ")
 }
 
-fn render_who_row(
-    out: &mut String,
-    row: &WhoRow,
-    include_project: bool,
-    name_counts: &std::collections::BTreeMap<String, usize>,
-    split_counts_by_project: bool,
-) {
+fn render_who_row(out: &mut String, row: &WhoRow, include_project: bool) {
     let stale = if row.fresh {
         String::new()
     } else {
@@ -350,9 +263,8 @@ fn render_who_row(
         .map(|d| format!(" {}", format!("[{d}]").dimmed()))
         .unwrap_or_default();
     let _ = include_project;
-    let name = display_row_agent_name(row, name_counts, split_counts_by_project)
-        .cyan()
-        .to_string();
+    // Distinct ordinal slugs already disambiguate concurrent same-agent rows.
+    let name = row.slug.clone().cyan().to_string();
     let _ = writeln!(
         out,
         "{} ({}){}{} - {}",

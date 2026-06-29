@@ -75,8 +75,9 @@ fn turn_start_context_returns_none_when_empty_non_first_turn() {
     let rec = test_session("sess-freeze-2");
     let m = Mutex::new(store);
 
-    let ctx =
-        assemble_turn_start_context(&m, &rec, BACKEND, "laptop", /* prev_turn_started_at */ 42);
+    let ctx = assemble_turn_start_context(
+        &m, &rec, BACKEND, "laptop", /* prev_turn_started_at */ 42,
+    );
     assert!(
         ctx.is_none(),
         "turn_start with no inbox, non-first turn, no peers must return None; got: {ctx:?}"
@@ -142,12 +143,20 @@ fn turn_check_delta_shows_siblings_with_activity_excludes_self() {
         200,
     );
     // The viewer's own status also changed — must NOT echo back.
-    pub_status(&store, "pk-coder", "coder", "My own work", "typing", true, 180, 200);
+    pub_status(
+        &store,
+        "pk-coder",
+        "coder",
+        "My own work",
+        "typing",
+        true,
+        180,
+        200,
+    );
     let m = Mutex::new(store);
 
-    let text =
-        assemble_turn_check_context(&m, &test_session("sess-me"), "laptop", Some(50), 200)
-            .expect("delta block expected when a sibling changed");
+    let text = assemble_turn_check_context(&m, &test_session("sess-me"), "laptop", Some(50), 200)
+        .expect("delta block expected when a sibling changed");
     assert!(
         text.contains("[tenex-edge] Fabric updates since your last check"),
         "awareness update header expected; got: {text:?}"
@@ -198,17 +207,15 @@ fn turn_check_chat_shown_once_not_per_tool_call() {
         .unwrap();
     let m = Mutex::new(store);
 
-    let text =
-        assemble_turn_check_context(&m, &test_session("sess-me"), "laptop", Some(50), 200)
-            .expect("fresh chat past the cursor must surface");
+    let text = assemble_turn_check_context(&m, &test_session("sess-me"), "laptop", Some(50), 200)
+        .expect("fresh chat past the cursor must surface");
     assert!(
         text.contains("Activity on #proj since your last check:"),
         "chat block expected; got: {text:?}"
     );
 
     // Cursor advanced past the row (since=150 > 120): no re-emit.
-    let text2 =
-        assemble_turn_check_context(&m, &test_session("sess-me"), "laptop", Some(150), 200);
+    let text2 = assemble_turn_check_context(&m, &test_session("sess-me"), "laptop", Some(150), 200);
     assert!(
         text2.is_none(),
         "already-shown chat must not repeat once the cursor passes it; got: {text2:?}"
@@ -270,13 +277,7 @@ fn view<'a>() -> EnvelopeView<'a> {
 fn envelope_has_email_like_headers_then_body() {
     let out = format_envelope(&view());
     let lines: Vec<&str> = out.lines().collect();
-    assert_eq!(
-        lines[0],
-        format!(
-            "From: {} (codex@my-box)",
-            session_codename("sender-session-id")
-        )
-    );
+    assert_eq!(lines[0], "From: codex@my-box");
     assert!(lines[1].starts_with("Date: ") && lines[1].ends_with("(3 min ago)"));
     assert_eq!(lines[2], "Subject: NIP-29 group creation failing");
     assert_eq!(lines[3], "Branch: features/oauth (a1b2c3d)");
@@ -291,7 +292,7 @@ fn dirty_count_and_remote_host_annotate() {
     v.dirty = 1;
     v.host = "prod-01.example.com";
     let out = format_envelope(&v);
-    assert!(out.contains("(codex@prod-01-example-com)"));
+    assert!(out.contains("From: codex@prod-01-example-com"));
     assert!(out.contains("Branch: features/oauth (a1b2c3d) [1 file dirty]"));
     v.dirty = 3;
     assert!(format_envelope(&v).contains("[3 files dirty]"));

@@ -1,0 +1,6 @@
+{
+  "id": "661eb-712ca",
+  "ts": "2026-06-29T10:14:48Z",
+  "session": "661ebf6b-e01b-4ff6-b9c7-5042b900c788",
+  "text": "C: explicit invite, not auto-add [...] - **`tenex-edge invite <slug[@backend]>`** — explicit verb, adds the agent to the current channel. Mentioning `@perf-hawk` in chat does **not** summon it (no stateful side-effect on a name reference).\n- **`tenex-edge agents`** — the on-demand summonable roster (slug@backend + \"when to use\" byline). This is where the roster *enumerates*; `who` shows it too (full snapshot), but the per-turn hook only ever shows the *delta* (new agent appeared)."
+}

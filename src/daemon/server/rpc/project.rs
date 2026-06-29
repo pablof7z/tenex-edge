@@ -12,9 +12,7 @@ pub async fn rpc_project_list(state: &Arc<DaemonState>) -> Result<serde_json::Va
     // Read the current read-model from the relay_channels cache: a "project" is a
     // root channel (empty parent); its slug is the channel_h and its about is the
     // kind:39000 description.
-    let local = state
-        .with_store(|s| s.list_channels())
-        .unwrap_or_default();
+    let local = state.with_store(|s| s.list_channels()).unwrap_or_default();
 
     let mut projects: Vec<serde_json::Value> = local
         .into_iter()
@@ -110,11 +108,20 @@ pub async fn rpc_project_members(
     }))
 }
 
-async fn wait_for_channel_about(state: &Arc<DaemonState>, project: &str, description: &str) -> bool {
+async fn wait_for_channel_about(
+    state: &Arc<DaemonState>,
+    project: &str,
+    description: &str,
+) -> bool {
     for _ in 0..20 {
         state.provider.refresh_project_list().await.ok();
         let matches = state.with_store(|s| {
-            s.get_channel(project).ok().flatten().map(|c| c.about).as_deref() == Some(description)
+            s.get_channel(project)
+                .ok()
+                .flatten()
+                .map(|c| c.about)
+                .as_deref()
+                == Some(description)
         });
         if matches {
             return true;

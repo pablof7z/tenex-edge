@@ -1,0 +1,18 @@
+[
+  [
+    "user",
+    "when an agent creates a channel it should auto switch to it and --agent should not be required"
+  ],
+  [
+    "assistant",
+    "All changes are complete, building, and tested. Here's a summary of what I implemented across the three requirements.\n\n## What changed\n\n**1. Auto-switch into a channel on create**\nAfter `channels create` provisions the new room, the daemon now re-homes the creating agent's session into it — the same route-scope + identity move that `channels switch` performs. I extracted that logic into a shared `rehome_session_to_channel` helper so create and switch can't drift apart. The brand-new room needs none of the switch path's occupancy/membership guards (the creator is its only member and no other session can already sign for it there), so the auto-switch is unconditional for genuine agent sessions. The CLI prints `switched to it`.\n\n**2. `--agent` is no longer required**\nDropped the \"at least one `--agent`\" bail in both the CLI and the daemon. With no targets, the channel is created and joined but **no** kind:9 orchestration event is published (an add-agents event with zero `add` tags is meaningless). `orchestration_event_id` comes back empty in that case.\n\n**3. New channel nests under the *current* channel, with `--parent-channel` override**\n`channels create` no longer sends a cwd-resolved project as the parent. The daemon resolves the parent in this precedence:\n1. `--parent-channel <ref>` — project-relative reference (e.g. `planning`, `epic999/planning`), resolved within the creator's project subtree; ambiguity returns candidate paths + exit 2, mirroring `channels switch`.\n2. the creating agent's **current channel** (the new default).\n3. an explicit literal `parent` — kept for the launch picker, operator invocations, and tests (back-compatible).\n\nCreator resolution uses the strict (no project-fallback) path so child-of-current and auto-switch only fire when actually run as an agent.\n\n## Verification\n- `cargo build` + `cargo clippy --all-targets`: clean on all changed files.\n- 280 lib tests pass.\n- New integration test `channels_create_no_agents_nests_under_current_and_auto_switches` covers all three behaviors and passes; the existing `channels_create_auto_creates_missing_parent_project` still passes.\n\n## One note on pre-existing failures\nThree integration tests in the `channels` suite fail (`orchestration_session_uses_existing_group_without_minting`, `agent_reply_...`, `first_turn_injects_channel_context_block`). I verified these are **not** from my changes: none of them call `channels_create`/`channels_switch`. They depend on `session_start`→`resolve_channel`, and the working tree has an unrelated in-progress refactor of `session_start.rs` (−8 lines) that those files depend on — reverting it to HEAD breaks compilation for *other* uncommitted files, confirming a mid-refactor change set that predates and is independent of this work.\n\nOne deliberate choice worth flagging: a `create` that hits the dedup path (name already exists) does **not** auto-switch — switching into a pre-existing channel needs the occupancy checks that only `channels switch` runs. Tell me if you'd rather have dedup route through the full switch instead."
+  ],
+  [
+    "user",
+    "it should error out if that channel already exists so the agent knows about it"
+  ],
+  [
+    "assistant",
+    "Passes. Let me confirm clippy is clean and all three `channels_create` tests still pass together:"
+  ]
+]

@@ -101,14 +101,12 @@ pub async fn channels(action: ChannelsAction) -> Result<()> {
             name,
             about,
             agents,
-            project,
+            parent_channel,
             message,
         } => {
-            let parent = resolve_project(project)?;
-            if agents.is_empty() {
-                bail!("at least one --agent slug@backend is required");
-            }
-            // Parse each `slug@backend` on the LAST `@` (agent slugs never contain `@`).
+            // `--agent` is optional: an agent may carve out an empty channel and
+            // populate it later. Each `slug@backend` splits on the LAST `@` (agent
+            // slugs never contain `@`).
             let mut parsed: Vec<serde_json::Value> = Vec::with_capacity(agents.len());
             for a in &agents {
                 let (slug, backend) = a
@@ -125,19 +123,33 @@ pub async fn channels(action: ChannelsAction) -> Result<()> {
             let v = daemon_call_async(
                 "channels_create",
                 serde_json::json!({
-                    "parent": parent,
+                    // No `parent` here: the daemon defaults the new channel under
+                    // the creating session's CURRENT channel. `--parent-channel`
+                    // overrides that with a project-relative reference.
+                    "parent_channel": parent_channel,
                     "name": name,
                     "about": about.unwrap_or_default(),
                     "agents": parsed,
                     "brief": brief,
                     // Caller identity so the daemon auto-adds the creating agent
-                    // to the new room (resolved like the messaging commands).
+                    // to the new room AND auto-switches its session into it
+                    // (resolved like the messaging commands).
                     "agent": crate::cli::agent_env_slug(),
                     "env_session": std::env::var("TENEX_EDGE_SESSION").ok(),
                     "cwd": std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()),
                 }),
             )
             .await?;
+            // Ambiguous `--parent-channel`: the daemon returns candidate paths
+            // instead of creating. Print copy-paste re-runs and exit 2.
+            if let Some(refs) = v["ambiguous"].as_array() {
+                let name = v["reference"].as_str().unwrap_or("");
+                eprintln!("'{name}' is ambiguous — re-run with an exact --parent-channel:");
+                for r in refs.iter().filter_map(|r| r.as_str()) {
+                    eprintln!("  tenex-edge channels create --name {name} --parent-channel {r}");
+                }
+                std::process::exit(2);
+            }
             let child = v["child_h"].as_str().unwrap_or("?");
             let path = v["display_path"].as_str().unwrap_or("");
             let oid = v["orchestration_event_id"].as_str().unwrap_or("");
@@ -149,6 +161,9 @@ pub async fn channels(action: ChannelsAction) -> Result<()> {
                 if !joined.is_empty() {
                     println!("  joined as {}", pubkey_short(joined).cyan());
                 }
+            }
+            if v["switched"].as_bool().unwrap_or(false) {
+                println!("  switched to it");
             }
             if !oid.is_empty() {
                 println!("  orchestration kind:9 {}", &oid[..oid.len().min(8)]);

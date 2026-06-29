@@ -29,7 +29,14 @@ pub(crate) fn render_awareness_snapshot(
     let proj_label = project_line(store, &breadcrumb, now);
     let chan_label = channel_path_line(store, &breadcrumb, now);
     let body = render_snapshot_body(
-        store, project, &proj_label, &chan_label, now, self_slug, self_pubkey, local_host,
+        store,
+        project,
+        &proj_label,
+        &chan_label,
+        now,
+        self_slug,
+        self_pubkey,
+        local_host,
     );
     Some(format!("[tenex-edge] Fabric context\n\n{body}"))
 }
@@ -58,7 +65,14 @@ pub(crate) fn render_fabric_view(
         )
     };
     render_snapshot_body(
-        store, project, &proj_label, &chan_label, now, self_slug, self_pubkey, local_host,
+        store,
+        project,
+        &proj_label,
+        &chan_label,
+        now,
+        self_slug,
+        self_pubkey,
+        local_host,
     )
 }
 
@@ -112,7 +126,15 @@ pub(crate) fn render_awareness_update_since_turn(
     exclude_pubkey: Option<&str>,
     local_host: &str,
 ) -> Option<String> {
-    render_awareness_update(store, since, project, now, exclude_pubkey, "last turn", local_host)
+    render_awareness_update(
+        store,
+        since,
+        project,
+        now,
+        exclude_pubkey,
+        "last turn",
+        local_host,
+    )
 }
 
 pub(crate) fn render_awareness_update_since_check(
@@ -123,7 +145,15 @@ pub(crate) fn render_awareness_update_since_check(
     exclude_pubkey: Option<&str>,
     local_host: &str,
 ) -> Option<String> {
-    render_awareness_update(store, since, project, now, exclude_pubkey, "last check", local_host)
+    render_awareness_update(
+        store,
+        since,
+        project,
+        now,
+        exclude_pubkey,
+        "last check",
+        local_host,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -185,8 +215,7 @@ pub(crate) fn new_agent_block(
     if fresh.is_empty() {
         return None;
     }
-    let mut out =
-        String::from("New agents available (invite with `tenex-edge invite <slug>`):");
+    let mut out = String::from("New agents available (invite with `tenex-edge invite <slug>`):");
     for (slug, byline, _) in fresh {
         match byline.as_deref().map(str::trim).filter(|b| !b.is_empty()) {
             Some(b) => {

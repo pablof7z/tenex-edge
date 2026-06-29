@@ -10,12 +10,8 @@ pub(super) async fn chat_write(message: String, channel: Option<String>) -> Resu
     });
     let v = daemon_call_async("chat_write", params).await?;
     let event_id = v["event_id"].as_str().unwrap_or("?");
-    if let Some(session) = v["mentioned_session"].as_str().filter(|s| !s.is_empty()) {
-        println!(
-            "sent chat {} mentioning session {}",
-            pubkey_short(event_id),
-            SessionId::from(session.to_string())
-        );
+    if let Some(label) = v["mentioned_label"].as_str().filter(|s| !s.is_empty()) {
+        println!("sent chat {} mentioning @{}", pubkey_short(event_id), label);
     } else {
         println!("sent chat {}", pubkey_short(event_id));
     }
@@ -188,7 +184,7 @@ pub fn mention_short_id(event_id: &str) -> String {
 pub struct EnvelopeView<'a> {
     pub from_slug: &'a str,
     pub project: &'a str,
-    /// Sender's session id (raw; rendered as a stable codename). Empty → omitted.
+    /// Sender's raw session id, used only as a fallback correlation handle.
     pub from_session: &'a str,
     /// Sender's host label. Empty, or equal to `self_host`, → no remote annotation.
     pub host: &'a str,
@@ -209,7 +205,7 @@ pub struct EnvelopeView<'a> {
 /// Render an inbound message as an email-like envelope:
 ///
 /// ```text
-/// From: codex@tenex-edge [session ca0ff4]
+/// From: codex@tenex-edge
 /// Date: 2026-06-12 14:23 (3 min ago)
 /// Subject: NIP-29 group creation failing
 /// Branch: features/oauth (a1b2c3d) [1 file dirty]
@@ -221,9 +217,8 @@ pub struct EnvelopeView<'a> {
 /// The Subject and Branch lines are omitted when absent; a remote sender adds
 /// `[remote: <host>]` to the From line.
 pub fn format_envelope(e: &EnvelopeView) -> String {
-    // Canonical sender identity: `codename (agent@host)` when the session is
-    // known, else `agent@host`. Host (slugified) encodes locality, so no
-    // separate `[remote]` tag is needed.
+    // Canonical sender identity: the agent-instance label with host. The session
+    // id is only a fallback correlation handle when the sender slug is missing.
     let host = if e.host.is_empty() {
         e.self_host
     } else {

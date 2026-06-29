@@ -438,8 +438,7 @@ pub fn derive_session_keys(
 
 /// Display label for an agent's Nth concurrent identity. Ordinal 0 is the base
 /// agent itself (`smith`); higher ordinals append the number (`smith1`,
-/// `smith2`). This is the addressable identity peers see, NOT a transient
-/// per-session codename.
+/// `smith2`). This is the addressable identity peers see.
 pub fn agent_ordinal_label(agent_slug: &str, ordinal: u32) -> String {
     if ordinal == 0 {
         agent_slug.to_string()
@@ -503,6 +502,89 @@ pub fn derive_agent_ordinal_keys(base: &Keys, ordinal: u32) -> Keys {
                 info[counter_idx] = counter + 1;
             }
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Agent-instance identity (issue #98)
+// ---------------------------------------------------------------------------
+
+/// The single authoritative identity of one running agent instance.
+///
+/// Issue #98: identity policy — which key signs, which slug displays, which
+/// pubkey is used for membership/routing — used to be reconstructed at ~6 edge
+/// sites (status publish, chat publish, profile publish, `who`,
+/// statusline, mention routing), each free to disagree. The recurring bug:
+/// signing as the `claude1` pubkey while labelling the event `claude`, or
+/// checking membership for the base pubkey while the instance signs as an
+/// ordinal.
+///
+/// This value is created ONCE at session birth and threaded through (or
+/// projected from the `identities` table for read-side callers). Every base-vs-
+/// ordinal decision — display label, selected pubkey, signing key — lives in the
+/// methods here and NOWHERE else. After session creation, callsites consume an
+/// `AgentInstance`; they never re-derive `keys_for_session(..).unwrap_or(base)`
+/// or `identity_for_session(..).unwrap_or(rec.agent_slug)`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentInstance {
+    /// The durable agent role (`claude`). Same for every ordinal of the agent.
+    pub base_slug: String,
+    /// The ordinal-0 (durable, file-backed) pubkey of the agent.
+    pub base_pubkey: String,
+    /// 0 for the durable instance, N for the Nth concurrent same-agent instance.
+    pub ordinal: u32,
+    /// This instance's selected pubkey: equals `base_pubkey` iff `ordinal == 0`,
+    /// else the deterministically-derived ordinal pubkey.
+    pub pubkey: String,
+}
+
+impl AgentInstance {
+    /// The base (ordinal-0) instance of an agent — the safety fallback for a
+    /// session with no derived identity bound yet. `pubkey` IS `base_pubkey`.
+    pub fn base(base_slug: String, base_pubkey: String) -> Self {
+        Self {
+            base_slug,
+            base_pubkey: base_pubkey.clone(),
+            ordinal: 0,
+            pubkey: base_pubkey,
+        }
+    }
+
+    /// Build from a persisted `identities`-row projection: the row already
+    /// carries the base slug/pubkey, ordinal, and selected pubkey.
+    pub fn from_parts(
+        base_slug: String,
+        base_pubkey: String,
+        ordinal: u32,
+        pubkey: String,
+    ) -> Self {
+        Self {
+            base_slug,
+            base_pubkey,
+            ordinal,
+            pubkey,
+        }
+    }
+
+    /// The display label peers see: `claude` for ordinal 0, `claude1`, `claude2`
+    /// for higher ordinals. The ONE definition of an instance's display name.
+    pub fn display_slug(&self) -> String {
+        agent_ordinal_label(&self.base_slug, self.ordinal)
+    }
+
+    /// The wire identity for every event this instance authors (kind:0, kind:9,
+    /// kind:30315): its selected pubkey paired with its display label — NEVER the
+    /// base slug paired with an ordinal pubkey.
+    pub fn agent_ref(&self) -> crate::domain::AgentRef {
+        crate::domain::AgentRef::new(self.pubkey.clone(), self.display_slug())
+    }
+
+    /// The keys this instance signs with: the durable base keys for ordinal 0,
+    /// the deterministically-derived ordinal keys otherwise. `base_keys` is the
+    /// agent's file-backed keypair (ordinal 0). The ONE place the base-vs-ordinal
+    /// signing decision is made.
+    pub fn signing_keys(&self, base_keys: &Keys) -> Keys {
+        derive_agent_ordinal_keys(base_keys, self.ordinal)
     }
 }
 

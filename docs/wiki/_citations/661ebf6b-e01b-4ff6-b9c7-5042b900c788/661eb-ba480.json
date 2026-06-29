@@ -1,0 +1,6 @@
+{
+  "id": "661eb-ba480",
+  "ts": "2026-06-29T10:14:48Z",
+  "session": "661ebf6b-e01b-4ff6-b9c7-5042b900c788",
+  "text": "\n**Channel reference / path rule (fixes the opaque-id leak):**\n- Display a channel by its **name**, never `#<raw_channel_id>`. The opaque id appears *only* as the `@3f9a` disambiguation escape hatch.\n- Hierarchy uses **slashes**: `tenex-edge/planning`. (Dotted paths rejected — names legally contain dots.)"
+}

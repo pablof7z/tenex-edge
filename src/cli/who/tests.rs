@@ -1,8 +1,7 @@
-use super::render::{render_who_once, render_who_plain, render_whoami};
+use super::render::{render_self_header, render_who_once, render_who_plain};
 use super::snapshot::{OtherProjectSummary, SpawnableRow, WhoRow, WhoSnapshot, WhoSource};
 use super::*;
 use crate::state::{Identity, RegisterSession, Status};
-use crate::util::session_codename;
 
 fn strip_ansi(input: &str) -> String {
     let mut out = String::new();
@@ -63,7 +62,15 @@ fn seed_draft_title(store: &Store, session_id: &str, title: &str, ts: u64) {
 /// Record a peer (or our own published) status as a kind:30315 in `relay_status`,
 /// plus a kind:0 carrying its host so remoteness can be derived.
 #[allow(clippy::too_many_arguments)]
-fn record_peer(store: &Store, pubkey: &str, slug: &str, host: &str, title: &str, busy: bool, ts: u64) {
+fn record_peer(
+    store: &Store,
+    pubkey: &str,
+    slug: &str,
+    host: &str,
+    title: &str,
+    busy: bool,
+    ts: u64,
+) {
     store
         .upsert_profile(pubkey, slug, slug, host, false, 1)
         .unwrap();
@@ -105,7 +112,7 @@ fn who_snapshot_merges_local_and_peer_sessions() {
     let store = Store::open_memory().unwrap();
     // Local coder is a hosted session; pk-coder is one of our signing keys.
     own_identity(&store, "pk-coder", "coder");
-    let coder_id = register_local(&store, "coder", "pk-coder", "sid-coder", 1_000);
+    register_local(&store, "coder", "pk-coder", "sid-coder", 1_000);
     // A relay echo of our own status (pk-coder) must be deduped out of peers.
     record_peer(&store, "pk-coder", "coder", "laptop", "", false, 1_000);
     // A genuine remote peer on a different host.
@@ -145,7 +152,6 @@ fn who_snapshot_merges_local_and_peer_sessions() {
     assert!(once.starts_with("proj\n\n"));
     assert!(once.contains("coder (laptop) - idle"));
     assert!(!once.contains("[session"));
-    assert!(!once.contains(&session_codename(&coder_id)));
     assert!(once.contains("reviewer (tower, remote) - reviewing the patch"));
 }
 
@@ -209,7 +215,10 @@ fn same_host_peer_is_not_remote() {
         once.contains("codex (laptop)"),
         "same-host peer shows its host"
     );
-    assert!(!once.contains("remote"), "same-host peer must not be remote");
+    assert!(
+        !once.contains("remote"),
+        "same-host peer must not be remote"
+    );
 }
 
 #[test]

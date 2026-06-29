@@ -29,7 +29,11 @@ pub(super) fn derive_from_status(s: &Status, now: u64) -> DerivedStatus {
         busy: s.busy,
         liveness: Liveness::Live,
         title: s.title.clone(),
-        activity: if s.busy { s.activity.clone() } else { String::new() },
+        activity: if s.busy {
+            s.activity.clone()
+        } else {
+            String::new()
+        },
         lifecycle: crate::domain::Lifecycle::Active,
         age_secs: now.saturating_sub(s.last_seen),
     }

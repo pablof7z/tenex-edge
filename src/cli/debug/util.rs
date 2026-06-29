@@ -1,5 +1,4 @@
 use super::data::{DebugKind, SessionPane};
-use crate::session::SessionId;
 use serde_json::Value;
 use std::collections::BTreeMap;
 
@@ -41,10 +40,11 @@ pub(super) fn tail_read(path: &std::path::Path, max_bytes: u64) -> String {
 pub(super) fn new_pane(session: &str) -> SessionPane {
     SessionPane {
         session: session.to_string(),
+        // Short raw-session-id prefix for correlation.
         short: if session == "unscoped" {
             "unscoped".to_string()
         } else {
-            SessionId::from(session).to_string()
+            session.chars().take(8).collect()
         },
         ..SessionPane::default()
     }

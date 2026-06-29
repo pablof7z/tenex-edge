@@ -289,7 +289,10 @@ async fn provision_before_spawn(
         .await
         .is_err()
     {
-        tracing::warn!(scope, "tmux_spawn: channel provisioning timed out; proceeding");
+        tracing::warn!(
+            scope,
+            "tmux_spawn: channel provisioning timed out; proceeding"
+        );
     }
 }
 
@@ -349,9 +352,10 @@ pub(super) async fn rpc_tmux_resume(
     let p: TmuxResumeParams =
         serde_json::from_value(params.clone()).context("parsing tmux_resume params")?;
 
-    // Resolve including dead sessions: exact id (get_session) first, then a
-    // session-id prefix, then the codename the TUI displays (e.g. `bravo4217`) —
-    // resolve_session only matches alive rows by cwd/agent.
+    // Resolve including dead sessions by the raw canonical session id: exact
+    // match (get_session) first, then a session-id prefix. (resolve_session only
+    // matches alive rows by cwd/agent.) Codename resolution is gone — the raw
+    // session id is the resume correlation handle.
     let rec = match state
         .with_store(|s| s.get_session(&p.session))
         .ok()
@@ -362,7 +366,6 @@ pub(super) async fn rpc_tmux_resume(
             .with_store(|s| s.find_session_by_prefix(&p.session))
             .ok()
             .flatten()
-            .or_else(|| resume_by_codename(state, &p.session))
             .with_context(|| format!("no session matching {:?}", p.session))?,
     };
 
@@ -390,19 +393,6 @@ pub(super) async fn rpc_tmux_resume(
         })),
         Err(e) => Ok(serde_json::json!({ "error": format!("{e:#}") })),
     }
-}
-
-/// Resolve a session by the codename the TUI displays (e.g. `bravo4217`), scanning
-/// recent local sessions (including dead rows) so a user can copy `[session
-/// bravo4217]` straight into `tmux resume`. Case-insensitive; first match wins.
-fn resume_by_codename(state: &Arc<DaemonState>, target: &str) -> Option<crate::state::Session> {
-    let want = target.to_lowercase();
-    state
-        .with_store(|s| s.list_resumable_sessions(200))
-        .ok()
-        .unwrap_or_default()
-        .into_iter()
-        .find(|rec| crate::util::session_codename(&rec.session_id).to_lowercase() == want)
 }
 
 // ── tmux_resumable ────────────────────────────────────────────────────────────
@@ -436,9 +426,10 @@ pub(super) fn rpc_tmux_resumable(state: &Arc<DaemonState>) -> Result<serde_json:
                 return None;
             }
             let work_root = work_root_for(state, &rec.channel_h);
+            let slug = state.session_instance(&rec).display_slug();
             Some(serde_json::json!({
                 "session_id": rec.session_id,
-                "slug": rec.agent_slug,
+                "slug": slug,
                 "project": rec.channel_h,
                 "work_root": work_root,
                 "rel_cwd": "",

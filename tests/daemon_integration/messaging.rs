@@ -2,7 +2,6 @@ use crate::daemon_harness::*;
 use std::time::Duration;
 use tenex_edge::daemon::client::Client;
 use tenex_edge::state::Store;
-use tenex_edge::util::session_codename;
 
 #[test]
 fn session_start_runs_engine_and_records_alive_session() {
@@ -151,17 +150,36 @@ fn chat_write_stdin_enqueues_live_project_chat_for_receiver() {
             r["session_id"].as_str().unwrap().to_string(),
         )
     });
-    let receiver_scope = Store::open(&home.store_path())
+    let receiver_row = Store::open(&home.store_path())
         .unwrap()
         .get_session(&receiver_canon)
         .unwrap()
-        .expect("receiver session row")
-        .channel_h
-        .clone();
+        .expect("receiver session row");
+    let receiver_scope = receiver_row.channel_h.clone();
 
-    // Mention is now inline in the body as `@<codename>` — no --mention flag.
-    let receiver_codename = session_codename(&receiver_canon);
-    let body = format!("hello @{receiver_codename} from redirected stdin");
+    // Mention is now inline in the body as `@<agent-instance-label>` — the
+    // receiver agent is `chat-receiver` (ordinal 0, no numeric suffix). The label
+    // resolves to the receiver instance: first via its live local session, and as
+    // a fallback via the relay-cached `relay_profiles`. In this nak env kind:0
+    // isn't materialized back, so also seed the receiver's profile (keyed on its
+    // own session pubkey, on the daemon's host = `test-host`) so the profile path
+    // resolves to exactly the pubkey delivery rings on.
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    Store::open(&home.store_path())
+        .unwrap()
+        .upsert_profile(
+            &receiver_row.agent_pubkey,
+            "chat-receiver",
+            "chat-receiver",
+            "test-host",
+            false,
+            now,
+        )
+        .unwrap();
+    let body = "hello @chat-receiver from redirected stdin".to_string();
     let out = run_cli_stdin_with_env(
         &home,
         &["chat", "write"],

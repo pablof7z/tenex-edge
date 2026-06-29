@@ -84,28 +84,28 @@ pub(in crate::daemon::server) fn spawn_retry_drainer(state: Arc<DaemonState>) {
 }
 
 /// Publish the agent's completed-turn output as kind:9 chat into the session's
-/// room (issue #6). Signed by the agent via `keys_for_session`, which falls
-/// back to the durable agent key (#5). Mirrors `rpc_chat_write`'s publish +
+/// room (issue #6). Signed by the agent via the session's `AgentInstance`
+/// (selected pubkey + display label), falling back to the base agent key (#5)
+/// only when no derived identity is bound. Mirrors `rpc_chat_write`'s publish +
 /// local record, minus mention handling.
 pub(in crate::daemon::server) async fn publish_agent_reply(
     state: &Arc<DaemonState>,
     rec: &crate::state::Session,
     reply: &str,
 ) -> Result<()> {
-    let id = identity::load_or_create(&config::edge_home(), &rec.agent_slug, now_secs())?;
-    // Sign with the selected session identity: durable by default, transient
-    // only when this live session collided with another durable signer in the
-    // same routing scope.
-    let signing = state
-        .keys_for_session(&rec.session_id)
-        .unwrap_or_else(|| id.keys.clone());
-    let from_pubkey = signing.public_key().to_hex();
+    // Issue #98: the session's authoritative agent-instance identity is the single
+    // source for signing key, selected pubkey, and display label — no ad hoc
+    // keys_for_session(..).unwrap_or(base) / base-slug pairing at the edge.
+    let instance = state.session_instance(rec);
+    let base = identity::load_or_create(&config::edge_home(), &instance.base_slug, now_secs())?;
+    let signing = instance.signing_keys(&base.keys);
+    let from_pubkey = instance.pubkey.clone();
     // Route into the session's CURRENT channel so a `channels switch` moves the
     // agent's turn replies to the new channel without restarting.
     let scope = rec.channel_h.clone();
 
     let chat = ChatMessage {
-        from: crate::domain::AgentRef::new(from_pubkey.clone(), rec.agent_slug.clone()),
+        from: instance.agent_ref(),
         project: scope.clone(),
         body: reply.to_string(),
         mentioned_pubkey: None,

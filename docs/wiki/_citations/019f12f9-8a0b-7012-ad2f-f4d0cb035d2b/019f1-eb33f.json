@@ -1,0 +1,6 @@
+{
+  "id": "019f1-eb33f",
+  "ts": "2026-06-29T10:51:48Z",
+  "session": "019f12f9-8a0b-7012-ad2f-f4d0cb035d2b",
+  "text": "- Integration-test helper files under `tests/` must live in a subdirectory and be loaded with explicit `#[path]` annotations, so they do not become standalone test crates."
+}

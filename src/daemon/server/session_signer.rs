@@ -49,9 +49,22 @@ pub(super) struct SelectedSigner {
 }
 
 impl SelectedSigner {
-    /// Engine signing keys: `None` for ordinal 0 (use the base agent key).
-    pub(super) fn session_keys(&self) -> Option<Keys> {
-        self.keys.clone()
+    /// Project to the authoritative [`crate::identity::AgentInstance`] (issue #98).
+    /// The base slug/pubkey are the agent's durable (ordinal-0) identity; this
+    /// signer contributes the selected ordinal + pubkey. Engine + publishers
+    /// derive label/pubkey/signing-key policy from the returned instance, never
+    /// from the raw `label`/`keys` fields here.
+    pub(super) fn instance(
+        &self,
+        base_slug: &str,
+        base_pubkey: &str,
+    ) -> crate::identity::AgentInstance {
+        crate::identity::AgentInstance::from_parts(
+            base_slug.to_string(),
+            base_pubkey.to_string(),
+            self.ordinal,
+            self.pubkey.clone(),
+        )
     }
     /// The pubkey that must be added as a NIP-29 member before use — only for
     /// ordinals > 0. Ordinal 0 is the base agent, admitted by the normal
@@ -243,9 +256,16 @@ mod tests {
         assert_eq!(s.ordinal, 0);
         assert_eq!(s.label, "smith");
         assert_eq!(s.pubkey, bp); // ordinal 0 IS the base pubkey
-        assert!(s.session_keys().is_none()); // base-key fallback
         assert!(s.member_pubkey_to_admit().is_none());
         assert!(sk.is_empty());
+        // Projected instance: ordinal 0 signs with the base keys (no derivation).
+        let inst = s.instance("smith", &bp);
+        assert_eq!(inst.display_slug(), "smith");
+        assert_eq!(inst.pubkey, bp);
+        assert_eq!(
+            inst.signing_keys(&bk).secret_key().to_secret_hex(),
+            bk.secret_key().to_secret_hex()
+        );
     }
 
     #[test]
@@ -259,13 +279,21 @@ mod tests {
         assert_eq!(s2.ordinal, 1);
         assert_eq!(s2.label, "smith1");
         assert_ne!(s2.pubkey, bp);
-        assert!(s2.session_keys().is_some());
         assert_eq!(s2.member_pubkey_to_admit(), Some(s2.pubkey.as_str()));
         // Durable: the same ordinal-1 key is reproducible (room-independent).
         assert_eq!(
             s2.pubkey,
-            identity::derive_agent_ordinal_keys(&bk, 1).public_key().to_hex()
+            identity::derive_agent_ordinal_keys(&bk, 1)
+                .public_key()
+                .to_hex()
         );
+        // Projected instance: ordinal 1 signs with a DERIVED key whose pubkey is
+        // the selected pubkey — never collapsing back onto the base.
+        let inst = s2.instance("smith", &bp);
+        assert_eq!(inst.display_slug(), "smith1");
+        assert_eq!(inst.pubkey, s2.pubkey);
+        assert_eq!(inst.signing_keys(&bk).public_key().to_hex(), s2.pubkey);
+        assert_ne!(inst.signing_keys(&bk).public_key().to_hex(), bp);
     }
 
     #[test]
@@ -307,7 +335,8 @@ mod tests {
         let bp = bk.public_key().to_hex();
         let mut r = SignerReservations::new();
         let mut sk = HashMap::new();
-        let s = select_and_reserve(&mut r, &mut sk, request("s1", "#a", &bp, &bk, Some(1))).unwrap();
+        let s =
+            select_and_reserve(&mut r, &mut sk, request("s1", "#a", &bp, &bk, Some(1))).unwrap();
         assert_eq!(s.ordinal, 1);
         assert_eq!(s.label, "smith1");
     }
@@ -386,9 +415,8 @@ mod tests {
                 scope.spawn(move || {
                     let mut r = reservations.lock().unwrap();
                     let mut sk = session_keys.lock().unwrap();
-                    let s =
-                        select_and_reserve(&mut r, &mut sk, request(sid, "#a", &bp, &bk, None))
-                            .unwrap();
+                    let s = select_and_reserve(&mut r, &mut sk, request(sid, "#a", &bp, &bk, None))
+                        .unwrap();
                     ordinals.lock().unwrap().push(s.ordinal);
                 });
             }

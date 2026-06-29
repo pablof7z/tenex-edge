@@ -1,0 +1,6 @@
+{
+  "id": "bd868-96ae0",
+  "ts": "2026-06-29T10:42:49Z",
+  "session": "bd8689c8-4a5f-45b3-9dbe-758baec2a2f4",
+  "text": "- Note for #99: the **ordinal label** (`claude1`) — not the codename — is now the primary same-agent disambiguator on the wire. The `slug-codename` form in `display_who_*` is legacy snapshot-table behavior. [...] - **Targeting** — relax the mention gate in `idref.rs` to accept `@haiku`/`@haiku1`; delete `find_session_by_codename` + the \"must name a concrete session codename\" bail in `chat_write.rs`. `resolve_agent_pubkey(\"haiku1\", host)` already resolves the label→selected-pubkey (each instance publishes kind:0 under its display label), so this is mostly deletion."
+}

@@ -5,20 +5,23 @@ pub(in crate::daemon::server) async fn spawn_session(
     params: EngineParams,
 ) -> Result<()> {
     let session_id = params.session_id.clone();
-    let pubkey = params.agent_pubkey.clone();
+    let pubkey = params.instance.pubkey.clone();
     let project = params.project.clone();
 
     tracing::info!(
-        agent = %params.agent_slug,
+        agent = %params.instance.base_slug,
         channel = %project,
         session = %session_id,
         "spawning session engine"
     );
 
+    // Register THIS instance's signing keys under its selected pubkey, so
+    // `keys_for(selected_pubkey)` returns the key that actually authored its
+    // events (base key for ordinal 0, derived key for ordinal N).
     state.hosted.lock().unwrap().insert(
         pubkey.clone(),
         HostedAgent {
-            keys: params.keys.clone(),
+            keys: params.instance.signing_keys(&params.base_keys),
         },
     );
     ensure_subscription(state, &project).await?;
@@ -113,7 +116,11 @@ pub(in crate::daemon::server) async fn ensure_subscription(
     if reqs.is_empty() {
         return Ok(());
     }
-    tracing::debug!(channel = project, req_count = reqs.len(), "opening narrow channel REQs");
+    tracing::debug!(
+        channel = project,
+        req_count = reqs.len(),
+        "opening narrow channel REQs"
+    );
     // Bounded: opening a relay subscription can hang on a slow/unreachable relay,
     // and this is awaited on hook-critical paths (session_start, spawn_session),
     // so a hang would block the editor. The intent (project recorded above +
@@ -121,7 +128,10 @@ pub(in crate::daemon::server) async fn ensure_subscription(
     match tokio::time::timeout(std::time::Duration::from_secs(5), apply_plan(state, reqs)).await {
         Ok(r) => r,
         Err(_) => {
-            tracing::warn!(channel = project, "subscription apply timed out; continuing best-effort");
+            tracing::warn!(
+                channel = project,
+                "subscription apply timed out; continuing best-effort"
+            );
             Ok(())
         }
     }
@@ -155,7 +165,10 @@ pub(in crate::daemon::server) async fn apply_plan(
 /// the now-alive session. Best-effort: a replay failure just means the session
 /// relies on subsequent live chat. Bounded so a slow relay can't block the hook.
 pub(in crate::daemon::server) async fn replay_channel_chat(state: &Arc<DaemonState>, h: &str) {
-    tracing::debug!(channel = h, "replaying channel chat (spawn-on-mention catch-up)");
+    tracing::debug!(
+        channel = h,
+        "replaying channel chat (spawn-on-mention catch-up)"
+    );
     let req = crate::fabric::subscriptions::channel_chat_replay_req(h);
     let fut = apply_plan(state, vec![req]);
     if tokio::time::timeout(std::time::Duration::from_secs(5), fut)
@@ -187,9 +200,7 @@ pub(in crate::daemon::server) async fn close_subs(
 /// - `addressed_pubkeys_p`: local durable + ordinal pubkeys, live transient
 ///   session keys, and the backend identity (folds in the old standalone backend
 ///   orchestration `#p` subscription).
-fn build_entity_coverage(
-    state: &Arc<DaemonState>,
-) -> crate::fabric::subscriptions::EntityCoverage {
+fn build_entity_coverage(state: &Arc<DaemonState>) -> crate::fabric::subscriptions::EntityCoverage {
     use std::collections::BTreeSet;
 
     let edge = crate::config::edge_home();
@@ -274,7 +285,10 @@ pub(in crate::daemon::server) async fn resubscribe(state: &Arc<DaemonState>) -> 
 pub(in crate::daemon::server) async fn reconcile_sessions(state: &Arc<DaemonState>) {
     let now = now_secs();
     let snaps = state.with_store(|s| s.list_alive_sessions().unwrap_or_default());
-    tracing::info!(session_count = snaps.len(), "reconciling sessions from previous daemon instance");
+    tracing::info!(
+        session_count = snaps.len(),
+        "reconciling sessions from previous daemon instance"
+    );
     for snap in snaps {
         let session_id = snap.session_id.clone();
         let pid_ok = snap.child_pid.map(pid_alive).unwrap_or(false);
@@ -366,14 +380,11 @@ pub(in crate::daemon::server) async fn reconcile_sessions(state: &Arc<DaemonStat
         let ep = engine_params_for(
             &state.cfg,
             &id,
-            &snap.agent_slug,
-            &signer.label,
-            &signer.pubkey,
+            signer.instance(&snap.agent_slug, &id.pubkey_hex()),
             &session_id,
             &snap.channel_h,
             "",
             snap.child_pid,
-            signer.session_keys(),
         );
         let _ = spawn_session(state, ep).await;
     }
@@ -385,26 +396,19 @@ pub(in crate::daemon::server) async fn reconcile_sessions(state: &Arc<DaemonStat
 pub(in crate::daemon::server) fn engine_params_for(
     cfg: &Config,
     id: &AgentIdentity,
-    agent_slug: &str,
-    agent_label: &str,
-    agent_pubkey: &str,
+    // The session's ONE authoritative agent-instance identity (issue #98): base
+    // slug/pubkey, selected ordinal + pubkey, and (via its methods) the display
+    // label + signing key. The engine derives all wire identity from it.
+    instance: crate::identity::AgentInstance,
     session_id: &str,
     project: &str,
     rel_cwd: &str,
     watch_pid: Option<i32>,
-    // Derived keypair for a duplicate live session in the same routing scope.
-    // `None` keeps the durable agent key as the default signer.
-    session_keys: Option<Keys>,
 ) -> EngineParams {
     EngineParams {
-        agent_slug: agent_slug.to_string(),
-        agent_label: agent_label.to_string(),
-        // The session's SELECTED ordinal pubkey (== base for ordinal 0). The
-        // engine signs with `session_keys` when present, so its self-identity must
-        // be the ordinal pubkey, not the base, for self-skip and status authorship.
-        agent_pubkey: agent_pubkey.to_string(),
-        keys: id.keys.clone(),
-        session_keys,
+        instance,
+        // Derivation root for this instance's signing keys (ordinal 0 == this).
+        base_keys: id.keys.clone(),
         project: project.to_string(),
         session_id: session_id.to_string(),
         host: cfg.host.clone(),

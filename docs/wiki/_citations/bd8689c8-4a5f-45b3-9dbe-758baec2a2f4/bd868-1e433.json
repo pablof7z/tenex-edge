@@ -1,0 +1,6 @@
+{
+  "id": "bd868-1e433",
+  "ts": "2026-06-29T10:42:49Z",
+  "session": "bd8689c8-4a5f-45b3-9dbe-758baec2a2f4",
+  "text": "| `docs/tail-v2-design.md:48–49` | paragraph defining codename via `session_codename` in util.rs. | [...] **Doc updates needed:** README.md:90 + 118 (replace `@<codename>` targeting vocabulary with `@<agent-label>`), daemon-rpc-surface.md:23–27 (drop the `codename` field from the example + delete the explainer paragraph, matching the §2 hook change), tail-v2-design.md:48–49 (delete/replace the codename definition). The `docs/wiki/...json` transcripts are out of scope for normative edits. [...] Assistant: My wiring edits are done. Two agents still running (who, mentions). While they finish, let me handle the docs (my files, disjoint). Let me find the doc codename refs: [...] - **docs** (me) ✅ — README, daemon-rpc-surface, tail-v2-design"
+}

@@ -1,0 +1,6 @@
+{
+  "id": "bd868-d64da",
+  "ts": "2026-06-29T10:43:26Z",
+  "session": "bd8689c8-4a5f-45b3-9dbe-758baec2a2f4",
+  "text": "2. **`src/cli/messaging.rs:13-18`** — prints `\"sent chat … mentioning session {codename}\"` from the RPC's `mentioned_session`. With a pubkey-only mention, `mentioned_session` is `None`, so it silently falls to the plain `\"sent chat …\"` branch — **functionally safe but loses the confirmation label.** Should print the resolved agent label (e.g. `mentioning @haiku1`) from `mentioned_pubkey` instead. [...] | `src/cli/messaging.rs:17` — `\"…mentioning session {}\"` | **[USER-FACING]** | agent-instance label of the mentioned session, or raw id if only correlation |"
+}

@@ -122,6 +122,26 @@ impl Store {
             .optional()?)
     }
 
+    /// The authoritative [`crate::identity::AgentInstance`] for a session (issue
+    /// #98): the projection of its bound `identities` row that read-side callers
+    /// (status/chat publish, `who`/statusline, mention routing) consume instead of
+    /// re-deriving base-vs-ordinal label/pubkey/key policy at the edge. `None` when
+    /// no derived identity is bound yet (callers fall back to the base instance
+    /// from the session row).
+    pub fn instance_identity_for_session(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<crate::identity::AgentInstance>> {
+        Ok(self.identity_for_session(session_id)?.map(|i| {
+            crate::identity::AgentInstance::from_parts(
+                i.agent_slug,
+                i.base_pubkey,
+                i.ordinal,
+                i.pubkey,
+            )
+        }))
+    }
+
     /// Mark every identity bound to a session dead (alive=0) while KEEPING the row
     /// so a later mention can resume its bound native session. Resolves the id.
     pub fn mark_identity_dead_for_session(&self, session_id: &str) -> Result<()> {

@@ -1,0 +1,6 @@
+{
+  "id": "47f3c-7263e",
+  "ts": "2026-06-29T10:52:14Z",
+  "session": "47f3cac2-1ad9-461c-8ac0-3ea341d0e962",
+  "text": "- `[daemon] nip29-role-decision` → `debug` via tracing (hidden by default) [...]    - **`src/daemon/server/diagnostics.rs`**\n     - `log_nip29_role_decision`: replaced `eprintln!` with `tracing::debug!(group, target, role, reason, \"nip29 role decision\")` [...] \n   **diagnostics.rs**: Converted `log_nip29_role_decision` from `eprintln!` to `tracing::debug!` with structured fields."
+}

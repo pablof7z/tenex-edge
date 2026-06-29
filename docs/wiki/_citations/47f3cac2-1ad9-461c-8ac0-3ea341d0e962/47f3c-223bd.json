@@ -1,0 +1,6 @@
+{
+  "id": "47f3c-223bd",
+  "ts": "2026-06-29T10:52:14Z",
+  "session": "47f3cac2-1ad9-461c-8ac0-3ea341d0e962",
+  "text": "| **Subscriptions** | Narrow REQ count when opening, subscription timeouts (warn), chat replay for spawn-on-mention | [...]      - `ensure_subscription`: added `tracing::debug!(channel, req_count, \"opening narrow channel REQs\")`; timeout → `tracing::warn!`\n     - `replay_channel_chat`: added `tracing::debug!(channel, \"replaying channel chat\")`; timeout → `tracing::warn!`"
+}

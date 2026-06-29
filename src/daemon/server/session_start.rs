@@ -71,7 +71,10 @@ pub(in crate::daemon::server) async fn rpc_session_start(
     let edge = config::edge_home();
     config::ensure_dir(&edge)?;
     if let Some(prog) = &progress {
-        prog.emit("identity", format!("loading local key for agent {}", p.agent));
+        prog.emit(
+            "identity",
+            format!("loading local key for agent {}", p.agent),
+        );
     }
     let id = identity::load_or_create(&edge, &p.agent, now_secs())?;
     let cwd = p
@@ -96,7 +99,10 @@ pub(in crate::daemon::server) async fn rpc_session_start(
     let rel_cwd = crate::project::rel_cwd(&cwd);
     let now = now_secs();
     if let Some(prog) = &progress {
-        prog.emit("project", format!("resolved project {project} from {}", cwd.display()));
+        prog.emit(
+            "project",
+            format!("resolved project {project} from {}", cwd.display()),
+        );
     }
 
     // Normalize the hook's identity inputs. claude-code/codex adopt their native
@@ -177,12 +183,12 @@ pub(in crate::daemon::server) async fn rpc_session_start(
     // row is written further down, AFTER signer selection, so it is born carrying
     // this session's ordinal pubkey (never the base) — see the `upsert_session_row`
     // call below.
-    let session_id = state
-        .with_store(|s| s.resolve_or_mint_session_id(harness_str, ext_kind, &ext_id, now))?;
+    let session_id =
+        state.with_store(|s| s.resolve_or_mint_session_id(harness_str, ext_kind, &ext_id, now))?;
     if let Some(prog) = &progress {
         prog.emit(
             "session_registry",
-            format!("session {} registered", crate::util::session_codename(&session_id)),
+            format!("session {session_id} registered"),
         );
     }
 
@@ -191,18 +197,22 @@ pub(in crate::daemon::server) async fn rpc_session_start(
     // slots repoint to this newest owner via ON CONFLICT.
     state.with_store(|s| {
         if let Some(pane) = &tmux_pane {
-            s.put_alias(harness_str, "tmux_pane", pane, &session_id, now).ok();
+            s.put_alias(harness_str, "tmux_pane", pane, &session_id, now)
+                .ok();
         }
         if let Some(pid) = p.watch_pid {
-            s.put_alias(harness_str, "watch_pid", &pid.to_string(), &session_id, now).ok();
+            s.put_alias(harness_str, "watch_pid", &pid.to_string(), &session_id, now)
+                .ok();
         }
         if let Some(hs) = &harness_session_id {
-            s.put_alias(harness_str, "harness_session", hs, &session_id, now).ok();
+            s.put_alias(harness_str, "harness_session", hs, &session_id, now)
+                .ok();
         }
         if let Some(r) = &resume_id {
             s.put_alias(harness_str, "resume", r, &session_id, now).ok();
         }
-        s.upsert_project_root(&project, &cwd.to_string_lossy(), now).ok();
+        s.upsert_project_root(&project, &cwd.to_string_lossy(), now)
+            .ok();
     });
 
     // A new logical session arriving on the SAME watched pid OR tmux pane (same
@@ -226,7 +236,10 @@ pub(in crate::daemon::server) async fn rpc_session_start(
             }
             let same_pid = p.watch_pid.is_some() && rec.child_pid == p.watch_pid;
             let same_pane = tmux_pane.as_deref().is_some_and(|pane| {
-                state.with_store(|s| session_pane(s, &rec.session_id)).as_deref() == Some(pane)
+                state
+                    .with_store(|s| session_pane(s, &rec.session_id))
+                    .as_deref()
+                    == Some(pane)
             });
             if same_pid || same_pane {
                 let reason = if same_pid { "same_pid" } else { "same_pane" };
@@ -311,14 +324,16 @@ pub(in crate::daemon::server) async fn rpc_session_start(
         }
         return Ok(serde_json::json!({
             "session_id": session_id,
-            "codename": crate::util::session_codename(&session_id),
         }));
     }
 
     // Make sure the channel exists + this agent is a member BEFORE the engine
     // starts publishing. Best-effort: never block a session from starting.
     if let Some(prog) = &progress {
-        prog.emit("nip29", "checking NIP-29 channel state and membership on the relay");
+        prog.emit(
+            "nip29",
+            "checking NIP-29 channel state and membership on the relay",
+        );
     }
     if let Some(parent) = &room_parent {
         // Human-initiated session: mint its per-session room under the work-root.
@@ -329,7 +344,8 @@ pub(in crate::daemon::server) async fn rpc_session_start(
             prog.emit("nip29", format!("minting per-session room {project}"));
         }
         state.with_store(|s| {
-            s.upsert_channel(&project, &project, "", parent, now_secs()).ok();
+            s.upsert_channel(&project, &project, "", parent, now_secs())
+                .ok();
         });
         let st = state.clone();
         let room = project.clone();
@@ -409,7 +425,10 @@ pub(in crate::daemon::server) async fn rpc_session_start(
     state.outbox_notify.notify_waiters();
 
     if let Some(prog) = &progress {
-        prog.emit("subscription", "opening or refreshing project subscriptions");
+        prog.emit(
+            "subscription",
+            "opening or refreshing project subscriptions",
+        );
     }
     // Was the channel already subscribed before this session? If so, a mention may
     // have been published to it BEFORE this session existed (spawn-on-mention) and
@@ -436,14 +455,11 @@ pub(in crate::daemon::server) async fn rpc_session_start(
     let ep = engine_params_for(
         &state.cfg,
         &id,
-        &p.agent,
-        &signer.label,
-        &signer.pubkey,
+        signer.instance(&p.agent, &id.pubkey_hex()),
         &session_id,
         &project,
         &rel_cwd,
         p.watch_pid,
-        signer.session_keys(),
     );
     if let Some(prog) = &progress {
         prog.emit("engine", "starting session engine and initial publishers");
@@ -453,7 +469,6 @@ pub(in crate::daemon::server) async fn rpc_session_start(
         agent = %p.agent,
         channel = %project,
         session = %session_id,
-        codename = %crate::util::session_codename(&session_id),
         harness = %harness_str,
         "session started"
     );
@@ -472,6 +487,5 @@ pub(in crate::daemon::server) async fn rpc_session_start(
 
     Ok(serde_json::json!({
         "session_id": session_id,
-        "codename": crate::util::session_codename(&session_id),
     }))
 }

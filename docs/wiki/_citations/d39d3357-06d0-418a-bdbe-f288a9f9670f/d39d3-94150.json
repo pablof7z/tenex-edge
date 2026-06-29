@@ -1,0 +1,6 @@
+{
+  "id": "d39d3-94150",
+  "ts": "2026-06-29T10:46:11Z",
+  "session": "d39d3357-06d0-418a-bdbe-f288a9f9670f",
+  "text": "Assistant: Critical finding: **the drain is _not_ atomic today.** `drain_pending_for_session` (inbox.rs:72) is a pure `SELECT`; marking happens separately via `mark_delivered` *after* rendering. So two paths can both select the same pending rows and double-deliver. To honor your #4, I'll convert it to an atomic claim (`UPDATE … SET state='delivered' … RETURNING`), so the first caller wins and the other gets nothing — atomicity *is* the dedup, no extra gate. (tmux re-enqueues to `pending` if the paste itself fails, so a dead pane doesn't silently eat a message.) [...] - **`src/state/inbox.rs`** — added `claim_pending_for_session` (atomic `UPDATE … RETURNING`, so the first drainer wins → atomicity *is* the dedup) + `reenqueue_pending` (paste-failure rollback). Kept `drain_pending_for_session` as the read-only peek for warming/statusline/who.\n- **`src/daemon/server/echo_guard.rs`** *(new)* — per-session hash ring (60s TTL) replacing the `[tenex-edge]` text marker. Records what the paste path typed; `rpc_user_prompt` consumes the match."
+}

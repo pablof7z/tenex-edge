@@ -1,0 +1,6 @@
+{
+  "id": "47f3c-b622e",
+  "ts": "2026-06-29T10:52:14Z",
+  "session": "47f3cac2-1ad9-461c-8ac0-3ea341d0e962",
+  "text": "**Noise removed:**\n- `[→relay]` / `[relay✗]` lines now go to `relay.log` only; they appear on stdout only at `RUST_LOG=tenex_edge=debug` [...]    - **`src/relay_log.rs`**\n     - Changed `log_entry` to route through `tracing::debug!(\"{line}\")` instead of `eprintln!`, still writes timestamped line to relay.log file\n     - Effect: relay event lines (previously noisy `[→relay]` unformatted stderr) now only show with `RUST_LOG=tenex_edge=debug`"
+}

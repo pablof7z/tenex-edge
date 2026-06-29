@@ -46,13 +46,19 @@ fn style_selected_bg() -> Style {
     Style::default()
 }
 
+/// Short raw-session-id correlation handle. Used only to distinguish/correlate
+/// rows; identity is conveyed by the agent label.
+fn short_sid(sid: &str) -> String {
+    sid.chars().take(8).collect()
+}
+
 // ── ratatui render functions ──────────────────────────────────────────────────
 
 /// Build a `Line` for a live-session row.
 pub(super) fn live_row_line(row: &LiveRow, is_sel: bool) -> Line<'static> {
     let cursor = if is_sel { "► " } else { "  " };
     let label = format!("{}@{}", row.slug, row.host);
-    let session_tag = format!(" [session {}]", row.session_codename);
+    let session_tag = format!(" [{}]", short_sid(&row.session_id));
     let status_str = if row.status.trim().is_empty() {
         "idle".to_string()
     } else {
@@ -106,7 +112,7 @@ pub(super) fn spawn_row_line(row: &SpawnRow, is_sel: bool) -> Line<'static> {
 pub(super) fn resume_row_line(row: &ResumeRow, is_sel: bool) -> Line<'static> {
     let cursor = if is_sel { "► " } else { "  " };
     let label = row.slug.clone();
-    let session_tag = format!(" [session {}]", row.session_codename);
+    let session_tag = format!(" [{}]", short_sid(&row.session_id));
     let title = if row.title.trim().is_empty() {
         String::new()
     } else {

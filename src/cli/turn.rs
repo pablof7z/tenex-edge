@@ -60,7 +60,9 @@ fn take_inbox(s: &Store, session_id: &str, now: u64) -> Vec<InboxRow> {
     // Atomic claim (pending → delivered in one statement). Whoever drains the
     // row first — this hook or the tmux paste path — wins; the other gets
     // nothing. The atomicity IS the dedup: no separate notified flag or gate.
-    let mut rows = s.claim_pending_for_session(session_id, now).unwrap_or_default();
+    let mut rows = s
+        .claim_pending_for_session(session_id, now)
+        .unwrap_or_default();
     rewrite_inbox_bodies(s, &mut rows);
     rows
 }
@@ -108,7 +110,9 @@ pub fn assemble_turn_start_context(
         // itself; a cache miss here is transient local state, not a user action.
         let should_warn_not_member = {
             let s = store.lock().expect("store mutex poisoned");
-            let not_member = !s.is_channel_member(&scope, &rec.agent_pubkey).unwrap_or(true);
+            let not_member = !s
+                .is_channel_member(&scope, &rec.agent_pubkey)
+                .unwrap_or(true);
             let locally_managed = s.is_channel_admin(&scope, backend_pubkey).unwrap_or(false);
             not_member && !locally_managed
         };
@@ -131,13 +135,19 @@ pub fn assemble_turn_start_context(
     //   - First turn: only messages since this session started (pre-join history
     //     is announced as a compact count, not dumped inline).
     //   - Subsequent turns: messages since the last seen_cursor high-water mark.
-    let ambient_since = if first_turn { rec.created_at } else { rec.seen_cursor };
+    let ambient_since = if first_turn {
+        rec.created_at
+    } else {
+        rec.seen_cursor
+    };
     let (mentions, ambient, pre_history_notice) = {
         let s = store.lock().expect("store mutex poisoned");
         let mentions = take_inbox(&s, &rec.session_id, now);
         let ambient = ambient_chat(&s, &scope, ambient_since, &rec.agent_pubkey);
         let notice = if first_turn {
-            let n = s.count_channel_events_before(&scope, rec.created_at).unwrap_or(0);
+            let n = s
+                .count_channel_events_before(&scope, rec.created_at)
+                .unwrap_or(0);
             if n > 0 {
                 let name = crate::injection::channel_display(&s, &scope);
                 Some(format!(
@@ -251,7 +261,8 @@ pub fn assemble_turn_check_context(
     };
     {
         let s = store.lock().expect("store mutex poisoned");
-        if let Some(block) = crate::injection::render_hook_mention(&s, &channel, &direct_mentions, now)
+        if let Some(block) =
+            crate::injection::render_hook_mention(&s, &channel, &direct_mentions, now)
         {
             blocks.push(block);
         }
@@ -349,10 +360,8 @@ mod tests {
 
     // Two distinct (fake) pubkeys used throughout — long enough for SQLite but
     // not real Nostr pubkeys (unit tests do not sign or verify).
-    const SELF_PK: &str =
-        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-    const OTHER_PK: &str =
-        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const SELF_PK: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const OTHER_PK: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
     fn register(store: &Store, pk: &str, channel: &str, now: u64) -> String {
         store
@@ -506,10 +515,7 @@ mod tests {
             let _ = super::assemble_turn_start_context(&m, &rec, "", "", 0);
         }
         // Manually peg the cursor at t=150 so the second turn only sees t>150.
-        m.lock()
-            .unwrap()
-            .set_seen_cursor(&sid, 150)
-            .unwrap();
+        m.lock().unwrap().set_seen_cursor(&sid, 150).unwrap();
         // Event after the cursor — should appear in the second turn.
         {
             let s = m.lock().unwrap();
@@ -517,9 +523,10 @@ mod tests {
         }
         let rec2 = m.lock().unwrap().get_session(&sid).unwrap().unwrap();
         assert_eq!(rec2.seen_cursor, 150, "cursor must be 150 for this test");
-        let ctx2 =
-            super::assemble_turn_start_context(&m, &rec2, "", "", 1 /* non-zero = not first turn */)
-                .unwrap_or_default();
+        let ctx2 = super::assemble_turn_start_context(
+            &m, &rec2, "", "", 1, /* non-zero = not first turn */
+        )
+        .unwrap_or_default();
         assert!(
             ctx2.contains("second-turn-event"),
             "second turn must show messages since cursor; got:\n{ctx2}"

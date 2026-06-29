@@ -19,7 +19,7 @@
 //! `is_channel_admin`, never a local owns-group flag.
 
 use crate::distill;
-use crate::domain::{AgentRef, DomainEvent, Profile, Status, STATUS_TTL_SECS};
+use crate::domain::{DomainEvent, Profile, Status, STATUS_TTL_SECS};
 use crate::fabric::provider::Nip29Provider;
 use crate::state::{Session, Store};
 use crate::util::now_secs;
@@ -33,8 +33,9 @@ use std::time::Duration;
 fn slog(session_id: &str, msg: &str) {
     let log_dir = crate::config::edge_home().join("logs");
     let _ = crate::config::ensure_dir(&log_dir);
-    let short = crate::util::session_codename(session_id);
-    let path = log_dir.join(format!("{short}.log"));
+    // Per-session debug log filename keyed by the raw canonical session id (an
+    // internal correlation handle; canonical ids are filename-safe).
+    let path = log_dir.join(format!("{session_id}.log"));
     if let Ok(mut f) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -50,18 +51,15 @@ fn slog(session_id: &str, msg: &str) {
 }
 
 pub struct EngineParams {
-    pub agent_slug: String,
-    /// Ordinal-qualified display name for this session: "claude" for ordinal 0,
-    /// "claude1" for the second concurrent instance. This is what gets published
-    /// in the kind:0 `name` field for the session's signing identity.
-    pub agent_label: String,
-    pub agent_pubkey: String,
-    pub keys: Keys,
-    /// Collision fallback signer. When `Some`, this session is a duplicate live
-    /// instance of the same durable agent in the same routing scope, so it signs
-    /// live events with a deterministic transient key. `None` is the default:
-    /// sign as the durable agent.
-    pub session_keys: Option<Keys>,
+    /// The session's ONE authoritative agent-instance identity (issue #98): base
+    /// slug, selected pubkey, ordinal, and display label all in one value. Every
+    /// publish this engine makes (kind:0, kind:9, kind:30315) derives its wire
+    /// identity and signing key from this — never from parallel slug/pubkey/key
+    /// fields with base-vs-ordinal fallback rules at the callsite.
+    pub instance: crate::identity::AgentInstance,
+    /// The agent's durable (ordinal-0, file-backed) keypair — the derivation root
+    /// for this instance's signing keys via [`AgentInstance::signing_keys`].
+    pub base_keys: Keys,
     pub project: String,
     pub session_id: String,
     pub host: String,
@@ -85,10 +83,11 @@ pub struct EngineParams {
 }
 
 impl EngineParams {
-    /// Keys used to SIGN this session's live events: the transient session key for
-    /// a duplicate live instance, otherwise the durable agent key.
-    fn signing_keys(&self) -> &Keys {
-        self.session_keys.as_ref().unwrap_or(&self.keys)
+    /// Keys used to SIGN this session's live events: the base keys for ordinal 0,
+    /// this instance's derived ordinal keys otherwise. The base-vs-ordinal choice
+    /// lives in [`AgentInstance::signing_keys`], not here.
+    fn signing_keys(&self) -> Keys {
+        self.instance.signing_keys(&self.base_keys)
     }
 }
 
@@ -105,10 +104,10 @@ fn route_channel<'a>(p: &'a EngineParams, session: &'a Session) -> &'a str {
 /// Build the kind:30315 the engine publishes for the current local draft. Idle
 /// sessions clear the live activity line (only the persistent title survives);
 /// the NIP-40 `expiration` re-arms liveness to `now + STATUS_TTL_SECS`.
-fn status_for(p: &EngineParams, status_pubkey: &str, session: &Session, now: u64) -> Status {
+fn status_for(p: &EngineParams, session: &Session, now: u64) -> Status {
     let busy = session.working;
     Status {
-        agent: AgentRef::new(status_pubkey.to_string(), p.agent_slug.clone()),
+        agent: p.instance.agent_ref(),
         project: route_channel(p, session).to_string(),
         session_id: p.session_id.clone().into(),
         host: p.host.clone(),
@@ -169,9 +168,8 @@ pub async fn run_session_in_daemon(
     cancel: std::sync::Arc<tokio::sync::Notify>,
 ) -> Result<()> {
     let owners = p.owners.clone();
-    let signing_keys = p.signing_keys().clone();
-    let status_pubkey = signing_keys.public_key().to_hex();
-    let aref = AgentRef::new(status_pubkey.clone(), p.agent_label.clone());
+    let signing_keys = p.signing_keys();
+    let aref = p.instance.agent_ref();
 
     macro_rules! st {
         ($f:expr) => {{
@@ -222,7 +220,7 @@ pub async fn run_session_in_daemon(
     st!(|s: &Store| s.touch_session(&p.session_id, now_secs()).ok());
     if let Some(session) = st!(|s: &Store| s.get_session(&p.session_id).ok().flatten()) {
         let now = now_secs();
-        enqueue_status(&provider, &signing_keys, &store, status_for(&p, &status_pubkey, &session, now), now).await;
+        enqueue_status(&provider, &signing_keys, &store, status_for(&p, &session, now), now).await;
     }
 
     let mut hb = tokio::time::interval(p.heartbeat);
@@ -240,7 +238,7 @@ pub async fn run_session_in_daemon(
                 let now = now_secs();
                 st!(|s: &Store| s.touch_session(&p.session_id, now).ok());
                 if let Some(session) = st!(|s: &Store| s.get_session(&p.session_id).ok().flatten()) {
-                    enqueue_status(&provider, &signing_keys, &store, status_for(&p, &status_pubkey, &session, now), now).await;
+                    enqueue_status(&provider, &signing_keys, &store, status_for(&p, &session, now), now).await;
                 }
             }
             _ = obs.tick() => {
@@ -261,7 +259,7 @@ pub async fn run_session_in_daemon(
 
                         // Read back the freshly-applied draft and publish it.
                         if let Some(session) = st!(|s: &Store| s.get_session(&p.session_id).ok().flatten()) {
-                            enqueue_status(&provider, &signing_keys, &store, status_for(&p, &status_pubkey, &session, now), now).await;
+                            enqueue_status(&provider, &signing_keys, &store, status_for(&p, &session, now), now).await;
                             // The distilled title feeds the kind:30315 status above;
                             // it NEVER renames the route channel. A channel `name`
                             // is set only at create (or an explicit edit).
@@ -299,7 +297,7 @@ pub async fn run_session_in_daemon(
                                     st!(|s: &Store| s.set_session_distill(&p.session_id, &qt, "", 0).ok());
                                     title_from_distill = false;
                                     if let Some(seeded) = st!(|s: &Store| s.get_session(&p.session_id).ok().flatten()) {
-                                        enqueue_status(&provider, &signing_keys, &store, status_for(&p, &status_pubkey, &seeded, now), now).await;
+                                        enqueue_status(&provider, &signing_keys, &store, status_for(&p, &seeded, now), now).await;
                                     }
                                 }
                             } else {
@@ -364,7 +362,7 @@ pub async fn run_session_in_daemon(
                     last_distill_attempt = 0;
                     distill_task = None;
                     if let Some(sess) = session.as_ref() {
-                        enqueue_status(&provider, &signing_keys, &store, status_for(&p, &status_pubkey, sess, now), now).await;
+                        enqueue_status(&provider, &signing_keys, &store, status_for(&p, sess, now), now).await;
                     }
                 }
                 prev_working = working;

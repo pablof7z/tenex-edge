@@ -92,53 +92,10 @@ pub fn dirty_label(n: u32) -> String {
 }
 
 /// A short, human-targetable prefix of a PUBKEY (its first 8 hex chars).
-/// Only meaningful for pubkeys — never use it to display a session id (use the
-/// `SessionId` newtype, whose `Display` routes through `session_codename`).
+/// Only meaningful for pubkeys; session identity is shown through the agent's
+/// instance label (`haiku`, `haiku1`, ...), not a shortened or generated id.
 pub fn pubkey_short(id: &str) -> String {
     id.chars().take(8).collect()
-}
-
-/// The NATO phonetic alphabet — the word stems of a session codename.
-const CODENAME_WORDS: [&str; 26] = [
-    "alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india", "juliet",
-    "kilo", "lima", "mike", "november", "oscar", "papa", "quebec", "romeo", "sierra", "tango",
-    "uniform", "victor", "whiskey", "xray", "yankee", "zulu",
-];
-
-/// Derive a stable, human-friendly **codename** for a session ID: a NATO
-/// phonetic word plus a four-digit number, e.g. `bravo4217` or `echo0163`.
-/// Replaces the old 6-char hex hash — a codename is just as stable (same id →
-/// same codename) but easy to say aloud and remember.
-///
-/// The space is 26×10000 = 260000 codenames. That is plenty for the sessions a
-/// fabric ever holds, but it is NOT collision-free at scale; it is a
-/// display/addressing convenience, never an identity (the canonical session id
-/// remains the source of truth).
-pub fn session_codename(session_id: &str) -> String {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-
-    let mut hasher = DefaultHasher::new();
-    session_id.hash(&mut hasher);
-    let hash = hasher.finish();
-
-    let word = CODENAME_WORDS[(hash % CODENAME_WORDS.len() as u64) as usize];
-    let num = (hash / CODENAME_WORDS.len() as u64) % 10_000;
-    format!("{word}{num:04}")
-}
-
-/// Heuristic: does `s` look like a session codename (`<nato-word><digits>`,
-/// e.g. `bravo4217`)? Used to disambiguate a bare token between a session
-/// codename and a durable agent slug when resolving an identifier. A leading
-/// NATO word immediately followed by one-or-more digits and nothing else.
-pub fn looks_like_codename(s: &str) -> bool {
-    let lower = s.to_ascii_lowercase();
-    let split = lower.find(|c: char| c.is_ascii_digit());
-    let Some(idx) = split else { return false };
-    let (word, digits) = lower.split_at(idx);
-    !digits.is_empty()
-        && digits.chars().all(|c| c.is_ascii_digit())
-        && CODENAME_WORDS.contains(&word)
 }
 
 /// Derive a short title from a raw user prompt: take the first non-empty line,
@@ -164,11 +121,9 @@ pub fn titleize_prompt(prompt: &str) -> String {
     }
 }
 
-/// A session identifier. Wraps the raw id (a UUID-shaped string stored verbatim
-/// in SQLite and carried on the wire) but its `Display` deliberately renders the
-/// stable `session_codename` (e.g. `bravo4217`), NOT the raw id. This makes it
-/// structurally impossible to print a session id through `pubkey_short` (the
-/// wrong formatter): any `{session_id}` in a format string yields the codename.
+/// A session identifier. Wraps the raw id stored in SQLite. `Display` preserves
+/// the raw id for correlation only; user-facing identity belongs to the agent
+/// instance label, not a generated session alias.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(transparent)]
 pub struct SessionId(String);
@@ -190,7 +145,7 @@ impl SessionId {
 
 impl std::fmt::Display for SessionId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&session_codename(&self.0))
+        f.write_str(&self.0)
     }
 }
 
@@ -302,22 +257,10 @@ mod tests {
     }
 
     #[test]
-    fn session_id_display_uses_codename() {
+    fn session_id_display_preserves_raw_id() {
         let sid = SessionId::from("local-session");
-        assert_eq!(sid.to_string(), session_codename("local-session"));
+        assert_eq!(sid.to_string(), "local-session");
         assert_eq!(sid.as_str(), "local-session");
-    }
-
-    #[test]
-    fn session_codename_is_word_plus_four_digits() {
-        let code = session_codename("some-session-uuid");
-        // Stable across calls.
-        assert_eq!(code, session_codename("some-session-uuid"));
-        // Shape: a phonetic word stem followed by exactly four digits.
-        let digits: String = code.chars().rev().take(4).collect();
-        assert!(digits.chars().all(|c| c.is_ascii_digit()), "got {code}");
-        let word: String = code[..code.len() - 4].to_string();
-        assert!(CODENAME_WORDS.contains(&word.as_str()), "got {code}");
     }
 
     #[test]
@@ -333,10 +276,7 @@ mod tests {
     fn opaque_group_id_is_8_hex() {
         let id = opaque_group_id();
         assert_eq!(id.len(), 8, "got {id}");
-        assert!(
-            id.chars().all(|c| c.is_ascii_hexdigit()),
-            "non-hex id {id}"
-        );
+        assert!(id.chars().all(|c| c.is_ascii_hexdigit()), "non-hex id {id}");
     }
 
     #[test]

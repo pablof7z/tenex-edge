@@ -57,7 +57,17 @@ pub(in crate::daemon::server) async fn rpc_channels_create(
     }
     #[derive(serde::Deserialize)]
     struct P {
-        parent: String,
+        /// Explicit literal parent group h. Set by the launch picker, operator
+        /// invocations, and tests. When absent, the parent defaults to the
+        /// creating agent's CURRENT channel (see `parent` resolution below).
+        #[serde(default)]
+        parent: Option<String>,
+        /// Project-relative parent override from `channels create
+        /// --parent-channel`. Resolved within the creator's project subtree; takes
+        /// precedence over both the literal `parent` and the current-channel
+        /// default.
+        #[serde(default)]
+        parent_channel: Option<String>,
         name: String,
         #[serde(default)]
         agents: Vec<AgentSpec>,
@@ -70,19 +80,66 @@ pub(in crate::daemon::server) async fn rpc_channels_create(
     }
     let p: P = serde_json::from_value(params.clone()).context("channels_create params")?;
 
-    // Dedupe on the `(parent, name)` identity: a repeat `create --name X` returns
-    // the existing opaque id rather than minting a twin (enforces the
-    // name-uniqueness-per-parent rule).
-    if let Some(existing) = state.with_store(|s| s.channel_id_for_name(&p.parent, &p.name))? {
-        return Ok(serde_json::json!({
-            "child_h": existing,
-            "display_path": format!("{} > {}", p.parent, p.name),
-            "deduped": true,
-        }));
-    }
+    // Resolve the creator agent (when invoked from a session) FIRST — both the
+    // child-of-current-channel default and the auto-switch below need it. Strict
+    // resolution (no project fallback): child-of-current and auto-switch must only
+    // fire when actually run as an agent, never bind to an arbitrary sibling
+    // session of a bare operator invocation.
+    let creator_rec = resolve_session_inner(
+        state,
+        None,
+        params.get("env_session").and_then(|v| v.as_str()),
+        params.get("cwd").and_then(|v| v.as_str()),
+        params.get("agent").and_then(|v| v.as_str()),
+        None,
+        false,
+    )
+    .ok();
 
-    if p.agents.is_empty() {
-        anyhow::bail!("at least one agent (slug@backend) is required");
+    // Resolve the parent the new channel hangs under:
+    //   1. `--parent-channel <ref>` — project-relative override (needs a session).
+    //   2. the creating agent's CURRENT channel — the child-of-current default.
+    //   3. an explicit literal `parent` — the picker / operator / test path.
+    let parent: String = if let Some(r) = p
+        .parent_channel
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        let rec = creator_rec
+            .as_ref()
+            .context("--parent-channel requires running inside an agent session")?;
+        let root = state.with_store(|s| super::project_root(s, &rec.channel_h));
+        match state.with_store(|s| super::resolve_channel_ref(s, &root, r)) {
+            super::ChannelResolution::Unique(h) => h,
+            super::ChannelResolution::Ambiguous(refs) => {
+                return Ok(serde_json::json!({ "ambiguous": refs, "reference": r }));
+            }
+            super::ChannelResolution::NotFound => {
+                anyhow::bail!("no channel matching {r:?} in this project")
+            }
+        }
+    } else if let Some(rec) = &creator_rec {
+        rec.channel_h.clone()
+    } else if let Some(par) = p.parent.as_deref().filter(|s| !s.is_empty()) {
+        par.to_string()
+    } else {
+        anyhow::bail!(
+            "channels create needs a parent: run it inside an agent session, or pass --parent-channel"
+        );
+    };
+
+    // Names are unique per parent: a `create --name X` where X already exists is
+    // an ERROR, not a silent no-op — the agent needs to KNOW the channel is already
+    // there (so it switches in rather than assuming it minted a fresh one). Point
+    // it at the existing channel with a copy-paste switch command.
+    if let Some(existing) = state.with_store(|s| s.channel_id_for_name(&parent, &p.name))? {
+        anyhow::bail!(
+            "channel {:?} already exists under this parent (id {existing}). \
+Switch into it instead: tenex-edge channels switch {}",
+            p.name,
+            p.name
+        );
     }
 
     // Relay subgroup-support verification is handled by a separate workstream;
@@ -120,26 +177,18 @@ pub(in crate::daemon::server) async fn rpc_channels_create(
         });
     }
 
-    // Resolve the creator agent (when invoked from a session) so the shared
-    // provisioning primitive adds it as a member of the room it just made. A bare
-    // operator invocation has none, in which case the management key (already the
-    // group admin) is passed purely to provision the group.
-    let creator: Option<String> = resolve_session(
-        state,
-        None,
-        params.get("env_session").and_then(|v| v.as_str()),
-        params.get("cwd").and_then(|v| v.as_str()),
-        params.get("agent").and_then(|v| v.as_str()),
-        None,
-    )
-    .ok()
-    .map(|rec| rec.agent_pubkey);
+    // The creator's pubkey (resolved above) tells the shared provisioning
+    // primitive to add it as a member of the room it just made. A bare operator
+    // invocation has none, in which case the management key (already the group
+    // admin) is passed purely to provision the group.
+    let creator: Option<String> = creator_rec.as_ref().map(|rec| rec.agent_pubkey.clone());
 
     // Stamp the operator-chosen name + parent locally so the shared primitive
     // names the new subgroup correctly when it creates it on the relay (it reads
     // the display name from the local store).
     state.with_store(|s| {
-        s.upsert_channel(&child_h, &p.name, &p.about, &p.parent, now_secs()).ok();
+        s.upsert_channel(&child_h, &p.name, &p.about, &parent, now_secs())
+            .ok();
     });
 
     // ONE shared primitive provisions EVERY channel — per-session rooms,
@@ -155,14 +204,13 @@ pub(in crate::daemon::server) async fn rpc_channels_create(
         .ensure_channel_ready(crate::fabric::nip29::readiness::ChannelCtx {
             channel: &child_h,
             expect_member,
-            parent_hint: Some(&p.parent),
+            parent_hint: Some(&parent),
         })
         .await;
     if matches!(gate, crate::fabric::nip29::readiness::ChannelGate::Degraded) {
         anyhow::bail!(
-            "relay did not provision subgroup {child_h} (parent {}); does the relay \
-             support NIP-29 subgroups and is the signing key an admin?",
-            p.parent
+            "relay did not provision subgroup {child_h} (parent {parent}); does the relay \
+             support NIP-29 subgroups and is the signing key an admin?"
         );
     }
     let _ = ensure_subscription(state, &child_h).await;
@@ -188,36 +236,57 @@ pub(in crate::daemon::server) async fn rpc_channels_create(
     });
 
     // Build + publish ONE kind:9 orchestration event into the parent (the
-    // coordination group). The child id rides in an `h-target` tag.
-    let prose = if p.brief.trim().is_empty() {
-        generate_orchestration_prose(&adds)
+    // coordination group), but ONLY when agents were named — `--agent` is
+    // optional, and an add-agents event with no `add` tags is meaningless (no
+    // backend would act on it). An empty channel is created and joined without
+    // any orchestration. The child id rides in an `h-target` tag.
+    let orchestration_event_id = if adds.is_empty() {
+        String::new()
     } else {
-        p.brief.clone()
-    };
-    let builder = build_add_agents_event(&p.parent, &child_h, &adds, &prose)?;
-    let signed = state.transport.sign(builder, &mgmt_keys).await?;
-    let orchestration_event_id = signed.id.to_hex();
-    // Checked publish: the bare `publish_event` resolves `Ok` even when every
-    // relay rejected the kind:9 (NIP-29 `blocked` / rate-limited), so reporting
-    // `orchestration_event_id` off it would advertise a channel whose
-    // orchestration event was silently dropped — backends would never receive
-    // the add-agents directive. `publish_event_checked` turns a relay rejection
-    // into a hard error so `channels_create` fails loudly instead of lying
-    // about success.
-    state.transport.publish_event_checked(&signed).await?;
+        let prose = if p.brief.trim().is_empty() {
+            generate_orchestration_prose(&adds)
+        } else {
+            p.brief.clone()
+        };
+        let builder = build_add_agents_event(&parent, &child_h, &adds, &prose)?;
+        let signed = state.transport.sign(builder, &mgmt_keys).await?;
+        let oid = signed.id.to_hex();
+        // Checked publish: the bare `publish_event` resolves `Ok` even when every
+        // relay rejected the kind:9 (NIP-29 `blocked` / rate-limited), so reporting
+        // `orchestration_event_id` off it would advertise a channel whose
+        // orchestration event was silently dropped — backends would never receive
+        // the add-agents directive. `publish_event_checked` turns a relay rejection
+        // into a hard error so `channels_create` fails loudly instead of lying
+        // about success.
+        state.transport.publish_event_checked(&signed).await?;
 
-    // Local fast-path: relays don't reliably echo to the publishing connection,
-    // so drive the same listener directly for roles targeted at THIS backend.
-    // Idempotency is enforced inside handle_orchestration via the inbox ledger.
-    if let Some(op) = crate::fabric::nip29::orchestration::parse_orchestration(&signed) {
-        handle_orchestration(state, &signed, op).await;
-    }
+        // Local fast-path: relays don't reliably echo to the publishing connection,
+        // so drive the same listener directly for roles targeted at THIS backend.
+        // Idempotency is enforced inside handle_orchestration via the inbox ledger.
+        if let Some(op) = crate::fabric::nip29::orchestration::parse_orchestration(&signed) {
+            handle_orchestration(state, &signed, op).await;
+        }
+        oid
+    };
+
+    // Auto-switch: re-home the creating agent's session INTO the channel it just
+    // made, so the agent is immediately working there (mirrors `channels switch`).
+    // Safe without the switch-path's occupancy/membership checks: the room is
+    // brand new, the creator is its only member, and no other live session can
+    // already sign as this pubkey in a channel that did not exist a moment ago.
+    let switched = if let Some(rec) = &creator_rec {
+        rehome_session_to_channel(state, &rec.session_id, &rec.agent_pubkey, &child_h);
+        true
+    } else {
+        false
+    };
 
     Ok(serde_json::json!({
         "child_h": child_h,
-        "display_path": format!("{} > {}", p.parent, p.name),
+        "display_path": format!("{} > {}", parent, p.name),
         "admins": granted,
         "creator": creator.unwrap_or_default(),
+        "switched": switched,
         "orchestration_event_id": orchestration_event_id,
     }))
 }
@@ -355,9 +424,11 @@ pub(in crate::daemon::server) async fn rpc_channels_switch(
     // same pubkey. Redirect the agent to message that instance — the redirect lands
     // in that instance's context because both sign as this pubkey.
     let my_pubkey = rec.agent_pubkey.clone();
-    if let Some(occupant) =
-        state.with_store(|s| s.resolve_identity_for_channel(&my_pubkey, &new_channel).ok().flatten())
-    {
+    if let Some(occupant) = state.with_store(|s| {
+        s.resolve_identity_for_channel(&my_pubkey, &new_channel)
+            .ok()
+            .flatten()
+    }) {
         if occupant.alive && occupant.session_id != rec.session_id {
             anyhow::bail!(
                 "Another instance of you is already active in #{new_channel}, so you cannot join it. \
@@ -368,30 +439,41 @@ Send it a message instead: tenex-edge chat write --channel {new_channel} --messa
     }
     ensure_subscription(state, &new_channel).await?;
     let prev_channel = rec.channel_h.clone();
-    // Move the session's route scope to the new channel. Every fabric publish,
-    // local chat routing, status, and turn-context delta keys on `channel_h`, so
-    // this is the whole switch.
-    state.with_store(|s| s.set_session_channel(&rec.session_id, &new_channel))?;
-    // Re-home the session's identity at the new channel — the pubkey is fixed,
-    // only `channel_h` changes; `(pubkey, new_channel)` becomes the resume key.
-    state.with_store(|s| {
-        if let Some(mut idn) = s.get_identity(&my_pubkey).ok().flatten() {
-            idn.channel_h = new_channel.clone();
-            idn.session_id = rec.session_id.clone();
-            idn.alive = true;
-            s.upsert_identity(&idn).ok();
-        }
-    });
-    // Nudge the drainer so the scope-changed status publishes immediately
-    // rather than waiting for the next heartbeat tick. The kind:30315 it
-    // publishes carries the new `h` tag, so peers in the channel see the
-    // session's presence without a separate profile push.
-    state.outbox_notify.notify_waiters();
+    rehome_session_to_channel(state, &rec.session_id, &rec.agent_pubkey, &new_channel);
     Ok(serde_json::json!({
         "session_id": rec.session_id,
         "prev_channel": prev_channel,
         "channel": new_channel,
     }))
+}
+
+/// Move a resolved session onto `new_channel`: set the route scope and re-home
+/// the session's identity (the pubkey is fixed for life — only `channel_h`
+/// changes, so `(pubkey, new_channel)` becomes the resume key), then nudge the
+/// status drainer. Every fabric publish, local chat routing, status, and
+/// turn-context delta keys on `channel_h`, so this is the whole switch. Shared by
+/// `channels_switch` and the auto-switch on `channels_create`; both callers do
+/// their own resolution/membership/occupancy checks before re-homing.
+pub(in crate::daemon::server) fn rehome_session_to_channel(
+    state: &Arc<DaemonState>,
+    session_id: &str,
+    agent_pubkey: &str,
+    new_channel: &str,
+) {
+    state.with_store(|s| {
+        s.set_session_channel(session_id, new_channel).ok();
+        if let Some(mut idn) = s.get_identity(agent_pubkey).ok().flatten() {
+            idn.channel_h = new_channel.to_string();
+            idn.session_id = session_id.to_string();
+            idn.alive = true;
+            s.upsert_identity(&idn).ok();
+        }
+    });
+    // Nudge the drainer so the scope-changed status publishes immediately rather
+    // than waiting for the next heartbeat tick. The kind:30315 it publishes
+    // carries the new `h` tag, so peers in the channel see the session's presence
+    // without a separate profile push.
+    state.outbox_notify.notify_waiters();
 }
 
 /// Human-readable summary of the add-agents request, grouped per backend, e.g.

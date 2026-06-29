@@ -1,0 +1,6 @@
+{
+  "id": "019f1-1e264",
+  "ts": "2026-06-29T10:51:56Z",
+  "session": "019f12f9-8a0b-7012-ad2f-f4d0cb035d2b",
+  "text": "Plans are not durable understanding and must not survive as reference documentation after they have been implemented, executed, or invalidated. When a plan completes, remove it or collapse it to the smallest live follow-up. Any lasting knowledge learned from the work belongs in durable documentation instead — `docs/product-spec/` for product doctrine, `docs/fabric-architecture*.md` and the design docs under `docs/` for architecture, and `docs/wiki/` for source-backed synthesis. [...] - **Retire executed plans.** A plan that has been implemented is no longer a source of truth — close the issue or delete the temporal detail; preserve durable lessons in the doc that owns that concept."
+}

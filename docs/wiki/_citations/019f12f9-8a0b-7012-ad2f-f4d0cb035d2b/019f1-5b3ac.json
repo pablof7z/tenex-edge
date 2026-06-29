@@ -1,0 +1,6 @@
+{
+  "id": "019f1-5b3ac",
+  "ts": "2026-06-29T10:51:33Z",
+  "session": "019f12f9-8a0b-7012-ad2f-f4d0cb035d2b",
+  "text": "This repository has exactly **one canonical tactical queue: GitHub Issues** (`gh issue list`). Every active violation, pending user decision, queued feature, post-v1 item, staged fix, and follow-up belongs in an open GitHub issue. Scattered notes, ad-hoc `TODO.md` / `NOTES.md` / `ROADMAP.md` / `PLAN-foo.md` files, parallel planning docs, and inline `// TODO:` annotations used as a substitute for tracking are **forbidden**. [...] > **Migration note.** The `Plans/` directory is empty and `M1.md` has been drained into `docs/daemon-design.md`, `docs/fabric-architecture.md`, and `docs/product-spec/`. Do not add new files under `Plans/` or new top-level plan docs; the canonical surfaces are GitHub Issues plus the durable docs. [...] Assistant: The GitHub queue is also aligned with those skill boundaries: open epics track CLI surface, store/read-model ownership, daemon service extraction, provider/fabric ownership, tooling, docs drift, and quality gates. That supports creating several focused skills rather than one huge “tenex-edge maintainer” skill."
+}

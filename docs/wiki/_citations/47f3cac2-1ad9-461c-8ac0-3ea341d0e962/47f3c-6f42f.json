@@ -1,0 +1,6 @@
+{
+  "id": "47f3c-6f42f",
+  "ts": "2026-06-29T10:52:14Z",
+  "session": "47f3cac2-1ad9-461c-8ac0-3ea341d0e962",
+  "text": "All `TENEX_EDGE_DEBUG`-gated `eprintln!` calls replaced; use `RUST_LOG=tenex_edge=debug` for verbose output instead."
+}

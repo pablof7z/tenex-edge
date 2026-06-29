@@ -18,7 +18,15 @@ fn members(store: &Store, project: &str, pubkeys: &[&str]) {
 }
 
 /// Publish a live kind:30315 status for an agent in a channel.
-fn status(store: &Store, pubkey: &str, slug: &str, channel: &str, title: &str, busy: bool, ts: u64) {
+fn status(
+    store: &Store,
+    pubkey: &str,
+    slug: &str,
+    channel: &str,
+    title: &str,
+    busy: bool,
+    ts: u64,
+) {
     store
         .upsert_profile(pubkey, slug, slug, "tower", false, 1)
         .unwrap();
@@ -80,7 +88,13 @@ fn snapshot_renders_awareness_without_transport_events() {
         "Agent coordination substrate",
         "",
     );
-    chan(&store, "h-aware", "awareness", "Channel awareness hook", "h-core");
+    chan(
+        &store,
+        "h-aware",
+        "awareness",
+        "Channel awareness hook",
+        "h-core",
+    );
     chan(
         &store,
         "h-ciflake",
@@ -123,10 +137,14 @@ fn snapshot_renders_awareness_without_transport_events() {
         997,
     );
 
-    let block = render_awareness_snapshot(&store, "h-aware", NOW, "codex", "pk-codex", LOCAL_HOST).unwrap();
+    let block =
+        render_awareness_snapshot(&store, "h-aware", NOW, "codex", "pk-codex", LOCAL_HOST).unwrap();
 
     assert_has(&block, "[tenex-edge] Fabric context");
-    assert_has(&block, "Project: tenex-edge -- Agent coordination substrate");
+    assert_has(
+        &block,
+        "Project: tenex-edge -- Agent coordination substrate",
+    );
     // Channel is the project-RELATIVE path (root prefix dropped) + description.
     assert_has(&block, "Channel: awareness -- Channel awareness hook");
     assert_has(
@@ -135,7 +153,10 @@ fn snapshot_renders_awareness_without_transport_events() {
     );
     assert_has(&block, "- @claude - Tracing current status delta behavior");
     // Subchannel referenced by NAME, description after `--`.
-    assert_has(&block, "- #ci-flake -- runner trust-cache failures [2 members]");
+    assert_has(
+        &block,
+        "- #ci-flake -- runner trust-cache failures [2 members]",
+    );
     // Unnamed session room: labelled by its live work title, no id.
     assert_has(&block, "- Investigating duplicate session rooms [1 member]");
     // The opaque channel_h ids must never appear in agent-facing text.
@@ -167,7 +188,10 @@ fn fabric_view_renders_unmaterialized_root_by_its_slug() {
     assert_has(&block, "Channel: tenex-edge");
     assert_lacks(&block, "(unnamed channel)");
     // Members still render from live status even with no kind:39002 roster.
-    assert_has(&block, "- @developer - Fix duplicate group creation on launch · idle");
+    assert_has(
+        &block,
+        "- @developer - Fix duplicate group creation on launch · idle",
+    );
     // The `who` fabric view carries no injected-context header.
     assert_lacks(&block, "[tenex-edge] Fabric context");
 }
@@ -178,14 +202,21 @@ fn new_agent_block_surfaces_only_agents_created_in_window() {
         // created before the cursor → already known, not announced.
         ("old".to_string(), Some("stale helper".to_string()), 500u64),
         // created within (since, now] → newly available.
-        ("writer".to_string(), Some("drafts posts".to_string()), 950u64),
+        (
+            "writer".to_string(),
+            Some("drafts posts".to_string()),
+            950u64,
+        ),
         // newly available, no byline.
         ("qa".to_string(), None, 960u64),
         // created in the future relative to now → ignored.
         ("future".to_string(), None, 2_000u64),
     ];
     let block = super::new_agent_block(&roster, 900, NOW).expect("two new agents in window");
-    assert_has(&block, "New agents available (invite with `tenex-edge invite <slug>`):");
+    assert_has(
+        &block,
+        "New agents available (invite with `tenex-edge invite <slug>`):",
+    );
     assert_has(&block, "- @writer - drafts posts");
     assert_has(&block, "- @qa");
     assert_lacks(&block, "old");
@@ -201,7 +232,15 @@ fn remote_peer_is_host_qualified_local_peer_is_bare() {
     chan(&store, "h-aware", "awareness", "", "");
     members(&store, "h-aware", &["pk-local", "pk-remote"]);
     // Local peer shares the viewer's host (status() stamps "tower" == LOCAL_HOST).
-    status(&store, "pk-local", "scout", "h-aware", "reviewing", true, 960);
+    status(
+        &store,
+        "pk-local",
+        "scout",
+        "h-aware",
+        "reviewing",
+        true,
+        960,
+    );
     // Remote peer: a same-fabric agent on a different machine. Its `@slug@host`
     // form is exactly the token an agent would type to address it.
     store
@@ -228,9 +267,15 @@ fn remote_peer_is_host_qualified_local_peer_is_bare() {
     assert_has(&snap, "- @developer@laptop - porting the resolver");
 
     // Delta path (changed_member_lines) carries the same host-qualified form.
-    let delta =
-        render_awareness_update_since_check(&store, 900, "h-aware", NOW, Some("pk-codex"), LOCAL_HOST)
-            .unwrap();
+    let delta = render_awareness_update_since_check(
+        &store,
+        900,
+        "h-aware",
+        NOW,
+        Some("pk-codex"),
+        LOCAL_HOST,
+    )
+    .unwrap();
     assert_has(&delta, "- @scout - reviewing");
     assert_has(&delta, "- @developer@laptop - porting the resolver");
 }
@@ -239,7 +284,13 @@ fn remote_peer_is_host_qualified_local_peer_is_bare() {
 fn update_renders_state_activity_and_omits_unchanged_sessions() {
     let store = Store::open_memory().unwrap();
     chan(&store, "h-aware", "awareness", "", "");
-    chan(&store, "h-ciflake", "ci-flake", "Runner issue isolated", "h-aware");
+    chan(
+        &store,
+        "h-ciflake",
+        "ci-flake",
+        "Runner issue isolated",
+        "h-aware",
+    );
     members(&store, "h-aware", &["pk-claude"]);
     members(&store, "h-ciflake", &["pk-a", "pk-b"]);
 
@@ -273,8 +324,15 @@ fn update_renders_state_activity_and_omits_unchanged_sessions() {
         970,
     );
 
-    let block =
-        render_awareness_update_since_check(&store, 900, "h-aware", NOW, Some("pk-old"), LOCAL_HOST).unwrap();
+    let block = render_awareness_update_since_check(
+        &store,
+        900,
+        "h-aware",
+        NOW,
+        Some("pk-old"),
+        LOCAL_HOST,
+    )
+    .unwrap();
 
     assert_has(&block, "[tenex-edge] Fabric updates since your last check");
     assert_has(
@@ -318,8 +376,15 @@ fn update_activity_excludes_viewers_own_chat() {
         970,
     );
 
-    let block = render_awareness_update_since_check(&store, 900, "h-aware", NOW, Some("pk-codex"), LOCAL_HOST)
-        .expect("other activity should still render");
+    let block = render_awareness_update_since_check(
+        &store,
+        900,
+        "h-aware",
+        NOW,
+        Some("pk-codex"),
+        LOCAL_HOST,
+    )
+    .expect("other activity should still render");
 
     assert_has(&block, "Activity in #awareness:");
     assert_has(
@@ -344,7 +409,8 @@ fn other_active_channels_use_status_titles_without_repeating_old_activity() {
         980,
     );
 
-    let block = render_awareness_update_since_check(&store, 900, "h-aware", NOW, None, LOCAL_HOST).unwrap();
+    let block =
+        render_awareness_update_since_check(&store, 900, "h-aware", NOW, None, LOCAL_HOST).unwrap();
     // Unnamed session room labelled by its work title; the opaque id never shows.
     assert_has(&block, "- Investigating duplicate session rooms [1 member]");
     assert_lacks(&block, "session-a9f2");
@@ -384,6 +450,7 @@ fn snapshot_includes_live_peer_even_when_roster_is_not_hydrated() {
         980,
     );
 
-    let block = render_awareness_snapshot(&store, "child", NOW, "codex", "pk-codex", LOCAL_HOST).unwrap();
+    let block =
+        render_awareness_snapshot(&store, "child", NOW, "codex", "pk-codex", LOCAL_HOST).unwrap();
     assert_has(&block, "- @claude - Tracing current status delta behavior");
 }

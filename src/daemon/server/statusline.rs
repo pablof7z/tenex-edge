@@ -6,12 +6,6 @@ pub(in crate::daemon::server) const STATUSLINE_RECENT_SECS: u64 = 30;
 pub(in crate::daemon::server) struct StatuslineParams {
     #[serde(default)]
     pub(in crate::daemon::server) session: Option<String>,
-    #[serde(default)]
-    pub(in crate::daemon::server) env_session: Option<String>,
-    #[serde(default)]
-    pub(in crate::daemon::server) cwd: Option<String>,
-    #[serde(default)]
-    pub(in crate::daemon::server) agent: Option<String>,
 }
 
 /// `statusline`: everything the host's status bar renders, in one pure-read RPC.
@@ -43,25 +37,16 @@ pub(in crate::daemon::server) fn rpc_statusline(
     // check key on it so a `channels switch` (which repoints channel_h) is
     // reflected in the statusline without restarting.
     let scope = rec.channel_h.clone();
+    // Issue #98: one authoritative agent-instance identity for label + membership.
+    let instance = state.session_instance(&rec);
     state.with_store(|s| {
         let member_count = s.count_channel_members(&scope).unwrap_or(0);
         // Resolve the ordinal label (e.g. "claude1" for the second concurrent
-        // Claude session) the same way `who` does — base slug when ordinal==0.
-        let identity = s.identity_for_session(&rec.session_id).ok().flatten();
-        let agent_label = identity
-            .as_ref()
-            .map(|i| {
-                if i.ordinal == 0 {
-                    i.agent_slug.clone()
-                } else {
-                    format!("{}{}", i.agent_slug, i.ordinal)
-                }
-            })
-            .unwrap_or_else(|| rec.agent_slug.clone());
-        let is_member = identity
-            .as_ref()
-            .map(|i| s.is_channel_member(&scope, &i.pubkey).unwrap_or(true))
-            .unwrap_or_else(|| s.is_channel_member(&scope, &rec.agent_pubkey).unwrap_or(true));
+        // Claude session) through the authoritative AgentInstance projection.
+        let agent_label = instance.display_slug();
+        let is_member = s
+            .is_channel_member(&scope, &instance.pubkey)
+            .unwrap_or(true);
         // Busy + title + live activity come straight off the local session row
         // (the pre-publish draft the distiller maintains). Pure read: no drains,
         // no touches. The statusline shows the activity line (the live "doing
@@ -87,7 +72,9 @@ pub(in crate::daemon::server) fn rpc_statusline(
             Some(p) if !p.is_empty() => p,
             _ => scope.clone(),
         };
-        let pending_chat = s.drain_pending_for_session(&rec.session_id).unwrap_or_default();
+        let pending_chat = s
+            .drain_pending_for_session(&rec.session_id)
+            .unwrap_or_default();
         let recent_since = now.saturating_sub(STATUSLINE_RECENT_SECS);
         let recent_chat = s
             .recently_delivered_for_session(&rec.session_id, recent_since)

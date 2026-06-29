@@ -3,8 +3,7 @@
 use crate::domain::DomainEvent;
 use crate::state::Store;
 use crate::util::{
-    dirty_label, format_local_datetime, now_secs, pubkey_short, relative_time, session_codename,
-    slugify_host, SessionId,
+    dirty_label, format_local_datetime, now_secs, pubkey_short, relative_time, slugify_host,
 };
 use anyhow::{bail, Context, Result};
 use crossterm::{
@@ -95,7 +94,6 @@ pub async fn run(cli: Cli) -> Result<()> {
                 who::who(project, all_projects)
             }
         }
-        Cmd::Whoami { session, json } => who::whoami(session, json).await,
         Cmd::Tail {
             project,
             agent,
@@ -214,7 +212,6 @@ pub async fn run(cli: Cli) -> Result<()> {
         }
     }
 }
-
 
 // Session resolution, session-id generation, recipient resolution, and the
 // store live INSIDE the daemon now (it is the sole writer). The CLI verbs below

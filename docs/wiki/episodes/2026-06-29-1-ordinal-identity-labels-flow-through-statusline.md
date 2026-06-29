@@ -4,7 +4,7 @@ date: 2026-06-29
 session: d0db1eb1-0eb3-4ab5-9a9f-93a1779283a2
 transcript: /Users/pablofernandez/.claude/projects/-Users-pablofernandez-src-tenex-edge/d0db1eb1-0eb3-4ab5-9a9f-93a1779283a2.jsonl
 salience: product
-status: active
+status: superseded
 subjects:
   - ordinal-identity
   - statusline

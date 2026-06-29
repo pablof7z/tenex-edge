@@ -30,16 +30,6 @@ pub(super) enum Cmd {
         #[arg(long)]
         live: bool,
     },
-    /// Show your own identity on the fabric: agent slug, project/channel, host,
-    /// pubkey, and current status.
-    Whoami {
-        /// Session id; if omitted, resolved from env / the current directory.
-        #[arg(long)]
-        session: Option<String>,
-        /// Emit the raw identity JSON instead of the rendered card.
-        #[arg(long)]
-        json: bool,
-    },
     /// Stream all fabric activity as structured events, colorized.
     Tail {
         /// Filter to a single project (default: all projects).
@@ -315,7 +305,7 @@ pub(super) enum TmuxAction {
     /// Resume a (typically dead) session: replay its harness in a new tmux
     /// window using the captured native resume token, then attach to it.
     Resume {
-        /// Session id (prefix, or codename like `bravo4217`) to resume.
+        /// Session id (or a unique prefix of it) to resume.
         #[arg(long)]
         session: String,
     },
@@ -417,9 +407,11 @@ pub(super) enum ProjectAction {
 /// Subgroup task channels under a project (NIP-29 child groups).
 #[derive(Subcommand)]
 pub(super) enum ChannelsAction {
-    /// Create a subgroup task channel under a project and publish one kind:9
-    /// orchestration event asking the named backends to add their agents. The
-    /// agent that runs this command is auto-added to the new channel.
+    /// Create a subgroup task channel and switch into it. When run as an agent
+    /// the new channel nests under your CURRENT channel by default, and the
+    /// running session auto-switches to it. If `--agent slug@backend` targets
+    /// are named, one kind:9 orchestration event asks those backends to add
+    /// their agents.
     Create {
         /// Human-readable channel name, e.g. "support". The channel id (NIP-29
         /// `h` value) is an opaque random value, never derived from the name;
@@ -430,16 +422,17 @@ pub(super) enum ChannelsAction {
         /// `about`. Optional.
         #[arg(long)]
         about: Option<String>,
-        /// Repeatable `slug@backend`, where `slug` is the agent identity (the
-        /// `~/.tenex-edge/agents/*.json` filename stem, e.g. `developer`, `alice`)
-        /// and `backend` is a hex pubkey or npub of the target backend (the pubkey
-        /// of its tenexPrivateKey).
+        /// Optional, repeatable `slug@backend`, where `slug` is the agent identity
+        /// (the `~/.tenex-edge/agents/*.json` filename stem, e.g. `developer`,
+        /// `alice`) and `backend` is a hex pubkey or npub of the target backend
+        /// (the pubkey of its tenexPrivateKey). Omit to create an empty channel.
         #[arg(long = "agent", value_name = "SLUG@BACKEND")]
         agents: Vec<String>,
-        /// Parent project slug this channel hangs under. Defaults to the project
-        /// resolved from the current directory.
-        #[arg(long)]
-        project: Option<String>,
+        /// Parent channel the new channel hangs under. Defaults to the channel
+        /// you are currently in; pass a project-relative reference (e.g.
+        /// `planning` or `epic999/planning`) to nest it elsewhere in the project.
+        #[arg(long = "parent-channel", value_name = "CHANNEL")]
+        parent_channel: Option<String>,
         /// Path to a markdown brief; its contents become the kind:9 prose body.
         #[arg(long = "message", value_name = "PATH")]
         message: Option<PathBuf>,
@@ -465,7 +458,7 @@ pub(super) enum DebugAction {
         /// Filter panes/events to one or more projects (repeatable).
         #[arg(long = "project")]
         projects: Vec<String>,
-        /// Filter panes/events to a session id or codename.
+        /// Filter panes/events to a session id (or a unique prefix of it).
         #[arg(long)]
         session: Option<String>,
         /// Maximum panes in the grid.

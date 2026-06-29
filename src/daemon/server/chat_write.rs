@@ -80,58 +80,67 @@ pub(in crate::daemon::server) async fn rpc_chat_write(
         None => None,
     };
     let body_to_send = match &explicit_dest {
-        Some(_) => format!("[from @{} working in #{scope}]: {}", rec.agent_slug, p.message),
+        Some(_) => format!(
+            "[from @{} working in #{scope}]: {}",
+            rec.agent_slug, p.message
+        ),
         None => p.message.clone(),
     };
     // Sessions to deliver to + the wire `h`: the explicit destination on a
     // redirect, else the sender's own scope.
     let deliver_scope = explicit_dest.clone().unwrap_or_else(|| scope.clone());
 
-    // Mention target: the FIRST inline `@codename` in the body. A redirect is a
-    // plain channel post, not a mention.
+    // Mention target: the FIRST inline `@<agent-instance-label>` in the body that
+    // resolves to a known instance pubkey. A redirect is a plain channel post, not
+    // a mention. An unresolvable token is silently treated as no mention — it must
+    // never bail or block the chat.
     let mention_token: Option<String> = if explicit_dest.is_some() {
         None
     } else {
-        crate::idref::extract_mentions(&p.message).into_iter().next()
+        crate::idref::extract_mentions(&p.message)
+            .into_iter()
+            .next()
     };
     let mention = if let Some(raw) = mention_token {
-        let target = state.with_store(|s| resolve_recipient(s, &scope, &state.host, &raw))?;
-        let Some(session_id) = target.target_session else {
-            anyhow::bail!(
-                "mention @{raw} must name a concrete session codename from `tenex-edge who`"
-            );
-        };
-        let same_work_root = state.with_store(|s| {
-            work_root_for(s, &scope) == work_root_for(s, &target.project)
-        });
-        if target.project != scope && !same_work_root {
-            anyhow::bail!(
-                "mention target is in project {:?}, but this chat is for project {:?}",
-                target.project,
-                scope
-            );
+        match state.with_store(|s| resolve_recipient(s, &scope, &state.host, &raw)) {
+            Ok(target) => {
+                let same_work_root = state
+                    .with_store(|s| work_root_for(s, &scope) == work_root_for(s, &target.project));
+                if target.project != scope && !same_work_root {
+                    anyhow::bail!(
+                        "mention target is in project {:?}, but this chat is for project {:?}",
+                        target.project,
+                        scope
+                    );
+                }
+                Some((target.pubkey, target.target_session, target.project, raw))
+            }
+            // Unresolvable mention token → treat the body as having no mention.
+            Err(_) => None,
         }
-        Some((target.pubkey, session_id, target.project))
     } else {
         None
     };
-    let mentioned_pubkey = mention.as_ref().map(|(pk, _, _)| pk.clone());
-    let mentioned_session = mention.as_ref().map(|(_, sid, _)| sid.clone());
+    let mentioned_pubkey = mention.as_ref().map(|(pk, ..)| pk.clone());
+    let mentioned_session = mention.as_ref().and_then(|(_, sid, ..)| sid.clone());
+    let mentioned_label = mention.as_ref().map(|(.., raw)| raw.clone());
     let publish_scope = explicit_dest.clone().unwrap_or_else(|| {
         mention
             .as_ref()
-            .map(|(_, _, project)| project.as_str())
+            .map(|(_, _, project, _)| project.as_str())
             .unwrap_or(scope.as_str())
             .to_string()
     });
 
-    let chat_signing_keys = state
-        .keys_for_session(&rec.session_id)
-        .unwrap_or_else(|| id.keys.clone());
-    let from_pubkey = chat_signing_keys.public_key().to_hex();
+    // Issue #98: sign + label from the session's authoritative agent-instance
+    // identity (selected pubkey + display label), never base-key fallback.
+    let instance = state.session_instance(&rec);
+    let base = identity::load_or_create(&config::edge_home(), &instance.base_slug, now_secs())?;
+    let chat_signing_keys = instance.signing_keys(&base.keys);
+    let from_pubkey = instance.pubkey.clone();
 
     let chat = ChatMessage {
-        from: crate::domain::AgentRef::new(from_pubkey.clone(), rec.agent_slug.clone()),
+        from: instance.agent_ref(),
         project: publish_scope.clone(),
         body: body_to_send.clone(),
         mentioned_pubkey: mentioned_pubkey.clone(),
@@ -199,10 +208,11 @@ pub(in crate::daemon::server) async fn rpc_chat_write(
         crate::tmux::ring_doorbells(state.clone());
     }
 
+    let from_label = instance.display_slug();
     state.emit_tail(TailEvent::Msg {
         ts: created_at,
         project: deliver_scope.clone(),
-        from: rec.agent_slug,
+        from: from_label,
         from_session: Some(rec.session_id),
         to: mentioned_pubkey
             .as_deref()
@@ -217,6 +227,7 @@ pub(in crate::daemon::server) async fn rpc_chat_write(
         "project": publish_scope,
         "mentioned_pubkey": mentioned_pubkey,
         "mentioned_session": mentioned_session,
+        "mentioned_label": mentioned_label,
     }))
 }
 
@@ -230,12 +241,14 @@ pub(in crate::daemon::server) struct ResolvedRecipient {
 ///   - `agent@host`  → the durable agent on that machine (host always slugified;
 ///     `@` NEVER means project). The message still goes to `my_project`.
 ///   - 64-hex / npub → raw pubkey.
-///   - a session     → by canonical id, harness alias, id prefix, or codename.
-///   - a bare slug   → that agent on the LOCAL host (`slug@<local_host>`).
+///   - a session     → by canonical id, harness alias, or id prefix (correlation
+///     handles only; a session id is never a chat-target identity).
+///   - a bare agent-instance label → that instance on the LOCAL host
+///     (`label@<local_host>`), reverse-resolved to its selected pubkey.
 ///
 /// Sessions are local-only in the new model (session ids never travel the wire),
-/// so session-prefix / codename matching searches the local `sessions` table; a
-/// remote agent is addressed only by `agent@host` or pubkey.
+/// so session-prefix matching searches the local `sessions` table; a remote agent
+/// is addressed only by `agent@host` or pubkey.
 pub(in crate::daemon::server) fn resolve_recipient(
     store: &Store,
     my_project: &str,
@@ -246,13 +259,21 @@ pub(in crate::daemon::server) fn resolve_recipient(
 
     let session_recipient =
         |store: &Store, session_id: String, fallback_pk: String, project: String| {
+            let pubkey = store
+                .instance_identity_for_session(&session_id)
+                .ok()
+                .flatten()
+                .map(|i| i.pubkey)
+                .or_else(|| {
+                    store
+                        .get_session(&session_id)
+                        .ok()
+                        .flatten()
+                        .map(|s| s.agent_pubkey)
+                })
+                .unwrap_or(fallback_pk);
             ResolvedRecipient {
-                pubkey: store
-                    .get_session(&session_id)
-                    .ok()
-                    .flatten()
-                    .map(|s| s.agent_pubkey)
-                    .unwrap_or(fallback_pk),
+                pubkey,
                 target_session: Some(session_id),
                 project,
             }
@@ -260,9 +281,9 @@ pub(in crate::daemon::server) fn resolve_recipient(
 
     match parse_ref(target) {
         Ref::Agent { slug, host } => {
-            let pk = store
-                .resolve_agent_pubkey(&slug, &host)?
-                .with_context(|| format!("can't resolve {slug}@{host} (no profile seen yet — try `tenex-edge who`)"))?;
+            let pk = store.resolve_agent_pubkey(&slug, &host)?.with_context(|| {
+                format!("can't resolve {slug}@{host} (no profile seen yet — try `tenex-edge who`)")
+            })?;
             Ok(ResolvedRecipient {
                 pubkey: pk,
                 target_session: None,
@@ -282,7 +303,12 @@ pub(in crate::daemon::server) fn resolve_recipient(
         Ref::Token(tok) => {
             // 1. Exact canonical id or harness alias.
             if let Some(s) = store.get_session(&tok)? {
-                return Ok(session_recipient(store, s.session_id, s.agent_pubkey, s.channel_h));
+                return Ok(session_recipient(
+                    store,
+                    s.session_id,
+                    s.agent_pubkey,
+                    s.channel_h,
+                ));
             }
             // 2. Local session id prefix.
             if tok.len() >= 6 {
@@ -292,11 +318,16 @@ pub(in crate::daemon::server) fn resolve_recipient(
                     .into_iter()
                     .find(|s| s.session_id.starts_with(&tok))
                 {
-                    return Ok(session_recipient(store, s.session_id, s.agent_pubkey, s.channel_h));
+                    return Ok(session_recipient(
+                        store,
+                        s.session_id,
+                        s.agent_pubkey,
+                        s.channel_h,
+                    ));
                 }
             }
-            // 3. Session codename (e.g. `bravo4217` from `who`).
-            if let Some(found) = find_session_by_codename(store, &tok)? {
+            // 3. Live local agent-instance label from `who` (`haiku`, `haiku1`, ...).
+            if let Some(found) = find_session_by_agent_label(store, my_project, &tok)? {
                 return Ok(session_recipient(
                     store,
                     found.session_id,
@@ -304,7 +335,8 @@ pub(in crate::daemon::server) fn resolve_recipient(
                     found.project,
                 ));
             }
-            // 4. Bare agent slug → that agent on the LOCAL host.
+            // 4. Bare agent-instance label → that instance on the LOCAL host
+            //    (profile fallback for remote/snapshotted peers).
             if let Some(pk) =
                 store.resolve_agent_pubkey(&tok, &crate::util::slugify_host(local_host))?
             {
@@ -319,28 +351,75 @@ pub(in crate::daemon::server) fn resolve_recipient(
     }
 }
 
-pub(in crate::daemon::server) struct SessionMatch {
+#[derive(Clone)]
+struct SessionMatch {
     pubkey: String,
     session_id: String,
     project: String,
 }
 
-/// Try to find a LOCAL session matching the given codename (what `who` displays,
-/// e.g. `bravo4217`). Remote agents have no local session and are addressed by
-/// `agent@host`/pubkey instead.
-pub(in crate::daemon::server) fn find_session_by_codename(
+fn find_session_by_agent_label(
     store: &Store,
-    codename: &str,
+    my_project: &str,
+    label: &str,
 ) -> Result<Option<SessionMatch>> {
-    let target_code = codename.to_lowercase();
-    for session in store.list_alive_sessions().unwrap_or_default() {
-        if session_codename(&session.session_id).to_lowercase() == target_code {
-            return Ok(Some(SessionMatch {
-                pubkey: session.agent_pubkey,
-                session_id: session.session_id,
-                project: session.channel_h,
-            }));
-        }
+    let wanted = label.trim().to_ascii_lowercase();
+    if wanted.is_empty() {
+        return Ok(None);
     }
-    Ok(None)
+
+    let my_root = work_root_for(store, my_project);
+    let mut same_scope = Vec::new();
+    let mut same_root = Vec::new();
+    let mut global = Vec::new();
+
+    for session in store.list_alive_sessions().unwrap_or_default() {
+        let instance = store
+            .instance_identity_for_session(&session.session_id)
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| {
+                crate::identity::AgentInstance::base(
+                    session.agent_slug.clone(),
+                    session.agent_pubkey.clone(),
+                )
+            });
+        if instance.display_slug().to_ascii_lowercase() != wanted {
+            continue;
+        }
+        let matched = SessionMatch {
+            pubkey: instance.pubkey,
+            session_id: session.session_id.clone(),
+            project: session.channel_h.clone(),
+        };
+        if session.channel_h == my_project {
+            same_scope.push(matched.clone());
+        } else if work_root_for(store, &session.channel_h) == my_root {
+            same_root.push(matched.clone());
+        }
+        global.push(matched);
+    }
+
+    if let Some(matched) = choose_unique_session_label_match(label, "current channel", same_scope)?
+    {
+        return Ok(Some(matched));
+    }
+    if let Some(matched) = choose_unique_session_label_match(label, "current project", same_root)? {
+        return Ok(Some(matched));
+    }
+    choose_unique_session_label_match(label, "all channels", global)
+}
+
+fn choose_unique_session_label_match(
+    label: &str,
+    scope: &str,
+    mut matches: Vec<SessionMatch>,
+) -> Result<Option<SessionMatch>> {
+    match matches.len() {
+        0 => Ok(None),
+        1 => Ok(matches.pop()),
+        _ => anyhow::bail!(
+            "agent label @{label} matches multiple live sessions in {scope}; run `tenex-edge who`"
+        ),
+    }
 }

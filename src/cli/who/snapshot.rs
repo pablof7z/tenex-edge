@@ -134,7 +134,7 @@ pub fn load_who_snapshot(
             other_agents
                 .entry(scope)
                 .or_default()
-                .insert(s.agent_slug.clone());
+                .insert(local_instance(store, &s).display_slug());
         }
     }
 
@@ -245,8 +245,9 @@ fn is_root_channel(store: &Store, scope: &str) -> bool {
 /// relay_status row when published, else the local pre-publish draft on the
 /// session.
 fn local_row(store: &Store, s: &crate::state::Session, local_host: &str, now: u64) -> WhoRow {
+    let instance = local_instance(store, s);
     let live = store
-        .get_status(&s.agent_pubkey, &s.channel_h)
+        .get_status(&instance.pubkey, &s.channel_h)
         .ok()
         .flatten()
         .filter(|st| st.expiration == 0 || st.expiration >= now);
@@ -270,7 +271,7 @@ fn local_row(store: &Store, s: &crate::state::Session, local_host: &str, now: u6
     WhoRow {
         source: WhoSource::Local,
         fresh,
-        slug: s.agent_slug.clone(),
+        slug: instance.display_slug(),
         project: s.channel_h.clone(),
         status: title,
         activity,
@@ -282,8 +283,18 @@ fn local_row(store: &Store, s: &crate::state::Session, local_host: &str, now: u6
         remote: false,
         attachable: false,
         work_root: work_root_for(store, &s.channel_h),
-        pubkey: s.agent_pubkey.clone(),
+        pubkey: instance.pubkey,
     }
+}
+
+fn local_instance(store: &Store, s: &crate::state::Session) -> crate::identity::AgentInstance {
+    store
+        .instance_identity_for_session(&s.session_id)
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| {
+            crate::identity::AgentInstance::base(s.agent_slug.clone(), s.agent_pubkey.clone())
+        })
 }
 
 /// Build a peer row from a relay-confirmed status. Host (and thus remoteness)

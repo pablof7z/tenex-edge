@@ -53,7 +53,10 @@ pub(in crate::daemon::server) async fn rpc_turn_start(
     // needs to name: pending inbound senders + body mentions + channel members.
     let to_warm: Vec<String> = state.with_store(|s| {
         let mut v: Vec<String> = Vec::new();
-        for r in s.drain_pending_for_session(&rec.session_id).unwrap_or_default() {
+        for r in s
+            .drain_pending_for_session(&rec.session_id)
+            .unwrap_or_default()
+        {
             v.push(r.from_pubkey);
             v.extend(crate::profile::body_mention_pubkeys(&r.body));
         }
@@ -204,8 +207,8 @@ pub(in crate::daemon::server) async fn rpc_turn_end(
         if let (Some(rec), Some(reply)) = (rec.as_ref(), p.reply.as_deref()) {
             let reply = reply.trim();
             // Publish into non-root (per-session / task) channels only.
-            let publish_reply = state
-                .with_store(|s| !s.is_root_channel(&rec.channel_h).unwrap_or(true));
+            let publish_reply =
+                state.with_store(|s| !s.is_root_channel(&rec.channel_h).unwrap_or(true));
             if !reply.is_empty() && publish_reply {
                 let publish = publish_agent_reply(state, rec, reply);
                 let debug = std::env::var("TENEX_EDGE_DEBUG").is_ok();

@@ -211,7 +211,6 @@ pub fn render_tail_event(
     compact: bool,
 ) -> String {
     use crate::daemon::tail_event::TailEvent;
-    use crate::util::session_codename;
 
     let ts = ev.ts();
     let ts_str = if relative {
@@ -242,8 +241,9 @@ pub fn render_tail_event(
         };
     }
 
-    // Session codename helper.
-    let sess_code = |sid: &str| session_codename(sid);
+    // Short raw-session-id correlation handle. Operator-facing handle to correlate
+    // lines for the same session; identity is the agent label.
+    let sess_code = |sid: &str| sid.chars().take(8).collect::<String>();
 
     match ev {
         TailEvent::Msg {

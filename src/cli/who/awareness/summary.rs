@@ -132,7 +132,7 @@ pub(super) fn member_lines(
         .iter()
         .map(|(pubkey, _)| pubkey.clone())
         .collect::<BTreeSet<_>>();
-    if !members.iter().any(|(pk, _)| pk == self_pubkey) {
+    if !self_pubkey.is_empty() && !members.iter().any(|(pk, _)| pk == self_pubkey) {
         members.push((self_pubkey.to_string(), "member".to_string()));
         seen.insert(self_pubkey.to_string());
     }
@@ -145,12 +145,16 @@ pub(super) fn member_lines(
         .into_iter()
         .filter(|(pubkey, _)| !is_backend(store, pubkey))
         .map(|(pubkey, role)| {
-            let (slug, host) = if pubkey == self_pubkey {
+            let is_self = !self_pubkey.is_empty() && pubkey == self_pubkey;
+            let (slug, host) = if is_self {
                 (self_slug.to_string(), local_host.to_string())
             } else {
-                (slug_for_pubkey(store, &pubkey), host_for_pubkey(store, &pubkey))
+                (
+                    slug_for_pubkey(store, &pubkey),
+                    host_for_pubkey(store, &pubkey),
+                )
             };
-            let you = if pubkey == self_pubkey { " (you)" } else { "" };
+            let you = if is_self { " (you)" } else { "" };
             let status = status_map
                 .get(&pubkey)
                 .map(|s| super::super::render::status_plain(&s.title, &s.activity, s.busy))
@@ -300,7 +304,10 @@ fn channel_label(store: &Store, id: &str, now: u64) -> (String, Option<String>) 
         let name = channel.name.trim();
         if !name.is_empty() && name != id {
             let about = channel.about.trim();
-            return (format!("#{name}"), (!about.is_empty()).then(|| about.to_string()));
+            return (
+                format!("#{name}"),
+                (!about.is_empty()).then(|| about.to_string()),
+            );
         }
     }
     (unnamed_channel_label(store, id, now), None)

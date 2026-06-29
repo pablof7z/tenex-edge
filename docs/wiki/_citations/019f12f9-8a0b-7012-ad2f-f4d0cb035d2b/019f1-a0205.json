@@ -1,0 +1,6 @@
+{
+  "id": "019f1-a0205",
+  "ts": "2026-06-29T10:52:18Z",
+  "session": "019f12f9-8a0b-7012-ad2f-f4d0cb035d2b",
+  "text": "Assistant: The source confirms the strongest implementation contract: pure domain types, NIP-29 wire codec, provider/materializer, single-writer daemon, and SQLite read model. A good skill set should preserve those boundaries explicitly, because they are exactly where regressions would be expensive."
+}

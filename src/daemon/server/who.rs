@@ -64,7 +64,9 @@ pub(in crate::daemon::server) fn rpc_who(
     // scope, so it keeps the cross-project snapshot table. The caller (this session,
     // when run inside an agent) is marked `(you)` and excluded from peer echoes.
     if let Some(scope) = current_project.as_deref() {
-        let (self_slug, self_pubkey) = resolve_session_inner(
+        // Resolve the caller's own session once; reuse it for both the fabric
+        // `(you)` match and the folded-in `self` identity block (issue #99).
+        let rec = resolve_session_inner(
             state,
             None,
             p.env_session.as_deref(),
@@ -73,9 +75,15 @@ pub(in crate::daemon::server) fn rpc_who(
             p.group.as_deref(),
             false,
         )
-        .ok()
-        .map(|rec| (rec.agent_slug, rec.agent_pubkey))
-        .unwrap_or_default();
+        .ok();
+        // Issue #98: the caller's ONE authoritative agent-instance identity — the
+        // selected pubkey + ordinal label every publisher signs with. Computed
+        // OUTSIDE `with_store` because `session_instance` locks the store itself.
+        let instance = rec.as_ref().map(|rec| state.session_instance(rec));
+        let (self_slug, self_pubkey) = instance
+            .as_ref()
+            .map(|i| (i.display_slug(), i.pubkey.clone()))
+            .unwrap_or_default();
         let edge = crate::config::edge_home();
         let fabric = state.with_store(|s| {
             crate::cli::render_fabric_snapshot(
@@ -91,87 +99,33 @@ pub(in crate::daemon::server) fn rpc_who(
         if let Some(fabric) = fabric {
             out["fabric"] = serde_json::Value::String(fabric);
         }
+        // Fold the current agent identity into `who` (issue #99): a `self` object
+        // with this session's own fabric identity, present only when `who` runs
+        // inside an agent. `session_id` is raw internal correlation, not a
+        // user-facing identity.
+        if let (Some(rec), Some(instance)) = (rec.as_ref(), instance.as_ref()) {
+            let pending = state
+                .with_store(|s| s.drain_pending_for_session(&rec.session_id))
+                .map(|rows| rows.len())
+                .unwrap_or(0);
+            let is_member = state
+                .with_store(|s| s.is_channel_member(&rec.channel_h, &instance.pubkey))
+                .unwrap_or(true);
+            out["self"] = serde_json::json!({
+                "label": instance.display_slug(),
+                "pubkey": instance.pubkey,
+                "channel": rec.channel_h,
+                "host": host,
+                "is_member": is_member,
+                "working": rec.working,
+                "status": rec.title,
+                "pending": pending,
+                "created_at": rec.created_at,
+                "session_id": rec.session_id,
+            });
+        }
     }
     Ok(out)
-}
-
-// ── session_start / session_end ──────────────────────────────────────────────
-
-pub(in crate::daemon::server) fn rpc_whoami(
-    state: &Arc<DaemonState>,
-    params: &serde_json::Value,
-) -> Result<serde_json::Value> {
-    let p: StatuslineParams = serde_json::from_value(params.clone()).unwrap_or_default();
-    // Strict: no bare-project fallback. `whoami` answers "which agent am I", so
-    // when run outside an agent (no session/agent signal) it must error, not
-    // silently report some unrelated sibling session in the cwd's project.
-    let rec = resolve_session_inner(
-        state,
-        p.session.as_deref(),
-        p.env_session.as_deref(),
-        p.cwd.as_deref(),
-        p.agent.as_deref(),
-        None,
-        false,
-    )?;
-    let host = state.host.clone();
-    // Routing scope: the session's channel (a `channels switch` moves the
-    // session by repointing channel_h). `whoami` answers "which agent am I on
-    // the fabric" — the channel it currently publishes into is the relevant
-    // scope, and the is_member check keys on it.
-    let scope = rec.channel_h.clone();
-    state.with_store(|s| {
-        // Report the session's DURABLE ORDINAL identity (issue #47): its ordinal
-        // pubkey + label (`smith`, `smith1`, …) — the identity peers see on the
-        // wire — from the identities table. Falls back to the base agent pubkey
-        // for sessions with no derived identity bound yet.
-        let identity = s.identity_for_session(&rec.session_id).ok().flatten();
-        let pubkey = identity
-            .as_ref()
-            .map(|i| i.pubkey.clone())
-            .unwrap_or_else(|| rec.agent_pubkey.clone());
-        let label = identity
-            .as_ref()
-            .map(|i| {
-                if i.ordinal == 0 {
-                    i.agent_slug.clone()
-                } else {
-                    format!("{}{}", i.agent_slug, i.ordinal)
-                }
-            })
-            .unwrap_or_else(|| rec.agent_slug.clone());
-        let npub = {
-            use nostr_sdk::prelude::ToBech32;
-            nostr_sdk::PublicKey::from_hex(&pubkey)
-                .ok()
-                .and_then(|pk| pk.to_bech32().ok())
-        };
-        let is_member = s.is_channel_member(&scope, &pubkey).unwrap_or(true);
-        // Busy + title come straight off the local session row (the pre-publish
-        // draft the distiller maintains), no separate read-model projection.
-        let working = rec.working;
-        let status = rec.title.clone();
-        let pending = s
-            .drain_pending_for_session(&rec.session_id)
-            .unwrap_or_default()
-            .len();
-        Ok(serde_json::json!({
-            "agent": rec.agent_slug,
-            "label": label,
-            "session_id": rec.session_id,
-            "codename": crate::util::session_codename(&rec.session_id),
-            "project": scope,
-            "host": host,
-            "rel_cwd": "",
-            "pubkey": pubkey,
-            "npub": npub,
-            "is_member": is_member,
-            "working": working,
-            "status": status,
-            "pending": pending,
-            "created_at": rec.created_at,
-        }))
-    })
 }
 
 // ── project_add ──────────────────────────────────────────────────────────────

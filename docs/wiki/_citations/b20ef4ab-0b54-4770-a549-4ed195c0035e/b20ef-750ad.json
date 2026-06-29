@@ -1,0 +1,6 @@
+{
+  "id": "b20ef-750ad",
+  "ts": "2026-06-29T10:50:59Z",
+  "session": "b20ef4ab-0b54-4770-a549-4ed195c0035e",
+  "text": "Creator resolution uses the strict (no project-fallback) path so child-of-current and auto-switch only fire when actually run as an agent."
+}

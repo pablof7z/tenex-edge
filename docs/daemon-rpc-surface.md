@@ -20,12 +20,12 @@ Spawns an in-daemon `SessionTask` (publishes profile, presence, subscribes,
 distills, routes mentions — today's `runtime::run_session`).
 ```jsonc
 params: {"agent": "coder", "session_id": "te-…"|null, "cwd": "/path", "watch_pid": 12345|null}
-result: {"session_id": "te-…", "codename": "bravo4217"}   // session_id printed verbatim to stdout
+result: {"session_id": "te-…"}   // session_id printed verbatim to stdout
 ```
-The `codename` is the human-friendly session label (NATO phonetic word + 4-digit
-number, e.g. `bravo4217`, `echo0163`), produced by `session_codename` in util.rs. It
-is a display/addressing convenience only — the space is 26×10000 = 260000 codenames,
-so it is not collision-free at scale and is never used as identity.
+The `session_id` is the raw canonical id — an internal correlation handle for
+hooks, tmux pane/session binding, resume, and DB rows. It is never rendered as a
+user-facing identity; a concrete agent instance is identified by its agent-instance
+label (`haiku`, `haiku1`, …) backed by that instance's selected pubkey.
 The provider opens the project's NIP-29 group and adds the session agent as a
 relay member before the engine publishes presence. There is no local agent
 allow/block file in the NIP-29 path.
@@ -180,12 +180,10 @@ result: {"working": bool, "status": "…", "session_count": N, "member_count": N
 ```
 Pure-read snapshot for the host statusline integration — no drain, no writes.
 
-### `whoami`
-```jsonc
-params: {"session": "te-…"|null, "cwd": "/path", ...}
-result: {"agent": "slug", "pubkey": "hex", "session_id": "te-…", "project": "…"}
-```
-Returns the resolved identity for the calling session.
+### `who` (self-identity)
+When run inside an agent session (`session`/`agent`/`group` signal present), `who`
+attaches a `self` block — the caller's agent-instance label (`haiku`/`haiku1`),
+selected pubkey, current channel, membership, and status.
 
 ### `ping`
 ```jsonc

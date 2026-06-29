@@ -1,0 +1,6 @@
+{
+  "id": "bd868-93a15",
+  "ts": "2026-06-29T10:42:57Z",
+  "session": "bd8689c8-4a5f-45b3-9dbe-758baec2a2f4",
+  "text": "| `chat_write.rs:99-103` \"must name a concrete session codename\" bail | Drop the `target_session` requirement. Route by `target.pubkey` alone — delivery (line 176) already keys on `mentioned_pubkey`. | [...] 1. **`chat_write.rs:99-103`** — the bail itself. With codenames gone there is no \"concrete session\" to demand; must route by pubkey. **Fix:** delete the requirement (delivery already pubkey-keyed)."
+}

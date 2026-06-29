@@ -1,0 +1,6 @@
+{
+  "id": "47f3c-ede20",
+  "ts": "2026-06-29T10:52:14Z",
+  "session": "47f3cac2-1ad9-461c-8ac0-3ea341d0e962",
+  "text": "| **Daemon startup** | Socket bound, relay pool connected, warmup complete, spawn-on-mention coverage count, shutdown | [...]      - Added at top of `run()`:\n     ```rust\n     crate::logging::init_daemon_logging(&crate::daemon::log_path())?;\n     ```\n     - Replaced all `eprintln!` with tracing: socket bound → `tracing::info!`, relay connected → `tracing::info!`, warmup complete → `tracing::info!`, spawn-on-mention coverage → `tracing::info!`, initial resubscribe failure → `tracing::warn!`, shutdown → `tracing::info!`, protocol re-exec → `tracing::info!`, connection error → `tracing::debug!`, accept error → `tracing::error!`"
+}

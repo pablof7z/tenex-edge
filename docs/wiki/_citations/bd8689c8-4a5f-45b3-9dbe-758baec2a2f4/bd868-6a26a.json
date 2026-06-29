@@ -1,0 +1,6 @@
+{
+  "id": "bd868-6a26a",
+  "ts": "2026-06-29T10:54:14Z",
+  "session": "bd8689c8-4a5f-45b3-9dbe-758baec2a2f4",
+  "text": "Assistant: Decision: **remove `whoami` entirely**, fold self-identity into `who`.\n [...] - Deleted `rpc_whoami` entirely (the function, its `StatuslineParams`/`npub`/`codename` logic, and the `ToBech32` use).\n- Extended `rpc_who`'s single-scope branch: it now resolves the caller's own session once (`rec`), computes `instance = state.session_instance(rec)` **outside** `with_store` (reentrancy rule honored), and reuses `instance.display_slug()` / `instance.pubkey` for the existing fabric `(you)` match."
+}

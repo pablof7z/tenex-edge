@@ -77,8 +77,8 @@ fn assert_who_lists_claude(home: &Home) {
         String::from_utf8_lossy(&out.stderr)
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
-    // `who` now renders a markdown agent table (the old `<codename> (claude)`
-    // line format is gone); the claude agent appears in the Agent column.
+    // `who` now renders a markdown agent table; the claude agent appears in the
+    // Agent column by its instance label.
     assert!(
         stdout.contains("claude"),
         "who should list the claude agent: {stdout}"
@@ -141,7 +141,7 @@ fn nak_relay_observes_transient_duplicate_status_author() {
     let channel = unique_channel("nak-hello");
     let other_channel = unique_channel("nak-backend");
 
-    let (first_id, second_id, other_id, whoami_pubkey) = rt().block_on(async {
+    let (first_id, second_id, other_id) = rt().block_on(async {
         let mut c = Client::connect_or_spawn().await.expect("connect");
         let first =
             start_session(&mut c, "claude", Some("issue22-nak-first"), None, &channel).await;
@@ -155,16 +155,7 @@ fn nak_relay_observes_transient_duplicate_status_author() {
             &other_channel,
         )
         .await;
-        let whoami = c
-            .call("whoami", serde_json::json!({"session": second.clone()}))
-            .await
-            .expect("whoami");
-        (
-            first,
-            second,
-            other,
-            whoami["pubkey"].as_str().unwrap().to_string(),
-        )
+        (first, second, other)
     });
 
     let store = Store::open(&home.store_path()).unwrap();
@@ -177,10 +168,15 @@ fn nak_relay_observes_transient_duplicate_status_author() {
     assert!(session_transient_pubkey(&store, &other_id).is_none());
     let transient_pubkey = session_transient_pubkey(&store, &second_id)
         .expect("duplicate session should use transient pubkey");
+    let instance = store
+        .instance_identity_for_session(&second_id)
+        .unwrap()
+        .expect("duplicate instance identity");
     assert_eq!(
-        whoami_pubkey, transient_pubkey,
-        "whoami should report the transient signer for the duplicate"
+        instance.pubkey, transient_pubkey,
+        "session identity should report the transient signer for the duplicate"
     );
+    assert_eq!(instance.display_slug(), "claude1");
 
     assert!(
         wait_until(std::time::Duration::from_secs(20), || {
@@ -208,9 +204,75 @@ fn nak_relay_observes_transient_duplicate_status_author() {
         "nak serve relay={relay} channel={other_channel} status evidence={:?}",
         relay::status_evidence_on_relay(&relay, &other_channel)
     );
-    eprintln!("whoami duplicate pubkey={whoami_pubkey}");
+    eprintln!("duplicate instance pubkey={transient_pubkey}");
 
     assert_who_lists_claude(&home);
+    stop_daemon(&home);
+}
+
+/// Issue #98 regression: two concurrent same-agent sessions in one channel must
+/// publish DISTINCT, INTERNALLY CONSISTENT identities. The bug this guards: the
+/// ordinal-1 instance published its kind:0 under the base pubkey AND labelled it
+/// "claude1", clobbering the base instance's "claude" profile — so both pubkeys
+/// (or the wrong pubkey) ended up named "claude1". Here we prove each selected
+/// pubkey carries its OWN label on the wire (kind:0) and through the local
+/// instance identity that backs `who`.
+#[test]
+fn concurrent_same_agent_sessions_publish_consistent_identities() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let home = Home::new();
+    let relay = rewrite_config_with_nak_relay(&home);
+    let channel = unique_channel("issue98-consistency");
+
+    let (first_id, second_id) = rt().block_on(async {
+        let mut c = Client::connect_or_spawn().await.expect("connect");
+        let first = start_session(&mut c, "claude", Some("issue98-first"), None, &channel).await;
+        let second = start_session(&mut c, "claude", Some("issue98-second"), None, &channel).await;
+        (first, second)
+    });
+
+    let store = Store::open(&home.store_path()).unwrap();
+    let durable_pubkey = store
+        .get_session(&first_id)
+        .unwrap()
+        .expect("first session")
+        .agent_pubkey;
+    let transient_pubkey = session_transient_pubkey(&store, &second_id)
+        .expect("second concurrent session should get a distinct ordinal pubkey");
+    assert_ne!(
+        durable_pubkey, transient_pubkey,
+        "the two concurrent instances must select distinct pubkeys"
+    );
+
+    // Each session reports its OWN (pubkey, label) pair through the identity that
+    // backs `who`: base instance is "claude" on the durable pubkey, the second is
+    // "claude1" on the ordinal key.
+    let first_instance = store
+        .instance_identity_for_session(&first_id)
+        .unwrap()
+        .expect("first instance identity");
+    let second_instance = store
+        .instance_identity_for_session(&second_id)
+        .unwrap()
+        .expect("second instance identity");
+    assert_eq!(first_instance.pubkey, durable_pubkey);
+    assert_eq!(first_instance.display_slug(), "claude");
+    assert_eq!(second_instance.pubkey, transient_pubkey);
+    assert_eq!(second_instance.display_slug(), "claude1");
+
+    // kind:0 on the relay: each pubkey is named for ITS OWN instance — the base
+    // pubkey is "claude" (never clobbered to "claude1"), the ordinal is "claude1".
+    assert!(
+        wait_until(std::time::Duration::from_secs(20), || {
+            relay::kind0_name_for_author(&relay, &durable_pubkey).as_deref() == Some("claude")
+                && relay::kind0_name_for_author(&relay, &transient_pubkey).as_deref()
+                    == Some("claude1")
+        }),
+        "kind:0 names must be self-consistent: base={:?} ordinal={:?}",
+        relay::kind0_name_for_author(&relay, &durable_pubkey),
+        relay::kind0_name_for_author(&relay, &transient_pubkey),
+    );
+
     stop_daemon(&home);
 }
 
@@ -221,46 +283,28 @@ fn duplicate_resume_reassert_preserves_transient_pubkey() {
     rewrite_config_with_signing_relay(&home);
     let channel = unique_channel("resume");
 
-    let (duplicate_id, whoami_pubkey, whoami_npub) = rt().block_on(async {
+    let duplicate_id = rt().block_on(async {
         let mut c = Client::connect_or_spawn().await.expect("connect");
         start_session(&mut c, "claude", Some("issue22-anchor-a"), None, &channel).await;
-        let duplicate = start_session(
+        start_session(
             &mut c,
             "claude",
             None,
             Some("issue22-resume-token"),
             &channel,
         )
-        .await;
-        let whoami = c
-            .call("whoami", serde_json::json!({"session": duplicate.clone()}))
-            .await
-            .expect("whoami");
-        (
-            duplicate,
-            whoami["pubkey"].as_str().unwrap().to_string(),
-            whoami["npub"].as_str().unwrap().to_string(),
-        )
+        .await
     });
-    let before = session_transient_pubkey(
-        &Store::open(&home.store_path()).unwrap(),
-        &duplicate_id,
-    )
-    .expect("duplicate session should have transient pubkey");
-    let expected_npub = {
-        use nostr_sdk::prelude::ToBech32;
-        nostr_sdk::PublicKey::from_hex(&before)
-            .unwrap()
-            .to_bech32()
-            .unwrap()
-    };
+    let before = session_transient_pubkey(&Store::open(&home.store_path()).unwrap(), &duplicate_id)
+        .expect("duplicate session should have transient pubkey");
+    let instance = Store::open(&home.store_path())
+        .unwrap()
+        .instance_identity_for_session(&duplicate_id)
+        .unwrap()
+        .expect("duplicate instance identity");
     assert_eq!(
-        whoami_pubkey, before,
-        "whoami should expose selected signer"
-    );
-    assert_eq!(
-        whoami_npub, expected_npub,
-        "whoami npub should match selected signer"
+        instance.pubkey, before,
+        "session identity should expose selected signer"
     );
 
     let duplicate_id_after = rt().block_on(async {

@@ -1,5 +1,4 @@
 /// TUI data model and state management
-use crate::util::SessionId;
 use anyhow::Result;
 use std::time::SystemTime;
 
@@ -7,8 +6,7 @@ pub(super) struct LiveRow {
     pub(super) slug: String,
     pub(super) host: String,
     pub(super) project: String,
-    pub(super) session_id: String,       // full raw id for RPC calls
-    pub(super) session_codename: String, // stable display codename (e.g. bravo4217)
+    pub(super) session_id: String, // full raw id for RPC calls + correlation
     pub(super) status: String,
     pub(super) attachable: bool, // has a live tmux endpoint
 }
@@ -33,8 +31,7 @@ pub(super) struct PendingAttach {
 pub(super) struct ResumeRow {
     pub(super) slug: String,
     pub(super) project: String,
-    pub(super) session_id: String,       // full raw id for RPC calls
-    pub(super) session_codename: String, // stable display codename (e.g. bravo4217)
+    pub(super) session_id: String, // full raw id for RPC calls + correlation
     pub(super) title: String,
     pub(super) created_at: u64,
 }
@@ -211,18 +208,13 @@ pub(super) fn fetch_tui_data() -> Result<TuiData> {
         .unwrap_or_default()
         .iter()
         .filter(|r| !r["remote"].as_bool().unwrap_or(false))
-        .map(|r| {
-            let raw_id = r["session_id"].as_str().unwrap_or("").to_string();
-            let session_codename = SessionId::from(raw_id.as_str()).to_string();
-            LiveRow {
-                slug: r["slug"].as_str().unwrap_or("").to_string(),
-                host: r["host"].as_str().unwrap_or("").to_string(),
-                project: row_project_for_tabs(r),
-                session_id: raw_id,
-                session_codename,
-                status: r["status"].as_str().unwrap_or("").to_string(),
-                attachable: r["attachable"].as_bool().unwrap_or(false),
-            }
+        .map(|r| LiveRow {
+            slug: r["slug"].as_str().unwrap_or("").to_string(),
+            host: r["host"].as_str().unwrap_or("").to_string(),
+            project: row_project_for_tabs(r),
+            session_id: r["session_id"].as_str().unwrap_or("").to_string(),
+            status: r["status"].as_str().unwrap_or("").to_string(),
+            attachable: r["attachable"].as_bool().unwrap_or(false),
         })
         .collect();
 
@@ -245,17 +237,12 @@ pub(super) fn fetch_tui_data() -> Result<TuiData> {
         .and_then(|rv| rv["resumable"].as_array().cloned())
         .unwrap_or_default()
         .iter()
-        .map(|r| {
-            let raw_id = r["session_id"].as_str().unwrap_or("").to_string();
-            let session_codename = SessionId::from(raw_id.as_str()).to_string();
-            ResumeRow {
-                slug: r["slug"].as_str().unwrap_or("").to_string(),
-                project: row_project_for_tabs(r),
-                session_id: raw_id,
-                session_codename,
-                title: r["title"].as_str().unwrap_or("").to_string(),
-                created_at: r["created_at"].as_u64().unwrap_or(0),
-            }
+        .map(|r| ResumeRow {
+            slug: r["slug"].as_str().unwrap_or("").to_string(),
+            project: row_project_for_tabs(r),
+            session_id: r["session_id"].as_str().unwrap_or("").to_string(),
+            title: r["title"].as_str().unwrap_or("").to_string(),
+            created_at: r["created_at"].as_u64().unwrap_or(0),
         })
         .collect();
 

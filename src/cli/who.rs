@@ -6,11 +6,11 @@ mod render;
 mod snapshot;
 
 // Public re-exports for the crate and cli module
+pub(crate) use awareness::new_agent_block;
 pub(super) use awareness::{
     render_awareness_snapshot, render_awareness_update_since_check,
     render_awareness_update_since_turn,
 };
-pub(crate) use awareness::new_agent_block;
 pub use snapshot::{load_who_snapshot, WhoSnapshot};
 
 /// The `tenex-edge who` full fabric view — the SAME format the hook injection
@@ -27,7 +27,8 @@ pub(crate) fn render_fabric_snapshot(
     local_host: &str,
     edge_home: &std::path::Path,
 ) -> Option<String> {
-    let mut out = awareness::render_fabric_view(store, scope, now, self_slug, self_pubkey, local_host);
+    let mut out =
+        awareness::render_fabric_view(store, scope, now, self_slug, self_pubkey, local_host);
     if let Some(section) = invitable_section(edge_home) {
         out.push_str("\n\n");
         out.push_str(&section);
@@ -81,6 +82,11 @@ pub(super) fn who(project: Option<String>, all_projects: bool) -> Result<()> {
     // daemon includes it whenever a current channel resolves; `--all-projects`
     // (no single scope) falls back to the cross-project snapshot table.
     if let Some(fabric) = v.get("fabric").and_then(|x| x.as_str()) {
+        // Fold in the current agent identity as a leading header (issue #99) when
+        // `who` runs inside an agent.
+        if let Some(header) = render::render_self_header(&v) {
+            println!("{header}\n");
+        }
         println!("{fabric}");
         return Ok(());
     }
@@ -99,7 +105,11 @@ pub(super) fn who_live(project: Option<String>, all_projects: bool) -> Result<()
         if now >= next_draw {
             let v = who_value_via_daemon(&project, all_projects)?;
             if let Some(fabric) = v.get("fabric").and_then(|x| x.as_str()) {
-                render::draw_fabric_live(fabric, refresh)?;
+                let screen = match render::render_self_header(&v) {
+                    Some(header) => format!("{header}\n\n{fabric}"),
+                    None => fabric.to_string(),
+                };
+                render::draw_fabric_live(&screen, refresh)?;
             } else {
                 let snapshot: WhoSnapshot = serde_json::from_value(v)?;
                 render::draw_who_live(&snapshot, refresh)?;
@@ -115,27 +125,6 @@ pub(super) fn who_live(project: Option<String>, all_projects: bool) -> Result<()
         }
     }
 
-    Ok(())
-}
-
-/// `whoami`: print this session's own identity card. Resolves the current
-/// session daemon-side (explicit `--session` → `TENEX_EDGE_SESSION` env → the
-/// cwd's project), then renders the same agent/channel/host vocabulary used by
-/// `who` and the hook-injected fabric context.
-pub(super) async fn whoami(session: Option<String>, json: bool) -> Result<()> {
-    let params = serde_json::json!({
-        "session": session,
-        "env_session": std::env::var("TENEX_EDGE_SESSION").ok(),
-        "agent": crate::cli::agent_env_slug(),
-        "group": crate::cli::channel_env(),
-        "cwd": std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()),
-    });
-    let v = super::daemon_call_async("whoami", params).await?;
-    if json {
-        println!("{}", serde_json::to_string_pretty(&v)?);
-    } else {
-        print!("{}", render::render_whoami(&v));
-    }
     Ok(())
 }
 

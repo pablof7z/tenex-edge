@@ -29,7 +29,8 @@ fn add_channel_member(state: &Arc<DaemonState>, channel: &str, pubkey: &str) {
         if !members.iter().any(|p| p == pubkey) {
             members.push(pubkey.to_string());
         }
-        s.replace_channel_members(channel, &members, now_secs()).ok();
+        s.replace_channel_members(channel, &members, now_secs())
+            .ok();
     });
 }
 
@@ -215,8 +216,11 @@ async fn handle_offline_agent_mention(state: &Arc<DaemonState>, mentioned_pk: &s
     // Resume vs fresh: if this identity previously ran in this channel and left a
     // bound native session, RESUME that harness (restores its conversation);
     // otherwise spawn fresh with the exact ordinal.
-    let bound =
-        state.with_store(|s| s.resolve_identity_for_channel(&base_pubkey, project).ok().flatten());
+    let bound = state.with_store(|s| {
+        s.resolve_identity_for_channel(&base_pubkey, project)
+            .ok()
+            .flatten()
+    });
     if let Some(route) = bound.filter(|r| !r.native_id.is_empty()) {
         tracing::info!(
             agent = %route.agent_slug,
@@ -224,7 +228,8 @@ async fn handle_offline_agent_mention(state: &Arc<DaemonState>, mentioned_pk: &s
             native_id = %route.native_id,
             "resuming bound native session"
         );
-        if let Err(e) = crate::tmux::resume_agent(state, &agent_slug, project, &route.native_id).await
+        if let Err(e) =
+            crate::tmux::resume_agent(state, &agent_slug, project, &route.native_id).await
         {
             tracing::warn!(agent = %agent_slug, project, error = %e, "session resume failed — falling through to fresh spawn");
         } else {
@@ -281,7 +286,9 @@ async fn handle_offline_agent_mention(state: &Arc<DaemonState>, mentioned_pk: &s
     )
     .await
     {
-        Ok(pane_id) => tracing::info!(agent = %agent_slug, pane_id = %pane_id, project, "agent spawned successfully"),
+        Ok(pane_id) => {
+            tracing::info!(agent = %agent_slug, pane_id = %pane_id, project, "agent spawned successfully")
+        }
         Err(e) => tracing::warn!(agent = %agent_slug, project, error = %e, "agent spawn failed"),
     }
 }

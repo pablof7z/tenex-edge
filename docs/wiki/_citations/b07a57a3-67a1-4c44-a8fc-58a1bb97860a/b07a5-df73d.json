@@ -1,0 +1,6 @@
+{
+  "id": "b07a5-df73d",
+  "ts": "2026-06-29T10:35:23Z",
+  "session": "b07a57a3-67a1-4c44-a8fc-58a1bb97860a",
+  "text": "User: when tenex-edge starts, regardless of command, show me the configured relay that will be used\n\nAssistant: The right place is the top of `cli::run()` before the match dispatch. Print to stderr so it doesn't interfere with stdout-based consumers like `statusline`. [...] ```\n[tenex-edge] home=/Users/pablofernandez/.tenex-edge relays=ws://127.0.0.1:9888\n```"
+}

@@ -23,7 +23,7 @@ use crate::runtime::{self, EngineParams};
 use crate::session::Harness;
 use crate::state::{InboxRow, Store};
 use crate::transport::Transport;
-use crate::util::{now_secs, pubkey_short, session_codename};
+use crate::util::{now_secs, pubkey_short};
 use anyhow::{Context, Result};
 use nostr_sdk::prelude::{Event, Keys, RelayMessage, RelayPoolNotification};
 use std::collections::HashMap;
@@ -170,10 +170,23 @@ impl DaemonState {
             .get(pubkey)
             .map(|h| h.keys.clone())
     }
-    /// Retrieve the derived per-session keypair by canonical session id.
-    /// Callers fall back to the durable agent key via `keys_for` when absent.
-    fn keys_for_session(&self, session_id: &str) -> Option<Keys> {
-        self.session_keys.lock().unwrap().get(session_id).cloned()
+    /// The authoritative agent-instance identity for a hosted session (issue #98).
+    /// Prefers the bound `identities`-row projection; falls back to the base
+    /// instance from the session row when no derived identity is bound yet. Every
+    /// publisher/renderer/router consumes THIS instead of re-deriving label/pubkey
+    /// policy from `agent_slug`/`agent_pubkey` + `keys_for_session(..)` fallbacks.
+    pub(in crate::daemon) fn session_instance(
+        &self,
+        rec: &crate::state::Session,
+    ) -> crate::identity::AgentInstance {
+        self.with_store(|s| {
+            s.instance_identity_for_session(&rec.session_id)
+                .ok()
+                .flatten()
+        })
+        .unwrap_or_else(|| {
+            crate::identity::AgentInstance::base(rec.agent_slug.clone(), rec.agent_pubkey.clone())
+        })
     }
     fn live_session_count(&self) -> usize {
         self.sessions.lock().unwrap().len()
@@ -235,8 +248,8 @@ use diagnostics::{
     rpc_local_backend, wait_for_project_member_cache,
 };
 use engine_lifecycle::{
-    cancel_session, engine_params_for, ensure_subscription, reconcile_sessions, replay_channel_chat,
-    resubscribe, spawn_session,
+    cancel_session, engine_params_for, ensure_subscription, reconcile_sessions,
+    replay_channel_chat, resubscribe, spawn_session,
 };
 pub use lifecycle::run;
 use lifecycle::{write_json, ClientGuard, InitProgress};
@@ -249,10 +262,10 @@ use resolution::{resolve_session, resolve_session_inner};
 use session_end::rpc_session_end;
 use session_signing::{admit_transient_signer, select_session_signer};
 use session_start::rpc_session_start;
-use status_publish::{spawn_status_heartbeat_publisher, spawn_outbox_drainer};
-use statusline::{rpc_statusline, StatuslineParams};
+use status_publish::{spawn_outbox_drainer, spawn_status_heartbeat_publisher};
+use statusline::rpc_statusline;
 use turns::{rpc_turn_check, rpc_turn_end, rpc_turn_start};
-use who::{rpc_who, rpc_whoami};
+use who::rpc_who;
 
 async fn dispatch(state: &Arc<DaemonState>, req: &Request) -> Response {
     let result = match req.method.as_str() {
@@ -284,7 +297,6 @@ async fn dispatch(state: &Arc<DaemonState>, req: &Request) -> Response {
         "channels_switch" => rpc_channels_switch(state, &req.params).await,
         "publish_profile" => rpc_publish_profile(state, &req.params).await,
         "statusline" => rpc_statusline(state, &req.params),
-        "whoami" => rpc_whoami(state, &req.params),
         "tmux_status" => tmux_rpc::rpc_tmux_status(state),
         "tmux_send" => tmux_rpc::rpc_tmux_send(state, &req.params).await,
         "tmux_spawn" => tmux_rpc::rpc_tmux_spawn(state, &req.params).await,

@@ -134,7 +134,10 @@ const MAX_CHANNEL_DEPTH: usize = 16;
 
 /// Walk `parent` links up from `channel` to the top-level project root (the first
 /// channel whose parent is empty/unknown). Bounded against malformed cycles.
-pub(in crate::daemon::server) fn project_root(store: &crate::state::Store, channel: &str) -> String {
+pub(in crate::daemon::server) fn project_root(
+    store: &crate::state::Store,
+    channel: &str,
+) -> String {
     let mut cur = channel.to_string();
     for _ in 0..MAX_CHANNEL_DEPTH {
         match store.channel_parent(&cur).ok().flatten() {
@@ -295,7 +298,10 @@ mod resolve_tests {
         chan(&store, "h-epic-plan", "planning", "h-epic");
         match resolve_channel_ref(&store, "h-root", "planning") {
             ChannelResolution::Ambiguous(refs) => {
-                assert_eq!(refs, vec!["epic999/planning".to_string(), "planning".to_string()]);
+                assert_eq!(
+                    refs,
+                    vec!["epic999/planning".to_string(), "planning".to_string()]
+                );
             }
             _ => panic!("expected ambiguous"),
         }

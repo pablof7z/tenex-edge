@@ -95,11 +95,17 @@ pub(in crate::daemon::server) async fn rpc_propose(
     // isn't a member of the project group) used to resolve Ok and report a false
     // "published" — silent data loss. `publish_checked` fails on relay rejection
     // so the CLI exits nonzero with the relay's stated reason.
-    // Sign with the selected session key when a live session is present.
-    let proposal_signing_keys = session_rec
-        .as_ref()
-        .and_then(|r| state.keys_for_session(&r.session_id))
-        .unwrap_or_else(|| id.keys.clone());
+    // Issue #98: sign with the session's authoritative agent-instance keys when a
+    // live session is present; else the base agent key.
+    let proposal_signing_keys = match session_rec.as_ref() {
+        Some(r) => {
+            let instance = state.session_instance(r);
+            let base =
+                identity::load_or_create(&config::edge_home(), &instance.base_slug, now_secs())?;
+            instance.signing_keys(&base.keys)
+        }
+        None => id.keys.clone(),
+    };
     let event_id = state
         .provider
         .publish_checked(&ev, &proposal_signing_keys)

@@ -357,3 +357,54 @@ fn byline_reads_field_alias_and_falls_back_to_agent_description() {
     assert_eq!(byline("c").as_deref(), Some("writes social posts"));
     assert_eq!(byline("d"), None);
 }
+
+// ── AgentInstance (issue #98) ─────────────────────────────────────────────────
+
+#[test]
+fn agent_instance_ordinal_zero_uses_base_identity() {
+    let base = Keys::new(SecretKey::from_slice(&[0x11; 32]).unwrap());
+    let bp = base.public_key().to_hex();
+    let inst = AgentInstance::from_parts("claude".into(), bp.clone(), 0, bp.clone());
+
+    // Display label is the bare slug; selected pubkey IS the base pubkey.
+    assert_eq!(inst.display_slug(), "claude");
+    assert_eq!(inst.pubkey, bp);
+    // Signing keys for ordinal 0 are exactly the base keys.
+    assert_eq!(
+        inst.signing_keys(&base).secret_key().to_secret_hex(),
+        base.secret_key().to_secret_hex()
+    );
+    // AgentRef pairs the base pubkey with the bare slug.
+    let aref = inst.agent_ref();
+    assert_eq!(aref.pubkey, bp);
+    assert_eq!(aref.slug, "claude");
+}
+
+#[test]
+fn agent_instance_ordinal_n_is_internally_consistent() {
+    let base = Keys::new(SecretKey::from_slice(&[0x11; 32]).unwrap());
+    let bp = base.public_key().to_hex();
+    let ord_keys = derive_agent_ordinal_keys(&base, 1);
+    let ord_pubkey = ord_keys.public_key().to_hex();
+    let inst = AgentInstance::from_parts("claude".into(), bp.clone(), 1, ord_pubkey.clone());
+
+    // Label is the ordinal-qualified name; selected pubkey is the derived key.
+    assert_eq!(inst.display_slug(), "claude1");
+    assert_ne!(inst.pubkey, bp);
+    assert_eq!(inst.pubkey, ord_pubkey);
+    // Signing keys derive to the SAME ordinal pubkey (no base collapse).
+    assert_eq!(inst.signing_keys(&base).public_key().to_hex(), ord_pubkey);
+    // The wire identity never mixes the ordinal pubkey with the bare slug.
+    let aref = inst.agent_ref();
+    assert_eq!(aref.pubkey, ord_pubkey);
+    assert_eq!(aref.slug, "claude1");
+}
+
+#[test]
+fn agent_instance_base_fallback_is_ordinal_zero() {
+    let inst = AgentInstance::base("claude".into(), "deadbeef".into());
+    assert_eq!(inst.ordinal, 0);
+    assert_eq!(inst.pubkey, "deadbeef");
+    assert_eq!(inst.base_pubkey, "deadbeef");
+    assert_eq!(inst.display_slug(), "claude");
+}

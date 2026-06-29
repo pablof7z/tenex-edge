@@ -1,0 +1,6 @@
+{
+  "id": "019f1-8d5dd",
+  "ts": "2026-06-29T10:51:33Z",
+  "session": "019f12f9-8a0b-7012-ad2f-f4d0cb035d2b",
+  "text": "- **GitHub search is the backlog view.** Use `gh issue list --state open` to see the queue; close or update the issue in the PR that touches it, and move lasting conclusions into durable docs."
+}

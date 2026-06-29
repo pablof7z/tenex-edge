@@ -1,0 +1,6 @@
+{
+  "id": "bd868-7dcbb",
+  "ts": "2026-06-29T10:42:49Z",
+  "session": "bd8689c8-4a5f-45b3-9dbe-758baec2a2f4",
+  "text": "- **DELETE** `resume_by_codename` (398–406) and the `.or_else(...)` call at 365. Keep tiers 1+2 (exact raw `session_id`, then `session_id` prefix) — those are raw-id correlation and satisfy \"raw canonical session_id stays as the internal correlation id for resume.\" [...] - `args.rs:318` → `/// Session id (prefix) to resume.` (drop the codename clause). Once tier-3 is deleted (see §1), codename is no longer a valid `--session` value.\n- `args.rs:468` → `/// Filter panes/events to a session id (or prefix).` (drop \"or codename\"). [...] - **Root + plumbing** — make `SessionId` Display render the raw id (or drop it), delete `session_codename`/word-list/heuristic, drop the `codename` field from session_start/hook/whoami responses, delete `resume_by_codename` (keep raw-id exact+prefix), fix `slog` filename, update docs/tests. [...] Assistant: Now the Resume and HookTail help text mentioning codename: [...] - **tmux resume** (me) ✅ — `resume_by_codename` deleted; raw-id exact+prefix only"
+}

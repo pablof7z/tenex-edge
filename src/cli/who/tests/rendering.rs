@@ -154,8 +154,11 @@ fn agent_renderer_uses_markdown_sections_and_agent_table() {
     assert!(out.contains("## Other projects\n\n- other"));
 }
 
+/// Concurrent same-agent instances now carry DISTINCT ordinal slugs
+/// ("codex"/"codex1"), so the renderer prints the slug directly with no raw
+/// session-id suffix (issue #99).
 #[test]
-fn agent_renderer_disambiguates_duplicate_slugs_as_agent_names() {
+fn agent_renderer_renders_ordinal_slugs_directly() {
     let snapshot = WhoSnapshot {
         project: "proj".to_string(),
         now: 1_000,
@@ -180,7 +183,7 @@ fn agent_renderer_disambiguates_duplicate_slugs_as_agent_names() {
             WhoRow {
                 source: WhoSource::Peer,
                 fresh: true,
-                slug: "codex".to_string(),
+                slug: "codex1".to_string(),
                 project: "proj".to_string(),
                 status: "two".to_string(),
                 activity: String::new(),
@@ -202,14 +205,12 @@ fn agent_renderer_disambiguates_duplicate_slugs_as_agent_names() {
     };
 
     let out = render_who_plain(&snapshot);
-    assert!(out.contains(&format!(
-        "| codex-{} | laptop |",
-        session_codename("sess-a")
-    )));
-    assert!(out.contains(&format!(
-        "| codex-{} | tower, remote |",
-        session_codename("sess-b")
-    )));
+    assert!(out.contains("| codex | laptop |"), "got: {out}");
+    assert!(out.contains("| codex1 | tower, remote |"), "got: {out}");
+    // No generated or raw session id ever surfaces as a name suffix.
+    assert!(!out.contains("codex-"), "no generated suffix: {out}");
+    assert!(!out.contains("sess-a"), "no raw session id: {out}");
+    assert!(!out.contains("sess-b"), "no raw session id: {out}");
     assert!(!out.contains("| Agent | Session |"));
 }
 
@@ -243,7 +244,14 @@ fn who_snapshot_exposes_work_root_for_session_room_rows() {
     store
         .upsert_channel("session-room", "session-room", "", "proj", 1_000)
         .unwrap();
-    register_local_in(&store, "coder", "pk-coder", "session-room", "sid-coder", 1_000);
+    register_local_in(
+        &store,
+        "coder",
+        "pk-coder",
+        "session-room",
+        "sid-coder",
+        1_000,
+    );
 
     let snapshot = load_who_snapshot(&store, Some("session-room"), 1_000, "laptop").unwrap();
     let row = snapshot.rows.first().expect("session-room row");
@@ -251,59 +259,46 @@ fn who_snapshot_exposes_work_root_for_session_room_rows() {
     assert_eq!(row.work_root, "proj");
 }
 
-/// `whoami`'s agent-facing render is a markdown identity card that uses the
-/// same agent/project/host vocabulary as `who`.
+/// The self-identity header folded into `who` (issue #99): names you by your
+/// ORDINAL LABEL on the fabric — never a raw session id. Driven by the `self`
+/// block the daemon attaches.
 #[test]
-fn render_whoami_card_names_self_without_session_code() {
-    let card = serde_json::json!({
-        "agent": "developer",
-        "session_id": "sess-abc",
-        "codename": session_codename("sess-abc"),
-        "project": "tenex-edge",
-        "host": "laptop",
-        "rel_cwd": "worktree1",
-        "pubkey": "deadbeef",
-        "npub": "npub1xyz",
-        "is_member": true,
-        "working": true,
-        "status": "Add whoami",
-        "pending": 2,
-        "created_at": 1_700_000_000u64,
+fn render_self_header_names_self_by_label_without_session_code() {
+    let v = serde_json::json!({
+        "self": {
+            "label": "developer1",
+            "channel": "tenex-edge",
+            "host": "laptop",
+            "pubkey": "deadbeef",
+            "is_member": true,
+            "working": true,
+            "status": "Add self header",
+            "pending": 2,
+            "created_at": 1_700_000_000u64,
+            "session_id": "sess-abc",
+        }
     });
-    let out = render_whoami(&card);
-    let code = session_codename("sess-abc");
+    let out = render_self_header(&v).expect("self header present");
     assert!(
-        out.contains("You are **developer** on **tenex-edge**."),
-        "card must name the agent + project: {out}"
+        out.contains("You are **developer1** on **tenex-edge** (laptop)."),
+        "header must name the ordinal label + channel + host: {out}"
     );
     assert!(
-        !out.contains(&code),
-        "session code must not be rendered: {out}"
+        !out.contains("sess-abc"),
+        "raw session id must not show: {out}"
     );
+    assert!(out.contains("deadbeef"), "fabric pubkey shown: {out}");
     assert!(
-        !out.contains("--to-session"),
-        "addressing guidance must not mention sessions: {out}"
-    );
-    assert!(
-        !out.contains("| Session"),
-        "session rows must not be rendered: {out}"
-    );
-    assert!(!out.contains("sess-abc"), "raw id: {out}");
-    assert!(
-        out.contains("| Host | laptop [worktree1] |"),
-        "host+cwd: {out}"
-    );
-    assert!(
-        out.contains("| Pubkey | deadbeef |"),
-        "hex durable pubkey shown, not npub: {out}"
-    );
-    assert!(
-        !out.contains("npub1xyz"),
-        "npub must NOT be rendered: {out}"
-    );
-    assert!(
-        out.contains("| Status | Add whoami |"),
+        out.contains("status Add self header"),
         "status title: {out}"
     );
-    assert!(out.contains("| Chat | 2 pending |"), "pending count: {out}");
+    assert!(out.contains("member yes"), "membership shown: {out}");
+    assert!(out.contains("2 pending"), "pending count: {out}");
+}
+
+/// No `self` block ⇒ `who` was not run inside an agent ⇒ no header.
+#[test]
+fn render_self_header_absent_without_self_block() {
+    let v = serde_json::json!({ "fabric": "Project: x\nChannel: x" });
+    assert!(render_self_header(&v).is_none());
 }

@@ -1,0 +1,6 @@
+{
+  "id": "b20ef-fa36b",
+  "ts": "2026-06-29T10:50:59Z",
+  "session": "b20ef4ab-0b54-4770-a549-4ed195c0035e",
+  "text": "**3. New channel nests under the *current* channel, with `--parent-channel` override**\n`channels create` no longer sends a cwd-resolved project as the parent. The daemon resolves the parent in this precedence:\n1. `--parent-channel <ref>` — project-relative reference (e.g. `planning`, `epic999/planning`), resolved within the creator's project subtree; ambiguity returns candidate paths + exit 2, mirroring `channels switch`.\n2. the creating agent's **current channel** (the new default).\n3. an explicit literal `parent` — kept for the launch picker, operator invocations, and tests (back-compatible). [...] **3. New channel nests under the *current* channel, with `--parent-channel` override**\n`channels create` no longer sends a cwd-resolved project as the parent. The daemon resolves the parent in this precedence: [...] 1. `--parent-channel <ref>` — project-relative reference (e.g. `planning`, `epic999/planning`), resolved within the creator's project subtree; ambiguity returns candidate paths + exit 2, mirroring `channels switch`."
+}

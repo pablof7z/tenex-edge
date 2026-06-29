@@ -78,9 +78,16 @@ pub(in crate::daemon::server) async fn handle_chat_read<W: AsyncWriteExt + Unpin
         }
         let mut rows: Vec<RelayEvent> = scopes
             .iter()
-            .flat_map(|sc| s.chat_for_channel(sc, since, CHAT_READ_CAP).unwrap_or_default())
+            .flat_map(|sc| {
+                s.chat_for_channel(sc, since, CHAT_READ_CAP)
+                    .unwrap_or_default()
+            })
             .collect();
-        rows.sort_by(|a, b| a.created_at.cmp(&b.created_at).then_with(|| a.id.cmp(&b.id)));
+        rows.sort_by(|a, b| {
+            a.created_at
+                .cmp(&b.created_at)
+                .then_with(|| a.id.cmp(&b.id))
+        });
         if p.tail {
             let limit = p.limit.unwrap_or(10) as usize;
             let start = rows

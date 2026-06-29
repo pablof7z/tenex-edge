@@ -24,9 +24,9 @@ pub(in crate::daemon::server) fn work_root_for(s: &Store, scope: &str) -> String
 /// Resolve the caller's session. `allow_project_fallback` controls the LAST
 /// resort: when the caller carries no session/agent signal at all, `true` picks
 /// the project's latest-alive session (fine for host-facing commands run from a
-/// repo), while `false` errors instead — used by `whoami`, which is only
-/// meaningful when actually run *as* an agent and must not silently bind to some
-/// arbitrary sibling session when run from a bare terminal.
+/// repo), while `false` errors instead — used when a caller needs only the
+/// current agent context and must not silently bind to some arbitrary sibling
+/// session when run from a bare terminal.
 pub(in crate::daemon::server) fn resolve_session_inner(
     state: &Arc<DaemonState>,
     explicit: Option<&str>,

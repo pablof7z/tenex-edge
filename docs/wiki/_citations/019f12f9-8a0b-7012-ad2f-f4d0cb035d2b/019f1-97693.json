@@ -1,0 +1,6 @@
+{
+  "id": "019f1-97693",
+  "ts": "2026-06-29T10:51:33Z",
+  "session": "019f12f9-8a0b-7012-ad2f-f4d0cb035d2b",
+  "text": "This repository has exactly **one canonical tactical queue: GitHub Issues** (`gh issue list`). Every active violation, pending user decision, queued feature, post-v1 item, staged fix, and follow-up belongs in an open GitHub issue. Scattered notes, ad-hoc `TODO.md` / `NOTES.md` / `ROADMAP.md` / `PLAN-foo.md` files, parallel planning docs, and inline `// TODO:` annotations used as a substitute for tracking are **forbidden**. [...] - **Do not duplicate state across files.** A violation or feature tracked in GitHub Issues is not also restated in a separate plan file. Single source of truth per fact. [...] - **When in doubt, fewer planning files.** The cost of a duplicate plan is divergence. If a new planning file feels necessary, justify why it cannot be a GitHub issue plus a durable doc."
+}

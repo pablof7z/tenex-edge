@@ -284,13 +284,9 @@ async fn hook_dispatch(
             if host.echo_session_id {
                 // Programmatic host with no id of its own: hand the daemon-minted
                 // canonical id back on stdout so the caller can adopt it for
-                // subsequent hooks. Return JSON with both session_id and
-                // codename so the caller can display the codename (matching
-                // `who` output).
-                let codename = crate::util::session_codename(&canonical);
+                // subsequent hooks.
                 let json = serde_json::json!({
                     "session_id": canonical,
-                    "codename": codename,
                 });
                 println!("{json}");
             }

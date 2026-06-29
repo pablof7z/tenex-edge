@@ -1,0 +1,6 @@
+{
+  "id": "019f1-3c7ec",
+  "ts": "2026-06-29T10:52:03Z",
+  "session": "019f12f9-8a0b-7012-ad2f-f4d0cb035d2b",
+  "text": "- When a refactor runs `cargo fmt`, revert formatting churn on files unrelated to the change so the diff stays scoped."
+}

@@ -5,12 +5,13 @@ use crate::state::Session;
 /// `title`/`activity`/`working` are the local pre-publish draft on the `sessions`
 /// row; publishing turns them into a kind:30315 read back into `relay_status`.
 pub(in crate::daemon::server) fn status_from_session(
+    instance: &crate::identity::AgentInstance,
     rec: &Session,
     host: &str,
     now: u64,
 ) -> crate::domain::Status {
     crate::domain::Status {
-        agent: crate::domain::AgentRef::new(rec.agent_pubkey.clone(), rec.agent_slug.clone()),
+        agent: instance.agent_ref(),
         project: rec.channel_h.clone(),
         session_id: crate::util::SessionId::new(rec.session_id.clone()),
         host: host.to_string(),
@@ -34,7 +35,9 @@ fn cache_status(state: &Arc<DaemonState>, st: &crate::domain::Status, signer: &s
         busy: st.busy,
         last_seen: now,
         updated_at: now,
-        expiration: st.expires_at.unwrap_or(now + crate::domain::STATUS_TTL_SECS),
+        expiration: st
+            .expires_at
+            .unwrap_or(now + crate::domain::STATUS_TTL_SECS),
     };
     state.with_store(|s| {
         s.upsert_status(&row).ok();
@@ -60,16 +63,20 @@ pub(in crate::daemon::server) fn spawn_status_heartbeat_publisher(state: Arc<Dae
                 if !rec.working && rec.last_seen < fresh_since {
                     continue;
                 }
-                // Sign with the selected session identity so a heartbeat cannot
+                // Issue #98: derive signing key + wire identity from the session's
+                // ONE authoritative agent-instance identity, so a heartbeat cannot
                 // collapse two duplicate sessions back onto the durable author.
-                let keys = match state
-                    .keys_for_session(&rec.session_id)
-                    .or_else(|| state.keys_for(&rec.agent_pubkey))
-                {
-                    Some(k) => k,
-                    None => continue,
+                let instance = state.session_instance(&rec);
+                let base = match identity::load_or_create(
+                    &config::edge_home(),
+                    &instance.base_slug,
+                    now,
+                ) {
+                    Ok(i) => i,
+                    Err(_) => continue,
                 };
-                let status = status_from_session(&rec, &state.host, now);
+                let keys = instance.signing_keys(&base.keys);
+                let status = status_from_session(&instance, &rec, &state.host, now);
                 if let Ok(_eid) = state.provider.set_status(&status, &keys).await {
                     let signer = keys.public_key().to_hex();
                     cache_status(&state, &status, &signer, now);

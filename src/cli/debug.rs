@@ -41,7 +41,8 @@ fn render_outbox(v: &serde_json::Value) {
     );
     for r in rows {
         let session = r["session_id"].as_str().unwrap_or("");
-        let short = crate::util::SessionId::from(session).to_string();
+        // Raw session id for correlation.
+        let short = session.to_string();
         let title = r["title"].as_str().unwrap_or("");
         println!(
             "{:<13} {:<8} {:<10} {:<7} {:<18} {:<20} {}",
