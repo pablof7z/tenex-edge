@@ -23,7 +23,7 @@ sources:
 The daemon logs comprehensive operational events including routing to sessions, starting new agents (with reasons), ordinal creation (with reasons), subscriptions, and relay events. <!-- [^47f3c-2a5f9] -->
 
 
-The slog per-session debug log filename uses the raw session_id instead of a codename. <!-- [^bd868-12ead] -->
+The slog per-session debug log filename uses the raw session_id for durable correlation. <!-- [^bd868-12ead] -->
 ## Log Level Strategy
 
 The log level strategy is: ERROR for unrecoverable errors, WARN for recoverable-unexpected conditions, INFO for consequential single events, DEBUG for high-frequency or expected events. The default `RUST_LOG` filter for the daemon is `tenex_edge=info`. <!-- [^47f3c-e88ec] -->

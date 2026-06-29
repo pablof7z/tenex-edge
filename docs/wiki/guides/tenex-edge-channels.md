@@ -27,7 +27,7 @@ sources:
 Agents are not removed from channels when a session ends. <!-- [^3c769-6616d] -->
 
 
-The chat_write bail requiring a concrete session codename is removed; delivery routes by pubkey alone. <!-- [^bd868-93a15] -->
+The chat_write bail requiring a concrete session id is removed; delivery routes by selected agent-instance pubkey alone. <!-- [^bd868-93a15] -->
 ## Invite
 
 `tenex-edge invite <slug[@backend]>` spawns a fresh session for the invited agent in the current channel. It is an explicit command, not an auto-add side-effect of @-mention. <!-- [^661eb-712ca] -->
@@ -48,4 +48,4 @@ When an agent creates a channel, the daemon auto-switches the creating agent's s
 
 ## Channel Awareness
 
-Unnamed channels (channels whose name is empty or equals their own id) are excluded from the "Other active channels" awareness block. <!-- [^c55ad-57ccb] -->
+Unnamed channels (channels whose name is empty or equals their own id) render in the "Other active channels" awareness block by current work title, never by raw channel id. <!-- [^c55ad-57ccb] -->

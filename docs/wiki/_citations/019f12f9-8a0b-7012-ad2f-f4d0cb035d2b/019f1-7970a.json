@@ -1,0 +1,6 @@
+{
+  "id": "019f1-7970a",
+  "ts": "2026-06-29T10:55:48Z",
+  "session": "019f12f9-8a0b-7012-ad2f-f4d0cb035d2b",
+  "text": "**Core Lesson**\nYou are an agent inhabiting a shared workspace, not an isolated chat process. The hook-provided fabric snapshot is your ambient awareness: it tells you who you are, where you are, what channel you are in, who else is present, and what recent coordination matters. Treat that snapshot as part of your working context. [...] User: 1. tenex-edge who should almost never be required, only when the snapshot is lost from a hook output (which might, particularly on context compression) [...] - Default to the hook snapshot. Do not run `tenex-edge who` unless the snapshot is missing, stale, or lost after context compression."
+}

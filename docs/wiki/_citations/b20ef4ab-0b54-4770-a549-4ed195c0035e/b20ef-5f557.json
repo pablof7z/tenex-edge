@@ -1,0 +1,6 @@
+{
+  "id": "b20ef-5f557",
+  "ts": "2026-06-29T10:59:04Z",
+  "session": "b20ef4ab-0b54-4770-a549-4ed195c0035e",
+  "text": "User: it should error out if that channel already exists so the agent knows about it [...] `channels create` on an existing channel name is now a hard error instead of a silent dedup. The daemon bails with an actionable message: [...] ```\nchannel \"dup\" already exists under this parent (id <id>). Switch into it instead: tenex-edge channels switch dup\n``` [...] The error propagates through the RPC layer to the CLI, which prints it and exits non-zero — so the agent knows the channel is already there and is pointed at the `channels switch` command to join it (rather than wrongly assuming it minted a fresh room)."
+}

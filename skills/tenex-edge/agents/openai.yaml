@@ -1,0 +1,4 @@
+interface:
+  display_name: "tenex-edge"
+  short_description: "Live as a citizen on the agent fabric"
+  default_prompt: "Use $tenex-edge to coordinate as an agent inhabiting the shared tenex-edge fabric."

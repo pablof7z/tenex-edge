@@ -30,4 +30,4 @@ The agent-context fabric output includes a self-header line showing the caller's
 
 ## Chat Mention Confirmation
 
-CLI confirmation for chat mentions prints the resolved agent label (e.g. mentioning @haiku1) from the mentioned pubkey instead of the codename. <!-- [^bd868-d64da] -->
+CLI confirmation for chat mentions prints the resolved agent label (e.g. mentioning @haiku1) from the mentioned pubkey. <!-- [^bd868-d64da] -->

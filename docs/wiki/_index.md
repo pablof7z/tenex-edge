@@ -4,10 +4,11 @@
 
 Last updated: 2026-06-29
 
-## agent-skills (1 guide)
+## agent-skills (2 guides)
 
 | Slug | Title | Summary | Tags | Volatility | Verified | Topic |
 |------|-------|---------|------|------------|----------|-------|
+| [tenex-edge-citizen-skill](guides/tenex-edge-citizen-skill.md) | Tenex-Edge Citizen Skill | This skill teaches the mental model for inhabiting a tenex-edge fabric | capture | warm | 2026-06-29 | agent-skills |
 | [tenex-edge-skills](guides/tenex-edge-skills.md) | Tenex-Edge Skills | This guide governs the family of `tenex-edge` agent skills checked into `.agents/skills/tenex-edge` | capture | warm | 2026-06-29 | agent-skills |
 
 ## code-organization (3 guides)
@@ -64,12 +65,12 @@ Last updated: 2026-06-29
 | [2026-06-29-3-roster-change-delta-surface-new-agents](episodes/2026-06-29-3-roster-change-delta-surface-new-agents.md) | 2026-06-29 | Roster-change delta — surface new agents automatically in turn context | product | active |
 | [2026-06-29-4-channel-name-disambiguation-via-project-relative](episodes/2026-06-29-4-channel-name-disambiguation-via-project-relative.md) | 2026-06-29 | Channel name disambiguation via project-relative path resolution | product | active |
 
-## Nouns (45 entities)
+## Nouns (44 entities)
 
 | Noun | Name | Origin | Definition |
 |------|------|--------|------------|
 | [agent-identity](nouns/agent-identity.md) | agent identity | extracted | Identity is (agent, machine): the same slug on another machine is a different key. An agent slug resolves to a durable Nostr keypair generated on first use and persisted under <edge_home>/agents/<slug>.json. |
-| [agent-ordinal-label](nouns/agent-ordinal-label.md) | agent_ordinal_label | extracted | Display label for an agent's Nth concurrent identity. Ordinal 0 is the base agent itself (smith); higher ordinals append the number (smith1, smith2). This is the addressable identity peers see, NOT a transient per-session codename. |
+| [agent-ordinal-label](nouns/agent-ordinal-label.md) | agent_ordinal_label | extracted | Display label for an agent's Nth concurrent identity. Ordinal 0 is the base agent itself (smith); higher ordinals append the number (smith1, smith2). This is the addressable identity peers see, not a transient per-session alias. |
 | [agentidentity](nouns/agentidentity.md) | AgentIdentity | extracted | A durable Nostr keypair resolved from --agent <slug>, generated on first use and persisted under <edge_home>/agents/<slug>.json. Identity is (agent, machine): the same slug on another machine is a different key. |
 | [agentinstance](nouns/agentinstance.md) | AgentInstance | extracted | The single authoritative identity value for a session, carrying base_slug, base_pubkey, ordinal, and pubkey, with methods display_slug(), agent_ref(), signing_keys(&base_keys). The single place base-vs-ordinal policy lives; created at session birth and threaded through EngineParams, replacing the distributed identity state across session rows, identity rows, and in-memory signer maps. |
 | [channel-h](nouns/channel-h.md) | channel_h | extracted | the relay group the session was actually in |
@@ -97,7 +98,6 @@ Last updated: 2026-06-29
 | [profile](nouns/profile.md) | Profile | extracted | The agent's published identity card. Resolves pubkey to slug, tells a peer which machine the agent lives on, and declares the human owner(s) it belongs to (p-tagged), so a recipient can decide whether to authorize it. Encoded as kind:0 with content {"name": slug}. |
 | [routing](nouns/routing.md) | routing | extracted | matching mentions by both the recipient's public key and the channel h-tag |
 | [session](nouns/session.md) | Session | extracted | A local agent process THIS daemon hosts. OS handles only (session_id, agent_pubkey, agent_slug, channel_h, harness, child_pid, transcript_path, alive, etc.) — never agent identity, which lives in relay_status/relay_profiles. |
-| [session-codename](nouns/session-codename.md) | session_codename | extracted | A synthetic per-session display/addressing token: NATO-word + 4-digit hash derived from session_id (e.g. bravo4217). Wired into SessionId's Display impl so every {} format of a session_id renders the codename, never the raw id. Targeted for complete deletion as a product concept (issue #99). |
 | [session-identity](nouns/session-identity.md) | session identity | extracted | the ordinal pubkey assigned at spawn time and persisted on the session row from creation, used for signing and routing to that specific instance |
 | [session-state-row](nouns/session-state-row.md) | Session (state row) | extracted | A local agent process THIS daemon hosts. OS handles only — never agent identity (that lives in relay_status/relay_profiles). |
 | [signerreservations](nouns/signerreservations.md) | SignerReservations | extracted | In-memory reservation map from OrdinalSlot to owning session id. Tracks which ordinals are live in each room so the allocator can pick the lowest free one and two concurrent spawns can't both claim the same ordinal. |
@@ -113,4 +113,3 @@ Last updated: 2026-06-29
 | [whitelisted-pubkeys](nouns/whitelisted-pubkeys.md) | whitelisted_pubkeys | extracted | A human operator's Nostr public keys, read from ~/.tenex-edge/config.json (JSON key `whitelistedPubkeys`). The source of truth for who is an admin in every project group via NIP-29 membership; distinct from the backend key, not derived from `user_nsec` or `tenex_private_key`. |
 | [whitelistedpubkey](nouns/whitelistedpubkey.md) | whitelistedPubkey | extracted | a human user (as distinguished from an agent) |
 | [work-root](nouns/work-root.md) | work_root | extracted | The project channel a routing scope belongs under: a top-level channel is its own work root; a sub-channel (task/session room) maps to its parent. Concretely, a channel's non-empty parent, else the scope itself. |
-
