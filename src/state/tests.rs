@@ -43,6 +43,41 @@ fn register_is_idempotent_per_external_id() {
     assert_eq!(s.list_alive_sessions().unwrap().len(), 1);
 }
 
+/// "Born-right" registration: `rpc_session_start` resolves the canonical id,
+/// selects the ordinal signer, then writes the row with the ordinal pubkey. The
+/// id is STABLE across the resolve/mint step, and re-asserting with the same
+/// ordinal pubkey keeps it — so an ordinal never collapses back to the base and
+/// a p-tagged mention reaches exactly one session. Regression for the mention
+/// fan-out.
+#[test]
+fn born_right_id_is_stable_and_ordinal_pubkey_persists() {
+    let s = Store::open_memory().unwrap();
+    // First start: resolve/mint the id, then write the row with the ORDINAL key.
+    let sid = s
+        .resolve_or_mint_session_id("claude-code", "harness_session", "x1", 1000)
+        .unwrap();
+    let mut r = reg("claude-code", "x1", "h1");
+    r.agent_pubkey = "pk-ordinal-1".into();
+    s.upsert_session_row(&sid, &r).unwrap();
+    assert_eq!(
+        s.get_session(&sid).unwrap().unwrap().agent_pubkey,
+        "pk-ordinal-1"
+    );
+
+    // Re-assert: same external id → SAME canonical id, and the signer re-selects
+    // the same ordinal, so the row keeps its ordinal pubkey.
+    let again = s
+        .resolve_or_mint_session_id("claude-code", "harness_session", "x1", 2000)
+        .unwrap();
+    assert_eq!(again, sid, "same external id → same canonical session");
+    s.upsert_session_row(&sid, &r).unwrap();
+    assert_eq!(
+        s.get_session(&sid).unwrap().unwrap().agent_pubkey,
+        "pk-ordinal-1",
+        "re-assert must keep the ordinal pubkey, never collapse to the base"
+    );
+}
+
 #[test]
 fn mark_dead_resolves_external_id() {
     let s = Store::open_memory().unwrap();

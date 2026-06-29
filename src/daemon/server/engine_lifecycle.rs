@@ -348,6 +348,9 @@ pub(in crate::daemon::server) async fn reconcile_sessions(state: &Arc<DaemonStat
                 continue;
             }
         };
+        // Rebind the row to the selected ordinal pubkey (== base for ordinal 0) so
+        // mention routing keys on this session's real identity, not the base.
+        state.with_store(|s| s.set_session_agent_pubkey(&session_id, &signer.pubkey).ok());
         if let Some(member_pubkey) = signer.member_pubkey_to_admit() {
             if let Err(e) = admit_transient_signer(state, &snap.channel_h, member_pubkey).await {
                 tracing::warn!(session = %session_id, error = %e, "ordinal signer admission failed during reconcile; skipping session");
@@ -364,6 +367,7 @@ pub(in crate::daemon::server) async fn reconcile_sessions(state: &Arc<DaemonStat
             &state.cfg,
             &id,
             &snap.agent_slug,
+            &signer.pubkey,
             &session_id,
             &snap.channel_h,
             "",
@@ -381,6 +385,8 @@ pub(in crate::daemon::server) fn engine_params_for(
     cfg: &Config,
     id: &AgentIdentity,
     agent_slug: &str,
+    agent_label: &str,
+    agent_pubkey: &str,
     session_id: &str,
     project: &str,
     rel_cwd: &str,
@@ -391,7 +397,11 @@ pub(in crate::daemon::server) fn engine_params_for(
 ) -> EngineParams {
     EngineParams {
         agent_slug: agent_slug.to_string(),
-        agent_pubkey: id.pubkey_hex(),
+        agent_label: agent_label.to_string(),
+        // The session's SELECTED ordinal pubkey (== base for ordinal 0). The
+        // engine signs with `session_keys` when present, so its self-identity must
+        // be the ordinal pubkey, not the base, for self-skip and status authorship.
+        agent_pubkey: agent_pubkey.to_string(),
         keys: id.keys.clone(),
         session_keys,
         project: project.to_string(),

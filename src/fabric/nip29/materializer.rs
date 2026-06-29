@@ -382,6 +382,51 @@ mod tests {
         assert!(store.has_event(&mention_event.id.to_hex()).unwrap());
     }
 
+    /// Two concurrent sessions of the SAME agent slug but DIFFERENT ordinal
+    /// pubkeys (ordinal 0 and ordinal 1) must route independently: a mention
+    /// p-tagging only ordinal 0's pubkey reaches ONLY that session, never the
+    /// sibling ordinal. Regression for the double-delivery bug where every
+    /// ordinal of an agent shared the base pubkey, so one mention woke both.
+    #[test]
+    fn mention_to_one_ordinal_does_not_route_to_sibling_ordinal() {
+        let store = Store::open_memory().unwrap();
+        let sender = Keys::generate();
+        let ord0 = Keys::generate(); // ordinal 0 (base) pubkey
+        let ord1 = Keys::generate(); // ordinal 1 (HKDF-derived) pubkey — distinct
+        let sender_pk = sender.public_key().to_hex();
+        let ord0_pk = ord0.public_key().to_hex();
+        let ord1_pk = ord1.public_key().to_hex();
+
+        // Both sessions are the same agent slug ("agent") in the same channel.
+        let ord0_sid = register(&store, &ord0_pk, "proj", "ord0-ext");
+        let ord1_sid = register(&store, &ord1_pk, "proj", "ord1-ext");
+
+        // Mention p-tags ONLY ordinal 0.
+        let event = build(
+            &sender,
+            9,
+            "hey ordinal zero",
+            vec![make_tag(&["h", "proj"]), make_tag(&["p", &ord0_pk])],
+        );
+        let chat = ChatMessage {
+            from: crate::domain::AgentRef::new(sender_pk, String::new()),
+            project: "proj".into(),
+            body: "hey ordinal zero".into(),
+            mentioned_pubkey: Some(ord0_pk),
+        };
+        assert!(Nip29Materializer::route_chat(&store, &event, &chat));
+
+        assert_eq!(
+            store.drain_pending_for_session(&ord0_sid).unwrap().len(),
+            1,
+            "the p-tagged ordinal must receive the mention"
+        );
+        assert!(
+            store.drain_pending_for_session(&ord1_sid).unwrap().is_empty(),
+            "the sibling ordinal must NOT receive a mention addressed to ordinal 0"
+        );
+    }
+
     #[test]
     fn other_kind_lands_in_relay_events() {
         let store = Store::open_memory().unwrap();

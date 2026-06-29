@@ -61,65 +61,83 @@ impl Store {
             .optional()?)
     }
 
-    /// Register or reassert a local session. If the `(harness, external_id_kind,
-    /// external_id)` alias already points at a session, that session is reasserted
-    /// (alive=1, handles/channel refreshed, last_seen bumped) and its canonical id
-    /// returned. Otherwise a fresh canonical id is minted, the session inserted,
-    /// and the alias pointed at it. Returns the canonical session_id.
-    pub fn register_session(&self, r: &RegisterSession) -> Result<String> {
-        let existing =
-            self.resolve_session_by_alias(&r.harness, &r.external_id_kind, &r.external_id)?;
-        let session_id = match existing {
-            Some(id) if self.session_exists(&id)? => {
-                self.conn.execute(
-                    "UPDATE sessions SET agent_pubkey=?2, agent_slug=?3, channel_h=?4, harness=?5,
-                         child_pid=?6, transcript_path=?7, resume_id=?8, alive=1, last_seen=?9
-                     WHERE session_id=?1",
-                    params![
-                        id,
-                        r.agent_pubkey,
-                        r.agent_slug,
-                        r.channel_h,
-                        r.harness,
-                        r.child_pid,
-                        r.transcript_path,
-                        r.resume_id,
-                        r.now
-                    ],
-                )?;
-                id
-            }
-            _ => {
-                let id = mint_session_id();
-                self.conn.execute(
-                    "INSERT INTO sessions
-                         (session_id, agent_pubkey, agent_slug, channel_h, harness, child_pid,
-                          transcript_path, alive, created_at, last_seen, resume_id)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, ?8, ?8, ?9)",
-                    params![
-                        id,
-                        r.agent_pubkey,
-                        r.agent_slug,
-                        r.channel_h,
-                        r.harness,
-                        r.child_pid,
-                        r.transcript_path,
-                        r.now,
-                        r.resume_id
-                    ],
-                )?;
-                id
-            }
+    /// Resolve the canonical session id for an alias WITHOUT writing the session
+    /// row — minting (and pointing the alias at) a fresh id when the alias is
+    /// absent or its row was pruned. Splitting this out of [`Self::upsert_session_row`]
+    /// lets `rpc_session_start` learn the id, select the ordinal signer (whose
+    /// reservation is keyed by session id), and THEN write the row already
+    /// carrying the correct ordinal pubkey — "born right" rather than registered
+    /// with the base key and patched afterward.
+    pub fn resolve_or_mint_session_id(
+        &self,
+        harness: &str,
+        external_id_kind: &str,
+        external_id: &str,
+        now: u64,
+    ) -> Result<String> {
+        let id = match self.resolve_session_by_alias(harness, external_id_kind, external_id)? {
+            Some(id) if self.session_exists(&id)? => id,
+            _ => mint_session_id(),
         };
         // (Re)point the external id at the resolved canonical session.
-        self.put_alias(
-            &r.harness,
-            &r.external_id_kind,
-            &r.external_id,
-            &session_id,
-            r.now,
-        )?;
-        Ok(session_id)
+        self.put_alias(harness, external_id_kind, external_id, &id, now)?;
+        Ok(id)
+    }
+
+    /// Insert or reassert the session row under an ALREADY-resolved canonical id
+    /// (see [`Self::resolve_or_mint_session_id`]). `r.agent_pubkey` is written
+    /// verbatim — the caller passes this session's selected ordinal pubkey, so a
+    /// re-assert refreshes the row WITHOUT collapsing the ordinal back to the base
+    /// (which would route a p-tagged mention to every ordinal of the agent).
+    pub fn upsert_session_row(&self, session_id: &str, r: &RegisterSession) -> Result<()> {
+        if self.session_exists(session_id)? {
+            self.conn.execute(
+                "UPDATE sessions SET agent_pubkey=?2, agent_slug=?3, channel_h=?4, harness=?5,
+                     child_pid=?6, transcript_path=?7, resume_id=?8, alive=1, last_seen=?9
+                 WHERE session_id=?1",
+                params![
+                    session_id,
+                    r.agent_pubkey,
+                    r.agent_slug,
+                    r.channel_h,
+                    r.harness,
+                    r.child_pid,
+                    r.transcript_path,
+                    r.resume_id,
+                    r.now
+                ],
+            )?;
+        } else {
+            self.conn.execute(
+                "INSERT INTO sessions
+                     (session_id, agent_pubkey, agent_slug, channel_h, harness, child_pid,
+                      transcript_path, alive, created_at, last_seen, resume_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, ?8, ?8, ?9)",
+                params![
+                    session_id,
+                    r.agent_pubkey,
+                    r.agent_slug,
+                    r.channel_h,
+                    r.harness,
+                    r.child_pid,
+                    r.transcript_path,
+                    r.now,
+                    r.resume_id
+                ],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Register or reassert a local session in one step: resolve/mint the id, then
+    /// upsert the row with `r.agent_pubkey`. `rpc_session_start` uses the two-step
+    /// form directly (it must select the signer between the two); other callers
+    /// (tests, simple registrations) use this convenience wrapper.
+    pub fn register_session(&self, r: &RegisterSession) -> Result<String> {
+        let id =
+            self.resolve_or_mint_session_id(&r.harness, &r.external_id_kind, &r.external_id, r.now)?;
+        self.upsert_session_row(&id, r)?;
+        Ok(id)
     }
 
     fn session_exists(&self, session_id: &str) -> Result<bool> {
@@ -172,7 +190,7 @@ impl Store {
     /// Find a session (alive or dead) whose canonical id starts with `prefix`,
     /// newest first. Used by `tmux resume` to accept a short id prefix.
     pub fn find_session_by_prefix(&self, prefix: &str) -> Result<Option<Session>> {
-        let pattern = format!("{}%", prefix.replace('%', "").replace('_', ""));
+        let pattern = format!("{}%", prefix.replace(['%', '_'], ""));
         Ok(self
             .conn
             .query_row(
@@ -270,6 +288,22 @@ impl Store {
         self.conn.execute(
             "UPDATE sessions SET transcript_path=?2 WHERE session_id=?1",
             params![canonical, transcript_path],
+        )?;
+        Ok(())
+    }
+
+    /// Realign a session row's wire identity to a re-selected ordinal pubkey.
+    /// The normal start path is "born right" (the row is written with the ordinal
+    /// pubkey via [`Self::upsert_session_row`]), so this is only for the reconcile
+    /// path, which re-derives the signer for an already-registered session on
+    /// daemon restart and keeps the row consistent with it. Resolves the id first.
+    pub fn set_session_agent_pubkey(&self, id: &str, agent_pubkey: &str) -> Result<()> {
+        let Some(canonical) = self.resolve_canonical_id(id)? else {
+            return Ok(());
+        };
+        self.conn.execute(
+            "UPDATE sessions SET agent_pubkey=?2 WHERE session_id=?1",
+            params![canonical, agent_pubkey],
         )?;
         Ok(())
     }

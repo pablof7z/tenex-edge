@@ -173,19 +173,12 @@ pub(in crate::daemon::server) async fn rpc_session_start(
     } else {
         ("harness_session", String::new())
     };
-    let reg = crate::state::RegisterSession {
-        harness: harness_str.to_string(),
-        external_id_kind: ext_kind.to_string(),
-        external_id: ext_id,
-        agent_pubkey: id.pubkey_hex(),
-        agent_slug: p.agent.clone(),
-        channel_h: project.clone(),
-        child_pid: p.watch_pid,
-        transcript_path: None,
-        resume_id: native_id.clone(),
-        now,
-    };
-    let session_id = state.with_store(|s| s.register_session(&reg))?;
+    // Resolve (or mint) the canonical session id WITHOUT writing the row yet. The
+    // row is written further down, AFTER signer selection, so it is born carrying
+    // this session's ordinal pubkey (never the base) — see the `upsert_session_row`
+    // call below.
+    let session_id = state
+        .with_store(|s| s.resolve_or_mint_session_id(harness_str, ext_kind, &ext_id, now))?;
     if let Some(prog) = &progress {
         prog.emit(
             "session_registry",
@@ -256,6 +249,38 @@ pub(in crate::daemon::server) async fn rpc_session_start(
             });
         }
     }
+
+    // Select this session's ordinal identity, THEN write its row carrying that
+    // ordinal pubkey. Ordering matters twice over: it runs AFTER stale-session
+    // cancellation (so a superseded ordinal is freed and reusable), and BEFORE the
+    // row is persisted / the re-assert early-return below (so the row is born with
+    // the correct pubkey — and re-asserts refresh it to the SAME ordinal rather
+    // than collapsing onto the base). `route_chat` keys on this `agent_pubkey`, so
+    // a p-tagged mention reaches exactly this session, not every ordinal of the
+    // agent. Membership admission for ordinals > 0 happens after channel-ready.
+    let signer = select_session_signer(
+        state,
+        &session_id,
+        &id.keys,
+        &id.pubkey_hex(),
+        &p.agent,
+        &project,
+        &native_id,
+        p.preferred_ordinal,
+    )?;
+    let reg = crate::state::RegisterSession {
+        harness: harness_str.to_string(),
+        external_id_kind: ext_kind.to_string(),
+        external_id: ext_id.clone(),
+        agent_pubkey: signer.pubkey.clone(),
+        agent_slug: p.agent.clone(),
+        channel_h: project.clone(),
+        child_pid: p.watch_pid,
+        transcript_path: None,
+        resume_id: native_id.clone(),
+        now,
+    };
+    state.with_store(|s| s.upsert_session_row(&session_id, &reg))?;
 
     // Stamp the canonical session id onto the tmux session owning this pane so the
     // status-format `#(...)` can read it via `#{@te_session}`. When the
@@ -359,16 +384,8 @@ pub(in crate::daemon::server) async fn rpc_session_start(
         }
     }
 
-    let signer = select_session_signer(
-        state,
-        &session_id,
-        &id.keys,
-        &id.pubkey_hex(),
-        &p.agent,
-        &project,
-        &native_id,
-        p.preferred_ordinal,
-    )?;
+    // `signer` was selected above (before the row was written). Now that the
+    // channel is ready, admit ordinals > 0 as NIP-29 members before routing use.
     if let Some(member_pubkey) = signer.member_pubkey_to_admit() {
         if let Some(prog) = &progress {
             prog.emit(
@@ -420,6 +437,7 @@ pub(in crate::daemon::server) async fn rpc_session_start(
         &state.cfg,
         &id,
         &p.agent,
+        &signer.pubkey,
         &session_id,
         &project,
         &rel_cwd,
