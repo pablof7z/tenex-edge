@@ -233,6 +233,10 @@ use who::{rpc_who, rpc_whoami};
 async fn dispatch(state: &Arc<DaemonState>, req: &Request) -> Response {
     let result = match req.method.as_str() {
         "ping" => Ok(serde_json::json!({"pong": true})),
+        "shutdown" => {
+            state.shutdown.notify_waiters();
+            Ok(serde_json::json!({"stopped": true}))
+        }
         "who" => rpc_who(state, &req.params),
         "session_start" => rpc_session_start(state, &req.params, None).await,
         "session_end" => rpc_session_end(state, &req.params),

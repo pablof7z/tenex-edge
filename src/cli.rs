@@ -155,6 +155,7 @@ pub async fn run(cli: Cli) -> Result<()> {
         Cmd::Project { action } => admin::project(action).await,
         Cmd::Channels { action } => admin::channels(action).await,
         Cmd::Agent { action } => admin::agent(action).await,
+        Cmd::Stop => stop_daemon(),
         Cmd::Doctor => admin::doctor().await,
         Cmd::Debug { action } => match action {
             DebugAction::HookTail {
@@ -218,9 +219,28 @@ const PEER_FRESH_SECS: u64 = 90;
 // store live INSIDE the daemon now (it is the sole writer). The CLI verbs below
 // are thin clients that forward to it over the UDS.
 
+// ── stop ─────────────────────────────────────────────────────────────────────
+
+fn stop_daemon() -> Result<()> {
+    // Try to gracefully shut down a running daemon without spawning one.
+    match crate::daemon::blocking::call_no_spawn("shutdown", serde_json::json!({})) {
+        Ok(_) => eprintln!("[tenex-edge] daemon stopped"),
+        Err(_) => eprintln!("[tenex-edge] daemon was not running"),
+    }
+    crate::daemon::set_inhibit();
+    eprintln!(
+        "[tenex-edge] hooks will not restart the daemon; \
+         run any non-hook command (e.g. `tenex-edge who`) to resume"
+    );
+    Ok(())
+}
+
 // ── session-end ──────────────────────────────────────────────────────────────
 
 pub(super) fn session_end(session: String) -> Result<()> {
+    if crate::daemon::is_inhibited() {
+        return Ok(());
+    }
     let v = crate::daemon::blocking::call("session_end", serde_json::json!({"session": session}))?;
     if v["ended"].as_bool().unwrap_or(false) {
         eprintln!("session {session} ended");
@@ -230,17 +250,35 @@ pub(super) fn session_end(session: String) -> Result<()> {
     Ok(())
 }
 
-/// Async daemon call helper for `async fn` verbs (uses the async client; we are
-/// inside the tokio runtime so we must NOT block_on a sync client here).
+/// Async daemon call for non-hook CLI verbs. Clears any stop inhibit so the
+/// daemon is restarted when needed — running a command like `who` or `chat`
+/// implicitly resumes after a `tenex-edge stop`.
 pub(super) async fn daemon_call_async(
     method: &str,
     params: serde_json::Value,
 ) -> Result<serde_json::Value> {
+    if crate::daemon::is_inhibited() {
+        crate::daemon::clear_inhibit();
+        eprintln!("[tenex-edge] stop inhibit cleared; restarting daemon...");
+    }
     let mut client = crate::daemon::client::Client::connect_or_spawn().await?;
     client.call(method, params).await
 }
 
-pub(super) async fn daemon_call_async_with_items<F>(
+/// Hook-path daemon call: returns `Ok(Null)` when the daemon is inhibited
+/// (after `tenex-edge stop`) so hooks fail open rather than spawning it.
+pub(super) async fn daemon_call_hook_async(
+    method: &str,
+    params: serde_json::Value,
+) -> Result<serde_json::Value> {
+    if crate::daemon::is_inhibited() {
+        return Ok(serde_json::Value::Null);
+    }
+    let mut client = crate::daemon::client::Client::connect_or_spawn().await?;
+    client.call(method, params).await
+}
+
+pub(super) async fn daemon_call_hook_async_with_items<F>(
     method: &str,
     params: serde_json::Value,
     on_item: F,
@@ -248,6 +286,9 @@ pub(super) async fn daemon_call_async_with_items<F>(
 where
     F: FnMut(serde_json::Value),
 {
+    if crate::daemon::is_inhibited() {
+        return Ok(serde_json::Value::Null);
+    }
     let mut client = crate::daemon::client::Client::connect_or_spawn().await?;
     client.call_with_items(method, params, on_item).await
 }

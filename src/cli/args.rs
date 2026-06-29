@@ -127,6 +127,10 @@ pub(super) enum Cmd {
         #[arg(long)]
         tmux: bool,
     },
+    /// Stop the daemon and prevent hooks from restarting it.
+    /// The next non-hook command (who, chat, tail, …) clears the inhibit and
+    /// restarts the daemon automatically.
+    Stop,
     /// Connectivity check: publish a test note to the configured relays and read it back.
     Doctor,
     /// Local debugging tools for hook injection and command telemetry.
@@ -223,10 +227,11 @@ pub(super) enum Cmd {
         #[arg(long)]
         uninstall: bool,
     },
-    /// Internal: the per-machine daemon. Spawned automatically; not for direct use.
-    /// (Replaces the old detached per-session engine, which now runs as an async
-    /// task inside this one daemon — the sole writer of state.db.)
-    #[command(name = "__daemon", hide = true)]
+    /// Start the per-machine daemon in the foreground.
+    /// Logs stream to stdout (colorised) and daemon.log simultaneously.
+    /// Normally spawned automatically; run this directly to watch its output interactively.
+    /// `__daemon` is kept as a hidden alias so the auto-spawner still works without change.
+    #[command(name = "daemon", alias = "__daemon")]
     Daemon,
 }
 

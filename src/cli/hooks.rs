@@ -354,7 +354,7 @@ async fn hook_dispatch(
                     "cwd": cwd.to_string_lossy(),
                     "prompt": prompt_text,
                 });
-                if let Err(e) = daemon_call_async("user_prompt", params).await {
+                if let Err(e) = daemon_call_hook_async("user_prompt", params).await {
                     eprintln!("[tenex-edge] user_prompt publish skipped: {e:#}");
                 }
             }

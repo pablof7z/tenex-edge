@@ -53,7 +53,7 @@ pub(super) async fn report_observation(
             .ok()
             .and_then(|v| v.parse::<u32>().ok()),
     });
-    let v = super::super::daemon_call_async_with_items("session_start", params, |item| {
+    let v = super::super::daemon_call_hook_async_with_items("session_start", params, |item| {
         render_init_progress(&item);
     })
     .await?;
