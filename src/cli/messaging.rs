@@ -4,7 +4,10 @@ pub(super) async fn chat_write(message: String, channel: Option<String>) -> Resu
     let params = crate::cli::rpc_params(serde_json::json!({
         "message": message,
         // Explicit `--channel` destination overrides the session's own group.
-        "group": channel.or_else(crate::cli::channel_env),
+        // Only pass an explicit channel here. The daemon reads the session's
+        // current active channel from the DB; sending the stale TENEX_EDGE_CHANNEL
+        // env var would override it and undo any channel switch made by this session.
+        "group": channel,
     }));
     let v = daemon_call_async("chat_write", params).await?;
     let event_id = v["event_id"].as_str().unwrap_or("?");

@@ -118,7 +118,12 @@ pub async fn channels(action: ChannelsAction) -> Result<()> {
                 std::process::exit(2);
             }
             let oid = v["orchestration_event_id"].as_str().unwrap_or("");
-            println!("#{} created and joined", name);
+            let switched = v["switched"].as_bool().unwrap_or(false);
+            if switched {
+                println!("#{} created and switched to it", name);
+            } else {
+                println!("#{} created", name);
+            }
             if !oid.is_empty() {
                 println!("  orchestration kind:9 {}", &oid[..oid.len().min(8)]);
             }
