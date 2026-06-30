@@ -61,8 +61,6 @@ pub(in crate::daemon::server) async fn rpc_channels_create(
         name: String,
         #[serde(default)]
         agents: Vec<AgentSpec>,
-        #[serde(default)]
-        brief: String,
         /// Durable channel description, published to the relay as kind:39000
         /// `about`. Set at creation; never derived from the name.
         #[serde(default)]
@@ -237,11 +235,7 @@ Switch into it instead: tenex-edge channels switch {}",
     let orchestration_event_id = if adds.is_empty() {
         String::new()
     } else {
-        let prose = if p.brief.trim().is_empty() {
-            generate_orchestration_prose(&adds)
-        } else {
-            p.brief.clone()
-        };
+        let prose = generate_orchestration_prose(&adds);
         let builder = build_add_agents_event(&parent, &child_h, &adds, &prose)?;
         let signed = state.transport.sign(builder, &mgmt_keys).await?;
         let oid = signed.id.to_hex();
