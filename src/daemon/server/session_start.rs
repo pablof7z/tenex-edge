@@ -1,5 +1,7 @@
 use super::*;
 
+mod stale;
+
 #[derive(serde::Deserialize, Default)]
 pub(in crate::daemon::server) struct SessionStartParams {
     agent: String,
@@ -243,44 +245,14 @@ pub(in crate::daemon::server) async fn rpc_session_start(
         let new_work_root = room_parent
             .clone()
             .unwrap_or_else(|| state.with_store(|s| work_root_for_scope(s, &project)));
-        let alive = state.with_store(|s| s.list_alive_sessions().unwrap_or_default());
-        let mut stale_ids: Vec<String> = Vec::new();
-        for rec in &alive {
-            if rec.session_id == session_id || rec.agent_slug != p.agent {
-                continue;
-            }
-            let same_work_root =
-                state.with_store(|s| work_root_for_scope(s, &rec.channel_h)) == new_work_root;
-            if !same_work_root {
-                continue;
-            }
-            let same_pid = p.watch_pid.is_some() && rec.child_pid == p.watch_pid;
-            let same_pane = tmux_pane.as_deref().is_some_and(|pane| {
-                state
-                    .with_store(|s| session_pane(s, &rec.session_id))
-                    .as_deref()
-                    == Some(pane)
-            });
-            if same_pid || same_pane {
-                let reason = if same_pid { "same_pid" } else { "same_pane" };
-                tracing::info!(
-                    stale_session = %rec.session_id,
-                    new_session = %session_id,
-                    agent = %p.agent,
-                    reason,
-                    "cancelling stale session on harness restart"
-                );
-                state.release_session_signer(&rec.session_id);
-                stale_ids.push(rec.session_id.clone());
-            }
-        }
-        for old_id in stale_ids {
-            cancel_session(state, &old_id);
-            state.with_store(|s| {
-                s.mark_dead(&old_id).ok();
-                s.mark_identity_dead_for_session(&old_id).ok();
-            });
-        }
+        stale::cancel_stale_sessions_on_restart(
+            state,
+            &session_id,
+            &p.agent,
+            p.watch_pid,
+            tmux_pane.as_deref(),
+            &new_work_root,
+        );
     }
 
     // Select this session's ordinal identity, THEN write its row carrying that
