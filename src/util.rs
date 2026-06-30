@@ -121,6 +121,27 @@ pub fn titleize_prompt(prompt: &str) -> String {
     }
 }
 
+/// True when `text`, trimmed, starts with `<` — the shape of harness-injected
+/// control content (task-completion notifications, system reminders,
+/// command-output wrappers, ...) as opposed to text a human actually typed.
+/// Human prose never starts with `<`; harness envelopes always do. Such a
+/// prompt is harness plumbing, not human speech, and must not be mirrored
+/// into chat as if it were (issue: raw `<task-notification>` blobs were
+/// getting posted into the channel verbatim).
+///
+/// Deliberately just a leading-`<` check, not "one well-formed wrapped
+/// element": some harness envelopes are several sibling top-level tags
+/// (Claude Code's slash-command expansion emits
+/// `<command-message>...</command-message><command-name>...</command-name>`,
+/// two elements, not one), so requiring a single matching open/close tag
+/// misses those. Mirrors `proactive-context`'s `visible_text`, validated
+/// against real sessions there. The accepted false positive is a human
+/// prompt that happens to start with a literal `<` — rare enough that
+/// harness content never leaking into chat matters more.
+pub fn is_harness_envelope(text: &str) -> bool {
+    text.trim_start().starts_with('<')
+}
+
 /// A session identifier. Wraps the raw id stored in SQLite. `Display` preserves
 /// the raw id for correlation only; user-facing identity belongs to the agent
 /// instance label, not a generated session alias.
@@ -267,6 +288,33 @@ mod tests {
     fn pubkey_short_truncates() {
         assert_eq!(pubkey_short("0123456789abcdef"), "01234567");
         assert_eq!(pubkey_short("abc"), "abc");
+    }
+
+    #[test]
+    fn is_harness_envelope_detects_leading_angle_bracket() {
+        assert!(is_harness_envelope(
+            "<task-notification>\n<task-id>abc</task-id>\n</task-notification>"
+        ));
+        assert!(is_harness_envelope("<system-reminder>careful</system-reminder>"));
+        // Whitespace around the whole message is ignored.
+        assert!(is_harness_envelope(
+            "  \n<system-reminder>careful</system-reminder>\n  "
+        ));
+        // Sibling top-level tags (Claude Code slash-command expansion), not one
+        // wrapped element — still harness content, must still be caught.
+        assert!(is_harness_envelope(
+            "<command-message>running</command-message><command-name>foo</command-name>"
+        ));
+        // Opens a tag but never closes it — still harness content.
+        assert!(is_harness_envelope("<task-notification>partial"));
+    }
+
+    #[test]
+    fn is_harness_envelope_rejects_genuine_human_text() {
+        // A mid-sentence `<` doesn't trigger — only a *leading* one does.
+        assert!(!is_harness_envelope("fix the bug in <Foo/> please"));
+        assert!(!is_harness_envelope("plain text prompt"));
+        assert!(!is_harness_envelope(""));
     }
 
     #[test]

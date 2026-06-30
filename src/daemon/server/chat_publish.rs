@@ -193,6 +193,17 @@ pub(in crate::daemon::server) async fn rpc_user_prompt(
         return Ok(serde_json::json!({ "skipped": "fabric injection echo" }));
     }
 
+    // The harness itself can resume a session with synthetic control content
+    // (a background task-completion notification, a system reminder, ...)
+    // delivered through the same user-prompt-submit hook as real typed input.
+    // That is harness plumbing, not the human speaking — mirroring it would
+    // post raw `<task-notification>...</task-notification>`-shaped blobs into
+    // the channel verbatim. Skip anything that is, start to finish, one such
+    // wrapper element.
+    if crate::util::is_harness_envelope(&p.prompt) {
+        return Ok(serde_json::json!({ "skipped": "harness envelope" }));
+    }
+
     // Only mirror prompts into a sub-channel (a task/session room). A human start
     // with no resume anchor keeps the session on the top-level project channel;
     // mirroring there would spam the bare project group, so skip it (fail-open).
