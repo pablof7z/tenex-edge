@@ -71,10 +71,23 @@ fn ambient_chat(
         .collect())
 }
 
-fn joined_channels(s: &Store, rec: &Session) -> Vec<(String, u64)> {
-    let mut channels = s
-        .list_session_joined_channels(&rec.session_id)
-        .unwrap_or_else(|_| vec![(rec.channel_h.clone(), rec.created_at)]);
+/// Returns `(joined_channels, read_failed)`. On a store error the active channel
+/// is still returned as a fallback so the turn is never blank, but `read_failed`
+/// is `true` so the caller ORs it into the turn's read-failure flag and surfaces
+/// the "⚠ Fabric read failed" marker — a dropped passive channel must not be
+/// mistaken for a quiet one.
+fn joined_channels(s: &Store, rec: &Session) -> (Vec<(String, u64)>, bool) {
+    let (mut channels, read_failed) = match s.list_session_joined_channels(&rec.session_id) {
+        Ok(c) => (c, false),
+        Err(e) => {
+            tracing::error!(
+                session = %rec.session_id,
+                error = ?e,
+                "turn: joined-channel read failed; passive channels may be dropped from this turn"
+            );
+            (vec![(rec.channel_h.clone(), rec.created_at)], true)
+        }
+    };
     if !rec.channel_h.is_empty() && !channels.iter().any(|(h, _)| h == &rec.channel_h) {
         channels.push((rec.channel_h.clone(), rec.created_at));
     }
@@ -83,7 +96,7 @@ fn joined_channels(s: &Store, rec: &Session) -> Vec<(String, u64)> {
         let b_active = if b_h == &rec.channel_h { 0 } else { 1 };
         a_active.cmp(&b_active).then(a_t.cmp(b_t)).then(a_h.cmp(b_h))
     });
-    channels
+    (channels, read_failed)
 }
 
 /// Ambient chat grouped per joined channel. The `bool` is `true` when any
@@ -165,7 +178,7 @@ pub fn assemble_turn_start_context(
     let scope = rec.channel_h.clone();
     let now = now_secs();
     let mut blocks: Vec<String> = Vec::new();
-    let joined = {
+    let (joined, joined_read_failed) = {
         let s = store.lock().expect("store mutex poisoned");
         joined_channels(&s, rec)
     };
@@ -240,7 +253,9 @@ pub fn assemble_turn_start_context(
     } else {
         rec.seen_cursor
     };
-    let mut read_failed = false;
+    // Seed with the joined-channel read result: a failure there silently dropped
+    // passive channels, so the marker must fire even if every other read succeeds.
+    let mut read_failed = joined_read_failed;
     let (mentions, ambient, pre_history_notice) = {
         let s = store.lock().expect("store mutex poisoned");
         // A failed inbox claim must NOT render as an empty inbox: log loudly and
@@ -373,12 +388,12 @@ pub fn assemble_turn_check_context(
     // key on this so mid-turn context reflects the channel the session is
     // actually publishing into after a switch.
     let scope = rec.channel_h.clone();
-    let joined = {
+    let (joined, joined_read_failed) = {
         let s = store.lock().expect("store mutex poisoned");
         joined_channels(&s, rec)
     };
 
-    let mut read_failed = false;
+    let mut read_failed = joined_read_failed;
     // Mentions that arrived mid-turn land as fresh pending inbox rows. Draining
     // them (and marking delivered) is the new "notify once" — there is no
     // separate notified flag; the inbox state IS the idempotency record. A

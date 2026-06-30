@@ -61,11 +61,19 @@ fn session_pane(s: &Store, session_id: &str) -> Option<String> {
 }
 
 /// Roll back a half-started session before bailing out of `rpc_session_start`:
-/// release the reserved signer and mark its bound identity dead, so a start that
-/// fails after the session row was written leaves no ghost-alive ordinal. A failed
-/// death-mark is logged loudly (it would otherwise leave a stale row).
+/// release the reserved signer, mark the session ROW dead, and mark its bound
+/// identity dead, so a start that fails after the session row was written leaves
+/// no ghost-alive session/ordinal behind. Both death-marks are logged loudly (a
+/// failed mark would otherwise leave a stale alive row with no engine).
 fn abort_session_start(state: &Arc<DaemonState>, session_id: &str) {
     state.release_session_signer(session_id);
+    if let Err(e) = state.with_store(|s| s.mark_dead(session_id)) {
+        tracing::error!(
+            session = %session_id,
+            error = %e,
+            "failed to mark session row dead while aborting session start (ghost-alive row may remain)"
+        );
+    }
     if let Err(e) = state.with_store(|s| s.mark_identity_dead_for_session(session_id)) {
         tracing::error!(
             session = %session_id,
@@ -417,8 +425,7 @@ pub(in crate::daemon::server) async fn rpc_session_start(
             );
         }
         if let Err(e) = admit_transient_signer(state, &project, member_pubkey).await {
-            state.release_session_signer(&session_id);
-            state.with_store(|s| s.mark_identity_dead_for_session(&session_id).ok());
+            abort_session_start(state, &session_id);
             return Err(e);
         }
     }

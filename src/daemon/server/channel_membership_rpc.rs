@@ -191,25 +191,23 @@ pub(in crate::daemon::server) fn set_active_session_channel(
     // the agent isn't actually focused on. Fail loud so the switch/create RPC
     // reports the failure instead of silently half-applying it.
     state.with_store(|s| -> Result<()> {
-        if leave_previous {
-            if let Some(prev) = s
-                .get_session(session_id)
+        // No store transaction is available here, so do the fallible reads/checks
+        // FIRST and perform the mutations only after they all pass: a failure must
+        // not leave the session/identity half-moved (left/joined/repointed but the
+        // identity row stale, or vice versa).
+        //
+        // A live session that is switching channels MUST have a bound identity
+        // row. `Ok(None)` means the identity vanished out from under an active
+        // session — a real invariant break, not a benign miss — so bail BEFORE any
+        // mutation rather than skip the identity repoint.
+        let prev_to_leave = if leave_previous {
+            s.get_session(session_id)
                 .context("set_active_session_channel: reading current session")?
                 .map(|r| r.channel_h)
                 .filter(|h| h != new_channel)
-            {
-                s.leave_session_channel(session_id, &prev)
-                    .context("set_active_session_channel: leaving previous channel")?;
-            }
-        }
-        s.join_session_channel(session_id, new_channel, now_secs())
-            .context("set_active_session_channel: joining new channel")?;
-        s.set_session_channel(session_id, new_channel)
-            .context("set_active_session_channel: repointing active channel")?;
-        // A live session that is switching channels MUST have a bound identity
-        // row. `Ok(None)` means the identity vanished out from under an active
-        // session — a real invariant break, not a benign miss — so bail rather
-        // than skip the identity repoint.
+        } else {
+            None
+        };
         let mut idn = s
             .get_identity(agent_pubkey)
             .context("set_active_session_channel: loading identity")?
@@ -223,6 +221,16 @@ pub(in crate::daemon::server) fn set_active_session_channel(
         idn.channel_h = new_channel.to_string();
         idn.session_id = session_id.to_string();
         idn.alive = true;
+
+        // Mutations — every fallible precondition above has already passed.
+        if let Some(prev) = prev_to_leave {
+            s.leave_session_channel(session_id, &prev)
+                .context("set_active_session_channel: leaving previous channel")?;
+        }
+        s.join_session_channel(session_id, new_channel, now_secs())
+            .context("set_active_session_channel: joining new channel")?;
+        s.set_session_channel(session_id, new_channel)
+            .context("set_active_session_channel: repointing active channel")?;
         s.upsert_identity(&idn)
             .context("set_active_session_channel: persisting identity channel move")?;
         Ok(())

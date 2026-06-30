@@ -60,7 +60,13 @@ pub(in crate::daemon::server) async fn spawn_session(
         }
         // Mark the bound identity dead but keep the row for resume (issue #47).
         st.with_store(|s| {
-            s.mark_identity_dead_for_session(&sid).ok();
+            if let Err(e) = s.mark_identity_dead_for_session(&sid) {
+                tracing::error!(
+                    session = %sid,
+                    error = %e,
+                    "engine exit: failed to mark identity dead; `who` may show a ghost"
+                );
+            }
         });
         st.sessions.lock().unwrap().remove(&sid);
         prune_hosted(&st);
@@ -308,8 +314,12 @@ pub(in crate::daemon::server) async fn reconcile_sessions(state: &Arc<DaemonStat
             // pubkey (if any) to remove from the channel.
             let identity = state.with_store(|s| s.identity_for_session(&session_id).ok().flatten());
             state.with_store(|s| {
-                s.mark_dead(&session_id).ok();
-                s.mark_identity_dead_for_session(&session_id).ok();
+                if let Err(e) = s.mark_dead(&session_id) {
+                    tracing::error!(session = %session_id, error = %e, "reconcile GC: failed to mark dead session dead; ghost-alive row may remain");
+                }
+                if let Err(e) = s.mark_identity_dead_for_session(&session_id) {
+                    tracing::error!(session = %session_id, error = %e, "reconcile GC: failed to mark identity dead for dead session");
+                }
             });
             // Crash-GC: remove an ordinal (>0) member from the NIP-29 channel.
             // Membership is relay-materialized, so only the relay remove is issued.
@@ -391,12 +401,25 @@ pub(in crate::daemon::server) async fn reconcile_sessions(state: &Arc<DaemonStat
         };
         // Rebind the row to the selected ordinal pubkey (== base for ordinal 0) so
         // mention routing keys on this session's real identity, not the base.
-        state.with_store(|s| s.set_session_agent_pubkey(&session_id, &signer.pubkey).ok());
+        state.with_store(|s| {
+            if let Err(e) = s.set_session_agent_pubkey(&session_id, &signer.pubkey) {
+                tracing::error!(
+                    session = %session_id,
+                    pubkey = %signer.pubkey,
+                    error = %e,
+                    "reconcile: failed to rebind session to ordinal pubkey; mention routing may key on the base identity"
+                );
+            }
+        });
         if let Some(member_pubkey) = signer.member_pubkey_to_admit() {
             if let Err(e) = admit_transient_signer(state, &snap.channel_h, member_pubkey).await {
                 tracing::warn!(session = %session_id, error = %e, "ordinal signer admission failed during reconcile; skipping session");
                 state.release_session_signer(&session_id);
-                state.with_store(|s| s.mark_identity_dead_for_session(&session_id).ok());
+                state.with_store(|s| {
+                    if let Err(e) = s.mark_identity_dead_for_session(&session_id) {
+                        tracing::error!(session = %session_id, error = %e, "reconcile: failed to mark identity dead after admission failure; ghost ordinal may remain");
+                    }
+                });
                 continue;
             }
         }

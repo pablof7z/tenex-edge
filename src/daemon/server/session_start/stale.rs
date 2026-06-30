@@ -52,8 +52,20 @@ pub(super) fn cancel_stale_sessions_on_restart(
     for old_id in stale_ids {
         cancel_session(state, &old_id);
         state.with_store(|s| {
-            s.mark_dead(&old_id).ok();
-            s.mark_identity_dead_for_session(&old_id).ok();
+            if let Err(e) = s.mark_dead(&old_id) {
+                tracing::error!(
+                    stale_session = %old_id,
+                    error = %e,
+                    "harness-restart reap: failed to mark stale session dead; `who` may show a ghost"
+                );
+            }
+            if let Err(e) = s.mark_identity_dead_for_session(&old_id) {
+                tracing::error!(
+                    stale_session = %old_id,
+                    error = %e,
+                    "harness-restart reap: failed to mark stale identity dead"
+                );
+            }
         });
     }
 }

@@ -325,14 +325,29 @@ async fn confirm_role_grant(
         } else {
             provider.nip29_add_member_outcome(channel, pubkey).await
         };
-        let (_, roles, members) = provider.fetch_group_state(channel).await;
-        let present = if want_admin {
-            roles.get(pubkey).map(String::as_str) == Some("admin")
-        } else {
-            members.contains(pubkey) || roles.contains_key(pubkey)
-        };
-        if present || (attempt > 0 && outcome.is_applied()) {
-            return true;
+        // Confirm ONLY on a relay state we actually OBSERVED. A read-back failure
+        // must never be promoted to "grant confirmed" (the old `outcome.is_applied()`
+        // path did exactly that): log loud, then retry and ultimately degrade.
+        match provider.try_fetch_group_state(channel).await {
+            Ok((_, roles, members)) => {
+                let present = if want_admin {
+                    roles.get(pubkey).map(String::as_str) == Some("admin")
+                } else {
+                    members.contains(pubkey) || roles.contains_key(pubkey)
+                };
+                if present {
+                    return true;
+                }
+            }
+            Err(e) => {
+                tracing::error!(
+                    channel,
+                    pubkey,
+                    attempt,
+                    error = %e,
+                    "confirm_role_grant: relay read-back failed; cannot confirm grant — retrying then degrading"
+                );
+            }
         }
         if outcome.is_rejected() {
             return false;
