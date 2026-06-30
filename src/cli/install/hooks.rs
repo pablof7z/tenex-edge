@@ -7,7 +7,7 @@ const CODEX_ROOT_HOOK_EVENTS: &[&str] =
 
 /// Does a hook group contain a tenex-edge command for `host`?
 fn group_is_ours(group: &serde_json::Value, host: &str) -> bool {
-    let needle = format!("tenex-edge hook --host {host} --type ");
+    let needle = format!("tenex-edge harness hook {host} --type ");
     group
         .get("hooks")
         .and_then(|h| h.as_array())

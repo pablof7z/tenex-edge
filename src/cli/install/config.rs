@@ -55,9 +55,9 @@ fn bin_on_path(bin: &str) -> bool {
     std::env::split_paths(&path).any(|dir| dir.join(bin).is_file())
 }
 
-/// The hook signature we dedupe by: `tenex-edge hook --host <host> --type <type>`.
+/// The hook signature we dedupe by: `tenex-edge harness hook <host> --type <type>`.
 fn sig(host: &str, ty: &str) -> String {
-    format!("tenex-edge hook --host {host} --type {ty}")
+    format!("tenex-edge harness hook {host} --type {ty}")
 }
 
 fn claude_hook_entries() -> Vec<(&'static str, serde_json::Value)> {
