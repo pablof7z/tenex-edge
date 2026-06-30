@@ -97,19 +97,23 @@ fn render_snapshot_body(
     let members = member_lines(store, project, now, self_slug, self_pubkey, local_host);
     write_section(&mut out, "Members:", &members);
 
-    let subs = subchannels_of(store, project);
-    if !subs.is_empty() {
-        let lines = subs
-            .iter()
-            .map(|(id, _, _)| channel_summary_line(store, id, now))
-            .collect::<Vec<_>>();
-        write_section(&mut out, "Subchannels:", &lines);
+    // At the project root, the root's direct children ARE the "other channels"
+    // (rendered below); a separate `Subchannels:` section would double-list them.
+    // Inside a branch, `Subchannels:` shows that branch's own subtree.
+    if !store.is_root_channel(project).unwrap_or(true) {
+        let subs = subchannels_of(store, project);
+        if !subs.is_empty() {
+            let lines = subs
+                .iter()
+                .map(|(id, _, _)| channel_summary_line(store, id, now))
+                .collect::<Vec<_>>();
+            write_section(&mut out, "Subchannels:", &lines);
+        }
     }
 
     let other = other_active_channel_lines(
         store,
         project,
-        &subs,
         now.saturating_sub(RECENT_SEMANTIC_WINDOW_SECS),
         now,
     );
@@ -166,7 +170,13 @@ fn render_awareness_update(
     label: &str,
     local_host: &str,
 ) -> Option<String> {
-    let subs = subchannels_of(store, project);
+    // At the project root the direct children surface as "other channels", so the
+    // `Subchannels:` delta is suppressed there (empty subs → no subchannel lines).
+    let subs = if store.is_root_channel(project).unwrap_or(true) {
+        Vec::new()
+    } else {
+        subchannels_of(store, project)
+    };
     let changed = changed_status_items(store, since, project, now, exclude_pubkey);
 
     let members = changed_member_lines(project, &changed, local_host);
@@ -174,7 +184,6 @@ fn render_awareness_update(
     let other = other_active_channel_lines(
         store,
         project,
-        &subs,
         since.max(now.saturating_sub(RECENT_SEMANTIC_WINDOW_SECS)),
         now,
     );

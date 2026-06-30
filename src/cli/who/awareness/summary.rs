@@ -234,17 +234,53 @@ pub(super) fn changed_subchannel_lines(
         .collect()
 }
 
+/// The "Other active channels" list: the TOP-LEVEL channels of the viewer's own
+/// project (the direct children of the project root) that saw activity since
+/// `cutoff`, MINUS the top-level branch the viewer is currently inside. The store
+/// is machine-global (one daemon owns every project's data), so this is the read
+/// layer that scopes awareness back down to a single project:
+///
+/// - channels belonging to a DIFFERENT project (their root ≠ ours) are skipped;
+/// - channels whose ancestry can't be traced to a materialized root are DROPPED
+///   with a loud warning — they'd otherwise leak across project boundaries.
+///
+/// Deeper-nested rooms of our own project are not listed here (they surface under
+/// `Subchannels:` when the viewer is inside their branch).
 pub(super) fn other_active_channel_lines(
     store: &Store,
     project: &str,
-    subs: &[(String, String, usize)],
     cutoff: u64,
     now: u64,
 ) -> Vec<String> {
-    let mut exclude = vec![project.to_string()];
-    exclude.extend(subs.iter().map(|(id, _, _)| id.clone()));
-    let mut channels: Vec<String> = active_channels_since(store, cutoff, &exclude)
+    // The viewer is anchored at `project`; treat it as its own root if its row
+    // isn't materialized (an un-cached root project), so we never warn about it.
+    let root = resolve_root(store, project).unwrap_or_else(|| project.to_string());
+    let current_branch = top_level_branch(store, project, &root);
+    let mut channels: Vec<String> = store
+        .active_channels_since(cutoff)
+        .unwrap_or_default()
         .into_iter()
+        .filter(|id| id != project)
+        .filter(|id| match resolve_root(store, id) {
+            None => {
+                tracing::warn!(
+                    channel = %id,
+                    project_root = %root,
+                    "[tenex-edge] awareness: DROPPING active channel with unresolvable \
+                     project root (unmaterialized ancestry) — refusing to leak it across \
+                     project boundaries into \"Other active channels\""
+                );
+                false
+            }
+            // A different project's channel — silently out of scope.
+            Some(r) if r != root => false,
+            // Same project: keep only top-level branches (direct children of the
+            // root), excluding the branch the viewer is already in.
+            Some(_) => {
+                store.channel_parent(id).ok().flatten().as_deref() == Some(root.as_str())
+                    && Some(id.as_str()) != current_branch.as_deref()
+            }
+        })
         .collect();
     channels.sort();
     channels
@@ -252,6 +288,40 @@ pub(super) fn other_active_channel_lines(
         .take(5)
         .map(|id| channel_summary_line(store, &id, now))
         .collect()
+}
+
+/// Walk `parent` links up to the materialized project root. Returns the root's
+/// `channel_h` when the chain terminates at a channel whose parent is empty (a
+/// true root); `None` when an ancestor is unmaterialized (its parent is unknown)
+/// before a root is reached — such a channel can't be attributed to any project.
+fn resolve_root(store: &Store, channel: &str) -> Option<String> {
+    let mut cur = channel.to_string();
+    for _ in 0..MAX_BREADCRUMB_DEPTH {
+        match store.channel_parent(&cur).ok().flatten() {
+            Some(p) if p.is_empty() => return Some(cur),
+            Some(p) => cur = p,
+            None => return None,
+        }
+    }
+    None
+}
+
+/// The top-level branch (a direct child of `root`) that contains `channel`.
+/// `None` when `channel` IS the root, or when the chain to `root` can't be traced.
+/// Used to exclude the viewer's own branch from the "other channels" list.
+fn top_level_branch(store: &Store, channel: &str, root: &str) -> Option<String> {
+    if channel == root {
+        return None;
+    }
+    let mut cur = channel.to_string();
+    for _ in 0..MAX_BREADCRUMB_DEPTH {
+        match store.channel_parent(&cur).ok().flatten() {
+            Some(p) if p == root => return Some(cur),
+            Some(p) if !p.is_empty() => cur = p,
+            _ => return None,
+        }
+    }
+    None
 }
 
 pub(super) fn current_activity_lines(
@@ -294,15 +364,15 @@ fn channel_about(store: &Store, id: &str) -> Option<String> {
 
 /// A channel's `(reference_handle, optional_description)`:
 ///   - named channel → (`#<name>`, its kind:39000 `about`)
-///   - unnamed channel (a session room, name empty or == its own id) → (the live
-///     work title of whoever is active there, else its `about`, else
-///     `(unnamed channel)`; no description).
+///   - unnamed channel (a session room whose name is empty or merely defaulted to
+///     its opaque id) → (the live work title of whoever is active there, else its
+///     `about`, else `(unnamed channel)`; no description).
 ///
-/// The full raw `channel_h` NEVER surfaces in either branch.
+/// Named-ness is decided by [`Channel::human_name`], so a root project (whose slug
+/// is both its id and its name) reads as named. The raw `channel_h` NEVER surfaces.
 fn channel_label(store: &Store, id: &str, now: u64) -> (String, Option<String>) {
     if let Some(channel) = store.get_channel(id).ok().flatten() {
-        let name = channel.name.trim();
-        if !name.is_empty() && name != id {
+        if let Some(name) = channel.human_name() {
             let about = channel.about.trim();
             return (
                 format!("#{name}"),
@@ -317,8 +387,7 @@ fn channel_label(store: &Store, id: &str, now: u64) -> (String, Option<String>) 
 /// else the unnamed-channel descriptive label. Never the raw opaque id.
 fn channel_name_bare(store: &Store, id: &str, now: u64) -> String {
     if let Some(channel) = store.get_channel(id).ok().flatten() {
-        let name = channel.name.trim();
-        if !name.is_empty() && name != id {
+        if let Some(name) = channel.human_name() {
             return name.to_string();
         }
     }

@@ -102,7 +102,10 @@ fn snapshot_renders_awareness_without_transport_events() {
         "runner trust-cache failures",
         "h-aware",
     );
-    chan(&store, "session-a9f2", "session-a9f2", "", "");
+    // A real session room: opaque-id `name` that defaulted to its own id, nested
+    // directly under the project root (`parent = h-core`) — so it reads as
+    // unnamed (not a root) and is a top-level branch surfaced as an "other channel".
+    chan(&store, "session-a9f2", "session-a9f2", "", "h-core");
     members(&store, "h-aware", &["pk-codex", "pk-claude"]);
     members(&store, "h-ciflake", &["pk-a", "pk-b"]);
     members(&store, "session-a9f2", &["pk-other"]);
@@ -194,6 +197,45 @@ fn fabric_view_renders_unmaterialized_root_by_its_slug() {
     );
     // The `who` fabric view carries no injected-context header.
     assert_lacks(&block, "[tenex-edge] Fabric context");
+}
+
+#[test]
+fn materialized_root_with_slug_id_renders_named_not_unnamed() {
+    let store = Store::open_memory().unwrap();
+    // The real-world shape (mirrors live ~/.tenex-edge state.db): a ROOT project's
+    // NIP-29 group id IS its slug, and the relay defaults the kind:39000 `name` to
+    // that same id — so `channel_h == name` with `parent` empty. This must read as
+    // NAMED, even though session rooms use the identical `name == id` shape.
+    chan(
+        &store,
+        "tenex-edge",
+        "tenex-edge",
+        "Agent coordination substrate",
+        "",
+    );
+    // A child session room under it, with the same `name == id` shape but a parent
+    // → genuinely unnamed, surfaced by its live work title.
+    chan(&store, "session-x1", "session-x1", "", "tenex-edge");
+    status(
+        &store,
+        "pk-dev",
+        "developer",
+        "session-x1",
+        "Investigating duplicate session rooms",
+        true,
+        980,
+    );
+
+    let block = super::render_fabric_view(&store, "tenex-edge", NOW, "", "", LOCAL_HOST);
+    // Root: named by its slug + about, never the unnamed placeholder.
+    assert_has(
+        &block,
+        "Project: tenex-edge -- Agent coordination substrate",
+    );
+    assert_lacks(&block, "(unnamed channel)");
+    // Child session room: labelled by its work title, never its raw id.
+    assert_has(&block, "Investigating duplicate session rooms");
+    assert_lacks(&block, "session-x1");
 }
 
 #[test]
@@ -291,6 +333,8 @@ fn update_renders_state_activity_and_omits_unchanged_sessions() {
         "Runner issue isolated",
         "h-aware",
     );
+    // A sibling session room directly under the root → a top-level "other channel".
+    chan(&store, "session-a9f2", "session-a9f2", "", "h-aware");
     members(&store, "h-aware", &["pk-claude"]);
     members(&store, "h-ciflake", &["pk-a", "pk-b"]);
 
@@ -398,7 +442,9 @@ fn update_activity_excludes_viewers_own_chat() {
 fn other_active_channels_use_status_titles_without_repeating_old_activity() {
     let store = Store::open_memory().unwrap();
     chan(&store, "h-aware", "awareness", "", "");
-    chan(&store, "session-a9f2", "session-a9f2", "", "");
+    // Session room directly under the root `h-aware` → unnamed (labelled by its
+    // live work title) and a top-level branch surfaced as an "other channel".
+    chan(&store, "session-a9f2", "session-a9f2", "", "h-aware");
     status(
         &store,
         "pk-codex",
@@ -421,6 +467,56 @@ fn other_active_channels_use_status_titles_without_repeating_old_activity() {
         later.is_none(),
         "old active channel state must not repeat without new activity; got: {later:?}"
     );
+}
+
+#[test]
+fn other_active_channels_are_scoped_to_this_project() {
+    let store = Store::open_memory().unwrap();
+    // Opaque ids distinct from human names (a `name == id` channel reads as
+    // unnamed). THIS project: root `nmp` with a top-level branch `epic123`.
+    chan(&store, "h-nmp", "nmp", "", "");
+    chan(&store, "h-epic123", "epic123", "", "h-nmp");
+    status(&store, "pk-a", "a", "h-epic123", "planning the epic", true, 980);
+    // A DIFFERENT project: its own root `other-proj`, also active.
+    chan(&store, "h-other", "other-proj", "", "");
+    status(&store, "pk-b", "b", "h-other", "unrelated work", true, 980);
+    // An orphan room whose ancestry can't be traced to any root (parent
+    // un-materialized) → must be dropped, never leaked.
+    chan(&store, "h-orphan", "orphan", "", "ghost-parent");
+    status(&store, "pk-c", "c", "h-orphan", "ghost work", true, 980);
+
+    // Viewer sits on the project root `nmp`.
+    let block = super::render_fabric_view(&store, "h-nmp", NOW, "", "", LOCAL_HOST);
+    // Our own top-level branch shows…
+    assert_has(&block, "- #epic123 [1 member]");
+    // …but the other project's root and the untraceable orphan never do.
+    assert_lacks(&block, "other-proj");
+    assert_lacks(&block, "unrelated work");
+    assert_lacks(&block, "orphan");
+    assert_lacks(&block, "ghost work");
+}
+
+#[test]
+fn other_channels_exclude_the_branch_the_viewer_is_in() {
+    let store = Store::open_memory().unwrap();
+    chan(&store, "h-nmp", "nmp", "", "");
+    chan(&store, "h-epic123", "epic123", "", "h-nmp");
+    chan(&store, "h-epic999", "epic999", "", "h-nmp");
+    // A deeper room under the SIBLING branch epic999 — not a top-level branch, so
+    // it must not surface as an "other channel" (only epic999 itself does).
+    chan(&store, "h-e999deep", "e999-deep", "", "h-epic999");
+    status(&store, "pk-a", "a", "h-epic999", "sibling work", true, 980);
+    status(&store, "pk-b", "b", "h-e999deep", "deep work", true, 980);
+
+    // Viewer is inside the epic123 branch.
+    let block = super::render_fabric_view(&store, "h-epic123", NOW, "", "", LOCAL_HOST);
+    // The sibling top-level branch shows; the viewer's own branch does not (the
+    // `Channel:` header names it, but it is never a "[N member]" channel line)…
+    assert_has(&block, "- #epic999 [1 member]");
+    assert_lacks(&block, "#epic123 [");
+    // …and the room nested under epic999 is not a top-level "other channel".
+    assert_lacks(&block, "deep work");
+    assert_lacks(&block, "e999-deep");
 }
 
 #[test]
