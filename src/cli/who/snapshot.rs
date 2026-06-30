@@ -114,10 +114,12 @@ pub fn load_who_snapshot(
     let local_host = slugify_host(daemon_host);
 
     // Pubkeys this daemon signs as — used to drop our own relay echoes from the
-    // peer set so a local session isn't double-counted as a remote one.
+    // peer set so a local session isn't double-counted as a remote one. A read
+    // failure here would empty the self set and render our OWN sessions as remote
+    // peers, so fail loud rather than mislabel.
     let my_pubkeys: std::collections::HashSet<String> = store
         .list_identity_pubkeys()
-        .unwrap_or_default()
+        .context("who snapshot: failed to load this daemon's identity pubkeys (self set)")?
         .into_iter()
         .collect();
 
@@ -126,7 +128,11 @@ pub fn load_who_snapshot(
         std::collections::BTreeMap::new();
 
     // ── local sessions on this machine ─────────────────────────────────────────
-    for s in store.list_alive_sessions().unwrap_or_default() {
+    // A read failure must error, not silently render "no local sessions".
+    for s in store
+        .list_alive_sessions()
+        .context("who snapshot: failed to list live local sessions")?
+    {
         let scope = s.channel_h.clone();
         if current_project.map(|p| p == scope).unwrap_or(true) {
             rows.push(local_row(store, &s, &local_host, now));
@@ -143,7 +149,7 @@ pub fn load_who_snapshot(
     // become rows, root channels out of scope feed the other-projects summary.
     let mut channels: Vec<String> = store
         .list_channels()
-        .unwrap_or_default()
+        .context("who snapshot: failed to list channels")?
         .into_iter()
         .map(|c| c.channel_h)
         .collect();
@@ -153,7 +159,11 @@ pub fn load_who_snapshot(
         }
     }
     for ch in &channels {
-        for st in store.live_status_for_channel(ch, now).unwrap_or_default() {
+        // A failed status read must not silently drop a channel's peers.
+        let live = store
+            .live_status_for_channel(ch, now)
+            .with_context(|| format!("who snapshot: failed to read live status for {ch}"))?;
+        for st in live {
             if my_pubkeys.contains(&st.pubkey) {
                 continue;
             }
@@ -170,12 +180,19 @@ pub fn load_who_snapshot(
     let other_projects = other_agents
         .into_iter()
         .map(|(project, agents)| {
-            let about = store
-                .get_channel(&project)
-                .ok()
-                .flatten()
-                .map(|c| c.about)
-                .filter(|a| !a.is_empty());
+            // not-found → no `about`; a genuine read error is logged loudly
+            // rather than silently swallowed into the same None.
+            let about = match store.get_channel(&project) {
+                Ok(c) => c.map(|c| c.about).filter(|a| !a.is_empty()),
+                Err(e) => {
+                    tracing::error!(
+                        channel = %project,
+                        error = ?e,
+                        "who snapshot: get_channel failed for other-project summary"
+                    );
+                    None
+                }
+            };
             // Show the project's human name; the raw id is only a fallback.
             let display = display_name(store, &project);
             let agents: Vec<String> = agents.into_iter().collect();
@@ -229,16 +246,34 @@ pub fn load_who_snapshot(
 fn work_root_for(store: &Store, scope: &str) -> String {
     let mut cur = scope.to_string();
     for _ in 0..16 {
-        match store.channel_parent(&cur).ok().flatten() {
-            Some(parent) if !parent.is_empty() => cur = parent,
-            _ => break,
+        match store.channel_parent(&cur) {
+            Ok(Some(parent)) if !parent.is_empty() => cur = parent,
+            Ok(_) => break,
+            Err(e) => {
+                tracing::error!(
+                    channel = %cur,
+                    error = ?e,
+                    "who snapshot: channel_parent lookup failed walking work-root"
+                );
+                break;
+            }
         }
     }
     cur
 }
 
 fn is_root_channel(store: &Store, scope: &str) -> bool {
-    store.is_root_channel(scope).unwrap_or(true)
+    match store.is_root_channel(scope) {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::error!(
+                channel = %scope,
+                error = ?e,
+                "who snapshot: is_root_channel lookup failed; assuming root"
+            );
+            true
+        }
+    }
 }
 
 /// Build a local-session row. Title/activity/busy come from the agent's own

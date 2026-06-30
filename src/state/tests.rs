@@ -21,7 +21,9 @@ fn reg(harness: &str, ext: &str, channel: &str) -> RegisterSession {
 #[test]
 fn canonical_id_stable_across_external_id_rotation() {
     let s = Store::open_memory().unwrap();
-    let canonical = s.register_session(&reg("claude-code", "ext-A", "h1")).unwrap();
+    let canonical = s
+        .register_session(&reg("claude-code", "ext-A", "h1"))
+        .unwrap();
     // A rotated harness id repointed onto the same canonical session.
     s.put_alias("claude-code", "resume", "ext-B", &canonical, 1500)
         .unwrap();
@@ -241,7 +243,8 @@ fn channels_root_vs_subchannel() {
 fn channel_id_for_name_resolves_within_parent() {
     let s = Store::open_memory().unwrap();
     // Opaque id, human name "support" under project "proj".
-    s.upsert_channel("ab12cd34", "support", "", "proj", 10).unwrap();
+    s.upsert_channel("ab12cd34", "support", "", "proj", 10)
+        .unwrap();
     assert_eq!(
         s.channel_id_for_name("proj", "support").unwrap().as_deref(),
         Some("ab12cd34")
@@ -249,13 +252,17 @@ fn channel_id_for_name_resolves_within_parent() {
     // Unknown name → None.
     assert_eq!(s.channel_id_for_name("proj", "nope").unwrap(), None);
     // Same name under a DIFFERENT parent is a distinct channel (allowed).
-    s.upsert_channel("ff99ff99", "support", "", "other", 10).unwrap();
+    s.upsert_channel("ff99ff99", "support", "", "other", 10)
+        .unwrap();
     assert_eq!(
-        s.channel_id_for_name("other", "support").unwrap().as_deref(),
+        s.channel_id_for_name("other", "support")
+            .unwrap()
+            .as_deref(),
         Some("ff99ff99")
     );
     // Legacy duplicate (parent, name): most-recently-updated wins.
-    s.upsert_channel("zz000000", "support", "", "proj", 20).unwrap();
+    s.upsert_channel("zz000000", "support", "", "proj", 20)
+        .unwrap();
     assert_eq!(
         s.channel_id_for_name("proj", "support").unwrap().as_deref(),
         Some("zz000000")
@@ -280,7 +287,10 @@ fn identities_bind_and_resolve() {
     .unwrap();
     s.bind_session_identity("derived", &sid, "native-1", true)
         .unwrap();
-    let r = s.resolve_identity_for_channel("base", "h1").unwrap().unwrap();
+    let r = s
+        .resolve_identity_for_channel("base", "h1")
+        .unwrap()
+        .unwrap();
     assert_eq!(r.session_id, sid);
     assert_eq!(r.native_id, "native-1");
     assert!(r.alive);
@@ -297,4 +307,31 @@ fn project_roots_roundtrip() {
     assert_eq!(s.project_root("h1").unwrap().unwrap(), "/abs/path");
     s.upsert_project_root("h1", "/abs/other", 2).unwrap();
     assert_eq!(s.project_root("h1").unwrap().unwrap(), "/abs/other");
+}
+
+#[test]
+fn channel_human_name_distinguishes_root_slug_from_unnamed_session_room() {
+    let chan = |channel_h: &str, name: &str, parent: &str| Channel {
+        channel_h: channel_h.into(),
+        name: name.into(),
+        about: String::new(),
+        parent: parent.into(),
+        created_at: 1,
+        updated_at: 1,
+    };
+    // Root project: slug is both id and name → that slug IS the human label.
+    assert_eq!(
+        chan("tenex-edge", "tenex-edge", "").human_name(),
+        Some("tenex-edge")
+    );
+    // Named subchannel: name distinct from its opaque id → named.
+    assert_eq!(
+        chan("ab12cd34", "support", "proj").human_name(),
+        Some("support")
+    );
+    // Session room: name defaulted to its opaque id under a parent → unnamed.
+    assert_eq!(chan("session-x1", "session-x1", "proj").human_name(), None);
+    // Empty name → always unnamed (covers the junk empty-id row too).
+    assert_eq!(chan("", "", "").human_name(), None);
+    assert_eq!(chan("ab12cd34", "   ", "proj").human_name(), None);
 }

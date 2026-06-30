@@ -12,12 +12,23 @@ pub(super) fn channel_status_map(
     channel: &str,
     now: u64,
 ) -> std::collections::HashMap<String, DerivedStatus> {
-    store
-        .live_status_for_channel(channel, now)
-        .unwrap_or_default()
-        .into_iter()
-        .map(|s| (s.pubkey.clone(), derive_from_status(&s, now)))
-        .collect()
+    match store.live_status_for_channel(channel, now) {
+        Ok(rows) => rows
+            .into_iter()
+            .map(|s| (s.pubkey.clone(), derive_from_status(&s, now)))
+            .collect(),
+        // A read failure must not silently render as an empty channel ("no
+        // agents present"): log loudly and return empty so the gap is visible
+        // in the logs rather than masquerading as a quiet channel.
+        Err(e) => {
+            tracing::error!(
+                channel = %channel,
+                error = ?e,
+                "awareness: live status read failed; channel may falsely appear empty"
+            );
+            std::collections::HashMap::new()
+        }
+    }
 }
 
 /// Project a relay-confirmed [`Status`] row into the shared [`DerivedStatus`]

@@ -57,17 +57,24 @@ async fn ensure_joinable(
         );
     }
 
-    let occupied = state.with_store(|s| {
-        s.list_alive_sessions()
-            .unwrap_or_default()
-            .into_iter()
-            .find(|other| {
-                other.session_id != rec.session_id
-                    && other.agent_pubkey == rec.agent_pubkey
-                    && s.is_session_joined_channel(&other.session_id, channel_h)
-                        .unwrap_or(other.channel_h == channel_h)
-            })
-    });
+    // A store error here MUST fail the switch — never read as "no occupant",
+    // which would let a second instance of the same agent silently barge into a
+    // channel another instance is already working in.
+    let occupied = state.with_store(|s| -> Result<Option<crate::state::Session>> {
+        for other in s
+            .list_alive_sessions()
+            .context("ensure_joinable: listing live sessions for occupancy check")?
+        {
+            if other.session_id != rec.session_id
+                && other.agent_pubkey == rec.agent_pubkey
+                && s.is_session_joined_channel(&other.session_id, channel_h)
+                    .context("ensure_joinable: checking channel occupancy")?
+            {
+                return Ok(Some(other));
+            }
+        }
+        Ok(None)
+    })?;
     if occupied.is_some() {
         anyhow::bail!(
             "Another instance of you is already active in #{channel_h}, so you cannot join it. \
@@ -159,7 +166,7 @@ pub(in crate::daemon::server) async fn rpc_channels_switch(
         &rec.agent_pubkey,
         &new_channel,
         true,
-    );
+    )?;
     Ok(serde_json::json!({
         "session_id": rec.session_id,
         "prev_channel": prev_channel,
@@ -177,27 +184,57 @@ pub(in crate::daemon::server) fn set_active_session_channel(
     agent_pubkey: &str,
     new_channel: &str,
     leave_previous: bool,
-) {
-    state.with_store(|s| {
-        if leave_previous {
-            if let Some(prev) = s
-                .get_session(session_id)
-                .ok()
-                .flatten()
+) -> Result<()> {
+    // Every write here is part of one logical "this session now publishes into
+    // `new_channel`" move. A swallowed error would leave the session and its
+    // identity pointing at different channels — mentions delivered to a channel
+    // the agent isn't actually focused on. Fail loud so the switch/create RPC
+    // reports the failure instead of silently half-applying it.
+    state.with_store(|s| -> Result<()> {
+        // No store transaction is available here, so do the fallible reads/checks
+        // FIRST and perform the mutations only after they all pass: a failure must
+        // not leave the session/identity half-moved (left/joined/repointed but the
+        // identity row stale, or vice versa).
+        //
+        // A live session that is switching channels MUST have a bound identity
+        // row. `Ok(None)` means the identity vanished out from under an active
+        // session — a real invariant break, not a benign miss — so bail BEFORE any
+        // mutation rather than skip the identity repoint.
+        let prev_to_leave = if leave_previous {
+            s.get_session(session_id)
+                .context("set_active_session_channel: reading current session")?
                 .map(|r| r.channel_h)
                 .filter(|h| h != new_channel)
-            {
-                s.leave_session_channel(session_id, &prev).ok();
-            }
+        } else {
+            None
+        };
+        let mut idn = s
+            .get_identity(agent_pubkey)
+            .context("set_active_session_channel: loading identity")?
+            .with_context(|| {
+                format!(
+                    "set_active_session_channel: no identity row for live session \
+                     {session_id} (agent {agent_pubkey}); refusing to silently skip the \
+                     identity channel move"
+                )
+            })?;
+        idn.channel_h = new_channel.to_string();
+        idn.session_id = session_id.to_string();
+        idn.alive = true;
+
+        // Mutations — every fallible precondition above has already passed.
+        if let Some(prev) = prev_to_leave {
+            s.leave_session_channel(session_id, &prev)
+                .context("set_active_session_channel: leaving previous channel")?;
         }
-        s.join_session_channel(session_id, new_channel, now_secs()).ok();
-        s.set_session_channel(session_id, new_channel).ok();
-        if let Some(mut idn) = s.get_identity(agent_pubkey).ok().flatten() {
-            idn.channel_h = new_channel.to_string();
-            idn.session_id = session_id.to_string();
-            idn.alive = true;
-            s.upsert_identity(&idn).ok();
-        }
-    });
+        s.join_session_channel(session_id, new_channel, now_secs())
+            .context("set_active_session_channel: joining new channel")?;
+        s.set_session_channel(session_id, new_channel)
+            .context("set_active_session_channel: repointing active channel")?;
+        s.upsert_identity(&idn)
+            .context("set_active_session_channel: persisting identity channel move")?;
+        Ok(())
+    })?;
     state.outbox_notify.notify_waiters();
+    Ok(())
 }

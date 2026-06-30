@@ -214,6 +214,19 @@ pub fn opaque_group_id() -> String {
     pk.chars().take(8).collect()
 }
 
+/// True when `s` has the exact shape minted by [`opaque_group_id`]: 8
+/// lowercase-hex chars (`[0-9a-f]{8}`). Used at the ONE shared channel resolver
+/// to discriminate an already-RESOLVED opaque channel id from a human channel
+/// NAME: an 8-hex value that misses the local cache is a not-yet-materialized id
+/// (a relay race), never a name to mint a literal-named channel for. A human
+/// handle that happens to be exactly 8 lowercase-hex chars is astronomically
+/// unlikely, so the heuristic is safe.
+pub fn is_opaque_group_id(s: &str) -> bool {
+    s.len() == 8
+        && s.bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
 /// Deterministic id for a per-session room (issue #6): `session-` followed by
 /// six `[a-z0-9]` chars (base36) derived from a stable hash of the session's
 /// `anchor` (resume token / harness id / pid).
@@ -277,6 +290,19 @@ mod tests {
         let id = opaque_group_id();
         assert_eq!(id.len(), 8, "got {id}");
         assert!(id.chars().all(|c| c.is_ascii_hexdigit()), "non-hex id {id}");
+    }
+
+    #[test]
+    fn is_opaque_group_id_discriminates_ids_from_names() {
+        assert!(is_opaque_group_id("2f1cd36f"));
+        assert!(is_opaque_group_id(&opaque_group_id()));
+        // Genuine human handles are not the opaque shape.
+        assert!(!is_opaque_group_id("backlog-work"));
+        assert!(!is_opaque_group_id("planning")); // 8 chars but not all hex
+        assert!(!is_opaque_group_id("2F1CD36F")); // uppercase hex is not our shape
+        assert!(!is_opaque_group_id("2f1cd3")); // too short
+        assert!(!is_opaque_group_id("2f1cd36ff")); // too long
+        assert!(!is_opaque_group_id(""));
     }
 
     #[test]

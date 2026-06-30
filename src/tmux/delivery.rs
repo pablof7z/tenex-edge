@@ -72,7 +72,15 @@ async fn collect_pending_prompt(
         .with_store(|s| crate::injection::render_tmux_mention(s, &chat_rows, &whitelisted, now));
     let Some(text) = rendered else {
         // Defensive: nothing to paste though rows were claimed — give them back.
-        state.with_store(|s| s.reenqueue_pending(&chat_ids, &rec.session_id).ok());
+        // If the rollback itself fails the rows stay `delivered` and the mention
+        // is silently lost, so surface that loudly rather than swallow it.
+        if let Err(e) = state.with_store(|s| s.reenqueue_pending(&chat_ids, &rec.session_id)) {
+            tracing::error!(
+                session_id = %rec.session_id,
+                error = %e,
+                "failed to re-enqueue claimed-but-unrendered inbox rows; mention may be lost"
+            );
+        }
         return Ok(None);
     };
 
@@ -93,7 +101,18 @@ pub async fn inject_pending_messages_pub(
     };
 
     if let Err(e) = paste_text(pane_id, &prompt.text).await {
-        state.with_store(|s| s.reenqueue_pending(&prompt.chat_ids, &rec.session_id).ok());
+        // Roll the claimed rows back to `pending` so a pane that died mid-flight
+        // doesn't eat the message. If the rollback fails the rows stay
+        // `delivered` and are never retried — that defeats the guarantee, so log
+        // it loudly instead of dropping it with `.ok()`.
+        if let Err(re) = state.with_store(|s| s.reenqueue_pending(&prompt.chat_ids, &rec.session_id))
+        {
+            tracing::error!(
+                session_id = %rec.session_id,
+                error = %re,
+                "failed to roll back claimed inbox rows after paste failure; mention may be lost"
+            );
+        }
         return Err(e);
     }
     // Record exactly what we pasted so the resulting user-prompt-submit hook is

@@ -235,6 +235,33 @@ async fn hook_dispatch(
         .filter(|s| !s.is_empty())
         .map(str::to_string);
 
+    // Turn hooks resolve identity from `sid`; an empty `sid` skips fabric
+    // injection entirely. When the harness DID send a session-id field but it
+    // resolved empty (malformed payload), that is a silent awareness drop for
+    // the whole turn — emit a loud forensic note mirroring session-start's
+    // `missing-session-id`, rather than a quiet no-op. (session-start has its own
+    // dedicated handling below, so it is excluded here.)
+    if sid.is_empty()
+        && matches!(hook_type.as_str(), "user-prompt-submit" | "post-tool-use")
+        && obj
+            .map(|o| host.session_id_fields.iter().any(|f| o.contains_key(*f)))
+            .unwrap_or(false)
+    {
+        eprintln!(
+            "[tenex-edge] session-id field(s) present but empty for host {} ({:?}); \
+             fabric injection skipped this turn",
+            host.name, host.session_id_fields
+        );
+        call_log.note(
+            "empty-session-id",
+            serde_json::json!({
+                "host": host.name,
+                "hook_type": hook_type,
+                "fields_tried": host.session_id_fields,
+            }),
+        );
+    }
+
     match hook_type.as_str() {
         "session-start" => {
             // PID to watch: an explicit `pid`/`watch_pid` in the payload (set by

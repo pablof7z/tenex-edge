@@ -243,8 +243,7 @@ fn operator_kind9_to_offline_local_agent_spawns_and_injects() {
     wait_for_injected_log(&log, &body);
 
     let store = Store::open(&home.store_path()).unwrap();
-    let pane_id =
-        tmux_pane_for_session(&store, &rec.session_id).expect("spawned tmux endpoint");
+    let pane_id = tmux_pane_for_session(&store, &rec.session_id).expect("spawned tmux endpoint");
     kill_pane(&pane_id);
     stop_daemon(&home);
 }

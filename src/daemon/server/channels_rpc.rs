@@ -261,7 +261,7 @@ Switch into it instead: tenex-edge channels switch {}",
     // Unlike `channels switch`, this preserves the parent as a passive joined
     // channel so the creator can still see and receive mentions from it.
     let switched = if let Some(rec) = &creator_rec {
-        set_active_session_channel(state, &rec.session_id, &rec.agent_pubkey, &child_h, false);
+        set_active_session_channel(state, &rec.session_id, &rec.agent_pubkey, &child_h, false)?;
         true
     } else {
         false

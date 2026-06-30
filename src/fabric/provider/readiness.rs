@@ -33,6 +33,12 @@ fn ensure_channel_ready_inner<'a>(
             return ChannelGate::Degraded;
         }
 
+        // Normalize: Some("") is the DB's sentinel for "known root channel" but
+        // is meaningless as a provisioning parent. Treat it as None (no parent)
+        // so callers that read channel_parent() without filtering cannot feed an
+        // empty h into group creation, even on the recursive path.
+        let parent_hint = ctx.parent_hint.filter(|h| !h.is_empty());
+
         let (is_ready, inflight) = provider.readiness.check(ctx.channel, ctx.expect_member);
         if is_ready {
             return ChannelGate::Ready;
@@ -49,12 +55,14 @@ fn ensure_channel_ready_inner<'a>(
         };
         let mgmt_pubkey = mgmt_keys.public_key().to_hex();
 
-        let parent_admins: Vec<String> = if let Some(parent) = ctx.parent_hint {
-            let grandparent = provider.with_store(|s| s.channel_parent(parent).unwrap_or(None));
+        let parent_admins: Vec<String> = if let Some(parent) = parent_hint {
+            let grandparent = provider.with_store(|s| s.channel_parent(parent).unwrap_or(None))
+                .filter(|p| !p.is_empty());
             let parent_ctx = ChannelCtx {
                 channel: parent,
                 expect_member: &mgmt_pubkey,
                 parent_hint: grandparent.as_deref(),
+                name: None,
             };
             let parent_gate = ensure_channel_ready_inner(provider, parent_ctx, depth + 1).await;
             if matches!(parent_gate, ChannelGate::Degraded) {
@@ -76,33 +84,37 @@ fn ensure_channel_ready_inner<'a>(
             vec![]
         };
 
-        let (group_exists, roles, members) = provider.fetch_group_state(ctx.channel).await;
+        // A relay fetch FAILURE must never be read as "group absent" — that would
+        // drive spurious group re-creation (fabrication-by-omission). Degrade
+        // loudly without attempting to create anything.
+        let (group_exists, roles, members) = match provider.try_fetch_group_state(ctx.channel).await
+        {
+            Ok(state) => state,
+            Err(e) => {
+                tracing::error!(
+                    channel = ctx.channel,
+                    error = %format!("{e:#}"),
+                    "ensure_channel_ready: relay fetch failed — degrading without attempting creation (no fabrication-by-omission)"
+                );
+                return ChannelGate::Degraded;
+            }
+        };
         let mut repaired = false;
 
         if !group_exists {
-            let created = if let Some(parent) = ctx.parent_hint {
-                let name = provider.with_store(|s| {
-                    s.get_channel(ctx.channel)
-                        .ok()
-                        .flatten()
-                        .map(|c| c.name)
-                        .unwrap_or_default()
-                });
-                let name = if name.is_empty() { ctx.channel } else { &name };
-                let ok = provider
+            let created = if let Some(parent) = parent_hint {
+                // The subgroup's display NAME rides on the create publish (9002
+                // metadata) so the relay's authored kind:39000 carries it. It is
+                // NEVER stashed in `relay_channels` first — that cache is fed only
+                // by materializing relay events. An unnamed session room (no name
+                // from the caller) names itself after its own id.
+                let name = ctx.name.filter(|n| !n.is_empty()).unwrap_or(ctx.channel);
+                provider
                     .nip29_create_subgroup(ctx.channel, name, parent)
-                    .await;
-                if ok {
-                    // Materialize the just-created subgroup's metadata locally; its
-                    // parent is non-empty (this is a task/session channel). Ownership
-                    // is relay-derived (admin membership), recorded below.
-                    provider.with_store(|s| {
-                        s.upsert_channel(ctx.channel, name, "", parent, now_secs())
-                            .ok();
-                    });
-                }
-                ok
+                    .await
             } else {
+                // A root group names itself after its slug (group_lock_closed emits
+                // `["name", slug]`); the relay's kind:39000 echoes it back.
                 let ok = match crate::fabric::nip29::lifecycle::group_create(ctx.channel) {
                     Ok(b) => {
                         provider
@@ -113,44 +125,60 @@ fn ensure_channel_ready_inner<'a>(
                 };
                 if ok {
                     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                    let locked =
-                        match crate::fabric::nip29::lifecycle::group_lock_closed(ctx.channel) {
-                            Ok(b) => {
-                                provider
-                                    .publish_group_management(b, &mgmt_keys, "9002 lock-closed")
-                                    .await
-                            }
-                            Err(_) => false,
-                        };
-                    if locked {
-                        // Materialize the root channel locally. Ownership is
-                        // relay-derived (admin membership materialized below).
-                        provider.with_store(|s| {
-                            s.upsert_channel(ctx.channel, "", "", "", now_secs()).ok();
-                        });
+                    if let Ok(b) = crate::fabric::nip29::lifecycle::group_lock_closed(ctx.channel) {
+                        provider
+                            .publish_group_management(b, &mgmt_keys, "9002 lock-closed")
+                            .await;
                     }
                 }
                 ok
             };
 
-            if !created {
+            if created {
+                repaired = true;
+                // Enter the channel into the cache by reading back the relay's OWN
+                // kind:39000 (await the echo) — never a local optimistic write. If
+                // it never materializes, fail loud and degrade.
+                let mut materialized = false;
+                for attempt in 0..6u32 {
+                    if provider.fetch_and_materialize_channel(ctx.channel).await {
+                        materialized = true;
+                        break;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(
+                        250 * (attempt as u64 + 1).min(3),
+                    ))
+                    .await;
+                }
+                if !materialized {
+                    eprintln!(
+                        "[daemon] ensure_channel_ready: kind:39000 for {:?} did not materialize \
+                         after create; degrading (no local fabrication)",
+                        ctx.channel
+                    );
+                    return ChannelGate::Degraded;
+                }
+                for attempt in 0..6u32 {
+                    let roles_now = provider.fetch_group_roles(ctx.channel).await;
+                    if roles_now.get(&mgmt_pubkey).map(String::as_str) == Some("admin") {
+                        break;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(
+                        250 * (attempt as u64 + 1).min(3),
+                    ))
+                    .await;
+                }
+            } else if !provider.fetch_and_materialize_channel(ctx.channel).await {
+                // Creation was rejected AND the group is absent from the relay —
+                // nothing to provision against; give up.
                 eprintln!(
                     "[daemon] ensure_channel_ready: failed to create {:?}",
                     ctx.channel
                 );
                 return ChannelGate::Degraded;
             }
-            repaired = true;
-            for attempt in 0..6u32 {
-                let roles_now = provider.fetch_group_roles(ctx.channel).await;
-                if roles_now.get(&mgmt_pubkey).map(String::as_str) == Some("admin") {
-                    break;
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(
-                    250 * (attempt as u64 + 1).min(3),
-                ))
-                .await;
-            }
+            // else: group pre-existed on the relay (create rejected because it was
+            // already there); fall through to membership / admin checks.
         } else if roles.get(&mgmt_pubkey).map(String::as_str) != Some("admin") {
             let granted = provider
                 .try_grant_mgmt_admin_via_user_nsec(ctx.channel, &mgmt_pubkey)
@@ -163,6 +191,14 @@ fn ensure_channel_ready_inner<'a>(
                 );
                 return ChannelGate::Degraded;
             }
+        }
+
+        // SOOT guarantee: a ready channel must be present in `relay_channels` from
+        // the relay's OWN kind:39000 — not a local optimistic write. A freshly
+        // created group was already materialized above; a pre-existing group hit by
+        // a cold daemon cache is read back from the relay here (best-effort).
+        if provider.with_store(|s| s.get_channel(ctx.channel).ok().flatten().is_none()) {
+            provider.fetch_and_materialize_channel(ctx.channel).await;
         }
 
         let mut invariant_ok = true;
@@ -181,8 +217,15 @@ fn ensure_channel_ready_inner<'a>(
                 }
                 if confirm_role_grant(provider, ctx.channel, pk, true).await {
                     provider.with_store(|s| {
-                        s.upsert_channel_member(ctx.channel, pk, "admin", now_secs())
-                            .ok();
+                        if let Err(e) = s.upsert_channel_member(ctx.channel, pk, "admin", now_secs())
+                        {
+                            tracing::error!(
+                                channel = ctx.channel,
+                                pubkey = pk.as_str(),
+                                error = %e,
+                                "ensure_channel_ready: local admin mirror write failed after confirmed relay grant — cache divergence"
+                            );
+                        }
                     });
                     repaired = true;
                 } else {
@@ -211,8 +254,16 @@ fn ensure_channel_ready_inner<'a>(
         {
             if confirm_role_grant(provider, ctx.channel, ctx.expect_member, false).await {
                 provider.with_store(|s| {
-                    s.upsert_channel_member(ctx.channel, ctx.expect_member, "member", now_secs())
-                        .ok();
+                    if let Err(e) =
+                        s.upsert_channel_member(ctx.channel, ctx.expect_member, "member", now_secs())
+                    {
+                        tracing::error!(
+                            channel = ctx.channel,
+                            pubkey = ctx.expect_member,
+                            error = %e,
+                            "ensure_channel_ready: local member mirror write failed after confirmed relay grant — cache divergence"
+                        );
+                    }
                 });
                 repaired = true;
             } else {
@@ -233,8 +284,16 @@ fn ensure_channel_ready_inner<'a>(
                     .map(String::as_str)
                     .unwrap_or("member");
                 provider.with_store(|s| {
-                    s.upsert_channel_member(ctx.channel, ctx.expect_member, role, now_secs())
-                        .ok();
+                    if let Err(e) =
+                        s.upsert_channel_member(ctx.channel, ctx.expect_member, role, now_secs())
+                    {
+                        tracing::error!(
+                            channel = ctx.channel,
+                            pubkey = ctx.expect_member,
+                            error = %e,
+                            "ensure_channel_ready: local member mirror sync failed — cache divergence"
+                        );
+                    }
                 });
             }
         }
@@ -266,14 +325,29 @@ async fn confirm_role_grant(
         } else {
             provider.nip29_add_member_outcome(channel, pubkey).await
         };
-        let (_, roles, members) = provider.fetch_group_state(channel).await;
-        let present = if want_admin {
-            roles.get(pubkey).map(String::as_str) == Some("admin")
-        } else {
-            members.contains(pubkey) || roles.contains_key(pubkey)
-        };
-        if present || (attempt > 0 && outcome.is_applied()) {
-            return true;
+        // Confirm ONLY on a relay state we actually OBSERVED. A read-back failure
+        // must never be promoted to "grant confirmed" (the old `outcome.is_applied()`
+        // path did exactly that): log loud, then retry and ultimately degrade.
+        match provider.try_fetch_group_state(channel).await {
+            Ok((_, roles, members)) => {
+                let present = if want_admin {
+                    roles.get(pubkey).map(String::as_str) == Some("admin")
+                } else {
+                    members.contains(pubkey) || roles.contains_key(pubkey)
+                };
+                if present {
+                    return true;
+                }
+            }
+            Err(e) => {
+                tracing::error!(
+                    channel,
+                    pubkey,
+                    attempt,
+                    error = %e,
+                    "confirm_role_grant: relay read-back failed; cannot confirm grant — retrying then degrading"
+                );
+            }
         }
         if outcome.is_rejected() {
             return false;

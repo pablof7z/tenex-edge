@@ -1,5 +1,7 @@
 use super::*;
 
+mod stale;
+
 #[derive(serde::Deserialize, Default)]
 pub(in crate::daemon::server) struct SessionStartParams {
     agent: String,
@@ -58,6 +60,29 @@ fn session_pane(s: &Store, session_id: &str) -> Option<String> {
         .map(|a| a.external_id)
 }
 
+/// Roll back a half-started session before bailing out of `rpc_session_start`:
+/// release the reserved signer, mark the session ROW dead, and mark its bound
+/// identity dead, so a start that fails after the session row was written leaves
+/// no ghost-alive session/ordinal behind. Both death-marks are logged loudly (a
+/// failed mark would otherwise leave a stale alive row with no engine).
+fn abort_session_start(state: &Arc<DaemonState>, session_id: &str) {
+    state.release_session_signer(session_id);
+    if let Err(e) = state.with_store(|s| s.mark_dead(session_id)) {
+        tracing::error!(
+            session = %session_id,
+            error = %e,
+            "failed to mark session row dead while aborting session start (ghost-alive row may remain)"
+        );
+    }
+    if let Err(e) = state.with_store(|s| s.mark_identity_dead_for_session(session_id)) {
+        tracing::error!(
+            session = %session_id,
+            error = %e,
+            "failed to mark identity dead while aborting session start"
+        );
+    }
+}
+
 pub(in crate::daemon::server) async fn rpc_session_start(
     state: &Arc<DaemonState>,
     params: &serde_json::Value,
@@ -91,9 +116,14 @@ pub(in crate::daemon::server) async fn rpc_session_start(
     // name-vs-id double-create: every downstream consumer shares one id, and the
     // literal-name subgroup is never minted.
     let mut project = match p.channel.clone().filter(|g| !g.is_empty()) {
-        Some(name) => {
-            super::resolve_channel(state, &work_root, &name, Some(&p.agent), true).await?
-        }
+        // The relay must provision/confirm the named channel before the session can
+        // be scoped to it. A degraded resolve used to fail OPEN to the work-root,
+        // silently relocating the agent out of `launch --channel X` into the project
+        // root; instead propagate the error so the launch command fails visibly. No
+        // fabrication, no silent re-scope.
+        Some(name) => super::resolve_channel(state, &work_root, &name, Some(&p.agent), true)
+            .await
+            .with_context(|| format!("resolving launch channel {name:?}"))?,
         None => work_root.clone(),
     };
     let rel_cwd = crate::project::rel_cwd(&cwd);
@@ -223,44 +253,14 @@ pub(in crate::daemon::server) async fn rpc_session_start(
         let new_work_root = room_parent
             .clone()
             .unwrap_or_else(|| state.with_store(|s| work_root_for_scope(s, &project)));
-        let alive = state.with_store(|s| s.list_alive_sessions().unwrap_or_default());
-        let mut stale_ids: Vec<String> = Vec::new();
-        for rec in &alive {
-            if rec.session_id == session_id || rec.agent_slug != p.agent {
-                continue;
-            }
-            let same_work_root =
-                state.with_store(|s| work_root_for_scope(s, &rec.channel_h)) == new_work_root;
-            if !same_work_root {
-                continue;
-            }
-            let same_pid = p.watch_pid.is_some() && rec.child_pid == p.watch_pid;
-            let same_pane = tmux_pane.as_deref().is_some_and(|pane| {
-                state
-                    .with_store(|s| session_pane(s, &rec.session_id))
-                    .as_deref()
-                    == Some(pane)
-            });
-            if same_pid || same_pane {
-                let reason = if same_pid { "same_pid" } else { "same_pane" };
-                tracing::info!(
-                    stale_session = %rec.session_id,
-                    new_session = %session_id,
-                    agent = %p.agent,
-                    reason,
-                    "cancelling stale session on harness restart"
-                );
-                state.release_session_signer(&rec.session_id);
-                stale_ids.push(rec.session_id.clone());
-            }
-        }
-        for old_id in stale_ids {
-            cancel_session(state, &old_id);
-            state.with_store(|s| {
-                s.mark_dead(&old_id).ok();
-                s.mark_identity_dead_for_session(&old_id).ok();
-            });
-        }
+        stale::cancel_stale_sessions_on_restart(
+            state,
+            &session_id,
+            &p.agent,
+            p.watch_pid,
+            tmux_pane.as_deref(),
+            &new_work_root,
+        );
     }
 
     // Select this session's ordinal identity, THEN write its row carrying that
@@ -336,67 +336,78 @@ pub(in crate::daemon::server) async fn rpc_session_start(
         );
     }
     if let Some(parent) = &room_parent {
-        // Human-initiated session: mint its per-session room under the work-root.
-        // Mark the channel in the LOCAL cache SYNCHRONOUSLY so room gates recognize
-        // it immediately, then do all relay-dependent work in the BACKGROUND
-        // (fail-open) so a slow relay never delays the engine or the first prompt.
+        // Human-initiated session: mint its per-session room under the work-root,
+        // then AWAIT the relay's kind:39000 echo before opening gates. The room
+        // enters the cache from relay truth (materialization) — never a local
+        // optimistic write. Bounded so a hung relay can't wedge session start. The
+        // room's `name` is its own id (an unnamed session room until renamed).
         if let Some(prog) = &progress {
             prog.emit("nip29", format!("minting per-session room {project}"));
         }
-        state.with_store(|s| {
-            s.upsert_channel(&project, &project, "", parent, now_secs())
-                .ok();
-        });
-        let st = state.clone();
-        let room = project.clone();
-        let par = parent.clone();
-        let name = project.clone();
         let agent_pubkey = id.pubkey_hex();
-        tokio::spawn(async move {
-            ensure_session_room(&st, &room, &name, &par, &agent_pubkey).await;
-        });
+        let provisioned = matches!(
+            tokio::time::timeout(
+                std::time::Duration::from_secs(8),
+                ensure_session_room(state, &project, &project, parent, &agent_pubkey),
+            )
+            .await,
+            Ok(true)
+        );
+        if !provisioned {
+            // The relay never confirmed the per-session room (timeout or degraded).
+            // `perSessionRooms` is on, so silently demoting to the parent project
+            // would misrepresent where the session runs against a work-root the relay
+            // never backed. Fail loud: roll back the half-started session and bail.
+            abort_session_start(state, &session_id);
+            anyhow::bail!(
+                "per-session room {project} (parent {parent}) was not provisioned on the relay; \
+                 refusing to start the session"
+            );
+        }
     } else {
         // Project / orchestration sessions: ensure the channel exists + the agent
         // is a member, bounded so a hung relay can't block session start. A
         // top-level project is the ROOT channel (parent_hint None); an explicit
         // channel scope (project != work_root) is a subgroup whose parent project
-        // is ensured first (parent_hint = work_root).
+        // is ensured first (parent_hint = work_root). A named scope was already
+        // resolved + materialized by `resolve_channel` above, so no name is
+        // injected here; `ensure_channel_ready` reads parent/name back from the
+        // relay's kind:39000, never a local stash.
         let parent_hint = if project != work_root && !work_root.is_empty() {
             Some(work_root.clone())
         } else {
             None
         };
-        // Stamp the parent relationship immediately so `work_root_for_scope`
-        // resolves without waiting for the relay's kind:39000 with the parent tag.
-        // Preserve any existing human `name`/`about` (the resolver already stamped
-        // them for a named channel) — only fall back to the id when truly unknown.
-        if let Some(parent) = &parent_hint {
-            state
-                .with_store(|s| {
-                    let existing = s.get_channel(&project).ok().flatten();
-                    let name = existing
-                        .as_ref()
-                        .map(|c| c.name.clone())
-                        .filter(|n| !n.is_empty())
-                        .unwrap_or_else(|| project.clone());
-                    let about = existing.map(|c| c.about).unwrap_or_default();
-                    s.upsert_channel(&project, &name, &about, parent, now_secs())
-                })
-                .ok();
-        }
         let open = async {
             let ctx = crate::fabric::nip29::readiness::ChannelCtx {
                 channel: &project,
                 expect_member: &id.pubkey_hex(),
                 parent_hint: parent_hint.as_deref(),
+                name: None,
             };
-            state.provider.ensure_channel_ready(ctx).await;
+            state.provider.ensure_channel_ready(ctx).await
         };
-        if tokio::time::timeout(std::time::Duration::from_secs(8), open)
-            .await
-            .is_err()
-        {
-            tracing::warn!(channel = %project, "ensure_channel_ready timed out (best-effort)");
+        // `Degraded` means the channel was NOT verified ready on the relay. Starting
+        // the engine against an unverified channel would publish into a phantom
+        // scope, so a degraded gate (or a timeout, which is equally unverified) fails
+        // the session start. Roll back the half-started session first.
+        match tokio::time::timeout(std::time::Duration::from_secs(8), open).await {
+            // Ready | Repaired: the channel is verified against relay truth.
+            Ok(crate::fabric::nip29::readiness::ChannelGate::Degraded) => {
+                abort_session_start(state, &session_id);
+                anyhow::bail!(
+                    "channel {project} was not verified ready on the relay; \
+                     refusing to start the session"
+                );
+            }
+            Ok(_) => {}
+            Err(_) => {
+                abort_session_start(state, &session_id);
+                anyhow::bail!(
+                    "ensure_channel_ready timed out for channel {project}; \
+                     refusing to start the session"
+                );
+            }
         }
     }
 
@@ -414,8 +425,7 @@ pub(in crate::daemon::server) async fn rpc_session_start(
             );
         }
         if let Err(e) = admit_transient_signer(state, &project, member_pubkey).await {
-            state.release_session_signer(&session_id);
-            state.with_store(|s| s.mark_identity_dead_for_session(&session_id).ok());
+            abort_session_start(state, &session_id);
             return Err(e);
         }
     }
