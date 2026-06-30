@@ -80,12 +80,12 @@ pub(super) fn render_self_header(v: &serde_json::Value) -> Option<String> {
         .unwrap_or(true);
     let pending = me.get("pending").and_then(|x| x.as_u64()).unwrap_or(0);
 
+    let _ = pubkey; // not shown to the agent
     let mut out = format!("You are **{label}** on **{channel}** ({host}).");
-    let _ = write!(
-        out,
-        "\npubkey {pubkey} · status {status} · member {}",
-        if is_member { "yes" } else { "no" }
-    );
+    let _ = write!(out, "\nstatus {status}");
+    if !is_member {
+        let _ = write!(out, " · not a member of this channel");
+    }
     if pending > 0 {
         let _ = write!(out, " · {pending} pending");
     }
