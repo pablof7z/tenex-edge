@@ -15,7 +15,7 @@ pub struct Cli {
 pub(super) enum Cmd {
     // session-start / session-end / turn-start / turn-check / turn-end are NOT
     // subcommands. They are hook-driven lifecycle steps invoked only through
-    // `hook --type <…>`, which parses the harness's stdin payload and calls the
+    // `harness <name> hook --type <…>`, which parses the harness's stdin payload and calls the
     // corresponding private fn (session_start_inner / session_end / turn_start /
     // turn_check / turn_end). There is no host-facing way — or need — to invoke
     // them by hand.
@@ -27,57 +27,6 @@ pub(super) enum Cmd {
         #[arg(long)]
         all_projects: bool,
         /// Keep a full-screen live view open, refreshing automatically.
-        #[arg(long)]
-        live: bool,
-    },
-    /// Stream all fabric activity as structured events, colorized.
-    Tail {
-        /// Filter to a single project (default: all projects).
-        #[arg(long)]
-        project: Option<String>,
-        /// Filter to a specific agent slug.
-        #[arg(long)]
-        agent: Option<String>,
-        /// Filter to a specific host.
-        #[arg(long)]
-        host: Option<String>,
-        /// Only show events after this time (unix timestamp or duration like "1h").
-        #[arg(long)]
-        since: Option<String>,
-        /// Number of backfill events from history (default 20; 0 = live only).
-        #[arg(long)]
-        backfill: Option<u64>,
-        /// Show only these categories (comma-separated: msg,sync,turn,stat,join,leave,sess,proj,profile).
-        #[arg(long)]
-        only: Option<String>,
-        /// Hide these categories (comma-separated).
-        #[arg(long)]
-        exclude: Option<String>,
-        /// Also show normally-hidden categories (e.g. profile).
-        #[arg(long)]
-        include: Option<String>,
-        /// Show everything including noise (profile, heartbeats).
-        #[arg(long, short = 'v')]
-        all: bool,
-        /// Compact mode: minimal output.
-        #[arg(long, short = 'q')]
-        compact: bool,
-        /// Use relative timestamps ("12s ago") instead of wall-clock.
-        #[arg(long)]
-        relative: bool,
-        /// Disable Unicode glyphs, use ASCII fallbacks.
-        #[arg(long)]
-        no_emoji: bool,
-        /// Disable ANSI colors.
-        #[arg(long)]
-        no_color: bool,
-        /// Output raw NDJSON instead of human-readable lines.
-        #[arg(long)]
-        json: bool,
-        /// Stop after history dump (do not follow live events).
-        #[arg(long)]
-        no_follow: bool,
-        /// Full-screen live TUI dashboard (follow-up feature, not yet implemented).
         #[arg(long)]
         live: bool,
     },
@@ -116,40 +65,10 @@ pub(super) enum Cmd {
         /// List options with `tenex-edge agents`.
         agent: String,
     },
-    /// Render the one-line fabric statusline for a host's status bar.
-    /// Reads the harness's statusline JSON payload on stdin (for `session_id`),
-    /// prints one line, and always exits 0 — fails open when the daemon is down
-    /// (and never spawns one).
-    Statusline {
-        /// Session id; if omitted, taken from the stdin payload.
-        #[arg(long)]
-        session: Option<String>,
-        /// Emit tmux #[style] format strings instead of ANSI codes. Required
-        /// when the output is consumed by tmux's status-format (#(...)).
-        #[arg(long)]
-        tmux: bool,
-    },
-    /// Stop the daemon and prevent hooks from restarting it.
-    /// The next non-hook command (who, chat, tail, …) clears the inhibit and
-    /// restarts the daemon automatically.
-    Stop,
-    /// Connectivity check: publish a test note to the configured relays and read it back.
-    Doctor,
-    /// Local debugging tools for hook injection and command telemetry.
-    Debug {
+    /// Hook integration and statusline for any supported agent harness.
+    Harness {
         #[command(subcommand)]
-        action: DebugAction,
-    },
-    /// Handle a hook event from any supported agent harness.
-    /// Reads hook JSON from stdin; emits context to inject into the model (if any).
-    /// Run `tenex-edge hook --host <name> --type <hook-type>`.
-    Hook {
-        /// Harness name: "claude-code", "codex", … Run `--host help` to list.
-        #[arg(long)]
-        host: String,
-        /// Hook type the harness uses: "session-start", "user-prompt-submit", etc.
-        #[arg(long = "type")]
-        hook_type: String,
+        action: HarnessAction,
     },
     /// Publish a long-form proposal (kind:30023) from this agent's session.
     Publish {
@@ -167,17 +86,6 @@ pub(super) enum Cmd {
         /// My session id; if omitted, resolved from the current directory.
         #[arg(long)]
         session: Option<String>,
-    },
-    /// TMUX control-plane commands: status, inject pending messages, spawn agent, attach.
-    /// With no subcommand, opens an interactive TUI.
-    Tmux {
-        #[command(subcommand)]
-        action: Option<TmuxAction>,
-        /// Run the bare TUI in popup mode: selecting a session switches the
-        /// underlying tmux client and exits (closing the `display-popup`),
-        /// instead of attaching inline. Used by the `M-t` quick-switcher.
-        #[arg(long, hide = true)]
-        popup: bool,
     },
     /// Launch an agent harness in a new tmux session, with tmux chrome hidden.
     Launch {
@@ -207,34 +115,61 @@ pub(super) enum Cmd {
         #[arg(last = true, value_name = "ARGS")]
         extra_args: Vec<String>,
     },
-    /// Detect local agent harnesses (Claude Code, Codex, opencode) and wire
-    /// tenex-edge's hook entries into each. With no flags, opens a picker when
-    /// interactive and selects detected harnesses in noninteractive shells.
+    /// Stop the daemon and prevent hooks from restarting it.
+    #[command(hide = true)]
+    Stop,
+    /// Local debugging tools for hook injection and command telemetry.
+    #[command(hide = true)]
+    Debug {
+        #[command(subcommand)]
+        action: DebugAction,
+    },
+    /// Detect local agent harnesses and wire tenex-edge's hook entries into each.
+    #[command(hide = true)]
     Install {
-        /// Install into every detected harness (skip the interactive picker).
         #[arg(long)]
         all: bool,
-        /// Comma-separated harness ids to install (e.g. `claude-code,codex`).
-        /// Skips the picker.
         #[arg(long, value_name = "HARNESSES")]
         harness: Option<String>,
-        /// Print exactly what would be written without changing anything.
         #[arg(long)]
         dry_run: bool,
-        /// Show detection + install status for every known harness and exit.
         #[arg(long)]
         status: bool,
-        /// Remove tenex-edge's hooks from the selected harnesses instead of
-        /// installing.
         #[arg(long)]
         uninstall: bool,
     },
     /// Start the per-machine daemon in the foreground.
-    /// Logs stream to stdout (colorised) and daemon.log simultaneously.
-    /// Normally spawned automatically; run this directly to watch its output interactively.
-    /// `__daemon` is kept as a hidden alias so the auto-spawner still works without change.
-    #[command(name = "daemon", alias = "__daemon")]
+    #[command(name = "daemon", alias = "__daemon", hide = true)]
     Daemon,
+}
+
+#[derive(Subcommand)]
+pub(super) enum HarnessAction {
+    /// Handle a hook event from a supported agent harness.
+    /// Reads hook JSON from stdin; emits context to inject into the model (if any).
+    /// Usage: `tenex-edge harness hook <name> --type <hook-type>`
+    Hook {
+        /// Harness name: claude-code, codex, opencode, grok, …
+        /// Run with name "help" to list known harnesses.
+        harness: String,
+        /// Hook type the harness fires: session-start, user-prompt-submit,
+        /// post-tool-use, stop, session-end.
+        #[arg(long = "type")]
+        hook_type: String,
+    },
+    /// Render the one-line fabric statusline for a host's status bar.
+    /// Reads the harness's statusline JSON payload on stdin (for `session_id`),
+    /// prints one line, and always exits 0 — fails open when the daemon is down
+    /// (and never spawns one).
+    Statusline {
+        /// Session id; if omitted, taken from the stdin payload.
+        #[arg(long)]
+        session: Option<String>,
+        /// Emit tmux #[style] format strings instead of ANSI codes. Required
+        /// when the output is consumed by tmux's status-format (#(...)).
+        #[arg(long)]
+        tmux: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -274,54 +209,6 @@ pub(super) enum ChatAction {
         /// active channel.
         #[arg(long, alias = "project")]
         channel: Option<String>,
-    },
-}
-
-#[derive(Subcommand)]
-pub(super) enum TmuxAction {
-    /// List registered tmux endpoints with liveness info.
-    Status,
-    /// Manually inject pending messages into a session's pane (debug).
-    Send {
-        /// Session id (or prefix) to inject.
-        #[arg(long)]
-        session: String,
-    },
-    /// Spawn a new tmux window running the given agent harness.
-    Spawn {
-        /// Agent slug: "claude", "codex", "opencode", …
-        #[arg(long)]
-        agent: String,
-        /// Project slug; defaults to project resolved from current directory.
-        #[arg(long)]
-        project: Option<String>,
-    },
-    /// Exec into the tmux pane registered for a session.
-    Attach {
-        /// Session id (or prefix).
-        #[arg(long)]
-        session: String,
-    },
-    /// Resume a (typically dead) session: replay its harness in a new tmux
-    /// window using the captured native resume token, then attach to it.
-    Resume {
-        /// Session id (or a unique prefix of it) to resume.
-        #[arg(long)]
-        session: String,
-    },
-    /// Long-running sidebar process: list project sessions in a narrow pane,
-    /// highlight the current session, and let the user switch between them.
-    /// Normally started automatically by `ensure_sidebar`; can also be run
-    /// manually with `tenex-edge tmux sidebar --session <id>`.
-    Sidebar {
-        /// The session this sidebar belongs to (highlighted as "current").
-        /// If omitted, resolved at runtime from the tmux client session name.
-        #[arg(long)]
-        session: Option<String>,
-        /// Project to filter by. If omitted, derived from the current session's
-        /// live row in the daemon data.
-        #[arg(long)]
-        project: Option<String>,
     },
 }
 

@@ -250,7 +250,7 @@ mod tests {
                     {
                         "hooks": [{
                             "type": "command",
-                            "command": "tenex-edge hook --host codex --type old",
+                            "command": "tenex-edge harness hook codex --type old",
                             "timeout": 1
                         }]
                     }
@@ -273,7 +273,7 @@ mod tests {
         assert!(groups.iter().any(|g| {
             g.pointer("/hooks/0/command")
                 .and_then(|v| v.as_str())
-                .is_some_and(|c| c == "tenex-edge hook --host codex --type user-prompt-submit")
+                .is_some_and(|c| c == "tenex-edge harness hook codex --type user-prompt-submit")
         }));
     }
 
@@ -285,7 +285,7 @@ mod tests {
                     {
                         "hooks": [{
                             "type": "command",
-                            "command": "tenex-edge hook --host codex --type stop",
+                            "command": "tenex-edge harness hook codex --type stop",
                             "timeout": 30
                         }]
                     }
@@ -301,7 +301,7 @@ mod tests {
                     {
                         "hooks": [{
                             "type": "command",
-                            "command": "tenex-edge hook --host codex --type user-prompt-submit",
+                            "command": "tenex-edge harness hook codex --type user-prompt-submit",
                             "timeout": 30
                         }]
                     }

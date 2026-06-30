@@ -35,7 +35,7 @@ pub use admin::render_fabric;
 #[cfg(test)]
 use admin::{parse_since, render_tail_event};
 pub use args::Cli;
-use args::{AgentAction, ChannelsAction, ChatAction, Cmd, DebugAction, ProjectAction, TmuxAction};
+use args::{AgentAction, ChannelsAction, ChatAction, Cmd, DebugAction, HarnessAction, ProjectAction};
 pub use messaging::{format_envelope, mention_short_id, EnvelopeView};
 pub use turn::{assemble_turn_check_context, assemble_turn_start_context};
 pub use who::load_who_snapshot;
@@ -73,11 +73,13 @@ pub async fn run(cli: Cli) -> Result<()> {
         let home = crate::config::edge_home();
         eprintln!("[tenex-edge] home={} relays={}", home.display(), relays);
     }
-    // Any explicit command (except `hook`) signals intent to use tenex-edge, so
+    // Any explicit command (except `harness hook`) signals intent to use tenex-edge, so
     // clear the stop-inhibit. Hooks honour the sentinel — they must never
     // restart a daemon the operator explicitly stopped. `stop` re-arms it
     // unconditionally, so clearing first is harmless.
-    if !matches!(cli.cmd, Cmd::Hook { .. }) && crate::daemon::is_inhibited() {
+    if !matches!(cli.cmd, Cmd::Harness { action: HarnessAction::Hook { .. } })
+        && crate::daemon::is_inhibited()
+    {
         crate::daemon::clear_inhibit();
         eprintln!("[tenex-edge] stop inhibit cleared");
     }
@@ -102,44 +104,6 @@ pub async fn run(cli: Cli) -> Result<()> {
                 who::who(project, all_projects)
             }
         }
-        Cmd::Tail {
-            project,
-            agent,
-            host,
-            since,
-            backfill,
-            only,
-            exclude,
-            include,
-            all,
-            compact,
-            relative,
-            no_emoji,
-            no_color,
-            json,
-            no_follow,
-            live,
-        } => {
-            admin::tail(admin::TailOpts {
-                project,
-                agent,
-                host,
-                since,
-                backfill,
-                only,
-                exclude,
-                include,
-                all,
-                compact,
-                relative,
-                no_emoji,
-                no_color,
-                json,
-                no_follow,
-                live,
-            })
-            .await
-        }
         Cmd::Chat { action } => match action {
             ChatAction::Write {
                 message,
@@ -158,14 +122,30 @@ pub async fn run(cli: Cli) -> Result<()> {
                 channel,
             } => messaging::chat_read(since, limit, offset, tail, live, channel).await,
         },
-        Cmd::Statusline { session, tmux } => statusline::statusline(session, tmux),
         Cmd::Project { action } => admin::project(action).await,
         Cmd::Channels { action } => admin::channels(action).await,
         Cmd::Agent { action } => admin::agent(action).await,
         Cmd::Agents => admin::agents_roster().await,
         Cmd::Invite { agent } => admin::invite(agent).await,
+        Cmd::Harness { action } => match action {
+            HarnessAction::Hook { harness, hook_type } => {
+                hooks::hook_run(harness, hook_type).await
+            }
+            HarnessAction::Statusline { session, tmux } => statusline::statusline(session, tmux),
+        },
+        Cmd::Launch {
+            slug,
+            project,
+            channel,
+            command_str,
+            extra_args,
+        } => {
+            let override_command = command_str
+                .map(|s| shlex::split(&s).unwrap_or_else(|| vec![s]))
+                .unwrap_or_default();
+            tmux_cli::launch(slug, project, channel, override_command, extra_args).await
+        }
         Cmd::Stop => stop_daemon(),
-        Cmd::Doctor => admin::doctor().await,
         Cmd::Debug { action } => match action {
             DebugAction::HookTail {
                 projects,
@@ -184,24 +164,6 @@ pub async fn run(cli: Cli) -> Result<()> {
                 refresh_ms,
             } => debug::outbox(live, limit, Duration::from_millis(refresh_ms.max(100))).await,
         },
-        Cmd::Hook { host, hook_type } => hooks::hook_run(host, hook_type).await,
-        Cmd::Tmux { action, popup } => match action {
-            Some(action) => tmux_cli::tmux_run(action).await,
-            None => tmux_cli::tmux_tui(popup),
-        },
-        Cmd::Launch {
-            slug,
-            project,
-            channel,
-            command_str,
-            extra_args,
-        } => {
-            let override_command = command_str
-                .map(|s| shlex::split(&s).unwrap_or_else(|| vec![s]))
-                .unwrap_or_default();
-            tmux_cli::launch(slug, project, channel, override_command, extra_args).await
-        }
-        Cmd::Daemon => crate::daemon::server::run().await,
         Cmd::Install {
             all,
             harness,
@@ -218,6 +180,7 @@ pub async fn run(cli: Cli) -> Result<()> {
             })
             .await
         }
+        Cmd::Daemon => crate::daemon::server::run().await,
     }
 }
 
