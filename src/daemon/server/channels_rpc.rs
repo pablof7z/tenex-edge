@@ -75,16 +75,8 @@ pub(in crate::daemon::server) async fn rpc_channels_create(
     // resolution (no project fallback): child-of-current and auto-switch must only
     // fire when actually run as an agent, never bind to an arbitrary sibling
     // session of a bare operator invocation.
-    let creator_rec = resolve_session_inner(
-        state,
-        None,
-        params.get("env_session").and_then(|v| v.as_str()),
-        params.get("cwd").and_then(|v| v.as_str()),
-        params.get("agent").and_then(|v| v.as_str()),
-        None,
-        false,
-    )
-    .ok();
+    let creator_rec =
+        resolve_session_inner(state, &CallerAnchor::from_params(params), ResolveScope::Strict).ok();
 
     // Resolve the parent the new channel hangs under:
     //   1. `--parent-channel <ref>` — project-relative override (needs a session).

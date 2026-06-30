@@ -11,8 +11,10 @@ pub(in crate::daemon::server) struct ChatReadParams {
     channel: Option<String>,
     #[serde(default)]
     session: Option<String>,
+    #[serde(default, alias = "env_session")]
+    harness_session: Option<String>,
     #[serde(default)]
-    env_session: Option<String>,
+    tmux_pane: Option<String>,
     #[serde(default)]
     cwd: Option<String>,
     #[serde(default)]
@@ -43,12 +45,8 @@ pub(in crate::daemon::server) async fn handle_chat_read<W: AsyncWriteExt + Unpin
         None => {
             resolve_session_inner(
                 state,
-                p.session.as_deref(),
-                p.env_session.as_deref(),
-                p.cwd.as_deref(),
-                p.agent.as_deref(),
-                p.group.as_deref(),
-                false,
+                &CallerAnchor::from_params(params),
+                ResolveScope::Project,
             )?
             .channel_h
         }

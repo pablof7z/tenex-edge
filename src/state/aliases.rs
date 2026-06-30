@@ -27,6 +27,53 @@ impl Store {
         Ok(())
     }
 
+    /// Resolve an external id of a SPECIFIC kind to its newest ALIVE session.
+    /// Type-safe (matches `external_id_kind`, not just the raw id) and never
+    /// returns a dead row — the in-session anchors (`tmux_pane`,
+    /// `harness_session`) must resolve to a LIVE session, never a ghost whose
+    /// alias has not yet been repointed.
+    ///
+    /// `harness` full-keys the match `(harness, kind, external_id)` per the alias
+    /// schema. Pass `Some` for harness-native ids (a harness session id is only
+    /// unique within its harness); pass `None` for `tmux_pane`, whose ids are
+    /// machine-globally unique (assigned by the tmux server, harness-independent).
+    pub fn alive_session_for_alias(
+        &self,
+        harness: Option<&str>,
+        external_id_kind: &str,
+        external_id: &str,
+    ) -> Result<Option<Session>> {
+        let id: Option<String> = match harness {
+            Some(h) => self
+                .conn
+                .query_row(
+                    "SELECT a.session_id FROM session_aliases a
+                     JOIN sessions s ON s.session_id = a.session_id
+                     WHERE a.harness=?1 AND a.external_id_kind=?2 AND a.external_id=?3
+                       AND s.alive=1
+                     ORDER BY a.created_at DESC LIMIT 1",
+                    params![h, external_id_kind, external_id],
+                    |r| r.get::<_, String>(0),
+                )
+                .optional()?,
+            None => self
+                .conn
+                .query_row(
+                    "SELECT a.session_id FROM session_aliases a
+                     JOIN sessions s ON s.session_id = a.session_id
+                     WHERE a.external_id_kind=?1 AND a.external_id=?2 AND s.alive=1
+                     ORDER BY a.created_at DESC LIMIT 1",
+                    params![external_id_kind, external_id],
+                    |r| r.get::<_, String>(0),
+                )
+                .optional()?,
+        };
+        match id {
+            Some(id) => self.get_session(&id),
+            None => Ok(None),
+        }
+    }
+
     /// Resolve a specific external id (by its full key) to its canonical session.
     pub fn resolve_session_by_alias(
         &self,

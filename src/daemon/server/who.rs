@@ -8,8 +8,10 @@ pub(in crate::daemon::server) struct WhoParams {
     all_projects: bool,
     #[serde(default)]
     cwd: Option<String>,
+    #[serde(default, alias = "env_session")]
+    harness_session: Option<String>,
     #[serde(default)]
-    env_session: Option<String>,
+    tmux_pane: Option<String>,
     #[serde(default)]
     agent: Option<String>,
     #[serde(default)]
@@ -24,24 +26,18 @@ pub(in crate::daemon::server) fn rpc_who(
     params: &serde_json::Value,
 ) -> Result<serde_json::Value> {
     let p: WhoParams = serde_json::from_value(params.clone()).unwrap_or_default();
+    let anchor = CallerAnchor::from_params(params);
     let current_project = if p.all_projects {
         None
     } else if p.project.is_none()
-        && (p.env_session.as_deref().filter(|s| !s.is_empty()).is_some()
+        && (p.tmux_pane.as_deref().filter(|s| !s.is_empty()).is_some()
+            || p.harness_session.as_deref().filter(|s| !s.is_empty()).is_some()
             || p.agent.as_deref().filter(|s| !s.is_empty()).is_some()
             || p.group.as_deref().filter(|s| !s.is_empty()).is_some())
     {
         Some(
-            resolve_session_inner(
-                state,
-                None,
-                p.env_session.as_deref(),
-                p.cwd.as_deref(),
-                p.agent.as_deref(),
-                p.group.as_deref(),
-                false,
-            )
-            .map(|rec| rec.channel_h.clone())?,
+            resolve_session_inner(state, &anchor, ResolveScope::Project)
+                .map(|rec| rec.channel_h.clone())?,
         )
     } else {
         Some(p.project.clone().unwrap_or_else(|| {
@@ -66,16 +62,7 @@ pub(in crate::daemon::server) fn rpc_who(
     if let Some(scope) = current_project.as_deref() {
         // Resolve the caller's own session once; reuse it for both the fabric
         // `(you)` match and the folded-in `self` identity block (issue #99).
-        let rec = resolve_session_inner(
-            state,
-            None,
-            p.env_session.as_deref(),
-            p.cwd.as_deref(),
-            p.agent.as_deref(),
-            p.group.as_deref(),
-            false,
-        )
-        .ok();
+        let rec = resolve_session_inner(state, &anchor, ResolveScope::Project).ok();
         // Issue #98: the caller's ONE authoritative agent-instance identity — the
         // selected pubkey + ordinal label every publisher signs with. Computed
         // OUTSIDE `with_store` because `session_instance` locks the store itself.

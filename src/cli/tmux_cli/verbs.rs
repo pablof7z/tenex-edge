@@ -223,15 +223,12 @@ async fn create_channel_interactive(
 
     let v = super::super::daemon_call_async(
         "channels_create",
-        serde_json::json!({
+        crate::cli::rpc_params(serde_json::json!({
             "parent": project,
             "name": name,
             "agents": [{ "slug": agent_slug, "backend": backend_pubkey }],
             "brief": "",
-            "agent": crate::cli::agent_env_slug(),
-            "env_session": std::env::var("TENEX_EDGE_SESSION").ok(),
-            "cwd": std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()),
-        }),
+        })),
     )
     .await?;
 

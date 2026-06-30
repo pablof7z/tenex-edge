@@ -257,7 +257,7 @@ use profile_rpc::{
     rpc_publish_profile,
 };
 use proposal::rpc_propose;
-use resolution::{resolve_session, resolve_session_inner};
+use resolution::{resolve_session, resolve_session_inner, CallerAnchor, ResolveScope};
 use session_end::rpc_session_end;
 use session_signing::{admit_transient_signer, select_session_signer};
 use session_start::rpc_session_start;

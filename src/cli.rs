@@ -64,6 +64,43 @@ pub(crate) fn channel_env() -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+/// The tmux pane (`$TMUX_PANE`) this CLI invocation runs in — the durable
+/// in-session anchor. It is present in the harness env from process birth and is
+/// 1:1 with the session, so the daemon resolves it (via the pane's `tmux_pane`
+/// alias) to the caller's canonical session. Empty outside tmux (e.g. opencode),
+/// where the daemon falls back to the agent+cwd scan. This REPLACES the old
+/// `TENEX_EDGE_SESSION` env var, which could never be set (the canonical id is
+/// minted only after the harness starts).
+pub(crate) fn tmux_pane_env() -> Option<String> {
+    std::env::var("TMUX_PANE").ok().filter(|s| !s.is_empty())
+}
+
+/// The caller-identity fields every in-session RPC sends so the daemon resolves
+/// "which session am I" identically (SSOT — the daemon mirror is
+/// `CallerAnchor::from_params`). One definition keeps senders from drifting (an
+/// earlier hand-rolled `invite` payload silently dropped `tmux_pane`). Merge
+/// call-specific fields on top with [`rpc_params`].
+pub(crate) fn caller_identity() -> serde_json::Value {
+    serde_json::json!({
+        "tmux_pane": tmux_pane_env(),
+        "agent": agent_env_slug(),
+        "cwd": std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()),
+        "group": channel_env(),
+    })
+}
+
+/// Build RPC params = the caller-identity fields plus `extra` (which wins on any
+/// key collision, e.g. an explicit destination `group`).
+pub(crate) fn rpc_params(extra: serde_json::Value) -> serde_json::Value {
+    let mut base = caller_identity();
+    if let (Some(b), Some(e)) = (base.as_object_mut(), extra.as_object()) {
+        for (k, v) in e {
+            b.insert(k.clone(), v.clone());
+        }
+    }
+    base
+}
+
 pub async fn run(cli: Cli) -> Result<()> {
     {
         let relays = crate::config::Config::load()

@@ -184,7 +184,7 @@ pub(super) enum ChatAction {
         message_flag: Option<String>,
         /// Channel name (or id) to write to; resolved to its opaque id within
         /// the sender's project scope. Defaults to this agent's active channel
-        /// (TENEX_EDGE_CHANNEL → TENEX_EDGE_SESSION → cwd).
+        /// (TENEX_EDGE_CHANNEL → tmux pane session → cwd).
         #[arg(long)]
         channel: Option<String>,
     },

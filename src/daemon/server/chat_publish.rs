@@ -142,8 +142,10 @@ pub(in crate::daemon::server) async fn rpc_user_prompt(
     struct P {
         #[serde(default)]
         session: Option<String>,
+        #[serde(default, alias = "env_session")]
+        harness_session: Option<String>,
         #[serde(default)]
-        env_session: Option<String>,
+        tmux_pane: Option<String>,
         #[serde(default)]
         agent: Option<String>,
         #[serde(default)]
@@ -178,11 +180,7 @@ pub(in crate::daemon::server) async fn rpc_user_prompt(
 
     let rec = resolve_session(
         state,
-        p.session.as_deref(),
-        p.env_session.as_deref(),
-        p.cwd.as_deref(),
-        p.agent.as_deref(),
-        None,
+        &CallerAnchor::from_params(params),
     )?;
 
     // A daemon-injected fabric envelope (a mention the tmux delivery path pasted

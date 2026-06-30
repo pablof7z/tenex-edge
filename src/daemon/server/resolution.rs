@@ -1,15 +1,78 @@
 use super::*;
 use crate::state::{Session, Store};
 
+/// Everything a caller knows about "which session am I" — one envelope, resolved
+/// by ONE function, so every in-session command identifies its session the same
+/// way every time.
+///
+/// The canonical session id is daemon-minted only AFTER the harness process
+/// starts, so it can never be a launch-time env var. The durable anchor is the
+/// tmux pane (`$TMUX_PANE`): present in the harness env from process birth, 1:1
+/// with the session, and recorded as a `tmux_pane` alias at session-start (which
+/// repoints to the newest owner on restart). `harness_session` covers
+/// harness-native ids (claude-code/codex report one via hooks; opencode does
+/// not). `cwd`+`agent`+`group` are the scan keys — used only outside `Strict`.
+#[derive(Default, Clone, Copy)]
+pub(in crate::daemon::server) struct CallerAnchor<'a> {
+    /// `--session` operator/host override (exact: canonical id or alias).
+    pub explicit: Option<&'a str>,
+    /// The tmux pane the caller runs in (`$TMUX_PANE`) — the primary in-session
+    /// anchor, resolved via its `tmux_pane` alias.
+    pub tmux_pane: Option<&'a str>,
+    /// Harness-native session id reported by a hook, resolved via its
+    /// `harness_session` alias. Never the identity — only a locator.
+    pub harness_session: Option<&'a str>,
+    /// The harness that owns `harness_session` (e.g. `claude-code`). The alias
+    /// table is keyed by `(harness, kind, external_id)`, so this full-keys the
+    /// harness-session lookup — a harness-native id is only unique WITHIN its
+    /// harness. (`tmux_pane` needs no harness: pane ids are machine-globally
+    /// unique, assigned by the tmux server independent of the harness in them.)
+    pub harness: Option<&'a str>,
+    /// Scan keys (used only in `Project` scope).
+    pub cwd: Option<&'a str>,
+    pub agent: Option<&'a str>,
+    pub group: Option<&'a str>,
+}
+
+impl<'a> CallerAnchor<'a> {
+    /// Build the anchor from raw RPC params — the SINGLE place wire field names
+    /// map to anchor fields, so every handler resolves identically (SSOT). The
+    /// `env_session` key is still read as a `harness_session` alias for
+    /// back-compat with older hook senders. Borrows from `p`, so `p` must outlive
+    /// the anchor. NOTE: the caller's agent slug is the `agent` key; `invite`
+    /// carries two agents and builds its anchor by hand.
+    pub(in crate::daemon::server) fn from_params(p: &'a serde_json::Value) -> Self {
+        let s = |k: &str| p.get(k).and_then(|v| v.as_str()).filter(|x| !x.is_empty());
+        CallerAnchor {
+            explicit: s("session"),
+            tmux_pane: s("tmux_pane"),
+            harness_session: s("harness_session").or_else(|| s("env_session")),
+            harness: s("harness"),
+            cwd: s("cwd"),
+            agent: s("agent"),
+            group: s("group"),
+        }
+    }
+}
+
+/// How far resolution may reach past the exact anchors before failing.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(in crate::daemon::server) enum ResolveScope {
+    /// Exact anchors only (explicit / tmux pane / harness id). No cwd+agent scan.
+    /// Fails loud rather than binding a sibling. For per-session MUTATIONS
+    /// (channels switch/join/leave, invite, create) where guessing the wrong
+    /// session is harmful.
+    Strict,
+    /// Exact anchors, then the cwd+agent scan (latest-alive in the project). For
+    /// reads and host-facing commands (who/turn/chat/propose) run from a repo.
+    Project,
+}
+
 pub(in crate::daemon::server) fn resolve_session(
     state: &Arc<DaemonState>,
-    explicit: Option<&str>,
-    env_session: Option<&str>,
-    cwd: Option<&str>,
-    agent: Option<&str>,
-    group: Option<&str>,
+    anchor: &CallerAnchor,
 ) -> Result<Session> {
-    resolve_session_inner(state, explicit, env_session, cwd, agent, group, true)
+    resolve_session_inner(state, anchor, ResolveScope::Project)
 }
 
 /// The project channel a routing scope belongs under: a top-level channel is its
@@ -21,47 +84,81 @@ pub(in crate::daemon::server) fn work_root_for(s: &Store, scope: &str) -> String
     }
 }
 
-/// Resolve the caller's session. `allow_project_fallback` controls the LAST
-/// resort: when the caller carries no session/agent signal at all, `true` picks
-/// the project's latest-alive session (fine for host-facing commands run from a
-/// repo), while `false` errors instead — used when a caller needs only the
-/// current agent context and must not silently bind to some arbitrary sibling
-/// session when run from a bare terminal.
+/// Resolve the caller's session through the single priority order:
+///   1. explicit `--session` (operator/host override; may name a dead session)
+///   2. tmux pane alias  (live only)
+///   3. harness-session alias  (live only)
+///   4. cwd+agent scan  (only outside `Strict`)
+///
+/// The exact anchors (2,3) resolve through `alive_session_for_alias_kind`, which
+/// matches the alias KIND (not just the raw id) and never returns a dead row —
+/// so a stale pane/harness alias whose owner exited cannot bind a ghost.
 pub(in crate::daemon::server) fn resolve_session_inner(
     state: &Arc<DaemonState>,
-    explicit: Option<&str>,
-    env_session: Option<&str>,
-    cwd: Option<&str>,
-    agent: Option<&str>,
-    group: Option<&str>,
-    allow_project_fallback: bool,
+    anchor: &CallerAnchor,
+    scope: ResolveScope,
 ) -> Result<Session> {
-    if let Some(id) = explicit.filter(|s| !s.is_empty()) {
+    // 1. Explicit `--session`: operator/host override (e.g. `tmux` RPCs). May
+    //    target a dead session deliberately (resume), so it is not alive-gated.
+    if let Some(id) = anchor.explicit.filter(|s| !s.is_empty()) {
         return state
             .with_store(|s| s.get_session(id))
             .with_context(|| format!("unknown session {id}"))?
             .with_context(|| format!("unknown session {id}"));
     }
-    if let Some(id) = env_session.filter(|s| !s.is_empty()) {
-        if let Some(rec) = state.with_store(|s| s.get_session(id)).ok().flatten() {
+    // 2. tmux pane — THE in-session anchor (live only). Pane ids are machine-
+    //    globally unique, so the lookup is intentionally harness-agnostic.
+    if let Some(pane) = anchor.tmux_pane.filter(|s| !s.is_empty()) {
+        if let Some(rec) = state
+            .with_store(|s| s.alive_session_for_alias(None, "tmux_pane", pane))
+            .ok()
+            .flatten()
+        {
             return Ok(rec);
         }
     }
-    let cwd = cwd
+    // 3. Harness-native session id reported by a hook (live only). Full-keyed by
+    //    harness — a harness id is only unique within its own harness. Canonicalize
+    //    the harness the SAME way session-start does before STORING the alias
+    //    (`Harness::from_str(..).as_str()`), so lookup and storage always agree
+    //    even for a name not in the enum (both normalize to "unknown").
+    if let Some(hs) = anchor.harness_session.filter(|s| !s.is_empty()) {
+        let harness = anchor
+            .harness
+            .map(|h| crate::session::Harness::from_str(h).as_str());
+        if let Some(rec) = state
+            .with_store(|s| s.alive_session_for_alias(harness, "harness_session", hs))
+            .ok()
+            .flatten()
+        {
+            return Ok(rec);
+        }
+    }
+    // Strict: exact anchors only. Never fall through to a sibling-binding scan.
+    if scope == ResolveScope::Strict {
+        anyhow::bail!(
+            "must be run from within a tenex-edge agent session \
+             (no --session, tmux pane, or harness id resolved a live session)"
+        );
+    }
+    // 4. Scan: cwd-derived project (or explicit group) + agent slug.
+    //    `list_alive_sessions` is newest-first, so the first match is the latest.
+    //    LIMITATION: with no exact anchor (e.g. a non-tmux harness like opencode,
+    //    which has neither a pane nor a harness-native id), this picks the latest
+    //    alive session for the agent in the project — so it assumes a single live
+    //    session per (agent, project) there. tmux harnesses never reach this tier
+    //    (the pane anchor at step 2 is exact).
+    let cwd = anchor
+        .cwd
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-    // An explicit group id IS the channel a session is stored under (a subgroup
-    // session). Otherwise the project is the work-root channel derived from cwd; a
-    // session stored under a child channel still belongs to that work root, so the
-    // scope match below also accepts sub-channels whose parent is the project.
-    let explicit_group = group.filter(|g| !g.is_empty());
+    let explicit_group = anchor.group.filter(|g| !g.is_empty());
     let work_root = explicit_group.is_none();
     let project = explicit_group
         .map(|g| g.to_string())
         .unwrap_or_else(|| crate::project::resolve(&cwd).unwrap_or_default());
-    let want_agent = agent.filter(|a| !a.is_empty());
+    let want_agent = anchor.agent.filter(|a| !a.is_empty());
 
-    // `list_alive_sessions` is newest-first, so the first match is the latest.
     let pick = state.with_store(|s| {
         s.list_alive_sessions()
             .unwrap_or_default()
@@ -81,11 +178,6 @@ pub(in crate::daemon::server) fn resolve_session_inner(
     if let Some(agent) = want_agent {
         anyhow::bail!(
             "no active tenex-edge session for agent {agent:?} in project {project:?} (run session-start, or pass --session)"
-        );
-    }
-    if !allow_project_fallback {
-        anyhow::bail!(
-            "not running as a tenex-edge agent: no --session, TENEX_EDGE_SESSION, or TENEX_EDGE_AGENT in scope"
         );
     }
     anyhow::bail!(

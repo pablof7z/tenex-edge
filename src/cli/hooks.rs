@@ -390,7 +390,9 @@ async fn hook_dispatch(
                 // this to a subagent" (issue #102).
                 let agent_id = obj.and_then(|o| o.get("agent_id")).and_then(|v| v.as_str());
                 let params = serde_json::json!({
-                    "env_session": sid,
+                    "harness_session": sid,
+                    "harness": host.name,
+                    "tmux_pane": crate::cli::tmux_pane_env(),
                     "agent": agent_env_slug(),
                     "cwd": cwd.to_string_lossy(),
                     "prompt": prompt_text,

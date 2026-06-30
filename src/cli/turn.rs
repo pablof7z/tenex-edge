@@ -77,12 +77,7 @@ pub(super) fn turn_check(session: Option<String>, emit: EmitFormat) -> Result<Op
     if crate::daemon::is_inhibited() {
         return Ok(None);
     }
-    let params = serde_json::json!({
-        "session": session,
-        "env_session": std::env::var("TENEX_EDGE_SESSION").ok(),
-        "agent": agent_env_slug(),
-        "cwd": std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()),
-    });
+    let params = crate::cli::rpc_params(serde_json::json!({ "session": session }));
     let v = crate::daemon::blocking::call("turn_check", params)?;
     if let Some(ctx) = v["context"].as_str() {
         emit_context(ctx, emit);

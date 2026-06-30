@@ -30,6 +30,7 @@ pub enum Harness {
     ClaudeCode,
     Codex,
     Opencode,
+    Grok,
     Unknown,
 }
 
@@ -39,6 +40,7 @@ impl Harness {
             Harness::ClaudeCode => "claude-code",
             Harness::Codex => "codex",
             Harness::Opencode => "opencode",
+            Harness::Grok => "grok",
             Harness::Unknown => "unknown",
         }
     }
@@ -48,6 +50,7 @@ impl Harness {
             "claude-code" | "claude" => Harness::ClaudeCode,
             "codex" => Harness::Codex,
             "opencode" => Harness::Opencode,
+            "grok" => Harness::Grok,
             _ => Harness::Unknown,
         }
     }

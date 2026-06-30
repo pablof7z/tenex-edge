@@ -5,18 +5,18 @@ enum TargetChannel {
     Ambiguous(serde_json::Value),
 }
 
-fn env_session(params: &serde_json::Value, verb: &str) -> Result<String> {
-    params
-        .get("env_session")
-        .and_then(|v| v.as_str())
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
-        .with_context(|| {
-            format!(
-                "{verb} must be run from within a tenex-edge agent session \
-                 (TENEX_EDGE_SESSION is not set)"
-            )
-        })
+/// Resolve the calling agent's OWN session for a membership mutation, in
+/// `Strict` scope: the pane anchor (`$TMUX_PANE`) identifies the exact session,
+/// and a miss fails loud rather than binding an arbitrary sibling. `join`/
+/// `leave`/`switch` are per-session mutations, so picking "some session in this
+/// project" would be wrong.
+fn resolve_caller(
+    state: &Arc<DaemonState>,
+    params: &serde_json::Value,
+    verb: &str,
+) -> Result<crate::state::Session> {
+    resolve_session_inner(state, &CallerAnchor::from_params(params), ResolveScope::Strict)
+        .with_context(|| format!("{verb} must be run from within a tenex-edge agent session"))
 }
 
 fn resolve_target_channel(
@@ -104,8 +104,7 @@ pub(in crate::daemon::server) async fn rpc_channels_join(
         channel: String,
     }
     let p: P = serde_json::from_value(params.clone()).context("channels_join params")?;
-    let env_session = env_session(params, "channels join")?;
-    let rec = resolve_session(state, None, Some(&env_session), None, None, None)?;
+    let rec = resolve_caller(state, params, "channels join")?;
     let channel = match resolve_target_channel(state, &rec, &p.channel)? {
         TargetChannel::Unique(h) => h,
         TargetChannel::Ambiguous(v) => return Ok(v),
@@ -132,8 +131,7 @@ pub(in crate::daemon::server) async fn rpc_channels_leave(
         channel: String,
     }
     let p: P = serde_json::from_value(params.clone()).context("channels_leave params")?;
-    let env_session = env_session(params, "channels leave")?;
-    let rec = resolve_session(state, None, Some(&env_session), None, None, None)?;
+    let rec = resolve_caller(state, params, "channels leave")?;
     let channel = match resolve_target_channel(state, &rec, &p.channel)? {
         TargetChannel::Unique(h) => h,
         TargetChannel::Ambiguous(v) => return Ok(v),
@@ -161,8 +159,7 @@ pub(in crate::daemon::server) async fn rpc_channels_switch(
         channel: String,
     }
     let p: P = serde_json::from_value(params.clone()).context("channels_switch params")?;
-    let env_session = env_session(params, "channels switch")?;
-    let rec = resolve_session(state, None, Some(&env_session), None, None, None)?;
+    let rec = resolve_caller(state, params, "channels switch")?;
     let new_channel = match resolve_target_channel(state, &rec, &p.channel)? {
         TargetChannel::Unique(h) => h,
         TargetChannel::Ambiguous(v) => return Ok(v),

@@ -56,7 +56,13 @@ pub(super) async fn rpc_tmux_send(
         serde_json::from_value(params.clone()).context("parsing tmux_send params")?;
 
     // Resolve the session (supports prefix matching via resolve_session fallback).
-    let rec = resolve_session(state, Some(&p.session), None, None, None, None)
+    let rec = resolve_session(
+        state,
+        &CallerAnchor {
+            explicit: Some(&p.session),
+            ..Default::default()
+        },
+    )
         .with_context(|| format!("no session matching {:?}", p.session))?;
 
     let pane_id = match tmux_pane_for_session(state, &rec.session_id) {
@@ -168,8 +174,12 @@ pub(super) async fn rpc_invite(
     #[derive(serde::Deserialize)]
     struct P {
         agent: String,
+        #[serde(default, alias = "env_session")]
+        harness_session: Option<String>,
         #[serde(default)]
-        env_session: Option<String>,
+        harness: Option<String>,
+        #[serde(default)]
+        tmux_pane: Option<String>,
         #[serde(default)]
         cwd: Option<String>,
         /// The caller's TENEX_EDGE_AGENT slug, to disambiguate the session.
@@ -182,14 +192,20 @@ pub(super) async fn rpc_invite(
         anyhow::bail!("invite requires an agent slug");
     }
 
-    // Resolve the inviter's current session to pin the spawn to its channel.
-    let rec = resolve_session(
+    // Resolve the inviter's OWN session (Strict) to pin the spawn to its channel —
+    // the caller's agent slug is `agent_slug` (`agent` is the invitee), so this
+    // anchor is built by hand rather than via `from_params`.
+    let rec = resolve_session_inner(
         state,
-        None,
-        p.env_session.as_deref(),
-        p.cwd.as_deref(),
-        p.agent_slug.as_deref(),
-        None,
+        &CallerAnchor {
+            tmux_pane: p.tmux_pane.as_deref(),
+            harness_session: p.harness_session.as_deref(),
+            harness: p.harness.as_deref(),
+            cwd: p.cwd.as_deref(),
+            agent: p.agent_slug.as_deref(),
+            ..Default::default()
+        },
+        ResolveScope::Strict,
     )
     .context("invite must be run from within a tenex-edge agent session")?;
     let channel_h = rec.channel_h.clone();
@@ -318,7 +334,13 @@ pub(super) fn rpc_tmux_attach(
 ) -> Result<serde_json::Value> {
     let p: TmuxAttachParams =
         serde_json::from_value(params.clone()).context("parsing tmux_attach params")?;
-    let rec = resolve_session(state, Some(&p.session), None, None, None, None)
+    let rec = resolve_session(
+        state,
+        &CallerAnchor {
+            explicit: Some(&p.session),
+            ..Default::default()
+        },
+    )
         .with_context(|| format!("no session matching {:?}", p.session))?;
     match tmux_pane_for_session(state, &rec.session_id) {
         Some(pane) => Ok(serde_json::json!({ "pane_id": pane, "session_id": rec.session_id })),

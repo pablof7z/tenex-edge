@@ -62,14 +62,10 @@ fn invitable_section(edge_home: &std::path::Path) -> Option<String> {
 /// `who` params for the daemon RPC. The daemon resolves the current project the
 /// same way the old CLI did (`all_projects ? None : resolve(cwd)`).
 fn who_params(project: &Option<String>, all_projects: bool) -> serde_json::Value {
-    serde_json::json!({
+    crate::cli::rpc_params(serde_json::json!({
         "project": project,
         "all_projects": all_projects,
-        "env_session": std::env::var("TENEX_EDGE_SESSION").ok(),
-        "agent": crate::cli::agent_env_slug(),
-        "group": crate::cli::channel_env(),
-        "cwd": std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()),
-    })
+    }))
 }
 
 fn who_value_via_daemon(project: &Option<String>, all_projects: bool) -> Result<serde_json::Value> {

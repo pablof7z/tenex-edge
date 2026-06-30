@@ -6,8 +6,10 @@ pub(in crate::daemon::server) struct ProposeParams {
     body: String,
     #[serde(default)]
     session: Option<String>,
+    #[serde(default, alias = "env_session")]
+    harness_session: Option<String>,
     #[serde(default)]
-    env_session: Option<String>,
+    tmux_pane: Option<String>,
     #[serde(default)]
     cwd: Option<String>,
     #[serde(default)]
@@ -42,11 +44,7 @@ pub(in crate::daemon::server) async fn rpc_propose(
     // propose doesn't require a live session — it just needs a project and a key.
     let session_rec = resolve_session(
         state,
-        p.session.as_deref(),
-        p.env_session.as_deref(),
-        p.cwd.as_deref(),
-        p.agent.as_deref(),
-        p.group.as_deref(),
+        &CallerAnchor::from_params(params),
     )
     .ok();
     let cwd = p

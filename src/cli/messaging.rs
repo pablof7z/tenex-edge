@@ -1,13 +1,11 @@
 use super::*;
 
 pub(super) async fn chat_write(message: String, channel: Option<String>) -> Result<()> {
-    let params = serde_json::json!({
+    let params = crate::cli::rpc_params(serde_json::json!({
         "message": message,
-        "env_session": std::env::var("TENEX_EDGE_SESSION").ok(),
-        "agent": agent_env_slug(),
-        "cwd": std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()),
+        // Explicit `--channel` destination overrides the session's own group.
         "group": channel.or_else(crate::cli::channel_env),
-    });
+    }));
     let v = daemon_call_async("chat_write", params).await?;
     let event_id = v["event_id"].as_str().unwrap_or("?");
     if let Some(label) = v["mentioned_label"].as_str().filter(|s| !s.is_empty()) {
@@ -39,18 +37,14 @@ pub(super) async fn chat_read(
     });
     let use_color = std::env::var("NO_COLOR").is_err() && std::io::stdout().is_terminal();
 
-    let params = serde_json::json!({
+    let params = crate::cli::rpc_params(serde_json::json!({
         "channel": channel,
-        "env_session": std::env::var("TENEX_EDGE_SESSION").ok(),
-        "agent": agent_env_slug(),
-        "cwd": std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()),
-        "group": crate::cli::channel_env(),
         "since": since_ts,
         "limit": effective_limit,
         "offset": offset.unwrap_or(0),
         "tail": effective_tail,
         "live": live,
-    });
+    }));
     let mut client = crate::daemon::client::Client::connect_or_spawn().await?;
     client
         .stream("chat_read", params, move |item| {
@@ -102,16 +96,12 @@ pub(super) async fn publish(
     d: Option<String>,
     session: Option<String>,
 ) -> Result<()> {
-    let params = serde_json::json!({
+    let params = crate::cli::rpc_params(serde_json::json!({
         "title": title,
         "body": body,
         "session": session,
-        "env_session": std::env::var("TENEX_EDGE_SESSION").ok(),
-        "agent": agent_env_slug(),
-        "cwd": std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()),
-        "group": crate::cli::channel_env(),
         "d": d,
-    });
+    }));
     let v = daemon_call_async("publish", params).await?;
     let title_echo = v["title"].as_str().unwrap_or(&title);
     let d_tag = v["d_tag"].as_str().unwrap_or("?");

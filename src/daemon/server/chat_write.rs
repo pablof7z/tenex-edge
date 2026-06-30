@@ -5,8 +5,10 @@ use crate::state::{RelayEvent, Store};
 #[derive(serde::Deserialize, Default)]
 pub(in crate::daemon::server) struct ChatWriteParams {
     message: String,
+    #[serde(default, alias = "env_session")]
+    harness_session: Option<String>,
     #[serde(default)]
-    env_session: Option<String>,
+    tmux_pane: Option<String>,
     #[serde(default)]
     cwd: Option<String>,
     #[serde(default)]
@@ -50,11 +52,7 @@ pub(in crate::daemon::server) async fn rpc_chat_write(
         serde_json::from_value(params.clone()).context("parsing chat_write params")?;
     let rec = resolve_session(
         state,
-        None,
-        p.env_session.as_deref(),
-        p.cwd.as_deref(),
-        p.agent.as_deref(),
-        p.group.as_deref(),
+        &CallerAnchor::from_params(params),
     )?;
     let id = identity::load_or_create(&config::edge_home(), &rec.agent_slug, now_secs())?;
     let durable_pubkey = id.pubkey_hex();

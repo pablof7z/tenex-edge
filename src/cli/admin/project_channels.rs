@@ -66,12 +66,6 @@ pub async fn channels(action: ChannelsAction) -> Result<()> {
             None => crate::project::resolve_or_bail(&std::env::current_dir().unwrap_or_default()),
         }
     }
-    fn resolve_env_session(verb: &str) -> Result<String> {
-        std::env::var("TENEX_EDGE_SESSION")
-            .ok()
-            .filter(|s| !s.is_empty())
-            .with_context(|| format!("{verb} must be run from within a tenex-edge agent session (TENEX_EDGE_SESSION is not set)"))
-    }
     fn print_ambiguous(verb: &str, channel: &str, v: &serde_json::Value) -> ! {
         let name = v["reference"].as_str().unwrap_or(channel);
         eprintln!("'{name}' is ambiguous — re-run with an exact path:");
@@ -108,7 +102,7 @@ pub async fn channels(action: ChannelsAction) -> Result<()> {
             };
             let v = daemon_call_async(
                 "channels_create",
-                serde_json::json!({
+                crate::cli::rpc_params(serde_json::json!({
                     // No `parent` here: the daemon defaults the new channel under
                     // the creating session's CURRENT channel. `--parent-channel`
                     // overrides that with a project-relative reference.
@@ -117,13 +111,7 @@ pub async fn channels(action: ChannelsAction) -> Result<()> {
                     "about": about.unwrap_or_default(),
                     "agents": parsed,
                     "brief": brief,
-                    // Caller identity so the daemon auto-adds the creating agent
-                    // to the new room AND auto-switches its session into it
-                    // (resolved like the messaging commands).
-                    "agent": crate::cli::agent_env_slug(),
-                    "env_session": std::env::var("TENEX_EDGE_SESSION").ok(),
-                    "cwd": std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()),
-                }),
+                })),
             )
             .await?;
             // Ambiguous `--parent-channel`: the daemon returns candidate paths
@@ -190,13 +178,9 @@ pub async fn channels(action: ChannelsAction) -> Result<()> {
             }
         }
         ChannelsAction::Join { channel } => {
-            let env_session = resolve_env_session("channels join")?;
             let v = daemon_call_async(
                 "channels_join",
-                serde_json::json!({
-                    "channel": channel.clone(),
-                    "env_session": env_session,
-                }),
+                crate::cli::rpc_params(serde_json::json!({ "channel": channel.clone() })),
             )
             .await?;
             if v["ambiguous"].is_array() {
@@ -205,13 +189,9 @@ pub async fn channels(action: ChannelsAction) -> Result<()> {
             println!("joined channel {}", v["channel"].as_str().unwrap_or(&channel));
         }
         ChannelsAction::Leave { channel } => {
-            let env_session = resolve_env_session("channels leave")?;
             let v = daemon_call_async(
                 "channels_leave",
-                serde_json::json!({
-                    "channel": channel.clone(),
-                    "env_session": env_session,
-                }),
+                crate::cli::rpc_params(serde_json::json!({ "channel": channel.clone() })),
             )
             .await?;
             if v["ambiguous"].is_array() {
@@ -220,13 +200,9 @@ pub async fn channels(action: ChannelsAction) -> Result<()> {
             println!("left channel {}", v["channel"].as_str().unwrap_or(&channel));
         }
         ChannelsAction::Switch { channel } => {
-            let env_session = resolve_env_session("channels switch")?;
             let v = daemon_call_async(
                 "channels_switch",
-                serde_json::json!({
-                    "channel": channel.clone(),
-                    "env_session": env_session,
-                }),
+                crate::cli::rpc_params(serde_json::json!({ "channel": channel.clone() })),
             )
             .await?;
             // Ambiguous reference: the daemon returns the candidate paths instead
@@ -251,7 +227,7 @@ pub async fn invite(agent: String) -> Result<()> {
         "invite",
         serde_json::json!({
             "agent": agent,
-            "env_session": std::env::var("TENEX_EDGE_SESSION").ok(),
+            "tmux_pane": crate::cli::tmux_pane_env(),
             "cwd": std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()),
             "agent_slug": crate::cli::agent_env_slug(),
         }),

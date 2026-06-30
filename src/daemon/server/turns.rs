@@ -118,33 +118,11 @@ fn merge_new_agents(base: Option<String>, since: u64, now: u64) -> Option<String
     }
 }
 
-#[derive(serde::Deserialize, Default)]
-pub(in crate::daemon::server) struct TurnCheckParams {
-    #[serde(default)]
-    session: Option<String>,
-    #[serde(default)]
-    env_session: Option<String>,
-    #[serde(default)]
-    cwd: Option<String>,
-    #[serde(default)]
-    agent: Option<String>,
-    #[serde(default)]
-    group: Option<String>,
-}
-
 pub(in crate::daemon::server) fn rpc_turn_check(
     state: &Arc<DaemonState>,
     params: &serde_json::Value,
 ) -> Result<serde_json::Value> {
-    let p: TurnCheckParams = serde_json::from_value(params.clone()).unwrap_or_default();
-    let rec = resolve_session(
-        state,
-        p.session.as_deref(),
-        p.env_session.as_deref(),
-        p.cwd.as_deref(),
-        p.agent.as_deref(),
-        p.group.as_deref(),
-    )?;
+    let rec = resolve_session(state, &CallerAnchor::from_params(params))?;
     let now = now_secs();
     // The sibling-session delta is rendered from the awareness high-water mark
     // (`seen_cursor`). We advance the cursor atomically — only the first of any
