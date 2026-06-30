@@ -221,7 +221,6 @@ pub(in crate::daemon::server) async fn handle_tail<W: AsyncWriteExt + Unpin>(
 
     {
         *state.open_clients.lock().unwrap() += 1;
-        state.liveness_changed.notify_waiters();
     }
     let _guard = ClientGuard(state.clone());
 

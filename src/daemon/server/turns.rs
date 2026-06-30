@@ -27,13 +27,9 @@ pub(in crate::daemon::server) async fn rpc_turn_start(
     let now = now_secs();
     state.with_store(|s| {
         // Canonical transition: working=1, turn_started_at=now (alias-resolving).
-        if let Err(e) = s.set_working(&p.session, true, now) {
-            tracing::error!(session = %p.session, error = %e, "failed to set session working on turn start");
-        }
+        s.set_working(&p.session, true, now).ok();
         if let Some(path) = p.transcript.as_deref().filter(|x| !x.is_empty()) {
-            if let Err(e) = s.set_session_transcript(&p.session, path) {
-                tracing::error!(session = %p.session, error = %e, "failed to set session transcript on turn start");
-            }
+            s.set_session_transcript(&p.session, path).ok();
         }
     });
     state.outbox_notify.notify_waiters();
@@ -199,9 +195,7 @@ pub(in crate::daemon::server) async fn rpc_turn_end(
         .unwrap_or((false, 0));
     state.with_store(|s| {
         // Canonical transition: working=0 (alias-resolving). The TITLE is retained.
-        if let Err(e) = s.set_working(&p.session, false, 0) {
-            tracing::error!(session = %p.session, error = %e, "failed to clear session working on turn end");
-        }
+        s.set_working(&p.session, false, 0).ok();
     });
     state.outbox_notify.notify_waiters();
 

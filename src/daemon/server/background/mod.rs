@@ -7,8 +7,6 @@
 //!
 //! Pure function movement — behavior is byte-identical to the pre-split file.
 
-mod idle;
 mod pruner;
 
-pub(super) use idle::spawn_idle_watcher;
 pub(super) use pruner::spawn_pruner;

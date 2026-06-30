@@ -25,7 +25,6 @@ mod debug;
 mod hooks;
 mod install;
 mod messaging;
-mod project_agents;
 mod statusline;
 mod tmux_cli;
 mod turn;

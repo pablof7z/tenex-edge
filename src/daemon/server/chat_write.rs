@@ -115,15 +115,8 @@ pub(in crate::daemon::server) async fn rpc_chat_write(
                 }
                 Some((target.pubkey, target.target_session, target.project, raw))
             }
-            // The mention token did not resolve. The contract is to treat the body
-            // as having no mention (never bail/block the chat), but the failure is
-            // no longer SILENT: surface it loudly so a store error can't masquerade
-            // as a genuinely-unknown handle. A real typo also logs here, which is
-            // the intended "your @mention didn't route" signal.
-            Err(e) => {
-                tracing::warn!(mention = %raw, error = %e, "mention token did not resolve; treating chat as having no mention");
-                None
-            }
+            // Unresolvable mention token → treat the body as having no mention.
+            Err(_) => None,
         }
     } else {
         None
@@ -163,16 +156,14 @@ pub(in crate::daemon::server) async fn rpc_chat_write(
     // connection that published it. Seed the verbatim log and park inbox rows for
     // sessions already alive in the same routing scope.
     let routed = state.with_store(|s| {
-        if let Err(e) = s.insert_event(&chat_relay_event(
+        let _ = s.insert_event(&chat_relay_event(
             &event_id,
             &from_pubkey,
             created_at,
             &deliver_scope,
             &body_to_send,
             mentioned_pubkey.as_deref(),
-        )) {
-            tracing::error!(event_id = %event_id, channel = %deliver_scope, error = %e, "failed to seed local chat-log row");
-        }
+        ));
         let mut routed = false;
         for target in s.list_alive_sessions().unwrap_or_default() {
             let is_direct_target = mentioned_session.as_deref() == Some(target.session_id.as_str());

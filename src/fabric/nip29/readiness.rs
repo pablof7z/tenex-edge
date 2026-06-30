@@ -18,6 +18,12 @@ pub struct ChannelCtx<'a> {
     /// already present (the relay's stored hierarchy wins). `None` creates the
     /// channel as a top-level group.
     pub parent_hint: Option<&'a str>,
+    /// Caller's intended display NAME, used ONLY when this readiness check has to
+    /// CREATE the (sub)group — it rides on the published kind:9002 metadata so the
+    /// relay's authored kind:39000 carries it. NEVER written to `relay_channels`
+    /// locally: that cache is materialized solely from observed relay events. A
+    /// root group always names itself after its slug, so `None` is correct there.
+    pub name: Option<&'a str>,
 }
 
 /// Outcome of a readiness check.
@@ -27,8 +33,12 @@ pub enum ChannelGate {
     Ready,
     /// Channel was missing, incomplete, or needed repairs; corrected.
     Repaired,
-    /// Could not fully verify or repair (relay unreachable, no management key,
-    /// etc.). The publish proceeds anyway (fail-open).
+    /// Could not fully verify or repair the channel (relay unreachable, no
+    /// management key, roster grant not confirmed, etc.). The channel is NOT
+    /// verified — callers MUST treat this as a failure and refuse to publish into
+    /// the channel (no longer fail-open: publishing into an unverified channel
+    /// would risk writing against a group whose existence/membership we could not
+    /// confirm against relay truth).
     Degraded,
 }
 

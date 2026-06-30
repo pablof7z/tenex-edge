@@ -287,9 +287,10 @@ pub async fn run_session_in_daemon(
                         // still schedules a real distillation this turn.
                         if let Some(sess) = session.as_ref() {
                             if sess.title.trim().is_empty() {
-                                let quick = sess.transcript_path.as_deref()
-                                    .and_then(|path| crate::transcript::read_last_user_prompt(std::path::Path::new(path)))
-                                    .and_then(|prompt| {
+                                let raw_prompt = sess.transcript_path.as_deref()
+                                    .and_then(|path| crate::transcript::read_last_user_prompt(std::path::Path::new(path)));
+                                slog(&p.session_id, &format!("[title-seed] raw_prompt={:?}", raw_prompt.as_deref().map(|s| &s[..s.len().min(200)])));
+                                let quick = raw_prompt.and_then(|prompt| {
                                         let t = crate::util::titleize_prompt(&prompt);
                                         if t.is_empty() { None } else { Some(t) }
                                     });

@@ -147,7 +147,6 @@ pub(crate) fn channel_display(store: &Store, channel_h: &str) -> String {
         .get_channel(channel_h)
         .ok()
         .flatten()
-        .map(|c| c.name)
-        .filter(|n| !n.trim().is_empty())
+        .and_then(|c| c.human_name().map(str::to_string))
         .unwrap_or_else(|| channel_h.to_string())
 }

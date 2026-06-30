@@ -30,6 +30,14 @@ pub(crate) fn classify_group_publish_error(reason: &str) -> GroupPublishOutcome 
 }
 
 fn is_benign_duplicate(lower: &str) -> bool {
+    // "group already exists" is a 9007-specific rejection meaning the group
+    // pre-existed on the relay. It is NOT treated as Applied here: the readiness
+    // caller re-fetches relay state and falls through to membership checks when
+    // the create is rejected, so classifying it as Applied would cause a redundant
+    // lock-closed 9002 on a group we didn't create.
+    if lower.contains("group already exists") {
+        return false;
+    }
     lower.contains("already exists")
         || lower.contains("duplicate")
         || lower.contains("members already")

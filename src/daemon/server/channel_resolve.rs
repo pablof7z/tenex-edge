@@ -8,16 +8,41 @@
 
 use super::*;
 
-/// Resolve a channel NAME to its opaque `channel_h` within `parent`.
-///
-/// Order of resolution:
+/// Resolve `name` to a `channel_h` using ONLY locally-known state — no minting,
+/// no relay calls. Returns `Some(h)` when the value resolves without provisioning:
 ///   1. An existing `(parent, name)` row wins (the durable key for that handle).
 ///   2. A value that is ALREADY a known `channel_h` is returned unchanged —
 ///      backward-compat for callers passing a literal id (tmux_resume re-scope,
 ///      `channels switch`, a launch whose picker already returned an id).
-///   3. Otherwise, when `create_if_absent`, mint exactly ONE opaque id and
-///      provision it exactly like `channels_create` does (upsert + ready + sub).
-///   4. Else bail — no silent literal-`h` mint.
+///   3. A value SHAPED like an opaque id (`[0-9a-f]{8}`) that missed 1–2 is an
+///      already-resolved id whose kind:39000 has not yet materialized into the
+///      local cache (a race vs the channel's own provisioning) — hand it back
+///      unchanged rather than minting a junk channel literally NAMED after the
+///      id. Every spawn/launch sets `TENEX_EDGE_CHANNEL` to an already-resolved
+///      opaque id, so this is the common case for a freshly provisioned channel.
+///
+/// Returns `None` only for a genuine human NAME with no local row — the caller
+/// then mints (when `create_if_absent`) or bails.
+fn resolve_locally(store: &crate::state::Store, parent: &str, name: &str) -> Result<Option<String>> {
+    if let Some(h) = store.channel_id_for_name(parent, name)? {
+        return Ok(Some(h));
+    }
+    if store.get_channel(name).ok().flatten().is_some() {
+        return Ok(Some(name.to_string()));
+    }
+    if crate::util::is_opaque_group_id(name) {
+        return Ok(Some(name.to_string()));
+    }
+    Ok(None)
+}
+
+/// Resolve a channel NAME to its opaque `channel_h` within `parent`.
+///
+/// Local resolution (see [`resolve_locally`]) runs first: an existing
+/// `(parent, name)` row, a known `channel_h`, or an opaque-id passthrough.
+/// Otherwise, when `create_if_absent`, mint exactly ONE opaque id and provision
+/// it exactly like `channels_create` does (upsert + ready + sub); else bail — no
+/// silent literal-`h` mint.
 ///
 /// `agent` (a slug) names the member to admit when a channel is minted; when
 /// absent the management key (already the group admin) provisions it.
@@ -28,17 +53,8 @@ pub(in crate::daemon::server) async fn resolve_channel(
     agent: Option<&str>,
     create_if_absent: bool,
 ) -> Result<String> {
-    if let Some(h) = state.with_store(|s| s.channel_id_for_name(parent, name))? {
+    if let Some(h) = state.with_store(|s| resolve_locally(s, parent, name))? {
         return Ok(h);
-    }
-    // A literal channel_h already known locally is treated as already-resolved.
-    if state
-        .with_store(|s| s.get_channel(name))
-        .ok()
-        .flatten()
-        .is_some()
-    {
-        return Ok(name.to_string());
     }
     if !create_if_absent {
         anyhow::bail!("channel {name} not found");
@@ -46,12 +62,6 @@ pub(in crate::daemon::server) async fn resolve_channel(
 
     let child_h = crate::util::opaque_group_id();
     let now = now_secs();
-    // Stamp the operator-chosen name + parent locally FIRST so the shared
-    // provisioning primitive names the new subgroup correctly (it reads the
-    // display name from the local store).
-    state.with_store(|s| {
-        s.upsert_channel(&child_h, name, "", parent, now).ok();
-    });
 
     // The member to admit: the named agent's durable pubkey, else the management
     // key (already an admin) purely to provision the group.
@@ -70,14 +80,27 @@ pub(in crate::daemon::server) async fn resolve_channel(
     })
     .unwrap_or_default();
 
-    let _ = state
+    let gate = state
         .provider
         .ensure_channel_ready(crate::fabric::nip29::readiness::ChannelCtx {
             channel: &child_h,
             expect_member: &member,
             parent_hint: Some(parent),
+            // Operator-chosen name rides on the create publish; the relay's
+            // kind:39000 echo lands it in the cache.
+            name: Some(name),
         })
         .await;
+    // Fail loud: the relay never confirmed the new channel (its kind:39000 did not
+    // materialize), so there is no real id to hand back. Returning `child_h` here
+    // would point callers at a channel with no `relay_channels` row — exactly the
+    // phantom-state the relay-sourced rule forbids.
+    if matches!(gate, crate::fabric::nip29::readiness::ChannelGate::Degraded) {
+        anyhow::bail!(
+            "relay did not provision channel {name:?} (id {child_h}, parent {parent}); \
+             its kind:39000 never materialized"
+        );
+    }
     let _ = ensure_subscription(state, &child_h).await;
     Ok(child_h)
 }
@@ -229,8 +252,9 @@ fn finish_resolution(mut hits: Vec<(String, Vec<String>)>) -> ChannelResolution 
 
 /// Every channel in `root`'s subtree (excluding root) as `(channel_h, name_path)`,
 /// where `name_path` is the chain of kind:39000 NAMES from root's child down to
-/// the channel. Unnamed nodes (name empty or == its own id, e.g. session rooms)
-/// are not path-referenceable, so they and their subtrees are skipped.
+/// the channel. Unnamed nodes (per [`Channel::human_name`] — e.g. session rooms
+/// whose name defaulted to their opaque id) are not path-referenceable, so they
+/// and their subtrees are skipped.
 fn subtree_paths(store: &crate::state::Store, root: &str) -> Vec<(String, Vec<String>)> {
     use std::collections::BTreeMap;
     let channels = store.list_channels().unwrap_or_default();
@@ -250,10 +274,9 @@ fn subtree_paths(store: &crate::state::Store, root: &str) -> Vec<(String, Vec<St
             continue;
         };
         for c in children {
-            let name = c.name.trim();
-            if name.is_empty() || name == c.channel_h {
+            let Some(name) = c.human_name() else {
                 continue; // unnamed → not referenceable by path; skip its subtree
-            }
+            };
             let mut child_path = path.clone();
             child_path.push(name.to_lowercase());
             out.push((c.channel_h.clone(), child_path.clone()));
@@ -271,11 +294,60 @@ fn path_ends_with(segs: &[String], want: &[String]) -> bool {
 
 #[cfg(test)]
 mod resolve_tests {
-    use super::{resolve_channel_ref, ChannelResolution};
+    use super::{resolve_channel_ref, resolve_locally, ChannelResolution};
     use crate::state::Store;
 
     fn chan(store: &Store, id: &str, name: &str, parent: &str) {
         store.upsert_channel(id, name, "", parent, 1).unwrap();
+    }
+
+    /// An 8-hex opaque id absent from the local cache (a freshly provisioned
+    /// channel whose kind:39000 hasn't materialized yet) resolves to ITSELF and
+    /// does NOT mint a literal-named channel — the launch-channel-scope fix.
+    #[test]
+    fn opaque_id_miss_passes_through_without_minting() {
+        let store = Store::open_memory().unwrap();
+        chan(&store, "h-root", "proj", "");
+        let id = "2f1cd36f";
+        assert!(
+            store.get_channel(id).unwrap().is_none(),
+            "precondition: opaque id must be absent from the cache"
+        );
+        assert_eq!(
+            resolve_locally(&store, "h-root", id).unwrap(),
+            Some(id.to_string()),
+            "an unknown opaque id must pass through unchanged, not be minted"
+        );
+        // Passthrough is pure: it must not have created a channel named after the id.
+        assert!(
+            store.get_channel(id).unwrap().is_none(),
+            "resolve_locally must never mint a channel"
+        );
+    }
+
+    /// Known names/ids resolve locally; a genuine human NAME with no row does NOT
+    /// (the caller mints/bails) — proving the opaque-id passthrough never
+    /// over-triggers on real handles.
+    #[test]
+    fn known_resolve_locally_but_unknown_human_name_does_not() {
+        let store = Store::open_memory().unwrap();
+        chan(&store, "h-root", "proj", "");
+        chan(&store, "h-plan", "planning", "h-root");
+        // 1. existing (parent, name) row wins.
+        assert_eq!(
+            resolve_locally(&store, "h-root", "planning").unwrap(),
+            Some("h-plan".to_string())
+        );
+        // 2. a literal known channel_h passes through.
+        assert_eq!(
+            resolve_locally(&store, "h-root", "h-plan").unwrap(),
+            Some("h-plan".to_string())
+        );
+        // 3. a genuine human NAME with no local row is unresolved here.
+        assert_eq!(
+            resolve_locally(&store, "h-root", "backlog-work").unwrap(),
+            None
+        );
     }
 
     #[test]

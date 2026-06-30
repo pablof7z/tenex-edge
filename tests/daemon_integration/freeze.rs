@@ -106,7 +106,9 @@ fn freeze_39000_39002_idempotency_no_member_duplication() {
 
     // FREEZE: membership is stable — no duplication, same set.
     assert!(
-        store.is_channel_member(&project, &rec.agent_pubkey).unwrap(),
+        store
+            .is_channel_member(&project, &rec.agent_pubkey)
+            .unwrap(),
         "member still present after double-apply of 39002 snapshot"
     );
     // Count members via list — expect exactly 1 (no duplication).

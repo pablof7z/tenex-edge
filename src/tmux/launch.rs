@@ -11,22 +11,28 @@ fn project_abs_path(
     state: &Arc<DaemonState>,
     project: &str,
     client_cwd: Option<&std::path::Path>,
-) -> String {
+) -> Result<String> {
     if let Some(cwd) = client_cwd {
         let abs = cwd.to_string_lossy().to_string();
         let now = crate::util::now_secs();
-        let _ = state.with_store(|s| s.upsert_project_root(project, &abs, now));
-        return abs;
+        // The recorded root is what the resume path reads back; if the write is
+        // dropped, a later resume falls into the "no root" branch and we'd spawn
+        // in the wrong directory. Propagate the failure instead of swallowing it.
+        state
+            .with_store(|s| s.upsert_project_root(project, &abs, now))
+            .with_context(|| format!("recording project root for {project:?}"))?;
+        return Ok(abs);
     }
-    state
+    // Resume path (no client cwd): the project root MUST already be recorded.
+    // Never guess the daemon's current_dir here — an unrelated cwd (or an empty
+    // PathBuf on error) would spawn `tmux new-session -c ""` and land the agent
+    // in the wrong/invalid directory. Fail loud on a read error or missing row.
+    let root = state
         .with_store(|s| s.project_root(project))
-        .unwrap_or(None)
-        .unwrap_or_else(|| {
-            std::env::current_dir()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string()
-        })
+        .with_context(|| format!("looking up project root for {project:?}"))?;
+    root.ok_or_else(|| {
+        anyhow::anyhow!("cannot resolve project root for {project:?} (no recorded path)")
+    })
 }
 
 fn unique_session_name(slug: &str) -> String {
@@ -225,7 +231,7 @@ pub async fn spawn_agent(
         }
     };
 
-    let abs_path = project_abs_path(state, project, client_cwd);
+    let abs_path = project_abs_path(state, project, client_cwd)?;
     open_agent_session(slug, window_name, &abs_path, &agent_command, group, ordinal).await
 }
 
@@ -251,7 +257,7 @@ pub async fn resume_agent(
     let resume_command = build_resume_command(&base, shape, resume_id);
 
     let window_name = format!("{slug}·resume");
-    let abs_path = project_abs_path(state, project, None);
+    let abs_path = project_abs_path(state, project, None)?;
     // ordinal=None: a resumed claude/codex session re-registers under the SAME
     // session_id, so select_session_signer recovers its ordinal from the existing
     // (pubkey,h) route — no explicit hint needed.

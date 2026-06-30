@@ -388,7 +388,9 @@ fn agent_reply_publishes_kind9_chat_into_room() {
 
     let store = Store::open(&home.store_path()).unwrap();
     let msgs = chat_in_channel(&store, &rec.channel_h);
-    let reply = msgs.iter().find(|m| m.content == "I fixed the bug in auth.rs");
+    let reply = msgs
+        .iter()
+        .find(|m| m.content == "I fixed the bug in auth.rs");
     assert!(
         reply.is_some(),
         "agent reply should be chat in room {}; got {:?}",

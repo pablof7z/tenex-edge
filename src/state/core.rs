@@ -3,7 +3,8 @@ use super::*;
 impl Store {
     pub fn open(path: &Path) -> Result<Self> {
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).ok();
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("creating parent dir for {}", path.display()))?;
         }
         let conn = Connection::open(path).with_context(|| format!("opening {}", path.display()))?;
         // WAL + busy timeout + relaxed sync: the per-machine daemon is the sole
@@ -14,9 +15,29 @@ impl Store {
         //   busy_timeout=5000  block up to 5s on a held lock instead of erroring
         //   synchronous=NORMAL safe under WAL; fsync only at checkpoints
         // No foreign_keys pragma: the schema declares no FK constraints.
-        conn.pragma_update(None, "journal_mode", "WAL").ok();
-        conn.pragma_update(None, "synchronous", "NORMAL").ok();
-        conn.busy_timeout(std::time::Duration::from_secs(5)).ok();
+        //
+        // WAL is a startup invariant, not a best-effort hint. This project has a
+        // documented multi-writer corruption incident: ~16 per-session readers
+        // plus the daemon writer rely on WAL actually being engaged. Critically,
+        // `PRAGMA journal_mode=WAL` does NOT error when it cannot switch — it
+        // returns the resulting mode as a row — so we must read that row back and
+        // refuse to open the db unless WAL is truly in effect, rather than run in
+        // a rollback-journal mode that reintroduces the corruption surface.
+        let journal_mode: String = conn
+            .query_row("PRAGMA journal_mode=WAL", [], |r| r.get(0))
+            .context("setting journal_mode=WAL")?;
+        if !journal_mode.eq_ignore_ascii_case("wal") {
+            anyhow::bail!(
+                "refusing to open {}: journal_mode is {journal_mode:?}, not WAL — \
+                 a rollback journal lets readers block the writer and reintroduces \
+                 the multi-writer corruption surface",
+                path.display(),
+            );
+        }
+        conn.pragma_update(None, "synchronous", "NORMAL")
+            .context("setting synchronous=NORMAL")?;
+        conn.busy_timeout(std::time::Duration::from_secs(5))
+            .context("setting busy_timeout")?;
         // Single fresh schema. No ALTER TABLE migrations and no legacy tables: the
         // store is a rebuildable cache plus local plumbing, so a schema change is a
         // wipe-and-rebuild, never an in-place migration.

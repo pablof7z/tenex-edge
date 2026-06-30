@@ -53,36 +53,6 @@ pub async fn project(action: ProjectAction) -> Result<()> {
             let event_id = v["event_id"].as_str().unwrap_or("?");
             println!("Updated {slug}: {}", &event_id[..event_id.len().min(8)]);
         }
-        ProjectAction::Add { project, pubkey } => match pubkey {
-            Some(pubkey) => {
-                let project = match project {
-                    Some(p) => p,
-                    None => crate::project::resolve_or_bail(
-                        &std::env::current_dir().unwrap_or_default(),
-                    )?,
-                };
-                let v = daemon_call_async(
-                    "project_add",
-                    serde_json::json!({ "project": project, "pubkey": pubkey }),
-                )
-                .await?;
-                let resolved = v["pubkey"].as_str().unwrap_or(&pubkey);
-                println!(
-                    "added {} to {}",
-                    pubkey_short(resolved).cyan(),
-                    project.bold()
-                );
-            }
-            None => {
-                let project = match project {
-                    Some(p) => p,
-                    None => crate::project::resolve_or_bail(
-                        &std::env::current_dir().unwrap_or_default(),
-                    )?,
-                };
-                super::super::project_agents::edit_membership(project).await?;
-            }
-        },
     }
     Ok(())
 }

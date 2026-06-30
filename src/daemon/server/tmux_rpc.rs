@@ -135,9 +135,10 @@ pub(super) async fn rpc_tmux_spawn(
 
     // Proactively provision the channel/project BEFORE opening the pane so the
     // relay already has the group and the agent as a member when the first
-    // session-start event arrives. Best-effort with an 8-second cap — a slow
-    // relay must never block the spawn. Session-start repeats this idempotently.
-    provision_before_spawn(state, &p.agent, &p.project, group).await;
+    // session-start event arrives. Bounded with an 8-second cap — a slow relay
+    // surfaces as a failed spawn rather than a hang. Session-start repeats this
+    // idempotently. A degraded/timed-out provision fails the spawn loudly.
+    provision_before_spawn(state, &p.agent, &p.project, group).await?;
 
     let pane_id = crate::tmux::spawn_agent(
         state,
@@ -198,7 +199,7 @@ pub(super) async fn rpc_invite(
 
     let client_cwd = p.cwd.as_deref().map(std::path::Path::new);
     // Provision membership in the EXISTING channel, then spawn pinned to it.
-    provision_before_spawn(state, &slug, &project, Some(&channel_h)).await;
+    provision_before_spawn(state, &slug, &project, Some(&channel_h)).await?;
     let pane_id = crate::tmux::spawn_agent(
         state,
         &slug,
@@ -240,15 +241,10 @@ async fn provision_before_spawn(
     slug: &str,
     project: &str,
     channel: Option<&str>,
-) {
+) -> Result<()> {
     let edge = crate::config::edge_home();
-    let id = match crate::identity::load_or_create(&edge, slug, crate::util::now_secs()) {
-        Ok(id) => id,
-        Err(e) => {
-            tracing::warn!(slug, error = %e, "provision: could not resolve identity");
-            return;
-        }
-    };
+    let id = crate::identity::load_or_create(&edge, slug, crate::util::now_secs())
+        .with_context(|| format!("provision: could not resolve identity for {slug}"))?;
     let pubkey = id.pubkey_hex();
 
     // Detect concurrent instances of the same agent in this scope.
@@ -293,14 +289,19 @@ async fn provision_before_spawn(
         parent_hint,
         name: None,
     };
-    if tokio::time::timeout(timeout, state.provider.ensure_channel_ready(ctx))
-        .await
-        .is_err()
-    {
-        tracing::warn!(
-            scope,
-            "provision: channel provisioning timed out; proceeding"
-        );
+    // `Degraded` means the channel was NOT verified ready on the relay. Opening a
+    // pane against an unprovisioned channel would report a spawned agent that then
+    // publishes into a phantom scope, so a degraded gate (or a timeout, equally
+    // unverified) fails the spawn loudly rather than proceeding.
+    match tokio::time::timeout(timeout, state.provider.ensure_channel_ready(ctx)).await {
+        // Ready | Repaired: the channel is verified against relay truth.
+        Ok(crate::fabric::nip29::readiness::ChannelGate::Degraded) => anyhow::bail!(
+            "channel {scope} was not provisioned on the relay; refusing to spawn the agent pane"
+        ),
+        Ok(_) => Ok(()),
+        Err(_) => anyhow::bail!(
+            "channel {scope} provisioning timed out; refusing to spawn the agent pane"
+        ),
     }
 }
 

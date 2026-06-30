@@ -72,7 +72,6 @@ pub async fn run() -> Result<()> {
         subscriptions: Mutex::new(crate::fabric::subscriptions::SubscriptionRegistry::new()),
         tail_tx: tokio::sync::broadcast::channel(512).0,
         open_clients: Mutex::new(0),
-        liveness_changed: Notify::new(),
         shutdown: Notify::new(),
         peer_sessions: Mutex::new(HashMap::new()),
         seen_events: Mutex::new((
@@ -92,7 +91,6 @@ pub async fn run() -> Result<()> {
     // publishers/subscribers are best-effort and queue), so they start now.
     spawn_demux(state.clone());
     spawn_pruner(state.clone());
-    spawn_idle_watcher(state.clone());
     spawn_outbox_drainer(state.clone());
     spawn_status_heartbeat_publisher(state.clone());
     spawn_retry_drainer(state.clone());
@@ -267,7 +265,6 @@ pub(in crate::daemon::server) async fn serve_connection(
 
     {
         *state.open_clients.lock().unwrap() += 1;
-        state.liveness_changed.notify_waiters();
     }
     let _guard = ClientGuard(state.clone());
 
@@ -313,7 +310,6 @@ impl Drop for ClientGuard {
     fn drop(&mut self) {
         let mut n = self.0.open_clients.lock().unwrap();
         *n = n.saturating_sub(1);
-        self.0.liveness_changed.notify_waiters();
     }
 }
 
