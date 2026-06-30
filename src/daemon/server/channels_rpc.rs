@@ -78,20 +78,32 @@ pub(in crate::daemon::server) async fn rpc_channels_create(
     let creator_rec =
         resolve_session_inner(state, &CallerAnchor::from_params(params), ResolveScope::Strict).ok();
 
+    // Operator cwd-resolved project slug (== root channel_h for project roots).
+    // Used as fallback when there is no agent session.
+    let cwd_project: Option<String> = params["cwd"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .and_then(|cwd| crate::project::resolve(std::path::Path::new(cwd)).ok());
+
     // Resolve the parent the new channel hangs under:
-    //   1. `--parent-channel <ref>` — project-relative override (needs a session).
+    //   1. `--parent-channel <ref>` — project-relative override.
     //   2. the creating agent's CURRENT channel — the child-of-current default.
     //   3. an explicit literal `parent` — the picker / operator / test path.
+    //   4. cwd-resolved project root — bare operator invocation from a project dir.
     let parent: String = if let Some(r) = p
         .parent_channel
         .as_deref()
         .map(str::trim)
         .filter(|s| !s.is_empty())
     {
-        let rec = creator_rec
-            .as_ref()
-            .context("--parent-channel requires running inside an agent session")?;
-        let root = state.with_store(|s| super::project_root(s, &rec.channel_h));
+        // Prefer the session's project root; fall back to cwd-resolved project.
+        let root = if let Some(rec) = &creator_rec {
+            state.with_store(|s| super::project_root(s, &rec.channel_h))
+        } else {
+            cwd_project.clone().context(
+                "--parent-channel requires running inside an agent session or a project directory",
+            )?
+        };
         match state.with_store(|s| super::resolve_channel_ref(s, &root, r)) {
             super::ChannelResolution::Unique(h) => h,
             super::ChannelResolution::Ambiguous(refs) => {
@@ -105,9 +117,11 @@ pub(in crate::daemon::server) async fn rpc_channels_create(
         rec.channel_h.clone()
     } else if let Some(par) = p.parent.as_deref().filter(|s| !s.is_empty()) {
         par.to_string()
+    } else if let Some(proj) = cwd_project {
+        proj
     } else {
         anyhow::bail!(
-            "channels create needs a parent: run it inside an agent session, or pass --parent-channel"
+            "channels create needs a parent: run it inside an agent session, pass --parent-channel, or run from a project directory"
         );
     };
 

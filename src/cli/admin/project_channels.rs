@@ -82,7 +82,6 @@ pub async fn channels(action: ChannelsAction) -> Result<()> {
             about,
             agents,
             parent_channel,
-            message,
         } => {
             // `--agent` is optional: an agent may carve out an empty channel and
             // populate it later. Each `slug@backend` splits on the LAST `@` (agent
@@ -95,11 +94,6 @@ pub async fn channels(action: ChannelsAction) -> Result<()> {
                     .with_context(|| format!("malformed --agent {a:?}: expected slug@backend"))?;
                 parsed.push(serde_json::json!({ "slug": slug, "backend": backend }));
             }
-            let brief = match &message {
-                Some(path) => std::fs::read_to_string(path)
-                    .with_context(|| format!("reading --message {}", path.display()))?,
-                None => String::new(),
-            };
             let v = daemon_call_async(
                 "channels_create",
                 crate::cli::rpc_params(serde_json::json!({
@@ -108,9 +102,8 @@ pub async fn channels(action: ChannelsAction) -> Result<()> {
                     // overrides that with a project-relative reference.
                     "parent_channel": parent_channel,
                     "name": name,
-                    "about": about.unwrap_or_default(),
+                    "about": about,
                     "agents": parsed,
-                    "brief": brief,
                 })),
             )
             .await?;

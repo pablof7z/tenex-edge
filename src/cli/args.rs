@@ -297,9 +297,9 @@ pub(super) enum ChannelsAction {
         #[arg(long)]
         name: String,
         /// Durable channel description, published to the relay as the kind:39000
-        /// `about`. Optional.
+        /// `about`. Required.
         #[arg(long)]
-        about: Option<String>,
+        about: String,
         /// Optional, repeatable `slug@backend`, where `slug` is the agent identity
         /// (the `~/.tenex-edge/agents/*.json` filename stem, e.g. `developer`,
         /// `alice`) and `backend` is a hex pubkey or npub of the target backend
@@ -311,9 +311,6 @@ pub(super) enum ChannelsAction {
         /// `planning` or `epic999/planning`) to nest it elsewhere in the project.
         #[arg(long = "parent-channel", value_name = "CHANNEL")]
         parent_channel: Option<String>,
-        /// Path to a markdown brief; its contents become the kind:9 prose body.
-        #[arg(long = "message", value_name = "PATH")]
-        message: Option<PathBuf>,
     },
     /// List the subgroup task channels under a project.
     List {
