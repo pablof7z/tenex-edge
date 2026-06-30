@@ -115,8 +115,19 @@ pub(in crate::daemon::server) async fn rpc_chat_write(
                 }
                 Some((target.pubkey, target.target_session, target.project, raw))
             }
-            // Unresolvable mention token → treat the body as having no mention.
-            Err(_) => None,
+            // An unknown token is an expected "no mention" (silent). A genuine
+            // store failure underneath, however, silently DROPS a real mention —
+            // surface that loudly so DB errors aren't mistaken for unknown handles.
+            Err(e) => {
+                if e.chain().any(|c| c.is::<rusqlite::Error>()) {
+                    tracing::warn!(
+                        token = %raw,
+                        error = %format!("{e:#}"),
+                        "chat_write: store error while resolving mention token — treating as no mention (mention may be lost)"
+                    );
+                }
+                None
+            }
         }
     } else {
         None
@@ -156,14 +167,21 @@ pub(in crate::daemon::server) async fn rpc_chat_write(
     // connection that published it. Seed the verbatim log and park inbox rows for
     // sessions already alive in the same routing scope.
     let routed = state.with_store(|s| {
-        let _ = s.insert_event(&chat_relay_event(
+        if let Err(e) = s.insert_event(&chat_relay_event(
             &event_id,
             &from_pubkey,
             created_at,
             &deliver_scope,
             &body_to_send,
             mentioned_pubkey.as_deref(),
-        ));
+        )) {
+            tracing::error!(
+                event_id = %event_id,
+                channel = %deliver_scope,
+                error = %e,
+                "chat_write: seeding published chat into relay_events log failed — local tail may miss this line"
+            );
+        }
         let mut routed = false;
         for target in s.list_alive_sessions().unwrap_or_default() {
             let is_direct_target = mentioned_session.as_deref() == Some(target.session_id.as_str());
