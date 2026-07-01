@@ -10,7 +10,7 @@ pub(crate) fn turn_start_audit(
     now: u64,
     context: Option<&str>,
 ) -> serde_json::Value {
-    let first_turn = prev_turn_started_at == 0;
+    let first_turn = rec.seen_cursor == 0;
     let ambient_since = if first_turn {
         rec.created_at.max(rec.seen_cursor)
     } else {
@@ -21,7 +21,7 @@ pub(crate) fn turn_start_audit(
     let joined = s
         .list_session_joined_channels(&rec.session_id)
         .unwrap_or_default();
-    let awareness_since = (!first_turn).then_some(prev_turn_started_at);
+    let awareness_since = (!first_turn).then_some(rec.seen_cursor);
     serde_json::json!({
         "kind": "turn_start",
         "now": now,

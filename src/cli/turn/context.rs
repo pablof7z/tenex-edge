@@ -4,15 +4,27 @@
 //! awareness) — kept apart from the thin hook clients in [`super`] so neither
 //! file grows past the LOC ceiling.
 
-use super::super::who::{
-    render_awareness_snapshot, render_awareness_update_since_check,
-    render_awareness_update_since_turn,
-};
+use super::super::who::{render_awareness_update_since_check, render_turn_awareness};
 use super::*;
 use crate::state::{InboxRow, RelayEvent, Session};
 
 /// Cap on ambient channel-chat rows pulled from the relay-event log per turn.
 const AMBIENT_CHAT_LIMIT: u32 = 50;
+
+fn context_instance(
+    store: &std::sync::Mutex<Store>,
+    rec: &Session,
+) -> crate::identity::AgentInstance {
+    store
+        .lock()
+        .expect("store mutex poisoned")
+        .instance_identity_for_session(&rec.session_id)
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| {
+            crate::identity::AgentInstance::base(rec.agent_slug.clone(), rec.agent_pubkey.clone())
+        })
+}
 
 /// Walk `channel`'s NIP-29 `parent` links up to the top-level project root (the
 /// first channel whose parent is empty/unknown). Bounded against malformed
@@ -161,22 +173,25 @@ fn render_mentions_by_channel(
 /// drift.
 ///
 /// `backend_pubkey` is this daemon's signing pubkey, used to decide whether we
-/// manage (admin) the channel. `prev_turn_started_at` is the `turn_started_at`
-/// value BEFORE this turn's mark; the caller passes it so first-turn detection
-/// matches the old behavior.
+/// manage (admin) the channel. `_prev_turn_started_at` is retained for the daemon
+/// call contract, but first-turn detection is based on `seen_cursor`: `turn_end`
+/// clears `turn_started_at`, while `seen_cursor` is the durable injection cursor.
 pub fn assemble_turn_start_context(
     store: &std::sync::Mutex<Store>,
     rec: &Session,
     backend_pubkey: &str,
     self_host: &str,
-    prev_turn_started_at: u64,
+    _prev_turn_started_at: u64,
 ) -> Option<String> {
-    let first_turn = prev_turn_started_at == 0;
+    let first_turn = rec.seen_cursor == 0;
     // Routing scope is the session's `channel_h` — a project channel, or the
     // session/task channel a `channels switch` moved it into. All fabric
     // presence/deltas key on this so a switched session's turn context reflects
     // the channel it actually publishes into.
     let scope = rec.channel_h.clone();
+    let self_instance = context_instance(store, rec);
+    let self_slug = self_instance.display_slug();
+    let self_pubkey = self_instance.pubkey.clone();
     let now = now_secs();
     let mut blocks: Vec<String> = Vec::new();
     let (joined, joined_read_failed) = {
@@ -194,7 +209,7 @@ pub fn assemble_turn_start_context(
             // A lookup error is NOT membership: treat an Err as "unknown" and
             // fail loud rather than assuming the agent is a member (which would
             // silently suppress the warning when the DB read actually failed).
-            let member = match s.is_channel_member(&scope, &rec.agent_pubkey) {
+            let member = match s.is_channel_member(&scope, &self_pubkey) {
                 Ok(m) => m,
                 Err(e) => {
                     tracing::error!(
@@ -237,15 +252,15 @@ pub fn assemble_turn_start_context(
             blocks.push(format!(
                 "<tenex-edge>\nWARNING: this agent ({slug}) is not a member of the \
                  NIP-29 group for {where_label}. Messages published by this session \
-                 may be rejected by the relay. Ask an operator with relay admin \
+                may be rejected by the relay. Ask an operator with relay admin \
                  access to add this agent to the channel.\n</tenex-edge>",
-                slug = rec.agent_slug,
+                slug = self_slug,
             ));
         }
     }
 
-    // Direct deliveries (p-tagged mentions) come from the inbox ledger. Ambient
-    // channel chat comes from the relay-event log:
+    // Direct deliveries (p-tagged mentions) come from the inbox ledger. Fabric
+    // awareness renders channel chat from the relay-event log:
     //   - First turn: only messages since this session started (pre-join history
     //     is announced as a compact count, not dumped inline).
     //   - Subsequent turns: messages since the last seen_cursor high-water mark.
@@ -260,7 +275,7 @@ pub fn assemble_turn_start_context(
     // Seed with the joined-channel read result: a failure there silently dropped
     // passive channels, so the marker must fire even if every other read succeeds.
     let mut read_failed = joined_read_failed;
-    let (mentions, ambient, pre_history_notice) = {
+    let (mentions, pre_history_notice) = {
         let s = store.lock().expect("store mutex poisoned");
         // A failed inbox claim must NOT render as an empty inbox: log loudly and
         // flag the turn so a visible marker is injected below.
@@ -276,8 +291,8 @@ pub fn assemble_turn_start_context(
                 Vec::new()
             }
         };
-        let (ambient, ambient_failed) =
-            ambient_by_joined_channel(&s, &joined, ambient_since, &rec.agent_pubkey);
+        let (_ambient, ambient_failed) =
+            ambient_by_joined_channel(&s, &joined, ambient_since, &self_pubkey);
         read_failed |= ambient_failed;
         let notice = if first_turn {
             // A count failure must not silently render as "no prior history": log
@@ -307,7 +322,7 @@ pub fn assemble_turn_start_context(
         } else {
             None
         };
-        (mentions, ambient, notice)
+        (mentions, notice)
     };
     if read_failed {
         blocks.push(
@@ -325,40 +340,20 @@ pub fn assemble_turn_start_context(
         for block in render_mentions_by_channel(&s, &scope, &mentions, now) {
             blocks.push(block);
         }
-        for (channel_h, rows) in ambient {
-            let name = crate::injection::channel_display(&s, &channel_h);
-            let ambient_header = if first_turn {
-                format!("Activity on #{name} since you joined:")
-            } else {
-                format!("Activity on #{name} since you last looked:")
-            };
-            if let Some(block) = crate::injection::render_ambient(&s, &ambient_header, &rows, now) {
-                blocks.push(block);
-            }
-        }
     }
 
     let awareness = {
         let s = store.lock().expect("store mutex poisoned");
-        if first_turn {
-            render_awareness_snapshot(
-                &s,
-                &scope,
-                now,
-                &rec.agent_slug,
-                &rec.agent_pubkey,
-                self_host,
-            )
-        } else {
-            render_awareness_update_since_turn(
-                &s,
-                prev_turn_started_at,
-                &scope,
-                now,
-                Some(&rec.agent_pubkey),
-                self_host,
-            )
-        }
+        render_turn_awareness(
+            &s,
+            rec.seen_cursor,
+            rec.created_at,
+            &scope,
+            now,
+            &self_slug,
+            &self_pubkey,
+            self_host,
+        )
     };
     if let Some(block) = awareness {
         blocks.push(block);
@@ -409,6 +404,7 @@ pub fn assemble_turn_check_context(
     // key on this so mid-turn context reflects the channel the session is
     // actually publishing into after a switch.
     let scope = rec.channel_h.clone();
+    let self_pubkey = context_instance(store, rec).pubkey;
     let (joined, joined_read_failed) = {
         let s = store.lock().expect("store mutex poisoned");
         joined_channels(&s, rec)
@@ -441,31 +437,23 @@ pub fn assemble_turn_check_context(
         }
     }
 
-    // Ambient chat and sibling-delta remain gated by the daemon's rate-limit
-    // floor and cursored off the same `since` so nothing re-emits per tool call.
+    // Fabric chat activity and sibling-delta remain gated by the daemon's
+    // rate-limit floor and cursored off the same `since` so nothing re-emits
+    // per tool call. The joined-channel read stays here only to surface a
+    // visible read-failure marker; channel activity text itself is rendered by
+    // the unified awareness block below.
     if let Some(since) = delta_since {
         let s = store.lock().expect("store mutex poisoned");
-        let (ambient, ambient_failed) =
-            ambient_by_joined_channel(&s, &joined, since, &rec.agent_pubkey);
+        let (_ambient, ambient_failed) =
+            ambient_by_joined_channel(&s, &joined, since, &self_pubkey);
         read_failed |= ambient_failed;
-        for (channel_h, rows) in ambient {
-            let name = crate::injection::channel_display(&s, &channel_h);
-            if let Some(block) = crate::injection::render_ambient(
-                &s,
-                &format!("Activity on #{name} since your last check:"),
-                &rows,
-                now,
-            ) {
-                blocks.push(block);
-            }
-        }
 
         if let Some(block) = render_awareness_update_since_check(
             &s,
             since,
             &scope,
             now,
-            Some(&rec.agent_pubkey),
+            Some(&self_pubkey),
             self_host,
         ) {
             blocks.push(block);

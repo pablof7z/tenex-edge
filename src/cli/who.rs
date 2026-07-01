@@ -7,10 +7,7 @@ mod snapshot;
 
 // Public re-exports for the crate and cli module
 pub(crate) use awareness::new_agent_block;
-pub(super) use awareness::{
-    render_awareness_snapshot, render_awareness_update_since_check,
-    render_awareness_update_since_turn,
-};
+pub(super) use awareness::{render_awareness_update_since_check, render_turn_awareness};
 pub use snapshot::{load_who_snapshot, WhoSnapshot};
 
 /// The `tenex-edge who` full fabric view — the SAME format the hook injection

@@ -1,5 +1,5 @@
 use super::*;
-use crate::state::{Session, Status, Store};
+use crate::state::{Identity, RegisterSession, Session, Status, Store};
 use std::sync::Mutex;
 
 const BACKEND: &str = "pk-backend";
@@ -72,7 +72,8 @@ fn test_session(id: &str) -> Session {
 #[test]
 fn turn_start_context_returns_none_when_empty_non_first_turn() {
     let store = Store::open_memory().unwrap();
-    let rec = test_session("sess-freeze-2");
+    let mut rec = test_session("sess-freeze-2");
+    rec.seen_cursor = 42;
     let m = Mutex::new(store);
 
     let ctx = assemble_turn_start_context(
@@ -110,6 +111,104 @@ fn first_turn_renders_awareness_snapshot_not_session_code() {
     assert!(
         !text.contains("[session"),
         "intro must not expose a session code; got: {text:?}"
+    );
+}
+
+#[test]
+fn first_turn_snapshot_uses_bound_instance_identity() {
+    let store = Store::open_memory().unwrap();
+    seed_channel(&store);
+    store
+        .replace_channel_members("proj", &["pk-coder1".to_string()], 2)
+        .unwrap();
+    let sid = store
+        .register_session(&RegisterSession {
+            harness: "codex".to_string(),
+            external_id_kind: "session".to_string(),
+            external_id: "sess-ordinal-native".to_string(),
+            agent_pubkey: "pk-coder".to_string(),
+            agent_slug: "coder".to_string(),
+            channel_h: "proj".to_string(),
+            child_pid: None,
+            transcript_path: None,
+            resume_id: String::new(),
+            now: 1,
+        })
+        .unwrap();
+    store
+        .upsert_identity(&Identity {
+            pubkey: "pk-coder1".to_string(),
+            base_pubkey: "pk-coder".to_string(),
+            agent_slug: "coder".to_string(),
+            ordinal: 1,
+            session_id: sid.clone(),
+            channel_h: "proj".to_string(),
+            native_id: "sess-ordinal-native".to_string(),
+            alive: true,
+            created_at: 2,
+        })
+        .unwrap();
+    let now = crate::util::now_secs();
+    pub_status(
+        &store,
+        "pk-coder1",
+        "coder1",
+        "Ordinal instance",
+        "checking hook context",
+        true,
+        now,
+        now,
+    );
+    let rec = store.get_session(&sid).unwrap().unwrap();
+    let m = Mutex::new(store);
+
+    let text = assemble_turn_start_context(&m, &rec, BACKEND, "laptop", 0)
+        .expect("first-turn intro expected");
+    assert!(
+        text.contains("@coder1 (you) - Ordinal instance — checking hook context"),
+        "snapshot must render the bound ordinal instance; got: {text:?}"
+    );
+    assert!(
+        !text.contains("@coder (you)"),
+        "raw session slug must not override the bound instance; got: {text:?}"
+    );
+}
+
+#[test]
+fn ended_turn_with_cursor_uses_delta_not_snapshot() {
+    let store = Store::open_memory().unwrap();
+    seed_channel(&store);
+    store
+        .insert_event(&crate::state::RelayEvent {
+            id: "chat-after-cursor".to_string(),
+            kind: 9,
+            pubkey: "pk-chat".to_string(),
+            created_at: 160,
+            channel_h: "proj".to_string(),
+            d_tag: String::new(),
+            content: "new message after prior turn".to_string(),
+            tags_json: "[]".to_string(),
+        })
+        .unwrap();
+    let mut rec = test_session("sess-ended-turn");
+    rec.seen_cursor = 150;
+    let m = Mutex::new(store);
+
+    let text = assemble_turn_start_context(
+        &m, &rec, BACKEND, "laptop", /* turn_end cleared this */ 0,
+    )
+    .expect("fresh chat past the cursor must surface");
+    assert!(
+        text.contains("[tenex-edge] Fabric updates since your last turn"),
+        "ended turn should render a delta, got: {text:?}"
+    );
+    assert!(
+        !text.contains("[tenex-edge] Fabric context"),
+        "static fabric snapshot must not repeat after the cursor advanced; got: {text:?}"
+    );
+    assert!(
+        !text.contains("Fabric updates since you joined"),
+        "post-first-turn chat must not be labelled as join-time context; got: {text:?}"
     );
 }
 
@@ -192,6 +291,7 @@ fn turn_check_delta_suppressed_when_not_due() {
 #[test]
 fn turn_check_chat_shown_once_not_per_tool_call() {
     let store = Store::open_memory().unwrap();
+    seed_channel(&store);
     // A kind:9 chat event in `proj`, created at 120 (after the cursor 50).
     store
         .insert_event(&crate::state::RelayEvent {
@@ -210,8 +310,16 @@ fn turn_check_chat_shown_once_not_per_tool_call() {
     let text = assemble_turn_check_context(&m, &test_session("sess-me"), "laptop", Some(50), 200)
         .expect("fresh chat past the cursor must surface");
     assert!(
-        text.contains("Activity on #proj since your last check:"),
-        "chat block expected; got: {text:?}"
+        text.contains("[tenex-edge] Fabric updates since your last check"),
+        "chat should render inside the unified fabric update; got: {text:?}"
+    );
+    assert!(
+        text.contains("Activity in #main:"),
+        "chat activity section expected; got: {text:?}"
+    );
+    assert!(
+        !text.contains("Activity on #proj since your last check:"),
+        "legacy ambient activity block must not render; got: {text:?}"
     );
 
     // Cursor advanced past the row (since=150 > 120): no re-emit.

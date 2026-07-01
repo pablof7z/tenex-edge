@@ -1,5 +1,6 @@
 use super::*;
 use crate::state::{RelayEvent, Status, Store};
+use nostr_sdk::prelude::{Keys, ToBech32};
 
 const NOW: u64 = 1_000;
 /// The viewer's machine. Test peers share this host (so they render bare
@@ -439,6 +440,33 @@ fn update_activity_excludes_viewers_own_chat() {
 }
 
 #[test]
+fn update_activity_rewrites_mention_entities_to_slugs() {
+    let store = Store::open_memory().unwrap();
+    chan(&store, "h-aware", "awareness", "", "");
+    let mentioned = Keys::generate().public_key();
+    store
+        .upsert_profile(&mentioned.to_hex(), "Ada", "ada", "claude-code", false, 1)
+        .unwrap();
+    chat(
+        &store,
+        "chat-mention",
+        "h-aware",
+        "claude",
+        &format!(
+            "hey nostr:{} check this out",
+            mentioned.to_bech32().unwrap()
+        ),
+        970,
+    );
+
+    let block = render_awareness_update_since_check(&store, 900, "h-aware", NOW, None, LOCAL_HOST)
+        .expect("activity should render");
+
+    assert_has(&block, "@ada");
+    assert_lacks(&block, "nostr:");
+}
+
+#[test]
 fn other_active_channels_use_status_titles_without_repeating_old_activity() {
     let store = Store::open_memory().unwrap();
     chan(&store, "h-aware", "awareness", "", "");
@@ -476,7 +504,15 @@ fn other_active_channels_are_scoped_to_this_project() {
     // unnamed). THIS project: root `nmp` with a top-level branch `epic123`.
     chan(&store, "h-nmp", "nmp", "", "");
     chan(&store, "h-epic123", "epic123", "", "h-nmp");
-    status(&store, "pk-a", "a", "h-epic123", "planning the epic", true, 980);
+    status(
+        &store,
+        "pk-a",
+        "a",
+        "h-epic123",
+        "planning the epic",
+        true,
+        980,
+    );
     // A DIFFERENT project: its own root `other-proj`, also active.
     chan(&store, "h-other", "other-proj", "", "");
     status(&store, "pk-b", "b", "h-other", "unrelated work", true, 980);

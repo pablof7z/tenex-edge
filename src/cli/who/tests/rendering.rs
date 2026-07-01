@@ -280,8 +280,12 @@ fn render_self_header_names_self_by_label_without_session_code() {
     });
     let out = render_self_header(&v).expect("self header present");
     assert!(
-        out.contains("You are **developer1** on **tenex-edge** (laptop)."),
-        "header must name the ordinal label + channel + host: {out}"
+        out.contains("You are **developer1** on **laptop**."),
+        "header must name the ordinal label + host: {out}"
+    );
+    assert!(
+        !out.contains("tenex-edge"),
+        "channel id/name must not show in the self identity sentence: {out}"
     );
     assert!(
         !out.contains("sess-abc"),

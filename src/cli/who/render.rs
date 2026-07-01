@@ -69,7 +69,6 @@ pub(super) fn render_self_header(v: &serde_json::Value) -> Option<String> {
     if label.is_empty() {
         return None;
     }
-    let channel = s("channel");
     let host = s("host");
     let pubkey = s("pubkey");
     let working = me.get("working").and_then(|x| x.as_bool()).unwrap_or(false);
@@ -81,7 +80,11 @@ pub(super) fn render_self_header(v: &serde_json::Value) -> Option<String> {
     let pending = me.get("pending").and_then(|x| x.as_u64()).unwrap_or(0);
 
     let _ = pubkey; // not shown to the agent
-    let mut out = format!("You are **{label}** on **{channel}** ({host}).");
+    let mut out = if host.is_empty() {
+        format!("You are **{label}**.")
+    } else {
+        format!("You are **{label}** on **{host}**.")
+    };
     let _ = write!(out, "\nstatus {status}");
     if !is_member {
         let _ = write!(out, " · not a member of this channel");

@@ -459,10 +459,11 @@ fn activity_line(store: &Store, row: RelayEvent, now: u64, local_host: &str) -> 
     let slug = slug_for_pubkey(store, &row.pubkey);
     let host = host_for_pubkey(store, &row.pubkey);
     let from = crate::idref::agent_ref_from(&slug, &host, local_host);
+    let content = crate::profile::rewrite_body_mentions(store, &row.content);
     format!(
         "[@{from}, {}] {}",
         relative_time(row.created_at, now),
-        row.content
+        content
     )
 }
 

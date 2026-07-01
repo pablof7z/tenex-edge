@@ -140,23 +140,43 @@ fn render_snapshot_body(
     out.trim_end().to_string()
 }
 
-pub(crate) fn render_awareness_update_since_turn(
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn render_turn_awareness(
     store: &Store,
-    since: u64,
+    seen_cursor: u64,
+    joined_at: u64,
     project: &str,
     now: u64,
-    exclude_pubkey: Option<&str>,
+    self_slug: &str,
+    self_pubkey: &str,
     local_host: &str,
 ) -> Option<String> {
-    render_awareness_update(
+    let mut blocks = Vec::new();
+    if seen_cursor == 0 {
+        if let Some(block) =
+            render_awareness_snapshot(store, project, now, self_slug, self_pubkey, local_host)
+        {
+            blocks.push(block);
+        }
+    }
+    let (since, label) = if seen_cursor == 0 {
+        (joined_at, "you joined")
+    } else {
+        (seen_cursor, "your last turn")
+    };
+    let exclude_pubkey = (!self_pubkey.is_empty()).then_some(self_pubkey);
+    if let Some(block) = render_awareness_update(
         store,
         since,
         project,
         now,
         exclude_pubkey,
-        "last turn",
+        label,
         local_host,
-    )
+    ) {
+        blocks.push(block);
+    }
+    (!blocks.is_empty()).then(|| blocks.join("\n\n"))
 }
 
 pub(crate) fn render_awareness_update_since_check(
@@ -173,7 +193,7 @@ pub(crate) fn render_awareness_update_since_check(
         project,
         now,
         exclude_pubkey,
-        "last check",
+        "your last check",
         local_host,
     )
 }
@@ -211,7 +231,7 @@ fn render_awareness_update(
         return None;
     }
 
-    let mut out = format!("[tenex-edge] Fabric updates since your {label}");
+    let mut out = format!("[tenex-edge] Fabric updates since {label}");
     write_section(&mut out, "Members:", &members);
     write_section(&mut out, "Subchannels:", &subchannels);
     write_section(

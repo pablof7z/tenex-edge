@@ -25,7 +25,8 @@ pub(in crate::daemon::server) async fn rpc_turn_start(
     }
     // Hooks speak the harness id; every mutator below resolves it to the canonical
     // session id internally, so passing the raw alias is correct. Read the previous
-    // turn_started_at BEFORE opening the turn (first-turn detection).
+    // turn_started_at BEFORE opening the turn for audit/debug context; durable
+    // snapshot-vs-delta gating lives on the session's seen_cursor.
     let prev_started = state
         .with_store(|s| s.get_session(&p.session).ok().flatten())
         .map(|r| r.turn_started_at)
@@ -61,11 +62,14 @@ pub(in crate::daemon::server) async fn rpc_turn_start(
         }
     };
 
+    let instance = state.session_instance(&rec);
+    let agent_label = instance.display_slug();
+
     // Emit Turn{working} for the live tail feed, keyed on the routing scope.
     state.emit_tail(TailEvent::Turn {
         ts: now,
         project: rec.channel_h.clone(),
-        agent: rec.agent_slug.clone(),
+        agent: agent_label,
         session: rec.session_id.clone(),
         state: "working".into(),
         elapsed_s: None,
@@ -109,8 +113,8 @@ pub(in crate::daemon::server) async fn rpc_turn_start(
     // Surface newly-available invitable agents (decision D) on a DELTA turn only
     // (never the first turn), keyed off the same per-session high-water mark so a
     // given new agent is announced once.
-    let merged = if prev_started != 0 {
-        merge_new_agents(base, prev_started, now)
+    let merged = if rec.seen_cursor != 0 {
+        merge_new_agents(base, rec.seen_cursor, now)
     } else {
         base
     };
@@ -245,10 +249,11 @@ pub(in crate::daemon::server) async fn rpc_turn_end(
         let now = now_secs();
         let elapsed_s = (turn_started_at > 0).then(|| now.saturating_sub(turn_started_at));
         if let Some(rec) = rec.as_ref() {
+            let agent_label = state.session_instance(rec).display_slug();
             state.emit_tail(TailEvent::Turn {
                 ts: now,
                 project: rec.channel_h.clone(),
-                agent: rec.agent_slug.clone(),
+                agent: agent_label,
                 session: rec.session_id.clone(),
                 state: "idle".into(),
                 elapsed_s,

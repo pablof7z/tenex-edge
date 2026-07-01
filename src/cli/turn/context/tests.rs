@@ -166,10 +166,7 @@ fn second_turn_ambient_gates_on_seen_cursor() {
     }
     let rec2 = m.lock().unwrap().get_session(&sid).unwrap().unwrap();
     assert_eq!(rec2.seen_cursor, 150, "cursor must be 150 for this test");
-    let ctx2 = super::assemble_turn_start_context(
-        &m, &rec2, "", "", 1, /* non-zero = not first turn */
-    )
-    .unwrap_or_default();
+    let ctx2 = super::assemble_turn_start_context(&m, &rec2, "", "", 0).unwrap_or_default();
     assert!(
         ctx2.contains("second-turn-event"),
         "second turn must show messages since cursor; got:\n{ctx2}"
@@ -244,5 +241,13 @@ fn ambient_and_mention_both_in_first_turn_context() {
     assert!(
         ctx.contains("ambient-background-chat"),
         "post-join ambient chat must also appear; got:\n{ctx}"
+    );
+    assert!(
+        ctx.contains("[tenex-edge] Fabric updates since you joined"),
+        "ambient chat must render as a fabric update; got:\n{ctx}"
+    );
+    assert!(
+        !ctx.contains("Activity on #"),
+        "legacy ambient activity block must not render; got:\n{ctx}"
     );
 }
