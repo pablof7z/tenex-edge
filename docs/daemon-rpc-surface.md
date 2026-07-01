@@ -58,8 +58,8 @@ result: {"context": "…"|null}    // the assembled injection text, or null
 ```
 Daemon does everything `turn_start` does today (mark turn, set transcript,
 drain pending chat messages, full roster on first turn / deltas after). Client
-emits via `emit_context` (plain or `{"systemMessage":…}`) to keep byte-identical
-output. Empty session id ⇒ no-op (returns `context: null`).
+emits via `emit_context` (plain text or the host's hook-specific additional
+context envelope). Empty session id ⇒ no-op (returns `context: null`).
 
 ### `turn_check`
 ```jsonc

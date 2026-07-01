@@ -9,4 +9,4 @@ source_refs:
 
 # EmitFormat
 
-How a context block is emitted to the harness on stdout. Selected per (host, hook-type): plain text is injected directly by Claude Code's UserPromptSubmit and opencode; Codex wraps every hook in `{systemMessage}`; Claude Code's PostToolUse only reads context from a `hookSpecificOutput` envelope.
+How a context block is emitted to the harness on stdout. Selected per (host, hook-type): plain text is injected directly by Claude Code's UserPromptSubmit and opencode; Codex and Claude Code PostToolUse use a `hookSpecificOutput.additionalContext` envelope for model-visible context.

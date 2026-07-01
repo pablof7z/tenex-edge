@@ -3,7 +3,7 @@
 Codex integrates through Codex lifecycle hooks. Each hook calls the
 `tenex-edge` binary directly:
 
-    tenex-edge hook --host codex --type <hook-type>
+    tenex-edge harness hook codex --type <hook-type>
 
 Install the hooks by copying `config.template.toml` into either:
 
@@ -15,12 +15,12 @@ and trusted in `/hooks`.
 
 The hook mapping is:
 
-- `SessionStart` → `tenex-edge hook --host codex --type session-start`
-- `UserPromptSubmit` → `tenex-edge hook --host codex --type user-prompt-submit`
+- `SessionStart` → `tenex-edge harness hook codex --type session-start`
+- `UserPromptSubmit` → `tenex-edge harness hook codex --type user-prompt-submit`
   (marks the turn "working", injects pending chat messages and `tenex-edge who` output)
-- `PostToolUse` → `tenex-edge hook --host codex --type post-tool-use`
+- `PostToolUse` → `tenex-edge harness hook codex --type post-tool-use`
   (read-only chat peek mid-turn; does not drain)
-- `Stop` → `tenex-edge hook --host codex --type stop`
+- `Stop` → `tenex-edge harness hook codex --type stop`
   (marks the session idle when the turn finishes)
 
 The adapter accepts Codex session identifiers under `session_id`, `sessionId`,

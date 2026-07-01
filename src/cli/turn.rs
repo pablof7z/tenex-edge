@@ -12,14 +12,12 @@ pub use context::{assemble_turn_check_context, assemble_turn_start_context};
 
 /// How a context block is emitted to the harness on stdout. Selected per
 /// (host, hook-type): plain text is injected directly by Claude Code's
-/// UserPromptSubmit and opencode; Codex wraps every hook in `{systemMessage}`;
-/// Claude Code's PostToolUse only reads context from a `hookSpecificOutput`
-/// envelope (plain stdout there is ignored by the harness).
+/// UserPromptSubmit and opencode; Codex and Claude Code PostToolUse use a
+/// `hookSpecificOutput.additionalContext` envelope for model-visible context.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum EmitFormat {
     PlainText,
-    JsonSystemMessage,
-    ClaudePostToolUse,
+    HookSpecificAdditionalContext { hook_event_name: &'static str },
 }
 
 pub(super) struct HookContextResult {
@@ -134,22 +132,20 @@ pub(super) fn turn_check(session: Option<String>, emit: EmitFormat) -> Result<Ho
 }
 
 fn emit_context(content: &str, emit: EmitFormat) {
+    println!("{}", render_context_output(content, emit));
+}
+
+fn render_context_output(content: &str, emit: EmitFormat) -> String {
     match emit {
-        EmitFormat::PlainText => println!("{content}"),
-        EmitFormat::JsonSystemMessage => {
-            let obj = serde_json::json!({ "systemMessage": content });
-            println!("{obj}");
-        }
-        EmitFormat::ClaudePostToolUse => {
-            // Claude Code only reads PostToolUse context from this envelope;
-            // plain stdout there is ignored by the harness.
+        EmitFormat::PlainText => content.to_string(),
+        EmitFormat::HookSpecificAdditionalContext { hook_event_name } => {
             let obj = serde_json::json!({
                 "hookSpecificOutput": {
-                    "hookEventName": "PostToolUse",
+                    "hookEventName": hook_event_name,
                     "additionalContext": content,
                 }
             });
-            println!("{obj}");
+            obj.to_string()
         }
     }
 }
@@ -163,4 +159,38 @@ pub(super) fn turn_end(session: String, reply: Option<String>) -> Result<()> {
         serde_json::json!({"session": session, "reply": reply}),
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hook_specific_context_uses_additional_context_envelope() {
+        let rendered = render_context_output(
+            "fabric snapshot",
+            EmitFormat::HookSpecificAdditionalContext {
+                hook_event_name: "UserPromptSubmit",
+            },
+        );
+        let parsed: serde_json::Value = serde_json::from_str(&rendered).unwrap();
+
+        assert_eq!(
+            parsed["hookSpecificOutput"]["hookEventName"],
+            "UserPromptSubmit"
+        );
+        assert_eq!(
+            parsed["hookSpecificOutput"]["additionalContext"],
+            "fabric snapshot"
+        );
+        assert!(parsed.get("systemMessage").is_none());
+    }
+
+    #[test]
+    fn plain_context_stays_plain_text() {
+        assert_eq!(
+            render_context_output("fabric snapshot", EmitFormat::PlainText),
+            "fabric snapshot"
+        );
+    }
 }

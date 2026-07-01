@@ -79,14 +79,14 @@ Reads the shared `~/.tenex/config.json` (only `whitelistedPubkeys`, optional
 ## Commands
 
 The session/turn lifecycle (session start/end, turn start/check/end) has **no
-standalone commands** — hosts drive it through the single `hook` entry point
+standalone commands** — hosts drive it through the single `harness hook` entry point
 (see _Host integrations_ below), which parses the harness payload on stdin and
 runs the corresponding step. The commands below are the human/agent-facing
 surface.
 
 | Command | Purpose |
 |---|---|
-| `hook --host <name> --type <hook-type>` | The one entry point for the session/turn lifecycle. Reads the harness's hook JSON on stdin; dispatches `session-start`/`session-end`/`user-prompt-submit`/`post-tool-use`/`stop` to the matching internal step. This is how every host (Claude Code, Codex, opencode) starts sessions and brackets turns. |
+| `harness hook <name> --type <hook-type>` | The one entry point for the session/turn lifecycle. Reads the harness's hook JSON on stdin; dispatches `session-start`/`session-end`/`user-prompt-submit`/`post-tool-use`/`stop` to the matching internal step. This is how every host (Claude Code, Codex, opencode) starts sessions and brackets turns. |
 | `chat write --message <m>` | Send a message to project chat. Mention an agent instance inline with `@<agent>` / `@<agent>1` in the body. |
 | `chat read [--live]` | Read project chat history. |
 | `who [--project <slug>] [--live]` | List visible peers (with session-id prefixes); `--live` opens a refreshing terminal board. |

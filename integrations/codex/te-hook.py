@@ -3,7 +3,7 @@
 
 The Codex config trusts this source-tree script. Keep it thin: all session,
 turn, inbox, and peer-context logic belongs in the Rust CLI behind
-`tenex-edge hook --host codex`.
+`tenex-edge harness hook codex`.
 """
 
 from __future__ import annotations
@@ -58,7 +58,7 @@ def main() -> int:
         log(f"tenex-edge binary not found for hook={hook_type}")
         return 0
 
-    cmd = [bin_path, "hook", "--host", "codex", "--type", hook_type]
+    cmd = [bin_path, "harness", "hook", "codex", "--type", hook_type]
     try:
         result = subprocess.run(
             cmd,
