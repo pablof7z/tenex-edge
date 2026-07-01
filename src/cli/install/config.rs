@@ -42,10 +42,14 @@ pub fn harnesses() -> Vec<Harness> {
     ]
 }
 
-fn home_dir() -> PathBuf {
+pub(super) fn home_dir() -> PathBuf {
     std::env::var("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("."))
+}
+
+pub(super) fn claude_detected() -> bool {
+    home_dir().join(".claude").exists() || bin_on_path("claude")
 }
 
 fn bin_on_path(bin: &str) -> bool {

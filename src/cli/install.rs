@@ -5,6 +5,7 @@
 mod config;
 mod hooks;
 mod io;
+mod skills;
 
 use anyhow::{bail, Result};
 use config::Harness;
@@ -29,8 +30,11 @@ pub(super) async fn install(opts: InstallOpts) -> Result<()> {
 
     if opts.status {
         print_status(&all);
+        skills::print_status();
         return Ok(());
     }
+
+    skills::install(&opts)?;
 
     let selected = resolve_selection(&all, &opts)?;
     if selected.is_empty() {
