@@ -178,10 +178,7 @@ pub(in crate::daemon::server) async fn rpc_user_prompt(
     let op_keys = Keys::parse(nsec).context("parsing operator key")?;
     let op_pubkey = op_keys.public_key().to_hex();
 
-    let rec = resolve_session(
-        state,
-        &CallerAnchor::from_params(params),
-    )?;
+    let rec = resolve_session(state, &CallerAnchor::from_params(params))?;
 
     // A daemon-injected fabric envelope (a mention the tmux delivery path pasted
     // into this session's pane) is ALREADY a kind:9 event in the room. The

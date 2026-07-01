@@ -108,9 +108,11 @@ impl Store {
     pub fn has_event(&self, id: &str) -> Result<bool> {
         Ok(self
             .conn
-            .query_row("SELECT 1 FROM relay_events WHERE id=?1", params![id], |_| {
-                Ok(())
-            })
+            .query_row(
+                "SELECT 1 FROM relay_events WHERE id=?1",
+                params![id],
+                |_| Ok(()),
+            )
             .optional()?
             .is_some())
     }

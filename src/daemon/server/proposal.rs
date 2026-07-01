@@ -42,11 +42,7 @@ pub(in crate::daemon::server) async fn rpc_propose(
 
     // Resolve session if one is live; fall back to cwd-based project + env agent.
     // propose doesn't require a live session — it just needs a project and a key.
-    let session_rec = resolve_session(
-        state,
-        &CallerAnchor::from_params(params),
-    )
-    .ok();
+    let session_rec = resolve_session(state, &CallerAnchor::from_params(params)).ok();
     let cwd = p
         .cwd
         .as_deref()

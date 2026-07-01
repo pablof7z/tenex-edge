@@ -213,8 +213,8 @@ impl DaemonState {
 
 // ── entry point ──────────────────────────────────────────────────────────────
 
-mod channel_resolve;
 mod channel_membership_rpc;
+mod channel_resolve;
 mod channels_rpc;
 mod chat_publish;
 mod chat_read_tail;
@@ -234,10 +234,10 @@ mod statusline;
 mod turns;
 mod who;
 
+use channel_membership_rpc::{rpc_channels_join, rpc_channels_leave, rpc_channels_switch};
 use channel_resolve::{
     project_root, resolve_channel, resolve_channel_ref, rpc_channels_resolve, ChannelResolution,
 };
-use channel_membership_rpc::{rpc_channels_join, rpc_channels_leave, rpc_channels_switch};
 use channels_rpc::{ensure_session_room, rpc_channels_create, rpc_channels_list};
 use chat_publish::{publish_agent_reply, rpc_user_prompt, spawn_retry_drainer};
 use chat_read_tail::{handle_chat_read, handle_tail};

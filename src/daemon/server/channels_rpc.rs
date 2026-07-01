@@ -1,5 +1,5 @@
-use super::*;
 use super::channel_membership_rpc::set_active_session_channel;
+use super::*;
 
 pub(in crate::daemon::server) async fn ensure_session_room(
     state: &Arc<DaemonState>,
@@ -73,8 +73,12 @@ pub(in crate::daemon::server) async fn rpc_channels_create(
     // resolution (no project fallback): child-of-current and auto-switch must only
     // fire when actually run as an agent, never bind to an arbitrary sibling
     // session of a bare operator invocation.
-    let creator_rec =
-        resolve_session_inner(state, &CallerAnchor::from_params(params), ResolveScope::Strict).ok();
+    let creator_rec = resolve_session_inner(
+        state,
+        &CallerAnchor::from_params(params),
+        ResolveScope::Strict,
+    )
+    .ok();
 
     // Operator cwd-resolved project slug (== root channel_h for project roots).
     // Used as fallback when there is no agent session.

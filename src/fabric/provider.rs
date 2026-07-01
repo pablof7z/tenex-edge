@@ -96,7 +96,8 @@ impl Nip29Provider {
     ) -> Result<nostr_sdk::prelude::EventId> {
         if let Some(ch) = ev.channel() {
             let agent_pubkey = keys.public_key().to_hex();
-            let parent = self.with_store(|s| s.channel_parent(ch).unwrap_or(None))
+            let parent = self
+                .with_store(|s| s.channel_parent(ch).unwrap_or(None))
                 .filter(|p| !p.is_empty());
             let ctx = ChannelCtx {
                 channel: ch,
@@ -122,7 +123,8 @@ impl Nip29Provider {
     ) -> Result<nostr_sdk::prelude::EventId> {
         if let Some(ch) = ev.channel() {
             let agent_pubkey = keys.public_key().to_hex();
-            let parent = self.with_store(|s| s.channel_parent(ch).unwrap_or(None))
+            let parent = self
+                .with_store(|s| s.channel_parent(ch).unwrap_or(None))
                 .filter(|p| !p.is_empty());
             let ctx = ChannelCtx {
                 channel: ch,
@@ -332,7 +334,8 @@ impl Nip29Provider {
         keys: &nostr_sdk::prelude::Keys,
     ) -> Result<nostr_sdk::prelude::EventId> {
         let agent_pubkey = keys.public_key().to_hex();
-        let parent = self.with_store(|s| s.channel_parent(&status.project).unwrap_or(None))
+        let parent = self
+            .with_store(|s| s.channel_parent(&status.project).unwrap_or(None))
             .filter(|p| !p.is_empty());
         let ctx = ChannelCtx {
             channel: &status.project,

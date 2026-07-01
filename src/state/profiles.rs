@@ -54,9 +54,9 @@ impl Store {
     /// `host` is matched either raw or via `slugify_host`, so callers can pass a
     /// host slug (`agent@host`) or the raw host string. Non-backend profiles only.
     pub fn resolve_agent_pubkey(&self, slug: &str, host: &str) -> Result<Option<String>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT pubkey, host FROM relay_profiles WHERE slug=?1 AND is_backend=0",
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT pubkey, host FROM relay_profiles WHERE slug=?1 AND is_backend=0")?;
         let rows = stmt.query_map(params![slug], |r| {
             Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
         })?;
@@ -75,9 +75,7 @@ impl Store {
         let mut stmt = self
             .conn
             .prepare("SELECT pubkey, host FROM relay_profiles WHERE is_backend=1")?;
-        let rows = stmt.query_map([], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
-        })?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
         for row in rows {
             let (pk, h) = row?;
             if crate::util::slugify_host(&h) == host_slug || h == host_slug {

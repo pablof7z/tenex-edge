@@ -25,6 +25,12 @@ pub(crate) struct Home {
     pub(crate) dir: tempfile::TempDir,
 }
 
+impl Drop for Home {
+    fn drop(&mut self) {
+        stop_daemon(self);
+    }
+}
+
 impl Home {
     pub(crate) fn new() -> Self {
         let dir = tempfile::tempdir().unwrap();
@@ -226,4 +232,5 @@ pub(crate) fn stop_daemon(home: &Home) {
     while Instant::now() < deadline && home.sock().exists() {
         std::thread::sleep(Duration::from_millis(25));
     }
+    let _ = std::fs::remove_file(home.dir.path().join("daemon.lock"));
 }

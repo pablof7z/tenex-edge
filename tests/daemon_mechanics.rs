@@ -31,6 +31,12 @@ struct Home {
     dir: tempfile::TempDir,
 }
 
+impl Drop for Home {
+    fn drop(&mut self) {
+        stop_daemon(self);
+    }
+}
+
 impl Home {
     fn new() -> Self {
         let dir = tempfile::tempdir().unwrap();

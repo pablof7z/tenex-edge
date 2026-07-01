@@ -225,9 +225,21 @@ mod tests {
         );
         let ambient_ts = ambient.created_at.as_secs();
         let hosted = vec![sender_pk.clone(), receiver_pk.clone()];
-        let outcome = materialize(&RawEnvelope::Nostr(ambient.clone()), &hosted, ambient_ts, "test-pi", &store);
-        assert!(!outcome.wake_mentions, "ambient message must not wake inbox");
-        assert!(store.drain_pending_for_session(&receiver_sid).unwrap().is_empty());
+        let outcome = materialize(
+            &RawEnvelope::Nostr(ambient.clone()),
+            &hosted,
+            ambient_ts,
+            "test-pi",
+            &store,
+        );
+        assert!(
+            !outcome.wake_mentions,
+            "ambient message must not wake inbox"
+        );
+        assert!(store
+            .drain_pending_for_session(&receiver_sid)
+            .unwrap()
+            .is_empty());
         assert!(store.has_event(&ambient.id.to_hex()).unwrap());
 
         // Mention (p-tagged): routed to inbox and wakes doorbell.
@@ -235,16 +247,28 @@ mod tests {
             &sender_keys,
             9,
             "hey receiver, LGTM",
-            vec![make_tag(&["h", "myproject"]), make_tag(&["p", &receiver_pk])],
+            vec![
+                make_tag(&["h", "myproject"]),
+                make_tag(&["p", &receiver_pk]),
+            ],
         );
         let mention_ts = mention.created_at.as_secs();
-        let outcome2 = materialize(&RawEnvelope::Nostr(mention.clone()), &hosted, mention_ts, "test-pi", &store);
+        let outcome2 = materialize(
+            &RawEnvelope::Nostr(mention.clone()),
+            &hosted,
+            mention_ts,
+            "test-pi",
+            &store,
+        );
         assert!(outcome2.wake_mentions, "mention should wake inbox");
         let receiver_rows = store.drain_pending_for_session(&receiver_sid).unwrap();
         assert_eq!(receiver_rows.len(), 1);
         assert_eq!(receiver_rows[0].body, "hey receiver, LGTM");
         assert!(
-            store.drain_pending_for_session(&sender_sid).unwrap().is_empty(),
+            store
+                .drain_pending_for_session(&sender_sid)
+                .unwrap()
+                .is_empty(),
             "sender session should not receive its own chat line"
         );
     }

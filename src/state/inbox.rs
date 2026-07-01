@@ -93,7 +93,11 @@ impl Store {
     /// with no separate "notified" flag or external gate. Rows come back
     /// oldest-first (RETURNING order is unspecified, so we sort). Resolves the
     /// id first.
-    pub fn claim_pending_for_session(&self, target_session: &str, now: u64) -> Result<Vec<InboxRow>> {
+    pub fn claim_pending_for_session(
+        &self,
+        target_session: &str,
+        now: u64,
+    ) -> Result<Vec<InboxRow>> {
         let target = self
             .resolve_canonical_id(target_session)?
             .unwrap_or_else(|| target_session.to_string());

@@ -72,9 +72,9 @@ impl Store {
 
     /// All known channels, newest metadata first.
     pub fn list_channels(&self) -> Result<Vec<Channel>> {
-        let mut stmt = self
-            .conn
-            .prepare(&format!("SELECT {COLS} FROM relay_channels ORDER BY updated_at DESC"))?;
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {COLS} FROM relay_channels ORDER BY updated_at DESC"
+        ))?;
         let rows = stmt.query_map([], row_to_channel)?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }

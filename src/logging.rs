@@ -13,8 +13,8 @@
 use anyhow::Result;
 use std::fmt;
 use std::path::Path;
-use tracing::Level;
 use tracing::field::{Field, Visit};
+use tracing::Level;
 use tracing_subscriber::{
     fmt::{format::Writer, layer, FmtContext, FormatEvent, FormatFields},
     layer::SubscriberExt,
@@ -33,7 +33,10 @@ struct Fields {
 
 impl Fields {
     fn new() -> Self {
-        Self { message: None, pairs: Vec::new() }
+        Self {
+            message: None,
+            pairs: Vec::new(),
+        }
     }
 }
 
@@ -50,20 +53,25 @@ impl Visit for Fields {
         if field.name() == "message" {
             self.message = Some(value.to_string());
         } else {
-            self.pairs.push((field.name().to_string(), value.to_string()));
+            self.pairs
+                .push((field.name().to_string(), value.to_string()));
         }
     }
     fn record_i64(&mut self, field: &Field, value: i64) {
-        self.pairs.push((field.name().to_string(), value.to_string()));
+        self.pairs
+            .push((field.name().to_string(), value.to_string()));
     }
     fn record_u64(&mut self, field: &Field, value: u64) {
-        self.pairs.push((field.name().to_string(), value.to_string()));
+        self.pairs
+            .push((field.name().to_string(), value.to_string()));
     }
     fn record_bool(&mut self, field: &Field, value: bool) {
-        self.pairs.push((field.name().to_string(), value.to_string()));
+        self.pairs
+            .push((field.name().to_string(), value.to_string()));
     }
     fn record_error(&mut self, field: &Field, value: &(dyn std::error::Error + 'static)) {
-        self.pairs.push((field.name().to_string(), value.to_string()));
+        self.pairs
+            .push((field.name().to_string(), value.to_string()));
     }
 }
 
@@ -106,8 +114,8 @@ where
             // colored level badge with fixed width
             match level {
                 Level::ERROR => write!(writer, "{}", " ERR ".on_red().white().bold())?,
-                Level::WARN  => write!(writer, "{}", " WRN ".on_yellow().black().bold())?,
-                Level::INFO  => write!(writer, "{}", " INF ".on_cyan().black().bold())?,
+                Level::WARN => write!(writer, "{}", " WRN ".on_yellow().black().bold())?,
+                Level::INFO => write!(writer, "{}", " INF ".on_cyan().black().bold())?,
                 Level::DEBUG => write!(writer, "{}", " DBG ".on_bright_black().white())?,
                 Level::TRACE => write!(writer, "{}", " TRC ".dimmed())?,
             }
@@ -143,8 +151,8 @@ where
 pub fn init_daemon_logging(log_path: &Path) -> Result<()> {
     use std::io::IsTerminal as _;
 
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("tenex_edge=info"));
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("tenex_edge=info"));
 
     if std::io::stdout().is_terminal() {
         let file = std::fs::OpenOptions::new()

@@ -22,7 +22,13 @@ impl Store {
              VALUES (?1, ?2, ?3, ?4, ?5)
              ON CONFLICT(harness, external_id_kind, external_id)
                  DO UPDATE SET session_id=excluded.session_id, created_at=excluded.created_at",
-            params![harness, external_id_kind, external_id, session_id, created_at],
+            params![
+                harness,
+                external_id_kind,
+                external_id,
+                session_id,
+                created_at
+            ],
         )?;
         Ok(())
     }

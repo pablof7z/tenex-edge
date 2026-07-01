@@ -15,8 +15,12 @@ fn resolve_caller(
     params: &serde_json::Value,
     verb: &str,
 ) -> Result<crate::state::Session> {
-    resolve_session_inner(state, &CallerAnchor::from_params(params), ResolveScope::Strict)
-        .with_context(|| format!("{verb} must be run from within a tenex-edge agent session"))
+    resolve_session_inner(
+        state,
+        &CallerAnchor::from_params(params),
+        ResolveScope::Strict,
+    )
+    .with_context(|| format!("{verb} must be run from within a tenex-edge agent session"))
 }
 
 fn resolve_target_channel(
@@ -45,8 +49,8 @@ async fn ensure_joinable(
     channel_h: &str,
 ) -> Result<()> {
     refresh_project_members_cache(state, channel_h).await;
-    let is_member = state.with_store(|s| {
-        match s.is_channel_member(channel_h, &rec.agent_pubkey) {
+    let is_member = state.with_store(
+        |s| match s.is_channel_member(channel_h, &rec.agent_pubkey) {
             Ok(present) => present,
             Err(e) => {
                 tracing::error!(
@@ -57,8 +61,8 @@ async fn ensure_joinable(
                 );
                 false
             }
-        }
-    });
+        },
+    );
     if !is_member {
         // Auto-add the agent via the management key — join/switch should be
         // transparent; an agent targeting a channel it isn't yet a member of

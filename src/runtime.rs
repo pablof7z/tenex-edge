@@ -24,7 +24,7 @@ use crate::fabric::provider::Nip29Provider;
 use crate::state::{Session, Store};
 use crate::util::now_secs;
 use anyhow::Result;
-use nostr_sdk::prelude::{Keys, JsonUtil, NostrSigner};
+use nostr_sdk::prelude::{JsonUtil, Keys, NostrSigner};
 use std::io::Write as _;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -155,7 +155,9 @@ async fn enqueue_status(
                 tracing::error!(error = %e, "enqueue_status: enqueue_outbox failed — status not published this cycle");
             }
         }
-        Err(_) => tracing::error!("enqueue_status: store mutex poisoned — status not published this cycle"),
+        Err(_) => tracing::error!(
+            "enqueue_status: store mutex poisoned — status not published this cycle"
+        ),
     }
 }
 
@@ -248,7 +250,14 @@ pub async fn run_session_in_daemon(
     }
     if let Some(session) = load_session("startup-status") {
         let now = now_secs();
-        enqueue_status(&provider, &signing_keys, &store, status_for(&p, &session, now), now).await;
+        enqueue_status(
+            &provider,
+            &signing_keys,
+            &store,
+            status_for(&p, &session, now),
+            now,
+        )
+        .await;
     }
 
     let mut hb = tokio::time::interval(p.heartbeat);

@@ -63,7 +63,7 @@ pub(super) async fn rpc_tmux_send(
             ..Default::default()
         },
     )
-        .with_context(|| format!("no session matching {:?}", p.session))?;
+    .with_context(|| format!("no session matching {:?}", p.session))?;
 
     let pane_id = match tmux_pane_for_session(state, &rec.session_id) {
         Some(p) => p,
@@ -344,7 +344,7 @@ pub(super) fn rpc_tmux_attach(
             ..Default::default()
         },
     )
-        .with_context(|| format!("no session matching {:?}", p.session))?;
+    .with_context(|| format!("no session matching {:?}", p.session))?;
     match tmux_pane_for_session(state, &rec.session_id) {
         Some(pane) => Ok(serde_json::json!({ "pane_id": pane, "session_id": rec.session_id })),
         None => Ok(serde_json::json!({

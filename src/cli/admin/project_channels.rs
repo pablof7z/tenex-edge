@@ -171,7 +171,10 @@ pub async fn channels(action: ChannelsAction) -> Result<()> {
             if v["ambiguous"].is_array() {
                 print_ambiguous("join", &channel, &v);
             }
-            println!("joined channel {}", v["channel"].as_str().unwrap_or(&channel));
+            println!(
+                "joined channel {}",
+                v["channel"].as_str().unwrap_or(&channel)
+            );
         }
         ChannelsAction::Leave { channel } => {
             let v = daemon_call_async(

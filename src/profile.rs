@@ -168,7 +168,10 @@ async fn fetch_and_cache(state: &Arc<DaemonState>, pubkey: &str, now: u64) -> Op
 
     // The kind:0 `name` doubles as the agent slug in our wire shape (mirrors the
     // materializer), so both columns carry it.
-    state.with_store(|s| s.upsert_profile(pubkey, &name, &name, &host, is_backend, now).ok());
+    state.with_store(|s| {
+        s.upsert_profile(pubkey, &name, &name, &host, is_backend, now)
+            .ok()
+    });
     Some(name)
 }
 

@@ -126,7 +126,13 @@ fn status_materializes_and_reads_live() {
     let raw = store.get_status(&pk, "proj").unwrap().unwrap();
     assert_eq!(raw.title, "build");
     assert!(raw.busy);
-    assert_eq!(store.live_status_for_channel("proj", exp - 1).unwrap().len(), 1);
+    assert_eq!(
+        store
+            .live_status_for_channel("proj", exp - 1)
+            .unwrap()
+            .len(),
+        1
+    );
     assert!(store
         .live_status_for_channel("proj", exp + 1)
         .unwrap()
@@ -154,8 +160,15 @@ fn chat_routes_to_channel_sessions_and_skips_sender() {
         mentioned_pubkey: None,
     };
     assert!(Nip29Materializer::materialize_event(&store, &ambient_event));
-    assert!(!Nip29Materializer::route_chat(&store, &ambient_event, &ambient_chat));
-    assert!(store.drain_pending_for_session(&receiver_sid).unwrap().is_empty());
+    assert!(!Nip29Materializer::route_chat(
+        &store,
+        &ambient_event,
+        &ambient_chat
+    ));
+    assert!(store
+        .drain_pending_for_session(&receiver_sid)
+        .unwrap()
+        .is_empty());
 
     // With a p-tag the message is a directed mention: routed to inbox.
     let mention_event = build(
@@ -171,7 +184,11 @@ fn chat_routes_to_channel_sessions_and_skips_sender() {
         mentioned_pubkey: Some(receiver_pk),
     };
     assert!(Nip29Materializer::materialize_event(&store, &mention_event));
-    assert!(Nip29Materializer::route_chat(&store, &mention_event, &mention_chat));
+    assert!(Nip29Materializer::route_chat(
+        &store,
+        &mention_event,
+        &mention_chat
+    ));
 
     let pending = store.drain_pending_for_session(&receiver_sid).unwrap();
     assert_eq!(pending.len(), 1);
@@ -223,7 +240,10 @@ fn mention_to_one_ordinal_does_not_route_to_sibling_ordinal() {
         "the p-tagged ordinal must receive the mention"
     );
     assert!(
-        store.drain_pending_for_session(&ord1_sid).unwrap().is_empty(),
+        store
+            .drain_pending_for_session(&ord1_sid)
+            .unwrap()
+            .is_empty(),
         "the sibling ordinal must NOT receive a mention addressed to ordinal 0"
     );
 }
@@ -232,12 +252,7 @@ fn mention_to_one_ordinal_does_not_route_to_sibling_ordinal() {
 fn other_kind_lands_in_relay_events() {
     let store = Store::open_memory().unwrap();
     let agent = Keys::generate();
-    let event = build(
-        &agent,
-        1,
-        "a social note",
-        vec![make_tag(&["h", "proj"])],
-    );
+    let event = build(&agent, 1, "a social note", vec![make_tag(&["h", "proj"])]);
     assert!(Nip29Materializer::materialize_event(&store, &event));
     let stored = store.get_event(&event.id.to_hex()).unwrap().unwrap();
     assert_eq!(stored.kind, 1);

@@ -165,7 +165,6 @@ pub fn edge_home() -> PathBuf {
     home_dir().join(".tenex-edge")
 }
 
-
 pub fn ensure_dir(p: &Path) -> Result<()> {
     std::fs::create_dir_all(p).with_context(|| format!("creating {}", p.display()))?;
     Ok(())
@@ -177,13 +176,10 @@ fn home_dir() -> PathBuf {
     // stripped launchd/cron env), defaulting to "." would relocate the keystore,
     // config, and state.db under ./.tenex-edge — agents would mint NEW identities
     // and the trust whitelist would empty. Refuse to run rather than guess.
-    let home = std::env::var("HOME")
-        .ok()
-        .filter(|h| !h.is_empty())
-        .expect(
-            "neither TENEX_EDGE_HOME nor HOME is set: refusing to relocate keystore/config/state.db \
+    let home = std::env::var("HOME").ok().filter(|h| !h.is_empty()).expect(
+        "neither TENEX_EDGE_HOME nor HOME is set: refusing to relocate keystore/config/state.db \
              under ./.tenex-edge (would mint new agent identities and empty the trust whitelist)",
-        );
+    );
     PathBuf::from(home)
 }
 

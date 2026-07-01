@@ -50,10 +50,7 @@ pub(in crate::daemon::server) async fn rpc_chat_write(
 ) -> Result<serde_json::Value> {
     let p: ChatWriteParams =
         serde_json::from_value(params.clone()).context("parsing chat_write params")?;
-    let rec = resolve_session(
-        state,
-        &CallerAnchor::from_params(params),
-    )?;
+    let rec = resolve_session(state, &CallerAnchor::from_params(params))?;
     let id = identity::load_or_create(&config::edge_home(), &rec.agent_slug, now_secs())?;
     let durable_pubkey = id.pubkey_hex();
     // Routing scope: the channel this session currently publishes into. All chat

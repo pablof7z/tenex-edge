@@ -137,8 +137,12 @@ impl Store {
     /// form directly (it must select the signer between the two); other callers
     /// (tests, simple registrations) use this convenience wrapper.
     pub fn register_session(&self, r: &RegisterSession) -> Result<String> {
-        let id =
-            self.resolve_or_mint_session_id(&r.harness, &r.external_id_kind, &r.external_id, r.now)?;
+        let id = self.resolve_or_mint_session_id(
+            &r.harness,
+            &r.external_id_kind,
+            &r.external_id,
+            r.now,
+        )?;
         self.upsert_session_row(&id, r)?;
         Ok(id)
     }

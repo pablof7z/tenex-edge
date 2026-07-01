@@ -23,7 +23,11 @@ use super::*;
 ///
 /// Returns `None` only for a genuine human NAME with no local row — the caller
 /// then mints (when `create_if_absent`) or bails.
-fn resolve_locally(store: &crate::state::Store, parent: &str, name: &str) -> Result<Option<String>> {
+fn resolve_locally(
+    store: &crate::state::Store,
+    parent: &str,
+    name: &str,
+) -> Result<Option<String>> {
     if let Some(h) = store.channel_id_for_name(parent, name)? {
         return Ok(Some(h));
     }

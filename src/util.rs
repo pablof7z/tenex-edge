@@ -295,7 +295,9 @@ mod tests {
         assert!(is_harness_envelope(
             "<task-notification>\n<task-id>abc</task-id>\n</task-notification>"
         ));
-        assert!(is_harness_envelope("<system-reminder>careful</system-reminder>"));
+        assert!(is_harness_envelope(
+            "<system-reminder>careful</system-reminder>"
+        ));
         // Whitespace around the whole message is ignored.
         assert!(is_harness_envelope(
             "  \n<system-reminder>careful</system-reminder>\n  "

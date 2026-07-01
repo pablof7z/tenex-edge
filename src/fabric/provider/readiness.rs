@@ -56,7 +56,8 @@ fn ensure_channel_ready_inner<'a>(
         let mgmt_pubkey = mgmt_keys.public_key().to_hex();
 
         let parent_admins: Vec<String> = if let Some(parent) = parent_hint {
-            let grandparent = provider.with_store(|s| s.channel_parent(parent).unwrap_or(None))
+            let grandparent = provider
+                .with_store(|s| s.channel_parent(parent).unwrap_or(None))
                 .filter(|p| !p.is_empty());
             let parent_ctx = ChannelCtx {
                 channel: parent,
