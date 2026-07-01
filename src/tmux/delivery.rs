@@ -50,6 +50,9 @@ pub async fn inject_spawn_message(pane_id: &str, text: &str) -> Result<()> {
 struct PendingTmuxPrompt {
     text: String,
     chat_ids: Vec<String>,
+    /// Max `created_at` of the claimed rows, used to advance the `seen_cursor`
+    /// so the subsequent turn-start hook's ambient chat doesn't re-show them.
+    max_created_at: u64,
 }
 
 async fn collect_pending_prompt(
@@ -67,6 +70,7 @@ async fn collect_pending_prompt(
     crate::profile::label_chat_senders(state, &mut chat_rows).await;
 
     let whitelisted = state.whitelisted_pubkeys().to_vec();
+    let max_created_at = chat_rows.iter().map(|r| r.created_at).max().unwrap_or(0);
     let chat_ids: Vec<String> = chat_rows.iter().map(|row| row.event_id.clone()).collect();
     let rendered = state
         .with_store(|s| crate::injection::render_tmux_mention(s, &chat_rows, &whitelisted, now));
@@ -84,7 +88,11 @@ async fn collect_pending_prompt(
         return Ok(None);
     };
 
-    Ok(Some(PendingTmuxPrompt { text, chat_ids }))
+    Ok(Some(PendingTmuxPrompt {
+        text,
+        chat_ids,
+        max_created_at,
+    }))
 }
 
 /// Paste pending mention content into a live pane and submit it as the next
@@ -105,7 +113,8 @@ pub async fn inject_pending_messages_pub(
         // doesn't eat the message. If the rollback fails the rows stay
         // `delivered` and are never retried — that defeats the guarantee, so log
         // it loudly instead of dropping it with `.ok()`.
-        if let Err(re) = state.with_store(|s| s.reenqueue_pending(&prompt.chat_ids, &rec.session_id))
+        if let Err(re) =
+            state.with_store(|s| s.reenqueue_pending(&prompt.chat_ids, &rec.session_id))
         {
             tracing::error!(
                 session_id = %rec.session_id,
@@ -118,6 +127,12 @@ pub async fn inject_pending_messages_pub(
     // Record exactly what we pasted so the resulting user-prompt-submit hook is
     // recognized as an echo and not republished into the channel.
     state.record_injection_echo(&rec.session_id, &prompt.text);
+    // Advance the seen_cursor to the newest delivered row so the subsequent
+    // turn-start hook's ambient chat window starts past these messages and
+    // doesn't re-show what was already injected as the prompt.
+    if prompt.max_created_at > 0 {
+        let _ = state.with_store(|s| s.set_seen_cursor(&rec.session_id, prompt.max_created_at));
+    }
     tokio::time::sleep(Duration::from_millis(200)).await;
     send_enter(pane_id).await?;
     Ok(true)

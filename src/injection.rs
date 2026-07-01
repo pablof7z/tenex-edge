@@ -133,7 +133,8 @@ pub(crate) fn render_ambient(
     for row in rows {
         let name = speaker_label(store, &row.pubkey);
         let chip = speaker_chip(&name, row.created_at, now, TimePolicy::Always);
-        let _ = write!(text, "\n{chip} {}", row.content);
+        let content = crate::profile::rewrite_body_mentions(store, &row.content);
+        let _ = write!(text, "\n{chip} {content}");
     }
     text.push_str("\n</tenex-edge>");
     Some(text)
@@ -149,4 +150,50 @@ pub(crate) fn channel_display(store: &Store, channel_h: &str) -> String {
         .flatten()
         .and_then(|c| c.human_name().map(str::to_string))
         .unwrap_or_else(|| channel_h.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nostr_sdk::prelude::{Keys, ToBech32};
+
+    #[test]
+    fn render_ambient_rewrites_mention_entities_to_slugs() {
+        let store = Store::open_memory().unwrap();
+        let speaker = Keys::generate().public_key().to_hex();
+        let mentioned = Keys::generate().public_key();
+        store
+            .upsert_profile(&mentioned.to_hex(), "Ada", "ada", "claude-code", false, 1)
+            .unwrap();
+
+        let row = RelayEvent {
+            id: "e1".to_string(),
+            kind: 9,
+            pubkey: speaker,
+            created_at: 1000,
+            channel_h: "h1".to_string(),
+            d_tag: String::new(),
+            content: format!(
+                "hey nostr:{} check this out",
+                mentioned.to_bech32().unwrap()
+            ),
+            tags_json: "[]".to_string(),
+        };
+
+        let text = render_ambient(&store, "Activity:", &[row], 2000).unwrap();
+        assert!(
+            text.contains("@ada"),
+            "mention entity should be rewritten to the resolved slug: {text}"
+        );
+        assert!(
+            !text.contains("nostr:"),
+            "raw nostr: entity must not leak into the rendered block: {text}"
+        );
+    }
+
+    #[test]
+    fn render_ambient_returns_none_for_no_rows() {
+        let store = Store::open_memory().unwrap();
+        assert!(render_ambient(&store, "Activity:", &[], 2000).is_none());
+    }
 }

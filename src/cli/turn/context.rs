@@ -59,12 +59,7 @@ fn take_inbox(s: &Store, session_id: &str, now: u64) -> Result<Vec<InboxRow>> {
 /// inbox-derived ambient stream with the verbatim `relay_events` log. Returns
 /// `Err` on a store failure so a read error is never rendered as a quiet
 /// channel.
-fn ambient_chat(
-    s: &Store,
-    scope: &str,
-    since: u64,
-    self_pubkey: &str,
-) -> Result<Vec<RelayEvent>> {
+fn ambient_chat(s: &Store, scope: &str, since: u64, self_pubkey: &str) -> Result<Vec<RelayEvent>> {
     Ok(s.chat_for_channel(scope, since, AMBIENT_CHAT_LIMIT)?
         .into_iter()
         .filter(|ev| ev.pubkey != self_pubkey)
@@ -94,7 +89,10 @@ fn joined_channels(s: &Store, rec: &Session) -> (Vec<(String, u64)>, bool) {
     channels.sort_by(|(a_h, a_t), (b_h, b_t)| {
         let a_active = if a_h == &rec.channel_h { 0 } else { 1 };
         let b_active = if b_h == &rec.channel_h { 0 } else { 1 };
-        a_active.cmp(&b_active).then(a_t.cmp(b_t)).then(a_h.cmp(b_h))
+        a_active
+            .cmp(&b_active)
+            .then(a_t.cmp(b_t))
+            .then(a_h.cmp(b_h))
     });
     (channels, read_failed)
 }
@@ -142,7 +140,10 @@ fn render_mentions_by_channel(
         } else {
             &row.channel_h
         };
-        grouped.entry(scope.to_string()).or_default().push(row.clone());
+        grouped
+            .entry(scope.to_string())
+            .or_default()
+            .push(row.clone());
     }
     grouped
         .into_iter()
@@ -248,8 +249,11 @@ pub fn assemble_turn_start_context(
     //   - First turn: only messages since this session started (pre-join history
     //     is announced as a compact count, not dumped inline).
     //   - Subsequent turns: messages since the last seen_cursor high-water mark.
+    // First turn uses session creation time as the ambient floor, but respects
+    // any cursor advance that tmux delivery may have written — so messages
+    // already injected as the pasted prompt are not re-shown in ambient chat.
     let ambient_since = if first_turn {
-        rec.created_at
+        rec.created_at.max(rec.seen_cursor)
     } else {
         rec.seen_cursor
     };
@@ -328,8 +332,7 @@ pub fn assemble_turn_start_context(
             } else {
                 format!("Activity on #{name} since you last looked:")
             };
-            if let Some(block) = crate::injection::render_ambient(&s, &ambient_header, &rows, now)
-            {
+            if let Some(block) = crate::injection::render_ambient(&s, &ambient_header, &rows, now) {
                 blocks.push(block);
             }
         }
