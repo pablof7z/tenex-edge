@@ -499,21 +499,37 @@ fn other_active_channels_are_scoped_to_this_project() {
 #[test]
 fn other_channels_exclude_the_branch_the_viewer_is_in() {
     let store = Store::open_memory().unwrap();
+    let now = 20_000;
+    let recent = now - 3 * 60 * 60;
+    let stale = now - 4 * 60 * 60 - 1;
     chan(&store, "h-nmp", "nmp", "", "");
     chan(&store, "h-epic123", "epic123", "", "h-nmp");
     chan(&store, "h-epic999", "epic999", "", "h-nmp");
+    chan(&store, "h-old", "old", "", "h-nmp");
     // A deeper room under the SIBLING branch epic999 — not a top-level branch, so
     // it must not surface as an "other channel" (only epic999 itself does).
     chan(&store, "h-e999deep", "e999-deep", "", "h-epic999");
-    status(&store, "pk-a", "a", "h-epic999", "sibling work", true, 980);
-    status(&store, "pk-b", "b", "h-e999deep", "deep work", true, 980);
+    members(&store, "h-epic999", &["pk-a"]);
+    status(
+        &store,
+        "pk-a",
+        "a",
+        "h-epic999",
+        "sibling work",
+        true,
+        recent,
+    );
+    status(&store, "pk-b", "b", "h-e999deep", "deep work", true, recent);
+    status(&store, "pk-old", "old", "h-old", "old work", true, stale);
 
     // Viewer is inside the epic123 branch.
-    let block = super::render_fabric_view(&store, "h-epic123", NOW, "", "", LOCAL_HOST);
+    let block = super::render_fabric_view(&store, "h-epic123", now, "", "", LOCAL_HOST);
+    assert_has(&block, "Other active channels, last 4h:");
     // The sibling top-level branch shows; the viewer's own branch does not (the
     // `Channel:` header names it, but it is never a "[N member]" channel line)…
     assert_has(&block, "- #epic999 [1 member]");
     assert_lacks(&block, "#epic123 [");
+    assert_lacks(&block, "#old");
     // …and the room nested under epic999 is not a top-level "other channel".
     assert_lacks(&block, "deep work");
     assert_lacks(&block, "e999-deep");

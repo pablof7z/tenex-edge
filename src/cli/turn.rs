@@ -5,7 +5,9 @@
 
 use super::*;
 
+pub(crate) mod audit;
 mod context;
+pub(crate) use audit::{turn_check_audit, turn_start_audit};
 pub use context::{assemble_turn_check_context, assemble_turn_start_context};
 
 /// How a context block is emitted to the harness on stdout. Selected per
@@ -20,6 +22,11 @@ pub(super) enum EmitFormat {
     ClaudePostToolUse,
 }
 
+pub(super) struct HookContextResult {
+    pub(super) context: Option<String>,
+    pub(super) audit: serde_json::Value,
+}
+
 // ── turn-start / turn-check / turn-end ───────────────────────────────────────
 
 /// `degraded_notice` is a caller-supplied marker (e.g. a failed session reassert)
@@ -31,13 +38,27 @@ pub(super) async fn turn_start(
     transcript: Option<String>,
     emit: EmitFormat,
     degraded_notice: Option<String>,
-) -> Result<Option<String>> {
+) -> Result<HookContextResult> {
     if session.is_empty() {
         if let Some(notice) = degraded_notice {
             emit_context(&notice, emit);
-            return Ok(Some(notice));
+            return Ok(HookContextResult {
+                context: Some(notice.clone()),
+                audit: serde_json::json!({
+                    "kind": "turn_start",
+                    "skipped": "empty-session-id",
+                    "output": { "emitted": true, "bytes": notice.len(), "text": notice },
+                }),
+            });
         }
-        return Ok(None);
+        return Ok(HookContextResult {
+            context: None,
+            audit: serde_json::json!({
+                "kind": "turn_start",
+                "skipped": "empty-session-id",
+                "output": { "emitted": false, "bytes": 0, "text": null },
+            }),
+        });
     }
     let params = serde_json::json!({
         "session": session,
@@ -53,7 +74,14 @@ pub(super) async fn turn_start(
             if let Some(notice) = degraded_notice {
                 tracing::error!(error = %format!("{e:#}"), "turn_start: daemon RPC failed; emitting degraded marker only");
                 emit_context(&notice, emit);
-                return Ok(Some(notice));
+                return Ok(HookContextResult {
+                    context: Some(notice.clone()),
+                    audit: serde_json::json!({
+                        "kind": "turn_start",
+                        "daemon_rpc_error": format!("{e:#}"),
+                        "output": { "emitted": true, "bytes": notice.len(), "text": notice },
+                    }),
+                });
             }
             return Err(e);
         }
@@ -66,24 +94,43 @@ pub(super) async fn turn_start(
     };
     if let Some(ctx) = combined {
         emit_context(&ctx, emit);
-        return Ok(Some(ctx));
+        return Ok(HookContextResult {
+            context: Some(ctx),
+            audit: v["audit"].clone(),
+        });
     }
-    Ok(None)
+    Ok(HookContextResult {
+        context: None,
+        audit: v["audit"].clone(),
+    })
 }
 
 /// Mid-turn check for PostToolUse hooks. Thin client: the daemon peeks the
 /// inbox and computes the rate-limited sibling-session delta.
-pub(super) fn turn_check(session: Option<String>, emit: EmitFormat) -> Result<Option<String>> {
+pub(super) fn turn_check(session: Option<String>, emit: EmitFormat) -> Result<HookContextResult> {
     if crate::daemon::is_inhibited() {
-        return Ok(None);
+        return Ok(HookContextResult {
+            context: None,
+            audit: serde_json::json!({
+                "kind": "turn_check",
+                "skipped": "daemon-inhibited",
+                "output": { "emitted": false, "bytes": 0, "text": null },
+            }),
+        });
     }
     let params = crate::cli::rpc_params(serde_json::json!({ "session": session }));
     let v = crate::daemon::blocking::call("turn_check", params)?;
     if let Some(ctx) = v["context"].as_str() {
         emit_context(ctx, emit);
-        return Ok(Some(ctx.to_string()));
+        return Ok(HookContextResult {
+            context: Some(ctx.to_string()),
+            audit: v["audit"].clone(),
+        });
     }
-    Ok(None)
+    Ok(HookContextResult {
+        context: None,
+        audit: v["audit"].clone(),
+    })
 }
 
 fn emit_context(content: &str, emit: EmitFormat) {

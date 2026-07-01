@@ -37,6 +37,7 @@ pub use args::Cli;
 use args::{AgentAction, ChannelsAction, ChatAction, Cmd, DebugAction, HarnessAction, ProjectAction};
 pub use messaging::{format_envelope, mention_short_id, EnvelopeView};
 pub use turn::{assemble_turn_check_context, assemble_turn_start_context};
+pub(crate) use turn::{turn_check_audit, turn_start_audit};
 pub use who::load_who_snapshot;
 pub(crate) use who::{new_agent_block, render_fabric_snapshot};
 

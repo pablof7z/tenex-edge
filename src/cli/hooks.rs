@@ -19,8 +19,8 @@ use observation::{find_ancestor_pid, report_observation};
 enum HookOutputFormat {
     /// Plain text on stdout — Claude Code UserPromptSubmit and most harnesses.
     PlainText,
-    /// Codex-style JSON: {"systemMessage": "<content>"} — all Codex hook types.
-    JsonSystemMessage,
+    /// Codex reads model-visible hook context from event-specific JSON output.
+    HookSpecificAdditionalContext,
 }
 
 pub(super) struct HostDef {
@@ -78,7 +78,7 @@ static HOOK_HOSTS: &[HostDef] = &[
         ],
         session_id_env: None,
         transcript_field: Some("transcript_path"),
-        output_format: HookOutputFormat::JsonSystemMessage,
+        output_format: HookOutputFormat::HookSpecificAdditionalContext,
         pid_search: Some("codex"),
         echo_session_id: false,
     },
@@ -178,14 +178,19 @@ async fn hook_dispatch(
     };
 
     // How context is emitted depends on host AND hook type. Claude Code's
-    // PostToolUse only reads a `hookSpecificOutput` envelope (plain stdout there
-    // is ignored), unlike its UserPromptSubmit which injects plain stdout. Every
-    // other (host, hook) pair follows the host's default output format.
+    // PostToolUse and Codex turn hooks read model-visible context from the
+    // `hookSpecificOutput.additionalContext` envelope.
     let emit = match (host.name, hook_type.as_str()) {
-        ("claude-code", "post-tool-use") => EmitFormat::ClaudePostToolUse,
+        ("claude-code", "post-tool-use") => EmitFormat::HookSpecificAdditionalContext {
+            hook_event_name: "PostToolUse",
+        },
         _ => match host.output_format {
             HookOutputFormat::PlainText => EmitFormat::PlainText,
-            HookOutputFormat::JsonSystemMessage => EmitFormat::JsonSystemMessage,
+            HookOutputFormat::HookSpecificAdditionalContext => {
+                EmitFormat::HookSpecificAdditionalContext {
+                    hook_event_name: hook_event_name(&hook_type),
+                }
+            }
         },
     };
     let agent_slug = agent_env_slug().unwrap_or_else(|| host.agent_slug.to_string());
@@ -372,18 +377,14 @@ async fn hook_dispatch(
                     );
                 }
             }
-            if let Some(ctx) = turn_start(sid.clone(), transcript, emit, degraded_notice).await? {
-                call_log.note(
-                    "context-injection",
-                    serde_json::json!({
-                        "host": host.name,
-                        "hook_type": hook_type,
-                        "session": sid,
-                        "bytes": ctx.len(),
-                        "text": ctx,
-                    }),
-                );
-            }
+            let result = turn_start(sid.clone(), transcript, emit, degraded_notice).await?;
+            call_log.context_audit(
+                host.name,
+                &hook_type,
+                Some(&sid),
+                result.audit,
+                result.context.as_deref(),
+            );
             // Publish the user's prompt as kind:9 chat into the session's room
             // (operator-signed; see daemon `rpc_user_prompt`). Fail open: if
             // userNsec is absent or the relay is unreachable, the hook must not
@@ -412,18 +413,14 @@ async fn hook_dispatch(
         }
         "post-tool-use" => {
             let explicit = if sid.is_empty() { None } else { Some(sid) };
-            if let Some(ctx) = turn_check(explicit.clone(), emit)? {
-                call_log.note(
-                    "context-injection",
-                    serde_json::json!({
-                        "host": host.name,
-                        "hook_type": hook_type,
-                        "session": explicit,
-                        "bytes": ctx.len(),
-                        "text": ctx,
-                    }),
-                );
-            }
+            let result = turn_check(explicit.clone(), emit)?;
+            call_log.context_audit(
+                host.name,
+                &hook_type,
+                explicit.as_deref(),
+                result.audit,
+                result.context.as_deref(),
+            );
         }
         "stop" => {
             if !sid.is_empty() {
@@ -452,4 +449,15 @@ async fn hook_dispatch(
         }
     }
     Ok(())
+}
+
+fn hook_event_name(hook_type: &str) -> &'static str {
+    match hook_type {
+        "session-start" => "SessionStart",
+        "session-end" => "SessionEnd",
+        "user-prompt-submit" => "UserPromptSubmit",
+        "post-tool-use" => "PostToolUse",
+        "stop" => "Stop",
+        _ => "Unknown",
+    }
 }

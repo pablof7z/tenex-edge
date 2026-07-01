@@ -64,6 +64,38 @@ impl HookCallLog {
         append_json(self.path.as_ref(), &payload);
     }
 
+    pub(super) fn context_audit(
+        &self,
+        host: &str,
+        hook_type: &str,
+        session: Option<&str>,
+        audit: Value,
+        context: Option<&str>,
+    ) {
+        self.note(
+            "context-audit",
+            serde_json::json!({
+                "host": host,
+                "hook_type": hook_type,
+                "session": session,
+                "output": output_json(context),
+                "audit": audit,
+            }),
+        );
+        if let Some(text) = context {
+            self.note(
+                "context-injection",
+                serde_json::json!({
+                    "host": host,
+                    "hook_type": hook_type,
+                    "session": session,
+                    "bytes": text.len(),
+                    "text": text,
+                }),
+            );
+        }
+    }
+
     pub(super) fn finish(&self, result: &Result<()>) {
         let payload = serde_json::json!({
             "schema": LOG_SCHEMA,
@@ -127,6 +159,14 @@ fn append_json(path: Option<&PathBuf>, payload: &Value) {
         let _ = serde_json::to_writer(&mut file, payload);
         let _ = writeln!(file);
     }
+}
+
+fn output_json(context: Option<&str>) -> Value {
+    serde_json::json!({
+        "emitted": context.is_some(),
+        "bytes": context.map(str::len).unwrap_or(0),
+        "text": context,
+    })
 }
 
 fn call_id() -> String {
@@ -241,4 +281,52 @@ fn is_sensitive_env(key: &str) -> bool {
         || key.contains("bearer")
         || key.contains("nsec")
         || (key.contains("auth") && key != "ssh_auth_sock")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn context_audit_logs_emitted_and_empty_outputs() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("hook-calls.jsonl");
+        let log = HookCallLog {
+            path: Some(path.clone()),
+            call_id: "call-1".to_string(),
+        };
+
+        log.context_audit(
+            "claude-code",
+            "post-tool-use",
+            Some("sess-1"),
+            serde_json::json!({
+                "kind": "turn_check",
+                "delta_gate": { "cursor_before": 10, "cursor_after": 11 },
+            }),
+            None,
+        );
+        log.context_audit(
+            "claude-code",
+            "user-prompt-submit",
+            Some("sess-1"),
+            serde_json::json!({ "kind": "turn_start" }),
+            Some("[tenex-edge] Fabric context"),
+        );
+
+        let raw = std::fs::read_to_string(path).unwrap();
+        let rows = raw
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(rows[0]["note"], "context-audit");
+        assert_eq!(rows[0]["detail"]["output"]["emitted"], false);
+        assert_eq!(rows[0]["detail"]["audit"]["kind"], "turn_check");
+        assert_eq!(rows[1]["note"], "context-audit");
+        assert_eq!(
+            rows[1]["detail"]["output"]["text"],
+            "[tenex-edge] Fabric context"
+        );
+        assert_eq!(rows[2]["note"], "context-injection");
+    }
 }

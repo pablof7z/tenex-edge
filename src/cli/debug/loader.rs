@@ -186,7 +186,25 @@ fn parse_hook_log(
                 let pane = panes
                     .entry(session.clone())
                     .or_insert_with(|| new_pane(&session));
-                if note == "context-injection" {
+                if note == "context-audit" {
+                    let emitted = detail_val["output"]["emitted"].as_bool().unwrap_or(false);
+                    let bytes = detail_val["output"]["bytes"].as_u64().unwrap_or(0);
+                    let audit_kind = detail_val["audit"]["kind"].as_str().unwrap_or("context");
+                    let summary = if emitted {
+                        format!("{audit_kind}: emitted {bytes} bytes")
+                    } else {
+                        format!("{audit_kind}: no injection")
+                    };
+                    let detail = serde_json::to_string_pretty(detail_val)
+                        .unwrap_or_else(|_| detail_val.to_string());
+                    pane.lines.push(DebugLine {
+                        ts_ms,
+                        kind: DebugKind::Hook,
+                        label: "audit".to_string(),
+                        summary,
+                        detail,
+                    });
+                } else if note == "context-injection" {
                     let full_text = detail_val["text"].as_str().unwrap_or("").to_string();
                     let summary = full_text
                         .lines()

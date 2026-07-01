@@ -14,7 +14,14 @@ pub(in crate::daemon::server) async fn rpc_turn_start(
     let p: TurnStartParams =
         serde_json::from_value(params.clone()).context("parsing turn_start params")?;
     if p.session.is_empty() {
-        return Ok(serde_json::json!({ "context": serde_json::Value::Null }));
+        return Ok(serde_json::json!({
+            "context": serde_json::Value::Null,
+            "audit": {
+                "kind": "turn_start",
+                "skipped": "empty-session-id",
+                "output": { "emitted": false, "bytes": 0, "text": null },
+            },
+        }));
     }
     // Hooks speak the harness id; every mutator below resolves it to the canonical
     // session id internally, so passing the raw alias is correct. Read the previous
@@ -40,7 +47,18 @@ pub(in crate::daemon::server) async fn rpc_turn_start(
 
     let rec = match state.with_store(|s| s.get_session(&p.session).ok().flatten()) {
         Some(r) => r,
-        None => return Ok(serde_json::json!({ "context": serde_json::Value::Null })),
+        None => {
+            return Ok(serde_json::json!({
+                "context": serde_json::Value::Null,
+                "audit": {
+                    "kind": "turn_start",
+                    "skipped": "session-not-found",
+                    "input_session": p.session,
+                    "prev_turn_started_at": prev_started,
+                    "output": { "emitted": false, "bytes": 0, "text": null },
+                },
+            }));
+        }
     };
 
     // Emit Turn{working} for the live tail feed, keyed on the routing scope.
@@ -96,10 +114,12 @@ pub(in crate::daemon::server) async fn rpc_turn_start(
     } else {
         base
     };
+    let audit =
+        crate::cli::turn_start_audit(&state.store, &rec, prev_started, now, merged.as_deref());
     let context = merged
         .map(serde_json::Value::String)
         .unwrap_or(serde_json::Value::Null);
-    Ok(serde_json::json!({ "context": context }))
+    Ok(serde_json::json!({ "context": context, "audit": audit }))
 }
 
 /// Append the "new agents available" delta section (decision D) to an assembled
@@ -128,11 +148,13 @@ pub(in crate::daemon::server) fn rpc_turn_check(
     // (`seen_cursor`). We advance the cursor atomically — only the first of any
     // concurrent PostToolUse hooks wins the CAS; the rest get delta_since=None
     // and emit nothing, preventing duplicate injections from parallel tool calls.
+    let mut cursor_advanced = false;
     let delta_since = if rec.working {
         let old = rec.seen_cursor;
         let won = state
             .with_store(|s| s.try_advance_seen_cursor(&rec.session_id, old, now))
             .unwrap_or(false);
+        cursor_advanced = won;
         won.then_some(old)
     } else {
         None
@@ -144,10 +166,18 @@ pub(in crate::daemon::server) fn rpc_turn_check(
         Some(since) => merge_new_agents(base, since, now),
         None => base,
     };
+    let audit = crate::cli::turn_check_audit(
+        &state.store,
+        &rec,
+        delta_since,
+        cursor_advanced,
+        now,
+        merged.as_deref(),
+    );
     let context = merged
         .map(serde_json::Value::String)
         .unwrap_or(serde_json::Value::Null);
-    Ok(serde_json::json!({ "context": context }))
+    Ok(serde_json::json!({ "context": context, "audit": audit }))
 }
 
 #[derive(serde::Deserialize)]

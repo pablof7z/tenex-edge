@@ -9,7 +9,8 @@ use summary::{
     other_active_channel_lines, project_line, subchannels_of,
 };
 
-const RECENT_SEMANTIC_WINDOW_SECS: u64 = 10 * 60;
+const RECENT_SEMANTIC_WINDOW_SECS: u64 = 4 * 60 * 60;
+const RECENT_SEMANTIC_WINDOW_LABEL: &str = "last 4h";
 
 /// `is_root_channel`, but a store error is logged loudly before defaulting to
 /// `true` (the safe choice: suppresses the `Subchannels:` section rather than
@@ -130,7 +131,11 @@ fn render_snapshot_body(
         now.saturating_sub(RECENT_SEMANTIC_WINDOW_SECS),
         now,
     );
-    write_section(&mut out, "Other active channels, last 10m:", &other);
+    write_section(
+        &mut out,
+        &format!("Other active channels, {RECENT_SEMANTIC_WINDOW_LABEL}:"),
+        &other,
+    );
 
     out.trim_end().to_string()
 }
@@ -209,7 +214,11 @@ fn render_awareness_update(
     let mut out = format!("[tenex-edge] Fabric updates since your {label}");
     write_section(&mut out, "Members:", &members);
     write_section(&mut out, "Subchannels:", &subchannels);
-    write_section(&mut out, "Other active channels, last 10m:", &other);
+    write_section(
+        &mut out,
+        &format!("Other active channels, {RECENT_SEMANTIC_WINDOW_LABEL}:"),
+        &other,
+    );
     if !activity.is_empty() {
         write_section(
             &mut out,
