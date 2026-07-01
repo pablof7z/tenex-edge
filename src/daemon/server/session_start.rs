@@ -281,13 +281,28 @@ pub(in crate::daemon::server) async fn rpc_session_start(
         &native_id,
         p.preferred_ordinal,
     )?;
+    // If the engine is already running (re-assert from a duplicate spawn such as
+    // the offline-agent-mention handler), preserve the live session's active
+    // channel rather than stomping it with whatever TENEX_EDGE_CHANNEL the new
+    // process was launched with. Without this guard, the duplicate's stale env
+    // overwrites channel_h transiently AND permanently adds a spurious passive
+    // join to session_channels (INSERT OR IGNORE never cleans it up), causing
+    // the session to receive inbox messages from the wrong channel.
+    let channel_for_upsert = if state.sessions.lock().unwrap().contains_key(&session_id) {
+        state
+            .with_store(|s| s.get_session(&session_id).ok().flatten())
+            .map(|r| r.channel_h)
+            .unwrap_or_else(|| project.clone())
+    } else {
+        project.clone()
+    };
     let reg = crate::state::RegisterSession {
         harness: harness_str.to_string(),
         external_id_kind: ext_kind.to_string(),
         external_id: ext_id.clone(),
         agent_pubkey: signer.pubkey.clone(),
         agent_slug: p.agent.clone(),
-        channel_h: project.clone(),
+        channel_h: channel_for_upsert,
         child_pid: p.watch_pid,
         transcript_path: None,
         resume_id: native_id.clone(),
