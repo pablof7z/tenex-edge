@@ -1,12 +1,12 @@
 use super::*;
 
-/// Select the durable ordinal identity for a session in channel `h` (issue #47).
+/// Select the durable ordinal identity for a session (issue #47).
 ///
 /// `base_keys`/`base_pubkey` are the agent's durable ordinal-0 identity. The
-/// allocator picks ordinal 0 (sign with the base key) for the first session of
-/// the agent in the channel, and the next free durable ordinal (`smith1`, …) for
-/// concurrent ones. A session's already-bound ordinal (same-process reassert or
-/// cross-restart revive) is honored so its identity is stable.
+/// allocator picks ordinal 0 (sign with the base key) for the first live session
+/// of the agent, and the next free durable ordinal (`smith1`, …) for concurrent
+/// ones across every channel. A session's already-bound ordinal (same-process
+/// reassert or cross-restart revive) is honored so its identity is stable.
 ///
 /// Persists the derived signing key into the `identities` cache, binding the
 /// ordinal pubkey to this live session + its harness-native id (the resume key)
@@ -28,11 +28,20 @@ pub(in crate::daemon::server) fn select_session_signer(
     let existing_identity = state.with_store(|s| s.identity_for_session(session_id).ok().flatten());
     let preferred = hint_ordinal.or_else(|| existing_identity.as_ref().map(|i| i.ordinal));
     let occupied_pubkeys: std::collections::HashSet<String> = state.with_store(|s| {
-        s.list_channel_members(h)
+        let mut occupied: std::collections::HashSet<String> = s
+            .list_channel_members(h)
             .unwrap_or_default()
             .into_iter()
             .map(|m| m.pubkey)
-            .collect()
+            .collect();
+        occupied.extend(
+            s.identities_for_base(base_pubkey)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|i| i.alive)
+                .map(|i| i.pubkey),
+        );
+        occupied
     });
 
     let signer = {
@@ -76,7 +85,7 @@ pub(in crate::daemon::server) fn select_session_signer(
 /// use. Membership is materialized from the relay's 39002 reflection, so this
 /// only performs the relay-side add; the local `relay_channel_members` cache
 /// updates when the reflected 39002 lands.
-pub(in crate::daemon::server) async fn admit_transient_signer(
+pub(in crate::daemon::server) async fn admit_ordinal_signer(
     state: &Arc<DaemonState>,
     project: &str,
     session_pubkey: &str,
@@ -87,7 +96,7 @@ pub(in crate::daemon::server) async fn admit_transient_signer(
         .unwrap_or(false);
     if !accepted {
         anyhow::bail!(
-            "NIP-29 admission failed for transient signer {} in {project}",
+            "NIP-29 admission failed for ordinal signer {} in {project}",
             pubkey_short(session_pubkey)
         );
     }

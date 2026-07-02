@@ -9,4 +9,4 @@ source_refs:
 
 # OrdinalSlot
 
-A reserved ordinal slot (issue #47). At most one LIVE session per (base agent pubkey, room h, ordinal). Replaces the old binary durable-vs-transient slot: each concurrent session in a room takes the next free durable ordinal identity (smith, smith1, smith2, …), reused across rooms.
+A reserved ordinal slot (issue #47). At most one live session per base agent pubkey and ordinal. Each concurrent live session takes the next free durable ordinal identity (smith, smith1, smith2, ...), globally for that base agent; channels are membership scopes, not identity scopes.

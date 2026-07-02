@@ -279,7 +279,7 @@ use profile_rpc::{
 use proposal::rpc_propose;
 use resolution::{resolve_session, resolve_session_inner, CallerAnchor, ResolveScope};
 use session_end::rpc_session_end;
-use session_signing::{admit_transient_signer, select_session_signer};
+use session_signing::{admit_ordinal_signer, select_session_signer};
 use session_start::rpc_session_start;
 use status_publish::{spawn_outbox_drainer, spawn_status_heartbeat_publisher};
 use statusline::rpc_statusline;

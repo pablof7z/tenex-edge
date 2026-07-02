@@ -227,10 +227,10 @@ pub(in crate::daemon::server) fn set_active_session_channel(
     leave_previous: bool,
 ) -> Result<()> {
     // Every write here is part of one logical "this session now publishes into
-    // `new_channel`" move. A swallowed error would leave the session and its
-    // identity pointing at different channels — mentions delivered to a channel
-    // the agent isn't actually focused on. Fail loud so the switch/create RPC
-    // reports the failure instead of silently half-applying it.
+    // `new_channel`" move. A swallowed error would leave the session row and the
+    // identity's active-channel hint disagreeing, so later resume/mention flows
+    // could target stale context. Fail loud so the switch/create RPC reports the
+    // failure instead of silently half-applying it.
     state.with_store(|s| -> Result<()> {
         // No store transaction is available here, so do the fallible reads/checks
         // FIRST and perform the mutations only after they all pass: a failure must
@@ -256,7 +256,7 @@ pub(in crate::daemon::server) fn set_active_session_channel(
                 format!(
                     "set_active_session_channel: no identity row for live session \
                      {session_id} (agent {agent_pubkey}); refusing to silently skip the \
-                     identity channel move"
+                     identity active-channel move"
                 )
             })?;
         idn.channel_h = new_channel.to_string();
@@ -273,7 +273,7 @@ pub(in crate::daemon::server) fn set_active_session_channel(
         s.set_session_channel(session_id, new_channel)
             .context("set_active_session_channel: repointing active channel")?;
         s.upsert_identity(&idn)
-            .context("set_active_session_channel: persisting identity channel move")?;
+            .context("set_active_session_channel: persisting identity active-channel move")?;
         Ok(())
     })?;
     state.outbox_notify.notify_waiters();
