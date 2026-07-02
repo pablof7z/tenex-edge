@@ -148,11 +148,7 @@ fn install_target(target: &SkillTarget, source: &Path, dry_run: bool) -> Result<
     }
 
     link_skill(&target.path, source)?;
-    println!(
-        "  linked {} -> {}",
-        target.path.display(),
-        source.display()
-    );
+    println!("  linked {} -> {}", target.path.display(), source.display());
     Ok(())
 }
 
@@ -196,12 +192,10 @@ fn remove_skill_link(path: &Path) -> Result<()> {
         return Ok(());
     }
     if meta.is_dir() {
-        std::fs::remove_dir_all(path)
-            .with_context(|| format!("removing {}", path.display()))?;
+        std::fs::remove_dir_all(path).with_context(|| format!("removing {}", path.display()))?;
         return Ok(());
     }
-    std::fs::remove_file(path)
-        .with_context(|| format!("removing {}", path.display()))?;
+    std::fs::remove_file(path).with_context(|| format!("removing {}", path.display()))?;
     Ok(())
 }
 
@@ -223,10 +217,7 @@ mod tests {
             let previous = std::env::var("HOME").ok();
             // SAFETY: serialized by HOME_LOCK; restored on drop.
             unsafe { std::env::set_var("HOME", path) };
-            Self {
-                _lock,
-                previous,
-            }
+            Self { _lock, previous }
         }
     }
 

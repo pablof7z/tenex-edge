@@ -148,6 +148,8 @@ pub async fn run() -> Result<()> {
             }
         }
 
+        membership_cleanup::cleanup_dead_local_sessions(&relay_state);
+
         // Discover groups where local agents are already members so kind:9 chat
         // arrives even when no session is alive (spawn-on-mention path), and record
         // them in `subscribed_projects`. We DON'T open a REQ per group here — the

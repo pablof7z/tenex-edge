@@ -265,8 +265,8 @@ pub(in crate::daemon::server) struct ResolvedRecipient {
 }
 
 /// Resolve a recipient/identifier to a wire pubkey under the CANONICAL scheme:
-///   - `agent@host`  → the durable agent on that machine (host always slugified;
-///     `@` NEVER means project). The message still goes to `my_project`.
+///   - `agent@backend-label` → the durable agent on that backend (`@` NEVER
+///     means project). The message still goes to `my_project`.
 ///   - 64-hex / npub → raw pubkey.
 ///   - a session     → by canonical id, harness alias, or id prefix (correlation
 ///     handles only; a session id is never a chat-target identity).
@@ -275,7 +275,7 @@ pub(in crate::daemon::server) struct ResolvedRecipient {
 ///
 /// Sessions are local-only in the new model (session ids never travel the wire),
 /// so session-prefix matching searches the local `sessions` table; a remote agent
-/// is addressed only by `agent@host` or pubkey.
+/// is addressed only by `agent@backend-label` or pubkey.
 pub(in crate::daemon::server) fn resolve_recipient(
     store: &Store,
     my_project: &str,
@@ -366,9 +366,7 @@ pub(in crate::daemon::server) fn resolve_recipient(
             }
             // 4. Bare agent-instance label → that instance on the LOCAL host
             //    (profile fallback for remote/snapshotted peers).
-            if let Some(pk) =
-                store.resolve_agent_pubkey(&tok, &crate::util::slugify_host(local_host))?
-            {
+            if let Some(pk) = store.resolve_agent_pubkey(&tok, local_host.trim())? {
                 return Ok(ResolvedRecipient {
                     pubkey: pk,
                     target_session: None,
