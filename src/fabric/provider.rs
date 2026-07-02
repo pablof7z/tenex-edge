@@ -8,7 +8,7 @@ use crate::domain::DomainEvent;
 use crate::fabric::nip29::readiness::{ChannelCtx, ChannelGate, ChannelReadiness};
 use crate::fabric::nip29::wire::Nip29WireCodec;
 use crate::fabric::nostr_delivery::NostrDelivery;
-use crate::fabric::{MaterializationOutcome, RawEnvelope, WireCodec};
+use crate::fabric::{MaterializationOutcome, NostrEventCodec, RawEnvelope};
 use crate::state::Store;
 use crate::transport::Transport;
 use anyhow::{Context, Result};

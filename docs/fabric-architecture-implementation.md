@@ -192,22 +192,24 @@ pub trait Delivery {
     fn notifications(&self) -> RawEnvelopeStream;
 }
 
-pub trait WireCodec {
-    fn encode(&self, event: &DomainEvent) -> Result<RawOutboundEnvelope>;
-    fn decode(&self, envelope: &RawEnvelope) -> Option<DecodedEvent>;
+pub trait NostrEventCodec {
+    fn encode(&self, event: &DomainEvent) -> Result<nostr_sdk::EventBuilder>;
+    fn decode(&self, envelope: &RawEnvelope) -> Option<DomainEvent>;
 }
 ```
 
 Implementation steps:
 
-1. Move the filter construction from `Nip29WireCodec::filters` into
-   `NostrDelivery::subscribe(scope)`.
+1. Keep filter construction in `NostrDelivery::subscribe(scope)` /
+   `scope_filters(scope)`, not in the codec.
 2. Keep `Transport` as the private implementation detail of `NostrDelivery`.
-3. Keep `Nip29WireCodec::encode/decode` under `src/fabric/nip29/wire.rs`.
+3. Keep `Nip29WireCodec::encode/decode` under `src/fabric/nip29/wire.rs` and
+   expose the shared trait as Nostr-event-specific while it returns
+   `nostr_sdk::EventBuilder`.
 4. Remove the old `Codec` trait/module; NIP-29 is the active wire provider.
 
 Done when: `resubscribe` no longer calls `state.codec.filters(&scope)`; it asks
-delivery to subscribe to `Scope`, while decode remains in the wire codec.
+delivery to subscribe to `Scope`, while decode remains in the provider codec.
 
 ### Phase 4 - extract the materializer
 
@@ -260,7 +262,7 @@ materialization code.
 
 ### Phase 5 - introduce FabricProvider
 
-Once delivery, wire codec, materializer, and lifecycle have concrete homes, add
+Once delivery, provider codec, materializer, and lifecycle have concrete homes, add
 the top-level provider.
 
 Provider API shape (pseudo-Rust; implement first with a concrete

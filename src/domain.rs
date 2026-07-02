@@ -1,26 +1,24 @@
-//! Pure domain model. No Nostr, no kinds, no tags, no wire format.
+//! Pure domain model. No concrete fabric codes, labels, or serialization
+//! format.
 //!
-//! The litmus test for the codec seam (M1 §3): this module must not name
-//! concrete Nostr kinds, tags, or wire-protocol concepts. Everything here is
-//! what tenex-edge *means*, never how it travels.
+//! The litmus test for the provider seam: everything here is what tenex-edge
+//! *means*, never how it travels.
 
 use crate::util::SessionId;
 
 /// Liveness TTL: a status is "live" while its heartbeat is fresher than this.
-/// The daemon re-arms the kind:30315 NIP-40 `expiration` to `now + STATUS_TTL_SECS`
-/// on every heartbeat, so a stopped session's event expires off the relay ~this
-/// long after its last beat. 90s matches the `who` peer-freshness window so local
-/// and peer liveness use one number.
+/// The daemon refreshes the provider-native expiry to `now + STATUS_TTL_SECS` on
+/// every heartbeat, so a stopped session disappears from live views roughly this
+/// long after its last beat. 90s matches the `who` peer-freshness window so
+/// local and peer liveness use one number.
 pub const STATUS_TTL_SECS: u64 = 90;
 
 /// Heartbeat cadence. 3x re-arm margin under `STATUS_TTL_SECS` (no flicker).
 pub const HEARTBEAT_SECS: u64 = 30;
 
-/// The lifecycle of a session aggregate. PURE marker (never on the wire — there
-/// are no tombstone events): a stopped session is detected by its status event
-/// expiring, not by an `ended`/`superseded` signal. Stored on `sessions` so
-/// readers and `derive_status` can suppress a finished session locally before its
-/// relay event ages out.
+/// The lifecycle of a session aggregate. Stored on `sessions` so readers and
+/// `derive_status` can suppress a finished session locally before remote
+/// liveness expires.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Lifecycle {
     /// Running or idle-but-resumable; the normal state.
@@ -74,7 +72,7 @@ impl AgentRef {
 
 /// The agent's published identity card. Resolves `pubkey -> slug`, tells a peer
 /// which machine the agent lives on, and declares the human owner(s) it belongs
-/// to (p-tagged), so a recipient can decide whether to authorize it.
+/// to so a recipient can decide whether to authorize it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Profile {
     pub agent: AgentRef,
@@ -82,13 +80,13 @@ pub struct Profile {
     /// Owner pubkeys this agent claims (the human's whitelisted pubkeys).
     pub owners: Vec<String>,
     /// True when published by the tenex-edge backend process itself (not an AI
-    /// agent). Encoded as a `["backend"]` tag on the wire; used to suppress
-    /// backend identities from agent-facing context injections.
+    /// agent). Used to suppress backend identities from agent-facing context
+    /// injections.
     pub is_backend: bool,
 }
 
 /// A durable, append-only line of narrative: what the agent is doing / did.
-/// Used for social Activity notes (kind:1 without p tag).
+/// Used for social activity notes that are not inbox-routed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Activity {
     pub agent: AgentRef,
@@ -96,9 +94,8 @@ pub struct Activity {
     pub text: String,
 }
 
-/// A long-form proposal authored by an agent (rendered as an article by any
-/// Nostr client). Addressable: republishing with the same `d` supersedes the
-/// prior revision at the same (author, d) address.
+/// A long-form proposal authored by an agent. Addressable: republishing with
+/// the same stable identifier supersedes the prior revision from that author.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Proposal {
     pub agent: AgentRef,
@@ -111,51 +108,24 @@ pub struct Proposal {
     pub audience: Vec<String>,
 }
 
-/// The agent's complete live state for one local session. On the wire, NIP-29
-/// status is replaceable by `(author pubkey, session_id)`, and targets every
-/// channel the session is currently present in via repeated `h` tags. From this
-/// one value a reader knows everything: who/where (agent, channels, host,
-/// session, rel_cwd), what the
-/// session is about (the persistent `title`), what it is doing *right now* (the
-/// live `activity`), and whether it is mid-turn (`busy`). It is replaceable per
-/// session, so each session keeps its own title even while idle — and after it
+/// The agent's complete live state for one local session. From this one value a
+/// reader knows everything: who/where (agent, channels, host, session, rel_cwd),
+/// what the session is about (the persistent `title`), what it is doing *right
+/// now* (the live `activity`), and whether it is mid-turn (`busy`). It is scoped
+/// per session, so each session keeps its own title even while idle and after it
 /// exits.
 ///
-/// Liveness = freshness of THIS event. The daemon re-arms `expires_at` to
-/// `now + STATUS_TTL_SECS` on every heartbeat; the codec turns `Some(ts)` into a
-/// NIP-40 `["expiration", ts]` tag. Beats stop → event expires → reads as dead.
-/// `expires_at == None` publishes without an expiration (used only in tests /
-/// non-heartbeat contexts).
-///
-/// PROVIDER STATUS API (implemented by the daemon's provider, NOT in this pure
-/// module — specified here so the codec/provider/drainer agents bind to it):
-///
-/// ```ignore
-/// impl crate::fabric::provider::Nip29Provider {
-///     /// Encode `status` to kind:30315 (NIP-40 expiration when `expires_at` is
-///     /// Some), sign with `keys`, and return only after checked relay
-///     /// acceptance. Returns the native event id.
-///     pub async fn set_status(
-///         &self,
-///         status: &crate::domain::Status,
-///         keys: &nostr_sdk::prelude::Keys,
-///     ) -> anyhow::Result<nostr_sdk::prelude::EventId>;
-/// }
-/// ```
-///
-/// The per-session engine encodes and signs a kind:30315 status into the
-/// durable `outbox`. The daemon drainer publishes that signed JSON with a
-/// checked relay verdict, then marks the row `published` only after acceptance.
-/// The heartbeat publisher that bypasses the outbox uses `set_status`, which
-/// applies the same checked verdict before refreshing the local status cache.
+/// Liveness = freshness of this state. The daemon refreshes `expires_at` on
+/// every heartbeat. Beats stop, the provider-native expiry passes, and readers
+/// treat the session as dead. `expires_at == None` publishes without an expiry
+/// (used only in tests / non-heartbeat contexts).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Status {
     pub agent: AgentRef,
-    /// NIP-29 channels this session is currently present in. Encoded as one
-    /// `h` tag per channel; materializers fan this single session status out to
-    /// per-channel read rows.
+    /// Channels this session is currently present in. Materializers fan this
+    /// single session status out to per-channel read rows.
     pub channels: Vec<String>,
-    /// The session this status belongs to. Encoded as the kind:30315 `d` tag.
+    /// The session this status belongs to.
     pub session_id: SessionId,
     /// The machine this session lives on.
     pub host: String,
@@ -172,12 +142,12 @@ pub struct Status {
     /// session keeps showing its title with a separate idle marker.
     pub busy: bool,
     /// Project-relative working directory (e.g. `worktree1`, `sub/dir`, `.`).
-    /// PUBLIC kind → never the absolute `$HOME/...` path (privacy). Lets a `who`
-    /// reflect where the agent is working.
+    /// Public status value: never the absolute `$HOME/...` path (privacy). Lets
+    /// a `who` reflect where the agent is working.
     pub rel_cwd: String,
-    /// NIP-40 expiration (unix secs). `Some(now + STATUS_TTL_SECS)` on every
-    /// heartbeat re-arm; `None` publishes without an expiration tag. Liveness IS
-    /// the freshness of this event.
+    /// Expiration timestamp (unix secs). `Some(now + STATUS_TTL_SECS)` on every
+    /// heartbeat re-arm; `None` publishes without an expiry. Liveness IS the
+    /// freshness of this state.
     pub expires_at: Option<u64>,
 }
 
@@ -193,22 +163,21 @@ impl Status {
     }
 }
 
-/// A NIP-29 project chat line. On the wire this is a NIP-C7 `kind:9` event
-/// scoped to the project group by its `h` tag. It is ambient project context;
-/// live sessions see it going forward only. Chat fans out to every alive project
-/// session by pubkey + channel membership; session ids are for lifecycle/status,
-/// not chat addressing.
+/// A project chat line. It is ambient project context; live sessions see it
+/// going forward only. Chat fans out to every alive project session by pubkey +
+/// channel membership; session ids are for lifecycle/status, not chat
+/// addressing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChatMessage {
     pub from: AgentRef,
     pub project: String,
     pub body: String,
-    /// Optional pubkey for the @-mentioned agent, carried as a Nostr `p` tag.
+    /// Optional pubkey for the @-mentioned agent.
     pub mentioned_pubkey: Option<String>,
 }
 
-/// The closed set of things that travel on the fabric. A codec encodes each of
-/// these to a wire envelope and decodes wire envelopes back into these.
+/// The closed set of things that travel on the fabric. A provider maps these to
+/// and from its native representation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DomainEvent {
     Profile(Profile),
@@ -219,8 +188,8 @@ pub enum DomainEvent {
 }
 
 impl DomainEvent {
-    /// The NIP-29 group h-tag this event targets, if any.
-    /// `Profile` (kind:0) is not scoped to a group and returns `None`.
+    /// The channel this event targets, if any.
+    /// `Profile` is not scoped to a channel and returns `None`.
     pub fn channel(&self) -> Option<&str> {
         match self {
             DomainEvent::Profile(_) => None,

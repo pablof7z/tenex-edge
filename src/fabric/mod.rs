@@ -2,7 +2,7 @@
 //!
 //! Layering intent (see docs/fabric-architecture.md §Phase 3/4):
 //!   Delivery    (subscribe, publish)  ← NostrDelivery
-//!   WireCodec   (encode, decode)      ← Nip29WireCodec
+//!   NostrEventCodec (encode, decode)  ← Nip29WireCodec
 //!   Materializer (store writes)       ← materialize()
 //!   Transport                         ← (private detail of NostrDelivery)
 
@@ -12,8 +12,11 @@ pub mod nostr_delivery;
 pub mod provider;
 pub(crate) mod subscriptions;
 
-/// Raw wire envelope crossing the transport boundary. Phase 3 adds only the
-/// Nostr variant; additional transports (NMP, Marmot) add variants in Phase 5.
+/// Raw envelope currently emitted by the Nostr delivery path.
+///
+/// This is intentionally not advertised as transport-neutral: current materialization
+/// is NIP-29-over-Nostr-specific. Future providers should own their native
+/// envelope type instead of making this enum a cross-fabric dumping ground.
 pub enum RawEnvelope {
     Nostr(nostr_sdk::Event),
 }
@@ -28,8 +31,11 @@ pub struct Scope {
     pub owners: Vec<String>,
 }
 
-/// Encode/decode between `DomainEvent` and `RawEnvelope`. Transport-agnostic.
-pub trait WireCodec {
+/// Encode/decode between `DomainEvent` and Nostr event envelopes.
+///
+/// The return type is `nostr_sdk::EventBuilder`, so this boundary is explicitly
+/// Nostr-specific even when a concrete codec maps NIP-29 group semantics.
+pub trait NostrEventCodec {
     fn encode(&self, ev: &crate::domain::DomainEvent) -> anyhow::Result<nostr_sdk::EventBuilder>;
     fn decode(&self, env: &RawEnvelope) -> Option<crate::domain::DomainEvent>;
 }
