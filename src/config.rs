@@ -155,10 +155,14 @@ impl Config {
 }
 
 pub fn config_path() -> PathBuf {
-    if let Ok(p) = std::env::var("TENEX_CONFIG") {
-        return PathBuf::from(p);
+    select_config_path(std::env::var_os("TENEX_CONFIG"), edge_home())
+}
+
+fn select_config_path(tenex_config: Option<OsString>, edge_home: PathBuf) -> PathBuf {
+    match tenex_config {
+        Some(p) => PathBuf::from(p),
+        None => edge_home.join("config.json"),
     }
-    edge_home().join("config.json")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

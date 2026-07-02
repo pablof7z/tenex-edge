@@ -2,7 +2,7 @@
 title: Tenex-Edge Home Directory
 slug: tenex-edge-home-directory
 topic: tenex-edge
-summary: The `edge_home()` function returns tenex-edge's data root â including `state.db`, agents, and logs â and is overridable via the `TENEX_EDGE_HOME` environmen
+summary: The `edge_home()` function returns tenex-edge's data root, including `state.db`, agents, and logs, and is overridable via `TENEX_EDGE_HOME`.
 tags:
   - capture
 volatility: warm
@@ -20,12 +20,10 @@ sources:
 
 ## Home Directory & Environment
 
-The `edge_home()` function returns tenex-edge's data root — including `state.db`, agents, and logs — and is overridable via the `TENEX_EDGE_HOME` environment variable. When set, `TENEX_EDGE_HOME` overrides the default `~/.tenex-edge` data directory for all tenex-edge state: config, keys, state.db, and logs. `config_path()` uses `edge_home()` to resolve the config file location, so `TENEX_EDGE_HOME` is respected for config loading everywhere rather than hardcoding `~/.tenex-edge`. The separate `tenex_dir()` abstraction for the shared TENEX platform config (LLM configs, providers) overridable via `TENEX_DIR` has been removed; everything now reads from `edge_home()`. <!-- [^b07a5-1f7a8] -->
+The `edge_home()` function returns tenex-edge's data root — including `config.json`, `state.db`, agents, and logs — and is overridable via the `TENEX_EDGE_HOME` environment variable. When set, `TENEX_EDGE_HOME` overrides the default `~/.tenex-edge` data directory for all tenex-edge state. `config_path()` uses `edge_home()` to resolve the default config file location, so `TENEX_EDGE_HOME` is respected for config loading; `TENEX_CONFIG` can override only the config file. The separate `tenex_dir()` abstraction for shared TENEX platform config was removed; `providers.json`, `llms.json`, relay logs, identities, and daemon state all live under `edge_home()`. <!-- [^b07a5-1f7a8] -->
 
 Processes spawned via `tenex-edge launch` inherit `TENEX_EDGE_HOME`, `TENEX_CONFIG`, and `TENEX_EDGE_BIN` from the parent environment, including agent harness hook calls. <!-- [^b07a5-ee2c8] -->
 
-
-README and older architecture docs still mention `~/.tenex/edge`, while newer code and wiki guidance says `edge_home()`/`TENEX_EDGE_HOME` now own all tenex-edge state; treat the legacy path references as stale. <!-- [^019f1-c1479] -->
 ## Startup Diagnostics
 
 On every `tenex-edge` invocation, before command dispatch, the configured home directory and relay URL are printed to stderr so stdout-based consumers like statusline are not affected. The line is formatted as `[tenex-edge] home=<home_path> relays=<relay_url>`. <!-- [^b07a5-df73d] -->
