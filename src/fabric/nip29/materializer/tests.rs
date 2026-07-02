@@ -1,6 +1,8 @@
 use super::*;
 use crate::state::{RegisterSession, Store};
-use nostr_sdk::prelude::{EventBuilder, Keys, Kind, Tag};
+use nostr_sdk::prelude::{EventBuilder, Keys, Kind, Tag, Timestamp};
+
+mod membership;
 
 fn make_tag(parts: &[&str]) -> Tag {
     Tag::parse(parts.iter().copied()).unwrap()
@@ -9,6 +11,14 @@ fn make_tag(parts: &[&str]) -> Tag {
 fn build(keys: &Keys, kind_n: u16, content: &str, tags: Vec<Tag>) -> Event {
     EventBuilder::new(Kind::from(kind_n), content)
         .tags(tags)
+        .sign_with_keys(keys)
+        .unwrap()
+}
+
+fn build_at(keys: &Keys, kind_n: u16, content: &str, tags: Vec<Tag>, created_at: u64) -> Event {
+    EventBuilder::new(Kind::from(kind_n), content)
+        .tags(tags)
+        .custom_created_at(Timestamp::from_secs(created_at))
         .sign_with_keys(keys)
         .unwrap()
 }
