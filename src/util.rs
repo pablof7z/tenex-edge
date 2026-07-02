@@ -98,29 +98,6 @@ pub fn pubkey_short(id: &str) -> String {
     id.chars().take(8).collect()
 }
 
-/// Derive a short title from a raw user prompt: take the first non-empty line,
-/// strip leading markdown sigils (#, *, -, >), and cap at 60 chars on a word
-/// boundary. Returns an empty string when nothing meaningful remains.
-pub fn titleize_prompt(prompt: &str) -> String {
-    let line = prompt
-        .lines()
-        .map(str::trim)
-        .find(|l| !l.is_empty())
-        .unwrap_or("")
-        .trim_start_matches(['#', '*', '-', '>', ' ', '\t'])
-        .trim();
-    if line.is_empty() {
-        return String::new();
-    }
-    if line.len() <= 60 {
-        return line.to_string();
-    }
-    match line[..60].rfind(' ') {
-        Some(i) => line[..i].to_string(),
-        None => line[..60].to_string(),
-    }
-}
-
 /// True when `text`, trimmed, starts with `<` — the shape of harness-injected
 /// control content (task-completion notifications, system reminders,
 /// command-output wrappers, ...) as opposed to text a human actually typed.

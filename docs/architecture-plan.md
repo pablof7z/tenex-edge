@@ -53,8 +53,8 @@ observations*, not identity policy.
 **State = one row.** `session_state` (canonical `session_id` PK): title,
 title_source, activity, phase/busy, turn_id, turn_started_at, last_distill_at,
 last_seen, resume metadata, state_version. All mutation through transition methods
-on `Store` (`start_turn`, `seed_title_if_empty`, `apply_distill_result`,
-`heartbeat`, `end_turn`, `end_session`, `supersede_session`), each one SQLite txn
+on `Store` (`start_turn`, `apply_distill_result`, `heartbeat`, `end_turn`,
+`end_session`, `supersede_session`), each one SQLite txn
 that also enqueues the outbox when public status changed. `session_status`,
 `agent_status`, `turn_state` stop being independently writable.
 

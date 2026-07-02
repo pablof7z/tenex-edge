@@ -86,14 +86,10 @@ impl AliasKind {
     }
 }
 
-/// Where a `title` came from. Higher-fidelity sources win: a `Distill` title is
-/// never overwritten by a `Seed`, and `seed_title_if_empty` only acts when the
-/// current source is `None`.
+/// Where a `title` came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TitleSource {
     None,
-    /// Quick-seeded from the user prompt at turn start.
-    Seed,
     /// Produced by the LLM distiller.
     Distill,
     /// Mirrored from a peer's kind:30315 wire title.
@@ -104,7 +100,6 @@ impl TitleSource {
     pub fn as_str(&self) -> &'static str {
         match self {
             TitleSource::None => "none",
-            TitleSource::Seed => "seed",
             TitleSource::Distill => "distill",
             TitleSource::Peer => "peer",
         }
@@ -112,7 +107,6 @@ impl TitleSource {
     #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Self {
         match s {
-            "seed" => TitleSource::Seed,
             "distill" => TitleSource::Distill,
             "peer" => TitleSource::Peer,
             _ => TitleSource::None,
@@ -342,8 +336,6 @@ pub enum Transition {
     Register,
     /// `start_turn` opened turn `turn_id` (busy -> true).
     StartTurn { turn_id: i64 },
-    /// `seed_title_if_empty` placed a provisional title.
-    SeedTitle,
     /// `apply_distill_result` applied a distilled (title, activity).
     Distill { turn_id: i64, base_version: i64 },
     /// `heartbeat_session` refreshed liveness ONLY (no version bump, no outbox).

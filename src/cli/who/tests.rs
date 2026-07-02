@@ -50,9 +50,8 @@ fn register_local_in(
         .unwrap()
 }
 
-/// Set a session's local pre-publish draft title (the new equivalent of the
-/// deleted `seed_title_if_empty`); local rows fall back to this when no kind:30315
-/// has been published yet.
+/// Set a session's local pre-publish draft title. Local rows fall back to this
+/// when no kind:30315 has been published yet.
 fn seed_draft_title(store: &Store, session_id: &str, title: &str, ts: u64) {
     store
         .set_session_distill(session_id, title, "", ts)

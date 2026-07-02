@@ -233,16 +233,13 @@ pub async fn run_session_in_daemon(
     //   - last_distill_attempt: wall-clock retry gate (success time lives in the
     //     session row's last_distill_at),
     //   - cur_turn_started / prev_working: edge detection against the session's
-    //     working/turn_started_at columns,
-    //   - title_from_distill: whether the current title came from the LLM (fed
-    //     back to nudge-to-keep) vs a raw user-prompt seed.
+    //     working/turn_started_at columns.
     let mut distill_task: Option<
         tokio::task::JoinHandle<(Option<distill::SessionLabels>, Option<String>)>,
     > = None;
     let mut last_distill_attempt: u64 = 0;
     let mut cur_turn_started: u64 = 0;
     let mut prev_working = false;
-    let mut title_from_distill = false;
 
     // Assert liveness immediately and arm the first status.
     if let Err(e) = st!(|s: &Store| s.touch_session(&p.session_id, now_secs())) {
@@ -295,7 +292,6 @@ pub async fn run_session_in_daemon(
                         )) {
                             tracing::error!(session = %p.session_id, error = %e, "set_session_distill failed — distilled title not persisted");
                         }
-                        title_from_distill = true;
                         slog(&p.session_id, &format!("[distill] applied title={:?}", labels.title));
 
                         // Read back the freshly-applied draft and publish it.
@@ -322,30 +318,6 @@ pub async fn run_session_in_daemon(
                     // ── rising edge / new user message ────────────────────
                     if turn_started_at != cur_turn_started {
                         cur_turn_started = turn_started_at;
-                        // Seed a provisional title from the user's prompt so the TUI
-                        // shows something before the LLM distiller fires. A seed is
-                        // NOT a distill: it writes last_distill_at=0 so the due-check
-                        // still schedules a real distillation this turn.
-                        if let Some(sess) = session.as_ref() {
-                            if sess.title.trim().is_empty() {
-                                let raw_prompt = sess.transcript_path.as_deref()
-                                    .and_then(|path| crate::transcript::read_last_user_prompt(std::path::Path::new(path)));
-                                slog(&p.session_id, &format!("[title-seed] raw_prompt={:?}", raw_prompt.as_deref().map(|s| &s[..s.len().min(200)])));
-                                let quick = raw_prompt.and_then(|prompt| {
-                                        let t = crate::util::titleize_prompt(&prompt);
-                                        if t.is_empty() { None } else { Some(t) }
-                                    });
-                                if let Some(qt) = quick {
-                                    st!(|s: &Store| s.set_session_distill(&p.session_id, &qt, "", 0).ok());
-                                    title_from_distill = false;
-                                    if let Some(seeded) = st!(|s: &Store| s.get_session(&p.session_id).ok().flatten()) {
-                                        enqueue_status(&provider, &signing_keys, &store, status_for(&p, &seeded, now), now).await;
-                                    }
-                                }
-                            } else {
-                                title_from_distill = true;
-                            }
-                        }
                         // Fresh turn → reset distill scheduling.
                         last_distill_attempt = 0;
                         distill_task = None;
@@ -374,10 +346,7 @@ pub async fn run_session_in_daemon(
                                     result
                                 });
                                 if let Some(ctx) = ctx {
-                                    // Only feed a prior title back when it came from
-                                    // distillation — a seed is the raw prompt and
-                                    // nudge-to-keep would just preserve it verbatim.
-                                    let current = (title_from_distill && !sess.title.trim().is_empty())
+                                    let current = (!sess.title.trim().is_empty())
                                         .then(|| sess.title.clone());
                                     slog(&p.session_id, &format!("[distill] spawning task ctx_len={} current_title={:?}", ctx.len(), current));
                                     last_distill_attempt = now;

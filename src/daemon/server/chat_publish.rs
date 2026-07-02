@@ -212,28 +212,6 @@ pub(in crate::daemon::server) async fn rpc_user_prompt(
         return Ok(serde_json::json!({ "skipped": "session not in a room" }));
     }
 
-    // Seed the local pre-publish title once, from the real user prompt, so the
-    // status pipeline has an immediate title before the runtime transcript read
-    // catches up. The title feeds the agent's kind:30315 status only — it never
-    // renames the CHANNEL (the channel `name` is set at create/edit alone).
-    let session_id = rec.session_id.clone();
-    let seeded = state.with_store(|s| {
-        let sess = s.get_session(&session_id).ok().flatten()?;
-        if !sess.title.trim().is_empty() {
-            return None;
-        }
-        let seed = crate::util::titleize_prompt(&p.prompt);
-        if seed.is_empty() {
-            return None;
-        }
-        s.set_session_distill(&session_id, &seed, &sess.activity, now_secs())
-            .ok()?;
-        Some(seed)
-    });
-    if seeded.is_some() {
-        state.outbox_notify.notify_waiters();
-    }
-
     // Publish into the session's CURRENT channel so the prompt lands where the
     // rest of the session's chat now goes.
     let scope = rec.channel_h.clone();

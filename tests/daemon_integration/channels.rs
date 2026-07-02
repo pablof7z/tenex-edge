@@ -322,6 +322,11 @@ fn user_prompt_publishes_kind9_chat_into_room() {
     });
 
     let store = Store::open(&home.store_path()).unwrap();
+    let session = store.get_session(&sid).unwrap().expect("session row");
+    assert_eq!(
+        session.title, "",
+        "user_prompt must not seed the kind:30315 title from the prompt"
+    );
     let msgs = chat_in_channel(&store, &rec.channel_h);
     assert!(
         msgs.iter().any(|m| m.content == "build me a thing"),
