@@ -220,7 +220,7 @@ fn chat_write_stdin_enqueues_live_project_chat_for_receiver() {
     for _ in 0..12 {
         let store = Store::open(&home.store_path()).unwrap();
         // peek_chat → the inbound routing ledger; pending rows for the receiver.
-        let rows = store.drain_pending_for_session(&receiver_canon).unwrap();
+        let rows = store.peek_pending_for_session(&receiver_canon).unwrap();
         if let Some(row) = rows.iter().find(|row| row.body == body) {
             assert_eq!(row.target_session, receiver_canon);
             assert_eq!(row.from_pubkey, sender_pubkey);
@@ -272,7 +272,7 @@ fn chat_write_stdin_enqueues_live_project_chat_for_receiver() {
     let store = Store::open(&home.store_path()).unwrap();
     assert!(
         store
-            .drain_pending_for_session(&sender_canon)
+            .peek_pending_for_session(&sender_canon)
             .unwrap()
             .is_empty(),
         "sender should not receive its own chat row"
@@ -403,7 +403,7 @@ fn non_mention_chat_does_not_route_to_inbox() {
     // Inbox for the receiver must be empty — no doorbell should ring.
     assert!(
         store
-            .drain_pending_for_session(&receiver_canon)
+            .peek_pending_for_session(&receiver_canon)
             .unwrap()
             .is_empty(),
         "non-mention message must not route to receiver inbox"
@@ -411,7 +411,7 @@ fn non_mention_chat_does_not_route_to_inbox() {
     // Sender never receives its own message either.
     assert!(
         store
-            .drain_pending_for_session(&sender_canon)
+            .peek_pending_for_session(&sender_canon)
             .unwrap()
             .is_empty(),
         "sender must not receive its own message"

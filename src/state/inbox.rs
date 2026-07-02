@@ -72,7 +72,7 @@ impl Store {
     /// (statusline, `who`, profile warm-up, the doorbell's "has pending?"
     /// filter). Delivery paths must use [`Store::claim_pending_for_session`]
     /// instead, so the rows are claimed atomically (resolves the id first).
-    pub fn drain_pending_for_session(&self, target_session: &str) -> Result<Vec<InboxRow>> {
+    pub fn peek_pending_for_session(&self, target_session: &str) -> Result<Vec<InboxRow>> {
         // Fall back to the raw id when no canonical mapping exists — symmetric
         // with `enqueue_inbox`, which parks under the same raw id in that case.
         let target = self

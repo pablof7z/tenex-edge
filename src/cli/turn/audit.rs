@@ -173,7 +173,7 @@ fn joined_json(rows: &[(String, u64)]) -> Vec<serde_json::Value> {
 }
 
 fn inbox_after_json(s: &Store, session_id: &str) -> serde_json::Value {
-    match s.drain_pending_for_session(session_id) {
+    match s.peek_pending_for_session(session_id) {
         Ok(rows) => serde_json::json!({
             "ok": true,
             "count": rows.len(),

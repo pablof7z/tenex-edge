@@ -80,7 +80,7 @@ pub(in crate::daemon::server) async fn rpc_turn_start(
     let to_warm: Vec<String> = state.with_store(|s| {
         let mut v: Vec<String> = Vec::new();
         for r in s
-            .drain_pending_for_session(&rec.session_id)
+            .peek_pending_for_session(&rec.session_id)
             .unwrap_or_default()
         {
             v.push(r.from_pubkey);

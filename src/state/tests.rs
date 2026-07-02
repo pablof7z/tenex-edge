@@ -213,21 +213,21 @@ fn inbox_idempotency_and_delivery() {
         .enqueue_inbox("ev1", &sid, "from", "h1", "hi", 100)
         .unwrap());
     assert!(s.is_event_handled("ev1", "x").unwrap());
-    assert_eq!(s.drain_pending_for_session("x").unwrap().len(), 1);
+    assert_eq!(s.peek_pending_for_session("x").unwrap().len(), 1);
     s.mark_delivered("ev1", "x", 200).unwrap();
-    assert!(s.drain_pending_for_session("x").unwrap().is_empty());
+    assert!(s.peek_pending_for_session("x").unwrap().is_empty());
 }
 
 #[test]
 fn outbox_publish_and_retry() {
     let s = Store::open_memory().unwrap();
     let id = s.enqueue_outbox("{\"k\":1}", 100).unwrap();
-    assert_eq!(s.drain_outbox(10).unwrap().len(), 1);
+    assert_eq!(s.peek_outbox(10).unwrap().len(), 1);
     s.mark_failed(id, "relay down").unwrap();
-    let pending = s.drain_outbox(10).unwrap();
+    let pending = s.peek_outbox(10).unwrap();
     assert_eq!(pending[0].retries, 1);
     s.mark_published(id).unwrap();
-    assert!(s.drain_outbox(10).unwrap().is_empty());
+    assert!(s.peek_outbox(10).unwrap().is_empty());
 }
 
 #[test]
