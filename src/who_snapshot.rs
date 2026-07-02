@@ -1,4 +1,4 @@
-use crate::state::Store;
+use crate::state::{Session, Status, Store, StoreReader};
 use anyhow::{Context, Result};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
@@ -36,7 +36,7 @@ pub(crate) struct WhoSnapshot {
 }
 
 /// A channel's human display name: its kind:39000 `name`, else the raw id.
-fn display_name(store: &Store, id: &str) -> String {
+fn display_name(store: StoreReader<'_>, id: &str) -> String {
     let channel = match store.get_channel(id) {
         Ok(c) => c,
         Err(e) => {
@@ -95,8 +95,7 @@ pub(crate) struct WhoRow {
     /// routing scope (session room or task channel); this is the project tab.
     #[serde(default)]
     pub(crate) work_root: String,
-    /// Hex pubkey others route to: the per-session pubkey when derived, else the
-    /// durable agent pubkey.
+    /// Hex pubkey others route to: per-session when derived, else durable agent.
     #[serde(default)]
     pub(crate) pubkey: String,
 }
@@ -113,6 +112,7 @@ pub(crate) fn load_who_snapshot(
     now: u64,
     daemon_host: &str,
 ) -> Result<WhoSnapshot> {
+    let store = store.reader();
     // "Remote" is computed daemon-side by comparing each peer's exact backend
     // label to the daemon's configured backend label. Local sessions are on this
     // daemon by construction → never remote.
@@ -254,7 +254,7 @@ pub(crate) fn load_who_snapshot(
 }
 
 /// Top-level work-root for `scope`.
-fn work_root_for(store: &Store, scope: &str) -> String {
+fn work_root_for(store: StoreReader<'_>, scope: &str) -> String {
     store
         .channel_project_root(scope)
         .unwrap_or_else(|e| {
@@ -268,14 +268,14 @@ fn work_root_for(store: &Store, scope: &str) -> String {
         .unwrap_or_else(|| scope.to_string())
 }
 
-fn scope_contains_channel(store: &Store, current: &str, scope: &str) -> bool {
+fn scope_contains_channel(store: StoreReader<'_>, current: &str, scope: &str) -> bool {
     if current == scope {
         return true;
     }
     matches!(store.is_root_channel(current), Ok(true)) && work_root_for(store, scope) == current
 }
 
-fn is_root_channel(store: &Store, scope: &str) -> bool {
+fn is_root_channel(store: StoreReader<'_>, scope: &str) -> bool {
     match store.is_root_channel(scope) {
         Ok(v) => v,
         Err(e) => {
@@ -292,7 +292,7 @@ fn is_root_channel(store: &Store, scope: &str) -> bool {
 /// Build a local-session row. Title/activity/busy come from the agent's own
 /// relay_status row when published, else the local pre-publish draft on the
 /// session.
-fn local_row(store: &Store, s: &crate::state::Session, local_host: &str, now: u64) -> WhoRow {
+fn local_row(store: StoreReader<'_>, s: &Session, local_host: &str, now: u64) -> WhoRow {
     let instance = local_instance(store, s);
     let live = store
         .get_status(&instance.pubkey, &s.session_id, &s.channel_h)
@@ -335,7 +335,7 @@ fn local_row(store: &Store, s: &crate::state::Session, local_host: &str, now: u6
     }
 }
 
-fn local_instance(store: &Store, s: &crate::state::Session) -> crate::identity::AgentInstance {
+fn local_instance(store: StoreReader<'_>, s: &Session) -> crate::identity::AgentInstance {
     store
         .instance_identity_for_session(&s.session_id)
         .ok()
@@ -347,7 +347,7 @@ fn local_instance(store: &Store, s: &crate::state::Session) -> crate::identity::
 
 /// Build a peer row from a relay-confirmed status. Host (and thus remoteness)
 /// comes from the peer's kind:0 profile; an unknown host is treated as local.
-fn peer_row(store: &Store, st: &crate::state::Status, local_host: &str, now: u64) -> WhoRow {
+fn peer_row(store: StoreReader<'_>, st: &Status, local_host: &str, now: u64) -> WhoRow {
     let host = store
         .get_profile(&st.pubkey)
         .ok()
@@ -381,7 +381,7 @@ fn peer_row(store: &Store, st: &crate::state::Status, local_host: &str, now: u64
     }
 }
 
-fn peer_slug(store: &Store, st: &crate::state::Status) -> String {
+fn peer_slug(store: StoreReader<'_>, st: &Status) -> String {
     if !st.slug.is_empty() {
         return st.slug.clone();
     }
