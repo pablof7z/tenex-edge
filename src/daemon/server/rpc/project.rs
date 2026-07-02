@@ -9,22 +9,12 @@ pub async fn rpc_project_list(state: &Arc<DaemonState>) -> Result<serde_json::Va
     // Best-effort: a relay timeout must not prevent returning cached results.
     state.provider.refresh_project_list().await.ok();
 
-    // Read the current read-model from the relay_channels cache: a "project" is a
-    // root channel (empty parent); its slug is the channel_h and its about is the
-    // kind:39000 description.
-    let local = state.with_store(|s| s.list_channels()).unwrap_or_default();
-
-    let mut projects: Vec<serde_json::Value> = local
+    let projects: Vec<serde_json::Value> = state
+        .with_store(|s| s.list_projects_read_model())
+        .unwrap_or_default()
         .into_iter()
-        .filter(|c| c.parent.is_empty())
         .map(|c| serde_json::json!({ "slug": c.channel_h, "about": c.about }))
         .collect();
-    projects.sort_by(|a, b| {
-        a["slug"]
-            .as_str()
-            .unwrap_or("")
-            .cmp(b["slug"].as_str().unwrap_or(""))
-    });
 
     Ok(serde_json::json!({ "projects": projects }))
 }
@@ -116,7 +106,7 @@ async fn wait_for_channel_about(
     for _ in 0..20 {
         state.provider.refresh_project_list().await.ok();
         let matches = state.with_store(|s| {
-            s.get_channel(project)
+            s.channel_meta_read_model(project)
                 .ok()
                 .flatten()
                 .map(|c| c.about)

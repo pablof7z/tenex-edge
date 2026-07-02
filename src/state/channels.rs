@@ -80,6 +80,20 @@ impl Store {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
+    /// Root project channels as read-model rows, ordered by stable project id.
+    pub fn list_projects_read_model(&self) -> Result<Vec<Channel>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {COLS} FROM relay_channels WHERE parent='' ORDER BY channel_h"
+        ))?;
+        let rows = stmt.query_map([], row_to_channel)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Read-model metadata for a channel/project.
+    pub fn channel_meta_read_model(&self, channel_h: &str) -> Result<Option<Channel>> {
+        self.get_channel(channel_h)
+    }
+
     /// The `parent` h-tag of a channel (`""` for a top-level project channel),
     /// or `None` if the channel is unknown.
     pub fn channel_parent(&self, channel_h: &str) -> Result<Option<String>> {
@@ -141,3 +155,6 @@ impl Store {
             .unwrap_or(false))
     }
 }
+
+#[cfg(test)]
+mod tests;
