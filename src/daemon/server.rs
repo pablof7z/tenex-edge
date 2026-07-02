@@ -222,6 +222,7 @@ mod channel_resolve;
 mod channels_rpc;
 mod chat_publish;
 mod chat_read_tail;
+mod chat_store;
 mod chat_target;
 mod chat_write;
 mod diagnostics;

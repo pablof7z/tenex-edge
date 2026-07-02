@@ -1,8 +1,7 @@
 use super::chat_target::resolve_chat_target;
 use super::*;
-use crate::state::RelayEvent;
+use crate::state::Message;
 use crate::util::{truncate_words, CHAT_RENDER_WORD_LIMIT};
-use anyhow::bail;
 
 mod read_scope;
 #[cfg(test)]
@@ -41,12 +40,9 @@ pub(in crate::daemon::server) async fn handle_chat_read<W: AsyncWriteExt + Unpin
     let p: ChatReadParams = serde_json::from_value(params.clone()).unwrap_or_default();
     if let Some(event_id) = p.id.as_deref().filter(|s| !s.trim().is_empty()) {
         let row = state
-            .with_store(|s| s.get_event_by_prefix(event_id))
+            .with_store(|s| s.get_message_by_prefix(event_id))
             .with_context(|| format!("reading chat message {event_id}"))?
             .with_context(|| format!("chat message not found: {event_id}"))?;
-        if row.kind != crate::fabric::nip29::wire::KIND_CHAT as u32 {
-            bail!("event is not a chat message: {event_id}");
-        }
         let json = chat_row_to_json(state, &row, false);
         if write_json(writer, &Response::item(id, json)).await.is_ok() {
             let _ = write_json(writer, &Response::end(id)).await;
@@ -75,17 +71,17 @@ pub(in crate::daemon::server) async fn handle_chat_read<W: AsyncWriteExt + Unpin
     let live_floor = live_started_at.max(since);
 
     let rows = state.with_store(|s| {
-        let mut rows: Vec<RelayEvent> = read_scopes
+        let mut rows: Vec<Message> = read_scopes
             .iter()
             .flat_map(|sc| {
-                s.chat_for_channel(sc, since, CHAT_READ_CAP)
+                s.chat_messages_for_channel(sc, since, CHAT_READ_CAP)
                     .unwrap_or_default()
             })
             .collect();
         rows.sort_by(|a, b| {
             a.created_at
                 .cmp(&b.created_at)
-                .then_with(|| a.id.cmp(&b.id))
+                .then_with(|| a.message_id.cmp(&b.message_id))
         });
         if p.tail {
             let limit = p.limit.unwrap_or(10) as usize;
@@ -105,7 +101,8 @@ pub(in crate::daemon::server) async fn handle_chat_read<W: AsyncWriteExt + Unpin
         }
         rows
     });
-    let mut seen: std::collections::HashSet<String> = rows.iter().map(|r| r.id.clone()).collect();
+    let mut seen: std::collections::HashSet<String> =
+        rows.iter().map(|r| r.message_id.clone()).collect();
     let mut cursors: std::collections::HashMap<String, ChatCursor> = read_scopes
         .iter()
         .map(|scope| (scope.clone(), ChatCursor::new(live_floor)))
@@ -141,7 +138,7 @@ pub(in crate::daemon::server) async fn handle_chat_read<W: AsyncWriteExt + Unpin
                     .or_insert_with(|| ChatCursor::new(live_floor))
                     .clone();
                 let rows = state.with_store(|s| {
-                    s.chat_for_channel_after(
+                    s.chat_messages_for_channel_after(
                         &ev_project,
                         cursor.created_at,
                         &cursor.id,
@@ -154,7 +151,7 @@ pub(in crate::daemon::server) async fn handle_chat_read<W: AsyncWriteExt + Unpin
                         .entry(row.channel_h.clone())
                         .or_insert_with(|| ChatCursor::new(live_floor))
                         .observe(&row);
-                    if !seen.insert(row.id.clone()) {
+                    if !seen.insert(row.message_id.clone()) {
                         continue;
                     }
                     let json = chat_row_to_json(state, &row, true);
@@ -181,43 +178,74 @@ fn chat_read_scopes(state: &Arc<DaemonState>, scope: &str) -> Vec<String> {
     state.with_store(|s| chat_read_scopes_for_store(s, scope))
 }
 
-/// Render a verbatim chat `RelayEvent` into the CLI's chat-line JSON, resolving
-/// the author's slug from the materialized profile cache.
-fn chat_row_to_json(
-    state: &Arc<DaemonState>,
-    row: &RelayEvent,
-    truncate: bool,
-) -> serde_json::Value {
-    let from_slug = state
-        .with_store(|s| s.resolve_slug_for_pubkey(&row.pubkey))
-        .ok()
-        .flatten()
-        .unwrap_or_else(|| pubkey_short(&row.pubkey));
-    chat_log_row_to_json(row, &from_slug, truncate)
+/// Render a canonical chat message into the CLI's chat-line JSON, resolving the
+/// author's slug from the materialized profile/session caches.
+fn chat_row_to_json(state: &Arc<DaemonState>, row: &Message, truncate: bool) -> serde_json::Value {
+    let (from_slug, host, mentioned_session) = chat_row_refs(state, row);
+    chat_log_row_to_json(
+        row,
+        &from_slug,
+        &host,
+        mentioned_session.as_deref(),
+        truncate,
+    )
 }
 
 pub(in crate::daemon::server) fn chat_log_row_to_json(
-    row: &RelayEvent,
+    row: &Message,
     from_slug: &str,
+    host: &str,
+    mentioned_session: Option<&str>,
     truncate: bool,
 ) -> serde_json::Value {
     let (body, truncated) = if truncate {
-        truncate_words(&row.content, CHAT_RENDER_WORD_LIMIT)
+        truncate_words(&row.body, CHAT_RENDER_WORD_LIMIT)
     } else {
-        (row.content.trim().to_string(), false)
+        (row.body.trim().to_string(), false)
     };
     serde_json::json!({
-        "event_id": &row.id,
-        "full_event_id": &row.id,
-        "from_pubkey": &row.pubkey,
+        "event_id": &row.message_id,
+        "full_event_id": &row.message_id,
+        "from_pubkey": &row.author_pubkey,
         "from_slug": from_slug,
-        "host": "",
+        "host": host,
         "project": &row.channel_h,
         "body": body,
         "truncated": truncated,
         "created_at": row.created_at,
-        "from_session": "",
-        "mentioned_session": "",
+        "from_session": row.author_session.as_deref().unwrap_or(""),
+        "mentioned_session": mentioned_session.unwrap_or(""),
+    })
+}
+
+fn chat_row_refs(state: &Arc<DaemonState>, row: &Message) -> (String, String, Option<String>) {
+    let local_host = state.host.clone();
+    state.with_store(|s| {
+        let profile = s.get_profile(&row.author_pubkey).ok().flatten();
+        let session = row
+            .author_session
+            .as_deref()
+            .and_then(|sid| s.get_session(sid).ok().flatten());
+        let from_slug = profile
+            .as_ref()
+            .map(|p| p.slug.as_str())
+            .filter(|slug| !slug.is_empty())
+            .or_else(|| session.as_ref().map(|rec| rec.agent_slug.as_str()))
+            .filter(|slug| !slug.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| pubkey_short(&row.author_pubkey));
+        let host = profile
+            .as_ref()
+            .map(|p| p.host.clone())
+            .filter(|h| !h.is_empty())
+            .or_else(|| session.as_ref().map(|_| local_host))
+            .unwrap_or_default();
+        let mentioned_session = s
+            .message_recipients(&row.message_id)
+            .unwrap_or_default()
+            .into_iter()
+            .find_map(|r| r.target_session);
+        (from_slug, host, mentioned_session)
     })
 }
 
@@ -333,7 +361,7 @@ pub(in crate::daemon::server) fn tail_event_matches_project(
 
 /// Build the backfill event list from the materialized caches.
 ///
-/// Returns recent chat lines from `relay_events` as `Msg` events + a roster
+/// Returns recent chat lines from `messages` as `Msg` events + a roster
 /// snapshot built from live `relay_status` rows (peers AND local agents read
 /// identically) and this daemon's own live sessions, sorted ascending by time.
 pub(in crate::daemon::server) fn build_backfill(
@@ -346,31 +374,31 @@ pub(in crate::daemon::server) fn build_backfill(
     let now = now_secs();
     let cap = limit.min(u32::MAX as u64) as u32;
 
-    // ── Recent chat lines from relay_events ──────────────────────────────────
-    let chat_rows: Vec<RelayEvent> = state.with_store(|s| match project {
-        Some(pr) => s.chat_for_channel(pr, since, cap).unwrap_or_default(),
-        None => {
-            let mut rows = s
-                .events_by_kind(crate::fabric::nip29::wire::KIND_CHAT as u32, cap)
-                .unwrap_or_default();
-            rows.retain(|r| r.created_at >= since);
-            rows
-        }
+    // ── Recent chat lines from messages ──────────────────────────────────────
+    let chat_rows: Vec<Message> = state.with_store(|s| match project {
+        Some(pr) => s
+            .chat_messages_for_channel(pr, since, cap)
+            .unwrap_or_default(),
+        None => s.recent_chat_messages(since, cap).unwrap_or_default(),
     });
     for row in chat_rows {
-        let from_slug = state
-            .with_store(|s| s.resolve_slug_for_pubkey(&row.pubkey))
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| pubkey_short(&row.pubkey));
+        let (from_slug, _, to_session) = chat_row_refs(state, &row);
+        let to = state.with_store(|s| {
+            s.message_recipients(&row.message_id)
+                .unwrap_or_default()
+                .into_iter()
+                .next()
+                .map(|r| pubkey_short(&r.recipient_pubkey))
+                .unwrap_or_else(|| "project-chat".to_string())
+        });
         events.push(TailEvent::Msg {
             ts: row.created_at,
             project: row.channel_h.clone(),
             from: from_slug,
-            from_session: None,
-            to: String::new(),
-            to_session: None,
-            body: row.content.chars().take(200).collect(),
+            from_session: row.author_session.clone(),
+            to,
+            to_session,
+            body: row.body.chars().take(200).collect(),
         });
     }
 

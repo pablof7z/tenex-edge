@@ -14,6 +14,8 @@ use crate::domain::{ChatMessage, Profile};
 use crate::state::{RelayEvent, Store};
 use nostr_sdk::Event;
 
+mod messages;
+
 pub struct Nip29Materializer;
 
 impl Nip29Materializer {
@@ -214,6 +216,20 @@ impl Nip29Materializer {
                     error = %e,
                     "route_chat: enqueue_inbox failed for matched session — mention not delivered (agent not woken)"
                 ),
+            }
+            if let Err(e) = store.add_message_recipient(
+                &event_id,
+                &sess.agent_pubkey,
+                Some(&sess.session_id),
+                None,
+            ) {
+                tracing::error!(
+                    session = %sess.session_id,
+                    channel = channel_h,
+                    event_id = %event_id,
+                    error = %e,
+                    "route_chat: recipient session edge upsert failed"
+                );
             }
         }
         woke

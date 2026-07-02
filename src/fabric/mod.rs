@@ -142,8 +142,9 @@ pub fn materialize(
 
         DomainEvent::ChatMessage(ref chat) => {
             // Cache the chat line in the verbatim log, then route it into the
-            // inbox ledger for the local sessions occupying its channel.
+            // canonical message read model and the local delivery ledger.
             Nip29Materializer::materialize_event(store, event);
+            Nip29Materializer::materialize_chat_message(store, event, chat);
 
             let sender_pk = event.pubkey.to_hex();
             let resolved_slug = store

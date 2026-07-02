@@ -1,9 +1,9 @@
 # `tenex-edge tail` v2 — design spec
 
-> Design produced by an opus design agent. NOTE: it read the `master` repo and
-> concluded the `threads`/`messages`/`message_recipients` tables "don't exist
-> yet" — on THIS branch they DO (Phase 1 read model). So the implementer should
-> use the canonical tables where the spec says "follow-up / schema gap".
+> Design produced by an opus design agent before the canonical message read model
+> landed. Current code has `messages` and `message_recipients`; it does not have a
+> standalone `threads` table. Use `messages.thread_id` where this spec mentions
+> thread rows.
 
 ## 1. Purpose
 `tail` is the operator's **live activity feed for the whole fabric** — a
@@ -119,10 +119,10 @@ nothing. leave = prune/expiry sweep (prune_peer_sessions / Presence.expires_at)
 emits Leave{online_s}. Local leave = rpc_session_end. Keep a small in-memory
 HashMap<session_id,(first_seen,project,slug,host)> on DaemonState.
 
-### D. Backfill (THIS BRANCH HAS THE READ MODEL — use it)
+### D. Backfill
 `{backfill:N, since:ts}` param on handle_tail. Backfill from the canonical
-`messages`/`threads`/`message_recipients` tables (recent messages as Msg w/
-thread) + a roster snapshot from list_alive_sessions/list_peer_sessions/
+`messages`/`message_recipients` tables (recent messages as Msg w/
+`messages.thread_id`) + a roster snapshot from list_alive_sessions/list_peer_sessions/
 get_turn_state/agent_status as synthetic Join/turn/stat, sorted by ts, before
 the live loop. (The original spec's inbox-only fallback is unnecessary here.)
 

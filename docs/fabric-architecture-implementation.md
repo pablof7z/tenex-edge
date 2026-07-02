@@ -68,16 +68,16 @@ Add durable ids and origins:
 Add canonical communication rows:
 
 - `messages(message_id TEXT PRIMARY KEY, thread_id TEXT NOT NULL,
-  author_pubkey TEXT NOT NULL, author_session TEXT, body TEXT NOT NULL,
-  created_at INTEGER NOT NULL, direction TEXT NOT NULL, sync_state TEXT NOT NULL,
-  native_event_id TEXT, error TEXT)`
+  channel_h TEXT NOT NULL, author_pubkey TEXT NOT NULL, author_session TEXT,
+  body TEXT NOT NULL, created_at INTEGER NOT NULL, direction TEXT NOT NULL,
+  sync_state TEXT NOT NULL, native_event_id TEXT, error TEXT)`
   - `author_session` is the **return envelope**: the sender's session id, so a
     reply can target the exact sibling session that wrote the message (sessions of
     one agent share `author_pubkey`, so the pubkey alone can't address a reply).
-    Carried today on `inbox.from_session`; derived from session pubkeys or local
+    Stored on `messages.author_session`; derived from kind:30315 status or local
     runtime state, `NULL` when a fabric can't supply it (reply then degrades to
     agent-level). The reply *handle* stays a read-side derivation, not a stored
-    column.
+    column. `inbox` is delivery state only.
 - `message_recipients(message_id TEXT NOT NULL, recipient_pubkey TEXT NOT NULL,
   target_session TEXT, delivered_at INTEGER, PRIMARY KEY(message_id,
   recipient_pubkey, target_session))`
@@ -110,10 +110,11 @@ Backfill rules:
   project with origin `(fabric='nip29', provider_instance=<relay set hash>,
   native_project_key=<slug>)`.
 - Mirror `relay_channel_members` into `membership` with source by role.
-- Do not migrate historical `inbox` rows into `messages` yet unless tests need
-  it; first dual-write new inbound/outbound mentions. When dual-writing, copy
-  `inbox.from_session → messages.author_session` so the return envelope is never
-  dropped in the cutover.
+- Historical kind:9 `relay_events` are idempotently backfilled into `messages`
+  when the store opens. New inbound/outbound chat dual-writes immediately. When
+  dual-writing, preserve any known local/status-derived sender session in
+  `messages.author_session` so the return envelope is never dropped in the
+  cutover.
 
 Done when: the new tables can be created on an existing `state.db`, backfilled
 idempotently, and queried without changing CLI output.
