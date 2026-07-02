@@ -1,3 +1,7 @@
+FROM golang:1-bookworm AS nak-builder
+
+RUN go install github.com/fiatjaf/nak@latest
+
 FROM rust:1-bookworm
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -9,12 +13,16 @@ RUN apt-get update \
         curl \
         git \
         iproute2 \
+        jq \
         lsof \
         nodejs \
         npm \
         pkg-config \
         sqlite3 \
+        tmux \
     && rm -rf /var/lib/apt/lists/*
+
+COPY --from=nak-builder /go/bin/nak /usr/local/bin/nak
 
 RUN mkdir -p /opt/opencode \
     && npm install --prefix /opt/opencode --no-bin-links opencode-ai \
@@ -25,6 +33,11 @@ RUN mkdir -p /opt/codex \
     && npm install --prefix /opt/codex --no-bin-links @openai/codex \
     && printf '#!/usr/bin/env bash\nexec /opt/codex/node_modules/@openai/codex/bin/codex.js "$@"\n' > /usr/local/bin/codex \
     && chmod +x /usr/local/bin/codex
+
+RUN mkdir -p /opt/claude \
+    && npm install --prefix /opt/claude --no-bin-links @anthropic-ai/claude-code \
+    && printf '#!/usr/bin/env bash\nexec /opt/claude/node_modules/@anthropic-ai/claude-code/bin/claude.exe "$@"\n' > /usr/local/bin/claude \
+    && chmod +x /usr/local/bin/claude
 
 WORKDIR /workspace
 

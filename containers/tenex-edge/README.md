@@ -11,6 +11,7 @@ bash containers/tenex-edge/run build-image
 bash containers/tenex-edge/run doctor
 bash containers/tenex-edge/run test-unit
 
+bash containers/tenex-edge/run claude
 bash containers/tenex-edge/run codex-login --device-auth
 bash containers/tenex-edge/run codex
 bash containers/tenex-edge/run codex-ollama
@@ -24,10 +25,19 @@ bash containers/tenex-edge/run opencode-ollama ollama/qwen2.5-coder:7b
 does not share Codex subscription state. OpenCode has the same split between
 `opencode` and `opencode-ollama`.
 
-`codex`, `codex-ollama`, `opencode`, and `opencode-ollama` build the current
+Live agent testing uses the host's real model credentials/config by default.
+This is intentional: Claude, Codex, OpenCode, and tenex-edge distillation should
+use the same subscriptions and provider settings as the host while keeping
+fabric runtime state isolated per container profile. The runner mounts host auth
+directories read-only, symlinks credential files into the isolated container
+home, and keeps writable hook config in container state. Set
+`TENEX_EDGE_CONTAINER_HOST_AUTH=0` only for non-agent smoke tests.
+
+`claude`, `codex`, `codex-ollama`, `opencode`, and `opencode-ollama` build the current
 checkout and run `tenex-edge install --harness <name>` inside the isolated home
-before launching the harness. That means Codex hooks and the OpenCode plugin are
-installed through the same code path users run on a real machine.
+before launching the harness. That means Claude hooks, Codex hooks, and the
+OpenCode plugin are installed through the same code path users run on a real
+machine.
 
 The runner defaults `OLLAMA_HOST` to `http://192.168.64.1:11434`, the Apple
 container VM's gateway to the host on this machine. Override it with
@@ -42,8 +52,9 @@ from inside the container.
 | Purpose | Path |
 | --- | --- |
 | Home | `/state/home` |
-| Codex config/auth | `/state/home/.codex` |
-| OpenCode config | `/state/home/.config/opencode` |
+| Claude auth/config | host credentials symlinked, hook config copied into `/state/home/.claude` |
+| Codex config/auth | host credentials symlinked into `/state/home/.codex` |
+| OpenCode config | host credentials symlinked into `/state/home/.config/opencode` |
 | OpenCode data/cache | `/state/home/.local/share`, `/state/home/.cache` |
 | Cargo registry/cache | `/state/cargo` |
 | Cargo target | `/state/target` |

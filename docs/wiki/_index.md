@@ -132,3 +132,4 @@ Last updated: 2026-07-02
 | [whitelisted-pubkeys](nouns/whitelisted-pubkeys.md) | whitelisted_pubkeys | extracted | A human operator's Nostr public keys, read from ~/.tenex-edge/config.json (JSON key `whitelistedPubkeys`). The source of truth for who is an admin in every project group via NIP-29 membership; distinct from the backend key, not derived from `user_nsec` or `tenex_private_key`. |
 | [whitelistedpubkey](nouns/whitelistedpubkey.md) | whitelistedPubkey | extracted | a human user (as distinguished from an agent) |
 | [work-root](nouns/work-root.md) | work_root | extracted | The project channel a routing scope belongs under: a top-level channel is its own work root; a sub-channel (task/session room) maps to its parent. Concretely, a channel's non-empty parent, else the scope itself. |
+

@@ -54,7 +54,8 @@ E2E_PROJECT="${E2E_ORD_PROJECT:-ord-demo}"
 AGENT_SLUG="${E2E_ORD_AGENT:-smith}"
 
 require_nak
-command -v jq >/dev/null 2>&1 || die "jq not found on PATH — required to parse relay/whoami JSON"
+command -v jq >/dev/null 2>&1 || die "jq not found on PATH — required to parse relay JSON"
+command -v sqlite3 >/dev/null 2>&1 || die "sqlite3 not found on PATH — required to inspect backend state"
 
 # ── check accounting ─────────────────────────────────────────────────────────
 PASS_N=0
@@ -221,39 +222,44 @@ wait "${P1}" || warn "session ${SID1} start returned nonzero"
 snapshot_daemon_pid
 sleep 2
 
-# Resolve each session's routable identity LOCALLY via whoami --json. This does
-# not depend on relay membership/acceptance, so it isolates the identity-
-# allocation behavior from relay policy. env_session resolves the harness id
-# through the daemon's session-alias table to the canonical session.
-whoami_json() {
+# Resolve each session's routable identity LOCALLY via the backend state DB. This
+# does not depend on relay membership/acceptance, so it isolates identity
+# allocation behavior from relay policy.
+session_identity_row() {
   local sid="$1"
-  (
-    cd "${A_PROJ}"
-    TENEX_EDGE_SESSION="${sid}" TENEX_EDGE_AGENT="${AGENT_SLUG}" \
-      TENEX_EDGE_CHANNEL="${E2E_PROJECT}" edge edge-a whoami --json 2>/dev/null
-  ) || true
+  local db
+  db="$(backend_edge_home edge-a)/state.db"
+  sqlite3 -separator $'\t' "${db}" "
+    SELECT
+      COALESCE(i.pubkey, s.agent_pubkey),
+      COALESCE(
+        CASE WHEN i.ordinal > 0 THEN i.agent_slug || i.ordinal ELSE i.agent_slug END,
+        s.agent_slug
+      )
+    FROM sessions s
+    LEFT JOIN identities i ON i.session_id = s.session_id AND i.alive = 1
+    WHERE s.session_id = COALESCE(
+      (SELECT session_id FROM sessions WHERE session_id = '${sid}' LIMIT 1),
+      (SELECT session_id FROM session_aliases WHERE external_id = '${sid}' ORDER BY created_at DESC LIMIT 1)
+    )
+    ORDER BY i.ordinal DESC
+    LIMIT 1;
+  " 2>/dev/null || true
 }
-W0="$(whoami_json "${SID0}")"
-W1="$(whoami_json "${SID1}")"
-PK0="$(echo "${W0}" | jq -r '.pubkey // empty' 2>/dev/null || true)"
-PK1="$(echo "${W1}" | jq -r '.pubkey // empty' 2>/dev/null || true)"
-CN0="$(echo "${W0}" | jq -r '.codename // empty' 2>/dev/null || true)"
-CN1="$(echo "${W1}" | jq -r '.codename // empty' 2>/dev/null || true)"
-AG0="$(echo "${W0}" | jq -r '.label // .agent // empty' 2>/dev/null || true)"
-AG1="$(echo "${W1}" | jq -r '.label // .agent // empty' 2>/dev/null || true)"
-dim "  session0 ${SID0}: agent=${AG0} codename=${CN0} pubkey=${PK0:0:12}"
-dim "  session1 ${SID1}: agent=${AG1} codename=${CN1} pubkey=${PK1:0:12}"
+IFS=$'\t' read -r PK0 AG0 <<<"$(session_identity_row "${SID0}")"
+IFS=$'\t' read -r PK1 AG1 <<<"$(session_identity_row "${SID1}")"
+dim "  session0 ${SID0}: agent=${AG0} pubkey=${PK0:0:12}"
+dim "  session1 ${SID1}: agent=${AG1} pubkey=${PK1:0:12}"
 
 if [[ -z "${PK0}" || -z "${PK1}" ]]; then
-  check_skip "1 ordinal allocation — could not resolve both sessions via whoami (daemon may have idle-reaped a session with no watched pid)"
+  check_skip "1 ordinal allocation — could not resolve both sessions from state.db (daemon may have idle-reaped a session with no watched pid)"
 elif [[ "${PK0}" != "${PK1}" ]]; then
   check_pass "1 ordinal allocation — two concurrent sessions got DISTINCT routable pubkeys (${PK0:0:8} != ${PK1:0:8})"
 else
   check_skip "1 ordinal allocation — both sessions share one pubkey (${PK0:0:8}); distinct-identity allocation not active for this concurrency"
 fi
 
-# 1b. ordinal LABELS smith / smith1 — best-effort. The live path does not yet
-# surface ordinal labels (whoami.agent is the bare slug for both). Auto-upgrades
+# 1b. ordinal LABELS smith / smith1 — best-effort. Auto-upgrades
 # to PASS once derive_agent_ordinal_keys is wired and a label is exposed.
 if [[ "${AG0}" == "${AGENT_SLUG}" && "${AG1}" == "${AGENT_SLUG}1" ]] \
    || [[ "${AG1}" == "${AGENT_SLUG}" && "${AG0}" == "${AGENT_SLUG}1" ]]; then
@@ -297,10 +303,10 @@ check_skip "2 room-independent reuse — not assertable from the CLI yet (no rou
 
 # ── 6. CHECK 3: chat routing by (pubkey, h) ──────────────────────────────────
 log "check 3: chat routing — session0 mentions session1 in room '${E2E_PROJECT}'"
-if [[ -z "${CN1}" || -z "${PK1}" || -z "${PK0}" || "${PK0}" == "${PK1}" ]]; then
-  check_skip "3 chat routing — need two distinct resolvable sessions with a recipient codename (codename1='${CN1}'); prerequisite check 1 did not produce them"
+if [[ -z "${AG1}" || -z "${PK1}" || -z "${PK0}" || "${PK0}" == "${PK1}" ]]; then
+  check_skip "3 chat routing — need two distinct resolvable sessions with a recipient label (agent1='${AG1}'); prerequisite check 1 did not produce them"
 else
-  CHAT_BODY="ordinal-routing-probe-$$ ping @${CN1} please ack"
+  CHAT_BODY="ordinal-routing-probe-$$ ping @${AG1} please ack"
   CHAT_OUT="$(
     cd "${A_PROJ}"
     TENEX_EDGE_SESSION="${SID0}" TENEX_EDGE_AGENT="${AGENT_SLUG}" \
@@ -310,7 +316,7 @@ else
   dim "  chat write: ${CHAT_OUT}"
 
   MENTION_OK=0
-  if echo "${CHAT_OUT}" | grep -qi "mentioning session"; then
+  if echo "${CHAT_OUT}" | grep -qi "mentioning @${AG1}"; then
     MENTION_OK=1
   fi
 

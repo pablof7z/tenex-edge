@@ -16,6 +16,7 @@ Commands:
   build-image              Build the Apple container image.
   doctor                   Verify mounts, tools, hooks/plugins, and isolated state.
   test-unit                Build tenex-edge and run hermetic library tests.
+  claude [args]            Run isolated Claude Code using host auth/config.
   codex [args]             Run isolated Codex using the codex profile.
   codex-login [args]       Run isolated `codex login` for subscription auth.
   codex-ollama [args]      Run isolated Codex with --oss --local-provider ollama.
@@ -28,6 +29,7 @@ Commands:
   clean-state              Remove .container-state/<profile>.
 
 Env:
+  TENEX_EDGE_CONTAINER_HOST_AUTH   Default: 1. Use real host auth/config via read-only mounts.
   TENEX_EDGE_OLLAMA_HOST   Default: http://192.168.64.1:11434
   TENEX_EDGE_OPENCODE_OLLAMA_MODEL   Default: ollama/qwen2.5-coder:7b
 EOF
@@ -40,6 +42,7 @@ fi
 
 agent_for_profile() {
   case "${1}" in
+    claude*) echo "claude" ;;
     codex*) echo "codex" ;;
     *) echo "opencode" ;;
   esac
@@ -48,6 +51,11 @@ agent_for_profile() {
 AGENT="${AGENT:-$(agent_for_profile "${PROFILE}")}"
 STATE_DIR="${TENEX_EDGE_CONTAINER_STATE:-${REPO_ROOT}/.container-state/${PROFILE}}"
 OLLAMA_HOST="${TENEX_EDGE_OLLAMA_HOST:-http://192.168.64.1:11434}"
+HOST_AUTH="${TENEX_EDGE_CONTAINER_HOST_AUTH:-1}"
+HOST_HOME="${TENEX_EDGE_CONTAINER_HOST_HOME:-${HOME}}"
+
+# shellcheck source=containers/tenex-edge/host-auth.bash
+source "${SCRIPT_DIR}/host-auth.bash"
 
 require_container() {
   command -v container >/dev/null 2>&1 || {
@@ -79,7 +87,10 @@ ensure_image() {
 prepare_state() {
   mkdir -p \
     "${STATE_DIR}/home/.codex" \
+    "${STATE_DIR}/home/.claude" \
+    "${STATE_DIR}/home/.config/opencode" \
     "${STATE_DIR}/home/.local/share" \
+    "${STATE_DIR}/home/.local/share/opencode" \
     "${STATE_DIR}/home/.cache" \
     "${STATE_DIR}/cargo" \
     "${STATE_DIR}/target" \
@@ -103,6 +114,8 @@ container_run() {
 
   ensure_image
   prepare_state
+  stage_host_auth
+  build_host_auth_mounts
 
   local source_mount="type=bind,source=${REPO_ROOT},target=/workspace"
   if [[ "${access}" == "readonly" ]]; then
@@ -119,6 +132,7 @@ container_run() {
     --memory "${TENEX_EDGE_CONTAINER_MEMORY:-4G}" \
     --mount "${source_mount}" \
     --mount "type=bind,source=${STATE_DIR},target=/state" \
+    "${HOST_AUTH_MOUNTS[@]}" \
     --workdir /workspace \
     --env HOME=/state/home \
     --env XDG_CONFIG_HOME=/state/home/.config \
@@ -143,7 +157,7 @@ with_tenex() {
   container_run readonly bash -c '
     set -euo pipefail
     cargo build >/dev/null
-    if [[ "$1" == "codex" || "$1" == "opencode" ]]; then
+    if [[ "$1" == "claude-code" || "$1" == "codex" || "$1" == "opencode" ]]; then
       tenex-edge install --harness "$1" >/dev/null
     fi
     shift
@@ -167,9 +181,13 @@ main() {
         echo "agent: $TENEX_EDGE_AGENT"
         echo "rust: $(rustc --version)"
         echo "cargo: $(cargo --version)"
+        echo "claude: $(claude --version)"
         echo "codex: $(codex --version)"
         echo "opencode: $(opencode --version)"
+        echo "nak: $(nak --version 2>/dev/null | head -1)"
+        echo "tmux: $(tmux -V)"
         echo "ollama_host: $OLLAMA_HOST"
+        echo "host_auth: '"${HOST_AUTH}"'"
         test -f /workspace/Cargo.toml
         echo "source: /workspace mounted"
         if touch /workspace/.container-readonly-check 2>/dev/null; then
@@ -180,9 +198,18 @@ main() {
         touch /state/write-check
         rm /state/write-check
         echo "state: /state writable"
+        test -f /state/tenex/edge/providers.json
+        test -f /state/tenex/edge/llms.json
+        test -f "$HOME/.claude/.credentials.json"
+        test -f "$CODEX_HOME/auth.json"
+        test -f "$XDG_DATA_HOME/opencode/auth.json"
+        echo "host auth: mounted"
         cargo build >/dev/null
+        tenex-edge install --harness claude-code >/dev/null
         tenex-edge install --harness codex >/dev/null
         tenex-edge install --harness opencode >/dev/null
+        test -f "$HOME/.claude/settings.json"
+        echo "claude hooks: host-auth install present"
         test -f "$CODEX_HOME/hooks.json"
         echo "codex hooks: isolated install present"
         test -f "$XDG_CONFIG_HOME/opencode/plugin/tenex-edge.ts"
@@ -193,6 +220,10 @@ main() {
       ;;
     test-unit)
       container_run readonly bash -c 'cargo build && cargo test --lib'
+      ;;
+    claude)
+      PROFILE=claude AGENT=claude STATE_DIR="${REPO_ROOT}/.container-state/claude" \
+        with_tenex claude-code claude "$@"
       ;;
     codex)
       PROFILE=codex AGENT=codex STATE_DIR="${REPO_ROOT}/.container-state/codex" \
