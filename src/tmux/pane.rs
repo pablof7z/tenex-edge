@@ -10,6 +10,15 @@ pub(super) fn tmux_available() -> bool {
         .unwrap_or(false)
 }
 
+pub(super) async fn tmux_available_async() -> bool {
+    tokio::process::Command::new("tmux")
+        .arg("-V")
+        .output()
+        .await
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
 /// Verify that `pane_id` (e.g. "%5") is still alive.
 /// Returns the current command running in the pane on success (e.g. "claude").
 pub fn pane_alive_pub(pane_id: &str) -> Option<String> {
@@ -27,6 +36,25 @@ pub(super) fn pane_alive(pane_id: &str) -> Option<String> {
         ])
         .output()
         .ok()?;
+    pane_command_from_output(out)
+}
+
+pub(crate) async fn pane_alive_async(pane_id: &str) -> Option<String> {
+    let out = tokio::process::Command::new("tmux")
+        .args([
+            "display",
+            "-p",
+            "-t",
+            pane_id,
+            "#{pane_id} #{pane_current_command}",
+        ])
+        .output()
+        .await
+        .ok()?;
+    pane_command_from_output(out)
+}
+
+fn pane_command_from_output(out: std::process::Output) -> Option<String> {
     if !out.status.success() {
         return None;
     }
@@ -147,6 +175,7 @@ pub struct EndpointStatus {
 pub fn list_endpoint_statuses(state: &Arc<DaemonState>) -> Vec<EndpointStatus> {
     // tmux endpoints are now `tmux_pane` alias rows (the alias IS the endpoint).
     let aliases = state.with_store(|s| s.list_aliases_of_kind("tmux_pane").unwrap_or_default());
+    let now = crate::util::now_secs();
 
     aliases
         .into_iter()
@@ -158,8 +187,29 @@ pub fn list_endpoint_statuses(state: &Arc<DaemonState>) -> Vec<EndpointStatus> {
                 pane_command: cmd_opt.clone().unwrap_or_default(),
                 alive: cmd_opt.is_some(),
                 registered_at: a.created_at,
-                last_verified: a.created_at,
+                last_verified: now,
             }
         })
         .collect()
+}
+
+pub(crate) async fn list_endpoint_statuses_async(state: &Arc<DaemonState>) -> Vec<EndpointStatus> {
+    // tmux endpoints are now `tmux_pane` alias rows (the alias IS the endpoint).
+    let aliases = state.with_store(|s| s.list_aliases_of_kind("tmux_pane").unwrap_or_default());
+    let now = crate::util::now_secs();
+    let mut statuses = Vec::with_capacity(aliases.len());
+
+    for a in aliases {
+        let cmd_opt = pane_alive_async(&a.external_id).await;
+        statuses.push(EndpointStatus {
+            session_id: a.session_id,
+            pane_id: a.external_id,
+            pane_command: cmd_opt.clone().unwrap_or_default(),
+            alive: cmd_opt.is_some(),
+            registered_at: a.created_at,
+            last_verified: now,
+        });
+    }
+
+    statuses
 }

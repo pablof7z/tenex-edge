@@ -306,13 +306,13 @@ async fn dispatch(state: &Arc<DaemonState>, req: &Request) -> Response {
         "channels_switch" => rpc_channels_switch(state, &req.params).await,
         "publish_profile" => rpc_publish_profile(state, &req.params).await,
         "statusline" => rpc_statusline(state, &req.params),
-        "tmux_status" => tmux_rpc::rpc_tmux_status(state),
+        "tmux_status" => tmux_rpc::rpc_tmux_status(state).await,
         "tmux_send" => tmux_rpc::rpc_tmux_send(state, &req.params).await,
         "tmux_spawn" => tmux_rpc::rpc_tmux_spawn(state, &req.params).await,
         "invite" => invite_rpc::rpc_invite(state, &req.params).await,
         "tmux_attach" => tmux_rpc::rpc_tmux_attach(state, &req.params),
         "tmux_resume" => tmux_rpc::rpc_tmux_resume(state, &req.params).await,
-        "tmux_resumable" => tmux_rpc::rpc_tmux_resumable(state),
+        "tmux_resumable" => tmux_rpc::rpc_tmux_resumable(state).await,
         other => Err(anyhow::anyhow!("unknown method {other}")),
     };
     match result {

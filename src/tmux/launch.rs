@@ -1,5 +1,5 @@
 use crate::daemon::server::DaemonState;
-use crate::tmux::pane::tmux_available;
+use crate::tmux::pane::tmux_available_async;
 use crate::tmux::registry::{
     apply_agent_def_args, build_resume_command, find_spawn_def, resolve_spawn_entry,
     resume_shape_for_bin,
@@ -35,11 +35,12 @@ fn project_abs_path(
     })
 }
 
-fn unique_session_name(slug: &str) -> String {
+async fn unique_session_name(slug: &str) -> String {
     let base = format!("te-{slug}");
-    let existing: std::collections::HashSet<String> = match std::process::Command::new("tmux")
+    let existing: std::collections::HashSet<String> = match tokio::process::Command::new("tmux")
         .args(["list-sessions", "-F", "#{session_name}"])
         .output()
+        .await
     {
         // tmux exits non-zero with "no server running" when there are genuinely
         // no sessions — that is a legitimate empty list, not a failure.
@@ -74,7 +75,7 @@ async fn open_agent_session(
     group: Option<&str>,
     ordinal: Option<u32>,
 ) -> Result<String> {
-    let session_name = unique_session_name(slug);
+    let session_name = unique_session_name(slug).await;
     let agent_env = format!("TENEX_EDGE_AGENT={slug}");
     let mut passthrough_env: Vec<String> = Vec::new();
     for key in ["TENEX_EDGE_HOME", "TENEX_CONFIG", "TENEX_EDGE_BIN"] {
@@ -153,12 +154,13 @@ async fn open_agent_session(
         slug,
         abs_path,
         status_cmd_override.as_deref(),
-    )?;
+    )
+    .await?;
 
     Ok(pane_id)
 }
 
-fn make_session_transparent(
+async fn make_session_transparent(
     session: &str,
     tenex_bin: Option<&str>,
     slug: &str,
@@ -188,9 +190,10 @@ fn make_session_transparent(
     ];
 
     for (opt, val) in &options {
-        let status = std::process::Command::new("tmux")
+        let status = tokio::process::Command::new("tmux")
             .args(["set-option", "-t", session, opt, val])
             .status()
+            .await
             .with_context(|| format!("tmux set-option {opt}"))?;
         if !status.success() && !matches!(*opt, "allow-passthrough" | "terminal-overrides") {
             anyhow::bail!("tmux set-option {opt} {val} failed for session {session}");
@@ -217,7 +220,7 @@ pub async fn spawn_agent(
     client_cwd: Option<&std::path::Path>,
     ordinal: Option<u32>,
 ) -> Result<String> {
-    if !tmux_available() {
+    if !tmux_available_async().await {
         anyhow::bail!("tmux binary not found");
     }
 
@@ -262,7 +265,7 @@ pub async fn resume_agent_in_channel(
     group: &str,
     resume_id: &str,
 ) -> Result<String> {
-    if !tmux_available() {
+    if !tmux_available_async().await {
         anyhow::bail!("tmux binary not found");
     }
     if resume_id.is_empty() {
