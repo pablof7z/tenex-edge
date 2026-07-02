@@ -1,7 +1,7 @@
-use super::chat_store::{seed_chat_read_models, ChatSeed};
 use super::chat_target::resolve_chat_target;
 use super::resolution::work_root_for;
 use super::*;
+use crate::fabric::provider::chat::OutboundChatRecord;
 use crate::state::Store;
 use crate::util::{word_count, CHAT_RENDER_WORD_LIMIT};
 use anyhow::bail;
@@ -132,32 +132,29 @@ pub(in crate::daemon::server) async fn rpc_chat_write(
         body: body_to_send.clone(),
         mentioned_pubkey: mentioned_pubkey.clone(),
     };
-    let event_id = state
+    let published = state
         .provider
-        .publish_checked(&DomainEvent::ChatMessage(chat), &chat_signing_keys)
+        .publish_chat_checked(
+            &chat,
+            &chat_signing_keys,
+            &OutboundChatRecord {
+                from_session: Some(rec.session_id.clone()),
+                channel_h: deliver_scope.clone(),
+                body: body_to_send.clone(),
+                mentioned_pubkey: mentioned_pubkey.clone(),
+                mentioned_session: mentioned_session.clone(),
+                created_at: Some(now_secs()),
+                direction: "outbound",
+            },
+        )
         .await?;
-    let event_id = event_id.to_hex();
-    let created_at = now_secs();
+    let event_id = published.event_id;
+    let created_at = published.created_at;
 
     // Local live delivery: relays often don't echo an event back to the same
     // connection that published it. Seed the verbatim log and park inbox rows for
     // sessions already alive in the same routing scope.
     let routed = state.with_store(|s| {
-        seed_chat_read_models(
-            s,
-            &ChatSeed {
-                event_id: &event_id,
-                from_pubkey: &from_pubkey,
-                from_session: Some(&rec.session_id),
-                channel_h: &deliver_scope,
-                body: &body_to_send,
-                mentioned_pubkey: mentioned_pubkey.as_deref(),
-                mentioned_session: mentioned_session.as_deref(),
-                created_at,
-                direction: "outbound",
-            },
-            "chat_write",
-        );
         let mut routed = false;
         // Best-effort local delivery (the publish already succeeded), but a store
         // failure listing targets must not silently drop a direct mention — log it

@@ -159,10 +159,8 @@ impl DaemonState {
             detail,
         ));
     }
-    /// The shared relay connection. Used by the kind:0 profile resolver to
-    /// one-shot fetch a pubkey's metadata on a cache miss.
-    pub(crate) fn transport(&self) -> &Arc<Transport> {
-        &self.transport
+    pub(crate) fn fabric_provider(&self) -> &Nip29Provider {
+        self.provider.as_ref()
     }
     fn hosted_pubkeys(&self) -> Vec<String> {
         self.hosted.lock().unwrap().keys().cloned().collect()
@@ -220,7 +218,6 @@ mod channel_resolve;
 mod channels_rpc;
 mod chat_publish;
 mod chat_read_tail;
-mod chat_store;
 mod chat_target;
 mod chat_write;
 mod diagnostics;
