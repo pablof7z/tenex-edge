@@ -10,7 +10,7 @@ and peer pruning.
 Today every Claude Code / Codex / OpenCode session spawns its own detached
 engine (`tenex-edge __run-session`), and **every** CLI invocation (`who`,
 `chat`, `who`, `turn-start`, …) opens its **own** `rusqlite`
-connection to the single SQLite file at `~/.tenex/edge/state.db`. Under ~16
+connection to the single SQLite file at `~/.tenex-edge/state.db`. Under ~16
 concurrent per-session writers this corrupted `state.db` (a real incident).
 Root cause: many independent processes each believe they own the db, and N
 sessions also mean N independent relay connections.
@@ -74,11 +74,11 @@ Claude channel adapter shell out to these verbs and parse their stdout).
 Any invocation that needs state does `Daemon::connect_or_spawn()`:
 
 1. Try to `connect()` to `$TENEX_EDGE_HOME/daemon.sock` (default base
-   `~/.tenex/edge`).
+   `~/.tenex-edge`).
 2. If that succeeds → return the client.
 3. If it fails (no listener, or stale socket) → acquire the startup lock (§4),
    re-check (another racer may have just bound), and if still absent, **spawn**
-   the daemon (double-fork / `setsid`, detach stdio → `~/.tenex/edge/daemon.log`),
+   the daemon (double-fork / `setsid`, detach stdio → `~/.tenex-edge/daemon.log`),
    then poll-connect with a short timeout.
 
 ### Idle exit
@@ -100,7 +100,7 @@ sessions briefly come and go.
 
 ## 4. Socket, lock, stale-reclaim, version handshake
 
-Files (all under `$TENEX_EDGE_HOME`, default `~/.tenex/edge`):
+Files (all under `$TENEX_EDGE_HOME`, default `~/.tenex-edge`):
 
 | file          | role                                                        |
 |---------------|-------------------------------------------------------------|
@@ -371,7 +371,7 @@ killed by an idle-exit mid-stream.
 >
 > **Worktree caveat:** `rel_cwd` is computed relative to `project::project_root`
 > (the git repo root via `git rev-parse --git-common-dir`, else the nearest
-> ancestor registered in `~/.tenex/edge/projects.json`). For real `git worktree
+> ancestor registered in `~/.tenex-edge/projects.json`). For real `git worktree
 > add` dirs, `--git-common-dir` returns the SHARED main repo path, so two
 > worktrees both resolve to `.` and render bracket-less. To make
 > `worktree1`/`worktree2` render distinctly, register their common parent in

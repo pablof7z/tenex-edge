@@ -17,10 +17,15 @@ from pathlib import Path
 
 
 def log(message: str) -> None:
+    edge_home = Path(
+        os.path.expanduser(
+            os.environ.get("TENEX_EDGE_HOME", str(Path.home() / ".tenex-edge"))
+        )
+    )
     path = Path(
         os.environ.get(
             "TENEX_EDGE_HOOK_LOG",
-            str(Path.home() / ".tenex" / "edge" / "codex-hook.log"),
+            str(edge_home / "codex-hook.log"),
         )
     )
     try:

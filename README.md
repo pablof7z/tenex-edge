@@ -42,7 +42,7 @@ cli ── runtime ── { domain · fabric/nip29/wire · transport · state ·
   per-session inbox ledger for directed mentions.
   Opened by ONE process only — the daemon — so there is a single writer by construction.
 - `distill` — recent conversation transcript → one-line intent. LLM-based via
-  the shared `~/.tenex` provider/model config.
+  `providers.json` and `llms.json` under `~/.tenex-edge`.
 - `runtime` — the per-session engine (`run_session_in_daemon`): presence
   heartbeat, status, distilled activity, watch-pid liveness. Runs as an async
   task INSIDE the daemon, sharing its store + relay connection.
@@ -73,9 +73,10 @@ bash scripts/demo-claude.sh  # a real `claude -p` session on the fabric
 
 ## Configuration
 
-Reads the shared `~/.tenex/config.json` (only `whitelistedPubkeys`, optional
-`relays`, `backendName`); keeps its own writable state under `~/.tenex-edge`
-(override with `$TENEX_EDGE_HOME`), never touching TENEX/pc data.
+Reads `~/.tenex-edge/config.json` (only `whitelistedPubkeys`, optional `relays`,
+`backendName`, and tenex-edge-specific keys) and keeps its writable state under
+the same `~/.tenex-edge` root. Override the whole root with `$TENEX_EDGE_HOME`,
+or just the config file with `$TENEX_CONFIG`.
 
 ## Commands
 

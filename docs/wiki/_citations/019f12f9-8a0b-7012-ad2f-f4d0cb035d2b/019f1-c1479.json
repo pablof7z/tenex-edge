@@ -1,6 +1,0 @@
-{
-  "id": "019f1-c1479",
-  "ts": "2026-06-29T10:52:32Z",
-  "session": "019f12f9-8a0b-7012-ad2f-f4d0cb035d2b",
-  "text": "Assistant: The repository has some internal drift: README and older architecture docs still mention `~/.tenex/edge`, while newer code/wiki guidance says `edge_home()`/`TENEX_EDGE_HOME` now own all tenex-edge state. For agent skills, that means the skill should teach “verify live code/help first” and keep volatile command/path details in small references."
-}

@@ -86,6 +86,25 @@ fn edge_home_selection_uses_default_home_without_override() {
 }
 
 #[test]
+fn config_path_defaults_inside_edge_home() {
+    assert_eq!(
+        select_config_path(None, PathBuf::from("/home/alice/.tenex-edge")),
+        PathBuf::from("/home/alice/.tenex-edge/config.json")
+    );
+}
+
+#[test]
+fn config_path_honors_tenex_config_override() {
+    assert_eq!(
+        select_config_path(
+            Some(OsString::from("/tmp/custom-config.json")),
+            PathBuf::from("/home/alice/.tenex-edge"),
+        ),
+        PathBuf::from("/tmp/custom-config.json")
+    );
+}
+
+#[test]
 fn edge_home_selection_reports_explicit_non_default_home() {
     let selected = select_edge_home(
         Some(OsString::from("/tmp/te-test-home")),
