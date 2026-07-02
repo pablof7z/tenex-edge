@@ -100,18 +100,22 @@ pub(in crate::daemon::server) async fn rpc_turn_start(
     });
     crate::profile::warm(state, &to_warm).await;
 
-    // Assemble via the SHARED cli.rs function so the injected text is byte-identical
-    // to the pre-daemon CLI and cannot drift.
+    // Assemble via the shared turn-context module so daemon and hook tests cannot drift.
     let backend_pubkey = state.backend_pubkey.clone().unwrap_or_default();
-    let base = crate::cli::assemble_turn_start_context(
+    let base = crate::turn_context::assemble_turn_start_context(
         &state.store,
         &rec,
         &backend_pubkey,
         &state.host,
         prev_started,
     );
-    let audit =
-        crate::cli::turn_start_audit(&state.store, &rec, prev_started, now, base.as_deref());
+    let audit = crate::turn_context::turn_start_audit(
+        &state.store,
+        &rec,
+        prev_started,
+        now,
+        base.as_deref(),
+    );
     let context = base
         .map(serde_json::Value::String)
         .unwrap_or(serde_json::Value::Null);
@@ -139,9 +143,14 @@ pub(in crate::daemon::server) fn rpc_turn_check(
     } else {
         None
     };
-    let base =
-        crate::cli::assemble_turn_check_context(&state.store, &rec, &state.host, delta_since, now);
-    let audit = crate::cli::turn_check_audit(
+    let base = crate::turn_context::assemble_turn_check_context(
+        &state.store,
+        &rec,
+        &state.host,
+        delta_since,
+        now,
+    );
+    let audit = crate::turn_context::turn_check_audit(
         &state.store,
         &rec,
         delta_since,

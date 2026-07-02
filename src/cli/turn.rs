@@ -5,11 +5,6 @@
 
 use super::*;
 
-pub(crate) mod audit;
-mod context;
-pub(crate) use audit::{turn_check_audit, turn_start_audit};
-pub use context::{assemble_turn_check_context, assemble_turn_start_context};
-
 /// How a context block is emitted to the harness on stdout. Selected per
 /// (host, hook-type): plain text is injected directly by Claude Code's
 /// UserPromptSubmit and opencode; Codex and Claude Code PostToolUse use a
