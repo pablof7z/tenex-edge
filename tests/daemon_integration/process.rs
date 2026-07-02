@@ -183,7 +183,7 @@ fn invalid_cli_invocation_writes_command_log_only_when_enabled() {
         &home,
         args,
         &[(
-            tenex_edge::cli::command_forensics::COMMAND_CALL_LOG_ENV,
+            tenex_edge::command_forensics::COMMAND_CALL_LOG_ENV,
             command_log_path.to_str().unwrap(),
         )],
     );
