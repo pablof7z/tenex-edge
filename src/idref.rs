@@ -57,6 +57,11 @@ pub fn session_label(session_id: &str, slug: &str, host: &str) -> String {
     }
 }
 
+/// A short prefix of a message/event id for envelope IDs and send confirmations.
+pub fn event_short_id(id: &str) -> String {
+    id.chars().take(8).collect()
+}
+
 /// A syntactically-classified identifier token (the input side). Resolution
 /// against the store happens in the daemon; this is the pure classification.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -189,6 +194,12 @@ mod tests {
         assert_eq!(session_label("te-abc-0", "codex", "laptop"), "codex@laptop");
         // Unknown slug degrades to the raw session id as a correlation handle.
         assert_eq!(session_label("te-abc-0", "", "laptop"), "te-abc-0");
+    }
+
+    #[test]
+    fn event_short_id_truncates_to_eight() {
+        assert_eq!(event_short_id("0123456789abcdef"), "01234567");
+        assert_eq!(event_short_id("abc"), "abc");
     }
 
     #[test]

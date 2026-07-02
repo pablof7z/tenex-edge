@@ -4,7 +4,6 @@ mod agent;
 mod args;
 mod doctor;
 mod project_channels;
-mod render;
 mod tail;
 
 // Re-exports for cli.rs callers
@@ -14,7 +13,6 @@ pub(super) use args::{
 };
 pub use doctor::doctor;
 pub use project_channels::{channels, project};
-pub use render::render_fabric;
 pub use tail::parse_since;
 #[cfg(test)]
 pub use tail::render_tail_event;

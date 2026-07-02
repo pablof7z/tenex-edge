@@ -18,9 +18,13 @@ pub(super) async fn chat_write(
     let v = daemon_call_async("chat_write", params).await?;
     let event_id = v["event_id"].as_str().unwrap_or("?");
     if let Some(label) = v["mentioned_label"].as_str().filter(|s| !s.is_empty()) {
-        println!("sent chat {} mentioning @{}", pubkey_short(event_id), label);
+        println!(
+            "sent chat {} mentioning @{}",
+            event_short_id(event_id),
+            label
+        );
     } else {
-        println!("sent chat {}", pubkey_short(event_id));
+        println!("sent chat {}", event_short_id(event_id));
     }
     Ok(())
 }
@@ -183,16 +187,10 @@ fn strip_single_trailing_newline(mut s: String) -> String {
 
 // ── envelope rendering ───────────────────────────────────────────────────────
 
-/// The short `ID` shown on an envelope — the first 8 hex chars of a message's
-/// event id.
-pub fn mention_short_id(event_id: &str) -> String {
-    event_id.chars().take(8).collect()
-}
-
 /// Everything needed to render one inbound message as an email-like envelope.
-pub struct EnvelopeView<'a> {
+#[cfg(test)]
+pub(super) struct EnvelopeView<'a> {
     pub from_slug: &'a str,
-    pub project: &'a str,
     /// Sender's raw session id, used only as a fallback correlation handle.
     pub from_session: &'a str,
     /// Sender's host label. Empty, or equal to `self_host`, → no remote annotation.
@@ -203,7 +201,7 @@ pub struct EnvelopeView<'a> {
     pub branch: &'a str,
     pub commit: &'a str,
     pub dirty: u32,
-    /// Short reply id (see `mention_short_id`).
+    /// Short reply id (see `event_short_id`).
     pub id: &'a str,
     /// When the sender published (unix secs); rendered absolute + relative.
     pub sent_at: u64,
@@ -225,7 +223,11 @@ pub struct EnvelopeView<'a> {
 ///
 /// The Subject and Branch lines are omitted when absent; a remote sender adds
 /// `[remote: <host>]` to the From line.
-pub fn format_envelope(e: &EnvelopeView) -> String {
+#[cfg(test)]
+pub(super) fn format_envelope(e: &EnvelopeView) -> String {
+    use crate::util::dirty_label;
+    use std::fmt::Write as _;
+
     // Canonical sender identity: the agent-instance label with host. The session
     // id is only a fallback correlation handle when the sender slug is missing.
     let host = if e.host.is_empty() {

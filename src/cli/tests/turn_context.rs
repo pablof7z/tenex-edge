@@ -1,5 +1,6 @@
-use super::*;
+use super::messaging::{format_envelope, EnvelopeView};
 use crate::state::{Identity, RegisterSession, Session, Status, Store};
+use crate::turn_context::{assemble_turn_check_context, assemble_turn_start_context};
 use std::sync::Mutex;
 
 const BACKEND: &str = "pk-backend";
@@ -367,7 +368,6 @@ fn turn_check_direct_mentions_surface_from_inbox() {
 fn view<'a>() -> EnvelopeView<'a> {
     EnvelopeView {
         from_slug: "codex",
-        project: "tenex-edge",
         from_session: "sender-session-id",
         host: "",
         self_host: "my-box",

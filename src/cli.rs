@@ -1,8 +1,9 @@
 //! The host-neutral CLI surface (M1 §6).
 
-use crate::domain::DomainEvent;
+use crate::idref::event_short_id;
+#[cfg(test)]
 use crate::state::Store;
-use crate::util::{dirty_label, format_local_datetime, now_secs, pubkey_short, relative_time};
+use crate::util::{format_local_datetime, now_secs, pubkey_short, relative_time};
 use anyhow::{bail, Context, Result};
 use crossterm::{
     cursor::{Hide, MoveTo, Show},
@@ -28,14 +29,10 @@ mod tmux_cli;
 mod turn;
 mod who;
 
-pub use admin::render_fabric;
 #[cfg(test)]
 use admin::{parse_since, render_tail_event};
 pub use args::Cli;
 use args::Cmd;
-pub use messaging::{format_envelope, mention_short_id, EnvelopeView};
-pub use turn::{assemble_turn_check_context, assemble_turn_start_context};
-pub(crate) use turn::{turn_check_audit, turn_start_audit};
 
 pub(crate) fn select_agent_env(active: Option<String>, fallback: Option<String>) -> Option<String> {
     active

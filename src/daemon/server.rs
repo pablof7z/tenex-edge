@@ -365,7 +365,7 @@ fn chat_rows_to_json(store: &Store, rows: &[InboxRow]) -> Vec<serde_json::Value>
                 "host": "",
                 "subject": "",
                 "created_at": r.created_at,
-                "id": crate::cli::mention_short_id(&r.event_id),
+                "id": crate::idref::event_short_id(&r.event_id),
                 "mention_event_id": r.event_id,
                 "body": r.body,
             })
