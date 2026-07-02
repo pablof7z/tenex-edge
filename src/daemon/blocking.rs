@@ -16,6 +16,10 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::time::{Duration, Instant};
 
+const HANDSHAKE_IO_TIMEOUT: Duration = Duration::from_secs(2);
+const DEFAULT_RESPONSE_IO_TIMEOUT: Duration = Duration::from_secs(2);
+const SLOW_RESPONSE_IO_TIMEOUT: Duration = Duration::from_secs(25);
+
 /// Connect to the daemon (spawning if absent), do the handshake, send one
 /// request, and return the `ok` payload. Mirrors the async client's behavior
 /// including the version-skew exit+respawn, but synchronously.
@@ -58,8 +62,8 @@ enum Outcome {
 
 fn try_call(method: &str, params: &serde_json::Value) -> Result<Outcome> {
     let stream = UnixStream::connect(socket_path()).context("connecting to daemon socket")?;
-    stream.set_read_timeout(Some(Duration::from_secs(2)))?;
-    stream.set_write_timeout(Some(Duration::from_secs(2)))?;
+    stream.set_read_timeout(Some(HANDSHAKE_IO_TIMEOUT))?;
+    stream.set_write_timeout(Some(HANDSHAKE_IO_TIMEOUT))?;
     let mut w = stream.try_clone()?;
     let mut r = BufReader::new(stream);
 
@@ -100,6 +104,8 @@ fn try_call(method: &str, params: &serde_json::Value) -> Result<Outcome> {
         "{}",
         serde_json::json!({"id": 1, "method": method, "params": params})
     )?;
+    r.get_ref()
+        .set_read_timeout(Some(response_timeout(method)))?;
     let mut resp_line = String::new();
     if r.read_line(&mut resp_line)? == 0 {
         bail!("daemon closed the connection");
@@ -113,6 +119,16 @@ fn try_call(method: &str, params: &serde_json::Value) -> Result<Outcome> {
     Ok(Outcome::Ok(
         resp.get("ok").cloned().unwrap_or(serde_json::Value::Null),
     ))
+}
+
+fn response_timeout(method: &str) -> Duration {
+    match method {
+        // `tmux_spawn` may spend up to 20s provisioning the launch channel before
+        // returning. Keep handshake probes short, but do not make launch retry
+        // while the daemon is still doing the requested work.
+        "tmux_spawn" => SLOW_RESPONSE_IO_TIMEOUT,
+        _ => DEFAULT_RESPONSE_IO_TIMEOUT,
+    }
 }
 
 /// Synchronous spawn-if-absent: under the startup `flock`, reclaim a stale
@@ -160,4 +176,15 @@ fn spawn_if_absent() -> Result<()> {
 
 fn daemon_answers_ping() -> bool {
     matches!(try_call("ping", &serde_json::json!({})), Ok(Outcome::Ok(_)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tmux_spawn_gets_slow_response_budget() {
+        assert!(response_timeout("tmux_spawn") > Duration::from_secs(20));
+        assert_eq!(response_timeout("ping"), DEFAULT_RESPONSE_IO_TIMEOUT);
+    }
 }

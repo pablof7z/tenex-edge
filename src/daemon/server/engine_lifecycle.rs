@@ -358,6 +358,7 @@ pub(in crate::daemon::server) async fn reconcile_sessions(state: &Arc<DaemonStat
                 expect_member: &id.pubkey_hex(),
                 parent_hint: parent_hint.as_deref(),
                 name: None,
+                repair_whitelisted_admins: false,
             })
             .await;
         // `Degraded` means the channel was NOT verified ready on the relay.

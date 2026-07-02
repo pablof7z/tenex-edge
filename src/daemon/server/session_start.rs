@@ -399,6 +399,7 @@ pub(in crate::daemon::server) async fn rpc_session_start(
                 expect_member: &id.pubkey_hex(),
                 parent_hint: parent_hint.as_deref(),
                 name: None,
+                repair_whitelisted_admins: false,
             };
             state.provider.ensure_channel_ready(ctx).await
         };

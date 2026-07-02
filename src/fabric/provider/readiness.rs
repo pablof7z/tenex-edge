@@ -64,6 +64,7 @@ fn ensure_channel_ready_inner<'a>(
                 expect_member: &mgmt_pubkey,
                 parent_hint: grandparent.as_deref(),
                 name: None,
+                repair_whitelisted_admins: ctx.repair_whitelisted_admins,
             };
             let parent_gate = ensure_channel_ready_inner(provider, parent_ctx, depth + 1).await;
             if matches!(parent_gate, ChannelGate::Degraded) {
@@ -212,7 +213,9 @@ fn ensure_channel_ready_inner<'a>(
         let mut invariant_ok = true;
         {
             let mut required_admins: Vec<String> = vec![mgmt_pubkey.clone()];
-            required_admins.extend(provider.whitelisted_pubkeys.iter().cloned());
+            if ctx.repair_whitelisted_admins {
+                required_admins.extend(provider.whitelisted_pubkeys.iter().cloned());
+            }
             for pk in &parent_admins {
                 if !required_admins.contains(pk) {
                     required_admins.push(pk.clone());

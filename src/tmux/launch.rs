@@ -182,7 +182,7 @@ fn make_session_transparent(
         ("status-format[0]", statusline_cmd),
         ("prefix", "None".to_string()),
         ("escape-time", "0".to_string()),
-        ("mouse", "off".to_string()),
+        ("mouse", "on".to_string()),
         ("allow-passthrough", "on".to_string()),
         ("focus-events", "on".to_string()),
         ("default-terminal", "tmux-256color".to_string()),

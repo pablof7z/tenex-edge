@@ -141,9 +141,9 @@ pub(super) async fn rpc_tmux_spawn(
 
     // Proactively provision the channel/project BEFORE opening the pane so the
     // relay already has the group and the agent as a member when the first
-    // session-start event arrives. Bounded with an 8-second cap — a slow relay
-    // surfaces as a failed spawn rather than a hang. Session-start repeats this
-    // idempotently. A degraded/timed-out provision fails the spawn loudly.
+    // session-start event arrives. Bounded with a 20-second cap: a slow relay
+    // must not prevent opening the local harness. Session-start repeats this
+    // idempotently and publish paths still fail closed if readiness is unverified.
     provision_before_spawn(state, &p.agent, &p.project, group).await?;
 
     let pane_id = crate::tmux::spawn_agent(
@@ -282,7 +282,7 @@ async fn provision_before_spawn(
         );
     }
 
-    let timeout = std::time::Duration::from_secs(8);
+    let timeout = std::time::Duration::from_secs(20);
     // One primitive provisions every channel: a top-level project is the ROOT
     // channel (parent_hint None); an explicit channel is a subgroup under the
     // project (parent_hint = project). `ensure_channel_ready` ensures existence +
@@ -307,21 +307,22 @@ async fn provision_before_spawn(
         expect_member: &pubkey,
         parent_hint,
         name: None,
+        repair_whitelisted_admins: false,
     };
-    // `Degraded` means the channel was NOT verified ready on the relay. Opening a
-    // pane against an unprovisioned channel would report a spawned agent that then
-    // publishes into a phantom scope, so a degraded gate (or a timeout, equally
-    // unverified) fails the spawn loudly rather than proceeding.
     match tokio::time::timeout(timeout, state.provider.ensure_channel_ready(ctx)).await {
-        // Ready | Repaired: the channel is verified against relay truth.
-        Ok(crate::fabric::nip29::readiness::ChannelGate::Degraded) => anyhow::bail!(
-            "channel {scope} was not provisioned on the relay; refusing to spawn the agent pane"
+        Ok(crate::fabric::nip29::readiness::ChannelGate::Degraded) => tracing::warn!(
+            slug,
+            channel = scope,
+            "provision: channel readiness degraded before spawn; opening local pane anyway"
         ),
-        Ok(_) => Ok(()),
-        Err(_) => anyhow::bail!(
-            "channel {scope} provisioning timed out; refusing to spawn the agent pane"
+        Ok(_) => {}
+        Err(_) => tracing::warn!(
+            slug,
+            channel = scope,
+            "provision: channel readiness timed out before spawn; opening local pane anyway"
         ),
     }
+    Ok(())
 }
 
 // ── tmux_attach ───────────────────────────────────────────────────────────────

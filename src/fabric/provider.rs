@@ -104,6 +104,7 @@ impl Nip29Provider {
                 expect_member: &agent_pubkey,
                 parent_hint: parent.as_deref(),
                 name: None,
+                repair_whitelisted_admins: true,
             };
             if matches!(self.ensure_channel_ready(ctx).await, ChannelGate::Degraded) {
                 anyhow::bail!(
@@ -131,6 +132,7 @@ impl Nip29Provider {
                 expect_member: &agent_pubkey,
                 parent_hint: parent.as_deref(),
                 name: None,
+                repair_whitelisted_admins: true,
             };
             if matches!(self.ensure_channel_ready(ctx).await, ChannelGate::Degraded) {
                 anyhow::bail!(
@@ -342,6 +344,7 @@ impl Nip29Provider {
             expect_member: &agent_pubkey,
             parent_hint: parent.as_deref(),
             name: None,
+            repair_whitelisted_admins: true,
         };
         if matches!(self.ensure_channel_ready(ctx).await, ChannelGate::Degraded) {
             anyhow::bail!(

@@ -23,6 +23,7 @@ pub(in crate::daemon::server) async fn ensure_session_room(
             // The intended room name rides on the create publish; the relay's
             // kind:39000 echo is what lands it in the cache.
             name: Some(name),
+            repair_whitelisted_admins: true,
         })
         .await;
     let _ = ensure_subscription(state, room_h).await;
@@ -198,6 +199,7 @@ Switch into it instead: tenex-edge channels switch {}",
             // Operator-chosen name rides on the create publish; the relay's
             // kind:39000 echo lands it in the cache (no local fabrication).
             name: Some(&p.name),
+            repair_whitelisted_admins: true,
         })
         .await;
     if matches!(gate, crate::fabric::nip29::readiness::ChannelGate::Degraded) {
