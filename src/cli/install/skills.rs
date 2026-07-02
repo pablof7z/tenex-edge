@@ -153,7 +153,7 @@ fn install_target(target: &SkillTarget, source: &Path, dry_run: bool) -> Result<
 }
 
 fn uninstall_target(target: &SkillTarget, dry_run: bool) -> Result<()> {
-    if !target.path.symlink_metadata().is_ok() {
+    if target.path.symlink_metadata().is_err() {
         println!("  nothing to remove");
         return Ok(());
     }

@@ -4,6 +4,7 @@ use super::*;
 use crate::state::{RelayEvent, Store};
 
 #[derive(serde::Deserialize, Default)]
+#[allow(dead_code)]
 pub(in crate::daemon::server) struct ChatWriteParams {
     message: String,
     #[serde(default, alias = "env_session")]

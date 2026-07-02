@@ -7,6 +7,7 @@ use crate::state::RelayEvent;
 const CHAT_READ_CAP: u32 = 10_000;
 
 #[derive(serde::Deserialize, Default)]
+#[allow(dead_code)]
 pub(in crate::daemon::server) struct ChatReadParams {
     #[serde(default)]
     channel: Option<String>,

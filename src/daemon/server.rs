@@ -69,6 +69,9 @@ struct PeerTracked {
     host: String,
 }
 
+type StatusTailKey = (String, String, String);
+type StatusTailSnapshot = (String, bool);
+
 /// Shared daemon state. The `Store` is behind an `Arc<Mutex<…>>` shared with
 /// session tasks; the guard is held only across synchronous rusqlite calls,
 /// NEVER across `.await`. One process + one connection = the single writer.
@@ -110,7 +113,7 @@ pub struct DaemonState {
     /// Last-seen (title, active) keyed by `(author_pubkey, session_id, channel)`
     /// for tail dedup. Tracking `active` too means an active→idle flip emits a
     /// tail event even though the persistent title text is unchanged.
-    last_status: Mutex<HashMap<(String, String, String), (String, bool)>>,
+    last_status: Mutex<HashMap<StatusTailKey, StatusTailSnapshot>>,
     /// Wakes the status-outbox drainer the instant a transition enqueues a publish.
     outbox_notify: Notify,
     /// Per-session derived keypairs for duplicate live signers. The durable
