@@ -18,7 +18,6 @@ use std::time::{Duration, Instant};
 
 mod admin;
 mod args;
-pub mod command_forensics;
 mod debug;
 mod hooks;
 mod install;

@@ -8,6 +8,7 @@
 //!   cli -> runtime -> { domain, codec, transport, state, distill }
 //!   config / identity / project are leaf utilities.
 
+pub mod command_forensics;
 pub mod config;
 pub mod domain;
 pub mod identity;

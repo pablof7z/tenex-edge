@@ -1,5 +1,6 @@
 use clap::Parser;
 use tenex_edge::cli::{self, Cli};
+use tenex_edge::command_forensics::CommandCallLog;
 
 fn main() {
     // rig-core's reqwest pulls a second rustls crypto provider (aws-lc-rs)
@@ -8,7 +9,7 @@ fn main() {
     let _ = rustls::crypto::ring::default_provider().install_default();
 
     let argv = std::env::args().collect::<Vec<_>>();
-    let command_log = cli::command_forensics::CommandCallLog::start(&argv);
+    let command_log = CommandCallLog::start(&argv);
     let cli = match Cli::try_parse_from(argv.clone()) {
         Ok(cli) => cli,
         Err(err) => {

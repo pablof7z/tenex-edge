@@ -42,7 +42,7 @@ pub(super) fn load_hook_tail_snapshot(
         read_hook_log(&home.join("hook-calls.jsonl"), &mut panes, 20_000_000);
         unscoped = read_command_log(&home.join("command-calls.jsonl"), &mut panes);
     }
-    if let Some(path) = crate::cli::command_forensics::configured_log_path() {
+    if let Some(path) = crate::command_forensics::configured_log_path() {
         unscoped.extend(read_command_log(&path, &mut panes));
     }
 
