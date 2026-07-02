@@ -2,7 +2,9 @@
 //!
 //! `role='admin'` is THE ONLY management authority over a channel. Materializing
 //! kind:39001 replaces the admin rows; kind:39002 replaces the member rows; each
-//! preserves the other set. A pubkey appears at most once per channel.
+//! preserves the other set. A pubkey appears at most once per channel. Replacement
+//! batches are guarded by `(channel_h, role)` high-water marks so stale relay
+//! replays cannot delete a newer roster.
 
 use super::*;
 
@@ -47,6 +49,24 @@ impl Store {
         pubkeys: &[String],
         updated_at: u64,
     ) -> Result<()> {
+        let current: Option<u64> = self
+            .conn
+            .query_row(
+                "SELECT updated_at FROM relay_channel_member_sets
+                 WHERE channel_h=?1 AND role=?2",
+                params![channel_h, role],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if current.is_some_and(|seen| seen > updated_at) {
+            return Ok(());
+        }
+        self.conn.execute(
+            "INSERT INTO relay_channel_member_sets (channel_h, role, updated_at)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(channel_h, role) DO UPDATE SET updated_at=excluded.updated_at",
+            params![channel_h, role, updated_at],
+        )?;
         self.conn.execute(
             "DELETE FROM relay_channel_members WHERE channel_h=?1 AND role=?2",
             params![channel_h, role],
