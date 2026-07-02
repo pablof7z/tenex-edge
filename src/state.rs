@@ -283,6 +283,7 @@ mod messages;
 mod outbox;
 mod profiles;
 mod project_roots;
+mod quarantine;
 mod reader;
 pub(crate) use reader::StoreReader;
 mod retention;

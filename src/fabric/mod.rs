@@ -6,6 +6,7 @@
 //!   Materializer (store writes)       ← materialize()
 //!   Transport                         ← (private detail of NostrDelivery)
 
+mod admission;
 pub(crate) mod group_management;
 pub mod nip29;
 pub mod nostr_delivery;
@@ -48,8 +49,8 @@ pub trait Delivery {
 // ── Materializer output ───────────────────────────────────────────────────────
 
 /// The two side-effects that `handle_incoming` performs outside the store.
-/// All other effects (quarantine, sync-state reconciliation) are reserved for
-/// later phases.
+/// Admission/quarantine writes happen inside materialization; sync-state
+/// reconciliation remains reserved for later phases.
 #[derive(Default)]
 pub struct MaterializationOutcome {
     /// The decoded domain event to forward onto the tail channel, if any.
@@ -102,11 +103,23 @@ pub fn materialize(
         }
         39001 => {
             Nip29Materializer::materialize_admins(store, event);
-            return MaterializationOutcome::default();
+            return MaterializationOutcome {
+                tail: None,
+                wake_mentions: admission::replay_quarantined_chat(
+                    store,
+                    crate::fabric::nip29::nostr_tag(event, "d").unwrap_or(""),
+                ),
+            };
         }
         39002 => {
             Nip29Materializer::materialize_members(store, event);
-            return MaterializationOutcome::default();
+            return MaterializationOutcome {
+                tail: None,
+                wake_mentions: admission::replay_quarantined_chat(
+                    store,
+                    crate::fabric::nip29::nostr_tag(event, "d").unwrap_or(""),
+                ),
+            };
         }
         _ => {}
     }
@@ -141,27 +154,7 @@ pub fn materialize(
         }
 
         DomainEvent::ChatMessage(ref chat) => {
-            // Cache the chat line in the verbatim log, then route it into the
-            // canonical message read model and the local delivery ledger.
-            Nip29Materializer::materialize_event(store, event);
-            Nip29Materializer::materialize_chat_message(store, event, chat);
-
-            let sender_pk = event.pubkey.to_hex();
-            let resolved_slug = store
-                .resolve_slug_for_pubkey(&sender_pk)
-                .ok()
-                .flatten()
-                .unwrap_or_default();
-            let enriched = if resolved_slug.is_empty() {
-                std::borrow::Cow::Borrowed(chat)
-            } else {
-                std::borrow::Cow::Owned(crate::domain::ChatMessage {
-                    from: crate::domain::AgentRef::new(sender_pk, resolved_slug),
-                    ..chat.clone()
-                })
-            };
-            outcome.wake_mentions = Nip29Materializer::route_chat(store, event, &enriched);
-            outcome.tail = Some(DomainEvent::ChatMessage(enriched.into_owned()));
+            outcome = admission::materialize_chat(store, event, chat);
         }
 
         // Activity (kind:1) and Proposal (kind:30023) carry no inbox routing; they
@@ -220,6 +213,10 @@ mod tests {
 
         let sender_sid = register(&store, &sender_pk, "myproject", "sender-ext");
         let receiver_sid = register(&store, &receiver_pk, "myproject", "receiver-ext");
+        store.replace_channel_admins("myproject", &[], 1).unwrap();
+        store
+            .replace_channel_members("myproject", &[sender_pk.clone(), receiver_pk.clone()], 1)
+            .unwrap();
 
         // Ambient message (no p-tag): stored in relay_events, inbox stays empty.
         let ambient = build_event(
