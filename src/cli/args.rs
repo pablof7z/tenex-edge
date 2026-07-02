@@ -2,6 +2,7 @@ use clap::{Parser, Subcommand};
 
 use super::admin::{AgentAction, AgentsAction, ChannelsAction, InviteArgs, ProjectAction};
 use super::debug::DebugAction;
+use super::harness::HarnessAction;
 use super::install::InstallArgs;
 use super::messaging::{ChatAction, PublishArgs};
 use super::tmux_cli::LaunchArgs;
@@ -84,35 +85,6 @@ pub(super) enum Cmd {
     /// Start the per-machine daemon in the foreground.
     #[command(name = "daemon", alias = "__daemon", hide = true)]
     Daemon,
-}
-
-#[derive(Subcommand)]
-pub(super) enum HarnessAction {
-    /// Handle a hook event from a supported agent harness.
-    /// Reads hook JSON from stdin; emits context to inject into the model (if any).
-    /// Usage: `tenex-edge harness hook <name> --type <hook-type>`
-    Hook {
-        /// Harness name: claude-code, codex, opencode, grok, …
-        /// Run with name "help" to list known harnesses.
-        harness: String,
-        /// Hook type the harness fires: session-start, user-prompt-submit,
-        /// post-tool-use, stop, session-end.
-        #[arg(long = "type")]
-        hook_type: String,
-    },
-    /// Render the one-line fabric statusline for a host's status bar.
-    /// Reads the harness's statusline JSON payload on stdin (for `session_id`),
-    /// prints one line, and always exits 0 — fails open when the daemon is down
-    /// (and never spawns one).
-    Statusline {
-        /// Session id; if omitted, taken from the stdin payload.
-        #[arg(long)]
-        session: Option<String>,
-        /// Emit tmux #[style] format strings instead of ANSI codes. Required
-        /// when the output is consumed by tmux's status-format (#(...)).
-        #[arg(long)]
-        tmux: bool,
-    },
 }
 
 #[cfg(test)]

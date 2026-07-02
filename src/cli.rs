@@ -19,6 +19,7 @@ mod admin;
 mod args;
 mod context;
 mod debug;
+mod harness;
 mod hooks;
 mod install;
 mod messaging;
@@ -31,7 +32,7 @@ pub use admin::render_fabric;
 #[cfg(test)]
 use admin::{parse_since, render_tail_event};
 pub use args::Cli;
-use args::{Cmd, HarnessAction};
+use args::Cmd;
 pub use messaging::{format_envelope, mention_short_id, EnvelopeView};
 pub use turn::{assemble_turn_check_context, assemble_turn_start_context};
 pub(crate) use turn::{turn_check_audit, turn_start_audit};
@@ -104,9 +105,7 @@ pub async fn run(cli: Cli) -> Result<()> {
     // unconditionally, so clearing first is harmless.
     if !matches!(
         cli.cmd,
-        Cmd::Harness {
-            action: HarnessAction::Hook { .. }
-        }
+        Cmd::Harness { ref action } if action.is_hook()
     ) && crate::daemon::is_inhibited()
     {
         crate::daemon::clear_inhibit();
@@ -122,10 +121,7 @@ pub async fn run(cli: Cli) -> Result<()> {
         Cmd::Agent { action } => admin::agent(action).await,
         Cmd::Agents { action } => admin::agents(action).await,
         Cmd::Invite(args) => admin::invite(args).await,
-        Cmd::Harness { action } => match action {
-            HarnessAction::Hook { harness, hook_type } => hooks::hook_run(harness, hook_type).await,
-            HarnessAction::Statusline { session, tmux } => statusline::statusline(session, tmux),
-        },
+        Cmd::Harness { action } => harness::harness(action).await,
         Cmd::Launch(args) => tmux_cli::launch(args).await,
         Cmd::Stop => stop_daemon(),
         Cmd::Debug { action } => debug::debug(action).await,
