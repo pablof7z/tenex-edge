@@ -317,8 +317,8 @@ and the ccstatusline multiplexer setup.
 
 ## 7. Environment variables
 
-Found via `grep -rn "TENEX_EDGE_" src | grep env` plus `TENEX_CONFIG` /
-`TENEX_DIR`. Durations suffixed `_MS` are milliseconds; `_S` are seconds.
+Found via `grep -rn "TENEX_EDGE_" src | grep env` plus `TENEX_CONFIG`.
+Durations suffixed `_MS` are milliseconds; `_S` are seconds.
 
 ### Paths / config
 
@@ -326,7 +326,6 @@ Found via `grep -rn "TENEX_EDGE_" src | grep env` plus `TENEX_CONFIG` /
 | --- | --- | --- |
 | `TENEX_EDGE_HOME` | Override tenex-edge's writable root (state.db, agent keystore). | `~/.tenex-edge` |
 | `TENEX_CONFIG` | Override the path to `config.json`. | `~/.tenex-edge/config.json` |
-| `TENEX_DIR` | Override the shared `~/.tenex` directory. | `~/.tenex` |
 | `TENEX_EDGE_BIN` | Path to the `tenex-edge` binary the daemon/launcher re-execs (spawned panes, blocking calls). | the running exe |
 
 ### Session / agent resolution (set by the launcher on spawned panes)
@@ -335,8 +334,8 @@ Found via `grep -rn "TENEX_EDGE_" src | grep env` plus `TENEX_CONFIG` /
 | --- | --- |
 | `TENEX_EDGE_AGENT` | The agent slug this pane runs as. Primary source for `agent_env_slug()`. |
 | `TENEX_EDGE_AGENT_FALLBACK` | Fallback agent slug when `TENEX_EDGE_AGENT` is empty. |
-| `TENEX_EDGE_SESSION` | The session id, threaded into session-resolving RPCs (chat, who, turn, forensics). Explicit `--session` flags win over it. |
 | `TENEX_EDGE_CHANNEL` | NIP-29 subgroup id (`h`) for sessions spawned into a subgroup task channel; absent for ordinary project sessions. Binds RPCs to the subgroup session rather than a sibling project session in the same directory. |
+| `TMUX_PANE` | tmux's pane id. For tmux-backed sessions, the daemon maps this to the canonical session id; the session id is not exported as `TENEX_EDGE_SESSION`. |
 
 ### Behavior knobs
 
@@ -351,7 +350,7 @@ Found via `grep -rn "TENEX_EDGE_" src | grep env` plus `TENEX_CONFIG` /
 | `TENEX_EDGE_TURN_FIRST_S` | Delay before the first turn-check nudge. | 30 |
 | `TENEX_EDGE_TURN_REPEAT_S` | Repeat interval for turn-check nudges (0 = no repeat). | 0 |
 | `TENEX_EDGE_DAEMON_GRACE_S` | Idle grace before the daemon exits. | 120 |
-| `TENEX_EDGE_COMMAND_CALL_LOG` | Path to write per-command forensics call log. | unset |
+| `TENEX_EDGE_COMMAND_CALL_LOG` | Opt-in path to write per-command forensics call log. Default CLI execution writes no command forensic log. | unset |
 | `TENEX_EDGE_HOOK_CALL_LOG` | Path to write per-hook forensics call log. | unset |
 | `TENEX_EDGE_INIT_PROGRESS` | Gate init-progress output during hooks. | unset |
 

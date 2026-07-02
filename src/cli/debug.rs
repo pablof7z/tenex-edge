@@ -67,13 +67,13 @@ mod tests {
     use std::collections::BTreeMap;
 
     #[test]
-    fn command_session_prefers_env_then_explicit_flag() {
+    fn command_session_uses_explicit_flag_only() {
         let v = serde_json::json!({
             "env": {"TENEX_EDGE_SESSION": "env-session"},
             "command": {"explicit_session": "flag-session"},
             "process": {"cwd": "/tmp"}
         });
-        assert_eq!(command_session(&v).as_deref(), Some("env-session"));
+        assert_eq!(command_session(&v).as_deref(), Some("flag-session"));
 
         let v = serde_json::json!({
             "env": {},
@@ -81,6 +81,13 @@ mod tests {
             "process": {"cwd": "/tmp"}
         });
         assert_eq!(command_session(&v).as_deref(), Some("flag-session"));
+
+        let v = serde_json::json!({
+            "env": {"TENEX_EDGE_SESSION": "env-session"},
+            "command": {},
+            "process": {"cwd": "/tmp"}
+        });
+        assert_eq!(command_session(&v), None);
     }
 
     #[test]

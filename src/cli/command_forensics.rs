@@ -7,15 +7,21 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const LOG_SCHEMA: &str = "tenex-edge.command-call.v1";
+pub const COMMAND_CALL_LOG_ENV: &str = "TENEX_EDGE_COMMAND_CALL_LOG";
 
 pub struct CommandCallLog {
     path: Option<PathBuf>,
-    call_id: String,
+    call_id: Option<String>,
 }
 
 impl CommandCallLog {
     pub fn start(argv: &[String]) -> Self {
-        let path = log_path(argv);
+        let Some(path) = configured_log_path() else {
+            return Self {
+                path: None,
+                call_id: None,
+            };
+        };
         let call_id = call_id();
         let payload = serde_json::json!({
             "schema": LOG_SCHEMA,
@@ -32,15 +38,21 @@ impl CommandCallLog {
             "parent_chain": parent_chain(),
             "env": redacted_env(),
         });
-        append_json(path.as_ref(), &payload);
-        Self { path, call_id }
+        append_json(Some(&path), &payload);
+        Self {
+            path: Some(path),
+            call_id: Some(call_id),
+        }
     }
 
     pub fn finish_clap_error(&self, err: &ClapError) {
+        let Some(call_id) = self.call_id.as_ref() else {
+            return;
+        };
         let payload = serde_json::json!({
             "schema": LOG_SCHEMA,
             "phase": "finished",
-            "call_id": self.call_id,
+            "call_id": call_id,
             "timestamp": timestamp(),
             "result": {
                 "ok": err.exit_code() == 0,
@@ -53,10 +65,13 @@ impl CommandCallLog {
     }
 
     pub fn finish_runtime_error(&self, message: &str) {
+        let Some(call_id) = self.call_id.as_ref() else {
+            return;
+        };
         let payload = serde_json::json!({
             "schema": LOG_SCHEMA,
             "phase": "finished",
-            "call_id": self.call_id,
+            "call_id": call_id,
             "timestamp": timestamp(),
             "result": {
                 "ok": false,
@@ -68,10 +83,13 @@ impl CommandCallLog {
     }
 
     pub fn finish_result(&self, result: &Result<()>) {
+        let Some(call_id) = self.call_id.as_ref() else {
+            return;
+        };
         let payload = serde_json::json!({
             "schema": LOG_SCHEMA,
             "phase": "finished",
-            "call_id": self.call_id,
+            "call_id": call_id,
             "timestamp": timestamp(),
             "result": match result {
                 Ok(()) => serde_json::json!({ "ok": true, "exit_code": 0 }),
@@ -86,25 +104,16 @@ impl CommandCallLog {
     }
 }
 
-fn log_path(argv: &[String]) -> Option<PathBuf> {
-    if let Ok(raw) = std::env::var("TENEX_EDGE_COMMAND_CALL_LOG") {
-        let trimmed = raw.trim();
-        if matches!(trimmed, "" | "0" | "false" | "off" | "none") {
-            return None;
-        }
-        return Some(PathBuf::from(trimmed));
+pub(crate) fn configured_log_path() -> Option<PathBuf> {
+    configured_log_path_from(std::env::var(COMMAND_CALL_LOG_ENV).ok().as_deref())
+}
+
+fn configured_log_path_from(raw: Option<&str>) -> Option<PathBuf> {
+    let trimmed = raw?.trim();
+    if matches!(trimmed, "" | "0" | "false" | "off" | "none") {
+        return None;
     }
-    let session_id = std::env::var("TENEX_EDGE_SESSION")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .or_else(|| flag_value(argv, "--session"));
-    let dir = match session_id.as_deref() {
-        Some(id) => crate::config::edge_home().join("sessions").join(id),
-        None => crate::config::edge_home()
-            .join("sessions")
-            .join("_unscoped"),
-    };
-    Some(dir.join("command-calls.jsonl"))
+    Some(PathBuf::from(trimmed))
 }
 
 fn append_json(path: Option<&PathBuf>, payload: &Value) {
@@ -252,4 +261,20 @@ fn is_sensitive_env(key: &str) -> bool {
         || key.contains("bearer")
         || key.contains("nsec")
         || (key.contains("auth") && key != "ssh_auth_sock")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn configured_log_path_is_opt_in() {
+        assert_eq!(configured_log_path_from(None), None);
+        assert_eq!(configured_log_path_from(Some("")), None);
+        assert_eq!(configured_log_path_from(Some("off")), None);
+        assert_eq!(
+            configured_log_path_from(Some("/tmp/command-calls.jsonl")),
+            Some(PathBuf::from("/tmp/command-calls.jsonl"))
+        );
+    }
 }

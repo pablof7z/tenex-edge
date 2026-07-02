@@ -180,22 +180,16 @@ fn chat_write_stdin_enqueues_live_project_chat_for_receiver() {
         )
         .unwrap();
     let body = "hello @chat-receiver from redirected stdin".to_string();
-    let out = run_cli_stdin_with_env(
-        &home,
-        &["chat", "write"],
-        &format!("{body}\n"),
-        &[("TENEX_EDGE_SESSION", "chat-sender-session")],
-    );
+    let out = run_cli_stdin(&home, &["chat", "write"], &format!("{body}\n"));
     assert!(
         out.status.success(),
         "chat write failed\nstdout: {}\nstderr: {}",
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
-    let out = run_cli_with_env(
+    let out = run_cli(
         &home,
         &["chat", "read", "--channel", &receiver_scope, "--limit", "1"],
-        &[("TENEX_EDGE_SESSION", "chat-sender-session")],
     );
     assert!(
         out.status.success(),
@@ -394,12 +388,7 @@ fn non_mention_chat_does_not_route_to_inbox() {
 
     // Write a plain channel message — no @mention in the body.
     let body = "no-mention ambient message for routing test";
-    let out = run_cli_stdin_with_env(
-        &home,
-        &["chat", "write"],
-        &format!("{body}\n"),
-        &[("TENEX_EDGE_SESSION", "ambient-sender-sess")],
-    );
+    let out = run_cli_stdin(&home, &["chat", "write"], &format!("{body}\n"));
     assert!(
         out.status.success(),
         "chat write failed: {}",

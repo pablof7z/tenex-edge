@@ -78,9 +78,8 @@ pub(super) fn hook_session(v: &Value) -> Option<String> {
 }
 
 pub(super) fn command_session(v: &Value) -> Option<String> {
-    v["env"]["TENEX_EDGE_SESSION"]
+    v["command"]["explicit_session"]
         .as_str()
-        .or_else(|| v["command"]["explicit_session"].as_str())
         .filter(|s| !s.is_empty())
         .map(str::to_string)
 }
