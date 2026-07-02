@@ -203,33 +203,7 @@ fn remove_skill_link(path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Mutex, MutexGuard};
-
-    static HOME_LOCK: Mutex<()> = Mutex::new(());
-
-    struct HomeGuard {
-        _lock: MutexGuard<'static, ()>,
-        previous: Option<String>,
-    }
-
-    impl HomeGuard {
-        fn set(path: &Path) -> Self {
-            let _lock = HOME_LOCK.lock().expect("home env lock");
-            let previous = std::env::var("HOME").ok();
-            // SAFETY: serialized by HOME_LOCK; restored on drop.
-            unsafe { std::env::set_var("HOME", path) };
-            Self { _lock, previous }
-        }
-    }
-
-    impl Drop for HomeGuard {
-        fn drop(&mut self) {
-            match &self.previous {
-                Some(home) => unsafe { std::env::set_var("HOME", home) },
-                None => unsafe { std::env::remove_var("HOME") },
-            }
-        }
-    }
+    use crate::test_env::EnvGuard;
 
     fn opts(dry_run: bool, uninstall: bool) -> InstallOpts {
         InstallOpts {
@@ -244,7 +218,7 @@ mod tests {
     #[test]
     fn install_symlinks_agents_skill_to_repo_source() {
         let temp = tempfile::tempdir().unwrap();
-        let _home = HomeGuard::set(temp.path());
+        let _home = EnvGuard::set("HOME", temp.path());
         let source = skill_source_dir().unwrap();
 
         install(&opts(false, false)).unwrap();
@@ -258,7 +232,7 @@ mod tests {
     fn install_symlinks_claude_skill_when_claude_dir_exists() {
         let temp = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(temp.path().join(".claude")).unwrap();
-        let _home = HomeGuard::set(temp.path());
+        let _home = EnvGuard::set("HOME", temp.path());
         let source = skill_source_dir().unwrap();
 
         install(&opts(false, false)).unwrap();
@@ -271,7 +245,7 @@ mod tests {
     #[test]
     fn uninstall_removes_symlink_only() {
         let temp = tempfile::tempdir().unwrap();
-        let _home = HomeGuard::set(temp.path());
+        let _home = EnvGuard::set("HOME", temp.path());
         let source = skill_source_dir().unwrap();
 
         install(&opts(false, false)).unwrap();
@@ -293,7 +267,7 @@ mod tests {
         #[cfg(unix)]
         std::os::unix::fs::symlink(&stale, &link).unwrap();
 
-        let _home = HomeGuard::set(temp.path());
+        let _home = EnvGuard::set("HOME", temp.path());
         let source = skill_source_dir().unwrap();
         install(&opts(false, false)).unwrap();
 
@@ -309,7 +283,7 @@ mod tests {
         std::fs::create_dir_all(&link).unwrap();
         std::fs::write(link.join("SKILL.md"), "name: tenex-edge\nold").unwrap();
 
-        let _home = HomeGuard::set(temp.path());
+        let _home = EnvGuard::set("HOME", temp.path());
         let source = skill_source_dir().unwrap();
         install(&opts(false, false)).unwrap();
 

@@ -53,7 +53,7 @@ fn parse_labels_bare_line_is_title() {
 /// live in one test: `TENEX_EDGE_DISTILL_CMD` is process-global.
 #[tokio::test]
 async fn distill_session_via_command() {
-    std::env::set_var(
+    let mut env = crate::test_env::EnvGuard::set(
         "TENEX_EDGE_DISTILL_CMD",
         "cat >/dev/null; printf 'TITLE: Fix GitHub issue 1\\nNOW: reading the issue tracker\\n'",
     );
@@ -63,7 +63,7 @@ async fn distill_session_via_command() {
     assert_eq!(got.title, "Fix GitHub issue 1");
     assert_eq!(got.activity, "reading the issue tracker");
 
-    std::env::set_var(
+    env.set_var(
         "TENEX_EDGE_DISTILL_CMD",
         "sed -n 's/^CURRENT TITLE: /TITLE: /p' | head -n1",
     );
@@ -73,7 +73,6 @@ async fn distill_session_via_command() {
         "test-session",
     )
     .await;
-    std::env::remove_var("TENEX_EDGE_DISTILL_CMD");
     assert!(err.is_none());
     let got = got.unwrap();
     assert_eq!(got.title, "refactoring the auth flow");

@@ -265,21 +265,11 @@ fn basename(p: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_env::EnvGuard;
 
-    // All resolve/project_root tests need to control TENEX_EDGE_HOME so the
-    // projects.json map lives in a tempdir. The env var is process-global, so
-    // the tests must run serially. This guard enforces that.
-    static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    struct Guard<'a>(#[allow(dead_code)] std::sync::MutexGuard<'a, ()>);
-    fn lock() -> Guard<'static> {
-        Guard(TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner()))
-    }
-
-    fn isolated_home() -> (Guard<'static>, tempfile::TempDir) {
-        let g = lock();
+    fn isolated_home() -> (EnvGuard, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
-        std::env::set_var("TENEX_EDGE_HOME", dir.path());
+        let g = EnvGuard::set("TENEX_EDGE_HOME", dir.path());
         (g, dir)
     }
 

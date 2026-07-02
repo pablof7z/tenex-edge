@@ -31,3 +31,6 @@ pub mod state;
 pub mod tmux;
 pub mod transcript;
 pub mod transport;
+
+#[cfg(test)]
+pub(crate) mod test_env;
