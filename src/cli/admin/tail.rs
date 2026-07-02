@@ -1,182 +1,6 @@
-#![allow(dead_code)]
-
 use super::*;
-use std::time::Duration;
 
-// ── tail ─────────────────────────────────────────────────────────────────────
-
-/// Options for the `tail` command.
-pub struct TailOpts {
-    pub project: Option<String>,
-    pub agent: Option<String>,
-    pub host: Option<String>,
-    pub since: Option<String>,
-    pub backfill: Option<u64>,
-    pub only: Option<String>,
-    pub exclude: Option<String>,
-    pub include: Option<String>,
-    pub all: bool,
-    pub compact: bool,
-    pub relative: bool,
-    pub no_emoji: bool,
-    pub no_color: bool,
-    pub json: bool,
-    pub no_follow: bool,
-    pub live: bool,
-}
-
-pub async fn tail(opts: TailOpts) -> Result<()> {
-    if opts.live {
-        eprintln!(
-            "tenex-edge tail --live: the full-screen TUI dashboard is not yet implemented. \
-             Use bare `tenex-edge tail` for the live scrolling feed."
-        );
-        return Ok(());
-    }
-
-    // Resolve color + emoji settings: explicit flags override env/TTY.
-    let use_color =
-        !opts.no_color && std::env::var("NO_COLOR").is_err() && std::io::stdout().is_terminal();
-    let use_emoji = !opts.no_emoji;
-
-    // Parse --since into a unix timestamp.
-    let since_ts: u64 = opts.since.as_deref().map(parse_since).unwrap_or(0);
-
-    let scope_label = opts.project.as_deref().unwrap_or("*");
-    if !opts.json {
-        eprintln!(
-            "{} tailing project {} … (Ctrl-C to stop)",
-            if use_color {
-                "tenex-edge".bold().to_string()
-            } else {
-                "tenex-edge".to_string()
-            },
-            if use_color {
-                scope_label.cyan().to_string()
-            } else {
-                scope_label.to_string()
-            },
-        );
-    }
-
-    // Build the category filter set.
-    let cats_only: Option<std::collections::HashSet<String>> = opts
-        .only
-        .as_deref()
-        .map(|s| s.split(',').map(|c| c.trim().to_lowercase()).collect());
-    let cats_exclude: std::collections::HashSet<String> = opts
-        .exclude
-        .as_deref()
-        .map(|s| s.split(',').map(|c| c.trim().to_lowercase()).collect())
-        .unwrap_or_default();
-    let cats_include: std::collections::HashSet<String> = opts
-        .include
-        .as_deref()
-        .map(|s| s.split(',').map(|c| c.trim().to_lowercase()).collect())
-        .unwrap_or_default();
-
-    // Minimum tier: default hides tier 0 (profile); --all includes all; --v same.
-    let min_tier: u8 = if opts.all { 0 } else { 1 };
-
-    let params = serde_json::json!({
-        "project": opts.project,
-        "backfill": opts.backfill.unwrap_or(20),
-        "since": since_ts,
-    });
-
-    let mut client = crate::daemon::client::Client::connect_or_spawn().await?;
-
-    let agent_filter = opts.agent.clone();
-    let host_filter = opts.host.clone();
-    let is_json = opts.json;
-    let no_follow = opts.no_follow;
-    let compact = opts.compact;
-    let relative = opts.relative;
-
-    let stream = client.stream("tail", params, move |item| {
-        // Deserialize TailEvent.
-        let ev: crate::daemon::tail_event::TailEvent = match serde_json::from_value(item.clone()) {
-            Ok(e) => e,
-            Err(_) => {
-                // Fallback: if we get an old {line} format, print it.
-                if let Some(line) = item.get("line").and_then(|l| l.as_str()) {
-                    println!("{line}");
-                }
-                return;
-            }
-        };
-
-        // Apply agent/host filters.
-        if let Some(ref ag) = agent_filter {
-            let ev_agent = match &ev {
-                crate::daemon::tail_event::TailEvent::Msg { from, .. } => from.as_str(),
-                crate::daemon::tail_event::TailEvent::Turn { agent, .. } => agent.as_str(),
-                crate::daemon::tail_event::TailEvent::Status { agent, .. } => agent.as_str(),
-                crate::daemon::tail_event::TailEvent::Join { agent, .. } => agent.as_str(),
-                crate::daemon::tail_event::TailEvent::Leave { agent, .. } => agent.as_str(),
-                crate::daemon::tail_event::TailEvent::Sess { agent, .. } => agent.as_str(),
-                crate::daemon::tail_event::TailEvent::Profile { agent, .. } => agent.as_str(),
-                _ => "",
-            };
-            if !ev_agent.is_empty() && ev_agent != ag.as_str() {
-                return;
-            }
-        }
-        if let Some(ref h) = host_filter {
-            let ev_host = match &ev {
-                crate::daemon::tail_event::TailEvent::Join { host, .. } => host.as_str(),
-                crate::daemon::tail_event::TailEvent::Leave { host, .. } => host.as_str(),
-                crate::daemon::tail_event::TailEvent::Profile { host, .. } => host.as_str(),
-                _ => "",
-            };
-            if !ev_host.is_empty() && ev_host != h.as_str() {
-                return;
-            }
-        }
-
-        // Tier filter.
-        if ev.tier() < min_tier && !cats_include.contains(ev.category()) {
-            return;
-        }
-
-        // Category filters.
-        let cat = ev.category();
-        if let Some(ref only) = cats_only {
-            if !only.contains(cat) {
-                return;
-            }
-        }
-        if cats_exclude.contains(cat) && !cats_include.contains(cat) {
-            return;
-        }
-
-        // Render.
-        if is_json {
-            if let Ok(s) = serde_json::to_string(&ev) {
-                println!("{s}");
-            }
-        } else {
-            let line = render_tail_event(&ev, use_color, use_emoji, relative, compact);
-            println!("{line}");
-        }
-    });
-
-    if no_follow {
-        // For no-follow: run with a short timeout to get just the backfill.
-        // The daemon will keep streaming; we disconnect after receiving the
-        // initial batch. Since we can't easily detect "backfill done", we
-        // use a small sleep approach: connect, get backfill, disconnect.
-        tokio::select! {
-            r = stream => r,
-            _ = tokio::time::sleep(Duration::from_millis(500)) => Ok(()),
-        }
-    } else {
-        tokio::select! {
-            _ = tokio::signal::ctrl_c() => Ok(()),
-            r = stream => r,
-        }
-    }
-}
+// ── tail rendering helpers ───────────────────────────────────────────────────
 
 /// Parse a --since value into a unix timestamp.
 /// Accepts: unix seconds ("1700000000"), or durations ("1h", "30m", "2d").
@@ -205,6 +29,7 @@ pub fn parse_since(s: &str) -> u64 {
 ///
 /// `use_color` and `use_emoji` are passed explicitly so this fn is testable
 /// without side-effects from TTY detection or NO_COLOR.
+#[cfg(test)]
 pub fn render_tail_event(
     ev: &crate::daemon::tail_event::TailEvent,
     use_color: bool,
@@ -457,6 +282,7 @@ pub fn render_tail_event(
     }
 }
 
+#[cfg(test)]
 fn fmt_duration(secs: u64) -> String {
     if secs < 60 {
         format!("{secs}s")
