@@ -1,30 +1,6 @@
 use super::resolution::work_root_for;
 use super::*;
 
-/// Add one pubkey as a channel member without disturbing existing rows. Reads the
-/// current member set, appends, and re-materializes via `replace_channel_members`
-/// (which preserves admins and won't demote an existing admin).
-pub(in crate::daemon::server) fn add_channel_member(
-    state: &Arc<DaemonState>,
-    channel: &str,
-    pubkey: &str,
-) {
-    state.with_store(|s| {
-        let mut members: Vec<String> = s
-            .list_channel_members(channel)
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|m| m.role == "member")
-            .map(|m| m.pubkey)
-            .collect();
-        if !members.iter().any(|p| p == pubkey) {
-            members.push(pubkey.to_string());
-        }
-        s.replace_channel_members(channel, &members, now_secs())
-            .ok();
-    });
-}
-
 /// React to a subgroup add-agents orchestration event: authorize the signer,
 /// provision the agents addressed to THIS backend, and either spawn fresh sessions
 /// or resume exact prior sessions into the target channel.
@@ -254,23 +230,11 @@ async fn spawn_target(
     });
     let _ = state.provider.publish(&profile, &id.keys).await;
 
-    let mut confirmed = false;
-    for attempt in 0..12u32 {
-        let outcome = state
-            .provider
-            .nip29_add_member_outcome(&op.child_h, &agent_pk)
-            .await;
-        let (_, _, members) = state.provider.fetch_group_state(&op.child_h).await;
-        if members.contains(&agent_pk) || (attempt > 0 && outcome.is_applied()) {
-            confirmed = true;
-            break;
-        }
-        if outcome.is_rejected() {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(900)).await;
-    }
-    if !confirmed {
+    let confirmed = state
+        .provider
+        .grant_member_confirmed(&op.child_h, &agent_pk)
+        .await;
+    if !confirmed.is_confirmed() {
         tracing::warn!(
             slug = %slug,
             child = %op.child_h,
@@ -278,7 +242,6 @@ async fn spawn_target(
         );
         return false;
     }
-    add_channel_member(state, &op.child_h, &agent_pk);
 
     let work_root = state.with_store(|s| work_root_for(s, &op.child_h));
     match crate::tmux::spawn_agent(

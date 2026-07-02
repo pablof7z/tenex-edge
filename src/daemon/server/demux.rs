@@ -11,7 +11,6 @@
 //! module calls them (the accept-loop bootstrap and the channels_create local
 //! fast-path); everything else is private to this module.
 
-use super::orchestration_handler::add_channel_member;
 use super::resolution::work_root_for;
 use super::*;
 
@@ -232,15 +231,16 @@ async fn handle_offline_agent_mention(state: &Arc<DaemonState>, mentioned_pk: &s
                 tracing::debug!(agent = %agent_slug, project, "base agent not a member of channel — skipping spawn");
                 return;
             }
-            // Mention-driven ordinal (issue #47): the mgmt key provisions this
-            // ordinal's pubkey into the channel (kind:9000) before spawning, so a
-            // mention to `smithN` in a room it has never joined wakes it.
             tracing::info!(agent = %agent_slug, ordinal, project, "provisioning ordinal pubkey into channel via mgmt key");
-            if !state.provider.nip29_add_member(project, mentioned_pk).await {
-                tracing::warn!(agent = %agent_slug, ordinal, project, "mgmt-key add_member failed — skipping spawn");
+            if !state
+                .provider
+                .grant_member_confirmed(project, mentioned_pk)
+                .await
+                .is_confirmed()
+            {
+                tracing::warn!(agent = %agent_slug, ordinal, project, "mgmt-key add_member was not confirmed — skipping spawn");
                 return;
             }
-            add_channel_member(state, project, mentioned_pk);
         }
     }
 

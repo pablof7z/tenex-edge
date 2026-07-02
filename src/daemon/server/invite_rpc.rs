@@ -1,6 +1,5 @@
 use super::resolution::work_root_for;
 use super::*;
-use std::time::Duration;
 
 mod wait;
 use wait::{
@@ -337,20 +336,12 @@ async fn ensure_backend_admin(
     if matches!(gate, crate::fabric::nip29::readiness::ChannelGate::Degraded) {
         anyhow::bail!("channel {channel_h} is not ready for remote invite");
     }
-    for _ in 0..8 {
-        let roles = state.provider.fetch_group_roles(channel_h).await;
-        if roles.get(backend_pubkey).map(String::as_str) == Some("admin") {
-            state.with_store(|s| {
-                s.upsert_channel_member(channel_h, backend_pubkey, "admin", now_secs())
-                    .ok();
-            });
-            return Ok(());
-        }
-        state
-            .provider
-            .nip29_add_admin(channel_h, backend_pubkey)
-            .await;
-        tokio::time::sleep(Duration::from_millis(500)).await;
+    let confirmed = state
+        .provider
+        .grant_admin_confirmed(channel_h, backend_pubkey)
+        .await;
+    if confirmed.is_confirmed() {
+        return Ok(());
     }
     anyhow::bail!(
         "backend {} was not confirmed as an admin of channel {channel_h}",

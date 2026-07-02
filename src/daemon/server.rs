@@ -248,7 +248,7 @@ use chat_read_tail::{handle_chat_read, handle_tail};
 use chat_write::rpc_chat_write;
 use diagnostics::{
     log_nip29_role_decision, refresh_project_members_cache, rpc_debug_outbox, rpc_doctor,
-    rpc_local_backend, wait_for_project_member_cache,
+    rpc_local_backend,
 };
 use engine_lifecycle::{cancel_session, engine_params_for, reconcile_sessions, spawn_session};
 pub use lifecycle::run;

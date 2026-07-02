@@ -127,8 +127,6 @@ pub async fn rpc_project_add(
     state: &Arc<DaemonState>,
     params: &serde_json::Value,
 ) -> Result<serde_json::Value> {
-    use nostr_sdk::prelude::Keys;
-
     #[derive(serde::Deserialize)]
     struct P {
         project: String,
@@ -136,32 +134,30 @@ pub async fn rpc_project_add(
     }
     let p: P = serde_json::from_value(params.clone()).context("project_add params")?;
 
-    let nsec = state
-        .cfg
-        .management_nsec()
-        .ok_or_else(|| anyhow::anyhow!("no signing key (tenexPrivateKey) set"))?;
-    let user_keys = Keys::parse(nsec).context("parsing signing key")?;
-
     let pubkey_hex = resolve_project_member_pubkey_hex(&p.pubkey).await?;
     log_nip29_role_decision(
         &p.project,
         &pubkey_hex,
         "member",
-        "rpc_project_add manual add uses group_put_user bare p tag",
+        "rpc_project_add manual add via confirmed provider mutation",
     );
 
-    let builder = crate::fabric::nip29::lifecycle::group_put_user(&p.project, &pubkey_hex)?;
-    state
-        .transport
-        .publish_signed_checked(builder, &user_keys)
-        .await?;
-
-    let confirmed = wait_for_project_member_cache(state, &p.project, &pubkey_hex, true).await;
+    let outcome = state
+        .provider
+        .grant_member_confirmed(&p.project, &pubkey_hex)
+        .await;
+    if outcome.is_rejected() {
+        anyhow::bail!(
+            "project_add rejected for {} in {}",
+            crate::util::pubkey_short(&pubkey_hex),
+            p.project
+        );
+    }
 
     Ok(serde_json::json!({
         "project": p.project,
         "pubkey": pubkey_hex,
-        "confirmed": confirmed,
+        "confirmed": outcome.is_confirmed(),
     }))
 }
 
@@ -173,8 +169,6 @@ pub async fn rpc_project_remove(
     state: &Arc<DaemonState>,
     params: &serde_json::Value,
 ) -> Result<serde_json::Value> {
-    use nostr_sdk::prelude::Keys;
-
     #[derive(serde::Deserialize)]
     struct P {
         project: String,
@@ -182,25 +176,23 @@ pub async fn rpc_project_remove(
     }
     let p: P = serde_json::from_value(params.clone()).context("project_remove params")?;
 
-    let nsec = state
-        .cfg
-        .management_nsec()
-        .ok_or_else(|| anyhow::anyhow!("no signing key (tenexPrivateKey) set"))?;
-    let user_keys = Keys::parse(nsec).context("parsing signing key")?;
-
     let pubkey_hex = resolve_pubkey_hex(&p.pubkey).await?;
 
-    let builder = crate::fabric::nip29::lifecycle::group_remove_user(&p.project, &pubkey_hex)?;
-    state
-        .transport
-        .publish_signed_checked(builder, &user_keys)
-        .await?;
-
-    let confirmed = wait_for_project_member_cache(state, &p.project, &pubkey_hex, false).await;
+    let outcome = state
+        .provider
+        .remove_member_confirmed(&p.project, &pubkey_hex)
+        .await;
+    if outcome.is_rejected() {
+        anyhow::bail!(
+            "project_remove rejected for {} in {}",
+            crate::util::pubkey_short(&pubkey_hex),
+            p.project
+        );
+    }
 
     Ok(serde_json::json!({
         "project": p.project,
         "pubkey": pubkey_hex,
-        "confirmed": confirmed,
+        "confirmed": outcome.is_confirmed(),
     }))
 }

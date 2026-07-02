@@ -97,13 +97,6 @@ impl Nip29Provider {
         );
     }
 
-    /// Admin-add `pubkey_hex` to `project` as a plain member (not admin).
-    pub async fn nip29_add_member(&self, project: &str, pubkey_hex: &str) -> bool {
-        self.nip29_add_member_outcome(project, pubkey_hex)
-            .await
-            .is_applied()
-    }
-
     pub(crate) async fn nip29_add_member_outcome(
         &self,
         project: &str,
@@ -151,13 +144,6 @@ impl Nip29Provider {
                 false
             }
         }
-    }
-
-    /// Admin-add `pubkey_hex` to `project` with the `admin` role.
-    pub async fn nip29_add_admin(&self, project: &str, pubkey_hex: &str) -> bool {
-        self.nip29_add_admin_outcome(project, pubkey_hex)
-            .await
-            .is_applied()
     }
 
     pub(crate) async fn nip29_add_admin_outcome(
@@ -230,10 +216,13 @@ impl Nip29Provider {
         }
     }
 
-    /// Admin-remove `pubkey_hex` from `project`.
-    pub async fn nip29_remove_member(&self, project: &str, pubkey_hex: &str) -> bool {
+    pub(crate) async fn nip29_remove_member_outcome(
+        &self,
+        project: &str,
+        pubkey_hex: &str,
+    ) -> GroupPublishOutcome {
         let Some(mgmt_keys) = self.parse_management_keys() else {
-            return false;
+            return GroupPublishOutcome::Rejected;
         };
         eprintln!(
             "[daemon] nip29 remove-member h={project} p={}",
@@ -241,7 +230,7 @@ impl Nip29Provider {
         );
         match crate::fabric::nip29::lifecycle::group_remove_user(project, pubkey_hex) {
             Ok(b) => {
-                self.publish_group_management(b, &mgmt_keys, "9001 remove-user (session)")
+                self.publish_group_management_outcome(b, &mgmt_keys, "9001 remove-user (session)")
                     .await
             }
             Err(e) => {
@@ -251,7 +240,7 @@ impl Nip29Provider {
                     error = %format!("{e:#}"),
                     "nip29_remove_member: group_remove_user build failed — failing closed"
                 );
-                false
+                GroupPublishOutcome::Rejected
             }
         }
     }

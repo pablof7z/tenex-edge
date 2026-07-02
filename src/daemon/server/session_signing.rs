@@ -98,9 +98,12 @@ pub(in crate::daemon::server) async fn admit_ordinal_signer(
     project: &str,
     session_pubkey: &str,
 ) -> Result<()> {
-    let add = state.provider.nip29_add_member(project, session_pubkey);
+    let add = state
+        .provider
+        .grant_member_confirmed(project, session_pubkey);
     let accepted = tokio::time::timeout(std::time::Duration::from_secs(8), add)
         .await
+        .map(|outcome| outcome.is_confirmed())
         .unwrap_or(false);
     if !accepted {
         anyhow::bail!(
