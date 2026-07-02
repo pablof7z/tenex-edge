@@ -377,7 +377,7 @@ pub(in crate::daemon::server) async fn rpc_session_start(
                 ),
             );
         }
-        if let Err(e) = admit_transient_signer(state, &project, member_pubkey).await {
+        if let Err(e) = admit_ordinal_signer(state, &project, member_pubkey).await {
             abort_session_start(state, &session_id);
             return Err(e);
         }

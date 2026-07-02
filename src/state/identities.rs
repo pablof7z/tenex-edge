@@ -177,3 +177,7 @@ impl Store {
             .optional()?)
     }
 }
+
+#[cfg(test)]
+#[path = "identities/tests.rs"]
+mod tests;

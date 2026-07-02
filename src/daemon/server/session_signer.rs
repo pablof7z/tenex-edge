@@ -4,21 +4,20 @@ use nostr_sdk::prelude::Keys;
 use std::collections::{HashMap, HashSet};
 
 /// A reserved ordinal slot (issue #47). At most one LIVE session per
-/// `(base agent pubkey, room h, ordinal)`. Replaces the old binary
+/// `(base agent pubkey, ordinal)`. Replaces the old binary
 /// `(agent, project)` durable-vs-transient slot: instead of "first session gets
 /// the durable key, everyone else gets a per-session transient key", each
-/// concurrent session in a room takes the next free DURABLE ordinal identity
-/// (`smith`, `smith1`, `smith2`, …), reused across rooms.
+/// concurrent live session takes the next free DURABLE ordinal identity
+/// (`smith`, `smith1`, `smith2`, …), globally for that base agent.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(super) struct OrdinalSlot {
     base_pubkey: String,
-    h: String,
     ordinal: u32,
 }
 
 /// In-memory reservation map: slot → owning session id. Tracks which ordinals
-/// are live in each room so the allocator can pick the lowest free one and two
-/// concurrent spawns can't both claim the same ordinal.
+/// are live for each base agent so the allocator can pick the lowest free one
+/// and two concurrent spawns can't both claim the same ordinal.
 pub(super) type SignerReservations = HashMap<OrdinalSlot, String>;
 
 pub(super) struct SignerRequest<'a> {
@@ -26,16 +25,17 @@ pub(super) struct SignerRequest<'a> {
     /// Durable base agent pubkey (the ordinal-0 identity).
     pub base_pubkey: &'a str,
     pub agent_slug: &'a str,
-    /// The NIP-29 group id the session operates in (`route_scope`). Ordinals are
-    /// allocated per room; the same ordinal pubkey is reused across rooms.
+    /// The NIP-29 group id the session operates in (`route_scope`). This is used
+    /// for membership admission and logging; ordinal identity itself is global.
     pub h: &'a str,
     /// Base agent keys — the HKDF derivation root for ordinals > 0.
     pub base_keys: &'a Keys,
     /// Honor this exact ordinal when free (resume of a known route, or a
     /// mention-driven spawn naming a specific `smithN`). `None` → allocate the
-    /// lowest free ordinal in the room (birth).
+    /// lowest free global ordinal (birth).
     pub preferred_ordinal: Option<u32>,
-    /// Pubkeys currently present in the target channel's active roster.
+    /// Pubkeys currently unavailable for reuse: live identities for the base
+    /// agent plus pubkeys present in the target channel's active roster.
     pub occupied_pubkeys: Option<&'a HashSet<String>>,
     /// Pubkey this same session already owns, if this is a reassert/revive.
     pub owned_pubkey: Option<&'a str>,
@@ -82,10 +82,9 @@ impl SelectedSigner {
     }
 }
 
-fn slot(base_pubkey: &str, h: &str, ordinal: u32) -> OrdinalSlot {
+fn slot(base_pubkey: &str, ordinal: u32) -> OrdinalSlot {
     OrdinalSlot {
         base_pubkey: base_pubkey.to_string(),
-        h: h.to_string(),
         ordinal,
     }
 }
@@ -124,7 +123,7 @@ fn finish(
 }
 
 fn is_taken(r: &SignerReservations, req: &SignerRequest<'_>, ordinal: u32) -> bool {
-    if r.get(&slot(req.base_pubkey, req.h, ordinal))
+    if r.get(&slot(req.base_pubkey, ordinal))
         .map(String::as_str)
         .is_some_and(|owner| owner != req.session_id)
     {
@@ -136,8 +135,8 @@ fn is_taken(r: &SignerReservations, req: &SignerRequest<'_>, ordinal: u32) -> bo
         && req.owned_pubkey != Some(signer.pubkey.as_str())
 }
 
-/// Lowest ordinal not currently reserved by a live session or visible in the
-/// channel's active roster.
+/// Lowest ordinal not currently reserved by a live session or otherwise visible
+/// as occupied.
 fn lowest_free(r: &SignerReservations, req: &SignerRequest<'_>) -> u32 {
     let mut n = 0u32;
     while is_taken(r, req, n) {
@@ -146,11 +145,11 @@ fn lowest_free(r: &SignerReservations, req: &SignerRequest<'_>) -> u32 {
     n
 }
 
-/// Select and reserve an ordinal identity for a session in room `h`.
+/// Select and reserve a global ordinal identity for a session.
 ///
-/// - Reassert: if this session already owns a slot in this room, keep its ordinal.
+/// - Reassert: if this session already owns a slot, keep its ordinal.
 /// - `preferred_ordinal` (resume/mention): honor it when free.
-/// - Otherwise allocate the lowest free ordinal (birth).
+/// - Otherwise allocate the lowest free global ordinal (birth).
 ///
 /// Race-safe under the single-writer daemon: the caller holds the reservations +
 /// session_keys mutexes across this call, so two concurrent spawns serialize and
@@ -160,10 +159,9 @@ pub(super) fn select_and_reserve(
     session_keys: &mut HashMap<String, Keys>,
     req: SignerRequest<'_>,
 ) -> Result<SelectedSigner> {
-    // Reassert: this session already holds an ordinal in this room.
+    // Reassert: this session already holds an ordinal.
     if let Some(existing) = reservations.iter().find_map(|(s, owner)| {
-        (s.base_pubkey == req.base_pubkey && s.h == req.h && owner.as_str() == req.session_id)
-            .then_some(s.ordinal)
+        (s.base_pubkey == req.base_pubkey && owner.as_str() == req.session_id).then_some(s.ordinal)
     }) {
         tracing::debug!(
             session = %req.session_id,
@@ -192,10 +190,7 @@ pub(super) fn select_and_reserve(
         }
         None => lowest_free(reservations, &req),
     };
-    reservations.insert(
-        slot(req.base_pubkey, req.h, ordinal),
-        req.session_id.to_string(),
-    );
+    reservations.insert(slot(req.base_pubkey, ordinal), req.session_id.to_string());
     let signer = finish(session_keys, &req, ordinal);
     tracing::info!(
         session = %req.session_id,
@@ -215,14 +210,14 @@ pub(super) fn release(
     session_keys: &mut HashMap<String, Keys>,
     session_id: &str,
 ) -> Option<Keys> {
-    let freed: Vec<(String, u32)> = reservations
+    let freed: Vec<u32> = reservations
         .iter()
         .filter(|(_, owner)| owner.as_str() == session_id)
-        .map(|(s, _)| (s.h.clone(), s.ordinal))
+        .map(|(s, _)| s.ordinal)
         .collect();
     reservations.retain(|_, owner| owner != session_id);
-    for (h, ordinal) in freed {
-        tracing::info!(session = %session_id, h = %h, ordinal, "ordinal slot released");
+    for ordinal in freed {
+        tracing::info!(session = %session_id, ordinal, "ordinal slot released");
     }
     session_keys.remove(session_id)
 }
@@ -305,20 +300,18 @@ mod tests {
     }
 
     #[test]
-    fn same_ordinal_pubkey_reused_in_different_room() {
-        // smith1 in #a and smith1 in #b are the SAME pubkey (room-independent).
+    fn different_rooms_allocate_distinct_global_ordinals() {
+        // A live smith in #a and another live smith in #b must not share a
+        // pubkey. Channels are membership scopes, not identity scopes.
         let bk = base_keys();
         let bp = bk.public_key().to_hex();
         let mut r = SignerReservations::new();
         let mut sk = HashMap::new();
-        // Fill ordinal 0 in both rooms, then ordinal 1 in both rooms.
-        select_and_reserve(&mut r, &mut sk, request("a0", "#a", &bp, &bk, None)).unwrap();
-        select_and_reserve(&mut r, &mut sk, request("b0", "#b", &bp, &bk, None)).unwrap();
-        let a1 = select_and_reserve(&mut r, &mut sk, request("a1", "#a", &bp, &bk, None)).unwrap();
-        let b1 = select_and_reserve(&mut r, &mut sk, request("b1", "#b", &bp, &bk, None)).unwrap();
-        assert_eq!(a1.ordinal, 1);
-        assert_eq!(b1.ordinal, 1);
-        assert_eq!(a1.pubkey, b1.pubkey);
+        let a = select_and_reserve(&mut r, &mut sk, request("a", "#a", &bp, &bk, None)).unwrap();
+        let b = select_and_reserve(&mut r, &mut sk, request("b", "#b", &bp, &bk, None)).unwrap();
+        assert_eq!(a.ordinal, 0);
+        assert_eq!(b.ordinal, 1);
+        assert_ne!(a.pubkey, b.pubkey);
     }
 
     #[test]

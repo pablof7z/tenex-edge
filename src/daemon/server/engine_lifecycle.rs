@@ -393,7 +393,7 @@ pub(in crate::daemon::server) async fn reconcile_sessions(state: &Arc<DaemonStat
             }
         });
         if let Some(member_pubkey) = signer.member_pubkey_to_admit() {
-            if let Err(e) = admit_transient_signer(state, &snap.channel_h, member_pubkey).await {
+            if let Err(e) = admit_ordinal_signer(state, &snap.channel_h, member_pubkey).await {
                 tracing::warn!(session = %session_id, error = %e, "ordinal signer admission failed during reconcile; skipping session");
                 state.release_session_signer(&session_id);
                 state.with_store(|s| {
