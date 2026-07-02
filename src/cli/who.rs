@@ -1,6 +1,9 @@
 use super::*;
 
+mod args;
 mod render;
+
+pub(super) use args::{who, WhoArgs};
 
 // Public re-exports for the crate and cli module
 use crate::who_snapshot::WhoSnapshot;
@@ -20,7 +23,7 @@ fn who_value_via_daemon(project: &Option<String>, all_projects: bool) -> Result<
     crate::daemon::blocking::call("who", who_params(project, all_projects))
 }
 
-pub(super) fn who(project: Option<String>, all_projects: bool) -> Result<()> {
+fn who_once(project: Option<String>, all_projects: bool) -> Result<()> {
     let v = who_value_via_daemon(&project, all_projects)?;
     // Prefer the unified fabric view (same format as the hook injection). The
     // daemon includes it whenever a current channel resolves; `--all-projects`
@@ -34,7 +37,7 @@ pub(super) fn who(project: Option<String>, all_projects: bool) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn who_live(project: Option<String>, all_projects: bool) -> Result<()> {
+fn who_live(project: Option<String>, all_projects: bool) -> Result<()> {
     let refresh = Duration::from_millis(1000);
     let _terminal = render::LiveTerminal::enter()?;
     let mut next_draw = Instant::now();

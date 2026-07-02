@@ -4,6 +4,7 @@ use super::admin::{AgentAction, AgentsAction, ChannelsAction, ProjectAction};
 use super::debug::DebugAction;
 use super::messaging::ChatAction;
 use super::tmux_cli::LaunchArgs;
+use super::who::WhoArgs;
 
 #[derive(Parser)]
 #[command(
@@ -24,16 +25,7 @@ pub(super) enum Cmd {
     // turn_check / turn_end). There is no host-facing way — or need — to invoke
     // them by hand.
     /// List agents currently visible in the project/channel.
-    Who {
-        #[arg(long)]
-        project: Option<String>,
-        /// Show agents across all projects (overrides --project / cwd resolution).
-        #[arg(long)]
-        all_projects: bool,
-        /// Keep a full-screen live view open, refreshing automatically.
-        #[arg(long)]
-        live: bool,
-    },
+    Who(WhoArgs),
     /// Write or read NIP-29 project chat.
     Chat {
         #[command(subcommand)]

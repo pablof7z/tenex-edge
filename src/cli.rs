@@ -122,17 +122,7 @@ pub async fn run(cli: Cli) -> Result<()> {
             let body = messaging::resolve_send_message_body(message)?;
             messaging::publish(title, body, d, session).await
         }
-        Cmd::Who {
-            project,
-            all_projects,
-            live,
-        } => {
-            if live {
-                who::who_live(project, all_projects)
-            } else {
-                who::who(project, all_projects)
-            }
-        }
+        Cmd::Who(args) => who::who(args),
         Cmd::Chat { action } => messaging::chat(action).await,
         Cmd::Project { action } => admin::project(action).await,
         Cmd::Doctor => admin::doctor().await,
