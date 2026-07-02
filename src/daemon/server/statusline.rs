@@ -73,7 +73,7 @@ pub(in crate::daemon::server) fn rpc_statusline(
             _ => scope.clone(),
         };
         let pending_chat = s
-            .drain_pending_for_session(&rec.session_id)
+            .peek_pending_for_session(&rec.session_id)
             .unwrap_or_default();
         let recent_since = now.saturating_sub(STATUSLINE_RECENT_SECS);
         let recent_chat = s

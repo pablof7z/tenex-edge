@@ -237,7 +237,7 @@ mod tests {
             "ambient message must not wake inbox"
         );
         assert!(store
-            .drain_pending_for_session(&receiver_sid)
+            .peek_pending_for_session(&receiver_sid)
             .unwrap()
             .is_empty());
         assert!(store.has_event(&ambient.id.to_hex()).unwrap());
@@ -261,12 +261,12 @@ mod tests {
             &store,
         );
         assert!(outcome2.wake_mentions, "mention should wake inbox");
-        let receiver_rows = store.drain_pending_for_session(&receiver_sid).unwrap();
+        let receiver_rows = store.peek_pending_for_session(&receiver_sid).unwrap();
         assert_eq!(receiver_rows.len(), 1);
         assert_eq!(receiver_rows[0].body, "hey receiver, LGTM");
         assert!(
             store
-                .drain_pending_for_session(&sender_sid)
+                .peek_pending_for_session(&sender_sid)
                 .unwrap()
                 .is_empty(),
             "sender session should not receive its own chat line"

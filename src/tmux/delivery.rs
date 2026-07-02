@@ -165,10 +165,10 @@ async fn ring_doorbells_inner(state: &Arc<DaemonState>) -> Result<()> {
             .into_iter()
             .filter(|rec| {
                 !rec.working
-                    && match s.drain_pending_for_session(&rec.session_id) {
+                    && match s.peek_pending_for_session(&rec.session_id) {
                         Ok(pending) => !pending.is_empty(),
                         Err(e) => {
-                            tracing::error!(session_id = %rec.session_id, error = %e, "ring_doorbells: drain_pending_for_session failed — treating session as having no pending inbox");
+                            tracing::error!(session_id = %rec.session_id, error = %e, "ring_doorbells: peek_pending_for_session failed — treating session as having no pending inbox");
                             false
                         }
                     }

@@ -29,8 +29,9 @@ impl Store {
         Ok(self.conn.last_insert_rowid())
     }
 
-    /// The next batch of pending rows to publish, oldest-first, capped at `limit`.
-    pub fn drain_outbox(&self, limit: u32) -> Result<Vec<OutboxRow>> {
+    /// Read-only peek at the next pending rows to publish, oldest-first, capped
+    /// at `limit`. Callers mark rows published or failed after the relay result.
+    pub fn peek_outbox(&self, limit: u32) -> Result<Vec<OutboxRow>> {
         let mut stmt = self.conn.prepare(&format!(
             "SELECT {COLS} FROM outbox WHERE state='pending' ORDER BY local_id ASC LIMIT ?1"
         ))?;

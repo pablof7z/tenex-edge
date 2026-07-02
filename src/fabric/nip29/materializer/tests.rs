@@ -176,7 +176,7 @@ fn chat_routes_to_channel_sessions_and_skips_sender() {
         &ambient_chat
     ));
     assert!(store
-        .drain_pending_for_session(&receiver_sid)
+        .peek_pending_for_session(&receiver_sid)
         .unwrap()
         .is_empty());
 
@@ -200,11 +200,11 @@ fn chat_routes_to_channel_sessions_and_skips_sender() {
         &mention_chat
     ));
 
-    let pending = store.drain_pending_for_session(&receiver_sid).unwrap();
+    let pending = store.peek_pending_for_session(&receiver_sid).unwrap();
     assert_eq!(pending.len(), 1);
     assert_eq!(pending[0].body, "ship it");
     assert!(store
-        .drain_pending_for_session(&sender_sid)
+        .peek_pending_for_session(&sender_sid)
         .unwrap()
         .is_empty());
     assert!(store.has_event(&mention_event.id.to_hex()).unwrap());
@@ -245,13 +245,13 @@ fn mention_to_one_ordinal_does_not_route_to_sibling_ordinal() {
     assert!(Nip29Materializer::route_chat(&store, &event, &chat));
 
     assert_eq!(
-        store.drain_pending_for_session(&ord0_sid).unwrap().len(),
+        store.peek_pending_for_session(&ord0_sid).unwrap().len(),
         1,
         "the p-tagged ordinal must receive the mention"
     );
     assert!(
         store
-            .drain_pending_for_session(&ord1_sid)
+            .peek_pending_for_session(&ord1_sid)
             .unwrap()
             .is_empty(),
         "the sibling ordinal must NOT receive a mention addressed to ordinal 0"

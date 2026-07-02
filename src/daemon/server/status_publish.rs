@@ -122,10 +122,10 @@ pub(in crate::daemon::server) fn spawn_outbox_drainer(state: Arc<DaemonState>) {
     use nostr_sdk::prelude::{Event, JsonUtil};
     tokio::spawn(async move {
         loop {
-            // Drain the backlog while we keep making progress (so a startup burst
-            // clears fast); stop if a whole batch failed to avoid a tight spin.
+            // Publish the backlog while we keep making progress (so a startup
+            // burst clears fast); stop if a whole batch failed to avoid a tight spin.
             loop {
-                let items = state.with_store(|s| s.drain_outbox(32).unwrap_or_default());
+                let items = state.with_store(|s| s.peek_outbox(32).unwrap_or_default());
                 if items.is_empty() {
                     break;
                 }
