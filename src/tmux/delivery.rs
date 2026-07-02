@@ -92,6 +92,12 @@ async fn collect_pending_prompt(
                 error = %e,
                 "failed to re-enqueue claimed-but-unrendered inbox rows; mention may be lost"
             );
+            state.emit_delivery_failure(
+                &rec.channel_h,
+                &rec.agent_slug,
+                &rec.session_id,
+                format!("failed to re-enqueue claimed-but-unrendered inbox rows: {e:#}"),
+            );
         }
         return Ok(None);
     };
@@ -128,6 +134,12 @@ pub async fn inject_pending_messages_pub(
                 session_id = %rec.session_id,
                 error = %re,
                 "failed to roll back claimed inbox rows after paste failure; mention may be lost"
+            );
+            state.emit_delivery_failure(
+                &rec.channel_h,
+                &rec.agent_slug,
+                &rec.session_id,
+                format!("failed to roll back claimed inbox rows after paste failure: {re:#}"),
             );
         }
         return Err(e);
@@ -179,6 +191,14 @@ async fn ring_doorbells_inner(state: &Arc<DaemonState>) -> Result<()> {
                         Ok(pending) => !pending.is_empty(),
                         Err(e) => {
                             tracing::error!(session_id = %rec.session_id, error = %e, "ring_doorbells: peek_pending_for_session failed — treating session as having no pending inbox");
+                            state.emit_delivery_failure(
+                                &rec.channel_h,
+                                &rec.agent_slug,
+                                &rec.session_id,
+                                format!(
+                                    "failed to read pending inbox for doorbell scan: {e:#}"
+                                ),
+                            );
                             false
                         }
                     }
@@ -201,6 +221,12 @@ async fn ring_doorbells_inner(state: &Arc<DaemonState>) -> Result<()> {
                 .map(|a| a.external_id),
             Err(e) => {
                 tracing::error!(session_id = %sid, error = %e, "ring_doorbells: aliases_for_session failed — cannot resolve pane endpoint this tick");
+                state.emit_delivery_failure(
+                    &rec.channel_h,
+                    &rec.agent_slug,
+                    &sid,
+                    format!("failed to resolve tmux pane endpoint for doorbell scan: {e:#}"),
+                );
                 None
             }
         }) {
@@ -214,6 +240,12 @@ async fn ring_doorbells_inner(state: &Arc<DaemonState>) -> Result<()> {
             }
             if let Err(e) = state.with_store(|s| s.clear_tmux_pane(&sid)) {
                 tracing::error!(session_id = %sid, error = %e, "ring_doorbells: clear_tmux_pane failed — stale dead-pane endpoint retained");
+                state.emit_delivery_failure(
+                    &rec.channel_h,
+                    &rec.agent_slug,
+                    &sid,
+                    format!("failed to clear dead tmux pane endpoint {pane_id}: {e:#}"),
+                );
             }
             continue;
         }
@@ -230,6 +262,12 @@ async fn ring_doorbells_inner(state: &Arc<DaemonState>) -> Result<()> {
             }
             Ok(false) => {}
             Err(e) => {
+                state.emit_delivery_failure(
+                    &rec.channel_h,
+                    &rec.agent_slug,
+                    &sid,
+                    format!("pending message injection failed for pane {pane_id}: {e:#}"),
+                );
                 if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
                     eprintln!(
                         "[tmux] pending message inject failed for {sid} pane {pane_id}: {e:#}"

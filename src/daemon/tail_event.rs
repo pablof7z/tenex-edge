@@ -98,6 +98,23 @@ pub enum TailEvent {
 }
 
 impl TailEvent {
+    pub(crate) fn delivery_failure(
+        ts: u64,
+        project: &str,
+        agent: &str,
+        session: &str,
+        detail: impl Into<String>,
+    ) -> Self {
+        TailEvent::Sync {
+            ts,
+            project: project.to_string(),
+            from: "tenex-edge".to_string(),
+            to: agent.to_string(),
+            state: "failed".to_string(),
+            detail: Some(format!("session {session}: {}", detail.into())),
+        }
+    }
+
     /// Return the unix timestamp for this event.
     pub fn ts(&self) -> u64 {
         match self {
@@ -194,6 +211,29 @@ mod tests {
             rel_cwd: ".".into(),
         };
         assert_eq!(ev.category(), "join");
+    }
+
+    #[test]
+    fn delivery_failure_is_failed_sync_with_session_detail() {
+        let ev = TailEvent::delivery_failure(7, "chan", "codex", "sid-1", "pane vanished");
+        match ev {
+            TailEvent::Sync {
+                ts,
+                project,
+                from,
+                to,
+                state,
+                detail,
+            } => {
+                assert_eq!(ts, 7);
+                assert_eq!(project, "chan");
+                assert_eq!(from, "tenex-edge");
+                assert_eq!(to, "codex");
+                assert_eq!(state, "failed");
+                assert_eq!(detail.as_deref(), Some("session sid-1: pane vanished"));
+            }
+            _ => panic!("expected sync event"),
+        }
     }
 
     #[test]

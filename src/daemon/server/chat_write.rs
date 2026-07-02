@@ -117,13 +117,7 @@ pub(in crate::daemon::server) async fn rpc_chat_write(
             // store failure underneath, however, silently DROPS a real mention —
             // surface that loudly so DB errors aren't mistaken for unknown handles.
             Err(e) => {
-                if e.chain().any(|c| c.is::<rusqlite::Error>()) {
-                    tracing::warn!(
-                        token = %raw,
-                        error = %format!("{e:#}"),
-                        "chat_write: store error while resolving mention token — treating as no mention (mention may be lost)"
-                    );
-                }
+                handle_mention_resolution_error(&raw, e)?;
                 None
             }
         }
@@ -273,6 +267,13 @@ pub(in crate::daemon::server) async fn rpc_chat_write(
 
 fn long_message_requires_override(p: &ChatWriteParams) -> bool {
     !p.long_message && word_count(&p.message) > CHAT_RENDER_WORD_LIMIT
+}
+
+fn handle_mention_resolution_error(raw: &str, e: anyhow::Error) -> Result<()> {
+    if e.chain().any(|c| c.is::<rusqlite::Error>()) {
+        anyhow::bail!("failed to resolve mention @{raw}: {e:#}");
+    }
+    Ok(())
 }
 
 pub(in crate::daemon::server) struct ResolvedRecipient {
