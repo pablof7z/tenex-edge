@@ -1,7 +1,9 @@
 use super::render::{render_who_once, render_who_plain};
-use super::snapshot::{OtherProjectSummary, SpawnableRow, WhoRow, WhoSnapshot, WhoSource};
 use super::*;
 use crate::state::{Identity, RegisterSession, Status};
+use crate::who_snapshot::{
+    load_who_snapshot, OtherProjectSummary, SpawnableRow, WhoRow, WhoSnapshot, WhoSource,
+};
 
 fn strip_ansi(input: &str) -> String {
     let mut out = String::new();

@@ -32,5 +32,7 @@ pub mod tmux;
 pub mod transcript;
 pub mod transport;
 
+mod who_snapshot;
+
 #[cfg(test)]
 pub(crate) mod test_env;

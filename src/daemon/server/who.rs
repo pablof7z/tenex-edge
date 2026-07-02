@@ -64,8 +64,9 @@ pub(in crate::daemon::server) fn rpc_who(
     };
     let now = now_secs();
     let host = state.host.clone();
-    let snapshot = state
-        .with_store(|s| crate::cli::load_who_snapshot(s, current_project.as_deref(), now, &host))?;
+    let snapshot = state.with_store(|s| {
+        crate::who_snapshot::load_who_snapshot(s, current_project.as_deref(), now, &host)
+    })?;
     let mut out = serde_json::to_value(snapshot)?;
 
     // Attach the UNIFIED fabric view (same format as the hook injection — decision

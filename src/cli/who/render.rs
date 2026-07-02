@@ -1,5 +1,5 @@
-use super::snapshot::WhoRow;
 use super::*;
+use crate::who_snapshot::WhoRow;
 
 pub(super) fn render_who_once(snapshot: &WhoSnapshot) -> String {
     let mut out = String::new();

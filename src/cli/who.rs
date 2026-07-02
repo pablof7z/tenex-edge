@@ -2,11 +2,10 @@ use super::*;
 
 mod fabric_context;
 mod render;
-mod snapshot;
 
 // Public re-exports for the crate and cli module
+use crate::who_snapshot::WhoSnapshot;
 pub(crate) use fabric_context::{inbox_seed, render_fabric_context, FabricContextInput};
-pub use snapshot::{load_who_snapshot, WhoSnapshot};
 
 // ── who ──────────────────────────────────────────────────────────────────────
 
