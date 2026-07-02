@@ -70,8 +70,20 @@ fn freeze_39000_39002_idempotency_no_member_duplication() {
         .expect("first session_start");
     });
 
-    // Allow the daemon time to receive any relay-echoed group events.
-    std::thread::sleep(Duration::from_millis(400));
+    assert!(
+        wait_until(Duration::from_secs(20), || Store::open(&home.store_path())
+            .map(|store| {
+                store
+                    .get_session("freeze-grp-idem-1")
+                    .ok()
+                    .flatten()
+                    .and_then(|rec| store.channel_parent(&rec.channel_h).ok().flatten())
+                    .as_deref()
+                    == Some("tmp")
+            })
+            .unwrap_or(false)),
+        "session start should materialize the room's parent project channel"
+    );
 
     // Record baseline membership state.
     let store = Store::open(&home.store_path()).unwrap();

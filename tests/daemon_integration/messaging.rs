@@ -216,20 +216,26 @@ fn chat_write_stdin_enqueues_live_project_chat_for_receiver() {
         .unwrap()
         .expect("sender session row")
         .agent_pubkey;
-    let mut received = false;
-    for _ in 0..12 {
-        let store = Store::open(&home.store_path()).unwrap();
-        // peek_chat → the inbound routing ledger; pending rows for the receiver.
-        let rows = store.peek_pending_for_session(&receiver_canon).unwrap();
-        if let Some(row) = rows.iter().find(|row| row.body == body) {
-            assert_eq!(row.target_session, receiver_canon);
-            assert_eq!(row.from_pubkey, sender_pubkey);
-            received = true;
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
-    assert!(received, "receiver did not get live chat row");
+    assert!(
+        wait_until(Duration::from_secs(2), || Store::open(&home.store_path())
+            .map(|store| {
+                store
+                    .peek_pending_for_session(&receiver_canon)
+                    .map(|rows| rows.iter().any(|row| row.body == body))
+                    .unwrap_or(false)
+            })
+            .unwrap_or(false)),
+        "receiver did not get live chat row"
+    );
+    let store = Store::open(&home.store_path()).unwrap();
+    // peek_chat → the inbound routing ledger; pending rows for the receiver.
+    let rows = store.peek_pending_for_session(&receiver_canon).unwrap();
+    let row = rows
+        .iter()
+        .find(|row| row.body == body)
+        .expect("receiver pending chat row");
+    assert_eq!(row.target_session, receiver_canon);
+    assert_eq!(row.from_pubkey, sender_pubkey);
 
     rt().block_on(async {
         let mut c = Client::connect_or_spawn().await.expect("connect");
@@ -395,8 +401,16 @@ fn non_mention_chat_does_not_route_to_inbox() {
         String::from_utf8_lossy(&out.stderr)
     );
 
-    // Give the daemon a moment to process any local delivery.
-    std::thread::sleep(std::time::Duration::from_millis(200));
+    assert!(
+        wait_until(Duration::from_secs(2), || Store::open(&home.store_path())
+            .map(|store| {
+                chat_in_channel(&store, "tmp")
+                    .iter()
+                    .any(|event| event.content == body)
+            })
+            .unwrap_or(false)),
+        "non-mention message must be stored in relay_events"
+    );
 
     let store = Store::open(&home.store_path()).unwrap();
 
