@@ -106,4 +106,35 @@ impl ChannelReadiness {
             slot.verified_at = None;
         }
     }
+
+    /// Invalidate every cached member readiness slot for a channel. Relay-authored
+    /// admin/member snapshots replace the roster, so any per-member readiness
+    /// proof for that channel must be re-checked on the next publish.
+    pub(crate) fn invalidate_channel(&self, channel: &str) {
+        let mut map = self.inner.lock().expect("readiness map poisoned");
+        for ((slot_channel, _), slot) in map.iter_mut() {
+            if slot_channel == channel {
+                slot.verified_at = None;
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn channel_invalidation_clears_all_members_for_that_channel_only() {
+        let readiness = ChannelReadiness::default();
+        readiness.mark_ready("chan-a", "alice");
+        readiness.mark_ready("chan-a", "bob");
+        readiness.mark_ready("chan-b", "alice");
+
+        readiness.invalidate_channel("chan-a");
+
+        assert!(!readiness.check("chan-a", "alice").0);
+        assert!(!readiness.check("chan-a", "bob").0);
+        assert!(readiness.check("chan-b", "alice").0);
+    }
 }

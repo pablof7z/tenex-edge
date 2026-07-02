@@ -2,13 +2,14 @@
 //! codec, materializer, and lifecycle in one place.
 
 mod group_management;
+mod materialization;
 mod readiness;
 
 use crate::domain::DomainEvent;
 use crate::fabric::nip29::readiness::{ChannelCtx, ChannelGate, ChannelReadiness};
 use crate::fabric::nip29::wire::Nip29WireCodec;
 use crate::fabric::nostr_delivery::NostrDelivery;
-use crate::fabric::{MaterializationOutcome, NostrEventCodec, RawEnvelope};
+use crate::fabric::{NostrEventCodec, RawEnvelope};
 use crate::state::Store;
 use crate::transport::Transport;
 use anyhow::{Context, Result};
@@ -419,17 +420,6 @@ impl Nip29Provider {
             self.with_store(|s| Nip29Materializer::materialize_channel(s, ev));
         }
         Ok(())
-    }
-
-    /// Decode one raw envelope and apply all store side-effects.
-    pub fn materialize(
-        &self,
-        env: &RawEnvelope,
-        hosted: &[String],
-        now: u64,
-        store: &Store,
-    ) -> MaterializationOutcome {
-        crate::fabric::materialize(env, hosted, now, &self.provider_instance, store)
     }
 
     pub(in crate::fabric::provider) fn with_store<R>(&self, f: impl FnOnce(&Store) -> R) -> R {
