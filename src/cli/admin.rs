@@ -11,5 +11,6 @@ pub use agent::{agent, agents};
 pub use doctor::doctor;
 pub use project_channels::{channels, invite, project};
 pub use render::render_fabric;
-#[allow(unused_imports)]
-pub use tail::{parse_since, render_tail_event, tail, TailOpts};
+pub use tail::parse_since;
+#[cfg(test)]
+pub use tail::render_tail_event;

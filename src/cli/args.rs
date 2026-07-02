@@ -222,7 +222,7 @@ pub(super) enum ChatAction {
         /// Project-relative channel name/path/id to read. Required when this
         /// session is joined to more than one channel; inferred only when exactly
         /// one joined channel exists.
-        #[arg(long, alias = "project")]
+        #[arg(long)]
         channel: Option<String>,
     },
 }
@@ -395,4 +395,69 @@ pub(super) enum DebugAction {
         #[arg(long, default_value = "1000")]
         refresh_ms: u64,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::{error::ErrorKind, Parser};
+
+    fn parse_err(args: &[&str]) -> clap::Error {
+        match Cli::try_parse_from(args) {
+            Ok(_) => panic!("expected parse failure for {args:?}"),
+            Err(err) => err,
+        }
+    }
+
+    #[test]
+    fn chat_read_help_lists_channel_not_project_alias() {
+        let err = parse_err(&["tenex-edge", "chat", "read", "--help"]);
+        let help = err.to_string();
+
+        assert!(help.contains("--channel <CHANNEL>"));
+        assert!(!help.contains("--project <PROJECT>"));
+    }
+
+    #[test]
+    fn chat_read_rejects_removed_project_alias() {
+        let err = parse_err(&["tenex-edge", "chat", "read", "--project", "tmp"]);
+
+        assert_eq!(err.kind(), ErrorKind::UnknownArgument);
+    }
+
+    #[test]
+    fn chat_read_channel_still_parses() {
+        let cli = Cli::try_parse_from(["tenex-edge", "chat", "read", "--channel", "ops"]).unwrap();
+
+        match cli.cmd {
+            Cmd::Chat {
+                action: ChatAction::Read { channel, .. },
+            } => assert_eq!(channel.as_deref(), Some("ops")),
+            _ => panic!("expected chat read command"),
+        }
+    }
+
+    #[test]
+    fn removed_tail_command_stays_unavailable() {
+        let err = parse_err(&["tenex-edge", "tail", "--live"]);
+
+        assert_eq!(err.kind(), ErrorKind::InvalidSubcommand);
+    }
+
+    #[test]
+    fn launch_channel_tristate_is_explicit_contract() {
+        let omitted = Cli::try_parse_from(["tenex-edge", "launch", "codex"]).unwrap();
+        let picker = Cli::try_parse_from(["tenex-edge", "launch", "codex", "--channel"]).unwrap();
+        let named =
+            Cli::try_parse_from(["tenex-edge", "launch", "codex", "--channel", "ops"]).unwrap();
+
+        let channel = |cli: Cli| match cli.cmd {
+            Cmd::Launch { channel, .. } => channel,
+            _ => panic!("expected launch command"),
+        };
+
+        assert_eq!(channel(omitted), None);
+        assert_eq!(channel(picker).as_deref(), Some(""));
+        assert_eq!(channel(named).as_deref(), Some("ops"));
+    }
 }
