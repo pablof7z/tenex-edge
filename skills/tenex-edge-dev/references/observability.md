@@ -145,6 +145,16 @@ Use this when validating:
 
 Hook proof should include both the hook-tail output and the agent UI evidence
 when possible. The UI proves what the agent sees; hook-tail proves why it saw it.
+If hook-tail exits with a terminal/device error in a noninteractive run, use the
+profile logs instead:
+
+```bash
+tail -n 200 .container-state/claude/tenex/edge/daemon.log
+tail -n 200 .container-state/claude/tenex/edge/relay.log
+```
+
+Do not mark the lab failed on hook-tail alone when tmux, daemon logs, relay logs,
+and croissant traffic provide the evidence needed for the feature under test.
 
 ## Probe Directory Shape
 

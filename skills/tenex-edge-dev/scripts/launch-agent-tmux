@@ -12,6 +12,26 @@ quote_cmd() {
   printf '%q ' "$@"
 }
 
+backend_command_for_profile() {
+  case "$1" in
+    claude*) echo "claude" ;;
+    codex-ollama*) echo "codex-ollama" ;;
+    codex*) echo "codex" ;;
+    opencode-ollama*) echo "opencode-ollama" ;;
+    opencode*) echo "opencode" ;;
+    *) echo "$1" ;;
+  esac
+}
+
+agent_slug_for_profile() {
+  case "$1" in
+    claude*) echo "claude" ;;
+    codex*) echo "codex" ;;
+    opencode*) echo "opencode" ;;
+    *) echo "$1" ;;
+  esac
+}
+
 need tmux
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -33,6 +53,10 @@ shift 3
 source "${ENV_FILE}"
 
 SESSION="${TENEX_EDGE_DEV_AGENT_TMUX:-te-${MODE}-${PROFILE}-${RUN_ID}}"
+BACKEND_CMD="${TENEX_EDGE_DEV_BACKEND_CMD:-$(backend_command_for_profile "${PROFILE}")}"
+AGENT_SLUG="${TENEX_EDGE_DEV_AGENT_SLUG:-$(agent_slug_for_profile "${PROFILE}")}"
+CONTAINER_NAME="${TENEX_EDGE_DEV_CONTAINER_NAME:-${SESSION}}"
+CONTAINER_CIDFILE="${WORK_DIR}/container-${SESSION}.cid"
 if tmux has-session -t "${SESSION}" 2>/dev/null; then
   echo "tmux session already exists: ${SESSION}" >&2
   exit 1
@@ -40,10 +64,10 @@ fi
 
 case "${MODE}" in
   direct)
-    cmd=(bash containers/tenex-edge/run --profile "${PROFILE}" "${PROFILE}" "$@")
+    cmd=(env TENEX_EDGE_CONTAINER_NAME="${CONTAINER_NAME}" TENEX_EDGE_CONTAINER_CIDFILE="${CONTAINER_CIDFILE}" bash containers/tenex-edge/run --profile "${PROFILE}" "${BACKEND_CMD}" "$@")
     ;;
   launch)
-    cmd=(bash containers/tenex-edge/run --profile "${PROFILE}" tenex-edge launch "${PROFILE}" -- "$@")
+    cmd=(env TENEX_EDGE_CONTAINER_NAME="${CONTAINER_NAME}" TENEX_EDGE_CONTAINER_CIDFILE="${CONTAINER_CIDFILE}" bash containers/tenex-edge/run --profile "${PROFILE}" tenex-edge launch "${AGENT_SLUG}" -- "$@")
     ;;
   *)
     echo "unknown mode: ${MODE}" >&2
@@ -55,3 +79,7 @@ tmux new-session -d -s "${SESSION}" "cd $(printf '%q' "${REPO_ROOT}") && $(quote
 echo "agent_tmux=${SESSION}"
 echo "mode=${MODE}"
 echo "profile=${PROFILE}"
+echo "backend_command=${BACKEND_CMD}"
+echo "agent_slug=${AGENT_SLUG}"
+echo "container_name=${CONTAINER_NAME}"
+echo "container_cidfile=${CONTAINER_CIDFILE}"

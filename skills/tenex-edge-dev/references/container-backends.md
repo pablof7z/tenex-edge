@@ -18,11 +18,15 @@ The expected direction is:
 - real provider credentials remain on the host
 - the container gets read-only access or symlinked projections
 - mutable CLI state and hook-installed files stay in profile-local state
+- Claude OAuth credentials may be materialized from the macOS Keychain into the
+  isolated profile when the host JSON credential file is stale
 - generated local fabric keys stay inside the live-lab work directory and
   `.container-state/<profile>/tenex/config.json`
 
 Do not run login commands inside the container to create unrelated credentials.
 If a provider credential is missing, report the missing host file or directory.
+If Claude shows an OAuth or paste-code prompt, treat that as an auth-staging
+failure; do not paste a code or print credential contents.
 
 ## Important Host Auth Sources
 
@@ -31,7 +35,8 @@ families are:
 
 - tenex-edge provider config, especially `providers.json` and `llms.json`
 - Codex auth/config state
-- Claude credential and settings state
+- Claude credential and settings state, including the `Claude Code-credentials`
+  Keychain item on macOS when available
 - OpenCode auth/config state
 
 Never print file contents from those paths. It is acceptable to report whether a
@@ -58,6 +63,16 @@ opencode
 
 Use profile-specific state even for one-off tests. Avoid sharing state across
 profiles because it makes hook behavior, logs, and relays harder to attribute.
+Also avoid running two containers against the same profile at once. A launched
+agent can own the daemon socket while a second diagnostic container waits or
+times out. Use tmux captures and logs first, or stop the agent pane before
+same-profile RPC checks.
+
+`write-container-profiles` resets `.container-state/<profile>/tenex/edge` by
+default when generating a lab profile. That removes stale daemon DB, relay logs,
+agent keys, and socket files tied to previous relays while preserving build
+cache and provider home state. Set `TENEX_EDGE_DEV_RESET_PROFILE_STATE=0` only
+when debugging the exact existing daemon state.
 
 ## Fabric Config Shape
 
@@ -66,8 +81,8 @@ The profile writer creates this shape:
 ```json
 {
   "whitelistedPubkeys": ["<pubkey-a>", "<pubkey-b>"],
-  "relays": ["ws://192.168.64.1:9888"],
-  "indexerRelay": "ws://192.168.64.1:9888",
+  "relays": ["ws://192.168.64.1:<lab-port>"],
+  "indexerRelay": "ws://192.168.64.1:<lab-port>",
   "backendName": "claude",
   "userNsec": "<secret>",
   "tenexPrivateKey": "<secret>"
@@ -97,6 +112,8 @@ The script:
 - computes each public key with `nak`
 - whitelists all generated public keys in every profile
 - writes relay/indexer relay to the croissant URL from `lab.env`
+- resets profile-local daemon/fabric state so fresh keys do not inherit an old
+  relay workspace
 - prints only profile names, config paths, and pubkey prefixes
 
 If you add a custom profile, use a simple lowercase name without spaces. The
@@ -130,6 +147,11 @@ Use launch mode when validating:
 - tenex-edge hook context is injected
 - tmux session naming/attachment behavior is correct
 - the launched agent appears as expected in fabric state
+
+The tmux launch helper names the Apple container after the tmux session and
+writes a cidfile in the lab work directory. Clean up with
+`scripts/cleanup-lab` so the container-side daemon exits before the relay is
+stopped.
 
 ## Backend Commands And Model Policy
 
@@ -173,9 +195,35 @@ The doctor should prove:
 - Codex hooks can be installed into the profile state
 - OpenCode plugin state can be installed or verified
 
+For live agent testing, run doctor against the exact generated profile before
+launching that profile:
+
+```bash
+bash containers/tenex-edge/run --profile claude doctor
+```
+
+Then run a tiny provider command to prove the CLI accepts the staged auth:
+
+```bash
+bash containers/tenex-edge/run --profile claude claude -p "Respond with exactly OK." --model haiku
+```
+
 If a provider is intentionally unavailable on the host, do not call the whole
 lab passing for that provider. Report it as unavailable and scope the lab to the
 providers that actually passed doctor/auth checks.
+
+## Build Cache Cost
+
+A fresh profile can pay a full Cargo cold build because its state starts empty.
+Prewarm the exact profile before timing a live run:
+
+```bash
+bash containers/tenex-edge/run --profile claude tenex-edge --version
+```
+
+For Claude, prefer the tiny `claude -p` command above because it proves both the
+build and the staged Claude auth. Reuse a deliberate lab profile only when
+isolation is not the behavior under test.
 
 ## File Mount Caveat
 

@@ -37,6 +37,8 @@ Read these files from this skill directory as needed:
   inside a host tmux session, either direct or through `tenex-edge launch`.
 - `scripts/probe-lab`: captures relay NIP-11, relay tmux output, selected Nostr
   event kinds, and optional agent tmux panes into a probe directory.
+- `scripts/cleanup-lab`: stops tmux-launched agent containers by their recorded
+  names/cidfiles, kills agent tmux sessions, then stops the relay tmux session.
 
 ## Non-Negotiables
 
@@ -86,6 +88,13 @@ of the run:
 ```bash
 LAB_ENV=/tmp/tenex-edge-live-lab-YYYYmmdd-HHMMSS/lab.env
 skills/tenex-edge-dev/scripts/write-container-profiles "${LAB_ENV}" claude
+```
+
+Prewarm and verify the exact profile before launching the agent UI:
+
+```bash
+bash containers/tenex-edge/run --profile claude doctor
+bash containers/tenex-edge/run --profile claude claude -p "Respond with exactly OK." --model haiku
 ```
 
 For multiple backends:
@@ -166,7 +175,8 @@ A useful report contains:
 
 - relay URL, run id, profile names, and whether this was direct or launch mode
 - exact agent commands and accepted model flags
-- tmux capture excerpts showing the agent UI and injected tenex-edge context
+- tmux capture excerpts showing the settled agent UI, no persistent
+  `@te_session` warning, and injected tenex-edge context
 - croissant log excerpts showing traffic or rejection reasons
 - `nak` evidence for the expected event kinds
 - hook-tail or daemon log evidence when testing hook injection
@@ -179,11 +189,13 @@ Give this to a simple agent to validate that the skill works:
 
 ```text
 Use the tenex-edge-dev skill. Start a fresh local croissant relay on the host,
-configure one claude container profile against it using real host Claude auth
-and disposable local fabric keys, run the container doctor, launch Claude in a
-host tmux session with the cheapest Haiku-class model available, ask it to run
-or describe tenex-edge who, then capture the tmux pane, croissant logs,
-hook-tail output, and nak relay probes. Do not print any secret or auth file
-contents. Report whether the skill worked and include the exact evidence
-commands/results.
+use the printed relay URL without forcing port 9888, configure one claude
+container profile against it using real host Claude auth and disposable local
+fabric keys, run the container doctor, launch Claude in a host tmux session
+with the cheapest Haiku-class model available, ask it to run or describe
+tenex-edge who, then capture the tmux pane, croissant logs, hook-tail or hook
+call output, and nak relay probes. Clean up with scripts/cleanup-lab. Do not
+print any secret or auth file contents. If it fails, write concise lessons to
+skills/tenex-edge-dev/lessons. Report whether the skill worked and include the
+exact evidence commands/results.
 ```

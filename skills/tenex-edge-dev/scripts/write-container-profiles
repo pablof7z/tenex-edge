@@ -31,6 +31,17 @@ fi
 KEY_DIR="${WORK_DIR}/keys"
 mkdir -p "${KEY_DIR}"
 
+reset_edge_state() {
+  local state_dir="$1" edge_dir="${1}/tenex/edge"
+  if [[ "${TENEX_EDGE_DEV_RESET_PROFILE_STATE:-1}" != "1" ]]; then
+    mkdir -p "${edge_dir}"
+    return 0
+  fi
+  chmod -R u+w "${edge_dir}" 2>/dev/null || true
+  rm -rf "${edge_dir}"
+  mkdir -p "${edge_dir}"
+}
+
 declare -a PUBKEYS=()
 for profile in "${PROFILES[@]}"; do
   key_file="${KEY_DIR}/${profile}.nsec"
@@ -50,7 +61,8 @@ for i in "${!PROFILES[@]}"; do
   key_file="${KEY_DIR}/${profile}.nsec"
   state_dir="${REPO_ROOT}/.container-state/${profile}"
   cfg="${state_dir}/tenex/config.json"
-  mkdir -p "${state_dir}/tenex/edge" "${state_dir}/home"
+  mkdir -p "${state_dir}/tenex" "${state_dir}/home"
+  reset_edge_state "${state_dir}"
   jq -n \
     --argjson whitelisted "${pubkeys_json}" \
     --arg relay "${RELAY_WS}" \
@@ -64,5 +76,5 @@ for i in "${!PROFILES[@]}"; do
       userNsec: ($secret | rtrimstr("\n")),
       tenexPrivateKey: ($secret | rtrimstr("\n"))
     }' >"${cfg}"
-  echo "profile=${profile} config=${cfg} pubkey=${PUBKEYS[$i]:0:12}"
+  echo "profile=${profile} config=${cfg} pubkey=${PUBKEYS[$i]:0:12} reset_edge_state=${TENEX_EDGE_DEV_RESET_PROFILE_STATE:-1}"
 done

@@ -20,7 +20,7 @@ pub(super) fn spawn_detached_daemon() -> Result<()> {
         .open(log_path())
         .context("opening daemon.log")?;
     let log_err = log.try_clone()?;
-    let mut command = std::process::Command::new(exe);
+    let mut command = std::process::Command::new(&exe);
     command
         .arg("__daemon")
         .stdin(std::process::Stdio::null())
@@ -31,6 +31,8 @@ pub(super) fn spawn_detached_daemon() -> Result<()> {
         use std::os::unix::process::CommandExt;
         command.process_group(0);
     }
-    command.spawn().context("spawning detached daemon")?;
+    command
+        .spawn()
+        .with_context(|| format!("spawning detached daemon from {}", exe.display()))?;
     Ok(())
 }

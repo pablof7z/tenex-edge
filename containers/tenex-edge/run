@@ -7,6 +7,7 @@ IMAGE="${TENEX_EDGE_CONTAINER_IMAGE:-tenex-edge-agents:local}"
 CONTAINERFILE="${SCRIPT_DIR}/Containerfile"
 PROFILE="${TENEX_EDGE_CONTAINER_PROFILE:-opencode}"
 AGENT="${TENEX_EDGE_CONTAINER_AGENT:-}"
+PROFILE_EXPLICIT=0
 
 usage() {
   cat <<'EOF'
@@ -30,6 +31,9 @@ Commands:
 
 Env:
   TENEX_EDGE_CONTAINER_HOST_AUTH   Default: 1. Use real host auth/config via read-only mounts.
+  TENEX_EDGE_CONTAINER_NAME        Optional Apple container name for cleanup.
+  TENEX_EDGE_CONTAINER_CIDFILE     Optional path for the Apple container ID.
+  TENEX_EDGE_CONTAINER_UID/GID     Optional numeric user/group for agent CLI processes.
   TENEX_EDGE_OLLAMA_HOST   Default: http://192.168.64.1:11434
   TENEX_EDGE_OPENCODE_OLLAMA_MODEL   Default: ollama/qwen2.5-coder:7b
 EOF
@@ -37,6 +41,7 @@ EOF
 
 if [[ "${1:-}" == "--profile" ]]; then
   PROFILE="${2:?missing profile name}"
+  PROFILE_EXPLICIT=1
   shift 2
 fi
 
@@ -106,6 +111,10 @@ prepare_state() {
 }
 JSON
   fi
+
+  if [[ "${TENEX_EDGE_CONTAINER_CLEAR_SOCKET:-1}" == "1" ]]; then
+    rm -f "${STATE_DIR}/tenex/edge/daemon.sock"
+  fi
 }
 
 container_run() {
@@ -123,16 +132,43 @@ container_run() {
   fi
 
   local run_args=(--rm)
+  if [[ -n "${TENEX_EDGE_CONTAINER_NAME:-}" ]]; then
+    run_args+=(--name "${TENEX_EDGE_CONTAINER_NAME}")
+  fi
+  if [[ -n "${TENEX_EDGE_CONTAINER_CIDFILE:-}" ]]; then
+    mkdir -p "$(dirname "${TENEX_EDGE_CONTAINER_CIDFILE}")"
+    rm -f "${TENEX_EDGE_CONTAINER_CIDFILE}"
+    run_args+=(--cidfile "${TENEX_EDGE_CONTAINER_CIDFILE}")
+  fi
   if [[ -t 0 && -t 1 ]]; then
     run_args+=(-i -t)
   fi
+  if [[ -n "${TENEX_EDGE_CONTAINER_UID:-}" ]]; then
+    run_args+=(--uid "${TENEX_EDGE_CONTAINER_UID}")
+  fi
+  if [[ -n "${TENEX_EDGE_CONTAINER_GID:-}" ]]; then
+    run_args+=(--gid "${TENEX_EDGE_CONTAINER_GID}")
+  fi
+
+  local passthrough_env_args=()
+  local name
+  for name in \
+    ANTHROPIC_API_KEY \
+    ANTHROPIC_AUTH_TOKEN \
+    ANTHROPIC_BASE_URL \
+    CLAUDE_CODE_OAUTH_TOKEN \
+    CLAUDE_CODE_ORGANIZATION_UUID
+  do
+    if [[ -n "${!name:-}" ]]; then
+      passthrough_env_args+=(--env "${name}=${!name}")
+    fi
+  done
 
   container run "${run_args[@]}" \
     --cpus "${TENEX_EDGE_CONTAINER_CPUS:-4}" \
     --memory "${TENEX_EDGE_CONTAINER_MEMORY:-4G}" \
     --mount "${source_mount}" \
     --mount "type=bind,source=${STATE_DIR},target=/state" \
-    "${HOST_AUTH_MOUNTS[@]}" \
     --workdir /workspace \
     --env HOME=/state/home \
     --env XDG_CONFIG_HOME=/state/home/.config \
@@ -141,6 +177,7 @@ container_run() {
     --env CARGO_HOME=/state/cargo \
     --env CARGO_TARGET_DIR=/state/target \
     --env CODEX_HOME=/state/home/.codex \
+    --env CLAUDE_CONFIG_DIR=/state/home/.claude \
     --env OLLAMA_HOST="${OLLAMA_HOST}" \
     --env TENEX_DIR=/state/tenex \
     --env TENEX_CONFIG=/state/tenex/config.json \
@@ -148,6 +185,8 @@ container_run() {
     --env TENEX_EDGE_BIN=/state/target/debug/tenex-edge \
     --env TENEX_EDGE_AGENT="${AGENT}" \
     --env PATH=/state/target/debug:/usr/local/cargo/bin:/usr/local/bin:/usr/bin:/bin \
+    "${HOST_AUTH_MOUNTS[@]+"${HOST_AUTH_MOUNTS[@]}"}" \
+    "${passthrough_env_args[@]+"${passthrough_env_args[@]}"}" \
     "${IMAGE}" "$@"
 }
 
@@ -163,6 +202,22 @@ with_tenex() {
     shift
     exec "$@"
   ' bash "${harness}" "$@"
+}
+
+select_command_profile() {
+  local default_profile="$1" agent="$2"
+  AGENT="${agent}"
+  if [[ "${PROFILE_EXPLICIT}" != "1" ]]; then
+    PROFILE="${default_profile}"
+    STATE_DIR="${TENEX_EDGE_CONTAINER_STATE:-${REPO_ROOT}/.container-state/${PROFILE}}"
+  fi
+}
+
+harness_for_agent() {
+  case "${1}" in
+    claude) echo "claude-code" ;;
+    *) echo "${1}" ;;
+  esac
 }
 
 main() {
@@ -200,7 +255,12 @@ main() {
         echo "state: /state writable"
         test -f /state/tenex/edge/providers.json
         test -f /state/tenex/edge/llms.json
-        test -f "$HOME/.claude/.credentials.json"
+        test -s "$HOME/.claude.json"
+        jq -e "has(\"oauthAccount\")" "$HOME/.claude.json" >/dev/null
+        test -s "$CLAUDE_CONFIG_DIR/.claude.json"
+        jq -e "has(\"oauthAccount\")" "$CLAUDE_CONFIG_DIR/.claude.json" >/dev/null
+        test -s "$CLAUDE_CONFIG_DIR/.credentials.json"
+        jq -e ".claudeAiOauth.accessToken and .claudeAiOauth.refreshToken" "$CLAUDE_CONFIG_DIR/.credentials.json" >/dev/null
         test -f "$CODEX_HOME/auth.json"
         test -f "$XDG_DATA_HOME/opencode/auth.json"
         echo "host auth: mounted"
@@ -222,43 +282,43 @@ main() {
       container_run readonly bash -c 'cargo build && cargo test --lib'
       ;;
     claude)
-      PROFILE=claude AGENT=claude STATE_DIR="${REPO_ROOT}/.container-state/claude" \
-        with_tenex claude-code claude "$@"
+      select_command_profile claude claude
+      with_tenex claude-code claude "$@"
       ;;
     codex)
-      PROFILE=codex AGENT=codex STATE_DIR="${REPO_ROOT}/.container-state/codex" \
-        with_tenex codex codex "$@"
+      select_command_profile codex codex
+      with_tenex codex codex "$@"
       ;;
     codex-login)
-      PROFILE=codex AGENT=codex STATE_DIR="${REPO_ROOT}/.container-state/codex" \
-        container_run readonly codex login "$@"
+      select_command_profile codex codex
+      container_run readonly codex login "$@"
       ;;
     codex-ollama)
-      PROFILE=codex-ollama AGENT=codex STATE_DIR="${REPO_ROOT}/.container-state/codex-ollama" \
-        with_tenex codex codex --oss --local-provider ollama "$@"
+      select_command_profile codex-ollama codex
+      with_tenex codex codex --oss --local-provider ollama "$@"
       ;;
     opencode)
-      PROFILE=opencode AGENT=opencode STATE_DIR="${REPO_ROOT}/.container-state/opencode" \
-        with_tenex opencode opencode "$@"
+      select_command_profile opencode opencode
+      with_tenex opencode opencode "$@"
       ;;
     opencode-auth)
-      PROFILE=opencode AGENT=opencode STATE_DIR="${REPO_ROOT}/.container-state/opencode" \
-        container_run readonly opencode providers "$@"
+      select_command_profile opencode opencode
+      container_run readonly opencode providers "$@"
       ;;
     opencode-ollama)
       local model="${1:-${TENEX_EDGE_OPENCODE_OLLAMA_MODEL:-ollama/qwen2.5-coder:7b}}"
       if [[ $# -gt 0 ]]; then shift; fi
-      PROFILE=opencode-ollama AGENT=opencode STATE_DIR="${REPO_ROOT}/.container-state/opencode-ollama" \
-        with_tenex opencode opencode -m "${model}" "$@"
+      select_command_profile opencode-ollama opencode
+      with_tenex opencode opencode -m "${model}" "$@"
       ;;
     tenex-edge)
-      with_tenex "${AGENT}" tenex-edge "$@"
+      with_tenex "$(harness_for_agent "${AGENT}")" tenex-edge "$@"
       ;;
     shell)
-      container_run readonly bash
+      container_run readonly bash "$@"
       ;;
     shell-rw)
-      container_run writable bash
+      container_run writable bash "$@"
       ;;
     clean-state)
       rm -rf "${STATE_DIR}"

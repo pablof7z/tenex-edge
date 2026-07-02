@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+need() {
+  command -v "$1" >/dev/null 2>&1 || {
+    echo "missing required command: $1" >&2
+    exit 1
+  }
+}
+
+stop_container() {
+  local id="$1"
+  [[ -n "${id}" ]] || return 0
+  if ! command -v container >/dev/null 2>&1; then
+    return 0
+  fi
+  if container inspect "${id}" >/dev/null 2>&1; then
+    container stop "${id}" >/dev/null 2>&1 || container kill "${id}" >/dev/null 2>&1 || true
+    container rm "${id}" >/dev/null 2>&1 || true
+    echo "container_stopped=${id}"
+  fi
+}
+
+need tmux
+
+ENV_FILE="${1:-${TENEX_EDGE_DEV_ENV:-}}"
+if [[ -z "${ENV_FILE}" || ! -f "${ENV_FILE}" ]]; then
+  echo "usage: $0 <lab.env> [agent-tmux-session ...]" >&2
+  exit 2
+fi
+shift || true
+# shellcheck source=/dev/null
+source "${ENV_FILE}"
+
+sessions=("$@")
+if [[ ${#sessions[@]} -eq 0 ]]; then
+  while IFS= read -r session; do
+    case "${session}" in
+      te-direct-*-"${RUN_ID}" | te-launch-*-"${RUN_ID}")
+        sessions+=("${session}")
+        ;;
+    esac
+  done < <(tmux list-sessions -F '#S' 2>/dev/null || true)
+fi
+
+for session in "${sessions[@]}"; do
+  stop_container "${session}"
+  if tmux has-session -t "${session}" 2>/dev/null; then
+    tmux kill-session -t "${session}" || true
+    echo "tmux_killed=${session}"
+  fi
+done
+
+for cidfile in "${WORK_DIR}"/container-*.cid; do
+  [[ -f "${cidfile}" ]] || continue
+  stop_container "$(cat "${cidfile}")"
+done
+
+if [[ -n "${RELAY_TMUX:-}" ]] && tmux has-session -t "${RELAY_TMUX}" 2>/dev/null; then
+  tmux kill-session -t "${RELAY_TMUX}" || true
+  echo "relay_tmux_killed=${RELAY_TMUX}"
+fi

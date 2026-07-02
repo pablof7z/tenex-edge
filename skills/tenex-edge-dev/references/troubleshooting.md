@@ -27,16 +27,17 @@ auditing; do not add stale vocabulary back to committed files.
 Symptom:
 
 ```text
-port 9888 is already held by pid ...
+port ... is already held by pid ...
 ```
 
 Find it:
 
 ```bash
-lsof -nP -iTCP:9888 -sTCP:LISTEN
+lsof -nP -iTCP:<port> -sTCP:LISTEN
 ```
 
-Prefer a new port for the lab:
+By default `start-croissant-relay` auto-selects an unused high port so stale
+labs do not share a relay. If a fixed port is required, set it explicitly:
 
 ```bash
 TENEX_EDGE_DEV_RELAY_PORT=9899 skills/tenex-edge-dev/scripts/start-croissant-relay
@@ -74,7 +75,7 @@ curl -fsS -H 'Accept: application/nostr+json' "${RELAY_HTTP}" | jq .
 Container reachability:
 
 ```bash
-bash containers/tenex-edge/run --profile claude sh -lc 'curl -fsS -H "Accept: application/nostr+json" http://192.168.64.1:9888'
+bash containers/tenex-edge/run --profile claude sh -lc "curl -fsS -H 'Accept: application/nostr+json' '${RELAY_HTTP}'"
 ```
 
 If host works and container fails:
@@ -100,6 +101,65 @@ If it reports a missing host auth path:
 - do not copy credential contents into `.container-state` by hand
 
 The expected fix is host-side auth or host-auth projection repair.
+
+## Claude Stops At OAuth
+
+Symptom: the Claude tmux pane shows a login, OAuth, paste-code, or first-run
+auth prompt instead of accepting the prompt.
+
+Treat this as a failed auth staging check. Do not paste OAuth codes, do not run
+Claude login in the container, and do not print credential files. Check:
+
+```bash
+bash containers/tenex-edge/run --profile claude doctor
+bash containers/tenex-edge/run --profile claude claude -p "Respond with exactly OK." --model haiku
+```
+
+On macOS the runner should prefer the `Claude Code-credentials` Keychain item
+over a stale host `~/.claude/.credentials.json`. If the tiny command fails,
+fix `containers/tenex-edge/host-auth.bash` or host auth before running the lab.
+
+## Host Hook Path Leaked Into Claude
+
+Symptom:
+
+```text
+spawning detached daemon from /Users/.../.local/bin/tenex-edge: No such file or directory
+```
+
+The staged Claude settings are still carrying a host `TENEX_EDGE_BIN`. The
+container profile must use:
+
+```text
+/state/target/debug/tenex-edge
+```
+
+Rerun the profile after staging has sanitized Claude settings. Do not edit host
+Claude settings just to make a container lab pass.
+
+## Launch Pane Has No Session Anchor
+
+Symptom: Claude launches and is authenticated, but the statusline says:
+
+```text
+[te: @te_session not set ...]
+```
+
+This means the launch pane did not get a successful SessionStart hook before the
+statusline rendered. A brief startup frame can show this before SessionStart
+settles; it is a failure when the warning persists after the prompt is accepted
+or after the agent runs `tenex-edge who`. Check that auth staging did not
+overwrite installed hooks without reinstalling them:
+
+```bash
+jq '.hooks | keys' .container-state/<profile>/home/.claude/settings.json
+find .container-state/<profile>/tenex/edge/sessions -name hook-calls.jsonl -print
+```
+
+For Claude launch mode, `containers/tenex-edge/run tenex-edge ...` must install
+the `claude-code` harness after staging auth, even though the agent slug is
+`claude`. A passing pane shows an identity like
+`claude1@<profile> workspace workspace [idle]` instead of the warning.
 
 ## Claude Hooks Cannot Install
 
@@ -139,6 +199,82 @@ cargo test --no-run
 
 or rebuild the specific binary/image that failed. Do not delete broad cache
 directories unless the user asks or the failure clearly points to that cache.
+For fresh profiles, a long first run is usually a cold build, not a hung agent.
+Prewarm the exact profile before tmux launch.
+
+## Stale Daemon Socket Or State
+
+Apple containers can leave a Unix socket path in the bind-mounted profile state
+after a container exits. The runner removes the socket before new sequential
+runs by default, but an active launched agent can still own the same profile.
+Avoid same-profile parallel commands.
+
+If an interrupted disposable profile has a corrupt or half-created daemon DB,
+use a fresh profile or remove only that generated profile's daemon state:
+
+```bash
+rm -f .container-state/<profile>/tenex/edge/daemon.sock
+rm -f .container-state/<profile>/tenex/edge/state.db*
+```
+
+Do not remove a non-disposable profile unless the user approves it.
+
+## Management Key Is Not Admin
+
+Symptom:
+
+```text
+ensure_channel_ready: management key is not admin of "workspace"
+blocked: unknown member
+not in channel workspace
+```
+
+This usually means a profile config was pointed at a fresh relay while the
+profile-local daemon DB still reflected an older workspace and key set. For
+live labs, rerun:
+
+```bash
+skills/tenex-edge-dev/scripts/write-container-profiles "${LAB_ENV}" claude
+```
+
+The writer resets `.container-state/claude/tenex/edge` by default. If you set
+`TENEX_EDGE_DEV_RESET_PROFILE_STATE=0`, use a fresh profile name instead.
+
+If the profile state is already fresh, check for shared relay contamination:
+
+```bash
+nak req -k 39000 "${RELAY_WS}" | head
+tmux capture-pane -pt "${RELAY_TMUX}" -S -160 -e
+```
+
+A fresh lab should not show old profile pubkeys creating `workspace` before the
+current profile connects. Use the default auto port, or explicitly choose a new
+port; do not keep retesting on a shared `9888` relay with stale agents alive.
+
+If the lab otherwise passed and `blocked: unknown member` appears only in
+`.container-state/<profile>/tenex/edge/logs/group-mgmt.log` as
+`9000 put-admin (self-grant via userNsec)`, treat it as a non-blocking cleanup
+or background repair warning. It becomes a failing symptom when it is paired
+with `management key is not admin`, `not in channel workspace`, a missing
+session anchor, or missing channel/member events.
+
+After a tmux-launched lab, run cleanup before stopping or reusing the relay:
+
+```bash
+skills/tenex-edge-dev/scripts/cleanup-lab "${LAB_ENV}" "${AGENT_TMUX}"
+```
+
+## Croissant pprof Conflict
+
+Croissant can log a local pprof bind conflict on `127.0.0.1:3337` while the
+relay itself is healthy on the requested bridge URL. Confirm actual health with:
+
+```bash
+curl -fsS -H 'Accept: application/nostr+json' "${RELAY_HTTP}" | jq .
+nak req -k 39000 "${RELAY_WS}" | head
+```
+
+Treat pprof as fatal only if NIP-11 or WebSocket probes also fail.
 
 ## Relay Has No Events
 

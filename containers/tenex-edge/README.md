@@ -33,11 +33,20 @@ directories read-only, symlinks credential files into the isolated container
 home, and keeps writable hook config in container state. Set
 `TENEX_EDGE_CONTAINER_HOST_AUTH=0` only for non-agent smoke tests.
 
+Claude auth is staged into `/state/home/.claude` because Claude Code may keep
+the fresh OAuth credential in the macOS `Claude Code-credentials` Keychain item
+while the host JSON file is stale. The runner also sanitizes Claude settings so
+container hooks use `/state/target/debug/tenex-edge`, not a host binary path.
+
 `claude`, `codex`, `codex-ollama`, `opencode`, and `opencode-ollama` build the current
 checkout and run `tenex-edge install --harness <name>` inside the isolated home
 before launching the harness. That means Claude hooks, Codex hooks, and the
 OpenCode plugin are installed through the same code path users run on a real
 machine.
+
+Tmux-launched live labs can set `TENEX_EDGE_CONTAINER_NAME` and
+`TENEX_EDGE_CONTAINER_CIDFILE` so a cleanup script can stop the exact Apple
+container if the host tmux pane is killed before the agent exits.
 
 The runner defaults `OLLAMA_HOST` to `http://192.168.64.1:11434`, the Apple
 container VM's gateway to the host on this machine. Override it with
@@ -52,7 +61,7 @@ from inside the container.
 | Purpose | Path |
 | --- | --- |
 | Home | `/state/home` |
-| Claude auth/config | host credentials symlinked, hook config copied into `/state/home/.claude` |
+| Claude auth/config | host credentials projected into `/state/home/.claude`, hook config copied and sanitized |
 | Codex config/auth | host credentials symlinked into `/state/home/.codex` |
 | OpenCode config | host credentials symlinked into `/state/home/.config/opencode` |
 | OpenCode data/cache | `/state/home/.local/share`, `/state/home/.cache` |

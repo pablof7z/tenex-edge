@@ -69,10 +69,66 @@ stage_auth_dir_copy() {
   if [[ -L "${target}" || -f "${target}" ]]; then
     rm -f "${target}"
   elif [[ -e "${target}" ]]; then
+    chmod -R u+w "${target}" 2>/dev/null || true
     rm -rf "${target}"
   fi
   cp -a "${source}" "${target}"
   chmod -R u+w "${target}"
+}
+
+stage_claude_credentials() {
+  local target="$1" tmp="${1}.tmp"
+  if [[ "${HOST_AUTH}" != "1" ]]; then
+    return 0
+  fi
+  rm -f "${tmp}"
+  if command -v security >/dev/null 2>&1 \
+    && command -v jq >/dev/null 2>&1 \
+    && security find-generic-password -l "Claude Code-credentials" -w >"${tmp}" 2>/dev/null \
+    && jq -e '.claudeAiOauth.accessToken and .claudeAiOauth.refreshToken' "${tmp}" >/dev/null 2>&1; then
+    mv "${tmp}" "${target}"
+    chmod 600 "${target}"
+    return 0
+  fi
+  rm -f "${tmp}"
+  stage_auth_copy "${HOST_HOME}/.claude/.credentials.json" "${target}"
+}
+
+stage_claude_settings() {
+  local source="$1" target="$2" required="${3:-required}" tmp="${2}.tmp"
+  if [[ "${HOST_AUTH}" != "1" ]]; then
+    return 0
+  fi
+  if [[ ! -f "${source}" ]]; then
+    if [[ "${required}" == "optional" ]]; then
+      rm -f "${target}"
+      return 0
+    fi
+    echo "required host auth/config path missing: ${source}" >&2
+    echo "set TENEX_EDGE_CONTAINER_HOST_AUTH=0 only for non-agent smoke tests" >&2
+    exit 1
+  fi
+  rm -f "${tmp}"
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "required command missing for Claude settings staging: jq" >&2
+    exit 1
+  fi
+  if jq '
+      del(.hooks, .statusLine)
+      | .env = ((.env // {}) + {
+          TENEX_DIR: "/state/tenex",
+          TENEX_CONFIG: "/state/tenex/config.json",
+          TENEX_EDGE_HOME: "/state/tenex/edge",
+          TENEX_EDGE_BIN: "/state/target/debug/tenex-edge"
+        })
+    ' "${source}" >"${tmp}" 2>/dev/null; then
+    mv "${tmp}" "${target}"
+  else
+    rm -f "${tmp}"
+    echo "failed to parse Claude settings JSON: ${source}" >&2
+    exit 1
+  fi
+  chmod u+w "${target}"
 }
 
 build_host_auth_mounts() {
@@ -101,11 +157,12 @@ stage_host_auth() {
   stage_auth_symlink "${HOST_HOME}/.codex/config.json" \
     "/host-auth/codex/config.json" "${STATE_DIR}/home/.codex/config.json" optional
 
-  stage_auth_symlink "${HOST_HOME}/.claude/.credentials.json" \
-    "/host-auth/claude/.credentials.json" "${STATE_DIR}/home/.claude/.credentials.json"
-  stage_auth_copy "${HOST_HOME}/.claude/settings.json" "${STATE_DIR}/home/.claude/settings.json"
-  stage_auth_symlink "${HOST_HOME}/.claude/settings.local.json" \
-    "/host-auth/claude/settings.local.json" "${STATE_DIR}/home/.claude/settings.local.json" optional
+  stage_auth_copy "${HOST_HOME}/.claude.json" "${STATE_DIR}/home/.claude.json"
+  stage_auth_copy "${HOST_HOME}/.claude.json" "${STATE_DIR}/home/.claude/.claude.json"
+  stage_claude_credentials "${STATE_DIR}/home/.claude/.credentials.json"
+  stage_claude_settings "${HOST_HOME}/.claude/settings.json" "${STATE_DIR}/home/.claude/settings.json"
+  stage_claude_settings "${HOST_HOME}/.claude/settings.local.json" \
+    "${STATE_DIR}/home/.claude/settings.local.json" optional
   stage_auth_symlink "${HOST_HOME}/.claude/.env" \
     "/host-auth/claude/.env" "${STATE_DIR}/home/.claude/.env" optional
   stage_auth_symlink "${HOST_HOME}/.claude/agents" \

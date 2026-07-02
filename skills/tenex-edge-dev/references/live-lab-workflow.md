@@ -54,7 +54,7 @@ Expected output:
 ```text
 run_id=...
 env=/tmp/.../tenex-edge-live-lab-.../lab.env
-relay=ws://192.168.64.1:9888
+relay=ws://192.168.64.1:<auto-port>
 relay_tmux=te-relay-...
 owner_pubkey=...
 ```
@@ -69,17 +69,21 @@ The relay command:
 
 - uses `/Users/pablofernandez/Work/croissant`
 - binds to `TENEX_EDGE_DEV_RELAY_HOST` or the Apple container bridge IP
-- uses `TENEX_EDGE_DEV_RELAY_PORT` or `9888`
+- uses `TENEX_EDGE_DEV_RELAY_PORT` or an unused high port from
+  `TENEX_EDGE_DEV_RELAY_PORT_BASE` (default `19888`)
 - creates a temp work directory under `${TMPDIR:-/tmp}`
 - creates a relay owner key without printing the secret
 - starts croissant in a host tmux session
 - waits for NIP-11 before returning
 - writes all run metadata to `lab.env`
 
-If port `9888` is in use, set a different port:
+The auto port is intentional. Reusing a shared bridge port such as `9888` lets
+stale live agents from older labs connect to the new relay and create the
+`workspace` group before the current profile does. Pin a port only when that
+specific shared-port behavior is under test:
 
 ```bash
-TENEX_EDGE_DEV_RELAY_PORT=9899 skills/tenex-edge-dev/scripts/start-croissant-relay
+TENEX_EDGE_DEV_RELAY_PORT=9888 skills/tenex-edge-dev/scripts/start-croissant-relay
 ```
 
 ## Configure Backend Profiles
@@ -104,6 +108,11 @@ This writes:
 .container-state/<profile>/home/
 ```
 
+The writer resets `.container-state/<profile>/tenex/edge` for every generated
+lab profile, preserving provider home state and build cache while removing old
+daemon DB/socket/log state. That reset is intentional: a fresh relay plus stale
+workspace membership is not a valid live lab.
+
 Every profile points only at the live croissant relay. Every generated backend
 pubkey is whitelisted in every generated profile, so the backends can see each
 other in the local fabric. The generated Nostr keys are disposable fabric keys;
@@ -116,6 +125,17 @@ jq '{relays,indexerRelay,backendName,whitelistedPubkeys}' .container-state/claud
 ```
 
 Do not print `userNsec` or `tenexPrivateKey`.
+
+Prewarm the exact profile before opening a tmux agent UI. This avoids confusing
+cold Cargo builds with agent startup failures, and it proves staged auth before
+the interactive run:
+
+```bash
+bash containers/tenex-edge/run --profile claude doctor
+bash containers/tenex-edge/run --profile claude claude -p "Respond with exactly OK." --model haiku
+```
+
+Use the same pattern for other providers with their cheapest working command.
 
 ## Direct Agent Runs
 
@@ -144,6 +164,10 @@ The helper prints the tmux session name. Save it:
 AGENT_TMUX=te-direct-claude-...
 ```
 
+It also names the Apple container after the tmux session and records a cidfile
+under the lab work directory. Use `scripts/cleanup-lab` rather than killing only
+tmux, so container-side daemons do not continue retrying after the relay stops.
+
 Drive the session:
 
 ```bash
@@ -155,6 +179,10 @@ Read the session:
 ```bash
 tmux capture-pane -pt "${AGENT_TMUX}" -S -240 -e
 ```
+
+Do not run a second diagnostic container against the same profile while this
+tmux session is still active. If you need same-profile `tenex-edge` RPC checks,
+stop the agent session first or use the profile logs.
 
 ## Launch Mode Runs
 
@@ -227,8 +255,7 @@ files you generated.
 Stop sessions explicitly:
 
 ```bash
-tmux kill-session -t "${AGENT_TMUX}"
-tmux kill-session -t "$(grep '^RELAY_TMUX=' "${LAB_ENV}" | cut -d= -f2- | xargs printf '%s')"
+skills/tenex-edge-dev/scripts/cleanup-lab "${LAB_ENV}" "${AGENT_TMUX}"
 ```
 
 Remove disposable state only when it is no longer needed for debugging:

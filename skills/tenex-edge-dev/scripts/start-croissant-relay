@@ -17,6 +17,21 @@ bridge_host() {
   ipconfig getifaddr bridge100 2>/dev/null || echo 192.168.64.1
 }
 
+pick_port() {
+  local start="${TENEX_EDGE_DEV_RELAY_PORT_BASE:-19888}"
+  local limit="${TENEX_EDGE_DEV_RELAY_PORT_LIMIT:-200}"
+  local port end
+  end=$((start + limit))
+  for ((port = start; port < end; port++)); do
+    if ! lsof -nP -tiTCP:"${port}" -sTCP:LISTEN >/dev/null 2>&1; then
+      printf '%s\n' "${port}"
+      return 0
+    fi
+  done
+  echo "no free relay port found in ${start}..$((end - 1))" >&2
+  return 1
+}
+
 wait_for_relay() {
   local http="$1"
   local timeout="${2:-20}"
@@ -47,7 +62,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 RUN_ID="${TENEX_EDGE_DEV_RUN_ID:-$(date +%Y%m%d-%H%M%S)}"
 CROISSANT_DIR="${TENEX_EDGE_DEV_CROISSANT_DIR:-/Users/pablofernandez/Work/croissant}"
 RELAY_HOST="${TENEX_EDGE_DEV_RELAY_HOST:-$(bridge_host)}"
-RELAY_PORT="${TENEX_EDGE_DEV_RELAY_PORT:-9888}"
+RELAY_PORT="${TENEX_EDGE_DEV_RELAY_PORT:-$(pick_port)}"
 RELAY_WS="ws://${RELAY_HOST}:${RELAY_PORT}"
 RELAY_HTTP="http://${RELAY_HOST}:${RELAY_PORT}"
 WORK_DIR="${TENEX_EDGE_DEV_WORK:-${TMPDIR:-/tmp}/tenex-edge-live-lab-${RUN_ID}}"
