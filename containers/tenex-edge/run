@@ -1,0 +1,246 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+IMAGE="${TENEX_EDGE_CONTAINER_IMAGE:-tenex-edge-agents:local}"
+CONTAINERFILE="${SCRIPT_DIR}/Containerfile"
+PROFILE="${TENEX_EDGE_CONTAINER_PROFILE:-opencode}"
+AGENT="${TENEX_EDGE_CONTAINER_AGENT:-}"
+
+usage() {
+  cat <<'EOF'
+Usage: bash containers/tenex-edge/run [--profile NAME] <command> [args...]
+
+Commands:
+  build-image              Build the Apple container image.
+  doctor                   Verify mounts, tools, hooks/plugins, and isolated state.
+  test-unit                Build tenex-edge and run hermetic library tests.
+  codex [args]             Run isolated Codex using the codex profile.
+  codex-login [args]       Run isolated `codex login` for subscription auth.
+  codex-ollama [args]      Run isolated Codex with --oss --local-provider ollama.
+  opencode [args]          Run isolated OpenCode using the opencode profile.
+  opencode-auth [args]     Run isolated `opencode providers`.
+  opencode-ollama [args]   Run isolated OpenCode with an Ollama model.
+  tenex-edge [args]        Run the in-container tenex-edge binary.
+  shell                    Open a read-only-source shell.
+  shell-rw                 Open a writable-source shell.
+  clean-state              Remove .container-state/<profile>.
+
+Env:
+  TENEX_EDGE_OLLAMA_HOST   Default: http://192.168.64.1:11434
+  TENEX_EDGE_OPENCODE_OLLAMA_MODEL   Default: ollama/qwen2.5-coder:7b
+EOF
+}
+
+if [[ "${1:-}" == "--profile" ]]; then
+  PROFILE="${2:?missing profile name}"
+  shift 2
+fi
+
+agent_for_profile() {
+  case "${1}" in
+    codex*) echo "codex" ;;
+    *) echo "opencode" ;;
+  esac
+}
+
+AGENT="${AGENT:-$(agent_for_profile "${PROFILE}")}"
+STATE_DIR="${TENEX_EDGE_CONTAINER_STATE:-${REPO_ROOT}/.container-state/${PROFILE}}"
+OLLAMA_HOST="${TENEX_EDGE_OLLAMA_HOST:-http://192.168.64.1:11434}"
+
+require_container() {
+  command -v container >/dev/null 2>&1 || {
+    echo "container CLI not found. Install apple/container first." >&2
+    exit 1
+  }
+}
+
+ensure_system() {
+  if ! container system status >/dev/null 2>&1; then
+    container system start
+  fi
+}
+
+build_image() {
+  require_container
+  ensure_system
+  container build --file "${CONTAINERFILE}" --tag "${IMAGE}" "${SCRIPT_DIR}"
+}
+
+ensure_image() {
+  require_container
+  ensure_system
+  if ! container image inspect "${IMAGE}" >/dev/null 2>&1; then
+    build_image
+  fi
+}
+
+prepare_state() {
+  mkdir -p \
+    "${STATE_DIR}/home/.codex" \
+    "${STATE_DIR}/home/.local/share" \
+    "${STATE_DIR}/home/.cache" \
+    "${STATE_DIR}/cargo" \
+    "${STATE_DIR}/target" \
+    "${STATE_DIR}/tenex/edge"
+
+  if [[ ! -f "${STATE_DIR}/tenex/config.json" ]]; then
+    cat >"${STATE_DIR}/tenex/config.json" <<JSON
+{
+  "whitelistedPubkeys": [],
+  "relays": ["wss://relay.tenex.chat"],
+  "indexerRelay": "wss://relay.tenex.chat",
+  "backendName": "container-${PROFILE}"
+}
+JSON
+  fi
+}
+
+container_run() {
+  local access="${1:-readonly}"
+  shift || true
+
+  ensure_image
+  prepare_state
+
+  local source_mount="type=bind,source=${REPO_ROOT},target=/workspace"
+  if [[ "${access}" == "readonly" ]]; then
+    source_mount="${source_mount},readonly"
+  fi
+
+  local run_args=(--rm)
+  if [[ -t 0 && -t 1 ]]; then
+    run_args+=(-i -t)
+  fi
+
+  container run "${run_args[@]}" \
+    --cpus "${TENEX_EDGE_CONTAINER_CPUS:-4}" \
+    --memory "${TENEX_EDGE_CONTAINER_MEMORY:-4G}" \
+    --mount "${source_mount}" \
+    --mount "type=bind,source=${STATE_DIR},target=/state" \
+    --workdir /workspace \
+    --env HOME=/state/home \
+    --env XDG_CONFIG_HOME=/state/home/.config \
+    --env XDG_CACHE_HOME=/state/home/.cache \
+    --env XDG_DATA_HOME=/state/home/.local/share \
+    --env CARGO_HOME=/state/cargo \
+    --env CARGO_TARGET_DIR=/state/target \
+    --env CODEX_HOME=/state/home/.codex \
+    --env OLLAMA_HOST="${OLLAMA_HOST}" \
+    --env TENEX_DIR=/state/tenex \
+    --env TENEX_CONFIG=/state/tenex/config.json \
+    --env TENEX_EDGE_HOME=/state/tenex/edge \
+    --env TENEX_EDGE_BIN=/state/target/debug/tenex-edge \
+    --env TENEX_EDGE_AGENT="${AGENT}" \
+    --env PATH=/state/target/debug:/usr/local/cargo/bin:/usr/local/bin:/usr/bin:/bin \
+    "${IMAGE}" "$@"
+}
+
+with_tenex() {
+  local harness="${1}"
+  shift
+  container_run readonly bash -c '
+    set -euo pipefail
+    cargo build >/dev/null
+    if [[ "$1" == "codex" || "$1" == "opencode" ]]; then
+      tenex-edge install --harness "$1" >/dev/null
+    fi
+    shift
+    exec "$@"
+  ' bash "${harness}" "$@"
+}
+
+main() {
+  local cmd="${1:-}"
+  [[ -n "${cmd}" ]] || { usage; exit 2; }
+  shift || true
+
+  case "${cmd}" in
+    build-image)
+      build_image
+      ;;
+    doctor)
+      container_run readonly bash -c '
+        set -euo pipefail
+        echo "profile: '"${PROFILE}"'"
+        echo "agent: $TENEX_EDGE_AGENT"
+        echo "rust: $(rustc --version)"
+        echo "cargo: $(cargo --version)"
+        echo "codex: $(codex --version)"
+        echo "opencode: $(opencode --version)"
+        echo "ollama_host: $OLLAMA_HOST"
+        test -f /workspace/Cargo.toml
+        echo "source: /workspace mounted"
+        if touch /workspace/.container-readonly-check 2>/dev/null; then
+          rm -f /workspace/.container-readonly-check
+          echo "source: writable (unexpected)"
+          exit 1
+        fi
+        touch /state/write-check
+        rm /state/write-check
+        echo "state: /state writable"
+        cargo build >/dev/null
+        tenex-edge install --harness codex >/dev/null
+        tenex-edge install --harness opencode >/dev/null
+        test -f "$CODEX_HOME/hooks.json"
+        echo "codex hooks: isolated install present"
+        test -f "$XDG_CONFIG_HOME/opencode/plugin/tenex-edge.ts"
+        echo "opencode plugin: isolated install present"
+        echo "codex home: $CODEX_HOME"
+        echo "tenex home: $TENEX_EDGE_HOME"
+      '
+      ;;
+    test-unit)
+      container_run readonly bash -c 'cargo build && cargo test --lib'
+      ;;
+    codex)
+      PROFILE=codex AGENT=codex STATE_DIR="${REPO_ROOT}/.container-state/codex" \
+        with_tenex codex codex "$@"
+      ;;
+    codex-login)
+      PROFILE=codex AGENT=codex STATE_DIR="${REPO_ROOT}/.container-state/codex" \
+        container_run readonly codex login "$@"
+      ;;
+    codex-ollama)
+      PROFILE=codex-ollama AGENT=codex STATE_DIR="${REPO_ROOT}/.container-state/codex-ollama" \
+        with_tenex codex codex --oss --local-provider ollama "$@"
+      ;;
+    opencode)
+      PROFILE=opencode AGENT=opencode STATE_DIR="${REPO_ROOT}/.container-state/opencode" \
+        with_tenex opencode opencode "$@"
+      ;;
+    opencode-auth)
+      PROFILE=opencode AGENT=opencode STATE_DIR="${REPO_ROOT}/.container-state/opencode" \
+        container_run readonly opencode providers "$@"
+      ;;
+    opencode-ollama)
+      local model="${1:-${TENEX_EDGE_OPENCODE_OLLAMA_MODEL:-ollama/qwen2.5-coder:7b}}"
+      if [[ $# -gt 0 ]]; then shift; fi
+      PROFILE=opencode-ollama AGENT=opencode STATE_DIR="${REPO_ROOT}/.container-state/opencode-ollama" \
+        with_tenex opencode opencode -m "${model}" "$@"
+      ;;
+    tenex-edge)
+      with_tenex "${AGENT}" tenex-edge "$@"
+      ;;
+    shell)
+      container_run readonly bash
+      ;;
+    shell-rw)
+      container_run writable bash
+      ;;
+    clean-state)
+      rm -rf "${STATE_DIR}"
+      ;;
+    -h|--help|help)
+      usage
+      ;;
+    *)
+      echo "unknown command: ${cmd}" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+}
+
+main "$@"
