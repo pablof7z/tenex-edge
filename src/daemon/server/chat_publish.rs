@@ -1,53 +1,22 @@
-use super::chat_store::{seed_chat_read_models, ChatSeed};
 use super::*;
-
-pub(in crate::daemon::server) struct ChatRecordDraft {
-    from_pubkey: String,
-    from_session: Option<String>,
-    project: String,
-    body: String,
-}
-
-async fn sign_chat(state: &Arc<DaemonState>, chat: &ChatMessage, signing: &Keys) -> Result<Event> {
-    let builder = state
-        .provider
-        .encode(&DomainEvent::ChatMessage(chat.clone()))?;
-    state.transport.sign(builder, signing).await
-}
+use crate::fabric::provider::chat::OutboundChatRecord;
 
 pub(in crate::daemon::server) async fn publish_chat_checked(
     state: &Arc<DaemonState>,
     signed: &Event,
-    draft: &ChatRecordDraft,
+    draft: &OutboundChatRecord,
 ) -> Result<String> {
-    let event_id = signed.id.to_hex();
-    state.transport.publish_event_checked(signed).await?;
-
-    state.with_store(|s| {
-        seed_chat_read_models(
-            s,
-            &ChatSeed {
-                event_id: &event_id,
-                from_pubkey: &draft.from_pubkey,
-                from_session: draft.from_session.as_deref(),
-                channel_h: &draft.project,
-                body: &draft.body,
-                mentioned_pubkey: None,
-                mentioned_session: None,
-                created_at: signed.created_at.as_secs(),
-                direction: "outbound",
-            },
-            "chat_publish",
-        );
-    });
-
-    Ok(event_id)
+    state
+        .provider
+        .publish_signed_chat_checked(signed, draft)
+        .await
+        .map(|published| published.event_id)
 }
 
 pub(in crate::daemon::server) fn spawn_chat_publish_retry(
     state: Arc<DaemonState>,
     signed: Event,
-    draft: ChatRecordDraft,
+    draft: OutboundChatRecord,
     label: &'static str,
 ) {
     tokio::spawn(async move {
@@ -81,7 +50,6 @@ pub(in crate::daemon::server) async fn publish_agent_reply(
     let instance = state.session_instance(rec);
     let base = identity::load_or_create(&config::edge_home(), &instance.base_slug, now_secs())?;
     let signing = instance.signing_keys(&base.keys);
-    let from_pubkey = instance.pubkey.clone();
     // Route into the session's CURRENT channel so a `channels switch` moves the
     // agent's turn replies to the new channel without restarting.
     let scope = rec.channel_h.clone();
@@ -92,13 +60,16 @@ pub(in crate::daemon::server) async fn publish_agent_reply(
         body: reply.to_string(),
         mentioned_pubkey: None,
     };
-    let draft = ChatRecordDraft {
-        from_pubkey,
+    let draft = OutboundChatRecord {
         from_session: Some(rec.session_id.clone()),
-        project: scope,
+        channel_h: scope,
         body: reply.to_string(),
+        mentioned_pubkey: None,
+        mentioned_session: None,
+        created_at: None,
+        direction: "outbound",
     };
-    let signed = sign_chat(state, &chat, &signing).await?;
+    let signed = state.provider.sign_chat_message(&chat, &signing).await?;
     let publish = publish_chat_checked(state, &signed, &draft);
     match tokio::time::timeout(std::time::Duration::from_secs(3), publish).await {
         Ok(Ok(_)) => {}
@@ -205,16 +176,19 @@ pub(in crate::daemon::server) async fn rpc_user_prompt(
         body: p.prompt.clone(),
         mentioned_pubkey: None,
     };
-    let draft = ChatRecordDraft {
-        from_pubkey: op_pubkey,
+    let draft = OutboundChatRecord {
         from_session: None,
-        project: scope.clone(),
+        channel_h: scope.clone(),
         body: p.prompt.clone(),
+        mentioned_pubkey: None,
+        mentioned_session: None,
+        created_at: None,
+        direction: "outbound",
     };
     // Try once synchronously so local chat history exists when the hook/RPC
     // returns. If relay membership is still converging, fall back to a daemon
     // retry without blocking the editor.
-    match sign_chat(state, &chat, &op_keys).await {
+    match state.provider.sign_chat_message(&chat, &op_keys).await {
         Ok(signed) => {
             let publish = publish_chat_checked(state, &signed, &draft);
             match tokio::time::timeout(std::time::Duration::from_secs(3), publish).await {

@@ -20,18 +20,13 @@
 use crate::daemon::server::DaemonState;
 use crate::state::Store;
 use crate::util::{now_secs, pubkey_short};
-use nostr_sdk::prelude::{Filter, FromBech32, Kind, Nip19Profile, PublicKey};
+use nostr_sdk::prelude::{FromBech32, Nip19Profile, PublicKey};
 use std::sync::Arc;
-use std::time::Duration;
 
 /// How long a cached `kind:0` entry is trusted before a re-fetch. Profiles
 /// change rarely, so a long window keeps relay traffic low; a stale name only
 /// costs a slightly outdated label until the next refresh.
 pub const PROFILE_TTL_SECS: u64 = 6 * 60 * 60;
-
-/// Bound the one-shot relay fetch so a slow/unreachable relay never stalls the
-/// caller (turn-context assembly, tmux injection) for long.
-const FETCH_TIMEOUT: Duration = Duration::from_secs(4);
 
 /// Resolve `pubkey` to a display name, going to the relays on a cache miss or
 /// TTL expiry. Returns `None` only when nothing is cached AND no `kind:0` could
@@ -46,7 +41,11 @@ pub async fn resolve_name(state: &Arc<DaemonState>, pubkey: &str) -> Option<Stri
         }
     }
 
-    if let Some(name) = fetch_and_cache(state, pubkey, now).await {
+    if let Some(name) = state
+        .fabric_provider()
+        .fetch_and_cache_profile_name(pubkey, now)
+        .await
+    {
         return Some(name);
     }
 
@@ -151,85 +150,4 @@ fn decode_entity_pubkey(entity: &str) -> Option<String> {
         return Some(profile.public_key.to_hex());
     }
     None
-}
-
-/// One-shot fetch the newest `kind:0` for `pubkey`, parse a display name, and
-/// write it to the `profiles` cache. Returns the parsed name on success.
-async fn fetch_and_cache(state: &Arc<DaemonState>, pubkey: &str, now: u64) -> Option<String> {
-    let author = PublicKey::from_hex(pubkey).ok()?;
-    let filter = Filter::new().author(author).kind(Kind::from(0u16)).limit(1);
-    let events = state.transport().fetch(filter, FETCH_TIMEOUT).await.ok()?;
-
-    // A relay may hold more than one replaceable copy; trust the newest.
-    let event = events.into_iter().max_by_key(|e| e.created_at)?;
-    let name = display_name_from_metadata(&event.content)?;
-    let host = host_tag(&event).unwrap_or_default();
-    let is_backend = backend_tag(&event);
-
-    // The kind:0 `name` doubles as the agent slug in our wire shape (mirrors the
-    // materializer), so both columns carry it.
-    state.with_store(|s| {
-        s.upsert_profile(pubkey, &name, &name, &host, is_backend, now)
-            .ok()
-    });
-    Some(name)
-}
-
-/// Pull the best human label out of `kind:0` content, preferring `display_name`
-/// over `name` (NIP-01 / NIP-24). Returns `None` when neither is a non-empty
-/// string so an empty profile never overwrites a better cached value.
-fn display_name_from_metadata(content: &str) -> Option<String> {
-    let v: serde_json::Value = serde_json::from_str(content).ok()?;
-    for key in ["display_name", "name"] {
-        if let Some(s) = v.get(key).and_then(|n| n.as_str()) {
-            let s = s.trim();
-            if !s.is_empty() {
-                return Some(s.to_string());
-            }
-        }
-    }
-    None
-}
-
-/// tenex-edge agent profiles carry a `["host", ...]` tag; human profiles do not.
-fn host_tag(event: &nostr_sdk::Event) -> Option<String> {
-    event.tags.iter().find_map(|t| {
-        let s = t.as_slice();
-        (s.first().map(String::as_str) == Some("host"))
-            .then(|| s.get(1).cloned())
-            .flatten()
-    })
-}
-
-/// Returns `true` when the kind:0 carries a bare `["backend"]` tag, marking the
-/// publisher as a tenex-edge backend process rather than an AI agent.
-fn backend_tag(event: &nostr_sdk::Event) -> bool {
-    event
-        .tags
-        .iter()
-        .any(|t| t.as_slice().first().map(String::as_str) == Some("backend"))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn display_name_prefers_display_name_over_name() {
-        let c = r#"{"name":"pablo","display_name":"Pablo F"}"#;
-        assert_eq!(display_name_from_metadata(c).as_deref(), Some("Pablo F"));
-    }
-
-    #[test]
-    fn display_name_falls_back_to_name() {
-        let c = r#"{"name":"pablo"}"#;
-        assert_eq!(display_name_from_metadata(c).as_deref(), Some("pablo"));
-    }
-
-    #[test]
-    fn empty_or_blank_metadata_yields_none() {
-        assert_eq!(display_name_from_metadata("{}"), None);
-        assert_eq!(display_name_from_metadata(r#"{"name":"  "}"#), None);
-        assert_eq!(display_name_from_metadata("not json"), None);
-    }
 }
