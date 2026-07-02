@@ -20,6 +20,13 @@ pub struct Transport {
     client: Client,
     pub pubkey: PublicKey,
     pub retry_queue: Arc<crate::retry_queue::RetryQueue>,
+    /// URL of the profile indexer relay (READ-only), if configured. kind:0
+    /// profiles are routed here via [`Transport::publish_signed_to`]; all other
+    /// events go to the WRITE relays (main NIP-29 relay) via `send_event`, which
+    /// skips READ-only relays. This prevents the indexer from rejecting NIP-29
+    /// kinds ("blocked: kind 9000 is not allowed") and having that rejection
+    /// pollute `assert_relay_accepted`'s joined-reason verdict.
+    indexer_url: Option<String>,
 }
 
 // ── secret scrubbing ──────────────────────────────────────────────────────────
@@ -85,7 +92,7 @@ fn scrub_secrets(input: &str) -> String {
 /// Scrub content in-place on an `UnsignedEvent`. Resets `id` to `None` when
 /// content changed so the signing step recomputes the event ID over the
 /// scrubbed content (required — nostr-sdk validates id vs content on sign).
-fn scrub_unsigned(unsigned: &mut UnsignedEvent) {
+pub(crate) fn scrub_unsigned(unsigned: &mut UnsignedEvent) {
     if unsigned.content.is_empty() {
         return;
     }
@@ -133,6 +140,19 @@ fn assert_relay_accepted(output: &Output<EventId>, event: Option<&Event>) -> Res
 impl Transport {
     /// Connect to the configured relays and authenticate.
     pub async fn connect(relays: &[String], keys: Keys) -> Result<Self> {
+        Self::connect_with_indexer(relays, None, keys).await
+    }
+
+    /// Connect to the configured main relays (READ+WRITE) plus an optional
+    /// indexer relay (READ-only). The indexer receives kind:0 profile publishes
+    /// via [`Transport::publish_signed_to`] and serves kind:0 lookups, but is
+    /// excluded from `send_event` broadcasts (which target WRITE relays only),
+    /// so it never sees — and therefore never rejects — NIP-29 group events.
+    pub async fn connect_with_indexer(
+        relays: &[String],
+        indexer_url: Option<&str>,
+        keys: Keys,
+    ) -> Result<Self> {
         let pubkey = keys.public_key();
         let opts = ClientOptions::default().automatic_authentication(true);
         let client = Client::builder().signer(keys).opts(opts).build();
@@ -141,6 +161,16 @@ impl Transport {
                 .add_relay(r)
                 .await
                 .with_context(|| format!("adding relay {r}"))?;
+        }
+        // Add the indexer as READ-only so send_event (which targets WRITE relays)
+        // skips it. kind:0 profiles route to it explicitly via publish_signed_to.
+        if let Some(url) = indexer_url {
+            if !url.is_empty() {
+                client
+                    .add_read_relay(url)
+                    .await
+                    .with_context(|| format!("adding indexer relay {url} (READ-only)"))?;
+            }
         }
         // Kick off the connection in the BACKGROUND (non-blocking) and return
         // immediately. Awaiting connectivity + NIP-42 auth is `warmup()`'s job,
@@ -152,6 +182,7 @@ impl Transport {
             client,
             pubkey,
             retry_queue: Arc::new(crate::retry_queue::RetryQueue::default()),
+            indexer_url: indexer_url.filter(|s| !s.is_empty()).map(String::from),
         })
     }
 
@@ -282,6 +313,36 @@ impl Transport {
             .context("publishing signed event")?;
         assert_relay_accepted(&out, Some(signed))?;
         Ok(out.val)
+    }
+
+    /// Publish an already-signed event to a specific relay subset (by URL).
+    /// Used by the indexer publish path: kind:0 profiles go to the READ-only
+    /// indexer relay, which is NOT in the WRITE set targeted by `send_event`.
+    /// Falls back to broadcasting on all WRITE relays when no indexer is
+    /// configured (preserves behavior for single-relay dev setups).
+    pub async fn publish_event_to(&self, signed: &Event, urls: &[String]) -> Result<EventId> {
+        crate::relay_log::log_outgoing_event(signed);
+        if urls.is_empty() {
+            // No explicit targets — broadcast on WRITE relays (the default pool).
+            let out = self
+                .client
+                .send_event(signed)
+                .await
+                .context("publishing signed event")?;
+            return Ok(out.val);
+        }
+        let out = self
+            .client
+            .send_event_to(urls.iter().cloned(), signed)
+            .await
+            .context("publishing signed event to target relays")?;
+        assert_relay_accepted(&out, Some(signed))?;
+        Ok(out.val)
+    }
+
+    /// The configured indexer relay URL, if any. kind:0 profiles route here.
+    pub fn indexer_url(&self) -> Option<&str> {
+        self.indexer_url.as_deref()
     }
 
     /// Retry a previously-failed signed event. Treats relay "duplicate" responses

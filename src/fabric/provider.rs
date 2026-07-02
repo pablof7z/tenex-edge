@@ -94,6 +94,21 @@ impl Nip29Provider {
         ev: &DomainEvent,
         keys: &nostr_sdk::prelude::Keys,
     ) -> Result<nostr_sdk::prelude::EventId> {
+        // kind:0 profiles route to the indexer relay only (purplepag.es). The
+        // main NIP-29 relay rejects kind:0 (it's not a NIP-29 kind), and the
+        // indexer rejects NIP-29 kinds — so the two must never share a publish.
+        // `publish_event_to` targets the indexer URL explicitly when configured,
+        // and falls back to the WRITE pool when no indexer is set.
+        if matches!(ev, DomainEvent::Profile(_)) {
+            let builder = self.wire.encode(ev)?;
+            let signed = self.transport.sign(builder, keys).await?;
+            let urls: Vec<String> = self
+                .transport
+                .indexer_url()
+                .map(|u| vec![u.to_string()])
+                .unwrap_or_default();
+            return self.transport.publish_event_to(&signed, &urls).await;
+        }
         if let Some(ch) = ev.channel() {
             let agent_pubkey = keys.public_key().to_hex();
             let parent = self

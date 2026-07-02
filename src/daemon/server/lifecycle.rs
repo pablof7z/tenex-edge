@@ -24,22 +24,28 @@ pub async fn run() -> Result<()> {
     let auth_keys = identity::load_or_create(&config::edge_home(), "tenex-edge-daemon", now_secs())
         .map(|i| i.keys)
         .unwrap_or_else(|_| Keys::generate());
-    // Include the indexer relay in the transport pool so kind:0 publishes reach
-    // it and kind:0 subscriptions also query it for profile discovery. Deduped
-    // in case someone lists purplepag.es in their main relays too.
-    let transport_relays: Vec<String> = {
-        let mut v = cfg.relays.clone();
-        if !v.iter().any(|r| r == &cfg.indexer_relay) {
-            v.push(cfg.indexer_relay.clone());
-        }
-        v
+    // The indexer relay is added to the pool as READ-only and targeted
+    // explicitly for kind:0 profile publishes via `publish_event_to`. It MUST
+    // NOT be in the WRITE relay set: the indexer (purplepag.es) rejects all
+    // NIP-29 kinds ("blocked: kind 9000 is not allowed"), and that rejection
+    // would pollute `assert_relay_accepted`'s joined-reason verdict whenever
+    // the main relay also returned a benign rejection — turning recoverable
+    // NIP-29 states into permanent `ChannelGate::Degraded`.
+    let indexer = if cfg.relays.contains(&cfg.indexer_relay) {
+        None
+    } else {
+        Some(cfg.indexer_relay.as_str())
     };
     let transport = Arc::new(
-        Transport::connect(&transport_relays, auth_keys)
+        Transport::connect_with_indexer(&cfg.relays, indexer, auth_keys)
             .await
             .context("daemon relay connect")?,
     );
-    tracing::info!(relays = ?transport_relays, "relay pool connected");
+    tracing::info!(
+        relays = ?cfg.relays,
+        indexer = ?cfg.indexer_relay,
+        "relay pool connected"
+    );
 
     let store = Arc::new(Mutex::new(Store::open(&store_path())?));
     let provider = Arc::new(Nip29Provider::new(
