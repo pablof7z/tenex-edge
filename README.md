@@ -38,7 +38,7 @@ cli ── runtime ── { domain · fabric/nip29/wire · transport · state ·
   status on kind:30315): project traffic is anchored with the `h` tag, using the
   project slug as the group id.
 - `transport` — thin adapter over `nostr-sdk` (publish/subscribe/AUTH/fetch).
-- `state` — SQLite: my sessions, the peer directory, per-session chat inbox rows.
+- `state` — SQLite: my sessions, the peer directory, per-session delivery rows.
   Opened by ONE process only — the daemon — so there is a single writer by construction.
 - `distill` — recent conversation transcript → one-line intent. LLM-based via
   the shared `~/.tenex` provider/model config.
@@ -78,19 +78,24 @@ Reads the shared `~/.tenex/config.json` (only `whitelistedPubkeys`, optional
 
 ## Commands
 
-The session/turn lifecycle (session start/end, turn start/check/end) has **no
-standalone commands** — hosts drive it through the single `harness hook` entry point
-(see _Host integrations_ below), which parses the harness payload on stdin and
-runs the corresponding step. The commands below are the human/agent-facing
-surface.
+The session/turn lifecycle has **no standalone commands**. Hosts drive it
+through the single `harness hook` entry point (see _Host integrations_ below),
+which parses the harness payload on stdin and runs the corresponding step. The
+commands below are the current live surface.
 
-| Command | Purpose |
-|---|---|
-| `harness hook <name> --type <hook-type>` | The one entry point for the session/turn lifecycle. Reads the harness's hook JSON on stdin; dispatches `session-start`/`session-end`/`user-prompt-submit`/`post-tool-use`/`stop` to the matching internal step. This is how every host (Claude Code, Codex, opencode) starts sessions and brackets turns. |
-| `chat write --message <m>` | Send a message to project chat. Mention an agent instance inline with `@<agent>` / `@<agent>1` in the body. |
-| `chat read [--live]` | Read project chat history. |
-| `who [--project <slug>] [--live]` | List visible peers (with session-id prefixes); `--live` opens a refreshing terminal board. |
-| `tail [--project <slug>]` | Stream all fabric activity, colorized. |
+| Audience | Command | Purpose |
+|---|---|---|
+| Agent/operator | `who [--project <slug>] [--all-projects] [--live]` | List visible agents. `--live` opens a refreshing terminal board. |
+| Agent/operator | `chat write --message <m>` | Send a message to the current channel. Mention an agent instance inline with `@<agent>` / `@<agent>1` in the body. |
+| Agent/operator | `chat read [--live]` | Read project chat history. |
+| Agent/operator | `channels create/list/join/leave/switch` | Manage NIP-29 subgroup task channels under a project. |
+| Agent/operator | `agents` / `invite <agent>` | List local invite targets and spawn one into the current channel. |
+| Operator | `project list/init/edit` | Manage project group discovery, local project registration, and group description. |
+| Operator | `agent list/add/assign/remove` | Manage this machine's local agent keystore and project assignments. |
+| Host integration | `harness hook <name> --type <hook-type>` | The one entry point for hook-driven session and turn lifecycle events. |
+| Host integration | `harness statusline` | Render the one-line fabric statusline for a supported host. |
+| Agent/operator | `publish --title <title>` | Publish a long-form proposal from this agent's session. |
+| Operator | `launch <slug>` | Launch an agent harness in a new tmux session. |
 
 ## Host integrations (Claude Code · Codex · OpenCode)
 
