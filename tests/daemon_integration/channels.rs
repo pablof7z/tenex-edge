@@ -102,8 +102,8 @@ fn channels_create_auto_creates_missing_parent_project() {
                 serde_json::json!({
                     "parent": parent,
                     "name": "tester",
-                    "agents": [{ "slug": "coder", "backend": backend_pk }],
-                    "brief": "",
+                    "about": "tester",
+                    "agents": [{ "slug": "coder", "backend": "test-host" }],
                 }),
             )
             .await
@@ -210,15 +210,13 @@ fn channels_create_errors_when_name_already_exists() {
     let home = Home::new();
     rewrite_config_with_user_nsec(&home);
     let parent = unique_session("dupproj");
-    let backend_pk = pubkey_of(EXAMPLE_BACKEND_SEC_HEX);
-
     rt().block_on(async {
         let mut c = Client::connect_or_spawn().await.expect("connect");
         let mk = || {
             serde_json::json!({
                 "parent": parent,
                 "name": "dup",
-                "agents": [{ "slug": "coder", "backend": backend_pk }],
+                "agents": [{ "slug": "coder", "backend": "test-host" }],
             })
         };
         c.call("channels_create", mk())
