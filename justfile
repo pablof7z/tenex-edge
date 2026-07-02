@@ -10,14 +10,35 @@ install: build
 lint:
     cargo clippy --all-targets -- -D warnings
 
-test:
-    cargo test
+test: test-all-local
 
-# Hermetic unit tests only. This is what CI runs. `just test` runs local
-# relay-backed integration tests too; ignored public-relay probes require their
-# explicit `cargo test --test ... -- --ignored --nocapture` commands.
+test-all-local: test-unit test-local-relay test-local-nip29
+
+# Hermetic unit tests only. This is what CI runs.
 test-unit:
     cargo test --lib
+
+# Local plain-Nostr relay tests. Requires `nak` on PATH or at `$HOME/go/bin/nak`.
+test-local-relay:
+    cargo test --test daemon_mechanics
+    cargo test --test e2e_transport
+
+# Local NIP-29 relay tests. Requires croissant at `$NIP29_RELAY_BIN` or
+# `$HOME/Work/croissant/croissant`.
+test-local-nip29:
+    cargo test --test daemon_integration -- --test-threads=1
+
+test-live-relay-probe:
+    : "${TE_RELAY:?set TE_RELAY=wss://relay.tenex.chat}"
+    cargo test --test relay_probe -- --ignored --nocapture
+
+test-live-nip29-probe:
+    : "${TE_NIP29_RELAY:?set TE_NIP29_RELAY=wss://nip29.f7z.io}"
+    cargo test --test nip29_probe -- --ignored --nocapture
+
+test-live-seed-validation:
+    : "${TE_NIP29_RELAY:?set TE_NIP29_RELAY=wss://nip29.f7z.io}"
+    cargo test --test seed_validation -- --ignored --nocapture
 
 fmt-check:
     cargo fmt --check
