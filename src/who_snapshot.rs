@@ -1,36 +1,38 @@
-use super::*;
+use crate::state::Store;
+use anyhow::{Context, Result};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub(super) struct OtherProjectSummary {
-    pub(super) project: String,
-    pub(super) agent_count: usize,
+pub(crate) struct OtherProjectSummary {
+    pub(crate) project: String,
+    pub(crate) agent_count: usize,
     #[serde(default)]
-    pub(super) agents: Vec<String>,
-    pub(super) about: Option<String>,
+    pub(crate) agents: Vec<String>,
+    pub(crate) about: Option<String>,
 }
 
 // The daemon serializes a WhoSnapshot and the thin `who` client renders it with
 // the EXACT renderers below — so output is byte-identical by construction and
 // can never drift from a separate copy.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct WhoSnapshot {
-    pub(super) project: String,
-    pub(super) now: u64,
-    pub(super) rows: Vec<WhoRow>,
-    pub(super) other_projects: Vec<OtherProjectSummary>,
+pub(crate) struct WhoSnapshot {
+    pub(crate) project: String,
+    pub(crate) now: u64,
+    pub(crate) rows: Vec<WhoRow>,
+    pub(crate) other_projects: Vec<OtherProjectSummary>,
     /// Agents tenex-edge has an identity for that can be spawned via tmux.
     #[serde(default)]
-    pub(super) spawnable: Vec<SpawnableRow>,
+    pub(crate) spawnable: Vec<SpawnableRow>,
     /// When the current scope is a per-session room, the work-root project it is
     /// nested under. Lets the renderer label the room as the current *channel*
     /// (distinct from the *project*). `None` when the scope is a plain project.
     #[serde(default)]
-    pub(super) channel_parent: Option<String>,
+    pub(crate) channel_parent: Option<String>,
     /// The human DISPLAY label for `project`: its kind:39000 `name` when set, else
     /// the raw scope id. Rendered in the `Channel:`/`Project:` headers so the
     /// opaque channel id never surfaces when a name exists. `*` for all-projects.
     #[serde(default)]
-    pub(super) project_display: String,
+    pub(crate) project_display: String,
 }
 
 /// A channel's human display name: its kind:39000 `name`, else the raw id.
@@ -49,63 +51,63 @@ fn display_name(store: &Store, id: &str) -> String {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub(super) struct SpawnableRow {
-    pub(super) host: String,
-    pub(super) slug: String,
-    pub(super) command: String,
+pub(crate) struct SpawnableRow {
+    pub(crate) host: String,
+    pub(crate) slug: String,
+    pub(crate) command: String,
     /// Optional one-line "when to use this agent" note from the agent file.
     #[serde(default)]
-    pub(super) byline: Option<String>,
+    pub(crate) byline: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub(super) struct WhoRow {
-    pub(super) source: WhoSource,
-    pub(super) fresh: bool,
-    pub(super) slug: String,
-    pub(super) project: String,
+pub(crate) struct WhoRow {
+    pub(crate) source: WhoSource,
+    pub(crate) fresh: bool,
+    pub(crate) slug: String,
+    pub(crate) project: String,
     /// Persistent session title (what the session is about); survives idle turns.
-    pub(super) status: String,
+    pub(crate) status: String,
     /// Live "doing now" line, distilled alongside the title. Shown after the
     /// title while mid-turn; empty (and not rendered) when idle.
     #[serde(default)]
-    pub(super) activity: String,
+    pub(crate) activity: String,
     /// Whether the session is mid-turn. Drives the idle marker independently of
     /// the title, which is retained while idle.
     #[serde(default)]
-    pub(super) active: bool,
-    pub(super) host: String,
-    pub(super) session_id: String,
-    pub(super) age_secs: Option<u64>,
+    pub(crate) active: bool,
+    pub(crate) host: String,
+    pub(crate) session_id: String,
+    pub(crate) age_secs: Option<u64>,
     /// Project-relative working dir (§8e). Empty or "." → rendered without a
     /// `[dir]` bracket; otherwise shown so worktrees render distinctly.
     #[serde(default)]
-    pub(super) rel_cwd: String,
+    pub(crate) rel_cwd: String,
     /// True only for a peer whose host differs from the daemon/viewer's host.
     /// Local sessions and same-machine peers are never remote (the §8e fix).
     #[serde(default)]
-    pub(super) remote: bool,
+    pub(crate) remote: bool,
     /// True when this session has a live tmux endpoint registered — i.e. it
     /// can be attached to via `tenex-edge tmux attach`.
     #[serde(default)]
-    pub(super) attachable: bool,
+    pub(crate) attachable: bool,
     /// Top-level work-root project for UI grouping. `project` remains the live
     /// routing scope (session room or task channel); this is the project tab.
     #[serde(default)]
-    pub(super) work_root: String,
+    pub(crate) work_root: String,
     /// Hex pubkey others route to: the per-session pubkey when derived, else the
     /// durable agent pubkey.
     #[serde(default)]
-    pub(super) pubkey: String,
+    pub(crate) pubkey: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub(super) enum WhoSource {
+pub(crate) enum WhoSource {
     Local,
     Peer,
 }
 
-pub fn load_who_snapshot(
+pub(crate) fn load_who_snapshot(
     store: &Store,
     current_project: Option<&str>,
     now: u64,
@@ -120,15 +122,14 @@ pub fn load_who_snapshot(
     // peer set so a local session isn't double-counted as a remote one. A read
     // failure here would empty the self set and render our OWN sessions as remote
     // peers, so fail loud rather than mislabel.
-    let my_pubkeys: std::collections::HashSet<String> = store
+    let my_pubkeys: HashSet<String> = store
         .list_identity_pubkeys()
         .context("who snapshot: failed to load this daemon's identity pubkeys (self set)")?
         .into_iter()
         .collect();
 
     let mut rows = Vec::new();
-    let mut other_agents: std::collections::BTreeMap<String, std::collections::BTreeSet<String>> =
-        std::collections::BTreeMap::new();
+    let mut other_agents: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
 
     // ── local sessions on this machine ─────────────────────────────────────────
     // A read failure must error, not silently render "no local sessions".
@@ -389,11 +390,4 @@ fn peer_slug(store: &Store, st: &crate::state::Status) -> String {
         .ok()
         .flatten()
         .unwrap_or_else(|| crate::util::pubkey_short(&st.pubkey))
-}
-
-impl WhoSnapshot {
-    /// Number of visible sessions (local + peer, including idle) in scope.
-    pub fn session_count(&self) -> usize {
-        self.rows.len()
-    }
 }

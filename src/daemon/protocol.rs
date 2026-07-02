@@ -172,9 +172,10 @@ impl Response {
 /// client treats this as "exit-and-respawn", not a hard failure.
 pub const ERR_PROTOCOL_SKEW: &str = "protocol_skew";
 
-// The `who` snapshot DTO is `crate::cli::WhoSnapshot` itself (Serialize/
+// The `who` snapshot DTO is `crate::who_snapshot::WhoSnapshot` (Serialize/
 // Deserialize): the daemon serializes the exact struct the CLI renderers
-// consume, so `who` output is byte-identical by construction.
+// consume, so `who` output is byte-identical by construction without making
+// the daemon depend on CLI presentation modules.
 
 #[cfg(test)]
 mod tests {
