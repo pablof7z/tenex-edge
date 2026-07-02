@@ -16,9 +16,9 @@ in [`docs/product-spec/`](docs/product-spec/).
 Working and tested for real:
 - **CI-safe gates**: formatting, LOC, clippy, and library tests run through the
   `just fmt-check`, `just loc-check`, `just lint`, and `just test-unit` recipes.
-- **Local relay integration tests** (`just test`). These use local relay
-  processes, not production fabric state: `nak serve` for plain Nostr tests and
-  croissant for NIP-29 group semantics.
+- **Local relay integration tests**: `just test-local-relay` uses local
+  `nak serve`; `just test-local-nip29` uses local croissant for NIP-29 group
+  semantics. `just test` runs all local tiers.
 - **Live multi-agent demo** (`scripts/demo.sh`): two agent processes exchange
   presence, distilled activity, and a session-targeted mention.
 - **Live real-agent demo** (`scripts/demo-claude.sh`): an actual `claude -p`
@@ -70,8 +70,10 @@ croissant binary, defaulting to `~/Work/croissant/croissant` or
 `$NIP29_RELAY_BIN`.
 
 ```bash
-just test-unit        # CI-safe library tests
-just test             # unit + local relay integration tests
+just test-unit          # CI-safe library tests
+just test-local-relay   # local nak-backed integration tests
+just test-local-nip29   # local croissant-backed integration tests
+just test               # all local tiers above
 bash scripts/demo.sh         # two agents: presence + activity + mention
 bash scripts/demo-claude.sh  # a real `claude -p` session on the fabric
 ```
@@ -79,22 +81,25 @@ bash scripts/demo-claude.sh  # a real `claude -p` session on the fabric
 ## Test tiers and live probes
 
 The default CI contract is hermetic: `just fmt-check`, `just loc-check`,
-`just lint`, and `just test-unit`. Use `just test` when local relay binaries are
-available and you want the full local integration suite.
+`just lint`, and `just test-unit`.
+
+Use the local integration recipes by prerequisite:
+
+- `just test-local-relay` requires `nak` on `PATH` or at `$HOME/go/bin/nak`.
+- `just test-local-nip29` requires croissant at `$NIP29_RELAY_BIN` or
+  `$HOME/Work/croissant/croissant`.
+- `just test` runs `test-unit`, `test-local-relay`, and `test-local-nip29`.
 
 The ignored probe tests below are intentional public-relay checks. Run them only
 when validating relay behavior because they publish disposable events and groups
 to the configured relay, may trigger rate limits, and leave probe data behind.
 
 ```bash
-TE_RELAY=wss://relay.tenex.chat \
-  cargo test --test relay_probe -- --ignored --nocapture
+TE_RELAY=wss://relay.tenex.chat just test-live-relay-probe
 
-TE_NIP29_RELAY=wss://nip29.f7z.io \
-  cargo test --test nip29_probe -- --ignored --nocapture
+TE_NIP29_RELAY=wss://nip29.f7z.io just test-live-nip29-probe
 
-TE_NIP29_RELAY=wss://nip29.f7z.io \
-  cargo test --test seed_validation -- --ignored --nocapture
+TE_NIP29_RELAY=wss://nip29.f7z.io just test-live-seed-validation
 ```
 
 `relay_probe` checks shared-connection AUTH behavior on a plain Nostr relay.

@@ -43,7 +43,8 @@ jobs:
         run: just lint
 
       # Unit tests only. Local relay-backed integration tests run through
+      # `just test-local-relay`, `just test-local-nip29`, or aggregate
       # `just test` when nak/croissant are available. Ignored public-relay
-      # probes stay explicit and are never part of default CI.
+      # probes stay behind explicit live-probe recipes.
       - name: Unit tests (just test-unit)
         run: just test-unit
