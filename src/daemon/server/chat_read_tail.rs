@@ -4,8 +4,11 @@ use crate::state::RelayEvent;
 use crate::util::{truncate_words, CHAT_RENDER_WORD_LIMIT};
 use anyhow::bail;
 
+mod read_scope;
 #[cfg(test)]
 mod tests;
+
+use read_scope::{chat_read_scopes_for_store, ChatCursor};
 
 /// Upper bound on chat-log rows pulled per channel for a read (the slicing below
 /// narrows to the requested window).
@@ -69,6 +72,7 @@ pub(in crate::daemon::server) async fn handle_chat_read<W: AsyncWriteExt + Unpin
         None
     };
     let live_started_at = now_secs();
+    let live_floor = live_started_at.max(since);
 
     let rows = state.with_store(|s| {
         let mut rows: Vec<RelayEvent> = read_scopes
@@ -102,11 +106,16 @@ pub(in crate::daemon::server) async fn handle_chat_read<W: AsyncWriteExt + Unpin
         rows
     });
     let mut seen: std::collections::HashSet<String> = rows.iter().map(|r| r.id.clone()).collect();
-    let mut cursor = rows
+    let mut cursors: std::collections::HashMap<String, ChatCursor> = read_scopes
         .iter()
-        .map(|r| r.created_at)
-        .max()
-        .unwrap_or(live_started_at.max(since));
+        .map(|scope| (scope.clone(), ChatCursor::new(live_floor)))
+        .collect();
+    for row in &rows {
+        cursors
+            .entry(row.channel_h.clone())
+            .or_insert_with(|| ChatCursor::new(live_floor))
+            .observe(row);
+    }
 
     for row in rows {
         let json = chat_row_to_json(state, &row, true);
@@ -127,15 +136,27 @@ pub(in crate::daemon::server) async fn handle_chat_read<W: AsyncWriteExt + Unpin
                 project: ev_project,
                 ..
             }) if read_scopes.contains(&ev_project) => {
+                let cursor = cursors
+                    .entry(ev_project.clone())
+                    .or_insert_with(|| ChatCursor::new(live_floor))
+                    .clone();
                 let rows = state.with_store(|s| {
-                    s.chat_for_channel(&ev_project, cursor, CHAT_READ_CAP)
-                        .unwrap_or_default()
+                    s.chat_for_channel_after(
+                        &ev_project,
+                        cursor.created_at,
+                        &cursor.id,
+                        CHAT_READ_CAP,
+                    )
+                    .unwrap_or_default()
                 });
                 for row in rows {
+                    cursors
+                        .entry(row.channel_h.clone())
+                        .or_insert_with(|| ChatCursor::new(live_floor))
+                        .observe(&row);
                     if !seen.insert(row.id.clone()) {
                         continue;
                     }
-                    cursor = cursor.max(row.created_at);
                     let json = chat_row_to_json(state, &row, true);
                     if write_json(writer, &Response::item(id, json)).await.is_err() {
                         let _ = write_json(writer, &Response::end(id)).await;
@@ -153,21 +174,7 @@ pub(in crate::daemon::server) async fn handle_chat_read<W: AsyncWriteExt + Unpin
 }
 
 fn chat_read_scopes(state: &Arc<DaemonState>, scope: &str) -> Vec<String> {
-    state.with_store(|s| {
-        let mut scopes = vec![scope.to_string()];
-        if s.is_root_channel(scope).unwrap_or(true) {
-            scopes.extend(
-                s.list_channels()
-                    .unwrap_or_default()
-                    .into_iter()
-                    .filter(|c| c.parent == scope)
-                    .map(|c| c.channel_h),
-            );
-        }
-        scopes.sort();
-        scopes.dedup();
-        scopes
-    })
+    state.with_store(|s| chat_read_scopes_for_store(s, scope))
 }
 
 /// Render a verbatim chat `RelayEvent` into the CLI's chat-line JSON, resolving

@@ -134,6 +134,29 @@ impl Store {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
+    /// Chat log rows after an exact `(created_at, id)` cursor, oldest-first.
+    /// This preserves same-second ordering for live catch-up without replaying
+    /// rows at the cursor timestamp whose ids sort before or equal to the cursor.
+    pub fn chat_for_channel_after(
+        &self,
+        channel_h: &str,
+        after_created_at: u64,
+        after_id: &str,
+        limit: u32,
+    ) -> Result<Vec<RelayEvent>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {COLS} FROM relay_events
+             WHERE channel_h=?1
+               AND (created_at > ?2 OR (created_at = ?2 AND id > ?3))
+             ORDER BY created_at ASC, id ASC LIMIT ?4"
+        ))?;
+        let rows = stmt.query_map(
+            params![channel_h, after_created_at, after_id, limit],
+            row_to_event,
+        )?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
     /// Count kind:9 chat events in a channel with `created_at < before`. Used on
     /// first turn to tell a newly-joined session how much history it can't see.
     pub fn count_channel_events_before(&self, channel_h: &str, before: u64) -> Result<u32> {
@@ -155,3 +178,6 @@ impl Store {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 }
+
+#[cfg(test)]
+mod tests;
