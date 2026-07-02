@@ -75,23 +75,6 @@ pub(in crate::daemon::server) async fn refresh_project_members_cache(
     true
 }
 
-pub(in crate::daemon::server) async fn wait_for_project_member_cache(
-    state: &Arc<DaemonState>,
-    project: &str,
-    pubkey: &str,
-    present: bool,
-) -> bool {
-    for _ in 0..20 {
-        let refreshed = refresh_project_members_cache(state, project).await;
-        let has = state.with_store(|s| s.is_channel_member(project, pubkey).unwrap_or(false));
-        if refreshed && has == present {
-            return true;
-        }
-        tokio::time::sleep(Duration::from_millis(250)).await;
-    }
-    false
-}
-
 pub(in crate::daemon::server) fn log_nip29_role_decision(
     group: &str,
     pubkey: &str,

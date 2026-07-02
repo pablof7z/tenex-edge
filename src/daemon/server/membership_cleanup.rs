@@ -35,21 +35,8 @@ pub(in crate::daemon::server) fn remove_session_memberships(
     if removals.is_empty() {
         return;
     }
-    state.with_store(|s| {
-        for (channel, pubkey) in &removals {
-            if let Err(e) = s.remove_channel_member(channel, pubkey) {
-                tracing::error!(
-                    session = %session_id,
-                    channel,
-                    pubkey = %pubkey_short(pubkey),
-                    error = %e,
-                    "membership cleanup: failed to remove local cache row"
-                );
-            }
-        }
-    });
     for (channel, pubkey) in removals {
-        let provider = state.provider.clone();
+        let state = state.clone();
         tokio::spawn(async move {
             tracing::info!(
                 channel = %channel,
@@ -57,7 +44,19 @@ pub(in crate::daemon::server) fn remove_session_memberships(
                 reason,
                 "removing locally managed offline agent from channel"
             );
-            provider.nip29_remove_member(&channel, &pubkey).await;
+            let removed = state
+                .provider
+                .remove_member_confirmed(&channel, &pubkey)
+                .await;
+            if !removed.is_confirmed() {
+                tracing::warn!(
+                    channel = %channel,
+                    pubkey = %pubkey_short(&pubkey),
+                    reason,
+                    outcome = ?removed,
+                    "membership cleanup: relay removal was not confirmed; local membership row retained"
+                );
+            }
         });
     }
 }

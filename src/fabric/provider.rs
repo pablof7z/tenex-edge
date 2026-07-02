@@ -4,6 +4,7 @@
 mod group_management;
 mod group_state;
 mod materialization;
+mod membership_confirmation;
 mod readiness;
 
 use crate::domain::DomainEvent;

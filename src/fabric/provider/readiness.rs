@@ -226,18 +226,11 @@ fn ensure_channel_ready_inner<'a>(
                 if already_admin {
                     continue;
                 }
-                if confirm_role_grant(provider, ctx.channel, pk, true).await {
-                    provider.with_store(|s| {
-                        if let Err(e) = s.upsert_channel_member(ctx.channel, pk, "admin", now_secs())
-                        {
-                            tracing::error!(
-                                channel = ctx.channel,
-                                pubkey = pk.as_str(),
-                                error = %e,
-                                "ensure_channel_ready: local admin mirror write failed after confirmed relay grant — cache divergence"
-                            );
-                        }
-                    });
+                if provider
+                    .grant_admin_confirmed(ctx.channel, pk)
+                    .await
+                    .is_confirmed()
+                {
                     repaired = true;
                 } else {
                     eprintln!(
@@ -263,19 +256,11 @@ fn ensure_channel_ready_inner<'a>(
             && !members.contains(ctx.expect_member)
             && !roles.contains_key(ctx.expect_member)
         {
-            if confirm_role_grant(provider, ctx.channel, ctx.expect_member, false).await {
-                provider.with_store(|s| {
-                    if let Err(e) =
-                        s.upsert_channel_member(ctx.channel, ctx.expect_member, "member", now_secs())
-                    {
-                        tracing::error!(
-                            channel = ctx.channel,
-                            pubkey = ctx.expect_member,
-                            error = %e,
-                            "ensure_channel_ready: local member mirror write failed after confirmed relay grant — cache divergence"
-                        );
-                    }
-                });
+            if provider
+                .grant_member_confirmed(ctx.channel, ctx.expect_member)
+                .await
+                .is_confirmed()
+            {
                 repaired = true;
             } else {
                 eprintln!(
@@ -332,48 +317,4 @@ fn ensure_channel_ready_inner<'a>(
             ChannelGate::Ready
         }
     })
-}
-
-async fn confirm_role_grant(
-    provider: &Nip29Provider,
-    channel: &str,
-    pubkey: &str,
-    want_admin: bool,
-) -> bool {
-    for attempt in 0..6u32 {
-        let outcome = if want_admin {
-            provider.nip29_add_admin_outcome(channel, pubkey).await
-        } else {
-            provider.nip29_add_member_outcome(channel, pubkey).await
-        };
-        // Confirm ONLY on a relay state we actually OBSERVED. A read-back failure
-        // must never be promoted to "grant confirmed" (the old `outcome.is_applied()`
-        // path did exactly that): log loud, then retry and ultimately degrade.
-        match provider.try_fetch_group_state(channel).await {
-            Ok((_, roles, members)) => {
-                let present = if want_admin {
-                    roles.get(pubkey).map(String::as_str) == Some("admin")
-                } else {
-                    members.contains(pubkey) || roles.contains_key(pubkey)
-                };
-                if present {
-                    return true;
-                }
-            }
-            Err(e) => {
-                tracing::error!(
-                    channel,
-                    pubkey,
-                    attempt,
-                    error = %e,
-                    "confirm_role_grant: relay read-back failed; cannot confirm grant — retrying then degrading"
-                );
-            }
-        }
-        if outcome.is_rejected() {
-            return false;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(250 * (attempt as u64 + 1))).await;
-    }
-    false
 }

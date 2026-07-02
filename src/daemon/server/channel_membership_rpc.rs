@@ -69,11 +69,11 @@ async fn ensure_joinable(
         // simply gets added silently rather than hitting an access error.
         let added = state
             .provider
-            .nip29_add_member(channel_h, &rec.agent_pubkey)
+            .grant_member_confirmed(channel_h, &rec.agent_pubkey)
             .await;
-        if !added {
+        if !added.is_confirmed() {
             anyhow::bail!(
-                "agent {} is not a member of channel {:?} and could not be auto-added \
+                "agent {} is not a member of channel {:?} and could not be confirmed as added \
                  (is the management key an admin of that channel?)",
                 rec.agent_slug,
                 channel_h
@@ -154,19 +154,29 @@ pub(in crate::daemon::server) async fn rpc_channels_leave(
     if channel == rec.channel_h {
         anyhow::bail!("cannot leave the active channel; switch to another channel first");
     }
-    let left = state.with_store(|s| {
-        s.leave_session_channel(&rec.session_id, &channel)
+    let was_joined = state.with_store(|s| {
+        s.is_session_joined_channel(&rec.session_id, &channel)
             .unwrap_or(false)
     });
-    if left {
-        state.with_store(|s| {
-            s.remove_channel_member(&channel, &rec.agent_pubkey).ok();
-        });
-        state
+    let left = if was_joined {
+        let removed = state
             .provider
-            .nip29_remove_member(&channel, &rec.agent_pubkey)
+            .remove_member_confirmed(&channel, &rec.agent_pubkey)
             .await;
-    }
+        if !removed.is_confirmed() {
+            anyhow::bail!(
+                "agent {} could not be confirmed as removed from channel {:?}",
+                rec.agent_slug,
+                channel
+            );
+        }
+        state.with_store(|s| {
+            s.leave_session_channel(&rec.session_id, &channel)
+                .unwrap_or(false)
+        })
+    } else {
+        false
+    };
     Ok(serde_json::json!({
         "session_id": rec.session_id,
         "channel": channel,
@@ -199,14 +209,17 @@ pub(in crate::daemon::server) async fn rpc_channels_switch(
         true,
     )?;
     if prev_channel != new_channel {
-        state.with_store(|s| {
-            s.remove_channel_member(&prev_channel, &rec.agent_pubkey)
-                .ok();
-        });
-        state
+        let removed = state
             .provider
-            .nip29_remove_member(&prev_channel, &rec.agent_pubkey)
+            .remove_member_confirmed(&prev_channel, &rec.agent_pubkey)
             .await;
+        if !removed.is_confirmed() {
+            tracing::warn!(
+                agent = %rec.agent_slug,
+                prev_channel,
+                "channels_switch: previous membership removal was not confirmed"
+            );
+        }
     }
     Ok(serde_json::json!({
         "session_id": rec.session_id,

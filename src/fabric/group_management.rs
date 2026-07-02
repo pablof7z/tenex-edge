@@ -5,9 +5,26 @@ pub(crate) enum GroupPublishOutcome {
     Rejected,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum GroupMutationOutcome {
+    Confirmed,
+    Unconfirmed,
+    Rejected,
+}
+
 impl GroupPublishOutcome {
     pub(crate) fn is_applied(self) -> bool {
         matches!(self, Self::Applied)
+    }
+
+    pub(crate) fn is_rejected(self) -> bool {
+        matches!(self, Self::Rejected)
+    }
+}
+
+impl GroupMutationOutcome {
+    pub(crate) fn is_confirmed(self) -> bool {
+        matches!(self, Self::Confirmed)
     }
 
     pub(crate) fn is_rejected(self) -> bool {
