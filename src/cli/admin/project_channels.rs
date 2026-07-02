@@ -149,18 +149,28 @@ pub async fn channels(action: ChannelsAction) -> Result<()> {
             for r in rooms {
                 let id = r["child_h"].as_str().unwrap_or("");
                 let name = r["name"].as_str().unwrap_or("");
+                let about = r["about"].as_str().unwrap_or("");
                 let depth = r["depth"].as_u64().unwrap_or(0) as usize;
                 // depth 0 = direct child of the project root → one level of indent.
                 let indent = "  ".repeat(depth + 1);
                 // Name-first: the human handle is primary; the opaque id is shown
                 // dimmed only as a secondary locator, and alone only when the
-                // channel has no name yet.
+                // channel has no name yet. `about`, when set, trails as a suffix —
+                // mirroring how `project list` shows a project's description.
+                let suffix = if about.is_empty() || about == name {
+                    String::new()
+                } else {
+                    format!("  — {about}")
+                };
                 if name.is_empty() {
-                    println!("{indent}{}", id.if_supports_color(Stdout, |s| s.cyan()));
+                    println!(
+                        "{indent}{}{suffix}",
+                        id.if_supports_color(Stdout, |s| s.cyan())
+                    );
                 } else {
                     let name_c = name.if_supports_color(Stdout, |s| s.bold());
                     let id_c = id.if_supports_color(Stdout, |s| s.cyan());
-                    println!("{indent}{name_c}  ({id_c})");
+                    println!("{indent}{name_c}  ({id_c}){suffix}");
                 }
             }
         }

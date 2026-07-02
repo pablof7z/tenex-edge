@@ -300,8 +300,8 @@ pub(in crate::daemon::server) fn rpc_channels_list(
 
     // Every channel the daemon has materialized.
     let rows = state.with_store(|s| s.list_channels())?;
-    // parent id -> children (id, display name). Sorted for stable output.
-    let mut children: std::collections::BTreeMap<String, Vec<(String, String)>> =
+    // parent id -> children (id, display name, about). Sorted for stable output.
+    let mut children: std::collections::BTreeMap<String, Vec<(String, String, String)>> =
         std::collections::BTreeMap::new();
     for ch in &rows {
         if ch.parent.is_empty() {
@@ -315,7 +315,7 @@ pub(in crate::daemon::server) fn rpc_channels_list(
         children
             .entry(ch.parent.clone())
             .or_default()
-            .push((ch.channel_h.clone(), display));
+            .push((ch.channel_h.clone(), display, ch.about.clone()));
     }
     for v in children.values_mut() {
         v.sort();
@@ -326,26 +326,27 @@ pub(in crate::daemon::server) fn rpc_channels_list(
 }
 
 /// Pre-order DFS flatten of the subgroup tree rooted at `root` into
-/// `{child_h, name, depth}` JSON (root excluded, its children at depth 0).
+/// `{child_h, name, about, depth}` JSON (root excluded, its children at depth 0).
 pub(in crate::daemon::server) fn preorder_rooms(
-    children: &std::collections::BTreeMap<String, Vec<(String, String)>>,
+    children: &std::collections::BTreeMap<String, Vec<(String, String, String)>>,
     root: &str,
 ) -> Vec<serde_json::Value> {
     fn walk(
-        children: &std::collections::BTreeMap<String, Vec<(String, String)>>,
+        children: &std::collections::BTreeMap<String, Vec<(String, String, String)>>,
         node: &str,
         depth: usize,
         seen: &mut std::collections::HashSet<String>,
         out: &mut Vec<serde_json::Value>,
     ) {
         if let Some(kids) = children.get(node) {
-            for (child_id, name) in kids {
+            for (child_id, name, about) in kids {
                 if !seen.insert(child_id.clone()) {
                     continue;
                 }
                 out.push(serde_json::json!({
                     "child_h": child_id,
                     "name": name,
+                    "about": about,
                     "depth": depth,
                 }));
                 walk(children, child_id, depth + 1, seen, out);
