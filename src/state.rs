@@ -238,6 +238,8 @@ mod members;
 mod outbox;
 mod profiles;
 mod project_roots;
+mod reader;
+pub(crate) use reader::StoreReader;
 mod retention;
 pub use retention::{
     RetentionPruneReport, COMPLETED_LEDGER_RETENTION_SECS, RELAY_EVENT_RETENTION_SECS,
