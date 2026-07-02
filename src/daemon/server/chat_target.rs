@@ -123,6 +123,24 @@ mod tests {
     }
 
     #[test]
+    fn explicit_chat_target_resolves_name_and_literal_id() {
+        let store = Store::open_memory().unwrap();
+        store.upsert_channel("root", "root", "", "", 1).unwrap();
+        store
+            .upsert_channel("abcd1234", "planning", "", "root", 1)
+            .unwrap();
+
+        assert_eq!(
+            resolve_chat_channel_ref(&store, "root", "planning").unwrap(),
+            "abcd1234"
+        );
+        assert_eq!(
+            resolve_chat_channel_ref(&store, "root", "abcd1234").unwrap(),
+            "abcd1234"
+        );
+    }
+
+    #[test]
     fn multi_join_without_explicit_channel_errors_with_reruns() {
         let store = Store::open_memory().unwrap();
         let rec = session("root");
