@@ -283,7 +283,11 @@ pub fn render_tail_event(
         }
 
         TailEvent::Sync {
-            from, to, state, ..
+            from,
+            to,
+            state,
+            detail,
+            ..
         } => {
             let (cat, color_fn): (&str, fn(&str) -> String) = match state.as_str() {
                 "failed" => ("sync ", |s| {
@@ -317,7 +321,16 @@ pub fn render_tail_event(
                     _ => "~",
                 }
             };
-            format!("{ts_str}  {cat_str}  {from} → {to}  {glyph} {state}")
+            let detail = if compact {
+                String::new()
+            } else {
+                detail
+                    .as_deref()
+                    .filter(|d| !d.trim().is_empty())
+                    .map(|d| format!(" - {}", d.replace('\n', " ")))
+                    .unwrap_or_default()
+            };
+            format!("{ts_str}  {cat_str}  {from} → {to}  {glyph} {state}{detail}")
         }
 
         TailEvent::Turn {

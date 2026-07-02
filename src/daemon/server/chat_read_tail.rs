@@ -166,7 +166,11 @@ pub(in crate::daemon::server) async fn handle_chat_read<W: AsyncWriteExt + Unpin
             }
             Ok(_) => {}
             Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                let _ =
+                    write_json(writer, &stream_lag_error(id, "chat read --live", skipped)).await;
+                return Ok(());
+            }
         }
     }
     let _ = write_json(writer, &Response::end(id)).await;
@@ -284,11 +288,24 @@ pub(in crate::daemon::server) async fn handle_tail<W: AsyncWriteExt + Unpin>(
                 }
             }
             Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                let _ = write_json(writer, &stream_lag_error(id, "tail", skipped)).await;
+                return Ok(());
+            }
         }
     }
     let _ = write_json(writer, &Response::end(id)).await;
     Ok(())
+}
+
+fn stream_lag_error(id: u64, stream: &str, skipped: u64) -> Response {
+    Response::err(
+        id,
+        "stream_lagged",
+        format!(
+            "{stream} dropped {skipped} live event(s); reconnect to resume from persisted history"
+        ),
+    )
 }
 
 /// True when the event belongs to the requested project scope (or no filter).

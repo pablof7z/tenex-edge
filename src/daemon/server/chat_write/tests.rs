@@ -75,3 +75,21 @@ fn mention_label_resolution_treats_nested_channels_under_same_root_as_same_proje
     assert_eq!(resolved.target_session.as_deref(), Some("helper-session"));
     assert_eq!(resolved.project, "leaf-b");
 }
+
+#[test]
+fn mention_resolution_store_errors_are_visible() {
+    let err = handle_mention_resolution_error(
+        "helper",
+        anyhow::Error::new(rusqlite::Error::InvalidQuery),
+    )
+    .unwrap_err();
+
+    assert!(err
+        .to_string()
+        .contains("failed to resolve mention @helper"));
+}
+
+#[test]
+fn mention_resolution_unknown_handles_remain_silent() {
+    handle_mention_resolution_error("ghost", anyhow::anyhow!("can't resolve recipient")).unwrap();
+}

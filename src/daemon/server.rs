@@ -163,6 +163,21 @@ impl DaemonState {
     pub(crate) fn whitelisted_pubkeys(&self) -> &[String] {
         &self.cfg.whitelisted_pubkeys
     }
+    pub(crate) fn emit_delivery_failure(
+        &self,
+        project: &str,
+        agent: &str,
+        session: &str,
+        detail: impl Into<String>,
+    ) {
+        self.emit_tail(TailEvent::delivery_failure(
+            now_secs(),
+            project,
+            agent,
+            session,
+            detail,
+        ));
+    }
     /// The shared relay connection. Used by the kind:0 profile resolver to
     /// one-shot fetch a pubkey's metadata on a cache miss.
     pub(crate) fn transport(&self) -> &Arc<Transport> {

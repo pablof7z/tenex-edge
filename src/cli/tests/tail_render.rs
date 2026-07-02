@@ -116,6 +116,27 @@ fn render_leave_formats_duration() {
     assert!(line.contains("17m0s"), "duration 1020s = 17m0s");
 }
 
+// ── Sync ─────────────────────────────────────────────────────────────────
+
+#[test]
+fn render_failed_sync_includes_detail() {
+    let ev = TailEvent::Sync {
+        ts: TS,
+        project: "proj".into(),
+        from: "tenex-edge".into(),
+        to: "codex".into(),
+        state: "failed".into(),
+        detail: Some("session sid-1: failed to read inbox".into()),
+    };
+    let line = render_tail_event(&ev, false, false, false, false);
+    assert!(line.contains("sync"), "category");
+    assert!(line.contains("[x] failed"), "failure glyph");
+    assert!(
+        line.contains("session sid-1: failed to read inbox"),
+        "detail"
+    );
+}
+
 // ── Sess ─────────────────────────────────────────────────────────────────
 
 #[test]

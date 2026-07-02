@@ -65,3 +65,24 @@ fn root_chat_read_backfill_and_live_scopes_include_nested_descendants() {
         vec!["unknown".to_string()]
     );
 }
+
+#[test]
+fn chat_read_live_lag_is_terminal_stream_error() {
+    let resp = stream_lag_error(42, "chat read --live", 3);
+
+    let err = resp.error.expect("lag response is an error");
+    assert_eq!(err.code, "stream_lagged");
+    assert!(err
+        .message
+        .contains("chat read --live dropped 3 live event"));
+    assert!(err.message.contains("reconnect"));
+}
+
+#[test]
+fn tail_lag_is_terminal_stream_error() {
+    let resp = stream_lag_error(7, "tail", 11);
+
+    let err = resp.error.expect("lag response is an error");
+    assert_eq!(err.code, "stream_lagged");
+    assert!(err.message.contains("tail dropped 11 live event"));
+}
