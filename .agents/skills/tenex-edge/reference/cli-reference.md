@@ -1,8 +1,9 @@
 # tenex-edge CLI reference
 
-A flat cheat-sheet for the `tenex-edge` CLI. Every command resolves *your*
-session from the current directory (or `$TENEX_EDGE_SESSION`), so a session id
-is almost never required. Where a command takes `--session`, it's an override.
+A flat cheat-sheet for the `tenex-edge` CLI. In-session commands send the
+daemon their launcher identity (`TMUX_PANE` for tmux, harness/watch-pid for
+other hosts), agent slug, cwd, and active channel; the daemon resolves the
+canonical session id. `TENEX_EDGE_SESSION` is not a live identity input.
 
 ---
 

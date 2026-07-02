@@ -139,10 +139,11 @@ tenex-edge chat read --since 2h --live
 When you write chat, the CLI decides which of *your* sessions is the author, in
 this order:
 
-1. explicit `--session <id>`
-2. `$TENEX_EDGE_SESSION` environment variable
-3. the agent-scoped latest **alive** session (with `$TENEX_EDGE_AGENT` honored to
-   pick the agent; agent-agnostic fallback only when no agent is supplied)
+1. the daemon-resolved launcher identity (`TMUX_PANE` for tmux-backed sessions,
+   otherwise the harness/watch-pid anchor when available)
+2. the active channel from `TENEX_EDGE_CHANNEL`, plus the agent slug and cwd
+3. the agent-scoped latest **alive** session only when there is no stronger
+   launcher anchor
 
 In normal Claude Code use you can ignore all of this — the cwd + env resolve you
 automatically.

@@ -151,32 +151,46 @@ fn cli_subprocess_blocking_path_session_start_and_who() {
 }
 
 #[test]
-fn invalid_cli_invocation_is_recorded_before_clap_rejects_it() {
+fn invalid_cli_invocation_writes_command_log_only_when_enabled() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let home = Home::new();
 
-    let out = run_cli(
+    let args = &[
+        "send-this-message",
+        "--session",
+        "hallucinated-session",
+        "hello",
+    ];
+    let out = run_cli(&home, args);
+    assert!(
+        !out.status.success(),
+        "hallucinated command unexpectedly succeeded"
+    );
+    assert!(
+        !home
+            .dir
+            .path()
+            .join("sessions")
+            .join("hallucinated-session")
+            .join("command-calls.jsonl")
+            .exists(),
+        "default CLI execution must not write command forensic logs"
+    );
+
+    let command_log_path = home.dir.path().join("command-calls.jsonl");
+    let out = run_cli_with_env(
         &home,
-        &[
-            "send-this-message",
-            "--session",
-            "hallucinated-session",
-            "hello",
-        ],
+        args,
+        &[(
+            tenex_edge::cli::command_forensics::COMMAND_CALL_LOG_ENV,
+            command_log_path.to_str().unwrap(),
+        )],
     );
     assert!(
         !out.status.success(),
         "hallucinated command unexpectedly succeeded"
     );
 
-    // Forensics logs are now scoped to per-session dirs. The --session flag
-    // value is "hallucinated-session", so the log lands in that session subdir.
-    let command_log_path = home
-        .dir
-        .path()
-        .join("sessions")
-        .join("hallucinated-session")
-        .join("command-calls.jsonl");
     let command_log = std::fs::read_to_string(&command_log_path).expect("command forensic log");
     let records: Vec<serde_json::Value> = command_log
         .lines()

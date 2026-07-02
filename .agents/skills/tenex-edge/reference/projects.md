@@ -84,7 +84,7 @@ Flags (verified via `whoami --help`):
 
 | Flag | Meaning |
 |---|---|
-| `--session <SESSION>` | Target a specific session id. Omitted → resolved from `$TENEX_EDGE_SESSION`, else the cwd's project. |
+| `--session <SESSION>` | Target a specific session id where the command exposes this override. Omitted → resolved by the daemon from launcher identity and cwd. |
 | `--json` | Emit the raw identity JSON instead of the rendered card. |
 
 The `member:` line is the key project-state signal: **`yes`** means your pubkey
@@ -300,9 +300,9 @@ ACL is a shared `is_member` predicate both planes consult, not a separate plane.
 An agent doesn't "switch projects" with a command — its project follows its
 **working directory**. To operate in a different project, change into that
 project's directory (or a worktree of it) and the next `whoami` / `who` /
-`chat write` resolves to the new slug. Session auto-resolution means you
-rarely pass `--session`: it's taken from `$TENEX_EDGE_SESSION`, else the cwd's
-project.
+`chat write` resolves to the new slug. Session auto-resolution is daemon-owned:
+launcher identity, agent slug, active channel, and cwd are the inputs, not a
+`TENEX_EDGE_SESSION` env var.
 
 To reach *across* projects without moving:
 
