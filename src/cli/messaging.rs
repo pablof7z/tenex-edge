@@ -1,5 +1,8 @@
 use super::*;
 
+mod args;
+pub(super) use args::{chat, ChatAction};
+
 pub(super) async fn chat_write(
     message: String,
     channel: Option<String>,

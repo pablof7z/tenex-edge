@@ -32,9 +32,7 @@ pub use admin::render_fabric;
 #[cfg(test)]
 use admin::{parse_since, render_tail_event};
 pub use args::Cli;
-use args::{
-    AgentAction, ChannelsAction, ChatAction, Cmd, DebugAction, HarnessAction, ProjectAction,
-};
+use args::{AgentAction, ChannelsAction, Cmd, DebugAction, HarnessAction, ProjectAction};
 pub use messaging::{format_envelope, mention_short_id, EnvelopeView};
 pub use turn::{assemble_turn_check_context, assemble_turn_start_context};
 pub(crate) use turn::{turn_check_audit, turn_start_audit};
@@ -136,26 +134,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                 who::who(project, all_projects)
             }
         }
-        Cmd::Chat { action } => match action {
-            ChatAction::Write {
-                message,
-                message_flag,
-                channel,
-                long_message,
-            } => {
-                let message = messaging::resolve_send_message_body(message_flag.or(message))?;
-                messaging::chat_write(message, channel, long_message).await
-            }
-            ChatAction::Read {
-                id,
-                since,
-                limit,
-                offset,
-                tail,
-                live,
-                channel,
-            } => messaging::chat_read(id, since, limit, offset, tail, live, channel).await,
-        },
+        Cmd::Chat { action } => messaging::chat(action).await,
         Cmd::Project { action } => admin::project(action).await,
         Cmd::Doctor => admin::doctor().await,
         Cmd::Channels { action } => admin::channels(action).await,
