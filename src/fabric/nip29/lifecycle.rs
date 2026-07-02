@@ -257,7 +257,7 @@ mod tests {
     }
 
     #[test]
-    fn group_edit_name_sets_d_and_name() {
+    fn group_edit_name_sets_h_and_name() {
         let b = group_edit_name("myrepo-1a2b3c4d", "Fix the auth race").unwrap();
         let ev = b.sign_with_keys(&Keys::generate()).unwrap();
         assert_eq!(ev.kind.as_u16(), KIND_GROUP_EDIT_METADATA);

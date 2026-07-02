@@ -4,14 +4,15 @@
 //! |-------------|------|
 //! | Profile     | kind:0,     content `{"name": slug}`, `["host", host]` |
 //! | Activity    | kind:1,     `["h", project]` — social narrative (no inbox routing) |
-//! | Status      | kind:30315, content = live activity (may be empty when idle), `["d", session_id]`, one or more `["h", channel]`, `["title", title]` (always), `["status", "busy"\|"idle"]`, `["host", host]`, optional `["rel-cwd", rel]`, optional NIP-40 `["expiration", ts]` |
+//! | Status      | kind:30315, content = live activity (may be empty when idle), `["d", session_id]`, one or more `["h", channel]`, `["title", title]` (always), `["status", "busy"\|"idle"]`, `["host", host]`, optional `["slug", slug]`, optional `["rel-cwd", rel]`, optional NIP-40 `["expiration", ts]` |
 //! | Chat        | kind:9,     `["h", project]`, optional `["p", mentioned_pubkey]` |
 //!
 //! Status is the single self-contained per-session signal: ONE kind:30315 event
 //! per `(author_pubkey, session_id)` carries the whole live state (busy/idle, the
 //! live activity in the content, the persistent title, host, rel-cwd). It targets
-//! every channel the session is in with repeated `h` tags. Liveness IS the
-//! freshness of this event: the daemon re-arms a NIP-40 `["expiration", now +
+//! every channel the session is in with repeated `h` tags. The optional `slug`
+//! tag is a render hint only; the event signer remains the identity authority.
+//! Liveness IS the freshness of this event: the daemon re-arms a NIP-40 `["expiration", now +
 //! STATUS_TTL_SECS]` tag on every heartbeat, so a stopped session's event ages
 //! off the relay shortly after its last beat. A `Status` with `expires_at ==
 //! None` publishes no expiration (tests / non-heartbeat contexts). There is no
@@ -21,8 +22,9 @@
 //! uses an inline `@<agent-instance-label>` in the chat body, which adds a `p`
 //! tag for the mentioned instance pubkey.
 //!
-//! Slug is NOT carried on the wire; it is resolved downstream from the signer's
-//! kind:0 profile (authoritative) or the local `profiles` table. Authorization
+//! Most events do not carry a slug: it is resolved downstream from the signer's
+//! kind:0 profile (authoritative) or the local `profiles` table. Status carries
+//! an optional `slug` convenience tag for immediate rendering. Authorization
 //! uses only event.pubkey (signer); self-asserted `agent` tags have no authority
 //! and are never written or read.
 

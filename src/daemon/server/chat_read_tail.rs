@@ -12,24 +12,11 @@ mod tests;
 const CHAT_READ_CAP: u32 = 10_000;
 
 #[derive(serde::Deserialize, Default)]
-#[allow(dead_code)]
 pub(in crate::daemon::server) struct ChatReadParams {
     #[serde(default)]
     id: Option<String>,
     #[serde(default)]
     channel: Option<String>,
-    #[serde(default)]
-    session: Option<String>,
-    #[serde(default, alias = "env_session")]
-    harness_session: Option<String>,
-    #[serde(default)]
-    tmux_pane: Option<String>,
-    #[serde(default)]
-    cwd: Option<String>,
-    #[serde(default)]
-    agent: Option<String>,
-    #[serde(default)]
-    group: Option<String>,
     #[serde(default)]
     since: Option<u64>,
     #[serde(default)]

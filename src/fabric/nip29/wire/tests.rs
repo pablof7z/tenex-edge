@@ -39,7 +39,8 @@ fn profile_roundtrip() {
 
 fn status(keys: &Keys, busy: bool, rel_cwd: &str) -> DomainEvent {
     DomainEvent::Status(Status {
-        // Slug is NOT on the wire; decoded status always has empty slug.
+        // Empty slug keeps the default status roundtrip focused on required
+        // fields; non-empty slug emission is covered separately.
         agent: AgentRef::new(keys.public_key().to_hex(), String::new()),
         channels: vec!["tenex-edge".into()],
         session_id: "sess-123".into(),
@@ -122,9 +123,35 @@ fn status_is_per_group_self_contained_signal() {
     // The live activity is the content, not a tag.
     assert_eq!(signed.content, "reading the diff");
     assert!(!has_tag_name(&signed, "activity"));
+    // Empty slugs are omitted rather than emitting a useless hint.
+    assert!(!has_tag_name(&signed, "slug"));
     // No legacy presence-heartbeat artifacts, no self-asserted agent tag.
     assert!(!has_tag(&signed, "d", "tenex-edge-presence:sess-123"));
     assert!(!has_tag_name(&signed, "agent"));
+}
+
+#[test]
+fn status_slug_is_convenience_hint_not_agent_tag() {
+    let keys = Keys::generate();
+    let ev = DomainEvent::Status(Status {
+        agent: agent(&keys, "coder"),
+        channels: vec!["tenex-edge".into()],
+        session_id: "sess-123".into(),
+        host: "laptop".into(),
+        title: "fixing the auth bug".into(),
+        activity: "reading the diff".into(),
+        busy: true,
+        rel_cwd: String::new(),
+        expires_at: None,
+    });
+    let signed = Nip29WireCodec
+        .encode_event(&ev)
+        .unwrap()
+        .sign_with_keys(&keys)
+        .unwrap();
+    assert!(has_tag(&signed, "slug", "coder"));
+    assert!(!has_tag_name(&signed, "agent"));
+    assert_eq!(roundtrip(ev.clone(), &keys), ev);
 }
 
 #[test]

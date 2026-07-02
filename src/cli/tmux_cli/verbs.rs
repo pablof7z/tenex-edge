@@ -214,20 +214,20 @@ async fn create_channel_interactive(
         .with_prompt("Channel name")
         .interact_text()?;
 
-    // Resolve the local backend pubkey from the daemon so we don't have to
-    // guess the hostname format the daemon uses internally.
+    // Resolve the local backend config label from the daemon so the picker uses
+    // the same backend identifier as `tenex-edge channels create --agent`.
     let backend_v = super::super::daemon_call_async("local_backend", serde_json::json!({})).await?;
-    let backend_pubkey = backend_v["pubkey"]
+    let backend_label = backend_v["backend_label"]
         .as_str()
-        .context("local_backend did not return pubkey")?;
+        .context("local_backend did not return backend_label")?;
 
     let v = super::super::daemon_call_async(
         "channels_create",
         crate::cli::rpc_params(serde_json::json!({
             "parent": project,
-            "name": name,
-            "agents": [{ "slug": agent_slug, "backend": backend_pubkey }],
-            "brief": "",
+            "name": &name,
+            "about": &name,
+            "agents": [{ "slug": agent_slug, "backend": backend_label }],
         })),
     )
     .await?;
