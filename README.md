@@ -58,9 +58,10 @@ cli ── runtime ── { domain · fabric/nip29/wire · transport · state ·
 
 > **Transport note.** M1 named NMP as the transport. On inspection NMP is a full
 > cross-platform *app kernel* (Elm-architecture, FFI, flatbuffers) — a poor fit
-> for a headless CLI daemon. The wire output is identical standard Nostr either
-> way, and transport sits behind the wire codec seam, so an NMP-backed transport
-> remains a drop-in. Built on `nostr-sdk` to ship working, tested code.
+> for a headless CLI daemon. The active provider is NIP-29 over standard Nostr,
+> with Nostr event encoding kept inside `fabric/nip29/wire`; future transport
+> changes belong behind the provider seam. Built on `nostr-sdk` to ship working,
+> tested code.
 
 ## Try it
 

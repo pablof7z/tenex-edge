@@ -108,9 +108,9 @@ flowchart TD
 ```
 
 **Rule of the seam:** everything *above* `SEAM` is written once and never edited
-to add a fabric. Everything *below* is a self-contained provider. The domain's
-vocabulary is `DomainEvent` + `Scope` (today's `SubScope`) — the two types that
-are already genuinely transport-agnostic.
+to add a fabric. Everything *below* is a self-contained provider. The domain
+speaks `DomainEvent`; subscription intent is expressed as `Scope` while concrete
+providers decide what native filters, streams, or queries that means.
 
 ---
 
@@ -306,7 +306,7 @@ flowchart TD
     PROVIDER["FabricProvider<br/>(Nip29 · Mls)"]
     PROVIDER --> L["① Lifecycle reactor<br/>react(ProjectOpened, AgentJoined…)<br/>→ native side-effects"]
     PROVIDER --> M["② Materializer<br/>composes ③+④ → admit · derive<br/>· upsert canonical rows into the store"]
-    PROVIDER --> W["③ Wire codec<br/>DomainEvent ⇄ raw envelope<br/>(bytes / event / MLS app-msg)"]
+    PROVIDER --> W["③ Provider codec<br/>DomainEvent ⇄ provider-native envelope"]
     PROVIDER --> D["④ Delivery<br/>publish(raw envelope) · subscribe(scope)→raw stream<br/>owns REQ-filters / gossip / MLS-stream"]
 ```
 
@@ -314,7 +314,7 @@ flowchart TD
 |---|------------|----------------|--------------|
 | ① | **Lifecycle** | Turn a domain lifecycle event into provider-native setup (create group, invite, or no-op). | Decide *when* a project opens (that's the host/daemon). |
 | ② | **Materializer** | **Composes ③ and ④:** consume ④'s inbound stream, decode via ③, then own *only* admission, and upsert of canonical rows — membership, project list & metadata, agents. The store is the read contract; this fills it. | Subscribe or decode *itself* (that's ④ and ③), or answer reads (readers query the store directly; the materializer never sits in a read path). |
-| ③ | **Wire codec** | Pure, symmetric ser/de of the five+ `DomainEvent` nouns to its envelope. | Open subscriptions or manage groups. |
+| ③ | **Provider codec** | Pure, symmetric ser/de of the five+ `DomainEvent` nouns to the provider's native envelope. The current NIP-29 provider uses a Nostr-event codec. | Open subscriptions or manage groups. |
 | ④ | **Delivery** | Connect/auth, publish raw envelopes, and stream raw inbound envelopes for a `Scope`. Owns whatever fetch model the fabric uses. | Decode, derive, apply admission, or know domain meaning. |
 
 The runtime only ever talks to one active provider interface. Swapping fabric =

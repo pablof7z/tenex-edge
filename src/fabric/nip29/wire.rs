@@ -29,7 +29,7 @@
 //! and are never written or read.
 
 use crate::domain::{Activity, AgentRef, ChatMessage, DomainEvent, Profile, Proposal, Status};
-use crate::fabric::{RawEnvelope, WireCodec};
+use crate::fabric::{NostrEventCodec, RawEnvelope};
 use crate::util::SessionId;
 use anyhow::Result;
 use nostr_sdk::prelude::*;
@@ -287,7 +287,7 @@ impl Nip29WireCodec {
     }
 }
 
-impl WireCodec for Nip29WireCodec {
+impl NostrEventCodec for Nip29WireCodec {
     fn encode(&self, ev: &DomainEvent) -> Result<EventBuilder> {
         self.encode_event(ev)
     }
