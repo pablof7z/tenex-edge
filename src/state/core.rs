@@ -39,13 +39,17 @@ impl Store {
         conn.busy_timeout(std::time::Duration::from_secs(5))
             .context("setting busy_timeout")?;
         schema::initialize_file(&conn, path)?;
-        Ok(Self { conn })
+        let store = Self { conn };
+        store.backfill_messages_from_relay_events()?;
+        Ok(store)
     }
 
     pub fn open_memory() -> Result<Self> {
         let conn = Connection::open_in_memory()?;
         schema::initialize_memory(&conn)?;
-        Ok(Self { conn })
+        let store = Self { conn };
+        store.backfill_messages_from_relay_events()?;
+        Ok(store)
     }
 
     /// `PRAGMA integrity_check` → "ok" on a healthy db, else the first problem

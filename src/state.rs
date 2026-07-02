@@ -114,6 +114,50 @@ pub struct RelayEvent {
     pub tags_json: String,
 }
 
+/// Canonical chat/message read-model row. `author_session` is the return
+/// envelope: when present, replies can target the exact session that authored the
+/// row instead of degrading to pubkey/agent-level addressing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Message {
+    pub message_id: String,
+    pub thread_id: String,
+    pub channel_h: String,
+    pub author_pubkey: String,
+    pub author_session: Option<String>,
+    pub body: String,
+    pub created_at: u64,
+    pub direction: String,
+    pub sync_state: String,
+    pub native_event_id: Option<String>,
+    pub error: Option<String>,
+}
+
+/// Input shape for recording a canonical message row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordMessage {
+    pub message_id: String,
+    pub thread_id: String,
+    pub channel_h: String,
+    pub author_pubkey: String,
+    pub author_session: Option<String>,
+    pub body: String,
+    pub created_at: u64,
+    pub direction: String,
+    pub sync_state: String,
+    pub native_event_id: Option<String>,
+    pub error: Option<String>,
+}
+
+/// One recipient edge for a canonical message. `target_session` is optional
+/// because fabric-level messages may only know the recipient pubkey.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MessageRecipient {
+    pub message_id: String,
+    pub recipient_pubkey: String,
+    pub target_session: Option<String>,
+    pub delivered_at: Option<u64>,
+}
+
 // ── local plumbing row types ─────────────────────────────────────────────────
 
 /// A local agent process THIS daemon hosts. OS handles only — never agent
@@ -235,6 +279,7 @@ mod events;
 mod identities;
 mod inbox;
 mod members;
+mod messages;
 mod outbox;
 mod profiles;
 mod project_roots;

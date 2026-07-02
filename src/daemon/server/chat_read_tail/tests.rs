@@ -1,16 +1,20 @@
 use super::*;
+use crate::state::Message;
 use crate::util::CHAT_RENDER_WORD_LIMIT;
 
-fn row(body: String) -> RelayEvent {
-    RelayEvent {
-        id: "event-1".into(),
-        kind: crate::fabric::nip29::wire::KIND_CHAT as u32,
-        pubkey: "pubkey-1".into(),
-        created_at: 123,
+fn row(body: String) -> Message {
+    Message {
+        message_id: "event-1".into(),
+        thread_id: "channel-1".into(),
         channel_h: "channel-1".into(),
-        d_tag: String::new(),
-        content: body,
-        tags_json: "[]".into(),
+        author_pubkey: "pubkey-1".into(),
+        author_session: Some("sender-session".into()),
+        body,
+        created_at: 123,
+        direction: "inbound".into(),
+        sync_state: "accepted".into(),
+        native_event_id: Some("event-1".into()),
+        error: None,
     }
 }
 
@@ -23,17 +27,25 @@ fn message(words: usize) -> String {
 
 #[test]
 fn chat_log_json_truncates_regular_reads() {
-    let json = chat_log_row_to_json(&row(message(CHAT_RENDER_WORD_LIMIT + 1)), "writer", true);
+    let json = chat_log_row_to_json(
+        &row(message(CHAT_RENDER_WORD_LIMIT + 1)),
+        "writer",
+        "laptop",
+        Some("target-session"),
+        true,
+    );
     assert_eq!(json["event_id"], "event-1");
     assert_eq!(json["full_event_id"], "event-1");
     assert_eq!(json["truncated"], true);
     assert!(json["body"].as_str().unwrap().ends_with("..."));
+    assert_eq!(json["from_session"], "sender-session");
+    assert_eq!(json["mentioned_session"], "target-session");
 }
 
 #[test]
 fn chat_log_json_keeps_exact_id_reads_full() {
     let body = message(CHAT_RENDER_WORD_LIMIT + 1);
-    let json = chat_log_row_to_json(&row(body.clone()), "writer", false);
+    let json = chat_log_row_to_json(&row(body.clone()), "writer", "laptop", None, false);
     assert_eq!(json["truncated"], false);
     assert_eq!(json["body"], body);
 }

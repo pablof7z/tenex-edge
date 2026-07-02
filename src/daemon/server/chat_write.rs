@@ -1,7 +1,8 @@
+use super::chat_store::{seed_chat_read_models, ChatSeed};
 use super::chat_target::resolve_chat_target;
 use super::resolution::work_root_for;
 use super::*;
-use crate::state::{RelayEvent, Store};
+use crate::state::Store;
 use crate::util::{word_count, CHAT_RENDER_WORD_LIMIT};
 use anyhow::bail;
 
@@ -24,33 +25,6 @@ pub(in crate::daemon::server) struct ChatWriteParams {
     channel: Option<String>,
     #[serde(default)]
     long_message: bool,
-}
-
-/// Build a verbatim kind:9 chat row for the `relay_events` log from the fields we
-/// already know about a freshly-published chat line (the relay rarely echoes a
-/// publish back to the same connection, so the log is seeded locally).
-pub(in crate::daemon::server) fn chat_relay_event(
-    id: &str,
-    pubkey: &str,
-    created_at: u64,
-    channel_h: &str,
-    body: &str,
-    mentioned: Option<&str>,
-) -> RelayEvent {
-    let mut tags: Vec<Vec<String>> = vec![vec!["h".to_string(), channel_h.to_string()]];
-    if let Some(pk) = mentioned {
-        tags.push(vec!["p".to_string(), pk.to_string()]);
-    }
-    RelayEvent {
-        id: id.to_string(),
-        kind: crate::fabric::nip29::wire::KIND_CHAT as u32,
-        pubkey: pubkey.to_string(),
-        created_at,
-        channel_h: channel_h.to_string(),
-        d_tag: String::new(),
-        content: body.to_string(),
-        tags_json: serde_json::to_string(&tags).unwrap_or_else(|_| "[]".to_string()),
-    }
 }
 
 fn chat_publish_scope(
@@ -169,21 +143,21 @@ pub(in crate::daemon::server) async fn rpc_chat_write(
     // connection that published it. Seed the verbatim log and park inbox rows for
     // sessions already alive in the same routing scope.
     let routed = state.with_store(|s| {
-        if let Err(e) = s.insert_event(&chat_relay_event(
-            &event_id,
-            &from_pubkey,
-            created_at,
-            &deliver_scope,
-            &body_to_send,
-            mentioned_pubkey.as_deref(),
-        )) {
-            tracing::error!(
-                event_id = %event_id,
-                channel = %deliver_scope,
-                error = %e,
-                "chat_write: seeding published chat into relay_events log failed — local tail may miss this line"
-            );
-        }
+        seed_chat_read_models(
+            s,
+            &ChatSeed {
+                event_id: &event_id,
+                from_pubkey: &from_pubkey,
+                from_session: Some(&rec.session_id),
+                channel_h: &deliver_scope,
+                body: &body_to_send,
+                mentioned_pubkey: mentioned_pubkey.as_deref(),
+                mentioned_session: mentioned_session.as_deref(),
+                created_at,
+                direction: "outbound",
+            },
+            "chat_write",
+        );
         let mut routed = false;
         // Best-effort local delivery (the publish already succeeded), but a store
         // failure listing targets must not silently drop a direct mention — log it
@@ -244,6 +218,20 @@ pub(in crate::daemon::server) async fn rpc_chat_write(
             };
             if enqueued {
                 routed = true;
+            }
+            if let Err(e) = s.add_message_recipient(
+                &event_id,
+                &target.agent_pubkey,
+                Some(&target.session_id),
+                None,
+            ) {
+                tracing::error!(
+                    event_id = %event_id,
+                    session = %target.session_id,
+                    channel = %deliver_scope,
+                    error = %e,
+                    "chat_write: recipient session edge upsert failed"
+                );
             }
         }
         routed

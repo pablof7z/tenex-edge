@@ -1,8 +1,9 @@
-use super::chat_write::chat_relay_event;
+use super::chat_store::{seed_chat_read_models, ChatSeed};
 use super::*;
 
 pub(in crate::daemon::server) struct ChatRecordDraft {
     from_pubkey: String,
+    from_session: Option<String>,
     project: String,
     body: String,
 }
@@ -23,21 +24,21 @@ pub(in crate::daemon::server) async fn publish_chat_checked(
     state.transport.publish_event_checked(signed).await?;
 
     state.with_store(|s| {
-        if let Err(e) = s.insert_event(&chat_relay_event(
-            &event_id,
-            &draft.from_pubkey,
-            signed.created_at.as_secs(),
-            &draft.project,
-            &draft.body,
-            None,
-        )) {
-            tracing::error!(
-                event_id = %event_id,
-                channel = %draft.project,
-                error = %e,
-                "chat_publish: caching relay-confirmed local chat failed"
-            );
-        }
+        seed_chat_read_models(
+            s,
+            &ChatSeed {
+                event_id: &event_id,
+                from_pubkey: &draft.from_pubkey,
+                from_session: draft.from_session.as_deref(),
+                channel_h: &draft.project,
+                body: &draft.body,
+                mentioned_pubkey: None,
+                mentioned_session: None,
+                created_at: signed.created_at.as_secs(),
+                direction: "outbound",
+            },
+            "chat_publish",
+        );
     });
 
     Ok(event_id)
@@ -93,6 +94,7 @@ pub(in crate::daemon::server) async fn publish_agent_reply(
     };
     let draft = ChatRecordDraft {
         from_pubkey,
+        from_session: Some(rec.session_id.clone()),
         project: scope,
         body: reply.to_string(),
     };
@@ -205,6 +207,7 @@ pub(in crate::daemon::server) async fn rpc_user_prompt(
     };
     let draft = ChatRecordDraft {
         from_pubkey: op_pubkey,
+        from_session: None,
         project: scope.clone(),
         body: p.prompt.clone(),
     };

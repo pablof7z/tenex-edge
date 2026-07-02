@@ -1,4 +1,4 @@
-use crate::state::{RelayEvent, Store};
+use crate::state::{Message, Store};
 
 #[derive(Clone, Debug)]
 pub(in crate::daemon::server) struct ChatCursor {
@@ -14,12 +14,12 @@ impl ChatCursor {
         }
     }
 
-    pub(in crate::daemon::server) fn observe(&mut self, row: &RelayEvent) {
+    pub(in crate::daemon::server) fn observe(&mut self, row: &Message) {
         if row.created_at > self.created_at
-            || (row.created_at == self.created_at && row.id.as_str() > self.id.as_str())
+            || (row.created_at == self.created_at && row.message_id.as_str() > self.id.as_str())
         {
             self.created_at = row.created_at;
-            self.id = row.id.clone();
+            self.id = row.message_id.clone();
         }
     }
 }
