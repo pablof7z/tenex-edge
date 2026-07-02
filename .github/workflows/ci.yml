@@ -18,6 +18,7 @@ jobs:
   quality-gate:
     name: fmt · lint · loc · test
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -48,3 +49,30 @@ jobs:
       # probes stay behind explicit live-probe recipes.
       - name: Unit tests (just test-unit)
         run: just test-unit
+
+  local-relay-integration:
+    name: local relay integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install just
+        uses: extractions/setup-just@v2
+
+      - name: Install Go toolchain
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - name: Pin nak
+        run: go install github.com/fiatjaf/nak@v0.20.0
+
+      - name: Local relay integration tests (just test-local-relay)
+        run: just test-local-relay
