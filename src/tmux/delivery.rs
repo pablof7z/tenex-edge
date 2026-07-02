@@ -1,8 +1,8 @@
 use crate::daemon::server::DaemonState;
-use crate::tmux::pane::{pane_alive, paste_text, send_enter, tmux_available};
+use crate::tmux::pane::{pane_alive_async, paste_text, send_enter, tmux_available_async};
 use crate::util::now_secs;
 use anyhow::Result;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
@@ -33,11 +33,19 @@ fn record_message_injection(session_id: &str) {
         .insert(session_id.to_string(), now_secs());
 }
 
+fn prune_debounce(active_session_ids: &HashSet<String>) {
+    let now = now_secs();
+    debounce().lock().unwrap().retain(|session_id, last| {
+        active_session_ids.contains(session_id)
+            && now.saturating_sub(*last) < MESSAGE_INJECT_DEBOUNCE_SECS
+    });
+}
+
 /// Type the received message into `pane_id` and submit it, so a freshly-spawned
 /// harness opens on the message that triggered its spawn.
 pub async fn inject_spawn_message(pane_id: &str, text: &str) -> Result<()> {
     tokio::time::sleep(Duration::from_millis(SPAWN_PROMPT_DELAY_MS)).await;
-    if pane_alive(pane_id).is_none() {
+    if pane_alive_async(pane_id).await.is_none() {
         anyhow::bail!("pane {pane_id} died before spawn message could be injected");
     }
 
@@ -149,7 +157,7 @@ pub fn ring_doorbells(state: Arc<DaemonState>) {
 }
 
 async fn ring_doorbells_inner(state: &Arc<DaemonState>) -> Result<()> {
-    if !tmux_available() {
+    if !tmux_available_async().await {
         return Ok(());
     }
 
@@ -161,6 +169,8 @@ async fn ring_doorbells_inner(state: &Arc<DaemonState>) -> Result<()> {
                 return Vec::new();
             }
         };
+        let active_ids: HashSet<String> = alive.iter().map(|rec| rec.session_id.clone()).collect();
+        prune_debounce(&active_ids);
         alive
             .into_iter()
             .filter(|rec| {
@@ -198,7 +208,7 @@ async fn ring_doorbells_inner(state: &Arc<DaemonState>) -> Result<()> {
             None => continue,
         };
 
-        if pane_alive(&pane_id).is_none() {
+        if pane_alive_async(&pane_id).await.is_none() {
             if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
                 eprintln!("[tmux] pane {pane_id} gone; removing endpoint for {sid}");
             }

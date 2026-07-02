@@ -16,8 +16,8 @@ fn tmux_pane_for_session(state: &Arc<DaemonState>, session_id: &str) -> Option<S
 
 // ── tmux_status ───────────────────────────────────────────────────────────────
 
-pub(super) fn rpc_tmux_status(state: &Arc<DaemonState>) -> Result<serde_json::Value> {
-    let statuses = crate::tmux::list_endpoint_statuses(state);
+pub(super) async fn rpc_tmux_status(state: &Arc<DaemonState>) -> Result<serde_json::Value> {
+    let statuses = crate::tmux::list_endpoint_statuses_async(state).await;
     let arr: Vec<serde_json::Value> = statuses
         .into_iter()
         .map(|s| {
@@ -68,7 +68,7 @@ pub(super) async fn rpc_tmux_send(
         }
     };
 
-    if crate::tmux::pane_alive_pub(&pane_id).is_none() {
+    if crate::tmux::pane_alive_async(&pane_id).await.is_none() {
         return Ok(serde_json::json!({
             "injected": false,
             "reason": format!("pane {pane_id} is gone")
@@ -341,44 +341,46 @@ pub(super) async fn rpc_tmux_resume(
 /// "Dead" rows only — sessions still alive on the fabric appear in the live list
 /// and are resumable from there via `[r]`; this section is the longer tail of
 /// sessions that have exited entirely. Newest first.
-pub(super) fn rpc_tmux_resumable(state: &Arc<DaemonState>) -> Result<serde_json::Value> {
+pub(super) async fn rpc_tmux_resumable(state: &Arc<DaemonState>) -> Result<serde_json::Value> {
     const LIMIT: u32 = 60;
     let candidates = state
         .with_store(|s| s.list_resumable_sessions(LIMIT))
         .unwrap_or_default();
 
-    let arr: Vec<serde_json::Value> = candidates
-        .into_iter()
-        .filter_map(|rec| {
-            // Must have a usable resume token (claude/codex: the session id;
-            // opencode: a captured ses_*; our synthetic te-* ids: not resumable).
-            resume_token_for(&rec)?;
-            // Alive sessions are shown in the live list (resume them with [r]
-            // there); keep this section to fully-exited ones to avoid dupes.
-            if rec.alive {
-                return None;
-            }
-            // Skip sessions with a live pane — those are attachable, not resume
-            // candidates. A missing/dead alias means the harness is gone.
-            let live_pane = tmux_pane_for_session(state, &rec.session_id)
-                .is_some_and(|p| crate::tmux::pane_alive_pub(&p).is_some());
-            if live_pane {
-                return None;
-            }
-            let work_root = state.with_store(|s| work_root_for(s, &rec.channel_h));
-            let slug = state.session_instance(&rec).display_slug();
-            Some(serde_json::json!({
-                "session_id": rec.session_id,
-                "slug": slug,
-                "project": rec.channel_h,
-                "work_root": work_root,
-                "rel_cwd": "",
-                "alive": rec.alive,
-                "created_at": rec.created_at,
-                "title": rec.title,
-            }))
-        })
-        .collect();
+    let mut arr = Vec::new();
+    for rec in candidates {
+        // Must have a usable resume token (claude/codex: the session id;
+        // opencode: a captured ses_*; our synthetic te-* ids: not resumable).
+        if resume_token_for(&rec).is_none() {
+            continue;
+        }
+        // Alive sessions are shown in the live list (resume them with [r]
+        // there); keep this section to fully-exited ones to avoid dupes.
+        if rec.alive {
+            continue;
+        }
+        // Skip sessions with a live pane — those are attachable, not resume
+        // candidates. A missing/dead alias means the harness is gone.
+        let live_pane = match tmux_pane_for_session(state, &rec.session_id) {
+            Some(pane) => crate::tmux::pane_alive_async(&pane).await.is_some(),
+            None => false,
+        };
+        if live_pane {
+            continue;
+        }
+        let work_root = state.with_store(|s| work_root_for(s, &rec.channel_h));
+        let slug = state.session_instance(&rec).display_slug();
+        arr.push(serde_json::json!({
+            "session_id": rec.session_id,
+            "slug": slug,
+            "project": rec.channel_h,
+            "work_root": work_root,
+            "rel_cwd": "",
+            "alive": rec.alive,
+            "created_at": rec.created_at,
+            "title": rec.title,
+        }));
+    }
 
     Ok(serde_json::json!({ "resumable": arr }))
 }

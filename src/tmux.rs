@@ -21,6 +21,7 @@ mod registry;
 pub use delivery::{inject_pending_messages_pub, inject_spawn_message, ring_doorbells};
 pub use launch::{resume_agent, resume_agent_in_channel, spawn_agent};
 pub use pane::{list_endpoint_statuses, pane_alive_pub, set_pane_session_id, EndpointStatus};
+pub(crate) use pane::{list_endpoint_statuses_async, pane_alive_async};
 pub use registry::spawnable_agents;
 
 #[cfg(test)]

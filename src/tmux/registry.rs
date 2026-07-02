@@ -95,28 +95,25 @@ pub(super) fn build_resume_command(
 /// an identity for. Returns an empty vec when tmux is absent.
 pub fn spawnable_agents() -> Vec<(String, String, Option<String>)> {
     if !tmux_available() {
-        eprintln!("[tenex-edge] spawnable_agents: tmux not available");
+        tracing::debug!("spawnable_agents: tmux not available");
         return Vec::new();
     }
     let edge_home = crate::config::edge_home();
     let agents = crate::identity::list_local_agents(&edge_home);
-    eprintln!(
-        "[tenex-edge] spawnable_agents: {} agents in store",
-        agents.len()
-    );
+    tracing::debug!(count = agents.len(), "spawnable_agents: agents in store");
     let result: Vec<(String, String, Option<String>)> = agents
         .into_iter()
         .filter_map(|(slug, file_cmd, _agent_def, byline)| {
-            let display = file_cmd
+            let display_cmd = file_cmd
                 .as_ref()
                 .filter(|c| !c.is_empty())
                 .map(|c| c.join(" "))
                 .or_else(|| find_spawn_def(&slug).map(|d| d.command.join(" ")));
-            eprintln!("[tenex-edge] spawnable_agents: slug={slug:?} display={display:?}");
-            Some((slug, display?, byline))
+            tracing::debug!(slug = %slug, display_cmd = ?display_cmd, "spawnable_agents: candidate");
+            Some((slug, display_cmd?, byline))
         })
         .collect();
-    eprintln!("[tenex-edge] spawnable_agents: result={result:?}");
+    tracing::debug!(?result, "spawnable_agents: result");
     result
 }
 
