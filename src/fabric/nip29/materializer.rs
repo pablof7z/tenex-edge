@@ -253,7 +253,7 @@ fn collect_p_pubkeys(event: &Event) -> Vec<String> {
 }
 
 /// Project a raw Nostr event onto the verbatim `relay_events` row shape.
-fn to_relay_event(event: &Event) -> RelayEvent {
+pub(crate) fn to_relay_event(event: &Event) -> RelayEvent {
     RelayEvent {
         id: event.id.to_hex(),
         kind: event.kind.as_u16() as u32,

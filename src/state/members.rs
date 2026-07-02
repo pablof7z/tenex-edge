@@ -120,6 +120,17 @@ impl Store {
             .is_some())
     }
 
+    /// Have both relay-authored role snapshots for this channel hydrated?
+    pub fn has_channel_membership_snapshot(&self, channel_h: &str) -> Result<bool> {
+        let n: i64 = self.conn.query_row(
+            "SELECT COUNT(DISTINCT role) FROM relay_channel_member_sets
+             WHERE channel_h=?1 AND role IN ('admin', 'member')",
+            params![channel_h],
+            |r| r.get(0),
+        )?;
+        Ok(n >= 2)
+    }
+
     /// All members (admins and members) of a channel.
     pub fn list_channel_members(&self, channel_h: &str) -> Result<Vec<ChannelMember>> {
         let mut stmt = self.conn.prepare(&format!(

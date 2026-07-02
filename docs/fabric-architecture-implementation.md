@@ -248,10 +248,10 @@ Admission behavior:
   Status, Activity, Mention); slug is resolved from the signer's kind:0 Profile
   by pubkey. Routing and admission never consult a tag — authorization is by
   signer pubkey + group membership only.
-- If membership for the project is known and sender is not admitted, quarantine
-  or drop according to local policy.
-- If membership is not hydrated yet, quarantine. Replay on 39002 snapshot or
-  project-origin creation.
+- If membership for the project is hydrated and sender is not admitted, drop the
+  chat before it reaches `relay_events`, `messages`, tail, or inbox routing.
+- If membership is not hydrated yet, quarantine. Replay after both 39001 admins
+  and 39002 members snapshots hydrate for the channel.
 - Presence/status/current roster use current membership; admitted messages remain
   historical after revocation.
 

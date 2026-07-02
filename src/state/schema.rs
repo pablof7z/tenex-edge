@@ -85,6 +85,19 @@ CREATE INDEX IF NOT EXISTS idx_relay_events_kind
 CREATE INDEX IF NOT EXISTS idx_relay_events_addr
     ON relay_events(kind, pubkey, d_tag);
 
+CREATE TABLE IF NOT EXISTS relay_event_quarantine (
+    id             TEXT PRIMARY KEY,
+    kind           INTEGER NOT NULL,
+    pubkey         TEXT NOT NULL,
+    created_at     INTEGER NOT NULL,
+    channel_h      TEXT NOT NULL DEFAULT '',
+    event_json     TEXT NOT NULL,
+    reason         TEXT NOT NULL DEFAULT '',
+    quarantined_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_relay_event_quarantine_channel
+    ON relay_event_quarantine(channel_h, kind, created_at, id);
+
 CREATE TABLE IF NOT EXISTS messages (
     message_id      TEXT PRIMARY KEY,
     thread_id       TEXT NOT NULL DEFAULT '',
