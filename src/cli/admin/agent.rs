@@ -1,5 +1,4 @@
 use super::*;
-use crate::cli::args::AgentsAction;
 
 // ── agent (local keystore) ────────────────────────────────────────────────────
 

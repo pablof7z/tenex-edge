@@ -1,6 +1,7 @@
 use super::*;
 
 mod agent;
+mod args;
 mod doctor;
 mod project_channels;
 mod render;
@@ -8,6 +9,7 @@ mod tail;
 
 // Re-exports for cli.rs callers
 pub use agent::{agent, agents};
+pub(super) use args::{AgentAction, AgentsAction, ChannelsAction, ProjectAction};
 pub use doctor::doctor;
 pub use project_channels::{channels, invite, project};
 pub use render::render_fabric;
