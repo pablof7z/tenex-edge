@@ -270,15 +270,15 @@ pub(super) fn mint_session_id() -> String {
     format!("te-{nanos:x}-{seq:x}")
 }
 
-mod schema;
-
 mod aliases;
 mod channels;
+mod schema;
 pub use channels::{archived_channel_about, is_archived_channel_about, CHANNEL_ABOUT_MAX_CHARS};
 mod core;
 mod events;
 mod identities;
 mod inbox;
+pub mod llm_calls;
 mod members;
 mod messages;
 mod outbox;
@@ -287,6 +287,7 @@ mod project_roots;
 mod quarantine;
 mod reader;
 pub(crate) use reader::StoreReader;
+pub mod receipts;
 mod retention;
 pub use retention::{
     RetentionPruneReport, COMPLETED_LEDGER_RETENTION_SECS, RELAY_EVENT_RETENTION_SECS,

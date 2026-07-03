@@ -20,6 +20,7 @@ mod admin;
 mod args;
 mod context;
 mod debug;
+mod explain;
 mod harness;
 mod hooks;
 mod install;
@@ -104,6 +105,7 @@ pub async fn run(cli: Cli) -> Result<()> {
     match cli.cmd {
         Cmd::Publish(args) => messaging::publish(args).await,
         Cmd::Who(args) => who::who(args),
+        Cmd::Explain(args) => explain::explain(args),
         Cmd::Chat { action } => messaging::chat(action).await,
         Cmd::Project { action } => admin::project(action).await,
         Cmd::Doctor => admin::doctor().await,

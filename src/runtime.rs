@@ -3,52 +3,44 @@
 //! Runs as a daemon-hosted task. It is a thin driver over the local `sessions`
 //! row (the canonical local process record). It:
 //!   - publishes the agent's `kind:0` profile once,
-//!   - heartbeats liveness each beat (`touch_session` bumps `last_seen`) and
-//!     enqueues a fresh kind:30315 status onto the `outbox` so the relay event's
-//!     NIP-40 `expiration` is re-armed (the outbox drainer publishes it),
-//!   - schedules background distillation; an applied distill writes
-//!     `sessions.title`/`activity` (`set_session_distill`) and enqueues a status
-//!     publish so the new title reaches the relay (the title feeds kind:30315
-//!     only — it never renames the route channel),
-//!   - watches the host PID and marks the session dead (`mark_dead`, title
-//!     retained on the relay until its status ages off) when it dies or on
-//!     `cancel` (the `session-end` path).
+//!   - feeds every kind:30315 status trigger (startup, TTL tick, distill, turn
+//!     edge, channel change, session-end) into the ONE status reconciler
+//!     ([`crate::reconcile::status`]), which decides when to (re)publish; the
+//!     emitted effects are signed + parked on the `outbox` (the single executor),
+//!   - schedules background distillation (`set_session_distill`; the title feeds
+//!     kind:30315 only — it never renames the route channel),
+//!   - watches the host PID and marks the session dead (`mark_dead`) on pid death
+//!     or `cancel` (the `session-end` path).
 //!
 //! There is no per-session-room branching: the only channel distinction is
 //! `parent` (`is_root_channel`/`channel_parent`), and management authority is
 //! `is_channel_admin`, never a local owns-group flag.
 
 use crate::distill;
-use crate::domain::{DomainEvent, Profile, Status};
+use crate::domain::{DomainEvent, Profile};
 use crate::fabric::provider::Nip29Provider;
 use crate::state::{Session, Store};
+use crate::status_seam::drive;
 use crate::util::now_secs;
 use anyhow::Result;
-use nostr_sdk::prelude::{JsonUtil, Keys, NostrSigner};
-use std::io::Write as _;
+use nostr_sdk::prelude::Keys;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
 
+/// Per-session debug log keyed by the raw canonical session id (an internal
+/// correlation handle; canonical ids are filename-safe).
 fn slog(session_id: &str, msg: &str) {
-    let log_dir = crate::config::edge_home().join("logs");
-    let _ = crate::config::ensure_dir(&log_dir);
-    // Per-session debug log filename keyed by the raw canonical session id (an
-    // internal correlation handle; canonical ids are filename-safe).
-    let path = log_dir.join(format!("{session_id}.log"));
-    if let Ok(mut f) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-    {
-        let ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
-        let ts = crate::util::format_local_datetime_ms(ms);
-        let _ = writeln!(f, "{ts} {msg}");
-    }
+    crate::applog::append(&format!("{session_id}.log"), "", msg);
 }
+
+/// The distill task's output: labels, an optional LLM error, and the optional
+/// verbatim round-trip capture (Slice 8) the host records as an `llm_calls` row.
+type DistillOutput = (
+    Option<distill::SessionLabels>,
+    Option<String>,
+    Option<crate::instrument::DistillCapture>,
+);
 
 pub struct EngineParams {
     /// The session's ONE authoritative agent-instance identity (issue #98): base
@@ -91,28 +83,6 @@ impl EngineParams {
     }
 }
 
-/// Build the kind:30315 the engine publishes for the current local draft. Idle
-/// sessions clear the live activity line (only the persistent title survives);
-/// the NIP-40 `expiration` re-arms liveness to `now + p.status_ttl`.
-fn status_for(p: &EngineParams, session: &Session, channels: Vec<String>, now: u64) -> Status {
-    let busy = session.working;
-    Status {
-        agent: p.instance.agent_ref(),
-        channels,
-        session_id: p.session_id.clone().into(),
-        host: p.host.clone(),
-        title: session.title.clone(),
-        activity: if busy {
-            session.activity.clone()
-        } else {
-            String::new()
-        },
-        busy,
-        rel_cwd: p.rel_cwd.clone(),
-        expires_at: Some(now.saturating_add(p.status_ttl.as_secs())),
-    }
-}
-
 fn status_channels(p: &EngineParams, store: &Mutex<Store>, session: &Session) -> Vec<String> {
     let mut channels = match store.lock() {
         Ok(g) => g
@@ -137,42 +107,13 @@ fn status_channels(p: &EngineParams, store: &Mutex<Store>, session: &Session) ->
     channels
 }
 
-/// Encode + sign the status and park the signed JSON on the `outbox`. The drainer
-/// publishes it (and records the relay-confirmed event); the engine never talks to
-/// the relay for status.
-async fn enqueue_status(
-    provider: &Nip29Provider,
-    keys: &Keys,
+/// A session's joined-channel set (archived excluded) — the canonical h-tag input.
+fn channel_set(
+    p: &EngineParams,
     store: &Mutex<Store>,
-    status: Status,
-    now: u64,
-) {
-    let builder = match provider.encode(&DomainEvent::Status(status)) {
-        Ok(b) => b,
-        Err(e) => {
-            tracing::error!(error = %format!("{e:#}"), "enqueue_status: encoding status event failed — skipping this heartbeat");
-            return;
-        }
-    };
-    let unsigned = builder.build(keys.public_key());
-    let signed = match keys.sign_event(unsigned).await {
-        Ok(s) => s,
-        Err(e) => {
-            tracing::error!(error = %format!("{e:#}"), "enqueue_status: signing status event failed — skipping this heartbeat");
-            return;
-        }
-    };
-    let json = signed.as_json();
-    match store.lock() {
-        Ok(g) => {
-            if let Err(e) = g.enqueue_outbox(&json, now) {
-                tracing::error!(error = %e, "enqueue_status: enqueue_outbox failed — status not published this cycle");
-            }
-        }
-        Err(_) => tracing::error!(
-            "enqueue_status: store mutex poisoned — status not published this cycle"
-        ),
-    }
+    session: &Session,
+) -> std::collections::BTreeSet<String> {
+    status_channels(p, store, session).into_iter().collect()
 }
 
 // ── daemon-hosted session task (the relocated engine) ────────────────────────
@@ -193,6 +134,7 @@ pub async fn run_session_in_daemon(
     provider: std::sync::Arc<Nip29Provider>,
     store: std::sync::Arc<Mutex<Store>>,
     cancel: std::sync::Arc<tokio::sync::Notify>,
+    status: std::sync::Arc<Mutex<crate::reconcile::StatusReconciler>>,
 ) -> Result<()> {
     let owners = p.owners.clone();
     let signing_keys = p.signing_keys();
@@ -248,9 +190,7 @@ pub async fn run_session_in_daemon(
     //     session row's last_distill_at),
     //   - cur_turn_started / prev_working: edge detection against the session's
     //     working/turn_started_at columns.
-    let mut distill_task: Option<
-        tokio::task::JoinHandle<(Option<distill::SessionLabels>, Option<String>)>,
-    > = None;
+    let mut distill_task: Option<tokio::task::JoinHandle<DistillOutput>> = None;
     let mut last_distill_attempt: u64 = 0;
     let mut cur_turn_started: u64 = 0;
     let mut prev_working = false;
@@ -261,13 +201,22 @@ pub async fn run_session_in_daemon(
     }
     if let Some(session) = load_session("startup-status") {
         let now = now_secs();
-        enqueue_status(
-            &provider,
-            &signing_keys,
-            &store,
-            status_for(&p, &session, status_channels(&p, &store, &session), now),
-            now,
-        )
+        // Seed the session in the ONE status authority (opening publish).
+        let chans = channel_set(&p, &store, &session);
+        drive(&status, &provider, &signing_keys, &store, None, |r| {
+            r.on_session_started(
+                &p.session_id,
+                &p.host,
+                &aref.slug,
+                &aref.pubkey,
+                &p.rel_cwd,
+                chans,
+                session.working,
+                &session.title,
+                &session.activity,
+                now,
+            )
+        })
         .await;
     }
 
@@ -280,23 +229,21 @@ pub async fn run_session_in_daemon(
                 if let Some(pid) = p.watch_pid {
                     if !pid_alive(pid) { break; }
                 }
-                // Liveness re-arm: bump last_seen and enqueue a fresh status so the
-                // relay event's NIP-40 expiration is pushed forward even for an
-                // idle session that produces no state change.
+                // Liveness re-arm: bump last_seen, then the reconciler's TTL tick
+                // pushes the NIP-40 expiration forward. The SINGLE re-arm cadence —
+                // subsumes the old heartbeat enqueue AND the deleted global timer.
                 let now = now_secs();
                 if let Err(e) = st!(|s: &Store| s.touch_session(&p.session_id, now)) {
                     tracing::error!(session = %p.session_id, error = %e, "touch_session failed — liveness not re-armed this beat");
                 }
-                if let Some(session) = load_session("heartbeat-status") {
-                    enqueue_status(&provider, &signing_keys, &store, status_for(&p, &session, status_channels(&p, &store, &session), now), now).await;
-                }
+                drive(&status, &provider, &signing_keys, &store, None, |r| r.on_tick(&p.session_id, now)).await;
             }
             _ = obs.tick() => {
                 let now = now_secs();
 
                 // ── collect a finished background distillation ────────────
                 if distill_task.as_ref().is_some_and(|h| h.is_finished()) {
-                    let (result, error) = distill_task.take().unwrap().await.ok().unwrap_or((None, None));
+                    let (result, error, capture) = distill_task.take().unwrap().await.ok().unwrap_or((None, None, None));
                     slog(&p.session_id, &format!("[distill] task finished result={} error={:?}",
                         result.as_ref().map(|l| format!("title={:?} activity={:?}", l.title, l.activity)).unwrap_or_else(|| "None".into()),
                         error));
@@ -308,13 +255,26 @@ pub async fn run_session_in_daemon(
                         }
                         slog(&p.session_id, &format!("[distill] applied title={:?}", labels.title));
 
-                        // Read back the freshly-applied draft and publish it.
-                        if let Some(session) = load_session("distill-publish") {
-                            enqueue_status(&provider, &signing_keys, &store, status_for(&p, &session, status_channels(&p, &store, &session), now), now).await;
-                            // The distilled title feeds the kind:30315 status above;
-                            // it NEVER renames the route channel. A channel `name`
-                            // is set only at create (or an explicit edit).
+                        // Instrument the round-trip: hash the exact fed slice HERE,
+                        // record the llm_call, and carry the SAME window_hash onto the
+                        // status receipt so a published 30315 rejoins these inputs.
+                        let window_hash = capture.as_ref().map(|c| crate::instrument::window_hash(&c.transcript_slice));
+                        if let (Some(cap), Some(wh)) = (capture.as_ref(), window_hash.as_deref()) {
+                            let created_at = crate::instrument::now_millis();
+                            st!(|s: &Store| crate::instrument::record_llm_call(
+                                s, &p.session_id, wh, cap,
+                                Some(labels.title.as_str()),
+                                (!labels.activity.is_empty()).then_some(labels.activity.as_str()),
+                                created_at,
+                            ));
                         }
+
+                        // The LLM output enters as a canonical input; the graph
+                        // republishes iff title/activity changed (title → 30315 only).
+                        drive(&status, &provider, &signing_keys, &store, window_hash.as_deref(), |r| {
+                            r.on_distill(&p.session_id, &labels.title, &labels.activity, now)
+                        })
+                        .await;
                     } else if let Some(err_msg) = error {
                         // Append to the per-session log for post-mortem inspection.
                         // (No DB error table in the new schema.)
@@ -327,6 +287,21 @@ pub async fn run_session_in_daemon(
                     .as_ref()
                     .map(|s| (s.working, s.turn_started_at))
                     .unwrap_or((false, 0));
+
+                // Feed observed turn state + channel set into the ONE authority; it
+                // dedups (publishes only on a real busy/idle flip or channel change).
+                if working != prev_working {
+                    drive(&status, &provider, &signing_keys, &store, None, |r| {
+                        if working { r.on_turn_start(&p.session_id, now) } else { r.on_turn_end(&p.session_id, now) }
+                    })
+                    .await;
+                }
+                if let Some(chans) = session.as_ref().map(|s| channel_set(&p, &store, s)) {
+                    drive(&status, &provider, &signing_keys, &store, None, |r| {
+                        r.on_channels_changed(&p.session_id, chans, now)
+                    })
+                    .await;
+                }
 
                 if working {
                     // ── rising edge / new user message ────────────────────
@@ -372,8 +347,8 @@ pub async fn run_session_in_daemon(
                                         )
                                         .await
                                         {
-                                            Ok(pair) => pair,
-                                            Err(_) => (None, Some("distillation timed out after 20s".to_string())),
+                                            Ok(triple) => triple,
+                                            Err(_) => (None, Some("distillation timed out after 20s".to_string()), None),
                                         }
                                     }));
                                 }
@@ -381,14 +356,11 @@ pub async fn run_session_in_daemon(
                         }
                     }
                 } else if prev_working {
-                    // Falling edge: turn closed. Reset local distill scheduling and
-                    // publish an idle status (activity cleared).
+                    // Falling edge: turn closed. Reset local distill scheduling; the
+                    // idle status was already published above via `on_turn_end`.
                     cur_turn_started = 0;
                     last_distill_attempt = 0;
                     distill_task = None;
-                    if let Some(sess) = session.as_ref() {
-                        enqueue_status(&provider, &signing_keys, &store, status_for(&p, sess, status_channels(&p, &store, sess), now), now).await;
-                    }
                 }
                 prev_working = working;
             }
@@ -396,9 +368,17 @@ pub async fn run_session_in_daemon(
         }
     }
 
+    // Deterministic teardown: close the status scope → the reconciler emits a
+    // FINAL, immediately-expiring kind:30315 (activity cleared, expiration = now)
+    // so peers drop the session at once instead of waiting out the TTL.
+    let end_now = now_secs();
+    drive(&status, &provider, &signing_keys, &store, None, |r| {
+        r.on_session_ended(&p.session_id, end_now)
+    })
+    .await;
+
     // Clean exit: mark the session dead (alive=0, working=0). The TITLE is retained
-    // in the row; the relay status ages off as heartbeats stop (no fresh outbox
-    // re-arm). Mention routing (list_alive_sessions) drops it immediately.
+    // in the row; mention routing (list_alive_sessions) drops it immediately.
     if let Err(e) = st!(|s: &Store| s.mark_dead(&p.session_id)) {
         tracing::error!(session = %p.session_id, error = %e, "mark_dead failed — session row left alive after clean exit");
     }
@@ -416,51 +396,5 @@ mod tests {
     #[test]
     fn current_pid_is_alive() {
         assert!(pid_alive(std::process::id() as i32));
-    }
-
-    #[test]
-    fn status_for_uses_configured_ttl() {
-        let keys = Keys::generate();
-        let pubkey = keys.public_key().to_hex();
-        let params = EngineParams {
-            instance: crate::identity::AgentInstance::base("agent".to_string(), pubkey),
-            base_keys: keys,
-            project: "project".to_string(),
-            session_id: "session".to_string(),
-            host: "host".to_string(),
-            rel_cwd: ".".to_string(),
-            owners: Vec::new(),
-            relays: Vec::new(),
-            watch_pid: None,
-            store_path: PathBuf::from(":memory:"),
-            heartbeat: Duration::from_secs(30),
-            obs_interval: Duration::from_secs(5),
-            status_ttl: Duration::from_secs(7),
-            turn_first: Duration::from_secs(30),
-            turn_repeat: Duration::from_secs(0),
-        };
-        let session = Session {
-            session_id: "session".to_string(),
-            agent_pubkey: String::new(),
-            agent_slug: "agent".to_string(),
-            channel_h: "project".to_string(),
-            harness: "test".to_string(),
-            child_pid: None,
-            transcript_path: None,
-            alive: true,
-            created_at: 0,
-            last_seen: 0,
-            working: true,
-            turn_started_at: 0,
-            last_distill_at: 0,
-            seen_cursor: 0,
-            title: "title".to_string(),
-            activity: "activity".to_string(),
-            resume_id: String::new(),
-        };
-
-        let status = status_for(&params, &session, vec!["project".to_string()], 1_000);
-
-        assert_eq!(status.expires_at, Some(1_007));
     }
 }

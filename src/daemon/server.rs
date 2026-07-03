@@ -84,10 +84,12 @@ pub struct DaemonState {
     hosted: Mutex<HashMap<String, HostedAgent>>,
     sessions: Mutex<HashMap<String, SessionHandle>>,
     subscribed_projects: Mutex<Vec<String>>,
-    /// Plans the THREE stable aggregate REQs plus narrow add-REQs, replacing the
-    /// old per-(project×kind) `Scope` expansion that blew the relay's REQ ceiling.
-    /// See `crate::fabric::subscriptions`.
-    subscriptions: Mutex<crate::fabric::subscriptions::SubscriptionRegistry>,
+    /// Refcounted per-entity relay-subscription reconciler: ONE narrow REQ per
+    /// covered channel `#h` / group-state `#d` / addressed pubkey `#p`, closed
+    /// when the last owner drops it. See `crate::reconcile::subscriptions`.
+    subs: Mutex<crate::reconcile::SubscriptionReconciler>,
+    /// The ONE authority deciding when each session's kind:30315 status publishes.
+    status: Arc<Mutex<crate::reconcile::StatusReconciler>>,
     /// Structured tail event broadcast replacing the old DomainEvent bus.
     tail_tx: tokio::sync::broadcast::Sender<TailEvent>,
     open_clients: Mutex<u64>,
@@ -112,8 +114,6 @@ pub struct DaemonState {
     last_status: Mutex<HashMap<StatusTailKey, StatusTailSnapshot>>,
     /// Wakes the status-outbox drainer the instant a transition enqueues a publish.
     outbox_notify: Notify,
-    /// Configured liveness window for kind:30315 NIP-40 expirations.
-    status_ttl: Duration,
     /// Per-session derived keypairs for duplicate live signers. The durable
     /// agent key remains the default; this map is populated only when a second
     /// live session of the same durable agent joins the same routing scope.
@@ -212,7 +212,6 @@ impl DaemonState {
 }
 
 // ── entry point ──────────────────────────────────────────────────────────────
-
 mod channel_membership_rpc;
 mod channel_resolve;
 mod channels_rpc;
@@ -246,7 +245,7 @@ use chat_read_tail::{handle_chat_read, handle_tail};
 use chat_write::rpc_chat_write;
 use diagnostics::{
     log_nip29_role_decision, refresh_project_members_cache, rpc_debug_outbox, rpc_doctor,
-    rpc_local_backend,
+    rpc_explain, rpc_local_backend,
 };
 use engine_lifecycle::{cancel_session, engine_params_for, reconcile_sessions, spawn_session};
 pub use lifecycle::run;
@@ -260,7 +259,7 @@ use resolution::{resolve_session, resolve_session_inner, CallerAnchor, ResolveSc
 use session_end::rpc_session_end;
 use session_signing::{admit_ordinal_signer, select_session_signer};
 use session_start::rpc_session_start;
-use status_publish::{spawn_outbox_drainer, spawn_status_heartbeat_publisher};
+use status_publish::spawn_outbox_drainer;
 use statusline::rpc_statusline;
 use subscriptions::{ensure_subscription, replay_channel_chat, resubscribe};
 use turns::{rpc_turn_check, rpc_turn_end, rpc_turn_start};
@@ -275,13 +274,14 @@ async fn dispatch(state: &Arc<DaemonState>, req: &Request) -> Response {
         }
         "who" => rpc_who(state, &req.params),
         "session_start" => rpc_session_start(state, &req.params, None).await,
-        "session_end" => rpc_session_end(state, &req.params),
+        "session_end" => rpc_session_end(state, &req.params).await,
         "chat_write" => rpc_chat_write(state, &req.params).await,
         "publish" => rpc_propose(state, &req.params).await,
         "turn_start" => rpc_turn_start(state, &req.params).await,
         "turn_check" => rpc_turn_check(state, &req.params),
         "turn_end" => rpc_turn_end(state, &req.params).await,
         "doctor" => rpc_doctor(state).await,
+        "explain" => rpc_explain(state, &req.params),
         "local_backend" => rpc_local_backend(state),
         "project_list" => rpc::rpc_project_list(state).await,
         "project_edit" => rpc::rpc_project_edit(state, &req.params).await,

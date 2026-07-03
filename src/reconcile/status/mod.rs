@@ -1,0 +1,300 @@
+//! Per-session kind:30315 status reconciler — the ONE authority that decides
+//! WHEN a session's public status is (re)published.
+//!
+//! It replaces FIVE uncoordinated publish sites (startup, the per-session
+//! heartbeat timer, a second global heartbeat task, distill completion, turn-end)
+//! that had NO content dedup (identical event re-published every ~30s), recorded
+//! no *why*, and let a dead session's status linger a full TTL. Every trigger is
+//! now a canonical INPUT update; the graph emits a publish command ONLY when the
+//! derived content changes — or a distinct `Refresh` when just the NIP-40 window
+//! must be re-armed (`on_tick`). Ending a session closes its scope → a
+//! deterministic closing/expiring command. The graph DECIDES; the host SIGNS +
+//! PUBLISHES via the durable outbox (single executor). No I/O happens here.
+
+mod model;
+#[cfg(test)]
+mod tests;
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::time::Duration;
+
+use trellis_core::{
+    Graph, GraphResult, NodeId, ResourceCommand, ResourceCommandExplanation, Transaction,
+    TransactionResult,
+};
+
+use crate::domain::{AgentRef, Status};
+use crate::util::SessionId;
+
+use model::{create_session, opts, status_key, SessionNodes, StaticInfo};
+
+/// The graph's in-plan command payload: everything needed to build a kind:30315
+/// EXCEPT the expiration, which the host stamps at apply time from its own clock.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StatusCommand {
+    pub session_id: String,
+    /// Fan-out channels (`h` tags), archived excluded.
+    pub channels: Vec<String>,
+    pub title: String,
+    /// Live activity line, empty when idle.
+    pub activity: String,
+    pub busy: bool,
+    pub host: String,
+    pub slug: String,
+    pub pubkey: String,
+    pub rel_cwd: String,
+}
+
+/// Why the reconciler is asking the host to publish.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PublishReason {
+    /// First status for a session.
+    Opened,
+    /// The derived content changed (turn edge, distill, channel change).
+    Changed,
+    /// Content unchanged; only the NIP-40 TTL window was re-armed.
+    Refreshed,
+}
+
+/// A host effect: the exact status to sign + enqueue on the outbox.
+#[derive(Clone, Debug, PartialEq)]
+pub enum StatusEffect {
+    /// Publish this status (fresh TTL) for the given reason.
+    Publish {
+        status: Status,
+        reason: PublishReason,
+    },
+    /// Final, immediately-expiring status so peers drop the session at once.
+    Expire { status: Status },
+}
+
+/// One reconciler tx outcome: effects to apply + the raw receipt (the Slice-8 instrumentation seam).
+pub struct StatusOutcome {
+    pub effects: Vec<StatusEffect>,
+    pub result: TransactionResult<StatusCommand>,
+}
+
+pub struct StatusReconciler {
+    graph: Graph<StatusCommand>,
+    ttl_secs: u64,
+    refresh_secs: u64,
+    sessions: BTreeMap<String, SessionNodes>,
+    /// Last published command per session, so a payload-free `Close` → expiring publish.
+    last: BTreeMap<String, StatusCommand>,
+}
+
+impl StatusReconciler {
+    /// Build an empty reconciler. `ttl_secs` is the NIP-40 window; `refresh_secs`
+    /// is the re-arm cadence (`on_tick` re-arms once per `refresh_secs` bucket).
+    pub fn new(ttl_secs: u64, refresh_secs: u64) -> Self {
+        Self {
+            graph: Graph::<StatusCommand>::new_with_command_type(),
+            ttl_secs: ttl_secs.max(1),
+            refresh_secs: refresh_secs.max(1),
+            sessions: BTreeMap::new(),
+            last: BTreeMap::new(),
+        }
+    }
+
+    /// Daemon constructor: TTL from a `Duration`, cadence from the domain heartbeat.
+    pub fn for_ttl(ttl: Duration) -> Self {
+        Self::new(ttl.as_secs(), crate::domain::HEARTBEAT_SECS)
+    }
+
+    /// A session became known: create its graph nodes, seed state, emit the opening publish.
+    #[allow(clippy::too_many_arguments)]
+    pub fn on_session_started(
+        &mut self,
+        id: &str,
+        host: &str,
+        slug: &str,
+        pubkey: &str,
+        rel_cwd: &str,
+        channels: BTreeSet<String>,
+        working: bool,
+        title: &str,
+        activity: &str,
+        now: u64,
+    ) -> GraphResult<StatusOutcome> {
+        if self.sessions.contains_key(id) {
+            return self.empty_commit();
+        }
+        let info = StaticInfo {
+            host: host.to_string(),
+            slug: slug.to_string(),
+            pubkey: pubkey.to_string(),
+            rel_cwd: rel_cwd.to_string(),
+        };
+        let (nodes, result) = create_session(
+            &mut self.graph,
+            id,
+            info,
+            channels,
+            working,
+            title,
+            activity,
+            now / self.refresh_secs,
+        )?;
+        self.sessions.insert(id.to_string(), nodes);
+        let effects = self.translate(&result, now);
+        Ok(StatusOutcome { effects, result })
+    }
+
+    /// A turn started (busy) / ended (idle: the derive clears the live activity).
+    pub fn on_turn_start(&mut self, id: &str, now: u64) -> GraphResult<StatusOutcome> {
+        self.mutate(id, now, |tx, n| tx.set_input(n.working, true))
+    }
+
+    pub fn on_turn_end(&mut self, id: &str, now: u64) -> GraphResult<StatusOutcome> {
+        self.mutate(id, now, |tx, n| tx.set_input(n.working, false))
+    }
+
+    /// A distillation completed: the LLM output enters as canonical input.
+    pub fn on_distill(
+        &mut self,
+        id: &str,
+        title: &str,
+        activity: &str,
+        now: u64,
+    ) -> GraphResult<StatusOutcome> {
+        self.mutate(id, now, |tx, n| {
+            tx.set_input(n.title, title.to_string())?;
+            tx.set_input(n.activity, activity.to_string())
+        })
+    }
+
+    /// The session's joined-channel set changed (archived already excluded).
+    pub fn on_channels_changed(
+        &mut self,
+        id: &str,
+        channels: BTreeSet<String>,
+        now: u64,
+    ) -> GraphResult<StatusOutcome> {
+        self.mutate(id, now, move |tx, n| tx.set_input(n.channels, channels))
+    }
+
+    /// A clock tick: re-arm the NIP-40 window (a `Refresh`, not a content change)
+    /// if `now` crossed a refresh bucket; otherwise nothing.
+    pub fn on_tick(&mut self, id: &str, now: u64) -> GraphResult<StatusOutcome> {
+        self.mutate(id, now, |_tx, _n| Ok(()))
+    }
+
+    /// The session ended (clean exit / pid death): close its scope, which emits a
+    /// deterministic closing command translated into a final expiring publish.
+    pub fn on_session_ended(&mut self, id: &str, now: u64) -> GraphResult<StatusOutcome> {
+        let Some(nodes) = self.sessions.remove(id) else {
+            return self.empty_commit();
+        };
+        let mut tx = self.graph.begin_transaction_with_options(opts())?;
+        tx.close_scope(nodes.scope)?;
+        let result = tx.commit()?;
+        drop(tx);
+        let effects = self.translate(&result, now);
+        Ok(StatusOutcome { effects, result })
+    }
+
+    /// Audit query: why the latest command for a session's status was emitted.
+    pub fn why_command(&self, id: &str) -> Option<&ResourceCommandExplanation> {
+        self.graph.why_resource_command(&status_key(id))
+    }
+
+    /// The `activity` input node id — instrumentation asserts a distill-triggered
+    /// publish is attributed to it.
+    pub fn activity_input(&self, id: &str) -> Option<NodeId> {
+        self.sessions.get(id).map(|n| n.activity_id)
+    }
+
+    /// The full-recompute oracle: incremental state must equal a rebuild.
+    pub fn assert_oracle(&self) -> GraphResult<()> {
+        self.graph.assert_incremental_equals_full()?;
+        Ok(())
+    }
+
+    /// Stage the caller's input, re-sync the TTL arm bucket, commit, translate.
+    fn mutate(
+        &mut self,
+        id: &str,
+        now: u64,
+        stage: impl FnOnce(&mut Transaction<'_, StatusCommand>, &SessionNodes) -> GraphResult<()>,
+    ) -> GraphResult<StatusOutcome> {
+        let Some(nodes) = self.sessions.get(id).copied() else {
+            return self.empty_commit();
+        };
+        let mut tx = self.graph.begin_transaction_with_options(opts())?;
+        stage(&mut tx, &nodes)?;
+        tx.set_input(nodes.arm, now / self.refresh_secs)?;
+        let result = tx.commit()?;
+        drop(tx);
+        let effects = self.translate(&result, now);
+        Ok(StatusOutcome { effects, result })
+    }
+
+    /// Empty commit for an unknown session, so callers always get a receipt.
+    fn empty_commit(&mut self) -> GraphResult<StatusOutcome> {
+        let mut tx = self.graph.begin_transaction_with_options(opts())?;
+        let result = tx.commit()?;
+        drop(tx);
+        Ok(StatusOutcome {
+            effects: Vec::new(),
+            result,
+        })
+    }
+
+    /// Turn the graph's resource plan into host effects, maintaining the
+    /// last-published shadow used to build closing/expiring publishes.
+    fn translate(
+        &mut self,
+        result: &TransactionResult<StatusCommand>,
+        now: u64,
+    ) -> Vec<StatusEffect> {
+        let mut effects = Vec::new();
+        for command in result.resource_plan.commands() {
+            let (cmd, reason) = match command {
+                ResourceCommand::Open { command, .. } => (command, PublishReason::Opened),
+                ResourceCommand::Replace { command, .. } => (command, PublishReason::Changed),
+                ResourceCommand::Refresh { command, .. } => (command, PublishReason::Refreshed),
+                ResourceCommand::Close { key, .. } => {
+                    if let Some(cmd) = key.segment(1).and_then(|sid| self.last.remove(sid)) {
+                        // Expiring publish: activity cleared, expiration = now, but
+                        // the last-known `h` tags kept so the retraction lands.
+                        effects.push(StatusEffect::Expire {
+                            status: self.to_status(&cmd, now, true),
+                        });
+                    }
+                    continue;
+                }
+            };
+            self.last.insert(cmd.session_id.clone(), cmd.clone());
+            effects.push(StatusEffect::Publish {
+                status: self.to_status(cmd, now, false),
+                reason,
+            });
+        }
+        effects
+    }
+
+    /// Build the wire status from a command. `expiring` clears the live activity,
+    /// marks it idle, and sets NIP-40 expiration to `now` (immediate teardown);
+    /// otherwise it is a live status with a fresh `now + ttl` window.
+    fn to_status(&self, cmd: &StatusCommand, now: u64, expiring: bool) -> Status {
+        Status {
+            agent: AgentRef::new(cmd.pubkey.clone(), cmd.slug.clone()),
+            channels: cmd.channels.clone(),
+            session_id: SessionId::new(cmd.session_id.clone()),
+            host: cmd.host.clone(),
+            title: cmd.title.clone(),
+            activity: if expiring {
+                String::new()
+            } else {
+                cmd.activity.clone()
+            },
+            busy: !expiring && cmd.busy,
+            rel_cwd: cmd.rel_cwd.clone(),
+            expires_at: Some(if expiring {
+                now
+            } else {
+                now.saturating_add(self.ttl_secs)
+            }),
+        }
+    }
+}

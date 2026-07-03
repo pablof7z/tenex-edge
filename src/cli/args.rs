@@ -2,6 +2,7 @@ use clap::{Parser, Subcommand};
 
 use super::admin::{AgentAction, AgentsAction, ChannelsAction, InviteArgs, ProjectAction};
 use super::debug::DebugAction;
+use super::explain::ExplainArgs;
 use super::harness::HarnessAction;
 use super::install::InstallArgs;
 use super::messaging::{ChatAction, PublishArgs};
@@ -28,6 +29,9 @@ pub(super) enum Cmd {
     // them by hand.
     /// List agents currently visible in the project/channel.
     Who(WhoArgs),
+    /// Explain a published artifact: the reconciler receipt + the exact LLM
+    /// inputs (system prompt, transcript slice, model, raw response) behind it.
+    Explain(ExplainArgs),
     /// Write or read NIP-29 project chat.
     Chat {
         #[command(subcommand)]

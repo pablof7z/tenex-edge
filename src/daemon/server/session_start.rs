@@ -399,7 +399,7 @@ pub(in crate::daemon::server) async fn rpc_session_start(
     // the live materialize path never delivered it. We replay below once alive. A
     // freshly-subscribed channel needs no replay: opening the new REQ streams its
     // backlog to this (already-alive) session.
-    let needs_chat_replay = state.subscriptions.lock().unwrap().covers_channel(&project);
+    let needs_chat_replay = state.subs.lock().unwrap().covers_channel(&project);
     if let Err(e) = ensure_subscription(state, &project).await {
         tracing::warn!(channel = %project, error = %e, "subscription setup failed (session will continue)");
         if let Some(prog) = &progress {

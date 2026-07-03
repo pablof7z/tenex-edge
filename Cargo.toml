@@ -36,6 +36,8 @@ sha2 = "0.10"
 shlex = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+trellis-core = { git = "https://github.com/pablof7z/trellis", rev = "6ab89831180ead7f88539003c34858637b4ee5bf", package = "trellis-core", features = ["serde"] }
 
 [dev-dependencies]
 tempfile = "3"
+trellis-testing = { git = "https://github.com/pablof7z/trellis", rev = "6ab89831180ead7f88539003c34858637b4ee5bf", package = "trellis-testing" }

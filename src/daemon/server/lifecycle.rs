@@ -1,4 +1,5 @@
 use super::*;
+use crate::reconcile::StatusReconciler;
 
 pub async fn run() -> Result<()> {
     let storage = crate::daemon::storage_paths::StoragePaths::current();
@@ -91,7 +92,8 @@ pub async fn run() -> Result<()> {
         hosted: Mutex::new(HashMap::new()),
         sessions: Mutex::new(HashMap::new()),
         subscribed_projects: Mutex::new(Vec::new()),
-        subscriptions: Mutex::new(crate::fabric::subscriptions::SubscriptionRegistry::new()),
+        subs: Mutex::new(crate::reconcile::SubscriptionReconciler::new().expect("subs")),
+        status: Arc::new(Mutex::new(StatusReconciler::for_ttl(status_ttl_duration()))),
         tail_tx: tokio::sync::broadcast::channel(512).0,
         open_clients: Mutex::new(0),
         shutdown: Notify::new(),
@@ -103,7 +105,6 @@ pub async fn run() -> Result<()> {
         seen_profiles: Mutex::new(std::collections::HashSet::new()),
         last_status: Mutex::new(HashMap::new()),
         outbox_notify: Notify::new(),
-        status_ttl: status_ttl_duration(),
         session_keys: Mutex::new(HashMap::new()),
         session_signers: Mutex::new(HashMap::new()),
         backend_pubkey,
@@ -114,7 +115,6 @@ pub async fn run() -> Result<()> {
     spawn_demux(state.clone());
     spawn_pruner(state.clone());
     spawn_outbox_drainer(state.clone());
-    spawn_status_heartbeat_publisher(state.clone());
 
     let accept_state = state.clone();
     let accept = tokio::spawn(async move {
