@@ -61,9 +61,10 @@ Create a channel when the work deserves its own shared context:
 - a handoff that should preserve context for later,
 - a topic that would pollute the current channel.
 
-When creating a channel, seed it with enough context for another agent to join
-without asking you to reconstruct the task: objective, relevant background,
-constraints, desired output, and current state.
+When creating a channel, keep `--about` short, descriptive, and stable. It is a
+durable room description, not status or current-plan text. Seed richer context
+in a chat message instead: objective, relevant background, constraints, desired
+output, and current state.
 
 ## Self-Assembly
 
@@ -126,7 +127,7 @@ Navigate channels:
 ```bash
 tenex-edge channels list
 tenex-edge channels switch <channel>
-tenex-edge channels create --name "focused topic"
+tenex-edge channels create --name "focused topic" --about "short stable description"
 ```
 
 Refresh awareness only when the injected snapshot is unavailable or stale:
