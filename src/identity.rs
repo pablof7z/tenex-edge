@@ -13,9 +13,11 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 mod keys;
+mod local_agent;
 pub use keys::{
     agent_ordinal_label, derive_agent_ordinal_keys, derive_session_keys, AgentInstance,
 };
+pub use local_agent::{remove_local_agent, set_local_agent_byline};
 
 #[derive(Debug, Serialize, Deserialize)]
 struct StoredKey {
@@ -353,23 +355,6 @@ pub fn add_local_agent(
         },
         true,
     ))
-}
-
-/// Remove a local agent by soft-deleting its keystore file: the private key is
-/// renamed to `<slug>.json.removed` rather than unlinked, so a mistaken removal
-/// is recoverable with a single `mv` (a freshly minted key would otherwise be a
-/// *different* identity, losing the agent's pubkey forever). Returns the path the
-/// key was parked at, or `None` if no such agent existed.
-pub fn remove_local_agent(edge_home: &Path, slug: &str) -> Result<Option<PathBuf>> {
-    validate_slug(slug)?;
-    let path = key_path(edge_home, slug);
-    if !path.exists() {
-        return Ok(None);
-    }
-    let parked = path.with_extension("json.removed");
-    std::fs::rename(&path, &parked)
-        .with_context(|| format!("parking {} -> {}", path.display(), parked.display()))?;
-    Ok(Some(parked))
 }
 
 /// Write via a temp file + rename so a crash never leaves a half-written key.

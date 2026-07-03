@@ -2,23 +2,27 @@
 title: Tenex-Edge Message Formatting
 slug: tenex-edge-message-formatting
 topic: tenex-edge
-summary: "When the sender is a whitelisted pubkey (human) and the agent is in a tmux-wrapped session, a direct mention is pasted as a bare turn: `<@pablo> @developer hey"
+summary: "The @mention is a session-targeted Nostr kind:9 event with a p-tag addressed to another agent's pubkey that gets server-side-routed into the target session's in"
 tags:
   - capture
 volatility: warm
 confidence: medium
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-07-03
 verified: 2026-06-29
 compiled-from: conversation
 sources:
   - session:d39d3357-06d0-418a-bdbe-f288a9f9670f
   - session:bd8689c8-4a5f-45b3-9dbe-758baec2a2f4
+  - session:bdb6c341-4dd4-48e7-9764-e80242beb005
+  - session:75f62bb9-f564-4633-8741-997dfea1d0e7
 ---
 
 # Tenex-Edge Message Formatting
 
 ## Direct Mentions
+
+The @mention is a session-targeted Nostr kind:9 event with a p-tag addressed to another agent's pubkey that gets server-side-routed into the target session's inbox and injected as a literal conversational turn into the target's live tmux pane.
 
 When the sender is a whitelisted pubkey (human) and the agent is in a tmux-wrapped session, a direct mention is pasted as a bare turn: `<@pablo> @developer hey there`.
 
@@ -34,7 +38,9 @@ Chat mentions use `@<agent-instance-label>` (e.g. @haiku, @haiku1) instead of `@
 
 The chat-write confirmation line reads `mentioning @{label}` instead of `mentioning session {codename}`, driven by the RPC's `mentioned_label`, falling back to plain `sent chat {id}` when no mention is present. README.md chat-write documentation references `@<agent-label>` targeting.
 
-<!-- citations: [^d39d3-7d6ac] [^bd868-1c088] [^bd868-dce28] [^bd868-f7785] -->
+@-mentioning someone from a subchannel they are not in is a cross-channel mention using existing `@slug@backend` addressing, with no membership side-effects from mentions; replying or joining requires an explicit invite or switch.
+
+<!-- citations: [^bdb6c-1833e] [^d39d3-7d6ac] [^bd868-1c088] [^bd868-dce28] [^bd868-f7785] [^75f62-ebb61] -->
 ## Ambient Chatter
 
 Ambient/background chatter is rendered inside a `<tenex-edge>` wrapper as a timeline with `<@name - Xm ago>` prefixes, identical for tmux and hooks sessions, with no reply hint.

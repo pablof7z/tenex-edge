@@ -1,0 +1,6 @@
+{
+  "id": "75f62-76b60",
+  "ts": "2026-07-03T09:14:39Z",
+  "session": "75f62bb9-f564-4633-8741-997dfea1d0e7",
+  "text": "Each AI coding-agent session (Claude Code, Codex, opencode, Grok CLI today) is wired via a host-neutral **hook**: on session start, the hook shells out to the `tenex-edge` binary, which talks to a single **per-machine daemon** over a Unix domain socket (spawning it if absent). The daemon:\n- resolves/mints a durable **Nostr keypair** for `(agent-slug, machine)` — `src/identity.rs` — stored at `~/.tenex-edge/agents/<slug>.json` [...] | Single per-machine daemon owning SQLite + the one relay connection | ✅ real; `flock`'d startup, UDS RPC server (`src/daemon/server/*`, ~20 RPC handler modules) |\n| Host integrations: Claude Code, Codex, opencode, Grok | ✅ real for all 4 — each is a thin adapter piping JSON to `tenex-edge hook`; the Rust binary is the only source of truth for injected context (see `integrations/opencode/tenex-edge.ts`, which explicitly states \"tenex-edge knows nothing about opencode; this plugin is the straw\") |\n| `tenex-edge launch` (spawn agent in tmux, hidden chrome) | ✅ real, `src/tmux/launch.rs`, incl. resume/reattach logic |"
+}

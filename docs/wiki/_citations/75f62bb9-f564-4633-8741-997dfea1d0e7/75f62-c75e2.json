@@ -1,0 +1,6 @@
+{
+  "id": "75f62-c75e2",
+  "ts": "2026-07-03T08:27:19Z",
+  "session": "75f62bb9-f564-4633-8741-997dfea1d0e7",
+  "text": "| Single per-machine daemon owning SQLite + the one relay connection | ✅ real; `flock`'d startup, UDS RPC server (`src/daemon/server/*`, ~20 RPC handler modules) | [...] Runner-up: the single-writer daemon collapsing N per-session SQLite writers + N relay connections into 1 (explicitly framed in `src/daemon/mod.rs` as fixing a real multi-writer corruption class — this project's own git history/memory shows this was a genuine incident, not speculative)."
+}

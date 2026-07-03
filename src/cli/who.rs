@@ -16,6 +16,7 @@ fn who_params(project: &Option<String>, all_projects: bool) -> serde_json::Value
     crate::cli::rpc_params(serde_json::json!({
         "project": project,
         "all_projects": all_projects,
+        "human_color": stdout_color_enabled(),
     }))
 }
 
@@ -25,6 +26,10 @@ fn who_value_via_daemon(project: &Option<String>, all_projects: bool) -> Result<
 
 fn who_once(project: Option<String>, all_projects: bool) -> Result<()> {
     let v = who_value_via_daemon(&project, all_projects)?;
+    if let Some(human) = v.get("fabric_human").and_then(|x| x.as_str()) {
+        print!("{human}");
+        return Ok(());
+    }
     // Prefer the unified fabric view (same format as the hook injection). The
     // daemon includes it whenever a current channel resolves; `--all-projects`
     // (no single scope) falls back to the cross-project snapshot table.
@@ -46,7 +51,9 @@ fn who_live(project: Option<String>, all_projects: bool) -> Result<()> {
         let now = Instant::now();
         if now >= next_draw {
             let v = who_value_via_daemon(&project, all_projects)?;
-            if let Some(fabric) = v.get("fabric").and_then(|x| x.as_str()) {
+            if let Some(human) = v.get("fabric_human").and_then(|x| x.as_str()) {
+                render::draw_fabric_live(human, refresh)?;
+            } else if let Some(fabric) = v.get("fabric").and_then(|x| x.as_str()) {
                 render::draw_fabric_live(fabric, refresh)?;
             } else {
                 let snapshot: WhoSnapshot = serde_json::from_value(v)?;
@@ -64,6 +71,10 @@ fn who_live(project: Option<String>, all_projects: bool) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn stdout_color_enabled() -> bool {
+    std::env::var_os("NO_COLOR").is_none() && io::stdout().is_terminal()
 }
 
 #[cfg(test)]

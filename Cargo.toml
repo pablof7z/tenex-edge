@@ -2,7 +2,8 @@
 name = "tenex-edge"
 version = "0.1.0"
 edition = "2021"
-description = "Citizenship for your agents: durable identity + awareness on the Nostr fabric, host-neutral."
+description = "Identity and awareness fabric for coding agents: durable, self-owned identity and live @mentions across Claude Code, Codex, OpenCode, and Grok."
+keywords = ["agents", "coding-agents", "nostr", "nip29", "cli"]
 
 [[bin]]
 name = "tenex-edge"

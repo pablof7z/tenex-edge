@@ -8,8 +8,8 @@ tags:
 volatility: warm
 confidence: medium
 created: 2026-06-29
-updated: 2026-06-29
-verified: 2026-06-29
+updated: 2026-07-03
+verified: 2026-07-03
 compiled-from: conversation
 sources:
   - session:b07a57a3-67a1-4c44-a8fc-58a1bb97860a
@@ -24,9 +24,9 @@ The `edge_home()` function returns tenex-edge's data root — including `config.
 
 Processes spawned via `tenex-edge launch` inherit `TENEX_EDGE_HOME`, `TENEX_CONFIG`, and `TENEX_EDGE_BIN` from the parent environment, including agent harness hook calls. <!-- [^b07a5-ee2c8] -->
 
-## Startup Diagnostics
+## Runtime Diagnostics
 
-On every `tenex-edge` invocation, before command dispatch, the configured home directory and relay URL are printed to stderr so stdout-based consumers like statusline are not affected. The line is formatted as `[tenex-edge] home=<home_path> relays=<relay_url>`. <!-- [^b07a5-df73d] -->
+`tenex-edge` no longer prints the configured home directory and relay URL on every invocation. Use `tenex-edge doctor` when you need to inspect the active edge home, config path, and relay configuration.
 
 ## Related Skills
 

@@ -130,6 +130,10 @@ fn who_refuses_agent_project_scan_without_exact_anchor() {
             .await
             .expect("who should accept the exact watched-process anchor");
         assert_eq!(ok["project"].as_str(), Some(current_channel.as_str()));
+        assert!(
+            ok.get("fabric_human").is_none(),
+            "agent-anchored who should keep the XML fabric path"
+        );
     });
 
     stop_daemon(&home);

@@ -2,6 +2,7 @@ use crate::state::{InboxRow, Session, Store};
 use std::path::Path;
 
 mod build;
+mod human_render;
 mod messages;
 mod model;
 mod people;
@@ -11,6 +12,7 @@ mod render;
 mod tests;
 
 use build::build_view;
+use human_render::render_human_view;
 use render::render_view;
 
 pub(crate) struct FabricContextInput<'a> {
@@ -52,6 +54,24 @@ pub(crate) fn render_fabric_context(
         return None;
     }
     Some(render_view(&view))
+}
+
+pub(crate) fn render_fabric_context_human(
+    store: &Store,
+    input: FabricContextInput<'_>,
+    color: bool,
+) -> Option<String> {
+    let force = input.force;
+    let view = build_view(store, input);
+    if !force
+        && view.channels.is_empty()
+        && view.agents.is_empty()
+        && view.important.is_empty()
+        && view.warnings.is_empty()
+    {
+        return None;
+    }
+    Some(render_human_view(&view, color))
 }
 
 pub(crate) fn inbox_seed(row: &InboxRow) -> FabricMessageSeed {

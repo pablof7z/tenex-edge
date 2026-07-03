@@ -1,0 +1,6 @@
+{
+  "id": "75f62-f2d2d",
+  "ts": "2026-07-03T09:03:48Z",
+  "session": "75f62bb9-f564-4633-8741-997dfea1d0e7",
+  "text": "4. **Numbers as texture, not as boasts.** \"One daemon per machine, one SQLite store, one relay connection\" reads as engineering; \"38.5k LOC of blazing-fast Rust\" reads as marketing. State counts where they explain the design (374 tests belongs in the architecture section, plainly)."
+}

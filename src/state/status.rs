@@ -24,8 +24,11 @@ const COLS: &str =
     "pubkey, session_id, channel_h, slug, title, activity, busy, last_seen, updated_at, expiration";
 
 impl Store {
-    /// Materialize a kind:30315 status for one channel. Newer `updated_at` wins
-    /// for the same `(pubkey, session_id, channel_h)`.
+    /// Materialize a kind:30315 status for one channel.
+    ///
+    /// Heartbeat re-arms refresh liveness (`last_seen`/`expiration`) without
+    /// advancing `updated_at`; turn deltas use `updated_at` as the semantic
+    /// status-change clock.
     pub fn upsert_status(&self, s: &Status) -> Result<()> {
         self.conn.execute(
             "INSERT INTO relay_status
@@ -34,7 +37,15 @@ impl Store {
              ON CONFLICT(pubkey, session_id, channel_h) DO UPDATE SET
                  slug=excluded.slug, title=excluded.title, activity=excluded.activity,
                  busy=excluded.busy, last_seen=excluded.last_seen,
-                 updated_at=excluded.updated_at, expiration=excluded.expiration
+                 updated_at=CASE
+                     WHEN relay_status.slug <> excluded.slug
+                       OR relay_status.title <> excluded.title
+                       OR relay_status.activity <> excluded.activity
+                       OR relay_status.busy <> excluded.busy
+                     THEN excluded.updated_at
+                     ELSE relay_status.updated_at
+                 END,
+                 expiration=excluded.expiration
              WHERE excluded.updated_at >= relay_status.updated_at",
             params![
                 s.pubkey,
@@ -132,5 +143,53 @@ impl Store {
         )?;
         let rows = stmt.query_map(params![cursor], |r| r.get::<_, String>(0))?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::state::{Status, Store};
+
+    fn status(activity: &str, busy: bool, updated_at: u64) -> Status {
+        Status {
+            pubkey: "pk".into(),
+            session_id: "sid".into(),
+            channel_h: "h1".into(),
+            slug: "agent".into(),
+            title: "Task title".into(),
+            activity: activity.into(),
+            busy,
+            last_seen: updated_at,
+            updated_at,
+            expiration: updated_at + 100,
+        }
+    }
+
+    #[test]
+    fn heartbeat_refreshes_liveness_without_advancing_delta_clock() {
+        let s = Store::open_memory().unwrap();
+        s.upsert_status(&status("reading", true, 100)).unwrap();
+        s.upsert_status(&status("reading", true, 150)).unwrap();
+
+        let row = s.get_status("pk", "sid", "h1").unwrap().unwrap();
+        assert_eq!(row.last_seen, 150);
+        assert_eq!(row.expiration, 250);
+        assert_eq!(row.updated_at, 100);
+        assert_eq!(s.active_channels_since(120).unwrap(), Vec::<String>::new());
+    }
+
+    #[test]
+    fn semantic_status_change_advances_delta_clock() {
+        let s = Store::open_memory().unwrap();
+        s.upsert_status(&status("reading", true, 100)).unwrap();
+        s.upsert_status(&status("writing", true, 150)).unwrap();
+
+        let row = s.get_status("pk", "sid", "h1").unwrap().unwrap();
+        assert_eq!(row.activity, "writing");
+        assert_eq!(row.updated_at, 150);
+        assert_eq!(
+            s.active_channels_since(120).unwrap(),
+            vec!["h1".to_string()]
+        );
     }
 }

@@ -57,6 +57,9 @@ pub async fn agent(action: AgentAction) -> Result<()> {
             // re-publishes the same Profile on first run, so a publish failure
             // (e.g. daemon/relay down) must not fail the create.
             if created {
+                if let Some(byline) = prompt_use_criteria()? {
+                    crate::identity::set_local_agent_byline(&edge_home, &slug, Some(byline))?;
+                }
                 publish_profile(&slug).await;
             }
             assign_to_projects(&id.pubkey_hex(), &projects).await?;
@@ -90,6 +93,18 @@ pub async fn agent(action: AgentAction) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn prompt_use_criteria() -> Result<Option<String>> {
+    if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
+        return Ok(None);
+    }
+    let criteria: String =
+        dialoguer::Input::with_theme(&dialoguer::theme::ColorfulTheme::default())
+            .with_prompt("Use criteria")
+            .allow_empty(true)
+            .interact_text()?;
+    Ok(Some(criteria.trim().to_string()).filter(|s| !s.is_empty()))
 }
 
 /// `tenex-edge agents` — the invitable roster: every local-keystore agent with

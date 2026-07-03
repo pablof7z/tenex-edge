@@ -104,6 +104,36 @@ fn session_view_has_self_and_chatter_human_view_does_not() {
 }
 
 #[test]
+fn human_who_renderer_is_non_xml_and_terminal_friendly() {
+    let store = seed_store();
+
+    let human = render_fabric_context_human(&store, input(None, "root", 0, 1_000, true), false)
+        .expect("human who should render");
+
+    assert!(human.starts_with("main\nRoot room\n\n"), "got: {human}");
+    assert!(human.contains("#main"), "got: {human}");
+    assert!(human.contains("Members"), "got: {human}");
+    assert!(human.contains("@coder"), "got: {human}");
+    assert!(human.contains("offline"), "got: {human}");
+    assert!(!human.contains("<tenex-edge>"), "got: {human}");
+    assert!(!human.contains("<member"), "got: {human}");
+}
+
+#[test]
+fn human_who_renderer_colorizes_when_requested() {
+    let store = seed_store();
+
+    let human = render_fabric_context_human(&store, input(None, "root", 0, 1_000, true), true)
+        .expect("human who should render");
+
+    assert!(
+        human.contains("\u{1b}["),
+        "expected ansi styling: {human:?}"
+    );
+    assert!(human.contains("@coder"), "got: {human}");
+}
+
+#[test]
 fn cursor_delta_only_renders_changed_joined_channel() {
     let store = seed_store();
     let rec = session(&store);
