@@ -3398,6 +3398,7 @@ dependencies = [
 [[package]]
 name = "trellis-core"
 version = "0.2.1"
+source = "git+https://github.com/pablof7z/trellis?rev=6ab89831180ead7f88539003c34858637b4ee5bf#6ab89831180ead7f88539003c34858637b4ee5bf"
 dependencies = [
  "serde",
 ]
@@ -3405,6 +3406,7 @@ dependencies = [
 [[package]]
 name = "trellis-testing"
 version = "0.2.1"
+source = "git+https://github.com/pablof7z/trellis?rev=6ab89831180ead7f88539003c34858637b4ee5bf#6ab89831180ead7f88539003c34858637b4ee5bf"
 dependencies = [
  "trellis-core",
 ]
