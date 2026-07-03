@@ -25,6 +25,7 @@ serde_json = "1"
 nix = { version = "0.29", features = ["signal", "process", "fs"] }
 libc = "0.2"
 dialoguer = { version = "0.11", features = ["fuzzy-select"] }
+inquire = "0.9"
 owo-colors = { version = "4", features = ["supports-colors"] }
 rig = { package = "rig-core", version = "0.37" }
 rustls = { version = "0.23", features = ["ring"] }

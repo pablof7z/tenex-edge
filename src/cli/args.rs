@@ -1,6 +1,7 @@
 use clap::{Parser, Subcommand};
 
 use super::admin::{AgentAction, AgentsAction, ChannelsAction, InviteArgs, ProjectAction};
+use super::config::ConfigArgs;
 use super::debug::DebugAction;
 use super::explain::ExplainArgs;
 use super::harness::HarnessAction;
@@ -44,6 +45,8 @@ pub(super) enum Cmd {
     },
     /// Diagnose daemon relay and storage-path configuration.
     Doctor,
+    /// Interactively configure model providers and role-to-model assignments.
+    Config(ConfigArgs),
     /// Manage NIP-29 subgroup task channels under a project (create, join, leave, list, switch).
     Channels {
         #[command(subcommand)]

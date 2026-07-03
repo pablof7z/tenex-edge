@@ -18,6 +18,7 @@ use std::time::{Duration, Instant};
 
 mod admin;
 mod args;
+mod config;
 mod context;
 mod debug;
 mod explain;
@@ -109,6 +110,7 @@ pub async fn run(cli: Cli) -> Result<()> {
         Cmd::Chat { action } => messaging::chat(action).await,
         Cmd::Project { action } => admin::project(action).await,
         Cmd::Doctor => admin::doctor().await,
+        Cmd::Config(args) => config::config(args).await,
         Cmd::Channels { action } => admin::channels(action).await,
         Cmd::Agent { action } => admin::agent(action).await,
         Cmd::Agents { action } => admin::agents(action).await,
