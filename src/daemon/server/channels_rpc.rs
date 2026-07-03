@@ -1,5 +1,5 @@
 use super::channel_membership_rpc::{
-    resolve_target_channel, set_active_session_channel, TargetChannel,
+    resolve_caller, resolve_target_channel, set_active_session_channel, TargetChannel,
 };
 use super::*;
 
@@ -357,82 +357,11 @@ async fn wait_for_channel_about(state: &Arc<DaemonState>, channel_h: &str, about
     false
 }
 
-/// `channels list`: render the subgroup tree under `project` from LOCAL daemon
-/// state (materialized kind:39000 metadata) — no relay round-trip. Returns the
-/// rooms in depth-first order, each with a `depth` (the project root is depth 0
-/// and not included; its direct children are depth 1) so the CLI can indent.
-pub(in crate::daemon::server) fn rpc_channels_list(
-    state: &Arc<DaemonState>,
-    params: &serde_json::Value,
-) -> Result<serde_json::Value> {
-    #[derive(serde::Deserialize)]
-    struct P {
-        project: String,
-    }
-    let p: P = serde_json::from_value(params.clone()).context("channels_list params")?;
+mod archive;
+pub(in crate::daemon::server) use archive::rpc_channels_archive;
 
-    // Every channel the daemon has materialized.
-    let rows = state.with_store(|s| s.list_channels())?;
-    // parent id -> children (id, display name, about). Sorted for stable output.
-    let mut children: std::collections::BTreeMap<String, Vec<(String, String, String)>> =
-        std::collections::BTreeMap::new();
-    for ch in &rows {
-        if ch.parent.is_empty() {
-            continue;
-        }
-        let display = if ch.name.is_empty() {
-            ch.about.clone()
-        } else {
-            ch.name.clone()
-        };
-        children.entry(ch.parent.clone()).or_default().push((
-            ch.channel_h.clone(),
-            display,
-            ch.about.clone(),
-        ));
-    }
-    for v in children.values_mut() {
-        v.sort();
-    }
-
-    let rooms = preorder_rooms(&children, &p.project);
-    Ok(serde_json::json!({ "project": p.project, "rooms": rooms }))
-}
-
-/// Pre-order DFS flatten of the subgroup tree rooted at `root` into
-/// `{child_h, name, about, depth}` JSON (root excluded, its children at depth 0).
-pub(in crate::daemon::server) fn preorder_rooms(
-    children: &std::collections::BTreeMap<String, Vec<(String, String, String)>>,
-    root: &str,
-) -> Vec<serde_json::Value> {
-    fn walk(
-        children: &std::collections::BTreeMap<String, Vec<(String, String, String)>>,
-        node: &str,
-        depth: usize,
-        seen: &mut std::collections::HashSet<String>,
-        out: &mut Vec<serde_json::Value>,
-    ) {
-        if let Some(kids) = children.get(node) {
-            for (child_id, name, about) in kids {
-                if !seen.insert(child_id.clone()) {
-                    continue;
-                }
-                out.push(serde_json::json!({
-                    "child_h": child_id,
-                    "name": name,
-                    "about": about,
-                    "depth": depth,
-                }));
-                walk(children, child_id, depth + 1, seen, out);
-            }
-        }
-    }
-    let mut out = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-    seen.insert(root.to_string());
-    walk(children, root, 0, &mut seen, &mut out);
-    out
-}
+mod list;
+pub(in crate::daemon::server) use list::rpc_channels_list;
 
 /// Human-readable summary of the add-agents request, grouped per backend, e.g.
 /// "@<edge1>: add research-lead. @<edge2>: add implementation-lead and test1."

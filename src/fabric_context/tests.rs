@@ -119,6 +119,32 @@ fn cursor_delta_only_renders_changed_joined_channel() {
 }
 
 #[test]
+fn archived_joined_channels_are_hidden_from_fabric_context() {
+    let store = seed_store();
+    let rec = session(&store);
+    store
+        .upsert_channel("archived", "archived", "[ARCHIVED] done", "root", 30)
+        .unwrap();
+    store
+        .join_session_channel(&rec.session_id, "archived", 30)
+        .unwrap();
+    chat(
+        &store,
+        "archived-chat",
+        "archived",
+        220,
+        "old task note",
+        "[]",
+    );
+
+    let text = render_fabric_context(&store, input(Some(&rec), "root", 0, 300, true))
+        .expect("forced context should render");
+    assert!(!text.contains("name=\"#archived\""));
+    assert!(!text.contains("[ARCHIVED] done"));
+    assert!(!text.contains("old task note"));
+}
+
+#[test]
 fn mention_rows_are_marked_important_and_truncated_with_recovery_id() {
     let store = seed_store();
     let rec = session(&store);

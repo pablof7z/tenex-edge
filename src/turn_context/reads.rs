@@ -48,6 +48,7 @@ pub(super) fn joined_channels(s: &Store, rec: &Session) -> (Vec<(String, u64)>, 
     if !rec.channel_h.is_empty() && !channels.iter().any(|(h, _)| h == &rec.channel_h) {
         channels.push((rec.channel_h.clone(), rec.created_at));
     }
+    channels.retain(|(channel, _)| !s.is_archived_channel(channel).unwrap_or(false));
     channels.sort_by(|(a_h, a_t), (b_h, b_t)| {
         let a_active = if a_h == &rec.channel_h { 0 } else { 1 };
         let b_active = if b_h == &rec.channel_h { 0 } else { 1 };

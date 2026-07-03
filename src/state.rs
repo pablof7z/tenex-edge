@@ -274,6 +274,7 @@ mod schema;
 
 mod aliases;
 mod channels;
+pub use channels::{archived_channel_about, is_archived_channel_about, CHANNEL_ABOUT_MAX_CHARS};
 mod core;
 mod events;
 mod identities;

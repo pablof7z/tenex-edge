@@ -131,6 +131,9 @@ fn status_channels(p: &EngineParams, store: &Mutex<Store>, session: &Session) ->
     }
     channels.sort();
     channels.dedup();
+    if let Ok(g) = store.lock() {
+        channels.retain(|channel| !g.is_archived_channel(channel).unwrap_or(false));
+    }
     channels
 }
 
