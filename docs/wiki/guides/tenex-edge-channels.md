@@ -21,6 +21,7 @@ sources:
   - session:019f12ce-2569-72e0-b959-6d87d5daec5d
   - session:bdb6c341-4dd4-48e7-9764-e80242beb005
   - session:4e6163df-c3cd-4d85-99ad-041cd0ca9701
+  - session:a685f611-39bd-4a18-a6b7-ea4e38334b82
 ---
 
 # Tenex-Edge Channels
@@ -65,6 +66,8 @@ Unnamed channels (channels whose name is empty or equals their own id) render in
 
 In schema, resolver, and daemon code there is only the `channel` node type. A channel optionally carries a workspace binding (machine + path); when it has one, it is shown as a project root in human-facing rendering. <!-- [^bdb6c-c9a04] -->
 
+
+The tenex-edge channel currently has zero NIP-29 group-state materialized on the relay — no kind 39000 (metadata), 39001 (admins), 39002 (members), or 39003 (roles) events exist, while all other channels have all four present and matching local state. The relay receives valid kind 9000/9002/9007 admin-op events for the tenex-edge group on the wire, but nothing materializes as queryable state — no raw event and no derived 39000-39003. Consequently, the daemon's readiness checks against 39000-39003 never succeed, so it repeatedly re-issues the same admin-add in a back-to-back nip29-role-decision retry loop. <!-- [^a685f-80f18] -->
 ## Membership and Awareness
 
 Membership is per-node: an agent is a member only of channels it was explicitly added to. Awareness — fabric snapshot visibility and deltas — inherits downward to all descendants of channels where the agent is a member. This membership-vs-awareness semantic is the one irreversible decision in the refactor that requires explicit human ratification before the mechanical work starts; all other decisions are mechanical once it is fixed. <!-- [^bdb6c-a11c7] -->

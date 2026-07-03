@@ -1,0 +1,6 @@
+{
+  "id": "fea53-85a33",
+  "ts": "2026-07-03T11:48:55Z",
+  "session": "fea5307b-d9a0-46fe-977c-408e5e0e0ff4",
+  "text": "we would expect agent1's mention of agent2 to be immediately injected into agent2's session (since it's running via tenex-edge launch and thus it auto-injects the message as user message, properly attributed to agent1 (i.e. agent2 needs to know this message came from agent1) [...] if it works it would need to be injected in the userPrompt hook [...] if it works ok, agent2 would use tenex-edge chat write to reply back, mentioning agent1\n\nsince agent1 is not running on a tenex-edge launch the new message won't trigger a user message injection -- so you, as the user, would need to ask afterwards \"did you receive something? dont use any tools -- if the reply back is not injected in your context let me know\""
+}

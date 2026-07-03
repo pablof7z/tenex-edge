@@ -2,7 +2,7 @@
 title: Tenex-Edge Daemon Write-Disabled Error
 slug: tenex-edge-daemon-write-disabled
 topic: tenex-edge
-summary: "The \\\\\\\\"write actions are disabled\\\\\\\\" error message originates client-side from the daemon's own `nostr-relay-pool` Rust dependency (`Error::WriteDisabled`), not fro"
+summary: "The \\\\\\\\\\\\\\\\\\"write actions are disabled\\\\\\\\\\\\\\\\\\" error message originates client-side from the daemon's own `nostr-relay-pool` Rust dependency (`Error::WriteDisabled`), not fro"
 tags:
   - capture
 volatility: warm
@@ -28,3 +28,5 @@ The daemon's `transport.rs` wraps the `WriteDisabled` error as `"relay rejected 
 ## Intermittent Startup Failures
 
 Intermittent `WriteDisabled` failures during daemon startup are consistent with a startup race in the relay-pool's internal state when ~10 reconciled sessions all fire a domain-event publish through the single shared `Transport` simultaneously, rather than a permanently-missing flag. <!-- [^a685f-69259] -->
+
+Session spawn proceeds regardless of domain-event publish failures — the daemon allocates the ordinal slot and spawns the session engine after each error. <!-- [^a685f-fbb3e] -->

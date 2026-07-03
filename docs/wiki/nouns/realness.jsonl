@@ -2,12 +2,18 @@
 {"canonical":"agent team","name":"Agent Teams","signed":0,"status":"provisional"}
 {"canonical":"another claude","name":"Another Claude","signed":18,"status":"real"}
 {"canonical":"clawstr agentry","name":"Clawstr Agentry","signed":0,"status":"provisional"}
+{"canonical":"container state","name":"container-state","signed":1,"status":"provisional"}
+{"canonical":"hacker new","name":"Hacker News","signed":0,"status":"provisional"}
 {"canonical":"haiku 1","name":"haiku1","signed":1,"status":"provisional"}
 {"canonical":"kind 0","name":"kind:0","signed":4,"status":"real"}
+{"canonical":"member pablo","name":"Members Pablo","signed":0,"status":"provisional"}
 {"canonical":"mtok ollama","name":"Mtok Ollama","signed":0,"status":"provisional"}
+{"canonical":"nak req k 39000","name":"nak req -k 39000","signed":1,"status":"provisional"}
 {"canonical":"palette ansi 256","name":"Palette ANSI-256","signed":0,"status":"provisional"}
+{"canonical":"rm rf","name":"rm -rf","signed":1,"status":"provisional"}
+{"canonical":"separately fyi","name":"Separately FYI","signed":0,"status":"provisional"}
 {"canonical":"sk or 4 f 2","name":"sk-or-…4f2a","signed":0,"status":"provisional"}
-{"canonical":"tenex edge config","name":"tenex-edge config","signed":2,"status":"provisional"}
+{"canonical":"tenex edge config","name":"tenex-edge config","signed":3,"status":"real"}
 {"canonical":"tenex edge daemon","name":"tenex-edge daemon","signed":3,"status":"real"}
 {"canonical":"tenex edge launch","name":"tenex-edge launch","signed":1,"status":"provisional"}
 {"canonical":"tenex edge who","name":"tenex-edge who","signed":1,"status":"provisional"}

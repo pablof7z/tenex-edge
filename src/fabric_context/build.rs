@@ -158,7 +158,7 @@ fn unjoined_channels(
         .collect()
 }
 
-fn agents(edge_home: Option<&Path>, cursor: u64, now: u64) -> Vec<AgentRow> {
+pub(super) fn agents(edge_home: Option<&Path>, cursor: u64, now: u64) -> Vec<AgentRow> {
     let Some(edge_home) = edge_home else {
         return Vec::new();
     };

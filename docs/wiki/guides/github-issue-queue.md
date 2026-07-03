@@ -8,11 +8,12 @@ tags:
 volatility: warm
 confidence: medium
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-07-03
 verified: 2026-06-29
 compiled-from: conversation
 sources:
   - session:019f12f9-8a0b-7012-ad2f-f4d0cb035d2b
+  - session:fea5307b-d9a0-46fe-977c-408e5e0e0ff4
 ---
 
 # GitHub Issue Queue
@@ -27,4 +28,6 @@ Scattered notes, ad-hoc `TODO.md` / `NOTES.md` / `ROADMAP.md` / `PLAN-foo.md` fi
 
 ## Workflow
 
-GitHub search is the backlog view; `gh issue list --state open` shows the queue, the issue is closed or updated in the PR that touches it, and lasting conclusions move into durable docs. <!-- [^019f1-8d5dd] -->
+GitHub search is the backlog view; `gh issue list --state open` shows the queue, the issue is closed or updated in the PR that touches it, and lasting conclusions move into durable docs. Bugs or gaps found during mention-testing are filed as GitHub issues, ideally with screenshots of the observed behavior.
+
+<!-- citations: [^019f1-8d5dd] [^fea53-03268] -->

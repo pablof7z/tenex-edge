@@ -4,7 +4,7 @@ date: 2026-06-29
 session: 661ebf6b-e01b-4ff6-b9c7-5042b900c788
 transcript: /Users/pablofernandez/.claude/projects/-Users-pablofernandez-src-tenex-edge/661ebf6b-e01b-4ff6-b9c7-5042b900c788.jsonl
 salience: product
-status: active
+status: superseded
 subjects:
   - tenex-edge-who
   - hook-injection

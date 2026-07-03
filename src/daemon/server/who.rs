@@ -154,8 +154,41 @@ pub(in crate::daemon::server) fn rpc_who(
                 });
             }
         }
+    } else if p.all_projects {
+        // No single scope exists across all projects, so `--all-projects` gets
+        // the same fabric renderer applied once per root project instead of
+        // falling back to the old snapshot table (issue: `who` and
+        // `who --all-projects` must not diverge in output format).
+        let edge = crate::config::edge_home();
+        let roots = state.with_store(project_roots)?;
+        let fabric =
+            state.with_store(|s| crate::fabric_context::render_fabric_all_projects(s, &roots, now, &host));
+        out["fabric"] = serde_json::Value::String(fabric);
+        let human = state.with_store(|s| {
+            crate::fabric_context::render_fabric_all_projects_human(
+                s,
+                &roots,
+                now,
+                &host,
+                Some(&edge),
+                p.human_color,
+            )
+        });
+        out["fabric_human"] = serde_json::Value::String(human);
     }
     Ok(out)
+}
+
+/// Top-level project channels (`parent` empty), non-archived — the set
+/// `--all-projects` fans its unified fabric render across.
+fn project_roots(store: &crate::state::Store) -> Result<Vec<String>> {
+    Ok(store
+        .reader()
+        .list_channels()?
+        .into_iter()
+        .filter(|c| c.parent.is_empty() && !c.is_archived())
+        .map(|c| c.channel_h)
+        .collect())
 }
 
 fn append_other_projects_human(

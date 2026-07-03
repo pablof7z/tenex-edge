@@ -257,6 +257,67 @@ fn claude_user_prompt_submit_reasserts_missing_session() {
 }
 
 #[test]
+fn who_all_projects_uses_unified_fabric_render_not_old_table() {
+    // Regression for the divergence the user flagged live: `who --all-projects`
+    // must render through the SAME fabric pipeline as single-project `who`
+    // (one project block per root channel), not the old flat markdown table.
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let home = Home::new().with_backend_key();
+
+    // Register a second project alongside the default "tmp" -> /tmp mapping.
+    let second_dir = tempfile::tempdir().unwrap();
+    let projects_map = serde_json::json!({ "tmp": "/tmp", "proj2": second_dir.path() });
+    std::fs::write(
+        home.dir.path().join("projects.json"),
+        serde_json::to_string(&projects_map).unwrap(),
+    )
+    .unwrap();
+
+    let out = run_cli_stdin(
+        &home,
+        &["harness", "hook", "opencode", "--type", "session-start"],
+        r#"{"cwd":"/tmp","session_id":"sid-tmp"}"#,
+    );
+    assert!(out.status.success(), "session-start (tmp) failed");
+
+    let payload = serde_json::json!({
+        "cwd": second_dir.path().display().to_string(),
+        "session_id": "sid-proj2",
+    })
+    .to_string();
+    let out = run_cli_stdin_with_env_in_dir(
+        &home,
+        &["harness", "hook", "opencode", "--type", "session-start"],
+        &payload,
+        &[],
+        second_dir.path(),
+    );
+    assert!(out.status.success(), "session-start (proj2) failed");
+
+    let out = run_cli(&home, &["who", "--all-projects"]);
+    assert!(
+        out.status.success(),
+        "who --all-projects failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let who = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        !who.contains("| Agent | Host | Title | Status |"),
+        "who --all-projects still uses the old markdown table renderer:\n{who}"
+    );
+    assert!(
+        who.contains("opencode"),
+        "who --all-projects missing agent:\n{who}"
+    );
+    assert!(
+        who.contains("tmp") && who.contains("proj2"),
+        "who --all-projects missing a project block:\n{who}"
+    );
+
+    stop_daemon(&home);
+}
+
+#[test]
 fn version_skew_client_detects_and_respawns() {
     // A daemon spawned at protocol 1, then a NEWER client (protocol 2) running
     // the real `connect_or_spawn` must detect the skew, make the old daemon

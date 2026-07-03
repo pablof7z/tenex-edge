@@ -1,0 +1,10 @@
+[
+  [
+    "user",
+    "is tenex-edge who --all-projects seriously using a completely different renderer??? it obviously fucking shouldn't!"
+  ],
+  [
+    "assistant",
+    "Confirmed `who --all-projects` was falling back to the old markdown-table renderer because the daemon skipped the unified fabric view when no single project scope resolved; added a new `render_fabric_all_projects` path and wired it in, with all tests passing. Also verified no other stray renderers duplicate this work—hook injection, single-project `who`, and `--all-projects` now all share one pipeline, and the old table renderer remains only as a version-skew fallback."
+  ]
+]

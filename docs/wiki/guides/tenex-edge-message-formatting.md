@@ -17,6 +17,7 @@ sources:
   - session:bdb6c341-4dd4-48e7-9764-e80242beb005
   - session:75f62bb9-f564-4633-8741-997dfea1d0e7
   - session:e0eba763-d227-40ca-a9d2-aaad5b192130
+  - session:fea5307b-d9a0-46fe-977c-408e5e0e0ff4
 ---
 
 # Tenex-Edge Message Formatting
@@ -29,7 +30,7 @@ When the sender is a whitelisted pubkey (human) and the agent is in a tmux-wrapp
 
 When the sender is not a whitelisted pubkey (i.e. an agent) in a tmux-wrapped session, a direct mention is pasted as `[tenex-edge mention] <@agent1> Hello @developer`.
 
-Agent-to-agent mentions in tmux are pasted as real turns and auto-publish replies, with no gating or suppression. A soft consecutive-auto-turn depth limit is reserved as a future safety valve but is not implemented.
+Agent-to-agent mentions in tmux are pasted as real turns and auto-publish replies, with no gating or suppression. A soft consecutive-auto-turn depth limit is reserved as a future safety valve but is not implemented. When agent1 (launched via tenex-edge launch) mentions agent2 (also launched via tenex-edge launch), the mention is immediately injected into agent2's session as a user message attributed to agent1. Injected mentions appear in the target agent's context via the userPrompt hook. When agent2 replies back mentioning agent1, and agent1 was launched as a raw `claude` session (not via tenex-edge launch), the reply is not auto-injected into agent1's session — the user must manually ask agent1 whether it received the message.
 
 In a hooks-only session, a direct mention is rendered inside a `<tenex-edge>` wrapper with a reply CLI hint and no message id. No system path auto-publishes kind:9 chat events; publishing happens only via explicit `tenex-edge chat write` by an agent or a user. The `user-prompt-submit` hook does not mirror the user's prompt as a kind:9 chat event (the `rpc_user_prompt` auto-publish path is removed). The agent Stop hook does not auto-publish the agent's turn output as a kind:9 chat event (the `publish_agent_reply` auto-publish path is removed).
 
@@ -41,9 +42,11 @@ Chat mentions use `@<agent-instance-label>` (e.g. @haiku, @haiku1) instead of `@
 
 The chat-write confirmation line reads `mentioning @{label}` instead of `mentioning session {codename}`, driven by the RPC's `mentioned_label`, falling back to plain `sent chat {id}` when no mention is present. README.md chat-write documentation references `@<agent-label>` targeting.
 
+`tenex-edge chat write` refuses messages longer than 600 characters, erroring out and offering `--long-message` for longer messages.
+
 @-mentioning someone from a subchannel they are not in is a cross-channel mention using existing `@slug@backend` addressing, with no membership side-effects from mentions; replying or joining requires an explicit invite or switch.
 
-<!-- citations: [^bdb6c-1833e] [^d39d3-7d6ac] [^bd868-1c088] [^bd868-dce28] [^bd868-f7785] [^75f62-ebb61] [^e0eba-b9cc1] [^e0eba-5f8a4] -->
+<!-- citations: [^bdb6c-1833e] [^d39d3-7d6ac] [^bd868-1c088] [^bd868-dce28] [^bd868-f7785] [^75f62-ebb61] [^e0eba-b9cc1] [^e0eba-5f8a4] [^e0eba-7764c] [^fea53-85a33] -->
 ## Ambient Chatter
 
 Ambient/background chatter is rendered inside a `<tenex-edge>` wrapper as a timeline with `<@name - Xm ago>` prefixes, identical for tmux and hooks sessions, with no reply hint.

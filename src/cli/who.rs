@@ -30,9 +30,9 @@ fn who_once(project: Option<String>, all_projects: bool) -> Result<()> {
         print!("{human}");
         return Ok(());
     }
-    // Prefer the unified fabric view (same format as the hook injection). The
-    // daemon includes it whenever a current channel resolves; `--all-projects`
-    // (no single scope) falls back to the cross-project snapshot table.
+    // Prefer the unified fabric view (same format as the hook injection and as
+    // single-project `who`). The daemon sets this for both a resolved current
+    // channel and `--all-projects` (one project block per root channel).
     if let Some(fabric) = v.get("fabric").and_then(|x| x.as_str()) {
         println!("{fabric}");
         return Ok(());

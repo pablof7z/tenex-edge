@@ -20,6 +20,7 @@ pub(crate) use model::FabricView;
 
 use build::build_view;
 use human_render::render_human_view;
+use model::FabricView;
 use render::render_view;
 
 /// Stringify an already-derived [`FabricView`] into the exact `<tenex-edge>`
@@ -87,6 +88,68 @@ pub(crate) fn render_fabric_context_human(
         return None;
     }
     Some(render_human_view(&view, color))
+}
+
+/// `--all-projects`: the same fabric renderer as a single-scope `who`, one
+/// project block per root channel in `roots`. No single caller session exists
+/// across projects, so each block is built session-less (no self row, no
+/// chatter — `build_view` only pulls messages when a session is present).
+pub(crate) fn render_fabric_all_projects(store: &Store, roots: &[String], now: u64, local_host: &str) -> String {
+    let mut out = String::new();
+    for root in roots {
+        let view = build_view(store, project_input(root, now, local_host, None));
+        out.push_str(&render_view(&view));
+        out.push('\n');
+    }
+    out
+}
+
+/// Human-rendered counterpart of [`render_fabric_all_projects`]. The
+/// invitable-agent roster is scope-independent, so it is rendered once up
+/// front instead of once per project block.
+pub(crate) fn render_fabric_all_projects_human(
+    store: &Store,
+    roots: &[String],
+    now: u64,
+    local_host: &str,
+    edge_home: Option<&Path>,
+    color: bool,
+) -> String {
+    let mut out = String::new();
+    let roster = build::agents(edge_home, 0, now);
+    if !roster.is_empty() {
+        let roster_view = FabricView {
+            agents: roster,
+            ..Default::default()
+        };
+        out.push_str(render_human_view(&roster_view, color).trim_start_matches('\n'));
+    }
+    for root in roots {
+        let view = build_view(store, project_input(root, now, local_host, None));
+        out.push_str(&render_human_view(&view, color));
+    }
+    out
+}
+
+fn project_input<'a>(
+    root: &'a str,
+    now: u64,
+    local_host: &'a str,
+    edge_home: Option<&'a Path>,
+) -> FabricContextInput<'a> {
+    FabricContextInput {
+        session: None,
+        scope: root,
+        cursor: 0,
+        now,
+        self_slug: "",
+        self_pubkey: "",
+        local_host,
+        edge_home,
+        forced_messages: &[],
+        warnings: &[],
+        force: true,
+    }
 }
 
 pub(crate) fn inbox_seed(row: &InboxRow) -> FabricMessageSeed {

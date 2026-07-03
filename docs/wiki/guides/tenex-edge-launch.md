@@ -13,6 +13,7 @@ verified: 2026-07-03
 compiled-from: conversation
 sources:
   - session:abce9e9f-8f3e-4561-9dd3-684afd59be80
+  - session:fea5307b-d9a0-46fe-977c-408e5e0e0ff4
 ---
 
 # Tenex-Edge Launch
@@ -28,3 +29,11 @@ With these settings in place, the fixed `tenex-edge launch` window renders agent
 The `tenex-edge launch` status line displays the agent identifier and session state in the format `<agent>@<host> <project> <project> [idle]` (e.g. `claude@isolated-test-mac project project [idle]`).
 
 <!-- citations: [^abce9-cad96] [^abce9-0fd96] [^abce9-2b259] [^abce9-b1683] -->
+
+## Mention Injection
+
+Mention injection into a `tenex-edge launch` agent must occur in the `userPrompt` hook. <!-- [^fea53-66223] -->
+
+## Agent Roles
+
+Agent1 is a raw `claude` session (direct mode, host-tmux-observed but not daemon-anchored) that the user types the initial instruction into. Agent2 is a `claude` session launched via `tenex-edge launch` that is expected to receive live daemon-pushed, attributed mentions. <!-- [^fea53-1e000] -->
