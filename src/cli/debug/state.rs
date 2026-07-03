@@ -45,17 +45,19 @@ pub(super) fn hook_tail(opts: HookTailOpts) -> Result<()> {
     };
 
     let refresh = opts.refresh.max(Duration::from_millis(100));
-    let snapshot = load_hook_tail_snapshot(&state.project_filters, &state.session_filter);
+    let mut snapshot = load_hook_tail_snapshot(&state.project_filters, &state.session_filter);
+    let mut pane_order = Vec::new();
+    stabilize_pane_order(&mut snapshot, &mut pane_order);
 
     let _terminal = TuiTerminal::enter()?;
     let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
     let mut next_refresh = Instant::now();
     let (snap_tx, snap_rx) = std::sync::mpsc::channel::<HookTailSnapshot>();
     let mut loading = false;
-    let mut snapshot = snapshot;
 
     loop {
-        while let Ok(new) = snap_rx.try_recv() {
+        while let Ok(mut new) = snap_rx.try_recv() {
+            stabilize_pane_order(&mut new, &mut pane_order);
             snapshot = new;
             loading = false;
         }
@@ -241,4 +243,56 @@ pub(super) fn hook_tail(opts: HookTailOpts) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn stabilize_pane_order(snapshot: &mut HookTailSnapshot, pane_order: &mut Vec<String>) {
+    for pane in &snapshot.panes {
+        if !pane_order.contains(&pane.session) {
+            pane_order.push(pane.session.clone());
+        }
+    }
+
+    snapshot.panes.sort_by_key(|pane| {
+        pane_order
+            .iter()
+            .position(|session| session == &pane.session)
+            .unwrap_or(usize::MAX)
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cli::debug::data::SessionPane;
+
+    fn pane(session: &str) -> SessionPane {
+        SessionPane {
+            session: session.to_string(),
+            short: session.to_string(),
+            ..SessionPane::default()
+        }
+    }
+
+    #[test]
+    fn pane_order_stays_fixed_when_snapshot_recency_order_changes() {
+        let mut order = Vec::new();
+        let mut first = HookTailSnapshot {
+            panes: vec![pane("session-b"), pane("session-a")],
+            ..HookTailSnapshot::default()
+        };
+        stabilize_pane_order(&mut first, &mut order);
+
+        let mut next = HookTailSnapshot {
+            panes: vec![pane("session-a"), pane("session-b"), pane("session-c")],
+            ..HookTailSnapshot::default()
+        };
+        stabilize_pane_order(&mut next, &mut order);
+
+        let sessions: Vec<_> = next
+            .panes
+            .iter()
+            .map(|pane| pane.session.as_str())
+            .collect();
+        assert_eq!(sessions, vec!["session-b", "session-a", "session-c"]);
+    }
 }
