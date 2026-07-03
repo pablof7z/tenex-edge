@@ -1,0 +1,6 @@
+{
+  "id": "75f62-3c91e",
+  "ts": "2026-07-03T09:04:32Z",
+  "session": "75f62bb9-f564-4633-8741-997dfea1d0e7",
+  "text": "**Design both themes.** The page renders in the viewer's theme: `prefers-color-scheme` carries the OS preference, and the viewer's toggle stamps `data-theme=\"dark\"` / `data-theme=\"light\"` on the root element, which must override the media query in both directions. The robust pattern is token-level: define the palette as custom properties on `:root`, redefine only the tokens under `@media (prefers-color-scheme: dark)` — style components through the tokens, never directly inside the media query — then redefine them again under `:root[data-theme=\"dark\"]` and `:root[data-theme=\"light\"]`. Give the second theme the same care as the first — don't naively invert; keep contrast legible and the accent working on both grounds. A design that deliberately commits to one visual world (a neon arcade screen, a letterpress invitation) may stay single-theme — make it a choice, not an omission."
+}

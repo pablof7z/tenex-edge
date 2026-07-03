@@ -89,13 +89,6 @@ pub(crate) fn rpc_params(extra: serde_json::Value) -> serde_json::Value {
 }
 
 pub async fn run(cli: Cli) -> Result<()> {
-    {
-        let relays = crate::config::Config::load()
-            .map(|c| c.relays.join(", "))
-            .unwrap_or_else(|_| "none".to_string());
-        let home = crate::config::edge_home();
-        eprintln!("[tenex-edge] home={} relays={}", home.display(), relays);
-    }
     // Any explicit command (except `harness hook`) signals intent to use tenex-edge, so
     // clear the stop-inhibit. Hooks honour the sentinel — they must never
     // restart a daemon the operator explicitly stopped. `stop` re-arms it

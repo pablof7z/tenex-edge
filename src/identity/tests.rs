@@ -1,5 +1,7 @@
 use super::*;
 
+mod byline;
+
 #[test]
 fn generates_then_reloads_same_key() {
     let dir = tempfile::tempdir().unwrap();
@@ -318,44 +320,6 @@ fn ordinal_label_format() {
     assert_eq!(agent_ordinal_label("smith", 0), "smith");
     assert_eq!(agent_ordinal_label("smith", 1), "smith1");
     assert_eq!(agent_ordinal_label("smith", 12), "smith12");
-}
-
-#[test]
-fn byline_reads_field_alias_and_falls_back_to_agent_description() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join("agents")).unwrap();
-    std::fs::write(
-        dir.path().join("agents/a.json"),
-        r#"{"slug":"a","secret_key":"0000000000000000000000000000000000000000000000000000000000000001","public_key":"","created_at":1,"byline":"front-line triage"}"#,
-    )
-    .unwrap();
-    std::fs::write(
-        dir.path().join("agents/b.json"),
-        r#"{"slug":"b","secret_key":"0000000000000000000000000000000000000000000000000000000000000002","public_key":"","created_at":1,"useCriteria":"use for deep research"}"#,
-    )
-    .unwrap();
-    std::fs::write(
-        dir.path().join("agents/c.json"),
-        r#"{"slug":"c","secret_key":"0000000000000000000000000000000000000000000000000000000000000003","public_key":"","created_at":1,"agent":{"description":"writes social posts"}}"#,
-    )
-    .unwrap();
-    std::fs::write(
-        dir.path().join("agents/d.json"),
-        r#"{"slug":"d","secret_key":"0000000000000000000000000000000000000000000000000000000000000004","public_key":"","created_at":1}"#,
-    )
-    .unwrap();
-
-    let agents = list_local_agents(dir.path());
-    let byline = |slug: &str| {
-        agents
-            .iter()
-            .find(|a| a.0 == slug)
-            .and_then(|a| a.3.clone())
-    };
-    assert_eq!(byline("a").as_deref(), Some("front-line triage"));
-    assert_eq!(byline("b").as_deref(), Some("use for deep research"));
-    assert_eq!(byline("c").as_deref(), Some("writes social posts"));
-    assert_eq!(byline("d"), None);
 }
 
 // ── AgentInstance (issue #98) ─────────────────────────────────────────────────

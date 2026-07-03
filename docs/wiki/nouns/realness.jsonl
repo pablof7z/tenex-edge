@@ -1,3 +1,6 @@
+{"canonical":"agent team","name":"Agent Teams","signed":0,"status":"provisional"}
+{"canonical":"another claude","name":"Another Claude","signed":18,"status":"real"}
+{"canonical":"clawstr agentry","name":"Clawstr Agentry","signed":0,"status":"provisional"}
 {"canonical":"haiku 1","name":"haiku1","signed":1,"status":"provisional"}
 {"canonical":"kind 0","name":"kind:0","signed":4,"status":"real"}
 {"canonical":"tenex edge daemon","name":"tenex-edge daemon","signed":3,"status":"real"}

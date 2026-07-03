@@ -1,0 +1,6 @@
+{
+  "id": "75f62-4b6a8",
+  "ts": "2026-07-03T09:04:35Z",
+  "session": "75f62bb9-f564-4633-8741-997dfea1d0e7",
+  "text": "- on every user turn (`UserPromptSubmit`/turn-start hook), the daemon hands the *live conversation transcript* to an LLM (via `rig`, OpenRouter/Ollama, or shelling to the local `claude` CLI) which returns a stable session **TITLE** + a live **NOW** line in one call (`src/distill.rs`) — this becomes the agent's broadcast \"what I'm doing\""
+}

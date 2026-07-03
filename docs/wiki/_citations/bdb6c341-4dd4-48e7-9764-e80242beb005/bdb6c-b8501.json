@@ -1,0 +1,6 @@
+{
+  "id": "bdb6c-b8501",
+  "ts": "2026-07-03T07:33:28Z",
+  "session": "bdb6c341-4dd4-48e7-9764-e80242beb005",
+  "text": "User: publish a gh issue about this\n\nAssistant: I'll draft and publish the issue. Let me first check the repo's issue conventions.\n\nAssistant: Published: **https://github.com/pablof7z/tenex-edge/issues/201**\n\nLabeled `refactor:architecture`, `needs-human-policy` (the membership-vs-awareness call in decision #2 is flagged as the one semantic that needs your ratification before the mechanical work starts), and `risk:high`."
+}

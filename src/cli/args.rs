@@ -11,7 +11,7 @@ use super::who::WhoArgs;
 #[derive(Parser)]
 #[command(
     name = "tenex-edge",
-    about = "Citizenship for your agents: identity + awareness on the Nostr fabric."
+    about = "An identity and awareness fabric for the coding agents you already run."
 )]
 pub struct Cli {
     #[command(subcommand)]

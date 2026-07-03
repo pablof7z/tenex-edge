@@ -8,6 +8,8 @@ mod chat_mirroring;
 mod create;
 #[path = "channels/edit.rs"]
 mod edit;
+#[path = "channels/human_who.rs"]
+mod human_who;
 #[path = "channels/launch_mentions.rs"]
 mod launch_mentions;
 #[path = "channels/native_context.rs"]

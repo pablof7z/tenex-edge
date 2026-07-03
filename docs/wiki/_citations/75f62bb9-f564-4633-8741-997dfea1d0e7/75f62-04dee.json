@@ -1,0 +1,6 @@
+{
+  "id": "75f62-04dee",
+  "ts": "2026-07-03T09:15:45Z",
+  "session": "75f62bb9-f564-4633-8741-997dfea1d0e7",
+  "text": "- `tenex-edge who` / `tail` / the injected turn-context render a unified live view of every other agent's identity, presence, and distilled activity on the project's fabric\n [...] Assistant: Now I have an exact, accurate command surface — including a critical catch: the `tail` command was **removed** (there's a test asserting it's gone), yet the current README still advertises it. The live view is `who --live`. Install path is `just install` then `tenex-edge install --all`. Let me confirm the repo remote so links are correct, then write.\n\nAssistant: Everything is verified. Repo is `github.com/pablof7z/tenex-edge`. Writing the new README now — proof-first hero, pain in the subhead, identity as beat two, honest \"what this isn't yet,\" Nostr revealed only in architecture, `tail` claim removed."
+}

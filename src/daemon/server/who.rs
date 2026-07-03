@@ -1,4 +1,7 @@
 use super::*;
+use crate::who_snapshot::OtherProjectSummary;
+use owo_colors::OwoColorize as _;
+use std::fmt::Write as _;
 
 #[derive(serde::Deserialize, Default)]
 pub(in crate::daemon::server) struct WhoParams {
@@ -18,6 +21,8 @@ pub(in crate::daemon::server) struct WhoParams {
     agent: Option<String>,
     #[serde(default)]
     group: Option<String>,
+    #[serde(default)]
+    human_color: bool,
 }
 
 /// `who`: build the snapshot with the SAME function the CLI used. The client
@@ -67,7 +72,7 @@ pub(in crate::daemon::server) fn rpc_who(
     let snapshot = state.with_store(|s| {
         crate::who_snapshot::load_who_snapshot(s, current_project.as_deref(), now, &host)
     })?;
-    let mut out = serde_json::to_value(snapshot)?;
+    let mut out = serde_json::to_value(&snapshot)?;
 
     // Attach the UNIFIED fabric view (same format as the hook injection — decision
     // A) whenever a single current channel resolves. `--all-projects` has no single
@@ -108,6 +113,35 @@ pub(in crate::daemon::server) fn rpc_who(
         });
         if let Some(fabric) = fabric {
             out["fabric"] = serde_json::Value::String(fabric);
+            if rec.is_none() {
+                let human = state.with_store(|s| {
+                    crate::fabric_context::render_fabric_context_human(
+                        s,
+                        crate::fabric_context::FabricContextInput {
+                            session: rec,
+                            scope,
+                            cursor: 0,
+                            now,
+                            self_slug: &self_slug,
+                            self_pubkey: &self_pubkey,
+                            local_host: &host,
+                            edge_home: Some(&edge),
+                            forced_messages: &[],
+                            warnings: &[],
+                            force: true,
+                        },
+                        p.human_color,
+                    )
+                });
+                if let Some(mut human) = human {
+                    append_other_projects_human(
+                        &mut human,
+                        &snapshot.other_projects,
+                        p.human_color,
+                    );
+                    out["fabric_human"] = serde_json::Value::String(human);
+                }
+            }
             if let Some(rec) = rec {
                 state.with_store(|s| {
                     if let Err(e) = s.set_seen_cursor(&rec.session_id, now) {
@@ -122,6 +156,80 @@ pub(in crate::daemon::server) fn rpc_who(
         }
     }
     Ok(out)
+}
+
+fn append_other_projects_human(
+    out: &mut String,
+    other_projects: &[OtherProjectSummary],
+    color: bool,
+) {
+    if other_projects.is_empty() {
+        return;
+    }
+    let _ = writeln!(
+        out,
+        "{}",
+        human_style("Other projects", color, HumanStyle::Header)
+    );
+    for project in other_projects {
+        let name = human_style(&project.project, color, HumanStyle::Project);
+        let agents = project
+            .agents
+            .iter()
+            .map(|agent| human_style(&format!("@{agent}"), color, HumanStyle::Agent))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let count = format!(
+            "{} agent{}",
+            project.agent_count,
+            if project.agent_count == 1 { "" } else { "s" }
+        );
+        let about = project
+            .about
+            .as_deref()
+            .filter(|about| !about.trim().is_empty())
+            .map(|about| format!(" - {about}"))
+            .unwrap_or_default();
+        if agents.is_empty() {
+            let _ = writeln!(out, "  {}  {}{}", name, human_dim(&count, color), about);
+        } else {
+            let _ = writeln!(
+                out,
+                "  {}  {}  {}{}",
+                name,
+                human_dim(&count, color),
+                agents,
+                about
+            );
+        }
+    }
+    out.push('\n');
+}
+
+#[derive(Clone, Copy)]
+enum HumanStyle {
+    Agent,
+    Header,
+    Project,
+}
+
+fn human_style(text: &str, color: bool, style: HumanStyle) -> String {
+    if !color {
+        return text.to_string();
+    }
+    match style {
+        HumanStyle::Agent => text.cyan().to_string(),
+        HumanStyle::Header => text.bold().to_string(),
+        HumanStyle::Project => text.blue().bold().to_string(),
+    }
+}
+
+fn human_dim(text: &str, color: bool) -> String {
+    if color {
+        text.dimmed().to_string()
+    } else {
+        text.to_string()
+    }
 }
 
 // ── project_add ──────────────────────────────────────────────────────────────

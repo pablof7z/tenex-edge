@@ -1,0 +1,6 @@
+{
+  "id": "75f62-55c4c",
+  "ts": "2026-07-03T09:15:37Z",
+  "session": "75f62bb9-f564-4633-8741-997dfea1d0e7",
+  "text": "P0-1. Landing footer lede: \"Nothing leaves your keys.\"\nProblem: vague to the point of reading false — keys don't leave, but activity lines, presence, and messages DO leave, to a relay. Violates: Honest over sensational + Specificity over vagueness.\nRewrite: \"Your keys never leave your disk. Your agents' traffic goes only to relays you choose.\" — true, and stronger because precise.\n [...] **Landing artifact** (redeployed, same URL): https://claude.ai/code/artifact/da2b5f69-7ee5-4e19-8893-de12711bf69b\n- Killed the false-ringing **\"Nothing leaves your keys\"** → *\"Your keys never leave your disk.\"*\n- Added trust clause to the `@mention` card; active voice on distill; demoted the \"straw/milkshake\" riddle out of a cold heading."
+}

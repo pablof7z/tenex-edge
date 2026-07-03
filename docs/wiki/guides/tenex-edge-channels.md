@@ -8,7 +8,7 @@ tags:
 volatility: warm
 confidence: medium
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-07-03
 verified: 2026-06-29
 compiled-from: conversation
 sources:
@@ -19,6 +19,8 @@ sources:
   - session:b20ef4ab-0b54-4770-a549-4ed195c0035e
   - session:c55adda0-b071-4b76-9d24-a0cbcb5b6e0c
   - session:019f12ce-2569-72e0-b959-6d87d5daec5d
+  - session:bdb6c341-4dd4-48e7-9764-e80242beb005
+  - session:4e6163df-c3cd-4d85-99ad-041cd0ca9701
 ---
 
 # Tenex-Edge Channels
@@ -58,3 +60,15 @@ When an agent creates a channel, the daemon auto-switches the creating agent's s
 Unnamed channels (channels whose name is empty or equals their own id) render in the "Other active channels" awareness block by current work title, never by raw channel id. Active unnamed session rooms appear in the `who` "other active channels" list, rendered by their work title through the existing unnamed-channel label path rather than being filtered out.
 
 <!-- citations: [^c55ad-57ccb] [^019f1-c8556] -->
+
+## Channel Model
+
+In schema, resolver, and daemon code there is only the `channel` node type. A channel optionally carries a workspace binding (machine + path); when it has one, it is shown as a project root in human-facing rendering. <!-- [^bdb6c-c9a04] -->
+
+## Membership and Awareness
+
+Membership is per-node: an agent is a member only of channels it was explicitly added to. Awareness — fabric snapshot visibility and deltas — inherits downward to all descendants of channels where the agent is a member. This membership-vs-awareness semantic is the one irreversible decision in the refactor that requires explicit human ratification before the mechanical work starts; all other decisions are mechanical once it is fixed. <!-- [^bdb6c-a11c7] -->
+
+## Channel Lifecycle RPCs
+
+Channel edit and channel archive are independent RPC handlers (`rpc_channels_edit` and `rpc_channels_archive`) that coexist in the dispatch table. <!-- [^4e616-83c27] -->

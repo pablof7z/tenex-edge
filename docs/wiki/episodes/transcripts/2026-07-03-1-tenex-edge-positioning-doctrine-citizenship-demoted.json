@@ -1,0 +1,38 @@
+[
+  [
+    "user",
+    "deeply review this repo -- I want you to help me with marketing, copywriting, launch strategy, specially positioning -- start with a swarm of sonnet agents to help you gather data, both from the code and from docs (no docs is to be taken too seriously -- might have hallucinations), as well as online market research -- once you've done a first exploration use a fable agent to get high-level ideas, direction, concepts. The first target is to rewrite from scratch the README.md and land high-level copywriting for the landing page, anchored in uniqueness, USP and any best copywriting practices."
+  ],
+  [
+    "assistant",
+    "Identified the core USP as cross-person, server-less, vendor-independent agent citizenship, and noted the doctrine's warning to anchor on identity/awareness rather than collision-prevention. Launched four research agents (code-reality, docs-vision, market-research, audience-copy) before commissioning a Fable creative-direction pass."
+  ],
+  [
+    "assistant",
+    "Two agents reported: the shipped reality includes 374 passing tests with session-targeted @mentions injected into live terminal panes host-neutrally as the concrete hero proof. Noted honesty guardrails — multi-app society and cross-person features are aspirational/unbuilt, so the README must lead with the grounded floor and label vision as horizon."
+  ],
+  [
+    "assistant",
+    "That was an idle notification from an already-reported agent. Still waiting on market-research and audience-copy before commissioning Fable."
+  ],
+  [
+    "assistant",
+    "audience-copy delivered real verbatim pain quotes from devs running parallel agents, highlighting that the human ends up manually routing work and resolving conflicts. Recommended leading the hook with collision-prevention while carrying the durable-identity story underneath, and suggested a terminal-transcript-as-hero structure."
+  ],
+  [
+    "assistant",
+    "Pinged market-research and is awaiting its reply, either completed research or a signal that web tools are blocked, before commissioning the Fable pass."
+  ],
+  [
+    "assistant",
+    "Fable creative-direction pass is running against the full synthesis; will write the new README and landing-page copy once it lands."
+  ],
+  [
+    "assistant",
+    "market-research's delivery was already received and synthesized. Still waiting on fable-direction to complete before writing."
+  ],
+  [
+    "assistant",
+    "Confirmed the exact command surface, catching that the `tail` command was removed (yet still advertised in the current README); the live view is `who --live` and install path is `just install` then `tenex-edge install --all`. Will confirm the repo remote for correct links, then write."
+  ]
+]
