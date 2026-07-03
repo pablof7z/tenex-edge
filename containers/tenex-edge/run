@@ -157,7 +157,8 @@ container_run() {
     ANTHROPIC_AUTH_TOKEN \
     ANTHROPIC_BASE_URL \
     CLAUDE_CODE_OAUTH_TOKEN \
-    CLAUDE_CODE_ORGANIZATION_UUID
+    CLAUDE_CODE_ORGANIZATION_UUID \
+    TENEX_EDGE_DISTILL_CMD
   do
     if [[ -n "${!name:-}" ]]; then
       passthrough_env_args+=(--env "${name}=${!name}")

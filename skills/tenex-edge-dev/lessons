@@ -1,0 +1,185 @@
+# tenex-edge-dev live lab lessons
+
+## `tenex-edge project init` is required before `tenex-edge launch`
+
+`tenex-edge launch <agent> -- <args>` fails fast with:
+
+```
+tenex-edge: no known project in /workspace; run `tenex-edge project init` or
+git init first, or pass `--project <slug>`
+```
+
+even though `/workspace` (the mounted `REPO_ROOT`) is already a git repo. The
+project registry (`~/.tenex-edge/projects.json`, inside container/profile
+state) is separate from git-repo detection. Run once per profile before the
+first `launch` in a lab:
+
+```bash
+bash containers/tenex-edge/run --profile claude tenex-edge project init
+```
+
+This registers the directory's basename (e.g. `workspace` for a worktree
+checked out as `.../tenex-edge-trellis` mounted at `/workspace`) as the
+project slug and creates the `workspace` NIP-29 channel. It only touches
+profile-local/container state, not host `~/.tenex-edge`. Add this step to the
+live-lab-workflow reference right after `write-container-profiles` and before
+the first `launch-agent-tmux ... launch ...` call — the workflow doc
+currently jumps straight from profile-writing to launching and does not
+mention `project init`, so a first-time runner hits this every time.
+
+## Running a second container against the same profile WHILE a launch-mode agent is alive breaks that agent's daemon connection
+
+The troubleshooting reference already warns "avoid running two containers
+against the same profile at once," but it undersells the blast radius. In
+this run, launching `claude` via `launch-agent-tmux ... launch claude
+--model haiku` produced a healthy pane (`claude@claude workspace workspace
+[idle]`, no `@te_session` warning). Running
+`bash containers/tenex-edge/run --profile claude tenex-edge explain event:<id>`
+in a **second** container against the same profile while that tmux session
+was still up:
+
+- succeeded and printed a correct receipt, BUT
+- started its own daemon in its own container/VM bound to the same
+  bind-mounted socket path, logged
+  `removing locally managed offline agent from channel ... reason=startup-stale-pid`,
+  and evicted the live agent's pubkey from the NIP-29 channel.
+- The live tmux pane's statusline flipped to `[te: down]` and its next
+  prompt hung with `UserPromptSubmit hook timed out after 30s` — the session
+  was unrecoverable; it had to be killed (`container stop/rm` +
+  `tmux kill-session`) and relaunched fresh.
+
+Lesson: treat "same-profile RPC" as a hard stop, not a soft caution. Before
+any `tenex-edge explain ...` / `tenex-edge project ...` / other one-shot
+`tenex-edge` subcommand against a profile, first stop that profile's
+tmux-launched agent (`container stop <name>`, `tmux kill-session -t <name>`,
+remove the stale `daemon.sock`), THEN run the diagnostic command. Only `nak`
+against the relay directly (no container involved) is safe to run
+concurrently with a live agent.
+
+## The 30315 status content/title stays empty for short turns — distill only fires ~30s into a turn
+
+`src/distill.rs` documents this precisely: "The engine decides *when* to
+distill (30s into a turn, then periodically)." Turns driven by trivial
+prompts (e.g. "run tenex-edge who") finish in 5-10 seconds — well under the
+threshold — so the published kind:30315 always has `title=""` and empty
+`content` even though `status` correctly flips `idle`→`busy`→`idle`. To
+observe a real distill attempt you must keep the turn's wall-clock duration
+above ~30s. Backgrounding a long shell command (e.g. "sleep 40 in the
+background") does NOT work — Claude Code ends the turn as soon as it hands
+control back to the user, even if a background job is still running. What
+worked: asking the agent to run several short foreground commands
+sequentially (`sleep 8` x4, ~32-50s total foreground wall time), which kept
+the turn open long enough to cross the 30s distill threshold (confirmed via
+`.container-state/<profile>/tenex/edge/logs/distill.log`).
+
+## The `edge-distillation` LLM role can be misconfigured to an unreachable local endpoint, and `explain` correctly reports "not distill-driven" for a failed distill
+
+In this host's `~/.tenex-edge/llms.json` (projected read-only into the
+container at `/host-auth/tenex-edge/llms.json`), the `edge-distillation`
+role resolves to `ollama/deepseek-v4-flash:cloud`, which attempts
+`http://localhost:8081/api/chat` — unreachable from inside the container
+(the reachable Ollama endpoint is `OLLAMA_HOST=http://192.168.64.1:11434`,
+used successfully by other roles/doctor checks). Result:
+`distill error: ollama/deepseek-v4-flash:cloud prompt failed: ... error
+sending request for url (http://localhost:8081/api/chat)`, followed by a
+graceful `falling back to nudge-to-keep`. `tenex-edge explain event:<id>` on
+the resulting status publish correctly prints `LLM inputs: (none — this
+publish was not distill-driven)` — this matches `src/distill.rs`'s
+`distill_session`, which only produces a `DistillCapture` (and therefore a
+queryable `llm_calls` row) on a *successful* model round-trip; an `Err` path
+falls through to nudge-to-keep with `capture = None`. So `explain` is
+behaving correctly here — the gap is host LLM-role config, not the
+reconciler/explain code.
+
+## `scripts/cleanup-lab` fails on macOS's system bash (3.2) when no explicit agent-tmux args are given
+
+Calling `skills/tenex-edge-dev/scripts/cleanup-lab "${LAB_ENV}"` (no trailing
+session names, relying on its own `tmux list-sessions` scan) fails with:
+
+```
+skills/tenex-edge-dev/scripts/cleanup-lab: line 52: sessions[@]: unbound variable
+```
+
+`/bin/bash` on this host is `GNU bash, version 3.2.57(1)-release
+(arm64-apple-darwin25)` (Apple ships 3.2 for licensing reasons). Bash 3.2 has
+a known bug where `"${array[@]}"` on a zero-element array raises "unbound
+variable" under `set -u`, even though the array was assigned (`sessions=()`
+from `sessions=("$@")` with empty `$@`). The script's `#!/usr/bin/env bash`
+shebang doesn't help if `bash` on `PATH` resolves to the system 3.2 binary
+rather than a newer Homebrew bash. Workaround used in this run: pass the
+exact agent tmux session name(s) explicitly (`cleanup-lab "${LAB_ENV}"
+"${AGENT_TMUX}"`) to avoid the auto-scan branch, or kill agent
+containers/tmux sessions manually and just `tmux kill-session -t
+"${RELAY_TMUX}"` at the end. A durable fix would be guarding the loop with
+`for session in "${sessions[@]-}"` or checking `((${#sessions[@]}))` before
+the `for`, or shipping `#!/usr/bin/env bash` scripts that assume Homebrew
+bash and documenting that dependency.
+
+### How the LLM-inputs money shot was actually produced (working recipe)
+
+The `$TENEX_EDGE_DISTILL_CMD` override (checked before the `edge-distillation`
+role, `src/distill.rs::distill_session` step (a)) pipes the transcript slice to
+any external command's stdin and parses `TITLE:`/`NOW:` lines from its stdout.
+The capture it records has `provider="command"`, `model=<the command string>`,
+and — importantly — `system_prompt = SESSION_SYSTEM_PROMPT` (the crate constant,
+`capture()` hardcodes it regardless of override), so `tenex-edge explain` still
+shows the canonical distiller system prompt. Recipe that worked end-to-end:
+
+1. Wrapper script dropped into profile home (bind-mounted at `/state/home`,
+   preserved across `write-container-profiles` edge-state resets):
+   `.container-state/claude/home/distill-claude.sh` (chmod +x), body:
+   ```sh
+   #!/bin/sh
+   exec claude -p --model haiku --no-session-persistence --disallowedTools '*' \
+     --system-prompt '<two-line TITLE:/NOW: instruction>'
+   ```
+   The transcript arrives on stdin (claude -p reads the prompt from stdin);
+   stdout is the two labelled lines. `claude` lives at `/usr/local/bin/claude`,
+   which IS on the daemon's restricted PATH, so `Command::new("claude")` /
+   `sh -c` both resolve.
+2. Passthrough: `containers/tenex-edge/run`'s env allow-list only forwarded
+   `ANTHROPIC_*` / `CLAUDE_CODE_*`. Added `TENEX_EDGE_DISTILL_CMD` to that loop
+   (one line) so a host-set value reaches the container daemon's env.
+3. Inject at launch: tmux swallows the current shell env when a server already
+   exists, so set it explicitly with `tmux new-session -e`:
+   ```bash
+   tmux new-session -d -s <sess> -e TENEX_EDGE_DISTILL_CMD='sh /state/home/distill-claude.sh' \
+     "cd <repo> && env TENEX_EDGE_CONTAINER_NAME=<sess> TENEX_EDGE_CONTAINER_CIDFILE=<cid> \
+      bash containers/tenex-edge/run --profile claude tenex-edge launch claude -- --model haiku"
+   ```
+4. Drive a >30s turn with real content, e.g. "Read src/distill.rs,
+   src/explain.rs, src/instrument.rs and one-line each, then run 'sleep 8 &&
+   echo tN' four times sequentially, then say finished." The reads give the
+   model real TITLE/NOW material; the four foreground sleeps guarantee the
+   turn crosses the 30s distill threshold.
+5. `distill.log` then shows `using TENEX_EDGE_DISTILL_CMD override` with NO
+   `distill error` / `falling back` line, and the 30315 gains
+   `title="Build transcript distillation and query system"` +
+   `content="Reading source code and executing commands"`.
+6. STOP the agent (same-profile RPC lesson), then:
+   - `tenex-edge explain session:<sid>` → latest llm_call + the status
+     receipt(s) sharing its `window_hash` (the receipt's `artifact_ref` is the
+     exact distill-driven 30315 id).
+   - `tenex-edge explain event:<that-30315-id>` → the join, headed
+     `LLM inputs — what was fed to the model so it said this:` with
+     provider/model, window_hash, parsed title/activity, the full system
+     prompt, the fed transcript slice, and the raw `TITLE:`/`NOW:` response.
+   - `tenex-edge explain llm:<row-id>` → the same call by row id (reverse
+     join to its status receipts).
+
+Two gotchas seen: (i) the override's `CommandDistiller::run_all` uses a
+*blocking* `std::process::Command`; while the `claude -p` distiller subprocess
+runs (cold start can take ~1-2 min end to end here), the statusline briefly
+reads `[te: down]` because the blocking call ties up the async worker — it
+recovers on completion and is NOT a failure. (ii) Only the `on_distill`
+publish (the one whose title/activity changed) carries `window_hash` in its
+receipt; later TTL heartbeat republishes carry the same title but drive with
+`None` window_hash, so `explain event:` on those shows "not distill-driven".
+Use the receipt list from `explain session:` to pick the right event id.
+
+The durable fix for the underlying gap is still worthwhile: either repair the
+host `edge-distillation` role to point at a reachable model (it currently
+resolves to `ollama/deepseek-v4-flash:cloud` → `http://localhost:8081`, which
+is unreachable in-container), or keep `TENEX_EDGE_DISTILL_CMD` in the run
+allow-list (done in this worktree) so labs can force a working distiller
+without touching host config.
