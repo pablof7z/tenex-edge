@@ -18,6 +18,29 @@ fn row_to_channel(row: &rusqlite::Row) -> rusqlite::Result<Channel> {
 
 const COLS: &str = "channel_h, name, about, parent, created_at, updated_at";
 const MAX_CHANNEL_PARENT_DEPTH: usize = 16;
+pub const CHANNEL_ABOUT_MAX_CHARS: usize = 80;
+pub const ARCHIVED_CHANNEL_ABOUT_PREFIX: &str = "[ARCHIVED]";
+
+pub fn is_archived_channel_about(about: &str) -> bool {
+    about.starts_with(ARCHIVED_CHANNEL_ABOUT_PREFIX)
+}
+
+pub fn archived_channel_about(about: &str) -> String {
+    let archived = if is_archived_channel_about(about) {
+        about.to_string()
+    } else if about.trim().is_empty() {
+        ARCHIVED_CHANNEL_ABOUT_PREFIX.to_string()
+    } else {
+        format!("{ARCHIVED_CHANNEL_ABOUT_PREFIX} {about}")
+    };
+    archived.chars().take(CHANNEL_ABOUT_MAX_CHARS).collect()
+}
+
+impl Channel {
+    pub fn is_archived(&self) -> bool {
+        is_archived_channel_about(&self.about)
+    }
+}
 
 impl Store {
     /// Materialize a kind:39000 metadata event. Newer `created_at` wins; an older
@@ -78,6 +101,13 @@ impl Store {
         ))?;
         let rows = stmt.query_map([], row_to_channel)?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    pub fn is_archived_channel(&self, channel_h: &str) -> Result<bool> {
+        Ok(self
+            .get_channel(channel_h)?
+            .map(|channel| channel.is_archived())
+            .unwrap_or(false))
     }
 
     /// Root project channels as read-model rows, ordered by stable project id.

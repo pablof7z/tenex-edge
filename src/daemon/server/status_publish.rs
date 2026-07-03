@@ -42,6 +42,9 @@ fn status_channels(state: &Arc<DaemonState>, rec: &Session) -> Vec<String> {
     }
     channels.sort();
     channels.dedup();
+    state.with_store(|s| {
+        channels.retain(|channel| !s.is_archived_channel(channel).unwrap_or(false));
+    });
     channels
 }
 

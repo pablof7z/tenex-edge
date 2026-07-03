@@ -57,6 +57,19 @@ fn channels_create_about_rejects_more_than_80_chars() {
 }
 
 #[test]
+fn channels_archive_parses_channel_reference() {
+    let cli = crate::cli::args::Cli::try_parse_from(["tenex-edge", "channels", "archive", "ops"])
+        .expect("channels archive parses");
+
+    match cli.cmd {
+        crate::cli::args::Cmd::Channels {
+            action: ChannelsAction::Archive { channel },
+        } => assert_eq!(channel, "ops"),
+        _ => panic!("expected channels archive command"),
+    }
+}
+
+#[test]
 fn invite_requires_agent_or_session_and_preserves_xor() {
     let missing = parse_err(&["tenex-edge", "invite", "--channel", "ops"]);
     assert_eq!(

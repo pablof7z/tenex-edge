@@ -197,6 +197,33 @@ fn who_snapshot_ignores_relay_echo_for_known_local_agent() {
     );
 }
 
+#[test]
+fn who_snapshot_hides_archived_channel_presence() {
+    let store = Store::open_memory().unwrap();
+    store.upsert_channel("proj", "proj", "", "", 1).unwrap();
+    store
+        .upsert_channel("archived", "archived", "[ARCHIVED] done", "proj", 1)
+        .unwrap();
+    register_local_in(&store, "coder", "pk-coder", "archived", "sid-coder", 1_000);
+    store
+        .upsert_status(&Status {
+            pubkey: "pk-reviewer".to_string(),
+            session_id: "sid-reviewer".to_string(),
+            channel_h: "archived".to_string(),
+            slug: "reviewer".to_string(),
+            title: "done".to_string(),
+            activity: String::new(),
+            busy: false,
+            last_seen: 1_000,
+            updated_at: 1_000,
+            expiration: 1_090,
+        })
+        .unwrap();
+
+    let snapshot = load_who_snapshot(&store, Some("proj"), 1_000, "laptop").unwrap();
+    assert!(snapshot.rows.is_empty());
+}
+
 mod rendering;
 
 #[test]

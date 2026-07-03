@@ -20,6 +20,7 @@ pub(super) fn build_view(store: &Store, input: FabricContextInput<'_>) -> Fabric
     }
     channels.sort();
     channels.dedup();
+    channels.retain(|channel| !is_archived_channel(store, channel));
 
     let mut view = FabricView {
         self_row: input.session.map(|s| SelfRow {
@@ -121,7 +122,7 @@ fn subchannel_rows(store: &Store, channel: &str) -> Vec<ChannelSummaryRow> {
         .list_channels()
         .unwrap_or_default()
         .into_iter()
-        .filter(|c| c.parent == channel)
+        .filter(|c| c.parent == channel && !c.is_archived())
         .map(|c| {
             let name = c.human_name().unwrap_or(&c.channel_h).to_string();
             ChannelSummaryRow {
@@ -144,7 +145,7 @@ fn unjoined_channels(
         .list_channels()
         .unwrap_or_default()
         .into_iter()
-        .filter(|c| c.parent == root && !joined.contains(&c.channel_h))
+        .filter(|c| c.parent == root && !joined.contains(&c.channel_h) && !c.is_archived())
         .filter_map(|c| {
             let name = c.human_name().unwrap_or(&c.channel_h).to_string();
             (!name.is_empty()).then(|| UnjoinedChannelRow {
@@ -177,6 +178,10 @@ fn project_root(store: &Store, channel: &str) -> String {
         .ok()
         .flatten()
         .unwrap_or_else(|| channel.to_string())
+}
+
+fn is_archived_channel(store: &Store, channel: &str) -> bool {
+    store.is_archived_channel(channel).unwrap_or(false)
 }
 
 fn channel_summary(store: &Store, channel: &str) -> ProjectRow {

@@ -138,6 +138,9 @@ pub(crate) fn load_who_snapshot(
         .context("who snapshot: failed to list live local sessions")?
     {
         let scope = s.channel_h.clone();
+        if is_archived_channel(store, &scope) {
+            continue;
+        }
         if current_project
             .map(|p| scope_contains_channel(store, p, &scope))
             .unwrap_or(true)
@@ -158,10 +161,11 @@ pub(crate) fn load_who_snapshot(
         .list_channels()
         .context("who snapshot: failed to list channels")?
         .into_iter()
+        .filter(|c| !c.is_archived())
         .map(|c| c.channel_h)
         .collect();
     if let Some(p) = current_project {
-        if !channels.iter().any(|c| c == p) {
+        if !is_archived_channel(store, p) && !channels.iter().any(|c| c == p) {
             channels.push(p.to_string());
         }
     }
@@ -269,10 +273,28 @@ fn work_root_for(store: StoreReader<'_>, scope: &str) -> String {
 }
 
 fn scope_contains_channel(store: StoreReader<'_>, current: &str, scope: &str) -> bool {
+    if is_archived_channel(store, current) || is_archived_channel(store, scope) {
+        return false;
+    }
     if current == scope {
         return true;
     }
     matches!(store.is_root_channel(current), Ok(true)) && work_root_for(store, scope) == current
+}
+
+fn is_archived_channel(store: StoreReader<'_>, scope: &str) -> bool {
+    match store.get_channel(scope) {
+        Ok(Some(channel)) => channel.is_archived(),
+        Ok(None) => false,
+        Err(e) => {
+            tracing::error!(
+                channel = %scope,
+                error = ?e,
+                "who snapshot: archived-channel lookup failed; treating channel as active"
+            );
+            false
+        }
+    }
 }
 
 fn is_root_channel(store: StoreReader<'_>, scope: &str) -> bool {

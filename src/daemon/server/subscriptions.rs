@@ -142,6 +142,7 @@ fn build_entity_coverage(state: &Arc<DaemonState>) -> crate::fabric::subscriptio
                 channels.insert(channel);
             }
         }
+        channels.retain(|channel| !s.is_archived_channel(channel).unwrap_or(false));
     });
 
     // Live transient session keys + backend identity round out the addressed set.

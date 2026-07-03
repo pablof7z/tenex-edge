@@ -240,7 +240,8 @@ use channel_resolve::{
     project_root, resolve_channel, resolve_channel_ref, rpc_channels_resolve, ChannelResolution,
 };
 use channels_rpc::{
-    ensure_session_room, rpc_channels_create, rpc_channels_edit, rpc_channels_list,
+    ensure_session_room, rpc_channels_archive, rpc_channels_create, rpc_channels_edit,
+    rpc_channels_list,
 };
 use chat_publish::{publish_agent_reply, rpc_user_prompt};
 use chat_read_tail::{handle_chat_read, handle_tail};
@@ -296,6 +297,7 @@ async fn dispatch(state: &Arc<DaemonState>, req: &Request) -> Response {
         "channels_edit" => rpc_channels_edit(state, &req.params).await,
         "channels_resolve" => rpc_channels_resolve(state, &req.params).await,
         "channels_list" => rpc_channels_list(state, &req.params),
+        "channels_archive" => rpc_channels_archive(state, &req.params).await,
         "channels_join" => rpc_channels_join(state, &req.params).await,
         "channels_leave" => rpc_channels_leave(state, &req.params).await,
         "channels_switch" => rpc_channels_switch(state, &req.params).await,

@@ -10,7 +10,7 @@ pub(in crate::daemon::server) enum TargetChannel {
 /// and a miss fails loud rather than binding an arbitrary sibling. `join`/
 /// `leave`/`switch` are per-session mutations, so picking "some session in this
 /// project" would be wrong.
-fn resolve_caller(
+pub(in crate::daemon::server) fn resolve_caller(
     state: &Arc<DaemonState>,
     params: &serde_json::Value,
     verb: &str,

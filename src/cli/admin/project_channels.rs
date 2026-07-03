@@ -234,6 +234,22 @@ pub async fn channels(action: ChannelsAction) -> Result<()> {
             }
             println!("left channel {}", v["channel"].as_str().unwrap_or(&channel));
         }
+        ChannelsAction::Archive { channel } => {
+            let v = daemon_call_async(
+                "channels_archive",
+                crate::cli::rpc_params(serde_json::json!({ "channel": channel.clone() })),
+            )
+            .await?;
+            if v["ambiguous"].is_array() {
+                print_ambiguous("archive", &channel, &v);
+            }
+            let removed = v["removed_members"].as_u64().unwrap_or(0);
+            println!(
+                "archived channel {} (removed {} non-admin member(s))",
+                v["channel"].as_str().unwrap_or(&channel),
+                removed
+            );
+        }
         ChannelsAction::Switch { channel } => {
             let v = daemon_call_async(
                 "channels_switch",
