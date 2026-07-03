@@ -1,0 +1,6 @@
+{
+  "id": "a685f-51c9c",
+  "ts": "2026-07-03T11:02:48Z",
+  "session": "a685f611-39bd-4a18-a6b7-ea4e38334b82",
+  "text": "i.e. the daemon's in-memory `Relay` object for `nip29.f7z.io` has its local `RelayServiceFlags` missing `WRITE`, so the SDK refuses to even put the `EVENT` on the wire — the relay literally never sees it. Your own `transport.rs:65` then wraps that as `\"relay rejected event: {msg}\"`, which is misleading — nothing was rejected; the daemon never sent it."
+}

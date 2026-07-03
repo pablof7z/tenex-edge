@@ -1,0 +1,18 @@
+[
+  [
+    "user",
+    "what are all those errors?"
+  ],
+  [
+    "assistant",
+    "The recurring \"relay rejected event: write actions are disabled\" errors occur as the daemon revives ~10 old sessions and tries publishing domain events to wss://nip29.f7z.io; the relay rejects all writes but the daemon continues spawning sessions anyway. The likely cause is either a temporary relay read-only state or a race condition during NIP-42 auth, not a code bug."
+  ],
+  [
+    "user",
+    "why does the relay say \"write actions are disabled.\" -- look at its logs (ssh into pablo@157.180.102.242)"
+  ],
+  [
+    "assistant",
+    "The relay never actually sends that message — it originates client-side in the nostr-relay-pool Rust crate when the daemon's local RelayServiceFlags for nip29.f7z.io is missing the WRITE flag, so the event never reaches the wire. The intermittent failures during startup suggest a relay-pool state race as ~10 reconciled sessions publish simultaneously through one shared Transport."
+  ]
+]

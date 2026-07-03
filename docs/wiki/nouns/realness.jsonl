@@ -1,8 +1,13 @@
+{"canonical":"4 7 gb 2 day ago","name":"4.7 GB · 2 days ago","signed":0,"status":"provisional"}
 {"canonical":"agent team","name":"Agent Teams","signed":0,"status":"provisional"}
 {"canonical":"another claude","name":"Another Claude","signed":18,"status":"real"}
 {"canonical":"clawstr agentry","name":"Clawstr Agentry","signed":0,"status":"provisional"}
 {"canonical":"haiku 1","name":"haiku1","signed":1,"status":"provisional"}
 {"canonical":"kind 0","name":"kind:0","signed":4,"status":"real"}
+{"canonical":"mtok ollama","name":"Mtok Ollama","signed":0,"status":"provisional"}
+{"canonical":"palette ansi 256","name":"Palette ANSI-256","signed":0,"status":"provisional"}
+{"canonical":"sk or 4 f 2","name":"sk-or-…4f2a","signed":0,"status":"provisional"}
+{"canonical":"tenex edge config","name":"tenex-edge config","signed":2,"status":"provisional"}
 {"canonical":"tenex edge daemon","name":"tenex-edge daemon","signed":3,"status":"real"}
 {"canonical":"tenex edge launch","name":"tenex-edge launch","signed":1,"status":"provisional"}
 {"canonical":"tenex edge who","name":"tenex-edge who","signed":1,"status":"provisional"}

@@ -36,11 +36,11 @@ Last updated: 2026-07-03
 | [github-issue-queue](guides/github-issue-queue.md) | GitHub Issue Queue | The repository has exactly one canonical tactical queue: GitHub Issues (`gh issue list`) | capture | warm | 2026-06-29 | repo-discipline |
 | [planning-vs-durable-docs](guides/planning-vs-durable-docs.md) | Planning vs Durable Docs | Scattered notes, ad-hoc `TODO.md`, `NOTES.md`, `ROADMAP.md`, `PLAN-foo.md` files, parallel planning docs, and inline `// TODO:` annotations used as a substitute | capture | warm | 2026-06-29 | repo-discipline |
 
-## tenex-edge (15 guides)
+## tenex-edge (17 guides)
 
 | Slug | Title | Summary | Tags | Volatility | Verified | Topic |
 |------|-------|---------|------|------------|----------|-------|
-| [croissant-test-relay](guides/croissant-test-relay.md) | Croissant Test Relay | Croissant is a local NIP-29 relay binary used for fully isolated, writable test relay environments. | capture | warm | 2026-07-03 | tenex-edge |
+| [croissant-test-relay](guides/croissant-test-relay.md) | Croissant Test Relay | Croissant is a local NIP-29 relay binary used for fully isolated, writable test relay environments | capture | warm | 2026-07-03 | tenex-edge |
 | [tenex-edge-agent-identity](guides/tenex-edge-agent-identity.md) | Tenex-Edge Agent Identity | The product's identity model is a per-(agent, machine) tuple backed by a durable Nostr keypair stored at ~/.tenex-edge/agents/<slug>.json | capture | warm | 2026-06-29 | tenex-edge |
 | [tenex-edge-architecture](guides/tenex-edge-architecture.md) | Tenex-Edge Architecture | Tenex-edge is a Rust project (38.5k LOC in src/) providing durable Nostr-keypair identity, presence, and cross-agent messaging for AI coding-agent sessions via | capture | warm | 2026-06-29 | tenex-edge |
 | [tenex-edge-channel-create](guides/tenex-edge-channel-create.md) | Tenex-Edge Channel Create | `channels create` resolves the parent channel in this precedence: `--parent-channel <ref>`, then the creating agent's current channel (the default), then an exp | capture | warm | 2026-06-29 | tenex-edge |
@@ -49,22 +49,25 @@ Last updated: 2026-07-03
 | [tenex-edge-cli-commands](guides/tenex-edge-cli-commands.md) | Tenex-Edge CLI Commands | Install the CLI with `just install`, then run `tenex-edge install --all`. | capture | warm | 2026-07-03 | tenex-edge |
 | [tenex-edge-daemon](guides/tenex-edge-daemon.md) | Tenex-Edge Daemon | Daemon `cleanup()` does not delete the lock file, so the flock persists on the same inode until the old daemon process exits | capture | warm | 2026-06-29 | tenex-edge |
 | [tenex-edge-daemon-logging](guides/tenex-edge-daemon-logging.md) | Tenex-Edge Daemon Logging | The daemon logs comprehensive operational events including routing to sessions, starting new agents (with reasons), ordinal creation (with reasons), subscriptio | capture | warm | 2026-06-29 | tenex-edge |
+| [tenex-edge-daemon-write-disabled](guides/tenex-edge-daemon-write-disabled.md) | Tenex-Edge Daemon Write-Disabled Error | The \\\\\\\\"write actions are disabled\\\\\\\\" error message originates client-side from the daemon's own `nostr-relay-pool` Rust dependency (`Error::WriteDisabled`), not fro | capture | warm | 2026-07-03 | tenex-edge |
 | [tenex-edge-home-directory](guides/tenex-edge-home-directory.md) | Tenex-Edge Home Directory | The `edge_home()` function returns tenex-edge's data root, including `state.db`, agents, and logs, and is overridable via `TENEX_EDGE_HOME`. | capture | warm | 2026-07-03 | tenex-edge |
 | [tenex-edge-inbox-delivery](guides/tenex-edge-inbox-delivery.md) | Tenex-Edge Inbox Delivery | Inbox delivery uses an atomic `UPDATE â¦ SET state='delivered' â¦ RETURNING` claim so the first drainer (tmux paste or hook) wins and the other gets nothing | capture | warm | 2026-06-29 | tenex-edge |
 | [tenex-edge-launch](guides/tenex-edge-launch.md) | Tenex-Edge Launch | When `tenex-edge launch` spawns an agent harness in tmux, `default-terminal` and `terminal-overrides` are set globally (`-g`) before `new-session` forks the chi | capture | warm | 2026-07-03 | tenex-edge |
 | [tenex-edge-message-formatting](guides/tenex-edge-message-formatting.md) | Tenex-Edge Message Formatting | The @mention is a session-targeted Nostr kind:9 event with a p-tag addressed to another agent's pubkey that gets server-side-routed into the target session's in | capture | warm | 2026-06-29 | tenex-edge |
+| [tenex-edge-model-config](guides/tenex-edge-model-config.md) | Tenex-Edge Model Config | `providers.json` and `llms.json` are config files living under `~/.tenex-edge` that drive model selection per role | capture | warm | 2026-07-03 | tenex-edge |
 | [tenex-edge-presence](guides/tenex-edge-presence.md) | Tenex-Edge Presence | Agent online presence is channel membership; kind:30315 carries per-session activity and resumable session history. | capture | warm | 2026-06-29 | tenex-edge |
 | [tenex-edge-session-distill](guides/tenex-edge-session-distill.md) | Tenex-Edge Session Distill | Distill is the LLM-powered process that turns the live conversation transcript into a stable session title and a live one-line NOW activity broadcast in a singl | capture | warm | 2026-07-03 | tenex-edge |
 
-## Research Records (3 records)
+## Research Records (4 records)
 
 | Record | Date | Finding | Agent |
 |--------|------|---------|-------|
 | [2026-07-03-1-haiku-subagent-verification-report-screenshot-based](research/2026-07-03-1-haiku-subagent-verification-report-screenshot-based.md) | 2026-07-03 | Haiku subagent verification report: screenshot-based validation of color fix and @te_session, verdict PASS with empirical evidence | a0fdaf03e09582690 |
+| [2026-07-03-1-haiku-subagent-verification-report-screenshots-taken](research/2026-07-03-1-haiku-subagent-verification-report-screenshots-taken.md) | 2026-07-03 | Haiku subagent verification report: screenshots taken and reviewed to validate color fix and te_session setting — verdict: all steps succeeded, ANSI color codes confirmed present | subagent (a0fdaf03e09582690) |
 | [2026-07-03-1-structured-editorial-copy-review-against-pre](research/2026-07-03-1-structured-editorial-copy-review-against-pre.md) | 2026-07-03 | Structured editorial copy review against pre-registered copywriting-skill rubric, scoring hero 8.5/10 with prioritized P0/P1/P2 line-by-line findings and a top-5 ranked verdict | fable-review |
 | [AGENTS](research/AGENTS.md) |  |  |  |
 
-## Episode Cards (21 cards)
+## Episode Cards (23 cards)
 
 | Card | Date | Title | Salience | Status |
 |------|------|-------|----------|--------|
@@ -85,23 +88,27 @@ Last updated: 2026-07-03
 | [2026-06-29-4-channel-name-disambiguation-via-project-relative](episodes/2026-06-29-4-channel-name-disambiguation-via-project-relative.md) | 2026-06-29 | Channel name disambiguation via project-relative path resolution | product | active |
 | [2026-07-03-1-auto-publish-of-user-prompts-as](episodes/2026-07-03-1-auto-publish-of-user-prompts-as.md) | 2026-07-03 | Auto-publish of user prompts as kind:9 removed in favor of explicit publishing | reversal | active |
 | [2026-07-03-1-projects-and-channels-unified-into-one](episodes/2026-07-03-1-projects-and-channels-unified-into-one.md) | 2026-07-03 | Projects and channels unified into one recursive node — 'project' becomes a workspace-binding attribute | architecture | active |
+| [2026-07-03-1-tenex-edge-config-interactive-model-provider](episodes/2026-07-03-1-tenex-edge-config-interactive-model-provider.md) | 2026-07-03 | tenex-edge config: interactive model provider/role configuration command | product | active |
 | [2026-07-03-1-tenex-edge-positioning-doctrine-citizenship-demoted](episodes/2026-07-03-1-tenex-edge-positioning-doctrine-citizenship-demoted.md) | 2026-07-03 | tenex-edge positioning doctrine: citizenship demoted, proof-as-hero, Nostr hidden | reversal | active |
 | [2026-07-03-1-tmux-terminal-options-must-be-set](episodes/2026-07-03-1-tmux-terminal-options-must-be-set.md) | 2026-07-03 | tmux terminal options must be set globally before session fork, not per-session after | root-cause | active |
+| [2026-07-03-1-write-actions-are-disabled-is-a](episodes/2026-07-03-1-write-actions-are-disabled-is-a.md) | 2026-07-03 | “Write actions are disabled” is a client-side relay-pool flag race, not a relay rejection | root-cause | active |
 | [2026-07-03-2-reply-instruction-reminder-added-to-mention](episodes/2026-07-03-2-reply-instruction-reminder-added-to-mention.md) | 2026-07-03 | Reply-instruction reminder added to mention injection paths | product | active |
 | [2026-07-03-2-te-session-not-set-is-daemon](episodes/2026-07-03-2-te-session-not-set-is-daemon.md) | 2026-07-03 | @te_session not set is daemon/CLI version skew, not a repo bug | root-cause | active |
 
-## Nouns (99 entities)
+## Nouns (117 entities)
 
 | Noun | Name | Origin | Definition |
 |------|------|--------|------------|
 | [activity](nouns/activity.md) | activity | extracted | A distilled one-line intent — the agent's broadcast 'what I'm doing right now,' produced by LLM distillation of the live transcript each turn. |
 | [add-agents-orchestration-event](nouns/add-agents-orchestration-event.md) | add-agents orchestration event | extracted | A parsed kind:9 orchestration event that asks named backends to add fresh agents |
 | [agent](nouns/agent.md) | agent | extracted | A citizen, not a process — it persists across hosts rather than being born and dying with a single session. |
+| [agent-cli-subcommand](nouns/agent-cli-subcommand.md) | agent (CLI subcommand) | extracted | Manages the local agent keystore: agents that have a private key on THIS machine under `<edge_home>/agents/<slug>.json`. Project membership is governed separately by the codec (the NIP-29 group's member list). |
 | [agent-identity](nouns/agent-identity.md) | agent identity | extracted | Identity is (agent, machine): the same slug on another machine is a different key. An agent slug resolves to a durable Nostr keypair generated on first use and persisted under <edge_home>/agents/<slug>.json. |
 | [agent-keystore](nouns/agent-keystore.md) | agent keystore | extracted | The set of agents that have a private key on this machine, stored under <edge_home>/agents/<slug>.json; these are the identities spawnable locally, while project membership is governed separately by the NIP-29 group member list. |
 | [agent-ordinal-label](nouns/agent-ordinal-label.md) | agent_ordinal_label | extracted | Display label for an agent's Nth concurrent identity. Ordinal 0 is the base agent itself (smith); higher ordinals append the number (smith1, smith2). This is the addressable identity peers see, not a transient per-session alias. |
 | [agentidentity](nouns/agentidentity.md) | AgentIdentity | extracted | A durable Nostr keypair resolved from --agent <slug>, generated on first use and persisted under <edge_home>/agents/<slug>.json. Identity is (agent, machine): the same slug on another machine is a different key. |
 | [agentinstance](nouns/agentinstance.md) | AgentInstance | extracted | The single authoritative identity value for a session, carrying base_slug, base_pubkey, ordinal, and pubkey, with methods display_slug(), agent_ref(), signing_keys(&base_keys). The single place base-vs-ordinal policy lives; created at session birth and threaded through EngineParams, replacing the distributed identity state across session rows, identity rows, and in-memory signer maps. |
+| [agentname](nouns/agentname.md) | agentName | extracted | Exactly what the session published in its kind:0 profile (the `name` field). |
 | [archived-channel](nouns/archived-channel.md) | archived channel | extracted | A channel whose about metadata is prefixed with [ARCHIVED]; non-admin members are removed and it is hidden from active surfaces (channels list, hook/fabric context, membership/subscription views). |
 | [awareness](nouns/awareness.md) | awareness | extracted | A first-class wire concept (Status.activity, kind:30315) where other agents can see what an agent is doing right now via LLM-distilled activity broadcast — distinct from mere presence; awareness over authority is a design law. |
 | [backend-nsec](nouns/backend-nsec.md) | backend_nsec | extracted | The backend's own identity key, always tenexPrivateKey with no fallback to userNsec — the operator key is a human identity, not a backend identity |
@@ -111,14 +118,18 @@ Last updated: 2026-07-03
 | [channel-id](nouns/channel-id.md) | channel id | extracted | The NIP-29 `h` value: an opaque random value, never derived from the channel name. |
 | [channel-name](nouns/channel-name.md) | channel name | extracted | The durable human handle for a channel (e.g. "support"), unique per parent project; distinct from the opaque channel id. |
 | [channelctx](nouns/channelctx.md) | ChannelCtx | extracted | Context for a channel readiness check in the NIP-29 provider: holds the group h-tag to target, the pubkey that must be a member, and a soft parent hint for ensuring parent groups first. |
+| [channelgate-degraded](nouns/channelgate-degraded.md) | ChannelGate::Degraded | extracted | A gate state meaning the channel was NOT verified ready on the relay. |
 | [citizen](nouns/citizen.md) | citizen | extracted | An agent whose identity equals a sovereign cryptographic keypair plus fabric membership (Nostr) — nothing more, nothing less. An agent is a citizen, not a process. |
 | [citizen-identity](nouns/citizen-identity.md) | citizen (identity) | extracted | A sovereign cryptographic keypair plus fabric membership (Nostr) — nothing more, nothing less. |
 | [cli-split](nouns/cli-split.md) | cli-split | extracted | A label for splitting an oversized CLI submodule. |
+| [config-json](nouns/config-json.md) | config.json | extracted | The file tenex-edge reads from ~/.tenex-edge for whitelistedPubkeys, optional relays, and backendName (host label); tenex-edge keeps all of its own writable state under ~/.tenex-edge alongside it. |
+| [croissant](nouns/croissant.md) | croissant | extracted | The NIP-29 relay binary running at /opt/nip29-f7z-io on port 3336, serving nip29.f7z.io as a groups provider. |
 | [daemon](nouns/daemon.md) | daemon | extracted | ONE daemon per machine is the sole owner of state.db, the single relay connection, the inbox, presence, membership cache, and peer pruning; every CLI invocation and every per-session engine becomes a thin client that talks to it over a Unix domain socket. |
 | [daemon-client](nouns/daemon-client.md) | daemon client | extracted | A thin client that connects to the per-machine daemon, spawning it if absent; on connect it tries the UDS, acquires a startup flock if no answer, re-checks for racers, reclaims stale sockets, and spawns a detached daemon. |
 | [daemon-inhibit](nouns/daemon-inhibit.md) | daemon.inhibit | extracted | A sentinel file ($TENEX_EDGE_HOME/daemon.inhibit) whose presence tells hook-path daemon calls to fail open (return Ok(Null)) rather than spawning or contacting the daemon; created by `tenex-edge stop`, cleared by non-hook commands. |
 | [doc-drift](nouns/doc-drift.md) | doc-drift | extracted | Docs that reference removed or renamed code in the project. |
 | [duplicated-policy](nouns/duplicated-policy.md) | duplicated-policy | extracted | The same logic present in multiple places in the codebase. |
+| [edge-distillation](nouns/edge-distillation.md) | edge-distillation | extracted | The only role name tenex-edge's distillation code actually looks up; it maps (via llms.json) to a configuration name, which resolves to a {provider, model} pair used for distillation. |
 | [edge-home](nouns/edge-home.md) | edge_home | extracted | tenex-edge's own writable root (state.db, agents, logs). Override with `$TENEX_EDGE_HOME`; default `~/.tenex-edge`. |
 | [emitformat](nouns/emitformat.md) | EmitFormat | extracted | How a context block is emitted to the harness on stdout. Selected per (host, hook-type): plain text is injected directly by Claude Code's UserPromptSubmit and opencode; Codex and Claude Code PostToolUse use a `hookSpecificOutput.additionalContext` envelope for model-visible context. |
 | [ensure-session-room](nouns/ensure-session-room.md) | ensure_session_room | extracted | A function that materializes a channel and its hierarchy in the local cache before (or if) the relay mint lands; a non-empty `parent` marks it as a task/session room vs a top-level project channel. |
@@ -143,6 +154,8 @@ Last updated: 2026-07-03
 | [kind-0-profiles-table](nouns/kind-0-profiles-table.md) | kind:0 / profiles table | extracted | the single source of truth for display-name resolution — caches pubkey→slug mappings with TTL and fallback |
 | [kind-30315-ttl](nouns/kind-30315-ttl.md) | kind:30315 TTL | extracted | Per-session activity expiration. The event is replaceable by `(author pubkey, |
 | [kind-9](nouns/kind-9.md) | kind:9 | extracted | The Nostr chat-message event kind used to publish session channel messages (both user prompts and agent replies) into a session's room |
+| [liverow](nouns/liverow.md) | LiveRow | extracted | A TUI data-struct representing a live session row with fields slug, host, project, session_id (full raw id for RPC calls + correlation), status, and attachable (whether it has a live tmux endpoint). |
+| [llms-json](nouns/llms-json.md) | llms.json | extracted | A file under edge_home() containing a "configurations" map of named entries { "model": "...", "provider": "..." } plus top-level role keys mapping a role name to a configuration name. |
 | [management-nsec](nouns/management-nsec.md) | management_nsec | extracted | The backend's own tenexPrivateKey used for group-management operations (put-admin/remove-user/edit-metadata); the operator's userNsec is no longer used for group management |
 | [mention-session-targeted](nouns/mention-session-targeted.md) | mention (session-targeted) | extracted | A p-tagged Nostr kind:9 event addressed to another agent's pubkey, server-side-routed into that specific session's inbox, and if the session has a live tmux pane, injected as a literal conversational turn — host-neutral delivery at the tmux-pane level, not via a host API. |
 | [nip-29-membership](nouns/nip-29-membership.md) | NIP-29 membership | extracted | Active channel presence and routing membership. Local daemons remove their |
@@ -150,6 +163,7 @@ Last updated: 2026-07-03
 | [north-star](nouns/north-star.md) | north-star | extracted | Part of the codebase quality north star portfolio, tracked as a GitHub issue label. |
 | [orchestration-spawned-session](nouns/orchestration-spawned-session.md) | orchestration-spawned session | extracted | A session the backend launched or resumed with `TENEX_EDGE_CHANNEL` set to a |
 | [ordinalslot](nouns/ordinalslot.md) | OrdinalSlot | extracted | A reserved ordinal slot (issue #47). At most one live session per base agent pubkey and ordinal. Each concurrent live session takes the next free durable ordinal identity (smith, smith1, smith2, ...), globally for that base agent; channels are membership scopes, not identity scopes. |
+| [pendingattach](nouns/pendingattach.md) | PendingAttach | extracted | A struct holding a pane to attach to once the event loop yields, plus a fallback session id to resume if attaching fails because the pane is stale/gone; attaching is best-effort so a pane-not-found error never surfaces to the user. |
 | [presence](nouns/presence.md) | presence | extracted | Liveness expressed as a heartbeat with TTL-expiring kind:30315 Nostr status events, published as a NIP-29 group member on a relay. |
 | [product-a](nouns/product-a.md) | Product A | extracted | A nervous system for your own fleet — durable cross-host identity, presence and awareness of what your agents are doing across devices, agents routing work to each other and to you, work that follows you from one host/device to the next. Single-player adoption, one person, one set of keys. |
 | [profile](nouns/profile.md) | Profile | extracted | The agent's published identity card. Resolves pubkey to slug, tells a peer which machine the agent lives on, and declares the human owner(s) it belongs to (p-tagged), so a recipient can decide whether to authorize it. Encoded as kind:0 with content {"name": slug}. |
@@ -157,12 +171,15 @@ Last updated: 2026-07-03
 | [profile-domain-profile](nouns/profile-domain-profile.md) | Profile (domain::Profile) | extracted | The agent's published identity card: resolves pubkey→slug, tells a peer which machine the agent lives on, and declares the human owner(s) it belongs to (p-tagged) so a recipient can decide whether to authorize it. Encoded as kind:0 with content {"name": slug} and a ["host", host] tag. |
 | [project-channel](nouns/project-channel.md) | project channel | extracted | A top-level channel with no parent; contrasted with a task/session room, which is marked by a non-empty parent. |
 | [project-current](nouns/project-current.md) | project (current) | extracted | A top-level NIP-29 group — equivalently, a channel whose parent is empty. Today the name for "channel whose parent is empty." |
+| [project-name](nouns/project-name.md) | project-name | extracted | The work-root project the session room hangs under. |
 | [project-proposed](nouns/project-proposed.md) | project (proposed) | extracted | A channel that owns a workspace binding (machine + path). "Project" stops being a noun and becomes a role/attribute a channel has — the presence of a workspace binding, not a position in the tree. |
 | [project-root](nouns/project-root.md) | project_root | extracted | The top-level project channel for a route scope: a channel's non-empty parent, else the scope itself (a root channel is its own work root). |
 | [proposal](nouns/proposal.md) | proposal | extracted | A long-form Nostr event of kind:30023 — materialized and published but under-exercised, with no end-to-end demo proof beyond unit tests. |
+| [providers-json](nouns/providers-json.md) | providers.json | extracted | A file under edge_home() holding provider credentials in the format { "providers": { "<provider>": { "apiKey": ... } } }, where for ollama the apiKey field actually holds the base URL. claude-cli needs no entry in it. |
 | [publish-de](nouns/publish-de.md) | publish_de | extracted | A closure in runtime.rs that captures provider and p.keys (the base agent keypair), then publishes a DomainEvent signed with those keys. It was hardcoded to always sign with base keys regardless of ordinal, causing the ordinal kind:0-clobbering bug. |
 | [quality-gate](nouns/quality-gate.md) | quality-gate | extracted | A CI/lint/fmt/LOC ratchet gate in the project. |
 | [rawconfig](nouns/rawconfig.md) | RawConfig | extracted | Mirror of the relevant fields in ~/.tenex-edge/config.json; unknown fields are ignored so tenex-edge coexists with TENEX's larger camelCase config. |
+| [role-tenex](nouns/role-tenex.md) | role (TENEX) | extracted | A named key in llms.json that code resolves to a concrete model + credentials; the canonical example is edge-distillation. Resolution path: role → llms.json[role] (config name) → configurations[name] → {provider, model} → apiKey from providers.json. |
 | [routing](nouns/routing.md) | routing | extracted | matching mentions by both the recipient's public key and the channel h-tag |
 | [session](nouns/session.md) | Session | extracted | A local agent process THIS daemon hosts. OS handles only (session_id, agent_pubkey, agent_slug, channel_h, harness, child_pid, transcript_path, alive, etc.) — never agent identity, which lives in relay_status/relay_profiles. |
 | [session-codename](nouns/session-codename.md) | session_codename | extracted | A stable, human-friendly codename for a session ID: a NATO phonetic word plus a four-digit number, e.g. bravo4217. Generated by session_codename() in util.rs and surfaced via SessionId's Display impl. Now deleted as a product concept per issue #99. |
@@ -175,13 +192,19 @@ Last updated: 2026-07-03
 | [signerreservations](nouns/signerreservations.md) | SignerReservations | extracted | In-memory reservation map from OrdinalSlot to owning session id. Tracks which ordinals are live for each base agent so the allocator can pick the lowest free one and two concurrent spawns cannot both claim the same ordinal. |
 | [single-writer](nouns/single-writer.md) | single-writer | extracted | The daemon's architectural property of collapsing N per-session SQLite writers and N relay connections into 1, fixing a real multi-writer corruption class (a genuine incident in the project's git history). |
 | [slice](nouns/slice.md) | slice | extracted | A PR-sized refactoring issue in the project's issue tracker. |
+| [spawnrow](nouns/spawnrow.md) | SpawnRow | extracted | A TUI data-struct representing a row for spawning a new session, with fields slug, host, and command. |
 | [stale-issue](nouns/stale-issue.md) | stale-issue | extracted | An issue that is resolved but not closed. |
 | [statusline](nouns/statusline.md) | statusline | extracted | The one-line fabric awareness floor rendered for a host's status bar, showing identity, project, channel, distilled title, and live activity segments. |
 | [subgroup-task-channel](nouns/subgroup-task-channel.md) | subgroup task channel | extracted | NIP-29 child groups under a project; created via `channels create`, which publishes a kind:9 orchestration event asking named backends to add their agents. |
 | [task-session-room](nouns/task-session-room.md) | task/session room | extracted | A channel distinguished from a top-level project channel by having a non-empty `parent` value. |
+| [te-session](nouns/te-session.md) | @te_session | extracted | A tmux session option that stores the tenex-edge session id, set via `tmux set-option -t <session> @te_session <session_id>` and read by the statusline command to render the current session. |
+| [te-session-not-set-error](nouns/te-session-not-set-error.md) | @te_session not set error | extracted | Is daemon/CLI version skew, not a repo bug — the stale daemon vs. rebuilt CLI mismatch causes the error, fixed by restarting the daemon rather than a code change. |
 | [tenex-edge](nouns/tenex-edge.md) | tenex-edge | extracted | A host-neutral substrate providing durable agent identity, awareness, and messaging on the Nostr fabric; nothing in the core knows about any specific host (no pc, no claude). |
 | [tenex-edge-chat-write](nouns/tenex-edge-chat-write.md) | tenex-edge chat write | extracted | The canonical CLI command name for explicitly sending messages to a channel; after removing auto-publish it is the sole way agents or users publish chat |
+| [tenex-edge-config](nouns/tenex-edge-config.md) | tenex-edge config | extracted | An interactive CLI subcommand built on the inquire prompt library for setting up providers.json and llms.json — configuring provider credentials/endpoints and assigning models to roles with fuzzy-searched live model listing from configured providers. |
+| [tenex-role](nouns/tenex-role.md) | TENEX role | extracted | A named key in llms.json (e.g. edge-distillation) that maps to a configuration name, which in turn resolves to {provider, model} and credentials from providers.json. |
 | [tenexprivatekey](nouns/tenexprivatekey.md) | tenexPrivateKey | extracted | A throwaway backend seckey (hex) distinct from the user's key; the backend's signing key, paired with userNsec as the human's key. |
+| [title](nouns/title.md) | [title] | extracted | The channel's title on the relay — the kind:39000 `name` tag for a task channel, or the distilled session title for a per-session room. |
 | [tmux-pane-sessionstartparams](nouns/tmux-pane-sessionstartparams.md) | tmux_pane (SessionStartParams) | extracted | Stable tmux pane id from $TMUX_PANE (e.g. %5), present only when the hook fires inside a tmux session. |
 | [tmux-socket-sessionstartparams](nouns/tmux-socket-sessionstartparams.md) | tmux_socket (SessionStartParams) | extracted | Value of $TMUX (socket path, session id, pane id) supplied by the hook environment. |
 | [tmux-wrapped-session](nouns/tmux-wrapped-session.md) | tmux-wrapped session | extracted | an agent session running in a live tmux pane where injected envelopes are pasted as real user prompts, auto-captured and published |

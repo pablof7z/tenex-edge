@@ -1,0 +1,6 @@
+{
+  "id": "026d1-c6f7f",
+  "ts": "2026-07-03T11:12:02Z",
+  "session": "026d1502-e769-4a9c-9ab5-26169a4150ef",
+  "text": "- **`providers_menu.rs`** — merged list+actions Select (pick a configured provider → Edit/Test connection/Remove), \"+ Add provider\" filtered to unconfigured ones only, masked secrets (`sk-or-…4f2a`), dependent-role warning before removing a provider, and a \"assign a role now?\" bridge into Models right after adding [...] 3. **Confirm-before-write is a semantic summary, not a JSON diff**: `edge-distillation → qwen2.5:7b (ollama)  was: mistral:7b`, default Yes; answering No returns to the previous prompt with state intact. Atomic writes, unknown JSON keys round-tripped, secrets always shown truncated (`sk-or-…4f2a`) everywhere including receipts and errors. Removing a provider warns which roles break but leaves them visibly dangling rather than auto-deleting."
+}

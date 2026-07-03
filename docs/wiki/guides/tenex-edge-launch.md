@@ -19,8 +19,12 @@ sources:
 
 ## tmux Environment Inheritance
 
-When `tenex-edge launch` spawns an agent harness in tmux, `default-terminal` and `terminal-overrides` are set globally (`-g`) before `new-session` forks the child process so the child inherits `tmux-256color` and color support. The `terminal-overrides` value uses the format `*:Tc:RGB:extkeys` (term-pattern-prefixed capability tokens), not the previous orphaned format `,*:Tc,RGB,extkeys`. <!-- [^abce9-cad96] -->
+When `tenex-edge launch` spawns an agent harness in tmux, `default-terminal` and `terminal-overrides` are set globally (`-g`) before `new-session` forks the child process so the child inherits `tmux-256color` and color support from the first frame. The `terminal-overrides` value uses the format `*:Tc:RGB:extkeys` (term-pattern-prefixed capability tokens), not the previous orphaned format `,*:Tc,RGB,extkeys`.
 
-`@te_session` is a tmux session option stamped by the daemon that the agent harness expects to be set; when unset, the tmux status line shows a red `@te_session not set` error. <!-- [^abce9-0fd96] -->
+With these settings in place, the fixed `tenex-edge launch` window renders agent harness colors identically to a direct launch — including the colored robot logo, orange banner, and yellow warning.
 
-The `tenex-edge launch` status line displays the agent identifier and session state in the format `<agent>@<host> <project> <project> [idle]` (e.g. `claude@isolated-test-mac project project [idle]`). <!-- [^abce9-2b259] -->
+`@te_session` is a tmux session option stamped by the daemon that the agent harness expects to be set. When correctly configured, the status line reads `claude@isolated-test-mac project project [idle]` instead of showing a red `@te_session not set` error.
+
+The `tenex-edge launch` status line displays the agent identifier and session state in the format `<agent>@<host> <project> <project> [idle]` (e.g. `claude@isolated-test-mac project project [idle]`).
+
+<!-- citations: [^abce9-cad96] [^abce9-0fd96] [^abce9-2b259] [^abce9-b1683] -->

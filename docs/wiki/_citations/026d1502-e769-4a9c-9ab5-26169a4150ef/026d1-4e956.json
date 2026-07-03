@@ -1,0 +1,6 @@
+{
+  "id": "026d1-4e956",
+  "ts": "2026-07-03T11:17:57Z",
+  "session": "026d1502-e769-4a9c-9ab5-26169a4150ef",
+  "text": "3. **Confirm-before-write is a semantic summary, not a JSON diff**: `edge-distillation → qwen2.5:7b (ollama)  was: mistral:7b`, default Yes; answering No returns to the previous prompt with state intact. Atomic writes, unknown JSON keys round-tripped, secrets always shown truncated (`sk-or-…4f2a`) everywhere including receipts and errors. Removing a provider warns which roles break but leaves them visibly dangling rather than auto-deleting."
+}

@@ -1,0 +1,6 @@
+{
+  "id": "026d1-b3ff2",
+  "ts": "2026-07-03T10:47:25Z",
+  "session": "026d1502-e769-4a9c-9ab5-26169a4150ef",
+  "text": "Assistant: No dedicated command or TUI found for editing `providers.json`/`llms.json` — only `resolve_role_in` reads them. Let me confirm there's no CLI subcommand at all covering this, and check the wiki docs which may reference plans.\n\nAssistant: No, there isn't. `providers.json`/`llms.json` (which drive model selection per role, e.g. `edge-distillation`) live under `~/.tenex-edge` and are read-only from tenex-edge's side — you'd edit them by hand. There's no `tenex-edge` subcommand or TUI to manage them; the only TUI in the codebase (`tmux_cli/tui_*.rs`) is the session-spawner picker, unrelated to model config.\n\nIf you want, I can sketch a small `tenex-edge models` TUI/subcommand for editing roles/configurations — is that something you'd like scoped as a task, or were you just checking if one already existed? [...] Assistant: No, there isn't. `providers.json`/`llms.json` (which drive model selection per role, e.g. `edge-distillation`) live under `~/.tenex-edge` and are read-only from tenex-edge's side — you'd edit them by hand. There's no `tenex-edge` subcommand or TUI to manage them; the only TUI in the codebase (`tmux_cli/tui_*.rs`) is the session-spawner picker, unrelated to model config."
+}
