@@ -88,6 +88,8 @@ pub struct DaemonState {
     /// covered channel `#h` / group-state `#d` / addressed pubkey `#p`, closed
     /// when the last owner drops it. See `crate::reconcile::subscriptions`.
     subs: Mutex<crate::reconcile::SubscriptionReconciler>,
+    /// The ONE authority deciding when each session's kind:30315 status publishes.
+    status: Arc<Mutex<crate::reconcile::StatusReconciler>>,
     /// Structured tail event broadcast replacing the old DomainEvent bus.
     tail_tx: tokio::sync::broadcast::Sender<TailEvent>,
     open_clients: Mutex<u64>,
@@ -112,8 +114,6 @@ pub struct DaemonState {
     last_status: Mutex<HashMap<StatusTailKey, StatusTailSnapshot>>,
     /// Wakes the status-outbox drainer the instant a transition enqueues a publish.
     outbox_notify: Notify,
-    /// Configured liveness window for kind:30315 NIP-40 expirations.
-    status_ttl: Duration,
     /// Per-session derived keypairs for duplicate live signers. The durable
     /// agent key remains the default; this map is populated only when a second
     /// live session of the same durable agent joins the same routing scope.
@@ -260,7 +260,7 @@ use resolution::{resolve_session, resolve_session_inner, CallerAnchor, ResolveSc
 use session_end::rpc_session_end;
 use session_signing::{admit_ordinal_signer, select_session_signer};
 use session_start::rpc_session_start;
-use status_publish::{spawn_outbox_drainer, spawn_status_heartbeat_publisher};
+use status_publish::spawn_outbox_drainer;
 use statusline::rpc_statusline;
 use subscriptions::{ensure_subscription, replay_channel_chat, resubscribe};
 use turns::{rpc_turn_check, rpc_turn_end, rpc_turn_start};

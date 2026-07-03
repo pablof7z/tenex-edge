@@ -1,0 +1,211 @@
+use super::*;
+use trellis_core::{ResourceCommandCause, ResourceCommandKind};
+use trellis_testing::ResourceLedger;
+
+fn chans<const N: usize>(items: [&str; N]) -> BTreeSet<String> {
+    items.iter().map(|s| s.to_string()).collect()
+}
+
+/// Seed a live session (busy, one channel) and return the reconciler + ledger.
+fn seeded(
+    working: bool,
+    title: &str,
+    activity: &str,
+    channels: BTreeSet<String>,
+    now: u64,
+) -> (StatusReconciler, ResourceLedger<StatusCommand>) {
+    let mut r = StatusReconciler::new(90, 30);
+    let mut ledger = ResourceLedger::new();
+    let out = r
+        .on_session_started(
+            "s1", "laptop", "coder", "pk1", ".", channels, working, title, activity, now,
+        )
+        .unwrap();
+    ledger.apply_result(&out.result);
+    r.assert_oracle().unwrap();
+    // Startup always opens.
+    assert_eq!(publishes(&out.effects).len(), 1);
+    (r, ledger)
+}
+
+fn publishes(effects: &[StatusEffect]) -> Vec<(&Status, PublishReason)> {
+    effects
+        .iter()
+        .filter_map(|e| match e {
+            StatusEffect::Publish { status, reason } => Some((status, *reason)),
+            _ => None,
+        })
+        .collect()
+}
+
+fn expires(effects: &[StatusEffect]) -> Vec<&Status> {
+    effects
+        .iter()
+        .filter_map(|e| match e {
+            StatusEffect::Expire { status } => Some(status),
+            _ => None,
+        })
+        .collect()
+}
+
+/// HEADLINE: the same session state committed twice — the SECOND commit emits no
+/// publish command. This is the dedup the old five-trigger path never had.
+#[test]
+fn identical_state_commit_is_deduped() {
+    let (mut r, mut ledger) = seeded(true, "T", "", chans(["room"]), 100);
+
+    // First distill: activity changes → exactly one publish.
+    let first = r.on_distill("s1", "T", "reading", 100).unwrap();
+    ledger.apply_result(&first.result);
+    r.assert_oracle().unwrap();
+    assert_eq!(publishes(&first.effects).len(), 1);
+
+    // Committing the IDENTICAL state again (same title/activity, same tick bucket)
+    // must emit NOTHING — the graph change-detection swallows it.
+    let second = r.on_distill("s1", "T", "reading", 100).unwrap();
+    ledger.apply_result(&second.result);
+    r.assert_oracle().unwrap();
+    assert!(
+        second.effects.is_empty(),
+        "identical re-commit must not publish: {:?}",
+        second.effects
+    );
+
+    ledger.assert_all_resources_have_owner().unwrap();
+    ledger.assert_no_duplicate_close().unwrap();
+}
+
+/// A distill that changes activity publishes exactly one status with the new
+/// content, and the receipt attributes the command to the `activity` input.
+#[test]
+fn distill_change_publishes_and_attributes_to_activity() {
+    let (mut r, mut ledger) = seeded(true, "T", "", chans(["room"]), 100);
+    let activity_node = r.activity_input("s1").unwrap();
+
+    let out = r.on_distill("s1", "T", "compiling", 100).unwrap();
+    ledger.apply_result(&out.result);
+    r.assert_oracle().unwrap();
+
+    let pubs = publishes(&out.effects);
+    assert_eq!(pubs.len(), 1, "one publish for the content change");
+    assert_eq!(pubs[0].0.activity, "compiling");
+    assert_eq!(pubs[0].1, PublishReason::Changed);
+
+    let why = r.why_command("s1").expect("a command was emitted for s1");
+    assert_eq!(why.kind, ResourceCommandKind::Replace);
+    assert!(
+        why.input_causes.contains(&activity_node),
+        "publish attributed to the activity input: {:?}",
+        why.input_causes
+    );
+}
+
+/// Turn-end flips the session to idle: exactly one publish, activity cleared.
+#[test]
+fn turn_end_flips_to_idle_one_publish() {
+    let (mut r, mut ledger) = seeded(true, "T", "writing", chans(["room"]), 100);
+
+    let out = r.on_turn_end("s1", 100).unwrap();
+    ledger.apply_result(&out.result);
+    r.assert_oracle().unwrap();
+
+    let pubs = publishes(&out.effects);
+    assert_eq!(pubs.len(), 1);
+    assert!(!pubs[0].0.busy, "idle after turn-end");
+    assert_eq!(pubs[0].0.activity, "", "idle clears the live activity line");
+    assert_eq!(pubs[0].1, PublishReason::Changed);
+}
+
+/// Ending a session closes its scope and emits a deterministic closing command,
+/// translated into a final, immediately-expiring publish (status teardown).
+#[test]
+fn session_end_emits_expire() {
+    let (mut r, mut ledger) = seeded(true, "T", "busy", chans(["room"]), 100);
+
+    let out = r.on_session_ended("s1", 200).unwrap();
+    ledger.apply_result(&out.result);
+    r.assert_oracle().unwrap();
+
+    let exp = expires(&out.effects);
+    assert_eq!(
+        exp.len(),
+        1,
+        "session-end emits exactly one expiring status"
+    );
+    assert_eq!(exp[0].expires_at, Some(200), "immediate NIP-40 expiration");
+    assert!(!exp[0].busy);
+    assert_eq!(exp[0].activity, "", "activity cleared on teardown");
+    assert_eq!(
+        exp[0].channels,
+        vec!["room".to_string()],
+        "retraction keeps the last-known h tags"
+    );
+
+    let why = r.why_command("s1").expect("a close was emitted for s1");
+    assert_eq!(why.kind, ResourceCommandKind::Close);
+    assert!(
+        matches!(why.cause, ResourceCommandCause::ScopeClosed { .. }),
+        "close cause names the session scope teardown: {:?}",
+        why.cause
+    );
+    ledger.assert_resource_not_open(&status_key("s1")).unwrap();
+    ledger.assert_all_resources_have_owner().unwrap();
+    ledger.assert_no_duplicate_close().unwrap();
+}
+
+/// Leaving a channel corrects the derived `h`-tag set with a single publish
+/// (fixes the stale-h-tag bug — the old path never retracted).
+#[test]
+fn channel_leave_corrects_h_tags() {
+    let (mut r, mut ledger) = seeded(true, "T", "x", chans(["a", "b"]), 100);
+
+    let out = r.on_channels_changed("s1", chans(["a"]), 100).unwrap();
+    ledger.apply_result(&out.result);
+    r.assert_oracle().unwrap();
+
+    let pubs = publishes(&out.effects);
+    assert_eq!(pubs.len(), 1);
+    assert_eq!(
+        pubs[0].0.channels,
+        vec!["a".to_string()],
+        "h-tag set corrected to the remaining channel"
+    );
+    assert_eq!(pubs[0].1, PublishReason::Changed);
+}
+
+/// A TTL tick that crosses a refresh bucket re-arms the NIP-40 window WITHOUT a
+/// content change — a distinct `Refresh` reason — and an in-bucket tick is a
+/// no-op. Proves the SINGLE refresh cadence subsumes both old timers.
+#[test]
+fn tick_rearms_without_content_change_and_is_the_single_path() {
+    let (mut r, mut ledger) = seeded(true, "T", "x", chans(["room"]), 0);
+
+    // Cross into the next 30s refresh bucket → one refresh (content unchanged).
+    let out = r.on_tick("s1", 30).unwrap();
+    ledger.apply_result(&out.result);
+    r.assert_oracle().unwrap();
+    let pubs = publishes(&out.effects);
+    assert_eq!(pubs.len(), 1);
+    assert_eq!(pubs[0].1, PublishReason::Refreshed);
+    assert_eq!(pubs[0].0.expires_at, Some(120), "TTL re-armed to now + ttl");
+    let why = r.why_command("s1").unwrap();
+    assert_eq!(why.kind, ResourceCommandKind::Refresh);
+
+    // Same bucket again → nothing (no unconditional republish).
+    let again = r.on_tick("s1", 45).unwrap();
+    ledger.apply_result(&again.result);
+    r.assert_oracle().unwrap();
+    assert!(again.effects.is_empty(), "in-bucket tick is a no-op");
+
+    ledger.assert_all_resources_have_owner().unwrap();
+    ledger.assert_no_duplicate_close().unwrap();
+}
+
+/// An unknown-session method call is a clean no-op that still returns a receipt.
+#[test]
+fn unknown_session_is_a_noop() {
+    let mut r = StatusReconciler::new(90, 30);
+    let out = r.on_turn_start("ghost", 10).unwrap();
+    assert!(out.effects.is_empty());
+    r.assert_oracle().unwrap();
+}

@@ -19,8 +19,10 @@
 
 pub mod graph;
 pub mod journal;
+pub mod status;
 pub mod subscriptions;
 
 pub use graph::{ReconcileCommand, Reconciler};
 pub use journal::InputFact;
+pub use status::{PublishReason, StatusCommand, StatusEffect, StatusOutcome, StatusReconciler};
 pub use subscriptions::{CoverageSnapshot, SubEffect, SubscriptionReconciler};
