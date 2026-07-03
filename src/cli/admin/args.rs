@@ -1,6 +1,18 @@
 use anyhow::Result;
 use clap::{Args, Subcommand};
 
+const CHANNEL_ABOUT_MAX_CHARS: usize = 80;
+
+fn channel_about(value: &str) -> std::result::Result<String, String> {
+    let len = value.chars().count();
+    if len > CHANNEL_ABOUT_MAX_CHARS {
+        return Err(format!(
+            "--about must be {CHANNEL_ABOUT_MAX_CHARS} characters or fewer (got {len})"
+        ));
+    }
+    Ok(value.to_string())
+}
+
 #[derive(Subcommand)]
 pub(in crate::cli) enum AgentAction {
     /// List the agents in this machine's local keystore (slug, pubkey, command).
@@ -119,9 +131,8 @@ pub(in crate::cli) enum ChannelsAction {
         /// the name is the durable human handle. Unique per parent project.
         #[arg(long)]
         name: String,
-        /// Durable channel description, published to the relay as the kind:39000
-        /// `about`. Required.
-        #[arg(long)]
+        /// Short, stable channel description (max 80 chars), not status text.
+        #[arg(long, value_parser = channel_about)]
         about: String,
         /// Optional, repeatable `slug@backend-label`, where `backend-label` is
         /// the target backend's config.json `backendName`. Omit to create an
@@ -161,7 +172,7 @@ pub(in crate::cli) enum ChannelsAction {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use clap::Parser;
+    use clap::{error::ErrorKind, Parser};
 
     fn parse_err(args: &[&str]) -> clap::Error {
         match crate::cli::args::Cli::try_parse_from(args) {
@@ -187,6 +198,35 @@ mod tests {
             } => assert_eq!(agent.as_deref(), Some("claude@laptop")),
             _ => panic!("expected agents list-sessions command"),
         }
+    }
+
+    #[test]
+    fn channels_create_help_shows_about_limit() {
+        let err = parse_err(&["tenex-edge", "channels", "create", "--help"]);
+        let help = err.to_string();
+
+        assert!(help.contains("Short, stable channel description (max 80 chars)"));
+    }
+
+    #[test]
+    fn channels_create_about_rejects_more_than_80_chars() {
+        let too_long = "a".repeat(CHANNEL_ABOUT_MAX_CHARS + 1);
+        let err = parse_err(&[
+            "tenex-edge",
+            "channels",
+            "create",
+            "--name",
+            "ops",
+            "--about",
+            &too_long,
+        ]);
+
+        assert_eq!(err.kind(), ErrorKind::ValueValidation);
+        assert!(
+            err.to_string()
+                .contains("--about must be 80 characters or fewer (got 81)"),
+            "{err}"
+        );
     }
 
     #[test]
