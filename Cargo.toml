@@ -36,6 +36,8 @@ sha2 = "0.10"
 shlex = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+trellis-core = { path = "/Users/pablofernandez/src/trellis/crates/trellis-core", features = ["serde"] }
 
 [dev-dependencies]
 tempfile = "3"
+trellis-testing = { path = "/Users/pablofernandez/src/trellis/crates/trellis-testing" }

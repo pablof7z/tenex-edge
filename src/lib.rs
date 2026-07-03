@@ -34,6 +34,8 @@ pub mod tmux;
 pub mod transcript;
 pub mod transport;
 
+pub mod reconcile;
+
 mod turn_context;
 mod who_snapshot;
 

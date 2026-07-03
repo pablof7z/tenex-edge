@@ -3037,6 +3037,8 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "trellis-core",
+ "trellis-testing",
 ]
 
 [[package]]
@@ -3391,6 +3393,20 @@ dependencies = [
  "tracing",
  "tracing-core",
  "tracing-log",
+]
+
+[[package]]
+name = "trellis-core"
+version = "0.2.1"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "trellis-testing"
+version = "0.2.1"
+dependencies = [
+ "trellis-core",
 ]
 
 [[package]]
