@@ -67,6 +67,27 @@ async fn unique_session_name(slug: &str) -> String {
     format!("{base}-{}", std::process::id())
 }
 
+/// tmux bakes `TERM` (and the truecolor overrides) into a pane's process
+/// environment at fork time, from whatever `default-terminal` /
+/// `terminal-overrides` are in effect *right then* — a later `set-option -t
+/// <session>` never reaches an already-running child. These must be the
+/// server-wide default *before* `new-session` forks the harness, or the
+/// harness inherits tmux's plain built-in default (no 256-color, no
+/// truecolor) for its entire lifetime.
+async fn ensure_global_terminal_options() -> Result<()> {
+    for (opt, val) in [
+        ("default-terminal", "tmux-256color"),
+        ("terminal-overrides", "*:Tc:RGB:extkeys"),
+    ] {
+        tokio::process::Command::new("tmux")
+            .args(["set-option", "-g", opt, val])
+            .status()
+            .await
+            .with_context(|| format!("tmux set-option -g {opt}"))?;
+    }
+    Ok(())
+}
+
 async fn open_agent_session(
     slug: &str,
     window_name: &str,
@@ -75,6 +96,7 @@ async fn open_agent_session(
     group: Option<&str>,
     ordinal: Option<u32>,
 ) -> Result<String> {
+    ensure_global_terminal_options().await?;
     let session_name = unique_session_name(slug).await;
     let agent_env = format!("TENEX_EDGE_AGENT={slug}");
     let mut passthrough_env: Vec<String> = Vec::new();
@@ -185,8 +207,6 @@ async fn make_session_transparent(
         ("mouse", "on".to_string()),
         ("allow-passthrough", "on".to_string()),
         ("focus-events", "on".to_string()),
-        ("default-terminal", "tmux-256color".to_string()),
-        ("terminal-overrides", ",*:Tc,RGB,extkeys".to_string()),
     ];
 
     for (opt, val) in &options {
@@ -195,7 +215,7 @@ async fn make_session_transparent(
             .status()
             .await
             .with_context(|| format!("tmux set-option {opt}"))?;
-        if !status.success() && !matches!(*opt, "allow-passthrough" | "terminal-overrides") {
+        if !status.success() && !matches!(*opt, "allow-passthrough") {
             anyhow::bail!("tmux set-option {opt} {val} failed for session {session}");
         }
     }
