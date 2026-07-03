@@ -5,7 +5,7 @@ pub(in crate::daemon::server) struct SessionEndParams {
     session: String,
 }
 
-pub(in crate::daemon::server) fn rpc_session_end(
+pub(in crate::daemon::server) async fn rpc_session_end(
     state: &Arc<DaemonState>,
     params: &serde_json::Value,
 ) -> Result<serde_json::Value> {
@@ -38,6 +38,10 @@ pub(in crate::daemon::server) fn rpc_session_end(
             state: "end".into(),
             rel_cwd: String::new(),
         });
+        // Reconcile subscriptions: the session is now dead, so its scope is closed
+        // and any REQ it SOLELY owned is torn down with a real NIP-01 CLOSE. A
+        // channel another live session still holds stays open (refcounted).
+        super::subscriptions::reconcile_subs_logged(state, "session_end").await;
     }
     Ok(serde_json::json!({ "ended": existed }))
 }

@@ -91,7 +91,7 @@ pub async fn run() -> Result<()> {
         hosted: Mutex::new(HashMap::new()),
         sessions: Mutex::new(HashMap::new()),
         subscribed_projects: Mutex::new(Vec::new()),
-        subscriptions: Mutex::new(crate::fabric::subscriptions::SubscriptionRegistry::new()),
+        subs: Mutex::new(crate::reconcile::SubscriptionReconciler::new().expect("subs")),
         tail_tx: tokio::sync::broadcast::channel(512).0,
         open_clients: Mutex::new(0),
         shutdown: Notify::new(),

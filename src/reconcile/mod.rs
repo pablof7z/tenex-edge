@@ -19,6 +19,8 @@
 
 pub mod graph;
 pub mod journal;
+pub mod subscriptions;
 
 pub use graph::{ReconcileCommand, Reconciler};
 pub use journal::InputFact;
+pub use subscriptions::{CoverageSnapshot, SubEffect, SubscriptionReconciler};

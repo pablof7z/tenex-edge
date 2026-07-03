@@ -84,10 +84,10 @@ pub struct DaemonState {
     hosted: Mutex<HashMap<String, HostedAgent>>,
     sessions: Mutex<HashMap<String, SessionHandle>>,
     subscribed_projects: Mutex<Vec<String>>,
-    /// Plans the THREE stable aggregate REQs plus narrow add-REQs, replacing the
-    /// old per-(project×kind) `Scope` expansion that blew the relay's REQ ceiling.
-    /// See `crate::fabric::subscriptions`.
-    subscriptions: Mutex<crate::fabric::subscriptions::SubscriptionRegistry>,
+    /// Refcounted per-entity relay-subscription reconciler: ONE narrow REQ per
+    /// covered channel `#h` / group-state `#d` / addressed pubkey `#p`, closed
+    /// when the last owner drops it. See `crate::reconcile::subscriptions`.
+    subs: Mutex<crate::reconcile::SubscriptionReconciler>,
     /// Structured tail event broadcast replacing the old DomainEvent bus.
     tail_tx: tokio::sync::broadcast::Sender<TailEvent>,
     open_clients: Mutex<u64>,
@@ -275,7 +275,7 @@ async fn dispatch(state: &Arc<DaemonState>, req: &Request) -> Response {
         }
         "who" => rpc_who(state, &req.params),
         "session_start" => rpc_session_start(state, &req.params, None).await,
-        "session_end" => rpc_session_end(state, &req.params),
+        "session_end" => rpc_session_end(state, &req.params).await,
         "chat_write" => rpc_chat_write(state, &req.params).await,
         "publish" => rpc_propose(state, &req.params).await,
         "turn_start" => rpc_turn_start(state, &req.params).await,

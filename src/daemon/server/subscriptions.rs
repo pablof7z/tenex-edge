@@ -1,5 +1,16 @@
 use super::*;
+use crate::fabric::subscriptions::{id_h_narrow, narrow_h_filter};
+use crate::reconcile::{CoverageSnapshot, SubEffect};
+use std::collections::{BTreeMap, BTreeSet};
 
+/// Record `project` as an explicitly-subscribed channel and reconcile. The
+/// subscribed set feeds the daemon-scope coverage; the reconciler opens a narrow
+/// per-entity REQ for any newly-covered channel and, critically, CLOSES any REQ
+/// no longer owned by anyone. Idempotent: an already-covered channel yields no
+/// effects. Bounded — opening/closing a relay REQ can hang on a slow relay, and
+/// this is awaited on hook-critical paths (session_start, spawn_session), so the
+/// intent (project recorded above + folded into the reconciler) survives a
+/// timeout; we fail open.
 pub(in crate::daemon::server) async fn ensure_subscription(
     state: &Arc<DaemonState>,
     project: &str,
@@ -10,52 +21,79 @@ pub(in crate::daemon::server) async fn ensure_subscription(
             projs.push(project.to_string());
         }
     }
-    // Incremental add: plan only the NARROW deltas for this newly-tracked channel
-    // (one `#h` chat/status/long-form REQ + one group-state REQ), NOT a full
-    // aggregate rebuild. Mutating an aggregate makes the relay replay every stored
-    // event for every tracked entity; a narrow REQ scoped to just this channel
-    // avoids that. The deltas are empty when the channel is already covered (by an
-    // aggregate seeded at startup or an earlier narrow add), making this idempotent.
-    let reqs = state.subscriptions.lock().unwrap().add_channel(project);
-    if reqs.is_empty() {
-        return Ok(());
-    }
-    tracing::debug!(
-        channel = project,
-        req_count = reqs.len(),
-        "opening narrow channel REQs"
-    );
-    // Bounded: opening a relay subscription can hang on a slow/unreachable relay,
-    // and this is awaited on hook-critical paths (session_start, spawn_session),
-    // so a hang would block the editor. The intent (project recorded above +
-    // folded into the registry) survives a timeout; we fail open.
-    match tokio::time::timeout(std::time::Duration::from_secs(5), apply_plan(state, reqs)).await {
+    match tokio::time::timeout(std::time::Duration::from_secs(5), sync_subscriptions(state)).await {
         Ok(r) => r,
         Err(_) => {
             tracing::warn!(
                 channel = project,
-                "subscription apply timed out; continuing best-effort"
+                "subscription sync timed out; continuing best-effort"
             );
             Ok(())
         }
     }
 }
 
-/// Open each planned REQ under its semantic [`SubscriptionId`], on the MAIN
-/// relays only. Broad `#h`/`#p` aggregate filters must NOT hit the kind:0 indexer
-/// relay — that relay is a one-shot profile-resolution endpoint, and pinning a
-/// firehose there wastes its connection and pulls in noise. Re-applying the same
-/// id REPLACES the relay-side REQ in place (NIP-01), which is exactly how `seed`
-/// compacts the three aggregates.
-pub(in crate::daemon::server) async fn apply_plan(
+/// Full recompute + apply: build the current coverage snapshot from the store,
+/// hand it to the [`SubscriptionReconciler`], and apply the returned
+/// Open/Close/Replace effects. This is the single point every subscription
+/// writer funnels through — no split-brain. Replaces the old `resubscribe`
+/// (aggregate seed) AND adds the previously-missing teardown path: a channel a
+/// session just left with no other owner produces a real NIP-01 CLOSE here.
+pub(in crate::daemon::server) async fn sync_subscriptions(state: &Arc<DaemonState>) -> Result<()> {
+    let snapshot = build_coverage_snapshot(state);
+    // Compute the plan under the lock, then DROP the guard before any await: the
+    // reconciler is a plain Mutex (never held across `.await`), the transport does
+    // the network I/O.
+    let effects = {
+        let mut rec = state.subs.lock().unwrap();
+        rec.sync(&snapshot)
+            .map_err(|e| anyhow::anyhow!("subscription reconcile failed: {e:?}"))?
+            .0
+    };
+    apply_effects(state, effects).await
+}
+
+/// `resubscribe` is now a thin alias for the reconciler sync, kept for the
+/// startup + reconcile call sites that name it.
+pub(in crate::daemon::server) async fn resubscribe(state: &Arc<DaemonState>) -> Result<()> {
+    sync_subscriptions(state).await
+}
+
+/// Reconcile subscriptions and log (never propagate) a failure. Used by the
+/// membership-mutation RPCs (leave/switch/session-end) where the teardown is
+/// best-effort: the store already reflects the change, so a transient relay
+/// hiccup must not fail the RPC.
+pub(in crate::daemon::server) async fn reconcile_subs_logged(
     state: &Arc<DaemonState>,
-    reqs: Vec<crate::fabric::subscriptions::PlannedReq>,
+    cause: &str,
+) {
+    if let Err(e) = sync_subscriptions(state).await {
+        tracing::warn!(cause, error = %e, "subscription sync failed");
+    }
+}
+
+/// Apply the reconciler's host effects on the MAIN relays only. Open/Replace both
+/// re-`subscribe_with_id_to` under the entity's semantic id (NIP-01
+/// replace-in-place); Close sends a real NIP-01 CLOSE. Broad filters never hit
+/// the kind:0 indexer relay — these are narrow per-entity REQs and profiles
+/// resolve on-demand.
+pub(in crate::daemon::server) async fn apply_effects(
+    state: &Arc<DaemonState>,
+    effects: Vec<SubEffect>,
 ) -> Result<()> {
-    for req in reqs {
-        state
-            .transport
-            .subscribe_with_id_to(&state.cfg.relays, req.id, req.filter)
-            .await?;
+    for effect in effects {
+        match effect {
+            SubEffect::Open { id, filter } | SubEffect::Replace { id, filter } => {
+                state
+                    .transport
+                    .subscribe_with_id_to(&state.cfg.relays, id, filter)
+                    .await?;
+            }
+            SubEffect::Close { id } => {
+                tracing::debug!(subscription = %id, "closing relay REQ (last owner left)");
+                state.transport.unsubscribe(&id).await?;
+            }
+        }
     }
     Ok(())
 }
@@ -64,17 +102,20 @@ pub(in crate::daemon::server) async fn apply_plan(
 /// became alive receives messages published BEFORE it existed (the spawn-on-
 /// mention case: the triggering kind:9 arrives, spawns the agent, but the live
 /// materialize path can only route to sessions already alive). Re-applying the
-/// channel's narrow `#h` REQ replaces it in place (NIP-01) and the relay
-/// re-streams the stored events, which `materialize_chat_message` then routes to
-/// the now-alive session. Best-effort: a replay failure just means the session
-/// relies on subsequent live chat. Bounded so a slow relay can't block the hook.
+/// channel's narrow `#h` REQ under its stable per-entity id replaces it in place
+/// (NIP-01) and the relay re-streams the stored events, which
+/// `materialize_chat_message` then routes to the now-alive session. Best-effort
+/// and bounded so a slow relay can't block the hook.
 pub(in crate::daemon::server) async fn replay_channel_chat(state: &Arc<DaemonState>, h: &str) {
     tracing::debug!(
         channel = h,
         "replaying channel chat (spawn-on-mention catch-up)"
     );
-    let req = crate::fabric::subscriptions::channel_chat_replay_req(h);
-    let fut = apply_plan(state, vec![req]);
+    let effect = SubEffect::Replace {
+        id: id_h_narrow(h),
+        filter: narrow_h_filter(h),
+    };
+    let fut = apply_effects(state, vec![effect]);
     if tokio::time::timeout(std::time::Duration::from_secs(5), fut)
         .await
         .is_err()
@@ -83,34 +124,22 @@ pub(in crate::daemon::server) async fn replay_channel_chat(state: &Arc<DaemonSta
     }
 }
 
-/// Close each subscription id (NIP-01 CLOSE). Used when compaction retires the
-/// narrow REQs now subsumed by a rebuilt aggregate. Best-effort per id.
-#[allow(dead_code)]
-pub(in crate::daemon::server) async fn close_subs(
-    state: &Arc<DaemonState>,
-    ids: Vec<nostr_sdk::prelude::SubscriptionId>,
-) -> Result<()> {
-    for id in ids {
-        state.transport.unsubscribe(&id).await?;
-    }
-    Ok(())
-}
-
-/// Compute the daemon's current subscription coverage from durable sources.
+/// Compute the daemon's current subscription coverage from durable sources,
+/// split by owner so channels can refcount per session:
 ///
-/// - `channels_h` / `group_state_d`: explicitly tracked projects, channels live
-///   sessions route under, groups any local/ordinal pubkey is a member of, and
-///   groups this daemon owns.
-/// - `addressed_pubkeys_p`: local durable + ordinal pubkeys, live transient
-///   session keys, and the backend identity (folds in the old standalone backend
-///   orchestration `#p` subscription).
-fn build_entity_coverage(state: &Arc<DaemonState>) -> crate::fabric::subscriptions::EntityCoverage {
-    use std::collections::BTreeSet;
-
+/// - `daemon_channels` / archived: explicitly tracked projects, groups any
+///   local/ordinal pubkey is a member of (spawn-on-mention), and groups this
+///   daemon manages (admin). Owned by the daemon scope.
+/// - `sessions`: each alive session mapped to the channels it has joined. Each
+///   session is its own scope, so a shared channel stays open until the LAST
+///   owning session leaves.
+/// - `addressed_pubkeys`: local durable + ordinal pubkeys, live transient session
+///   keys, and the backend identity. Owned by the daemon scope.
+fn build_coverage_snapshot(state: &Arc<DaemonState>) -> CoverageSnapshot {
     let edge = crate::config::edge_home();
     let local_pks = crate::identity::list_local_pubkeys(&edge);
 
-    let mut channels: BTreeSet<String> = state
+    let mut daemon_channels: BTreeSet<String> = state
         .subscribed_projects
         .lock()
         .unwrap()
@@ -118,31 +147,41 @@ fn build_entity_coverage(state: &Arc<DaemonState>) -> crate::fabric::subscriptio
         .cloned()
         .collect();
     let mut pubkeys: BTreeSet<String> = local_pks.iter().cloned().collect();
+    let mut sessions: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
 
-    state.with_store(|s| {
+    let archived = state.with_store(|s| {
         let ordinals = s.list_identity_pubkeys().unwrap_or_default();
         pubkeys.extend(ordinals.iter().cloned());
         // Channels any local/ordinal pubkey is a member of (spawn-on-mention path),
         // plus channels it manages (admin = the old "owned groups").
         for pk in local_pks.iter().chain(ordinals.iter()) {
             if let Ok(gs) = s.list_channels_where_member(pk) {
-                channels.extend(gs);
+                daemon_channels.extend(gs);
             }
             if let Ok(gs) = s.list_channels_where_admin(pk) {
-                channels.extend(gs);
+                daemon_channels.extend(gs);
             }
         }
-        // Channels live sessions listen to. This includes the active publishing
-        // channel plus any passively joined channels.
+        // Channels each live session listens to (active + passively joined).
         for sess in s.list_alive_sessions().unwrap_or_default() {
             let joined = s
                 .list_session_joined_channels(&sess.session_id)
                 .unwrap_or_else(|_| vec![(sess.channel_h.clone(), sess.created_at)]);
-            for (channel, _) in joined {
-                channels.insert(channel);
-            }
+            sessions.insert(
+                sess.session_id.clone(),
+                joined.into_iter().map(|(channel, _)| channel).collect(),
+            );
         }
-        channels.retain(|channel| !s.is_archived_channel(channel).unwrap_or(false));
+        // Archived channels are excluded from all #h/#d coverage. Compute the flag
+        // over the union of every candidate channel so the reconciler can subtract.
+        let mut candidates: BTreeSet<String> = daemon_channels.clone();
+        for chans in sessions.values() {
+            candidates.extend(chans.iter().cloned());
+        }
+        candidates
+            .into_iter()
+            .filter(|channel| s.is_archived_channel(channel).unwrap_or(false))
+            .collect::<BTreeSet<String>>()
     });
 
     // Live transient session keys + backend identity round out the addressed set.
@@ -151,40 +190,10 @@ fn build_entity_coverage(state: &Arc<DaemonState>) -> crate::fabric::subscriptio
         pubkeys.insert(bp.to_string());
     }
 
-    crate::fabric::subscriptions::EntityCoverage {
-        channels_h: channels.clone(),
-        group_state_d: channels,
-        addressed_pubkeys_p: pubkeys,
+    CoverageSnapshot {
+        daemon_channels,
+        addressed_pubkeys: pubkeys,
+        archived_channels: archived,
+        sessions,
     }
-}
-
-/// Seed the THREE stable aggregate REQs from the daemon's current coverage. This
-/// REPLACES the whole aggregate (the compaction point) and applies exactly three
-/// REQs: `#h` (chat/status/long-form over all channels), `#p` (chat/long-form
-/// addressed to all durable pubkeys), and group-state (39000/39001/39002 over all
-/// group ids). It NO LONGER expands per-(project×kind) `Scope`s and NEVER
-/// subscribes kind:0 — profile resolution stays on the on-demand `Transport::fetch`
-/// + `profile.rs` cache.
-///
-/// An aggregate filter with an EMPTY coverage set degenerates to an unscoped
-/// firehose over its kinds; such a REQ is skipped (never opened) so a daemon with
-/// no channels/pubkeys yet does not pull the whole relay. The registry is still
-/// seeded so later narrow adds dedup correctly against the (empty) aggregate.
-pub(in crate::daemon::server) async fn resubscribe(state: &Arc<DaemonState>) -> Result<()> {
-    let coverage = build_entity_coverage(state);
-    // seed() returns the three aggregate REQs in the fixed, tested order
-    // [`#h`, `#p`, group-state]; pair each with its set's emptiness so we drop
-    // any that would be an unscoped firehose.
-    let empties = [
-        coverage.channels_h.is_empty(),
-        coverage.addressed_pubkeys_p.is_empty(),
-        coverage.group_state_d.is_empty(),
-    ];
-    let reqs = state.subscriptions.lock().unwrap().seed(coverage);
-    let reqs: Vec<_> = reqs
-        .into_iter()
-        .zip(empties)
-        .filter_map(|(req, empty)| (!empty).then_some(req))
-        .collect();
-    apply_plan(state, reqs).await
 }

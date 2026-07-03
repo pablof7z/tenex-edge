@@ -177,6 +177,10 @@ pub(in crate::daemon::server) async fn rpc_channels_leave(
     } else {
         false
     };
+    // Teardown: with no other owner, dropping the channel emits a REAL NIP-01 CLOSE.
+    if left {
+        subscriptions::reconcile_subs_logged(state, "channels_leave").await;
+    }
     Ok(serde_json::json!({
         "session_id": rec.session_id,
         "channel": channel,
@@ -220,6 +224,8 @@ pub(in crate::daemon::server) async fn rpc_channels_switch(
                 "channels_switch: previous membership removal was not confirmed"
             );
         }
+        // Reconcile so the left channel's REQ tears down when no owner remains.
+        subscriptions::reconcile_subs_logged(state, "channels_switch").await;
     }
     Ok(serde_json::json!({
         "session_id": rec.session_id,
