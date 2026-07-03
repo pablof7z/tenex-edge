@@ -270,10 +270,9 @@ pub(super) fn mint_session_id() -> String {
     format!("te-{nanos:x}-{seq:x}")
 }
 
-mod schema;
-
 mod aliases;
 mod channels;
+mod schema;
 pub use channels::{archived_channel_about, is_archived_channel_about, CHANNEL_ABOUT_MAX_CHARS};
 mod core;
 mod events;

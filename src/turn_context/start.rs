@@ -244,5 +244,7 @@ pub(crate) fn assemble_turn_start(
     TurnContext {
         text: outcome.text,
         receipt: outcome.receipt,
+        transaction_id: outcome.transaction_id,
+        revision: outcome.revision,
     }
 }

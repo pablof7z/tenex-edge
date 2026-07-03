@@ -112,11 +112,29 @@ pub(in crate::daemon::server) async fn rpc_turn_start(
         prev_started,
     );
     let audit = turn.receipt.to_json();
+    record_hook_receipt(state, &turn);
     let context = turn
         .text
         .map(serde_json::Value::String)
         .unwrap_or(serde_json::Value::Null);
     Ok(serde_json::json!({ "context": context, "audit": audit }))
+}
+
+/// Slice 8: persist the hook-context render's receipt (the "why this injected
+/// shape" trace) keyed by `<session>:<kind>:<now>` so `explain hook:<session>@ts`
+/// can replay it. Off the hot path — a failed insert is logged, never fatal.
+fn record_hook_receipt(state: &Arc<DaemonState>, turn: &crate::turn_context::TurnContext) {
+    let r = &turn.receipt;
+    let row = crate::state::receipts::NewReceipt {
+        surface: "hook_context".into(),
+        transaction_id: turn.transaction_id,
+        revision: turn.revision,
+        changed_summary: r.to_json().to_string(),
+        commands: "[]".into(),
+        artifact_ref: Some(format!("{}:{}:{}", r.session_id, r.kind, r.now)),
+        created_at: crate::instrument::now_millis(),
+    };
+    state.with_store(|s| crate::instrument::record_receipt(s, row));
 }
 
 pub(in crate::daemon::server) fn rpc_turn_check(
@@ -141,6 +159,7 @@ pub(in crate::daemon::server) fn rpc_turn_check(
     let turn =
         crate::turn_context::assemble_turn_check(&state.store, &rec, &state.host, delta_since, now);
     let audit = turn.receipt.to_json();
+    record_hook_receipt(state, &turn);
     let context = turn
         .text
         .map(serde_json::Value::String)

@@ -23,6 +23,9 @@ use crate::reconcile::HookContextReceipt;
 pub(crate) struct TurnContext {
     pub(crate) text: Option<String>,
     pub(crate) receipt: HookContextReceipt,
+    /// The render's committed transaction id / revision, for the receipts ledger.
+    pub(crate) transaction_id: i64,
+    pub(crate) revision: i64,
 }
 
 #[cfg(test)]

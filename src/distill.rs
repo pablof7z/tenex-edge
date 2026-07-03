@@ -13,27 +13,14 @@
 //! provider: `claude-cli` → native `claude` CLI binary; `openrouter`/`ollama` →
 //! native `rig` → `None`.
 
+use crate::instrument::DistillCapture;
 use anyhow::Result;
 use std::io::Write;
 use std::process::{Command, Stdio};
 
 fn dlog(session_id: &str, msg: &str) {
-    let log_dir = crate::config::edge_home().join("logs");
-    let _ = crate::config::ensure_dir(&log_dir);
-    let path = log_dir.join("distill.log");
-    if let Ok(mut f) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-    {
-        let ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
-        let ts = crate::util::format_local_datetime_ms(ms);
-        let short = &session_id[..8.min(session_id.len())];
-        let _ = writeln!(f, "{ts} [{short}] {msg}");
-    }
+    let short = &session_id[..8.min(session_id.len())];
+    crate::applog::append("distill.log", short, msg);
 }
 
 /// Pipes a context string to an external command's stdin; its stdout (first
@@ -327,14 +314,20 @@ fn assemble(
 ///         – provider = `openrouter`/`ollama` → native rig;
 ///   (c) else **nudge-to-keep**: retain the current title with an empty activity.
 ///
-/// Returns `(labels, error)`. `error` is `Some` only when the LLM was actually
-/// called and failed — the caller should log it and surface it in the statusline.
-/// A nudge-to-keep (no model configured, empty transcript) is not an error.
+/// Returns `(labels, error, capture)`. `error` is `Some` only when the LLM was
+/// actually called and failed. `capture` is `Some` only when a model round-trip
+/// produced output — the verbatim system prompt / fed slice / raw response the
+/// host records as an `llm_calls` row (Slice 8). A nudge-to-keep (no model
+/// configured, empty transcript) is neither an error nor a capture.
 pub async fn distill_session(
     transcript: &str,
     current_title: Option<&str>,
     session_id: &str,
-) -> (Option<SessionLabels>, Option<String>) {
+) -> (
+    Option<SessionLabels>,
+    Option<String>,
+    Option<DistillCapture>,
+) {
     let ctx = transcript.trim();
     if ctx.is_empty() {
         // Nothing new to read: keep the title, no live activity.
@@ -346,6 +339,7 @@ pub async fn distill_session(
                     title: t.to_string(),
                     activity: String::new(),
                 }),
+            None,
             None,
         );
     }
@@ -360,13 +354,11 @@ pub async fn distill_session(
         dlog(session_id, "using TENEX_EDGE_DISTILL_CMD override");
         if let Some(out) = cmd.summarize_full(&input) {
             if let Some(labels) = assemble(parse_labels(&out), current_title) {
-                return (Some(labels), None);
+                let cap = capture("command", &cmd.command, &input, &out);
+                return (Some(labels), None, Some(cap));
             }
         }
-        dlog(
-            session_id,
-            "TENEX_EDGE_DISTILL_CMD produced no usable output",
-        );
+        dlog(session_id, "override produced no usable output");
     }
     // (b) edge-distillation role — dispatch by provider.
     let mut rig_error: Option<String> = None;
@@ -378,7 +370,7 @@ pub async fn distill_session(
         Some(resolved) => {
             dlog(
                 session_id,
-                &format!("calling {}/{}", resolved.provider, resolved.model),
+                &format!("call {}/{}", resolved.provider, resolved.model),
             );
             let result = match resolved.provider.as_str() {
                 "claude-cli" => complete_via_claude_cli(&resolved.model, &input).await,
@@ -388,12 +380,10 @@ pub async fn distill_session(
                 Ok(Some(out)) => {
                     dlog(session_id, &format!("distill response: {out:?}"));
                     if let Some(labels) = assemble(parse_labels(&out), current_title) {
-                        return (Some(labels), None);
+                        let cap = capture(&resolved.provider, &resolved.model, &input, &out);
+                        return (Some(labels), None, Some(cap));
                     }
-                    dlog(
-                        session_id,
-                        "parse/assemble produced no labels from response",
-                    );
+                    dlog(session_id, "no labels parsed from response");
                 }
                 Ok(None) => dlog(
                     session_id,
@@ -418,7 +408,17 @@ pub async fn distill_session(
             title: t.to_string(),
             activity: String::new(),
         });
-    (labels, rig_error)
+    (labels, rig_error, None)
+}
+// Verbatim round-trip capture (`system_prompt` is the canonical prompt).
+fn capture(provider: &str, model: &str, input: &str, out: &str) -> DistillCapture {
+    DistillCapture {
+        provider: provider.to_string(),
+        model: model.to_string(),
+        system_prompt: SESSION_SYSTEM_PROMPT.to_string(),
+        transcript_slice: input.to_string(),
+        raw_response: out.to_string(),
+    }
 }
 
 #[cfg(test)]

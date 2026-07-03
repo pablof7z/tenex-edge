@@ -44,6 +44,10 @@ pub struct HookContextOutcome {
     pub text: Option<String>,
     /// The plain, Trellis-free receipt derived from the render's own trace.
     pub receipt: HookContextReceipt,
+    /// This render's committed transaction id (i64 for the receipts ledger).
+    pub transaction_id: i64,
+    /// This render's post-commit graph revision (i64 for the receipts ledger).
+    pub revision: i64,
 }
 
 /// Per-graph handles for the reusable snapshot node-set.
@@ -115,6 +119,8 @@ impl HookContextReconciler {
         let nodes = self.nodes.as_ref().expect("nodes present");
 
         let output_key = nodes.output;
+        let transaction_id = result.transaction_id.get() as i64;
+        let revision = result.revision.get() as i64;
         // The frame carries the derived view; an unchanged commit emits none, so
         // fall back to the cached last view (identical by construction).
         let frame = result
@@ -148,7 +154,12 @@ impl HookContextReconciler {
             text.as_deref(),
             input_causes,
         );
-        Ok(HookContextOutcome { text, receipt })
+        Ok(HookContextOutcome {
+            text,
+            receipt,
+            transaction_id,
+            revision,
+        })
     }
 
     /// Map the frame's canonical input causes to stable labels for the receipt.

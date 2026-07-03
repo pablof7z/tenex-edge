@@ -212,7 +212,6 @@ impl DaemonState {
 }
 
 // ── entry point ──────────────────────────────────────────────────────────────
-
 mod channel_membership_rpc;
 mod channel_resolve;
 mod channels_rpc;
@@ -246,7 +245,7 @@ use chat_read_tail::{handle_chat_read, handle_tail};
 use chat_write::rpc_chat_write;
 use diagnostics::{
     log_nip29_role_decision, refresh_project_members_cache, rpc_debug_outbox, rpc_doctor,
-    rpc_local_backend,
+    rpc_explain, rpc_local_backend,
 };
 use engine_lifecycle::{cancel_session, engine_params_for, reconcile_sessions, spawn_session};
 pub use lifecycle::run;
@@ -282,6 +281,7 @@ async fn dispatch(state: &Arc<DaemonState>, req: &Request) -> Response {
         "turn_check" => rpc_turn_check(state, &req.params),
         "turn_end" => rpc_turn_end(state, &req.params).await,
         "doctor" => rpc_doctor(state).await,
+        "explain" => rpc_explain(state, &req.params),
         "local_backend" => rpc_local_backend(state),
         "project_list" => rpc::rpc_project_list(state).await,
         "project_edit" => rpc::rpc_project_edit(state, &req.params).await,

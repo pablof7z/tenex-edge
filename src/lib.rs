@@ -8,14 +8,17 @@
 //!   cli -> runtime -> { domain, codec, transport, state, distill }
 //!   config / identity / project are leaf utilities.
 
+mod applog;
 mod channel_about;
 pub mod command_forensics;
 pub mod config;
 pub mod domain;
+pub mod explain;
 mod fabric_context;
 pub mod identity;
 pub mod idref;
 pub mod injection;
+pub mod instrument;
 pub mod llmconfig;
 pub mod logging;
 pub mod profile;
@@ -30,6 +33,7 @@ pub mod fabric;
 pub mod relay_log;
 pub mod runtime;
 pub mod state;
+pub mod status_seam;
 pub mod tmux;
 pub mod transcript;
 pub mod transport;

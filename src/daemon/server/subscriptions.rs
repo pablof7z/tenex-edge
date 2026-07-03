@@ -44,12 +44,31 @@ pub(in crate::daemon::server) async fn sync_subscriptions(state: &Arc<DaemonStat
     // Compute the plan under the lock, then DROP the guard before any await: the
     // reconciler is a plain Mutex (never held across `.await`), the transport does
     // the network I/O.
-    let effects = {
+    let (effects, result) = {
         let mut rec = state.subs.lock().unwrap();
         rec.sync(&snapshot)
             .map_err(|e| anyhow::anyhow!("subscription reconcile failed: {e:?}"))?
-            .0
     };
+    // Slice 8: record the drive-seam receipt (host-side, off the graph path) only
+    // when the sync actually opened/closed a REQ — a no-op recompute leaves no noise.
+    if !effects.is_empty() {
+        let row = crate::state::receipts::NewReceipt {
+            surface: "subscriptions".into(),
+            transaction_id: result.transaction_id.get() as i64,
+            revision: result.revision.get() as i64,
+            changed_summary: crate::instrument::changed_summary_json(
+                &result.changed_inputs,
+                &result.changed_derived_nodes,
+                &result.changed_collection_nodes,
+                None,
+                None,
+            ),
+            commands: crate::instrument::commands_json(result.resource_plan.commands()),
+            artifact_ref: None,
+            created_at: crate::instrument::now_millis(),
+        };
+        state.with_store(|s| crate::instrument::record_receipt(s, row));
+    }
     apply_effects(state, effects).await
 }
 

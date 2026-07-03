@@ -124,3 +124,18 @@ pub(in crate::daemon::server) fn rpc_debug_outbox(
 pub(in crate::daemon::server) fn default_debug_outbox_limit() -> u64 {
     50
 }
+
+/// `explain <handle>`: resolve a `scheme:value` handle against the receipts +
+/// llm_calls ledgers. The store is daemon-owned, so the CLI reaches the pure
+/// [`crate::explain`] engine through this one RPC (like `who`).
+pub(in crate::daemon::server) fn rpc_explain(
+    state: &Arc<DaemonState>,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value> {
+    let handle = params
+        .get("handle")
+        .and_then(|h| h.as_str())
+        .context("explain: missing `handle` param")?;
+    let handle = crate::explain::parse_handle(handle)?;
+    state.with_store(|s| crate::explain::explain(s, &handle))
+}
