@@ -26,6 +26,7 @@ mod harness;
 mod hooks;
 mod install;
 mod messaging;
+mod probe;
 mod statusline;
 mod tmux_cli;
 mod turn;
@@ -119,6 +120,7 @@ pub async fn run(cli: Cli) -> Result<()> {
         Cmd::Launch(args) => tmux_cli::launch(args).await,
         Cmd::Stop => stop_daemon(),
         Cmd::Debug { action } => debug::debug(action).await,
+        Cmd::Probe(args) => probe::probe(args).await,
         Cmd::Install(args) => install::install(args).await,
         Cmd::Daemon => crate::daemon::server::run().await,
     }

@@ -12,6 +12,7 @@
 //! PUBLISHES via the durable outbox (single executor). No I/O happens here.
 
 mod model;
+pub(crate) mod probe;
 #[cfg(test)]
 mod tests;
 
@@ -24,6 +25,7 @@ use trellis_core::{
 };
 
 use crate::domain::{AgentRef, Status};
+use crate::reconcile::labels::NodeLabels;
 use crate::util::SessionId;
 
 use model::{create_session, opts, status_key, SessionNodes, StaticInfo};
@@ -81,6 +83,8 @@ pub struct StatusReconciler {
     sessions: BTreeMap<String, SessionNodes>,
     /// Last published command per session, so a payload-free `Close` → expiring publish.
     last: BTreeMap<String, StatusCommand>,
+    /// Stable node-id → semantic-label registry, populated at node creation (§4.2).
+    labels: NodeLabels,
 }
 
 impl StatusReconciler {
@@ -93,7 +97,18 @@ impl StatusReconciler {
             refresh_secs: refresh_secs.max(1),
             sessions: BTreeMap::new(),
             last: BTreeMap::new(),
+            labels: NodeLabels::new(),
         }
+    }
+
+    /// The stable node-label registry for this surface (§4.2).
+    pub fn labels(&self) -> &NodeLabels {
+        &self.labels
+    }
+
+    /// Total graph node count (for the commit ledger histogram).
+    pub fn graph_node_count(&self) -> usize {
+        self.graph.nodes().count()
     }
 
     /// Daemon constructor: TTL from a `Duration`, cadence from the domain heartbeat.
@@ -127,6 +142,7 @@ impl StatusReconciler {
         };
         let (nodes, result) = create_session(
             &mut self.graph,
+            &mut self.labels,
             id,
             info,
             channels,

@@ -25,6 +25,7 @@
 //! plus the raw [`TransactionResult`] for instrumentation. No I/O happens here.
 
 mod keys;
+pub(crate) mod probe;
 #[cfg(test)]
 mod tests;
 
@@ -36,6 +37,7 @@ use trellis_core::{
     ResourceCommandKind, ResourceKey, ScopeId, TransactionResult,
 };
 
+use crate::reconcile::labels::NodeLabels;
 use keys::{id_from_key, plan_subs, sub_key, Space, SubCommand, SubKey};
 
 /// Host effect the daemon applies via the transport. Open/Replace both map to a
@@ -84,6 +86,8 @@ pub struct SubscriptionReconciler {
     addressed_pubkeys: InputNode<BTreeSet<String>>,
     archived_channels: InputNode<BTreeSet<String>>,
     sessions: BTreeMap<String, SessionNodes>,
+    /// Stable node-id → semantic-label registry, populated at node creation (§4.2).
+    labels: NodeLabels,
 }
 
 impl SubscriptionReconciler {
@@ -92,15 +96,25 @@ impl SubscriptionReconciler {
     /// collection, and the planner that opens/closes each entity's REQ.
     pub fn new() -> GraphResult<Self> {
         let mut graph = Graph::<SubCommand>::new_with_command_type();
+        let mut labels = NodeLabels::new();
         let mut tx = graph.begin_transaction()?;
 
         let daemon_scope = tx.create_scope("daemon-subs")?;
 
         let daemon_channels = tx.input::<BTreeSet<String>>("daemon-channels")?;
+        labels.record(daemon_channels.id(), "subscriptions/daemon/channels");
         tx.set_input(daemon_channels, BTreeSet::new())?;
         let addressed_pubkeys = tx.input::<BTreeSet<String>>("addressed-pubkeys")?;
+        labels.record(
+            addressed_pubkeys.id(),
+            "subscriptions/daemon/addressed_pubkeys",
+        );
         tx.set_input(addressed_pubkeys, BTreeSet::new())?;
         let archived_channels = tx.input::<BTreeSet<String>>("archived-channels")?;
+        labels.record(
+            archived_channels.id(),
+            "subscriptions/daemon/archived_channels",
+        );
         tx.set_input(archived_channels, BTreeSet::new())?;
 
         // Derived: the daemon's live channels are its candidates minus archived.
@@ -134,6 +148,8 @@ impl SubscriptionReconciler {
                 Ok(out)
             },
         )?;
+        labels.record(live_channels.id(), "subscriptions/daemon/live_channels");
+        labels.record(daemon_subs.id(), "subscriptions/daemon/subs");
         tx.set_resource_planner(daemon_subs, daemon_scope, plan_subs)?;
 
         tx.commit()?;
@@ -146,7 +162,18 @@ impl SubscriptionReconciler {
             addressed_pubkeys,
             archived_channels,
             sessions: BTreeMap::new(),
+            labels,
         })
+    }
+
+    /// The stable node-label registry for this surface (§4.2).
+    pub fn labels(&self) -> &NodeLabels {
+        &self.labels
+    }
+
+    /// The current total graph node count (for the commit ledger's histogram).
+    pub fn graph_node_count(&self) -> usize {
+        self.graph.nodes().count()
     }
 
     /// Full recompute from the current canonical coverage. Sets the daemon inputs,
@@ -188,6 +215,10 @@ impl SubscriptionReconciler {
                 let scope = tx.create_scope(format!("session-{id}"))?;
                 let channels_input =
                     tx.input::<BTreeSet<String>>(format!("session-{id}-channels"))?;
+                self.labels.record(
+                    channels_input.id(),
+                    format!("subscriptions/session/{id}/channels"),
+                );
                 tx.set_input(channels_input, live)?;
                 let coll = tx.set_collection::<SubKey>(
                     format!("session-{id}-subs"),
@@ -201,6 +232,8 @@ impl SubscriptionReconciler {
                         Ok(out)
                     },
                 )?;
+                self.labels
+                    .record(coll.id(), format!("subscriptions/session/{id}/subs"));
                 tx.set_resource_planner(coll, scope, plan_subs)?;
                 self.sessions.insert(
                     id.clone(),

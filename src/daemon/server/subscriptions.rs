@@ -44,11 +44,33 @@ pub(in crate::daemon::server) async fn sync_subscriptions(state: &Arc<DaemonStat
     // Compute the plan under the lock, then DROP the guard before any await: the
     // reconciler is a plain Mutex (never held across `.await`), the transport does
     // the network I/O.
-    let (effects, result) = {
+    let start = std::time::Instant::now();
+    let (effects, result, facts) = {
         let mut rec = state.subs.lock().unwrap();
-        rec.sync(&snapshot)
-            .map_err(|e| anyhow::anyhow!("subscription reconcile failed: {e:?}"))?
+        let (effects, result) = rec
+            .sync(&snapshot)
+            .map_err(|e| anyhow::anyhow!("subscription reconcile failed: {e:?}"))?;
+        // Flatten EVERY commit (incl. no-op recomputes) through the surface labels.
+        let facts = crate::reconcile::CommitFacts::from_result(
+            rec.labels(),
+            &result,
+            rec.graph_node_count(),
+        );
+        (effects, result, facts)
     };
+    let duration_us = start.elapsed().as_micros() as i64;
+    // §4.1: record the all-commit ledger row for EVERY sync, incl. no-ops (which
+    // record no receipt) — the suppression evidence `probe stats` reports.
+    state.with_store(|s| {
+        crate::instrument::record_commit(
+            s,
+            "subscriptions",
+            "sync",
+            &facts,
+            duration_us,
+            crate::instrument::now_millis(),
+        )
+    });
     // Slice 8: record the drive-seam receipt (host-side, off the graph path) only
     // when the sync actually opened/closed a REQ — a no-op recompute leaves no noise.
     if !effects.is_empty() {

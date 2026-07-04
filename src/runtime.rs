@@ -203,20 +203,28 @@ pub async fn run_session_in_daemon(
         let now = now_secs();
         // Seed the session in the ONE status authority (opening publish).
         let chans = channel_set(&p, &store, &session);
-        drive(&status, &provider, &signing_keys, &store, None, |r| {
-            r.on_session_started(
-                &p.session_id,
-                &p.host,
-                &aref.slug,
-                &aref.pubkey,
-                &p.rel_cwd,
-                chans,
-                session.working,
-                &session.title,
-                &session.activity,
-                now,
-            )
-        })
+        drive(
+            &status,
+            &provider,
+            &signing_keys,
+            &store,
+            "session_started",
+            None,
+            |r| {
+                r.on_session_started(
+                    &p.session_id,
+                    &p.host,
+                    &aref.slug,
+                    &aref.pubkey,
+                    &p.rel_cwd,
+                    chans,
+                    session.working,
+                    &session.title,
+                    &session.activity,
+                    now,
+                )
+            },
+        )
         .await;
     }
 
@@ -236,7 +244,7 @@ pub async fn run_session_in_daemon(
                 if let Err(e) = st!(|s: &Store| s.touch_session(&p.session_id, now)) {
                     tracing::error!(session = %p.session_id, error = %e, "touch_session failed — liveness not re-armed this beat");
                 }
-                drive(&status, &provider, &signing_keys, &store, None, |r| r.on_tick(&p.session_id, now)).await;
+                drive(&status, &provider, &signing_keys, &store, "tick", None, |r| r.on_tick(&p.session_id, now)).await;
             }
             _ = obs.tick() => {
                 let now = now_secs();
@@ -271,7 +279,7 @@ pub async fn run_session_in_daemon(
 
                         // The LLM output enters as a canonical input; the graph
                         // republishes iff title/activity changed (title → 30315 only).
-                        drive(&status, &provider, &signing_keys, &store, window_hash.as_deref(), |r| {
+                        drive(&status, &provider, &signing_keys, &store, "distill", window_hash.as_deref(), |r| {
                             r.on_distill(&p.session_id, &labels.title, &labels.activity, now)
                         })
                         .await;
@@ -291,13 +299,13 @@ pub async fn run_session_in_daemon(
                 // Feed observed turn state + channel set into the ONE authority; it
                 // dedups (publishes only on a real busy/idle flip or channel change).
                 if working != prev_working {
-                    drive(&status, &provider, &signing_keys, &store, None, |r| {
+                    drive(&status, &provider, &signing_keys, &store, "turn_edge", None, |r| {
                         if working { r.on_turn_start(&p.session_id, now) } else { r.on_turn_end(&p.session_id, now) }
                     })
                     .await;
                 }
                 if let Some(chans) = session.as_ref().map(|s| channel_set(&p, &store, s)) {
-                    drive(&status, &provider, &signing_keys, &store, None, |r| {
+                    drive(&status, &provider, &signing_keys, &store, "channels_changed", None, |r| {
                         r.on_channels_changed(&p.session_id, chans, now)
                     })
                     .await;
@@ -372,9 +380,15 @@ pub async fn run_session_in_daemon(
     // FINAL, immediately-expiring kind:30315 (activity cleared, expiration = now)
     // so peers drop the session at once instead of waiting out the TTL.
     let end_now = now_secs();
-    drive(&status, &provider, &signing_keys, &store, None, |r| {
-        r.on_session_ended(&p.session_id, end_now)
-    })
+    drive(
+        &status,
+        &provider,
+        &signing_keys,
+        &store,
+        "session_ended",
+        None,
+        |r| r.on_session_ended(&p.session_id, end_now),
+    )
     .await;
 
     // Clean exit: mark the session dead (alive=0, working=0). The TITLE is retained

@@ -246,6 +246,26 @@ CREATE TABLE IF NOT EXISTS receipts (
 );
 CREATE INDEX IF NOT EXISTS idx_receipts_surface ON receipts(surface, created_at);
 CREATE INDEX IF NOT EXISTS idx_receipts_artifact_ref ON receipts(artifact_ref);
+
+-- ── all-commit ledger: trellis_commits (§4.1; additive, every txn incl no-ops) ─
+CREATE TABLE IF NOT EXISTS trellis_commits (
+    id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+    surface                  TEXT NOT NULL,
+    transaction_id           INTEGER NOT NULL,
+    revision                 INTEGER NOT NULL,
+    trigger_kind             TEXT NOT NULL,
+    changed_inputs_json      TEXT NOT NULL DEFAULT '[]',
+    changed_derived_json     TEXT NOT NULL DEFAULT '[]',
+    changed_collections_json TEXT NOT NULL DEFAULT '[]',
+    command_count            INTEGER NOT NULL DEFAULT 0,
+    output_count             INTEGER NOT NULL DEFAULT 0,
+    noop                     INTEGER NOT NULL DEFAULT 0,
+    duration_us              INTEGER NOT NULL DEFAULT 0,
+    graph_nodes              INTEGER NOT NULL DEFAULT 0,
+    created_at               INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_trellis_commits_surface
+    ON trellis_commits(surface, created_at);
 "#;
 
 pub(super) fn initialize_file(conn: &Connection, path: &Path) -> Result<()> {

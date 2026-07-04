@@ -294,6 +294,7 @@ pub use retention::{
 };
 mod sessions;
 mod status;
+pub mod trellis_commits;
 
 #[cfg(test)]
 #[path = "state/tests.rs"]
