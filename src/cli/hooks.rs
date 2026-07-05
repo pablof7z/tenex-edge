@@ -383,7 +383,12 @@ async fn hook_dispatch(
         }
         "post-tool-use" => {
             let explicit = if sid.is_empty() { None } else { Some(sid) };
-            let result = turn_check(explicit.clone(), emit)?;
+            let explicit_for_call = explicit.clone();
+            // turn_check/turn_end go through the sync `daemon::blocking` client,
+            // not the async hook path, so they need their own bounded wrapper to
+            // get the same "hooks never hang" guarantee.
+            let result =
+                super::run_hook_blocking(move || turn_check(explicit_for_call, emit)).await?;
             call_log.context_audit(
                 host.name,
                 &hook_type,
@@ -394,7 +399,7 @@ async fn hook_dispatch(
         }
         "stop" => {
             if !sid.is_empty() {
-                turn_end(sid)?;
+                super::run_hook_blocking(move || turn_end(sid)).await?;
             }
         }
         other => {

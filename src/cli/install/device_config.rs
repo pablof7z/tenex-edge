@@ -26,7 +26,9 @@ pub(super) fn ensure_device_config() -> Result<()> {
         "No device config found at".bold(),
         path.display().to_string().cyan()
     );
-    println!("tenex-edge's daemon needs this file to start (whitelisted operator pubkeys, relays).");
+    println!(
+        "tenex-edge's daemon needs this file to start (whitelisted operator pubkeys, relays)."
+    );
 
     if !(io::stdin().is_terminal() && io::stdout().is_terminal()) {
         println!(

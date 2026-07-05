@@ -168,11 +168,12 @@ pub(super) async fn daemon_call_async(
     client.call(method, params).await
 }
 
-/// Hard cap on how long a hook invocation will wait to connect to (or spawn)
-/// the daemon. Hooks fire on every turn of an unrelated harness session, so
-/// they must never hang for anywhere near `DAEMON_STARTUP_TIMEOUT` — this
-/// bounds the wait independent of whatever the daemon itself is doing.
-const HOOK_DAEMON_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+/// Hard cap on how long a hook invocation will wait on the daemon — connect
+/// (or spawn) AND the RPC response together. Hooks fire on every turn of an
+/// unrelated harness session, so they must never hang for anywhere near
+/// `DAEMON_STARTUP_TIMEOUT` — this bounds the whole round trip independent of
+/// whatever the daemon itself is doing.
+const HOOK_DAEMON_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Hook-path daemon call: returns `Ok(Null)` when the daemon is inhibited
 /// (after `tenex-edge stop`) so hooks fail open rather than spawning it.
@@ -183,13 +184,12 @@ pub(super) async fn daemon_call_hook_async(
     if crate::daemon::is_inhibited() {
         return Ok(serde_json::Value::Null);
     }
-    let mut client = tokio::time::timeout(
-        HOOK_DAEMON_CONNECT_TIMEOUT,
-        crate::daemon::client::Client::connect_or_spawn(),
-    )
+    tokio::time::timeout(HOOK_DAEMON_TIMEOUT, async {
+        let mut client = crate::daemon::client::Client::connect_or_spawn().await?;
+        client.call(method, params).await
+    })
     .await
-    .context("hook: timed out connecting to daemon")??;
-    client.call(method, params).await
+    .context("hook: timed out talking to daemon")?
 }
 
 pub(super) async fn daemon_call_hook_async_with_items<F>(
@@ -203,13 +203,27 @@ where
     if crate::daemon::is_inhibited() {
         return Ok(serde_json::Value::Null);
     }
-    let mut client = tokio::time::timeout(
-        HOOK_DAEMON_CONNECT_TIMEOUT,
-        crate::daemon::client::Client::connect_or_spawn(),
-    )
+    tokio::time::timeout(HOOK_DAEMON_TIMEOUT, async {
+        let mut client = crate::daemon::client::Client::connect_or_spawn().await?;
+        client.call_with_items(method, params, on_item).await
+    })
     .await
-    .context("hook: timed out connecting to daemon")??;
-    client.call_with_items(method, params, on_item).await
+    .context("hook: timed out talking to daemon")?
+}
+
+/// Runs a blocking hook-path daemon call (the sync `daemon::blocking` client
+/// used by `turn_check`/`turn_end`) on a blocking thread, under the same
+/// [`HOOK_DAEMON_TIMEOUT`] as the async hook path — hooks must never hang
+/// regardless of which client a given RPC happens to use.
+pub(super) async fn run_hook_blocking<F, T>(f: F) -> Result<T>
+where
+    F: FnOnce() -> Result<T> + Send + 'static,
+    T: Send + 'static,
+{
+    tokio::time::timeout(HOOK_DAEMON_TIMEOUT, tokio::task::spawn_blocking(f))
+        .await
+        .context("hook: timed out talking to daemon")?
+        .context("hook: blocking daemon call panicked")?
 }
 
 #[cfg(test)]

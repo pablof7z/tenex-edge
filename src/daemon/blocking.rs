@@ -283,10 +283,18 @@ fn spawn_if_absent() -> Result<()> {
         }
         if let Some(child) = spawned_child.as_mut() {
             if let Ok(Some(status)) = child.try_wait() {
-                bail!(
-                    "daemon exited immediately ({status}); last daemon.log lines:\n{}",
-                    super::tail_daemon_log()
-                );
+                if status.success() {
+                    // Lost the startup-lock race: `lifecycle::run` exits `Ok(())`
+                    // when another daemon already holds the lock, so a clean exit
+                    // here means a concurrent spawner's daemon won, not a crash.
+                    // Stop watching this child and keep polling for the winner.
+                    spawned_child = None;
+                } else {
+                    bail!(
+                        "daemon exited immediately ({status}); last daemon.log lines:\n{}",
+                        super::tail_daemon_log()
+                    );
+                }
             }
         }
         if !noted_ready {
