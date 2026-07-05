@@ -12,10 +12,10 @@ fn frontier_modes_match_epic_baseline() {
     assert_eq!(modes["subscriptions"], "authoritative");
     assert_eq!(modes["hook_context"], "authoritative");
     assert_eq!(modes["turn_lifecycle"], "authoritative");
-    assert_eq!(modes["cursor"], "imperative");
+    assert_eq!(modes["cursor"], "authoritative");
     assert_eq!(modes["session_start"], "imperative");
     assert_eq!(modes["outbox"], "imperative");
-    assert_eq!(host_seam_coverage_percent(), 57);
+    assert_eq!(host_seam_coverage_percent(), 71);
 }
 
 #[test]
@@ -71,6 +71,10 @@ fn authoritative_effect_executors_require_preview_evidence() {
     let turn_lifecycle = source("src/daemon/server/turn_lifecycle.rs");
     assert!(turn_lifecycle.contains("preview_turn_started"));
     assert!(turn_lifecycle.contains("command_plans_match"));
+
+    let cursor = source("src/daemon/server/cursor.rs");
+    assert!(cursor.contains("preview_request"));
+    assert!(cursor.contains("command_plans_match"));
 }
 
 #[test]
@@ -98,6 +102,19 @@ fn no_direct_set_working_outside_declared_lifecycle_seam() {
 #[test]
 fn no_direct_set_session_transcript_outside_declared_lifecycle_seam() {
     assert_only_allowed(scan(["set_session_transcript("]), ["src/state/sessions.rs"]);
+}
+
+#[test]
+fn no_direct_cursor_mutation_outside_declared_cursor_seam() {
+    assert!(scan(["set_seen_cursor("]).is_empty());
+    assert!(scan(["try_advance_seen_cursor("]).is_empty());
+    assert_only_allowed(
+        scan(["apply_cursor_projection("]),
+        [
+            "src/daemon/server/cursor.rs",
+            "src/state/turn_projection.rs",
+        ],
+    );
 }
 
 fn assert_only_allowed<const N: usize>(hits: BTreeSet<String>, allowed: [&str; N]) {

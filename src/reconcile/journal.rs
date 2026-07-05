@@ -127,6 +127,20 @@ pub enum InputFact {
     /// Transitional replay fact for the current hook-context render surface.
     HookContextRender(HookContextRenderFact),
 
+    /// A fabric render asked whether it should advance the session cursor.
+    ///
+    /// Replaces the daemon's independent `seen_cursor` compare-and-swap decision.
+    TurnCheckRequested {
+        /// Session whose hook requested a check.
+        session_id: String,
+        /// The cursor observed on the session row before asking Trellis.
+        observed_cursor: Timestamp,
+        /// Whether this render is allowed to advance the cursor.
+        working: bool,
+        /// Current host time.
+        at: Timestamp,
+    },
+
     /// A new agent session became known to the daemon.
     ///
     /// Replaces `state::sessions::Store::register_session` /
@@ -262,6 +276,7 @@ impl InputFact {
             Self::StatusDrive(drive) => drive.at(),
             Self::SubscriptionSync { at, .. } => *at,
             Self::HookContextRender(fact) => fact.now.max(0) as Timestamp,
+            Self::TurnCheckRequested { at, .. } => *at,
             Self::SessionStarted { at, .. }
             | Self::TurnStarted { at, .. }
             | Self::TranscriptWindowCaptured { at, .. }

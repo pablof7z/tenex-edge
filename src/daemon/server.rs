@@ -71,14 +71,13 @@ pub struct DaemonState {
     cfg: Config,
     host: String,
     owners: Vec<String>,
-    /// Hosted local agent pubkeys (the "me set" for self-skip + routing).
     hosted: Mutex<HashMap<String, HostedAgent>>,
     sessions: Mutex<HashMap<String, SessionHandle>>,
     subscribed_projects: Mutex<Vec<String>>,
-    /// Refcounted per-entity relay-subscription reconciler.
     subs: Mutex<crate::reconcile::SubscriptionReconciler>,
     status: Arc<Mutex<crate::reconcile::StatusReconciler>>,
     turn_lifecycle: Mutex<crate::reconcile::TurnLifecycleReconciler>,
+    cursor: Mutex<crate::reconcile::CursorReconciler>,
     hook_contexts: crate::turn_context::HookContextGraphs,
     /// Structured tail event broadcast replacing the old DomainEvent bus.
     tail_tx: tokio::sync::broadcast::Sender<TailEvent>,
@@ -113,8 +112,8 @@ pub struct DaemonState {
     session_signers: Mutex<session_signer::SignerReservations>,
     /// Hex pubkey of this backend's identity (pubkey of `tenexPrivateKey`;
     /// no `userNsec` fallback). Added as an admin to every group we create
-    /// and the address the subgroup orchestration listener matches `add` tags
-    /// against. `None` only when no `tenexPrivateKey` is configured.
+    /// and the address matched by subgroup orchestration `add` tags.
+    /// `None` only when no `tenexPrivateKey` is configured.
     backend_pubkey: Option<String>,
 }
 
@@ -207,6 +206,7 @@ mod channels_rpc;
 mod chat_read_tail;
 mod chat_target;
 mod chat_write;
+mod cursor;
 mod diagnostics;
 mod engine_lifecycle;
 mod lifecycle;

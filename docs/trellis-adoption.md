@@ -93,8 +93,8 @@ render regression fails the build.
 
 `rpc_session_start` (interleaved DB writes, relay round-trips, spawns, tmux
 calls, inline rollback) was intentionally left imperative — Trellis earns its
-keep on the three derived-resource surfaces without that surgery. The
-cross-process PostToolUse cursor CAS is likewise unchanged (the within-graph
-cursor input makes the shape decision explicit; eliminating the cross-process
-race would move cursor advancement into the daemon graph). Both are noted
-follow-ups.
+keep on the derived-resource surfaces without that surgery. Cursor advancement
+is graph-owned: render requests enter as `InputFact::TurnCheckRequested`, the
+daemon-held cursor graph derives `HookFrame` or `NoFrame`, and the host only
+applies the resulting `sessions.seen_cursor` projection. Session start and the
+outbox drainer remain the explicit follow-ups.

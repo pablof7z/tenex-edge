@@ -67,6 +67,29 @@ async fn simulate_subscriptions_accepts_input_fact_json_without_mutating() {
 }
 
 #[tokio::test]
+async fn simulate_cursor_accepts_input_fact_json_without_mutating() {
+    let state = DaemonState::new_for_test().await;
+    let fact = InputFact::TurnCheckRequested {
+        session_id: "s1".into(),
+        observed_cursor: 10,
+        working: true,
+        at: 20,
+    };
+
+    let out = simulate_value(&state, &json!({ "verb": "simulate", "fact": fact })).unwrap();
+
+    assert_eq!(out["surface"], "cursor");
+    assert_eq!(out["would_effect"], true);
+    assert_eq!(out["commands"][0]["op"], "Open");
+    assert!(out["changed"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|v| v == "cursor/s1/observed_cursor"));
+    assert_eq!(out["revision_before"], out["revision_after"]);
+}
+
+#[tokio::test]
 async fn simulate_new_status_session_labels_preview_only_nodes() {
     let state = DaemonState::new_for_test().await;
     let fact = InputFact::StatusDrive(StatusDrive::SessionStarted(StatusSessionStartedArgs {

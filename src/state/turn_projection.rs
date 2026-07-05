@@ -30,4 +30,17 @@ impl Store {
         }
         Ok(())
     }
+
+    /// Apply the Trellis-derived cursor transition. The cursor graph decides
+    /// whether a render request advances; this method only writes the result.
+    pub fn apply_cursor_projection(&self, id: &str, seen_cursor: u64) -> Result<()> {
+        let Some(canonical) = self.resolve_canonical_id(id)? else {
+            return Ok(());
+        };
+        self.conn.execute(
+            "UPDATE sessions SET seen_cursor=?2 WHERE session_id=?1",
+            params![canonical, seen_cursor],
+        )?;
+        Ok(())
+    }
 }

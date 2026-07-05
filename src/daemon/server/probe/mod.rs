@@ -8,7 +8,7 @@
 //! * `seams`    — authority-frontier registrations + host-seam coverage (§4.5).
 //! * `replay`   — replay a stored input capsule and optionally export a trace (§4.4).
 //! * `simulate` — dry-run a fact via `tx.preview()`; the keystone (§3).
-//! * `why`      — live causality for a `sub:`/`status:` handle (§4.3).
+//! * `why`      — live causality for a surface handle (§4.3).
 //! * `state`    — live values per surface: owners/refcounts, status inputs (§4.3).
 
 use super::DaemonState;
@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 mod acid;
 mod artifact;
+mod cursor_artifact;
 mod diff;
 mod oracle;
 mod replay;
@@ -31,7 +32,13 @@ pub(in crate::daemon::server) use oracle::oracle_report;
 
 /// The reconciler surfaces the ledger records; `stats` with no `--surface`
 /// reports all of them.
-pub(super) const SURFACES: [&str; 3] = ["status", "subscriptions", "hook_context"];
+pub(super) const SURFACES: [&str; 5] = [
+    "status",
+    "subscriptions",
+    "hook_context",
+    "turn_lifecycle",
+    "cursor",
+];
 
 /// Route a `probe` RPC to its verb. `params` carries `{"verb": <str>, ...}`.
 pub(in crate::daemon::server) fn rpc_probe(

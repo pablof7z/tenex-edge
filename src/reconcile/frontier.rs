@@ -124,11 +124,11 @@ static REGISTRATIONS: [SurfaceRegistration; 7] = [
     },
     SurfaceRegistration {
         name: "cursor",
-        mode: SurfaceMode::Imperative,
-        facts: &["post-tool cursor observation"],
-        trellis_inputs: &["InputFact::CursorAdvanced"],
-        host_effects: &["sessions.seen_cursor"],
-        bypass_risks: &["cursor CAS"],
+        mode: SurfaceMode::Authoritative,
+        facts: &["render cursor observation"],
+        trellis_inputs: &["InputFact::TurnCheckRequested"],
+        host_effects: &["cursor executor applies sessions.seen_cursor"],
+        bypass_risks: &[],
     },
     SurfaceRegistration {
         name: "session_start",

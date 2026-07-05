@@ -65,6 +65,7 @@ pub fn replay_script(
         ReplaySurface::TurnLifecycle => {
             super::turn_lifecycle::replay::replay_script(script, export_trace)
         }
+        ReplaySurface::Cursor => super::cursor::replay::replay_script(script, export_trace),
     })
 }
 
@@ -74,6 +75,7 @@ enum ReplaySurface {
     Subscriptions,
     HookContext,
     TurnLifecycle,
+    Cursor,
 }
 
 fn script_surface(script: &DataTransactionScript<InputFact>) -> Result<ReplaySurface> {
@@ -87,6 +89,7 @@ fn script_surface(script: &DataTransactionScript<InputFact>) -> Result<ReplaySur
                 InputFact::TurnStarted { .. }
                 | InputFact::TurnEnded { .. }
                 | InputFact::TranscriptWindowCaptured { .. } => ReplaySurface::TurnLifecycle,
+                InputFact::TurnCheckRequested { .. } => ReplaySurface::Cursor,
                 other => anyhow::bail!(
                     "replay capsule operation is not a supported surface drive fact: {other:?}"
                 ),
@@ -177,6 +180,34 @@ mod tests {
 
         let report = replay_script(&script, false).unwrap();
         assert_eq!(report.surface, "turn_lifecycle");
+        assert_eq!(report.steps, 2);
+        assert_eq!(report.resource_commands, 2);
+    }
+
+    #[test]
+    fn cursor_replay_accepts_canonical_turn_check_facts() {
+        let mut script = DataTransactionScript::new();
+        script
+            .step("first")
+            .operation(InputFact::TurnCheckRequested {
+                session_id: "s1".into(),
+                observed_cursor: 10,
+                working: true,
+                at: 20,
+            })
+            .commit();
+        script
+            .step("stale")
+            .operation(InputFact::TurnCheckRequested {
+                session_id: "s1".into(),
+                observed_cursor: 10,
+                working: true,
+                at: 21,
+            })
+            .commit();
+
+        let report = replay_script(&script, false).unwrap();
+        assert_eq!(report.surface, "cursor");
         assert_eq!(report.steps, 2);
         assert_eq!(report.resource_commands, 2);
     }

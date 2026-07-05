@@ -118,3 +118,43 @@ async fn turn_acid_verifies_turn_started_cause() {
     assert_eq!(v["necessary"], true);
     assert_eq!(v["unrelated_stable"], true);
 }
+
+#[tokio::test]
+async fn cursor_acid_verifies_observed_cursor_cause() {
+    let state = DaemonState::new_for_test().await;
+    {
+        let mut r = state.cursor.lock().unwrap();
+        r.request(
+            crate::reconcile::CursorSeed {
+                session_id: "s1".into(),
+                seen_cursor: 10,
+            },
+            InputFact::TurnCheckRequested {
+                session_id: "s1".into(),
+                observed_cursor: 10,
+                working: true,
+                at: 20,
+            },
+        )
+        .unwrap();
+    }
+    let fact = InputFact::TurnCheckRequested {
+        session_id: "s1".into(),
+        observed_cursor: 20,
+        working: true,
+        at: 30,
+    };
+    let v = acid_value(
+        &state,
+        &json!({
+            "verb": "acid",
+            "handle": "cursor:s1",
+            "cause": "cursor/s1/observed_cursor",
+            "fact": fact,
+        }),
+    )
+    .unwrap();
+    assert_eq!(v["ok"], true);
+    assert_eq!(v["necessary"], true);
+    assert_eq!(v["unrelated_stable"], true);
+}

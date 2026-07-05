@@ -1,8 +1,8 @@
 //! `probe state <surface>` (§4.3): live values for a surface, under its lock.
 //! `subscriptions` lists each live REQ with its owner scopes + refcount;
 //! `status` lists each session's currently-published content, `turn_lifecycle`
-//! lists local turn projections, and `hook_context` lists daemon-held per-session
-//! fabric snapshot graphs.
+//! lists local turn projections, `cursor` lists high-water decisions, and
+//! `hook_context` lists daemon-held per-session fabric snapshot graphs.
 
 use super::{required_str, DaemonState};
 use anyhow::Result;
@@ -62,6 +62,22 @@ pub(super) fn state_value(state: &Arc<DaemonState>, params: &Value) -> Result<Va
                 })
                 .collect();
             Ok(json!({ "verb": "state", "surface": "turn_lifecycle", "rows": rows }))
+        }
+        "cursor" => {
+            let r = state.cursor.lock().expect("cursor mutex poisoned");
+            let rows: Vec<Value> = r
+                .state_rows()
+                .into_iter()
+                .map(|row| {
+                    json!({
+                        "session": row.session,
+                        "cursor": row.cursor,
+                        "last_frame": row.last_frame,
+                        "delta_since": row.delta_since,
+                    })
+                })
+                .collect();
+            Ok(json!({ "verb": "state", "surface": "cursor", "rows": rows }))
         }
         "hook_context" => hook_context_state(state, params),
         other => Err(anyhow::anyhow!("probe state: unknown surface `{other}`")),
