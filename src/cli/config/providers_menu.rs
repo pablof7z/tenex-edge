@@ -1,9 +1,4 @@
-//! Interactive "Providers" screen: add/edit/remove entries in
-//! `providers.json` (OpenRouter's API key, Ollama's base URL, ...).
-//!
-//! The provider list and its actions are one flow: picking a configured
-//! provider drops straight into Edit/Test/Remove for it, rather than making
-//! the user pick "Edit" first and then which provider.
+//! Interactive Providers screen for add/edit/remove in `providers.json`.
 
 use super::catalog;
 use super::store::{LlmsFile, ProvidersFile};
@@ -96,7 +91,9 @@ async fn add(existing: &[(String, String)]) -> Result<()> {
     let key = if choice == OTHER {
         let Some(name) = prompted(
             Text::new("Provider name")
-                .with_help_message("lowercase slug, becomes the key in providers.json, e.g. \"my-proxy\"")
+                .with_help_message(
+                    "lowercase slug, becomes the key in providers.json, e.g. \"my-proxy\"",
+                )
                 .prompt(),
         )?
         else {
@@ -116,7 +113,10 @@ async fn add(existing: &[(String, String)]) -> Result<()> {
         return Ok(());
     }
     if existing.iter().any(|(name, _)| name == &key) {
-        println!("  {}", format!("\"{key}\" already exists — pick it from the list to edit it").yellow());
+        println!(
+            "  {}",
+            format!("\"{key}\" already exists — pick it from the list to edit it").yellow()
+        );
         return Ok(());
     }
 
@@ -211,7 +211,9 @@ async fn test_connection(file: &ProvidersFile, key: &str) {
                 return;
             }
         },
-        "openrouter" => catalog::openrouter_models(&file.get("openrouter").unwrap_or_default()).await,
+        "openrouter" => {
+            catalog::openrouter_models(&file.get("openrouter").unwrap_or_default()).await
+        }
         _ => return,
     };
 
@@ -262,10 +264,7 @@ fn remove_one(key: &str) -> Result<()> {
     Ok(())
 }
 
-/// Prompt for a provider's value: a plain (visible) URL for Ollama-style
-/// providers, or a masked secret otherwise. `current` prefills the URL case
-/// (URLs aren't secrets — editing beats retyping) and is shown as a masked
-/// hint above the prompt for the secret case, never used to prefill it.
+/// Prompt for a visible URL or masked secret.
 fn prompt_value(key: &str, is_url: bool, current: Option<&str>) -> Result<Option<String>> {
     if is_url {
         let initial = current

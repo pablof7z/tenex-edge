@@ -7,22 +7,8 @@
 //! ONCE and closed when the LAST owner stops needing it; it is never mutated, so
 //! the relay never replays a shrunk aggregate. That kills the unbounded-leak bug
 //! AND makes teardown correct.
-//!
-//! ## Ownership / refcounting
-//!
-//! Trellis scopes carry the refcount. A daemon-level scope owns durable coverage
-//! (explicitly subscribed projects, channels any local/ordinal pubkey manages or
-//! is a member of, and every addressed `#p`). Each alive session is ALSO a
-//! scope, owning the channels it has joined. A channel key is opened by every
-//! scope that needs it and the resource reconciler emits a real Open only on the
-//! first owner and a real Close only when the last owner drops it — so a shared
-//! channel is never closed while another session still holds it. When a session
-//! ends, closing its scope tears down exactly the resources it solely owned.
-//!
-//! The graph owns decisions; the host owns effects. [`sync`](SubscriptionReconciler::sync)
-//! takes a plain [`CoverageSnapshot`] (built by the daemon from the store) and
-//! returns [`SubEffect`]s — Open/Close/Replace over semantic subscription ids —
-//! plus the raw [`TransactionResult`] for instrumentation. No I/O happens here.
+//! Trellis scopes carry the refcount; the host applies only the returned
+//! Open/Close/Replace effects.
 
 mod keys;
 pub(crate) mod probe;
@@ -86,7 +72,6 @@ pub struct SubscriptionReconciler {
     addressed_pubkeys: InputNode<BTreeSet<String>>,
     archived_channels: InputNode<BTreeSet<String>>,
     sessions: BTreeMap<String, SessionNodes>,
-    /// Stable node-id → semantic-label registry, populated at node creation (§4.2).
     labels: NodeLabels,
 }
 
@@ -166,12 +151,10 @@ impl SubscriptionReconciler {
         })
     }
 
-    /// The stable node-label registry for this surface (§4.2).
     pub fn labels(&self) -> &NodeLabels {
         &self.labels
     }
 
-    /// The current total graph node count (for the commit ledger's histogram).
     pub fn graph_node_count(&self) -> usize {
         self.graph.nodes().count()
     }

@@ -1,24 +1,9 @@
 //! The hook/fabric-context snapshot as a Trellis derived node → materialized
 //! output frame over DECLARED inputs.
 //!
-//! This surface REPLACES the hand-rolled `turn_start_audit` / `turn_check_audit`.
-//! Those diverged from the render (they scoped awareness to a different channel
-//! set than the real renderer and cursor-filtered rows the `<members>` block did
-//! not), and the snapshot itself flipped shape on an ambient cursor and rendered
-//! moving wall-clock strings — untrustworthy and non-replayable.
-//!
-//! Here the snapshot is a derived [`FabricView`] over six inputs: the four
-//! canonical store sources (channel/subchannel metadata, member roster,
-//! presence/status rows, chat/mentions) PLUS the previously-ambient seen `cursor`
-//! and wall-clock `now`, modelled as EXPLICIT inputs. Because the derive reads
-//! ONLY declared inputs (an undeclared read is a Trellis error), the awareness/
-//! render scope mismatch is impossible by construction, and the receipt —
-//! sourced from `why_output_frame` / `why_changed` — cannot drift from the bytes
-//! because it IS the render's dependency trace.
-//!
-//! This graph emits an OUTPUT, not effects, so it wraps a plain `Graph<()>` with
-//! no resource commands. The single reusable node-set is re-pointed each render;
-//! the first render emits a Baseline frame, a changed render a Delta.
+//! It replaces the hand-rolled hook audit with one derived [`FabricView`] over
+//! explicit store inputs plus cursor/now, so the injected bytes and receipt share
+//! the same dependency trace.
 
 mod receipt;
 #[cfg(test)]
@@ -41,16 +26,10 @@ use crate::reconcile::labels::{CommitFacts, NodeLabels};
 /// and unforced) plus the graph-sourced receipt — the instrumentation seam a
 /// later `explain` CLI persists and replays.
 pub struct HookContextOutcome {
-    /// The exact `<tenex-edge>` snapshot text agents see, or `None` when suppressed.
     pub text: Option<String>,
-    /// The plain, Trellis-free receipt derived from the render's own trace.
     pub receipt: HookContextReceipt,
-    /// This render's committed transaction id (i64 for the receipts ledger).
     pub transaction_id: i64,
-    /// This render's post-commit graph revision (i64 for the receipts ledger).
     pub revision: i64,
-    /// Flattened all-commit facts (§4.1) for the ledger — labels + counts, no
-    /// Trellis types. Present for EVERY render, including suppressed/no-op ones.
     pub commit: CommitFacts,
 }
 
@@ -72,7 +51,6 @@ pub struct HookContextReconciler {
     nodes: Option<Nodes>,
     /// Last derived view, so an unchanged commit (no frame) still yields bytes.
     last_view: Option<FabricView>,
-    /// Stable node-id → semantic-label registry, populated at node creation (§4.2).
     labels: NodeLabels,
 }
 
@@ -93,7 +71,6 @@ impl HookContextReconciler {
         }
     }
 
-    /// The stable node-label registry for this surface (§4.2).
     pub fn labels(&self) -> &NodeLabels {
         &self.labels
     }
@@ -127,8 +104,6 @@ impl HookContextReconciler {
         tx.set_input(nodes.messages, inputs.messages)?;
         let result = tx.commit()?;
         drop(tx);
-        // Flatten the commit for the all-commit ledger BEFORE re-borrowing `nodes`:
-        // labels + counts, no Trellis types, present even for a suppressed render.
         let commit = CommitFacts::from_result(&self.labels, &result, self.graph.nodes().count());
         self.nodes = Some(nodes);
         let nodes = self.nodes.as_ref().expect("nodes present");

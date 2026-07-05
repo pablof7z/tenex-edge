@@ -1,16 +1,7 @@
 //! The daemon process: sole owner of state.db AND the single relay connection.
 //!
-//! Started as the hidden `tenex-edge __daemon` subcommand by a thin client's
-//! spawn-if-absent path. See docs/daemon-design.md. Responsibilities:
-//!   - bind the UDS under the startup `flock`, reclaiming a stale socket;
-//!   - own one `Store` (single SQLite writer) and one `Transport` (one relay
-//!     connection) with a single union subscription across all hosted agents;
-//!   - run per-session engine tasks (the relocated `run_session_in_daemon`);
-//!   - demux incoming relay events once and route mentions to the right agent's
-//!     inbox (multi-agent aware); prune stale peers; serve RPCs. The daemon is
-//!     resident: it stays up to keep the fabric live (presence heartbeats,
-//!     awareness, real-time receipt) and exits only on explicit `stop` or a
-//!     version-skew handshake — never on idleness.
+//! Started as the hidden daemon subcommand by a thin client's spawn-if-absent
+//! path. See docs/daemon-design.md for responsibilities and lifecycle.
 
 use super::client::StartupLock;
 use super::protocol::{
@@ -231,6 +222,8 @@ mod session_start;
 mod status_publish;
 mod statusline;
 mod subscriptions;
+#[cfg(test)]
+mod test_support;
 mod turns;
 mod who;
 
@@ -251,7 +244,6 @@ use diagnostics::{
 use engine_lifecycle::{cancel_session, engine_params_for, reconcile_sessions, spawn_session};
 pub use lifecycle::run;
 use lifecycle::{write_json, ClientGuard, InitProgress};
-use probe::rpc_probe;
 use profile_rpc::{
     resolve_backend_pubkey, resolve_project_member_pubkey_hex, resolve_pubkey_hex,
     rpc_publish_profile,
@@ -284,7 +276,7 @@ async fn dispatch(state: &Arc<DaemonState>, req: &Request) -> Response {
         "turn_end" => rpc_turn_end(state, &req.params).await,
         "doctor" => rpc_doctor(state).await,
         "explain" => rpc_explain(state, &req.params),
-        "probe" => rpc_probe(state, &req.params),
+        "probe" => probe::rpc_probe(state, &req.params),
         "local_backend" => rpc_local_backend(state),
         "project_list" => rpc::rpc_project_list(state).await,
         "project_edit" => rpc::rpc_project_edit(state, &req.params).await,
@@ -396,72 +388,4 @@ fn status_ttl_duration() -> Duration {
         "TENEX_EDGE_STATUS_TTL_S",
         crate::domain::STATUS_TTL_SECS,
     ))
-}
-
-#[cfg(test)]
-impl DaemonState {
-    /// Build a minimal, fully offline `DaemonState` for tests. An in-memory store,
-    /// a transport with NO relays (`connect` adds none and only kicks off a
-    /// background dial, so nothing touches the network synchronously), a real
-    /// `Nip29Provider`, and the live `status`/`subs` reconcilers the daemon holds.
-    /// The `probe` RPC verbs only ever read the store + those two reconcilers, so
-    /// this is a faithful stand-in for driving `rpc_probe` end-to-end without a
-    /// running daemon or socket.
-    pub(crate) async fn new_for_test() -> Arc<DaemonState> {
-        let cfg = Config {
-            whitelisted_pubkeys: Vec::new(),
-            relays: Vec::new(),
-            indexer_relay: String::new(),
-            host: "test-host".into(),
-            user_nsec: None,
-            tenex_private_key: None,
-            tmux_status_command: None,
-            per_session_rooms: false,
-        };
-        let host = cfg.host.clone();
-        let owners = cfg.whitelisted_pubkeys.clone();
-        let transport = Arc::new(
-            Transport::connect(&[], Keys::generate())
-                .await
-                .expect("offline transport connect (no relays)"),
-        );
-        let store = Arc::new(Mutex::new(Store::open_memory().expect("in-memory store")));
-        let provider = Arc::new(Nip29Provider::new(
-            transport.clone(),
-            store.clone(),
-            None,
-            None,
-            Vec::new(),
-            &cfg.relays,
-        ));
-        Arc::new(DaemonState {
-            store,
-            transport,
-            provider,
-            cfg,
-            host,
-            owners,
-            hosted: Mutex::new(HashMap::new()),
-            sessions: Mutex::new(HashMap::new()),
-            subscribed_projects: Mutex::new(Vec::new()),
-            subs: Mutex::new(crate::reconcile::SubscriptionReconciler::new().expect("subs")),
-            status: Arc::new(Mutex::new(crate::reconcile::StatusReconciler::for_ttl(
-                status_ttl_duration(),
-            ))),
-            tail_tx: tokio::sync::broadcast::channel(512).0,
-            open_clients: Mutex::new(0),
-            shutdown: Notify::new(),
-            peer_sessions: Mutex::new(HashMap::new()),
-            seen_events: Mutex::new((
-                std::collections::HashSet::new(),
-                std::collections::VecDeque::new(),
-            )),
-            seen_profiles: Mutex::new(std::collections::HashSet::new()),
-            last_status: Mutex::new(HashMap::new()),
-            outbox_notify: Notify::new(),
-            session_keys: Mutex::new(HashMap::new()),
-            session_signers: Mutex::new(HashMap::new()),
-            backend_pubkey: None,
-        })
-    }
 }

@@ -328,37 +328,35 @@ pub(crate) fn tmux_tui(popup: bool) -> Result<()> {
                                                         status_msg = format!("Spawn failed: {e}")
                                                     }
                                                 }
-                                            } else {
-                                                if let Some(sid) = selected_resume_sid(
-                                                    &fl,
-                                                    data.spawnable.len(),
-                                                    &fr,
-                                                    selected,
-                                                ) {
-                                                    status_msg = "Resuming...".to_string();
-                                                    // Render the status immediately before blocking.
-                                                    let tabs_snap = pt.visible.clone();
-                                                    let status_snap = status_msg.clone();
-                                                    let _ = ratatui_term.draw(|f| {
-                                                        render_main(
-                                                            f,
-                                                            &data,
-                                                            selected,
-                                                            &status_snap,
-                                                            &tabs_snap,
-                                                            tab_idx,
-                                                            exited_opt,
-                                                        )
-                                                    });
-                                                    match resume_in_tui(&sid) {
-                                                        Ok(pane) => {
-                                                            pending_attach = Some(PendingAttach {
-                                                                pane,
-                                                                resume_sid: Some(sid.clone()),
-                                                            })
-                                                        }
-                                                        Err(msg) => status_msg = msg,
+                                            } else if let Some(sid) = selected_resume_sid(
+                                                &fl,
+                                                data.spawnable.len(),
+                                                &fr,
+                                                selected,
+                                            ) {
+                                                status_msg = "Resuming...".to_string();
+                                                // Render the status immediately before blocking.
+                                                let tabs_snap = pt.visible.clone();
+                                                let status_snap = status_msg.clone();
+                                                let _ = ratatui_term.draw(|f| {
+                                                    render_main(
+                                                        f,
+                                                        &data,
+                                                        selected,
+                                                        &status_snap,
+                                                        &tabs_snap,
+                                                        tab_idx,
+                                                        exited_opt,
+                                                    )
+                                                });
+                                                match resume_in_tui(&sid) {
+                                                    Ok(pane) => {
+                                                        pending_attach = Some(PendingAttach {
+                                                            pane,
+                                                            resume_sid: Some(sid.clone()),
+                                                        })
                                                     }
+                                                    Err(msg) => status_msg = msg,
                                                 }
                                             }
                                         }
