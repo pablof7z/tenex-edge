@@ -29,11 +29,18 @@ async fn install_with_opts(opts: InstallOpts) -> Result<()> {
         return Ok(());
     }
 
-    skills::install(&opts)?;
-
     let selected = resolve_selection(&all, &opts)?;
-    if selected.is_empty() {
-        println!("No harnesses selected. Detected: {}", detected_list(&all));
+    if selected.skill {
+        skills::install(&opts)?;
+    } else {
+        println!("\n{}", "Skipping tenex-edge skill".dimmed());
+    }
+
+    if selected.harnesses.is_empty() {
+        println!(
+            "No harness hooks selected. Detected: {}",
+            detected_list(&all)
+        );
         return Ok(());
     }
 
@@ -44,7 +51,7 @@ async fn install_with_opts(opts: InstallOpts) -> Result<()> {
     };
     let flag = if opts.dry_run { " (dry-run)" } else { "" };
 
-    for h in selected {
+    for h in selected.harnesses {
         println!("\n{} {}{flag}", verb.bold(), h.display.cyan().bold());
         match h.id {
             "claude-code" | "codex" | "grok" => install_json_harness(h, &opts)?,
@@ -59,6 +66,11 @@ async fn install_with_opts(opts: InstallOpts) -> Result<()> {
         println!("\nDone. Restart any open harness sessions to pick up the hooks.");
     }
     Ok(())
+}
+
+struct InstallSelection<'a> {
+    skill: bool,
+    harnesses: Vec<&'a Harness>,
 }
 
 fn print_status(all: &[Harness]) {
@@ -97,7 +109,7 @@ fn detected_list(all: &[Harness]) -> String {
     }
 }
 
-fn resolve_selection<'a>(all: &'a [Harness], opts: &InstallOpts) -> Result<Vec<&'a Harness>> {
+fn resolve_selection<'a>(all: &'a [Harness], opts: &InstallOpts) -> Result<InstallSelection<'a>> {
     if let Some(ids) = &opts.harness {
         let wanted = ids
             .split(',')
@@ -116,53 +128,67 @@ fn resolve_selection<'a>(all: &'a [Harness], opts: &InstallOpts) -> Result<Vec<&
                 all.iter().map(|h| h.id).collect::<Vec<_>>().join(", ")
             );
         }
-        return Ok(all.iter().filter(|h| wanted.contains(&h.id)).collect());
+        return Ok(InstallSelection {
+            skill: true,
+            harnesses: all.iter().filter(|h| wanted.contains(&h.id)).collect(),
+        });
     }
 
     if opts.all {
-        return Ok(all.iter().filter(|h| h.detected).collect());
+        return Ok(InstallSelection {
+            skill: true,
+            harnesses: all.iter().filter(|h| h.detected).collect(),
+        });
     }
 
     if stdio::stdin().is_terminal() && stdio::stdout().is_terminal() {
         return interactive_select(all);
     }
 
-    Ok(all.iter().filter(|h| h.detected).collect())
+    Ok(InstallSelection {
+        skill: true,
+        harnesses: all.iter().filter(|h| h.detected).collect(),
+    })
 }
 
-fn interactive_select(all: &[Harness]) -> Result<Vec<&Harness>> {
-    let labels: Vec<String> = all
-        .iter()
-        .map(|h| {
-            let status = if h.detected {
-                "detected".green().to_string()
-            } else {
-                "not detected".dimmed().to_string()
-            };
-            let installed = if is_installed(h) {
-                format!("  {}", "installed".green())
-            } else {
-                String::new()
-            };
-            format!(
-                "{:<14} {}{}  {}",
-                h.display.cyan().bold(),
-                status,
-                installed,
-                h.config_path.display().to_string().dimmed()
-            )
-        })
-        .collect();
+fn interactive_select(all: &[Harness]) -> Result<InstallSelection<'_>> {
+    let mut labels = vec![skills::selection_label()?];
+    labels.extend(all.iter().map(|h| {
+        let status = if h.detected {
+            "detected".green().to_string()
+        } else {
+            "not detected".dimmed().to_string()
+        };
+        let installed = if is_installed(h) {
+            format!("  {}", "installed".green())
+        } else {
+            String::new()
+        };
+        format!(
+            "{:<18} {}{}  {}",
+            h.display.cyan().bold(),
+            status,
+            installed,
+            h.config_path.display().to_string().dimmed()
+        )
+    }));
 
-    let defaults: Vec<bool> = all.iter().map(|h| h.detected).collect();
+    let mut defaults = vec![true];
+    defaults.extend(all.iter().map(|h| h.detected));
 
     let chosen = MultiSelect::new()
-        .with_prompt("Install tenex-edge hooks  (space to toggle, enter to apply)")
+        .with_prompt("Install tenex-edge components  (space to toggle, enter to apply)")
         .items(&labels)
         .defaults(&defaults)
         .interact()?;
 
-    Ok(chosen.into_iter().map(|i| &all[i]).collect())
+    Ok(InstallSelection {
+        skill: chosen.contains(&0),
+        harnesses: chosen
+            .into_iter()
+            .filter_map(|i| i.checked_sub(1).map(|harness| &all[harness]))
+            .collect(),
+    })
 }
 
 fn install_json_harness(h: &Harness, opts: &InstallOpts) -> Result<()> {
@@ -232,6 +258,46 @@ mod tests {
             config_path: path,
             detected: true,
         }
+    }
+
+    fn opts(all: bool, harness: Option<&str>) -> InstallOpts {
+        InstallOpts {
+            all,
+            harness: harness.map(str::to_string),
+            dry_run: false,
+            status: false,
+            uninstall: false,
+        }
+    }
+
+    #[test]
+    fn all_selection_includes_skill_and_detected_harnesses() {
+        let temp = tempfile::tempdir().unwrap();
+        let harnesses = vec![
+            harness("codex", temp.path().join("codex.json")),
+            Harness {
+                detected: false,
+                ..harness("opencode", temp.path().join("opencode.ts"))
+            },
+        ];
+
+        let selection = resolve_selection(&harnesses, &opts(true, None)).unwrap();
+
+        assert!(selection.skill);
+        assert_eq!(selection.harnesses.len(), 1);
+        assert_eq!(selection.harnesses[0].id, "codex");
+    }
+
+    #[test]
+    fn explicit_harness_selection_includes_skill() {
+        let temp = tempfile::tempdir().unwrap();
+        let harnesses = vec![harness("codex", temp.path().join("codex.json"))];
+
+        let selection = resolve_selection(&harnesses, &opts(false, Some("codex"))).unwrap();
+
+        assert!(selection.skill);
+        assert_eq!(selection.harnesses.len(), 1);
+        assert_eq!(selection.harnesses[0].id, "codex");
     }
 
     #[test]
