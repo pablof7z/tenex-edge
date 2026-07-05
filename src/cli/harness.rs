@@ -6,6 +6,9 @@ pub(in crate::cli) enum HarnessAction {
     /// Handle a hook event from a supported agent harness.
     /// Reads hook JSON from stdin; emits context to inject into the model (if any).
     /// Usage: `tenex-edge harness hook <name> --type <hook-type>`
+    /// Always exits 0 — a hook failure (daemon down, config missing, RPC
+    /// timeout, …) is fabric plumbing, never something to surface to the
+    /// harness or inject into the agent's context.
     Hook {
         /// Harness name: claude-code, codex, opencode, grok, …
         /// Run with name "help" to list known harnesses.
@@ -39,7 +42,15 @@ impl HarnessAction {
 pub(in crate::cli) async fn harness(action: HarnessAction) -> Result<()> {
     match action {
         HarnessAction::Hook { harness, hook_type } => {
-            super::hooks::hook_run(harness, hook_type).await
+            // Hooks fire on every turn of an unrelated harness session. An error
+            // here (daemon down, config missing, RPC failure, …) must NEVER
+            // surface as a nonzero exit or an injected error blob — that would
+            // pollute the agent's context with fabric plumbing it didn't ask
+            // about. Log it for our own debugging and always exit clean.
+            if let Err(e) = super::hooks::hook_run(harness, hook_type).await {
+                eprintln!("[tenex-edge] hook error (ignored): {e:#}");
+            }
+            Ok(())
         }
         HarnessAction::Statusline { session, tmux } => super::statusline::statusline(session, tmux),
     }

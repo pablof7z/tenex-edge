@@ -383,7 +383,7 @@ async fn hook_dispatch(
         }
         "post-tool-use" => {
             let explicit = if sid.is_empty() { None } else { Some(sid) };
-            let result = turn_check(explicit.clone(), emit)?;
+            let result = turn_check(explicit.clone(), emit).await?;
             call_log.context_audit(
                 host.name,
                 &hook_type,
@@ -394,7 +394,7 @@ async fn hook_dispatch(
         }
         "stop" => {
             if !sid.is_empty() {
-                turn_end(sid)?;
+                turn_end(sid).await?;
             }
         }
         other => {

@@ -247,6 +247,7 @@ fn spawn_if_absent() -> Result<()> {
     config::ensure_dir(&config::edge_home())?;
 
     let mut noted_wait = false;
+    let mut spawned_child: Option<std::process::Child> = None;
     let wait_deadline = Instant::now() + DAEMON_STARTUP_TIMEOUT;
     while Instant::now() < wait_deadline {
         if daemon_answers_ping() {
@@ -258,7 +259,7 @@ fn spawn_if_absent() -> Result<()> {
             if sock.exists() {
                 let _ = std::fs::remove_file(&sock);
             }
-            spawn_detached_daemon()?;
+            spawned_child = Some(spawn_detached_daemon()?);
             drop(lock);
             break;
         }
@@ -274,6 +275,13 @@ fn spawn_if_absent() -> Result<()> {
     while Instant::now() < deadline {
         if daemon_answers_ping() {
             return Ok(());
+        }
+        if let Some(child) = spawned_child.as_mut() {
+            match super::poll_spawned_child(child) {
+                super::SpawnedChildStatus::LostRace => spawned_child = None,
+                super::SpawnedChildStatus::Crashed(msg) => bail!("{msg}"),
+                super::SpawnedChildStatus::Running => {}
+            }
         }
         if !noted_ready {
             eprintln!("[tenex-edge] waiting for daemon to answer RPCs...");

@@ -9,7 +9,12 @@ use std::path::PathBuf;
 /// (the basis of the version-skew re-exec). `$TENEX_EDGE_BIN` overrides it —
 /// used by tests (whose `current_exe()` is the test harness) and as an escape
 /// hatch.
-pub(super) fn spawn_detached_daemon() -> Result<()> {
+///
+/// Returns the `Child` handle (not detached from *this* process's `wait()`
+/// perspective — only `process_group(0)` detaches it from the controlling
+/// terminal/session) so the caller can `try_wait()` for a fast crash instead
+/// of blindly polling the socket for the full startup timeout.
+pub(super) fn spawn_detached_daemon() -> Result<std::process::Child> {
     let exe = match std::env::var_os("TENEX_EDGE_BIN") {
         Some(p) => PathBuf::from(p),
         None => std::env::current_exe().context("locating own executable")?,
@@ -33,6 +38,5 @@ pub(super) fn spawn_detached_daemon() -> Result<()> {
     }
     command
         .spawn()
-        .with_context(|| format!("spawning detached daemon from {}", exe.display()))?;
-    Ok(())
+        .with_context(|| format!("spawning detached daemon from {}", exe.display()))
 }
