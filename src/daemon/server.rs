@@ -75,12 +75,10 @@ pub struct DaemonState {
     hosted: Mutex<HashMap<String, HostedAgent>>,
     sessions: Mutex<HashMap<String, SessionHandle>>,
     subscribed_projects: Mutex<Vec<String>>,
-    /// Refcounted per-entity relay-subscription reconciler: ONE narrow REQ per
-    /// covered channel `#h` / group-state `#d` / addressed pubkey `#p`, closed
-    /// when the last owner drops it. See `crate::reconcile::subscriptions`.
+    /// Refcounted per-entity relay-subscription reconciler.
     subs: Mutex<crate::reconcile::SubscriptionReconciler>,
-    /// The ONE authority deciding when each session's kind:30315 status publishes.
     status: Arc<Mutex<crate::reconcile::StatusReconciler>>,
+    turn_lifecycle: Mutex<crate::reconcile::TurnLifecycleReconciler>,
     hook_contexts: crate::turn_context::HookContextGraphs,
     /// Structured tail event broadcast replacing the old DomainEvent bus.
     tail_tx: tokio::sync::broadcast::Sender<TailEvent>,
@@ -224,6 +222,7 @@ mod statusline;
 mod subscriptions;
 #[cfg(test)]
 mod test_support;
+mod turn_lifecycle;
 mod turns;
 mod who;
 

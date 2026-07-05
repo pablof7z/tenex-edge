@@ -62,6 +62,9 @@ pub fn replay_script(
         ReplaySurface::HookContext => {
             super::hook_context::replay::replay_script(script, export_trace)
         }
+        ReplaySurface::TurnLifecycle => {
+            super::turn_lifecycle::replay::replay_script(script, export_trace)
+        }
     })
 }
 
@@ -70,6 +73,7 @@ enum ReplaySurface {
     Status,
     Subscriptions,
     HookContext,
+    TurnLifecycle,
 }
 
 fn script_surface(script: &DataTransactionScript<InputFact>) -> Result<ReplaySurface> {
@@ -80,6 +84,9 @@ fn script_surface(script: &DataTransactionScript<InputFact>) -> Result<ReplaySur
                 InputFact::StatusDrive(_) => ReplaySurface::Status,
                 InputFact::SubscriptionSync { .. } => ReplaySurface::Subscriptions,
                 InputFact::HookContextRender(_) => ReplaySurface::HookContext,
+                InputFact::TurnStarted { .. }
+                | InputFact::TurnEnded { .. }
+                | InputFact::TranscriptWindowCaptured { .. } => ReplaySurface::TurnLifecycle,
                 other => anyhow::bail!(
                     "replay capsule operation is not a supported surface drive fact: {other:?}"
                 ),
@@ -148,5 +155,29 @@ mod tests {
             false_republish.resource_commands, 1,
             "same-bucket unchanged tick must not republish status"
         );
+    }
+
+    #[test]
+    fn turn_lifecycle_replay_accepts_canonical_turn_facts() {
+        let mut script = DataTransactionScript::new();
+        script
+            .step("start")
+            .operation(InputFact::TurnStarted {
+                session_id: "s1".into(),
+                at: 100,
+            })
+            .commit();
+        script
+            .step("end")
+            .operation(InputFact::TurnEnded {
+                session_id: "s1".into(),
+                at: 130,
+            })
+            .commit();
+
+        let report = replay_script(&script, false).unwrap();
+        assert_eq!(report.surface, "turn_lifecycle");
+        assert_eq!(report.steps, 2);
+        assert_eq!(report.resource_commands, 2);
     }
 }

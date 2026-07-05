@@ -29,6 +29,7 @@ pub(super) fn simulate_value(state: &Arc<DaemonState>, params: &Value) -> Result
     }
     match surface {
         "status" => simulate_status_fact(state, normalize_status_fact(fact)?),
+        "turn_lifecycle" => simulate_turn_lifecycle_fact(state, fact),
         "subscriptions" => simulate_subscription_fact(state, fact),
         other => Err(anyhow::anyhow!("probe simulate: unknown surface `{other}`")),
     }
@@ -51,6 +52,29 @@ fn simulate_status_fact(state: &Arc<DaemonState>, fact: InputFact) -> Result<Val
         revision_after,
         wire_kind: Some(STATUS_KIND),
         would_publish: Some(would_publish(&preview.result)),
+    }))
+}
+
+fn simulate_turn_lifecycle_fact(state: &Arc<DaemonState>, fact: InputFact) -> Result<Value> {
+    let mut r = state
+        .turn_lifecycle
+        .lock()
+        .expect("turn lifecycle mutex poisoned");
+    let revision_before = r.revision();
+    let preview = r
+        .preview_fact(&fact)
+        .map_err(|e| anyhow::anyhow!("turn lifecycle preview failed: {e:?}"))?
+        .context("probe simulate: fact is not supported by turn_lifecycle")?;
+    let revision_after = r.revision();
+    Ok(plan_value(PlanJson {
+        surface: "turn_lifecycle",
+        fact: serde_json::to_value(&fact).unwrap_or(Value::Null),
+        labels: &preview.labels,
+        plan: &preview.result,
+        revision_before,
+        revision_after,
+        wire_kind: None,
+        would_publish: None,
     }))
 }
 
@@ -120,10 +144,10 @@ fn fact_param(params: &Value) -> Result<Option<InputFact>> {
 
 fn infer_surface(fact: &InputFact) -> Option<&'static str> {
     match fact {
-        InputFact::StatusDrive(_)
-        | InputFact::TurnStarted { .. }
+        InputFact::StatusDrive(_) | InputFact::DistillCompleted { .. } => Some("status"),
+        InputFact::TurnStarted { .. }
         | InputFact::TurnEnded { .. }
-        | InputFact::DistillCompleted { .. } => Some("status"),
+        | InputFact::TranscriptWindowCaptured { .. } => Some("turn_lifecycle"),
         InputFact::SubscriptionSync { .. } => Some("subscriptions"),
         _ => None,
     }
@@ -132,8 +156,6 @@ fn infer_surface(fact: &InputFact) -> Option<&'static str> {
 fn normalize_status_fact(fact: InputFact) -> Result<InputFact> {
     let drive = match fact {
         InputFact::StatusDrive(_) => return Ok(fact),
-        InputFact::TurnStarted { session_id, at } => StatusDrive::TurnStarted { session_id, at },
-        InputFact::TurnEnded { session_id, at } => StatusDrive::TurnEnded { session_id, at },
         InputFact::DistillCompleted {
             session_id,
             window_hash,

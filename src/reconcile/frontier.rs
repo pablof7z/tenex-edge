@@ -108,11 +108,19 @@ static REGISTRATIONS: [SurfaceRegistration; 7] = [
     },
     SurfaceRegistration {
         name: "turn_lifecycle",
-        mode: SurfaceMode::Imperative,
-        facts: &["turn_start", "turn_end", "transcript append"],
-        trellis_inputs: &["InputFact::TurnStarted", "InputFact::TurnEnded"],
-        host_effects: &["sessions.working", "turn transcript rows"],
-        bypass_risks: &["rpc_turn_start"],
+        mode: SurfaceMode::Authoritative,
+        facts: &[
+            "InputFact::TurnStarted",
+            "InputFact::TurnEnded",
+            "InputFact::TranscriptWindowCaptured",
+        ],
+        trellis_inputs: &[
+            "InputFact::TurnStarted",
+            "InputFact::TurnEnded",
+            "InputFact::TranscriptWindowCaptured",
+        ],
+        host_effects: &["turn_lifecycle executor applies sessions projection"],
+        bypass_risks: &[],
     },
     SurfaceRegistration {
         name: "cursor",

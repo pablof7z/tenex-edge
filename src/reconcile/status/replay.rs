@@ -9,6 +9,7 @@ use crate::reconcile::labels::NodeLabels;
 use crate::reconcile::replay::ReplayReport;
 
 use super::model::{stage_session, SessionNodes, StaticInfo};
+use super::preview::status_drive_from_fact;
 use super::{StatusCommand, StatusReconciler};
 
 const STATUS_REFRESH_SECS: u64 = crate::domain::HEARTBEAT_SECS;
@@ -68,10 +69,10 @@ impl ReplayState {
         operation: &InputFact,
         tx: &mut Transaction<'_, StatusCommand>,
     ) -> GraphResult<()> {
-        let InputFact::StatusDrive(drive) = operation else {
+        let Some(drive) = status_drive_from_fact(operation) else {
             return Ok(());
         };
-        match drive {
+        match &drive {
             StatusDrive::SessionStarted(args) => {
                 if self.sessions.contains_key(&args.session_id) {
                     return Ok(());

@@ -252,9 +252,7 @@ pub struct OutboxRow {
 }
 
 // ── canonical id minting ─────────────────────────────────────────────────────
-// No uuid crate, so canonical session ids are built from nanosecond wall-clock
-// time + an in-process monotonic counter: `te-<nanos_hex>-<counter_hex>`. The
-// counter prevents collisions inside tight backfill loops.
+// Canonical ids use wall-clock nanos plus a monotonic counter: `te-<nanos_hex>-<counter_hex>`.
 
 static ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -298,3 +296,4 @@ mod status;
 mod tests;
 pub mod trellis_commits;
 pub mod trellis_replay_capsules;
+mod turn_projection;
