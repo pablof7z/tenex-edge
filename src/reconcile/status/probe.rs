@@ -11,9 +11,7 @@
 //!   last (re)publish" from the dependency-path audit already computed under
 //!   `opts()`, rendered through the label registry — the live-causality `why`.
 
-use trellis_core::{
-    GraphResult, ResourceCommand, ResourceCommandCause, ScopeId, Transaction, TransactionResult,
-};
+use trellis_core::{GraphResult, ResourceCommandCause, ScopeId, Transaction, TransactionResult};
 
 use crate::reconcile::labels::key_path;
 
@@ -150,17 +148,10 @@ impl StatusReconciler {
     }
 }
 
-/// Does this preview's plan carry any publishing command (Open/Replace/Refresh)?
-/// A pure `Close`, or an empty plan, would publish nothing.
+/// Does this preview's plan carry any status effect? A `Close` becomes the
+/// final expiring status publish at the host seam, so any command means publish.
 pub fn would_publish(result: &TransactionResult<StatusCommand>) -> bool {
-    result.resource_plan.commands().iter().any(|c| {
-        matches!(
-            c,
-            ResourceCommand::Open { .. }
-                | ResourceCommand::Replace { .. }
-                | ResourceCommand::Refresh { .. }
-        )
-    })
+    !result.resource_plan.commands().is_empty()
 }
 
 #[cfg(test)]

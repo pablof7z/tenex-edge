@@ -62,16 +62,19 @@ enum ProbeAction {
     },
     /// Dry-run a fact against a surface via `tx.preview()` — nothing is applied.
     Simulate {
-        /// The surface to simulate (`status`; `subscriptions` is a v2 follow-up).
+        /// The surface to simulate (`status` | `subscriptions`).
         #[arg(default_value = "status")]
         surface: String,
-        /// Session whose status the fact applies to.
+        /// Exact serde JSON for `InputFact`; preferred over the status shorthand.
+        #[arg(long, value_name = "JSON")]
+        fact: Option<String>,
+        /// Session whose status the legacy shorthand applies to.
         #[arg(long)]
-        session: String,
-        /// The distilled live-activity line the fact would set.
+        session: Option<String>,
+        /// Legacy status shorthand: distilled live-activity line to set.
         #[arg(long)]
         activity: Option<String>,
-        /// The distilled title the fact would set.
+        /// Legacy status shorthand: distilled title to set.
         #[arg(long)]
         title: Option<String>,
         /// Unix **seconds** (NOT millis) — the reconciler's clock unit. When set,
@@ -91,22 +94,22 @@ enum ProbeAction {
 impl ProbeAction {
     /// Project the parsed verb into the `{verb, ...}` RPC params the daemon's
     /// `probe` arm dispatches on.
-    fn to_rpc(&self) -> (String, Value) {
+    fn to_rpc(&self) -> Result<(String, Value)> {
         match self {
-            ProbeAction::Stats { surface, since } => (
+            ProbeAction::Stats { surface, since } => Ok((
                 "stats".into(),
                 json!({ "verb": "stats", "surface": surface, "since": since }),
-            ),
-            ProbeAction::Oracle { surface, .. } => (
+            )),
+            ProbeAction::Oracle { surface, .. } => Ok((
                 "oracle".into(),
                 json!({ "verb": "oracle", "surface": surface }),
-            ),
-            ProbeAction::Seams => ("seams".into(), json!({ "verb": "seams" })),
+            )),
+            ProbeAction::Seams => Ok(("seams".into(), json!({ "verb": "seams" }))),
             ProbeAction::Replay {
                 capsule,
                 assert_replay,
                 export_trace,
-            } => (
+            } => Ok((
                 "replay".into(),
                 json!({
                     "verb": "replay",
@@ -114,25 +117,33 @@ impl ProbeAction {
                     "assert": assert_replay,
                     "export_trace": export_trace.is_some(),
                 }),
-            ),
+            )),
             ProbeAction::Simulate {
                 surface,
+                fact,
                 session,
                 activity,
                 title,
                 now,
-            } => (
-                "simulate".into(),
-                json!({ "verb": "simulate", "surface": surface, "session": session,
-                        "activity": activity, "title": title, "now": now }),
-            ),
-            ProbeAction::Why { handle } => {
-                ("why".into(), json!({ "verb": "why", "handle": handle }))
+            } => {
+                let fact = fact
+                    .as_deref()
+                    .map(serde_json::from_str::<Value>)
+                    .transpose()?;
+                Ok((
+                    "simulate".into(),
+                    json!({ "verb": "simulate", "surface": surface, "fact": fact,
+                            "session": session, "activity": activity, "title": title,
+                            "now": now }),
+                ))
             }
-            ProbeAction::State { surface } => (
+            ProbeAction::Why { handle } => {
+                Ok(("why".into(), json!({ "verb": "why", "handle": handle })))
+            }
+            ProbeAction::State { surface } => Ok((
                 "state".into(),
                 json!({ "verb": "state", "surface": surface }),
-            ),
+            )),
         }
     }
 
@@ -146,7 +157,7 @@ impl ProbeAction {
 
 pub(in crate::cli) async fn probe(args: ProbeArgs) -> Result<()> {
     let export_trace_path = args.action.export_trace_path();
-    let (verb, params) = args.action.to_rpc();
+    let (verb, params) = args.action.to_rpc()?;
     let mut v = super::daemon_call_async("probe", params).await?;
     if let Some(path) = export_trace_path {
         let trace = v
@@ -213,7 +224,7 @@ mod tests {
             surface: Some("status".into()),
             since: 42,
         };
-        let (verb, params) = action.to_rpc();
+        let (verb, params) = action.to_rpc().unwrap();
         assert_eq!(verb, "stats");
         assert_eq!(params["verb"], "stats");
         assert_eq!(params["surface"], "status");
@@ -222,7 +233,7 @@ mod tests {
 
     #[test]
     fn seams_action_projects_rpc_params() {
-        let (verb, params) = ProbeAction::Seams.to_rpc();
+        let (verb, params) = ProbeAction::Seams.to_rpc().unwrap();
         assert_eq!(verb, "seams");
         assert_eq!(params["verb"], "seams");
     }
@@ -234,7 +245,7 @@ mod tests {
             assert_replay: true,
             export_trace: Some(PathBuf::from("trace.json")),
         };
-        let (verb, params) = action.to_rpc();
+        let (verb, params) = action.to_rpc().unwrap();
         assert_eq!(verb, "replay");
         assert_eq!(params["capsule"], "42");
         assert_eq!(params["assert"], true);
@@ -245,15 +256,31 @@ mod tests {
     fn simulate_action_projects_rpc_params() {
         let action = ProbeAction::Simulate {
             surface: "status".into(),
-            session: "s1".into(),
+            fact: None,
+            session: Some("s1".into()),
             activity: Some("reviewing the PR".into()),
             title: None,
             now: None,
         };
-        let (verb, params) = action.to_rpc();
+        let (verb, params) = action.to_rpc().unwrap();
         assert_eq!(verb, "simulate");
         assert_eq!(params["session"], "s1");
         assert_eq!(params["activity"], "reviewing the PR");
         assert!(params["title"].is_null());
+    }
+
+    #[test]
+    fn simulate_action_parses_fact_json() {
+        let action = ProbeAction::Simulate {
+            surface: "subscriptions".into(),
+            fact: Some(r#"{"SubscriptionSync":{"snapshot":{"daemon_channels":[],"addressed_pubkeys":[],"archived_channels":[],"sessions":{}},"at":1}}"#.into()),
+            session: None,
+            activity: None,
+            title: None,
+            now: None,
+        };
+        let (_verb, params) = action.to_rpc().unwrap();
+        assert!(params["fact"].is_object());
+        assert_eq!(params["fact"]["SubscriptionSync"]["at"], 1);
     }
 }

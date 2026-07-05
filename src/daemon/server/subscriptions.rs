@@ -45,8 +45,12 @@ pub(in crate::daemon::server) async fn sync_subscriptions(state: &Arc<DaemonStat
     // reconciler is a plain Mutex (never held across `.await`), the transport does
     // the network I/O.
     let start = std::time::Instant::now();
-    let (effects, result, facts) = {
+    let (effects, result, facts, preview) = {
         let mut rec = state.subs.lock().unwrap();
+        let preview = rec
+            .preview_sync(&snapshot)
+            .map_err(|e| anyhow::anyhow!("subscription preview failed: {e:?}"))?
+            .result;
         let (effects, result) = rec
             .sync(&snapshot)
             .map_err(|e| anyhow::anyhow!("subscription reconcile failed: {e:?}"))?;
@@ -57,7 +61,7 @@ pub(in crate::daemon::server) async fn sync_subscriptions(state: &Arc<DaemonStat
             rec.graph_node_count(),
         );
         facts.graph_resources = rec.state_rows().len() as i64;
-        (effects, result, facts)
+        (effects, result, facts, preview)
     };
     let duration_us = start.elapsed().as_micros() as i64;
     // §4.1: record the all-commit ledger row for EVERY sync, incl. no-ops (which
@@ -105,7 +109,12 @@ pub(in crate::daemon::server) async fn sync_subscriptions(state: &Arc<DaemonStat
         };
         state.with_store(|s| crate::instrument::record_receipt(s, row));
     }
-    apply_effects(state, effects).await
+    if !effects.is_empty() && !preview_matches(&preview, &result) {
+        return Err(anyhow::anyhow!(
+            "subscription effects blocked: committed plan was not previewed first"
+        ));
+    }
+    apply_effects(state, effects, &preview).await
 }
 
 /// `resubscribe` is now a thin alias for the reconciler sync, kept for the
@@ -135,6 +144,7 @@ pub(in crate::daemon::server) async fn reconcile_subs_logged(
 pub(in crate::daemon::server) async fn apply_effects(
     state: &Arc<DaemonState>,
     effects: Vec<SubEffect>,
+    _preview: &trellis_core::TransactionResult<crate::reconcile::SubCommand>,
 ) -> Result<()> {
     for effect in effects {
         match effect {
@@ -170,13 +180,35 @@ pub(in crate::daemon::server) async fn replay_channel_chat(state: &Arc<DaemonSta
         id: id_h_narrow(h),
         filter: narrow_h_filter(h),
     };
-    let fut = apply_effects(state, vec![effect]);
+    let snapshot = build_coverage_snapshot(state);
+    let preview = {
+        let mut rec = state.subs.lock().unwrap();
+        match rec.preview_sync(&snapshot) {
+            Ok(preview) => preview.result,
+            Err(e) => {
+                tracing::warn!(channel = h, error = ?e, "channel chat replay skipped: preview failed");
+                return;
+            }
+        }
+    };
+    let fut = apply_effects(state, vec![effect], &preview);
     if tokio::time::timeout(std::time::Duration::from_secs(5), fut)
         .await
         .is_err()
     {
         tracing::warn!(channel = h, "channel chat replay timed out (best-effort)");
     }
+}
+
+fn preview_matches(
+    preview: &trellis_core::TransactionResult<crate::reconcile::SubCommand>,
+    committed: &trellis_core::TransactionResult<crate::reconcile::SubCommand>,
+) -> bool {
+    preview.revision == committed.revision
+        && crate::reconcile::preview::command_plans_match(
+            preview.resource_plan.commands(),
+            committed.resource_plan.commands(),
+        )
 }
 
 /// Compute the daemon's current subscription coverage from durable sources,

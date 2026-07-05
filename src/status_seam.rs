@@ -42,13 +42,22 @@ pub(crate) async fn drive(
 ) {
     // Time the commit at the host boundary (the ledgers never read the clock).
     let start = std::time::Instant::now();
-    let (outcome, facts, replay_seed) = {
+    let (outcome, facts, replay_seed, preview) = {
         let mut rec = status.lock().expect("status reconciler poisoned");
         let replay_seed = meta
             .replay_fact
             .as_ref()
             .and_then(status_replay_seed_session_id)
             .and_then(|id| rec.replay_seed(id));
+        let preview = meta.replay_fact.as_ref().and_then(|fact| {
+            rec.preview_fact(fact)
+                .map_err(|e| {
+                    tracing::error!(error = ?e, "status preview failed before commit");
+                    e
+                })
+                .ok()
+                .flatten()
+        });
         let outcome = f(&mut rec).ok();
         // Flatten EVERY commit (incl. no-ops) through the surface's labels.
         let facts = outcome.as_ref().map(|o| {
@@ -60,11 +69,28 @@ pub(crate) async fn drive(
             facts.graph_resources = rec.state_rows().len() as i64;
             facts
         });
-        (outcome, facts, replay_seed)
+        (outcome, facts, replay_seed, preview.map(|p| p.result))
     };
     let duration_us = start.elapsed().as_micros() as i64;
     let Some(outcome) = outcome else { return };
-    let event_ids = apply_status_effects(outcome.effects, provider, keys, store).await;
+    let effects = outcome.effects;
+    if !effects.is_empty() && !preview_matches(preview.as_ref(), &outcome.result) {
+        tracing::error!(
+            trigger = meta.trigger,
+            "status effects blocked: committed plan was not previewed first"
+        );
+        return;
+    }
+    let event_ids = apply_status_effects(
+        effects,
+        provider,
+        keys,
+        store,
+        preview
+            .as_ref()
+            .expect("effectful status commit has preview"),
+    )
+    .await;
     let trigger_ref = status_session_id(&outcome.result);
     record_status_receipt(store, meta.window_hash, &outcome.result, &event_ids);
     if let Some(facts) = facts {
@@ -163,6 +189,7 @@ async fn apply_status_effects(
     provider: &Nip29Provider,
     keys: &Keys,
     store: &Mutex<Store>,
+    _preview: &TransactionResult<StatusCommand>,
 ) -> Vec<String> {
     let mut ids = Vec::new();
     for effect in effects {
@@ -174,6 +201,20 @@ async fn apply_status_effects(
         }
     }
     ids
+}
+
+fn preview_matches(
+    preview: Option<&TransactionResult<StatusCommand>>,
+    committed: &TransactionResult<StatusCommand>,
+) -> bool {
+    let Some(preview) = preview else {
+        return false;
+    };
+    preview.revision == committed.revision
+        && crate::reconcile::preview::command_plans_match(
+            preview.resource_plan.commands(),
+            committed.resource_plan.commands(),
+        )
 }
 
 /// Encode + sign the status and park the signed JSON on the `outbox`, returning
