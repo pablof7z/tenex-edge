@@ -59,6 +59,17 @@ fn no_direct_subscribe_unsubscribe_outside_subscription_executor() {
 }
 
 #[test]
+fn authoritative_effect_executors_require_preview_evidence() {
+    let status = source("src/status_seam.rs");
+    assert!(status.contains("_preview: &TransactionResult<StatusCommand>"));
+    assert!(status.contains("preview_matches(preview.as_ref(), &outcome.result)"));
+
+    let subscriptions = source("src/daemon/server/subscriptions.rs");
+    assert!(subscriptions.contains("_preview: &trellis_core::TransactionResult"));
+    assert!(subscriptions.contains("preview_matches(&preview, &result)"));
+}
+
+#[test]
 fn no_direct_set_working_outside_declared_lifecycle_seam() {
     assert_only_allowed(
         scan(["set_working("]),
@@ -87,6 +98,11 @@ fn scan<const N: usize>(needles: [&str; N]) -> BTreeSet<String> {
         .into_iter()
         .flat_map(|path| hits_in_file(&root, &path, &needles))
         .collect()
+}
+
+fn source(path: &str) -> String {
+    std::fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(path))
+        .expect("read source file")
 }
 
 fn source_files(dir: &Path) -> Vec<PathBuf> {

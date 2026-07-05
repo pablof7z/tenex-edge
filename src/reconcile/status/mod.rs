@@ -4,6 +4,7 @@
 //! only signs and enqueues the emitted effects.
 
 mod model;
+mod preview;
 pub(crate) mod probe;
 pub(crate) mod replay;
 #[cfg(test)]

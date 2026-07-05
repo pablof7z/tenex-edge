@@ -133,13 +133,13 @@ pub(super) fn render_replay(v: &Value) -> String {
     out
 }
 
-/// `probe simulate status/<id>` — the would-be plan; nothing is applied.
+/// `probe simulate` — the would-be plan; nothing is applied.
 pub(super) fn render_simulate(v: &Value) -> String {
     let mut out = String::new();
-    let session = str_at(v, "session");
+    let surface = str_at(v, "surface");
     let _ = writeln!(
         out,
-        "simulate status/{session}  ← what committing this fact would do (nothing is applied)\n"
+        "simulate {surface}  ← what committing this fact would do (nothing is applied)\n"
     );
     let fact = v.get("fact").cloned().unwrap_or(Value::Null);
     let _ = writeln!(out, "  fact:     {}", fact_line(&fact));
@@ -159,8 +159,17 @@ pub(super) fn render_simulate(v: &Value) -> String {
                 str_at(c, "resource"),
             );
         }
+    } else if v.get("would_effect").and_then(Value::as_bool) == Some(true) {
+        for c in cmds {
+            let _ = writeln!(
+                out,
+                "  result:   WOULD APPLY    ({} {})",
+                str_at(c, "op"),
+                str_at(c, "resource"),
+            );
+        }
     } else {
-        let _ = writeln!(out, "  result:   NO CHANGE (deduped — no publish)");
+        let _ = writeln!(out, "  result:   NO CHANGE (deduped)");
     }
     let changed = strs(v, "changed");
     if !changed.is_empty() {
@@ -177,15 +186,18 @@ fn fact_line(fact: &Value) -> String {
     if let Some(t) = fact.get("title").and_then(Value::as_str) {
         parts.push(format!("title={t:?}"));
     }
-    format!(
-        "{} → {}",
-        fact.get("kind").and_then(Value::as_str).unwrap_or("fact"),
-        if parts.is_empty() {
-            "(no fields)".to_string()
-        } else {
-            parts.join(", ")
-        }
-    )
+    if !parts.is_empty() || fact.get("kind").is_some() {
+        return format!(
+            "{} → {}",
+            fact.get("kind").and_then(Value::as_str).unwrap_or("fact"),
+            if parts.is_empty() {
+                "(no fields)".to_string()
+            } else {
+                parts.join(", ")
+            }
+        );
+    }
+    serde_json::to_string(fact).unwrap_or_else(|_| "fact".into())
 }
 
 /// `probe why <handle>` — live causality + the latest-per-key footer.

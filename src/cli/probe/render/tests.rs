@@ -47,9 +47,9 @@ fn seams_render_lists_modes_and_risks() {
 #[test]
 fn simulate_render_would_publish() {
     let v = json!({
-        "verb":"simulate","session":"s1",
+        "verb":"simulate","surface":"status",
         "fact":{"kind":"distill","activity":"reviewing the PR","title":null},
-        "would_publish": true,
+        "would_publish": true, "would_effect": true,
         "commands":[{"op":"Replace","resource":"status/s1","kind":30315,"publish":true}],
         "changed":["status/s1/activity"],
     });
@@ -63,12 +63,26 @@ fn simulate_render_would_publish() {
 #[test]
 fn simulate_render_no_change() {
     let v = json!({
-        "verb":"simulate","session":"s1",
+        "verb":"simulate","surface":"status",
         "fact":{"kind":"distill","activity":"reading","title":null},
-        "would_publish": false, "commands": [], "changed": [],
+        "would_publish": false, "would_effect": false, "commands": [], "changed": [],
     });
     let text = render_simulate(&v);
-    assert!(text.contains("NO CHANGE (deduped — no publish)"));
+    assert!(text.contains("NO CHANGE (deduped)"));
+}
+
+#[test]
+fn simulate_render_subscription_effect() {
+    let v = json!({
+        "verb":"simulate","surface":"subscriptions",
+        "fact":{"SubscriptionSync":{"snapshot":{"daemon_channels":["room"],"addressed_pubkeys":[],"archived_channels":[],"sessions":{}},"at":1}},
+        "would_effect": true,
+        "commands":[{"op":"Open","resource":"sub/h/room","effect":true}],
+        "changed":["subscriptions/daemon/channels"],
+    });
+    let text = render_simulate(&v);
+    assert!(text.contains("simulate subscriptions"));
+    assert!(text.contains("WOULD APPLY    (Open sub/h/room)"));
 }
 
 #[test]

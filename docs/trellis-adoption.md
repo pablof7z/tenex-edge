@@ -61,6 +61,14 @@ bounded to the newest 512 capsules and 16 MiB of serialized script bytes; the
 same off-values used by `TENEX_EDGE_HOOK_CALL_LOG` also disable capsule capture
 unless `TENEX_EDGE_REPLAY_CAPSULES` overrides the gate.
 
+`tenex-edge probe simulate <surface> --fact '<InputFact JSON>'` stages one fact
+against the daemon-held status or subscription graph and calls
+`Transaction::preview()` instead of committing. The returned plan is the resource
+commands and changed labels that would result; the live revision stays unchanged.
+For those authoritative surfaces, the live effect seam also previews the same
+fact/snapshot before applying host effects and blocks the effect if the committed
+plan does not match the previewed plan.
+
 ```
 tenex-edge explain event:<30315-id>   # the receipt + the exact LLM inputs behind the activity
 tenex-edge explain hook:<session>[@ts] # why the injected snapshot had this shape

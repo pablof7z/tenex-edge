@@ -8,6 +8,7 @@
 //! AND makes teardown correct.
 
 mod keys;
+mod preview;
 pub(crate) mod probe;
 pub(crate) mod replay;
 #[cfg(test)]
@@ -23,7 +24,8 @@ use trellis_core::{
 };
 
 use crate::reconcile::labels::NodeLabels;
-use keys::{id_from_key, plan_subs, sub_key, Space, SubCommand, SubKey};
+pub(crate) use keys::SubCommand;
+use keys::{id_from_key, plan_subs, sub_key, Space, SubKey};
 
 /// Host effect the daemon applies via the transport. Open/Replace both map to a
 /// re-`subscribe_with_id_to` (NIP-01 replace-in-place); Close maps to a real
