@@ -181,6 +181,59 @@ pub(super) fn render_simulate(v: &Value) -> String {
     out
 }
 
+/// `probe diff` — before/after artifact hashes plus changed fields.
+pub(super) fn render_diff(v: &Value) -> String {
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
+        "diff {}  ({})",
+        str_at(v, "surface"),
+        str_at(v, "mode")
+    );
+    let verdict = if v.get("artifact_changed").and_then(Value::as_bool) == Some(true) {
+        "CHANGED"
+    } else {
+        "UNCHANGED"
+    };
+    let _ = writeln!(out, "  artifact: {verdict}");
+    let _ = writeln!(out, "  before:   {}", str_at(v, "before_hash"));
+    let _ = writeln!(out, "  after:    {}", str_at(v, "after_hash"));
+    let empty = Vec::new();
+    for row in v
+        .get("field_diff")
+        .and_then(Value::as_array)
+        .unwrap_or(&empty)
+    {
+        let _ = writeln!(out, "  changed:  {}", str_at(row, "field"));
+    }
+    out
+}
+
+/// `probe acid` — necessity and unrelated-input stability verdicts.
+pub(super) fn render_acid(v: &Value) -> String {
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
+        "acid {}  ({})",
+        str_at(v, "handle"),
+        str_at(v, "surface")
+    );
+    let _ = writeln!(out, "  cause:    {}", str_at(v, "cause"));
+    let _ = writeln!(
+        out,
+        "  verdict:  necessary={}  unrelated_stable={}  ok={}",
+        v.get("necessary").and_then(Value::as_bool).unwrap_or(false),
+        v.get("unrelated_stable")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        v.get("ok").and_then(Value::as_bool).unwrap_or(false),
+    );
+    let _ = writeln!(out, "  original: {}", str_at(v, "original_hash"));
+    let _ = writeln!(out, "  removed:  {}", str_at(v, "removed_hash"));
+    let _ = writeln!(out, "  unrelated: {}", str_at(v, "unrelated_hash"));
+    out
+}
+
 fn fact_line(fact: &Value) -> String {
     let mut parts = Vec::new();
     if let Some(a) = fact.get("activity").and_then(Value::as_str) {

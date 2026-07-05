@@ -5,8 +5,9 @@
 //!
 //! Verbs: `stats` (aggregate value evidence, §4.1), `oracle` (live
 //! incremental-equals-full correctness, §4.6), `seams` (frontier modes, §4.5),
-//! `simulate` (dry-run a fact via `tx.preview()`, the keystone, §3), `why` (live
-//! causality for a handle, §4.3), and `state` (live per-surface values, §4.3).
+//! `simulate` (dry-run a fact via `tx.preview()`, the keystone, §3), `diff` /
+//! `acid` (counterfactual checks), `why` (live causality for a handle, §4.3),
+//! and `state` (live per-surface values, §4.3).
 
 mod render;
 mod state_render;
@@ -86,6 +87,32 @@ enum ProbeAction {
         #[arg(long)]
         now: Option<u64>,
     },
+    /// Compare a live preview or replay capsule against a counterfactual fact.
+    Diff {
+        /// Surface hint (`status` | `subscriptions`); inferred from `--fact`.
+        #[arg(default_value = "status")]
+        surface: String,
+        /// Exact serde JSON for `InputFact`.
+        #[arg(long, value_name = "JSON")]
+        fact: String,
+        /// Optional replay capsule id; when set, replaces the capsule's last fact.
+        #[arg(long)]
+        capsule: Option<String>,
+        /// Optional mutation fact for capsule mode; defaults to `--fact`.
+        #[arg(long = "mutate-fact", value_name = "JSON")]
+        mutate_fact: Option<String>,
+    },
+    /// Verify a live `why` cause by previewing cause-removed and unrelated facts.
+    Acid {
+        /// Handle to verify (`status:<session>` | `sub:<channel>`).
+        handle: String,
+        /// Exact serde JSON for `InputFact`.
+        #[arg(long, value_name = "JSON")]
+        fact: String,
+        /// Specific cause label; defaults to the first live why input cause.
+        #[arg(long)]
+        cause: Option<String>,
+    },
     /// Explain the latest change to a handle (`sub:<channel>` | `status:<session>` | `hook:<session>`).
     Why { handle: String },
     /// Live values for a surface (`status` | `subscriptions` | `hook_context`).
@@ -143,6 +170,34 @@ impl ProbeAction {
                     json!({ "verb": "simulate", "surface": surface, "fact": fact,
                             "session": session, "activity": activity, "title": title,
                             "now": now }),
+                ))
+            }
+            ProbeAction::Diff {
+                surface,
+                fact,
+                capsule,
+                mutate_fact,
+            } => {
+                let fact = serde_json::from_str::<Value>(fact)?;
+                let mutate_fact = mutate_fact
+                    .as_deref()
+                    .map(serde_json::from_str::<Value>)
+                    .transpose()?;
+                Ok((
+                    "diff".into(),
+                    json!({ "verb": "diff", "surface": surface, "fact": fact,
+                            "capsule": capsule, "mutate_fact": mutate_fact }),
+                ))
+            }
+            ProbeAction::Acid {
+                handle,
+                fact,
+                cause,
+            } => {
+                let fact = serde_json::from_str::<Value>(fact)?;
+                Ok((
+                    "acid".into(),
+                    json!({ "verb": "acid", "handle": handle, "fact": fact, "cause": cause }),
                 ))
             }
             ProbeAction::Why { handle } => {
@@ -209,6 +264,8 @@ fn render(verb: &str, v: &Value) -> String {
         "seams" => render::render_seams(v),
         "replay" => render::render_replay(v),
         "simulate" => render::render_simulate(v),
+        "diff" => render::render_diff(v),
+        "acid" => render::render_acid(v),
         "why" => render::render_why(v),
         "state" => state_render::render_state(v),
         _ => format!("{v}\n"),
@@ -216,83 +273,4 @@ fn render(verb: &str, v: &Value) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn unimplemented_shape_renders_marker() {
-        let v = json!({ "verb": "simulate", "implemented": false,
-                        "message": "subscriptions simulate is a v2 follow-up" });
-        let text = render("simulate", &v);
-        assert_eq!(
-            text,
-            "probe simulate: subscriptions simulate is a v2 follow-up\n"
-        );
-    }
-
-    #[test]
-    fn stats_action_projects_rpc_params() {
-        let action = ProbeAction::Stats {
-            surface: Some("status".into()),
-            since: 42,
-        };
-        let (verb, params) = action.to_rpc().unwrap();
-        assert_eq!(verb, "stats");
-        assert_eq!(params["verb"], "stats");
-        assert_eq!(params["surface"], "status");
-        assert_eq!(params["since"], 42);
-    }
-
-    #[test]
-    fn seams_action_projects_rpc_params() {
-        let (verb, params) = ProbeAction::Seams.to_rpc().unwrap();
-        assert_eq!(verb, "seams");
-        assert_eq!(params["verb"], "seams");
-    }
-
-    #[test]
-    fn replay_action_projects_rpc_params() {
-        let action = ProbeAction::Replay {
-            capsule: "42".into(),
-            assert_replay: true,
-            export_trace: Some(PathBuf::from("trace.json")),
-        };
-        let (verb, params) = action.to_rpc().unwrap();
-        assert_eq!(verb, "replay");
-        assert_eq!(params["capsule"], "42");
-        assert_eq!(params["assert"], true);
-        assert_eq!(params["export_trace"], true);
-    }
-
-    #[test]
-    fn simulate_action_projects_rpc_params() {
-        let action = ProbeAction::Simulate {
-            surface: "status".into(),
-            fact: None,
-            session: Some("s1".into()),
-            activity: Some("reviewing the PR".into()),
-            title: None,
-            now: None,
-        };
-        let (verb, params) = action.to_rpc().unwrap();
-        assert_eq!(verb, "simulate");
-        assert_eq!(params["session"], "s1");
-        assert_eq!(params["activity"], "reviewing the PR");
-        assert!(params["title"].is_null());
-    }
-
-    #[test]
-    fn simulate_action_parses_fact_json() {
-        let action = ProbeAction::Simulate {
-            surface: "subscriptions".into(),
-            fact: Some(r#"{"SubscriptionSync":{"snapshot":{"daemon_channels":[],"addressed_pubkeys":[],"archived_channels":[],"sessions":{}},"at":1}}"#.into()),
-            session: None,
-            activity: None,
-            title: None,
-            now: None,
-        };
-        let (_verb, params) = action.to_rpc().unwrap();
-        assert!(params["fact"].is_object());
-        assert_eq!(params["fact"]["SubscriptionSync"]["at"], 1);
-    }
-}
+mod tests;

@@ -1,0 +1,42 @@
+{
+  "formatVersion": 1,
+  "steps": [
+    {
+      "name": "two sessions share room",
+      "operations": [
+        {
+          "SubscriptionSync": {
+            "snapshot": {
+              "daemon_channels": [],
+              "addressed_pubkeys": [],
+              "archived_channels": [],
+              "sessions": {
+                "s1": ["room"],
+                "s2": ["room"]
+              }
+            },
+            "at": 100
+          }
+        }
+      ]
+    },
+    {
+      "name": "first owner leaves",
+      "operations": [
+        {
+          "SubscriptionSync": {
+            "snapshot": {
+              "daemon_channels": [],
+              "addressed_pubkeys": [],
+              "archived_channels": [],
+              "sessions": {
+                "s2": ["room"]
+              }
+            },
+            "at": 130
+          }
+        }
+      ]
+    }
+  ]
+}

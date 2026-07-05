@@ -19,31 +19,24 @@ use std::collections::{BTreeMap, BTreeSet};
 use nostr_sdk::prelude::{Filter, SubscriptionId};
 use serde::{Deserialize, Serialize};
 use trellis_core::{
-    DependencyList, Graph, GraphResult, InputNode, ResourceCommand, ResourceCommandExplanation,
-    ResourceCommandKind, ResourceKey, ScopeId, TransactionResult,
+    AuditExplanationLevel, DependencyList, Graph, GraphResult, InputNode, ResourceCommand,
+    ResourceCommandExplanation, ResourceCommandKind, ResourceKey, ScopeId, TransactionOptions,
+    TransactionResult,
 };
 
 use crate::reconcile::labels::NodeLabels;
 pub(crate) use keys::SubCommand;
 use keys::{id_from_key, plan_subs, sub_key, Space, SubKey};
 
-/// Host effect the daemon applies via the transport. Open/Replace both map to a
-/// re-`subscribe_with_id_to` (NIP-01 replace-in-place); Close maps to a real
-/// NIP-01 CLOSE (`transport.unsubscribe`).
+/// Host effect the daemon applies via the transport.
 #[derive(Clone, Debug, PartialEq)]
 pub enum SubEffect {
-    /// Open a new REQ.
     Open { id: SubscriptionId, filter: Filter },
-    /// Close a live REQ — the last owner dropped it.
     Close { id: SubscriptionId },
-    /// Replace a live REQ's filter in place.
     Replace { id: SubscriptionId, filter: Filter },
 }
 
-/// The daemon's current coverage, computed from the store and handed to the
-/// reconciler. This is the canonical input the graph derives every REQ from —
-/// exactly the data the old `build_entity_coverage` gathered, but split by owner
-/// so channels can refcount per session.
+/// The daemon's current coverage, split by owner so channels refcount per scope.
 #[derive(Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CoverageSnapshot {
     /// Explicitly subscribed projects + channels any local/ordinal pubkey manages
@@ -171,7 +164,7 @@ impl SubscriptionReconciler {
         &mut self,
         snapshot: &CoverageSnapshot,
     ) -> GraphResult<(Vec<SubEffect>, TransactionResult<SubCommand>)> {
-        let mut tx = self.graph.begin_transaction()?;
+        let mut tx = self.graph.begin_transaction_with_options(opts())?;
         tx.set_input(self.daemon_channels, snapshot.daemon_channels.clone())?;
         tx.set_input(self.addressed_pubkeys, snapshot.addressed_pubkeys.clone())?;
         tx.set_input(self.archived_channels, snapshot.archived_channels.clone())?;
@@ -273,6 +266,10 @@ impl SubscriptionReconciler {
         self.graph.assert_incremental_equals_full()?;
         Ok(())
     }
+}
+
+fn opts() -> TransactionOptions {
+    TransactionOptions::default().with_audit_explanations(AuditExplanationLevel::DependencyPaths)
 }
 
 /// Translate the graph's resource plan into host effects the daemon applies.

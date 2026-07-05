@@ -86,6 +86,32 @@ fn simulate_render_subscription_effect() {
 }
 
 #[test]
+fn diff_render_shows_hashes_and_fields() {
+    let v = json!({
+        "verb":"diff","surface":"status","mode":"live-preview",
+        "artifact_changed":true,"before_hash":"sha256:before","after_hash":"sha256:after",
+        "field_diff":[{"field":"commands"}]
+    });
+    let text = render_diff(&v);
+    assert!(text.contains("artifact: CHANGED"));
+    assert!(text.contains("before:   sha256:before"));
+    assert!(text.contains("changed:  commands"));
+}
+
+#[test]
+fn acid_render_shows_verdicts() {
+    let v = json!({
+        "verb":"acid","handle":"status:s1","surface":"status",
+        "cause":"status/s1/activity","necessary":true,"unrelated_stable":true,"ok":true,
+        "original_hash":"sha256:o","removed_hash":"sha256:r","unrelated_hash":"sha256:u"
+    });
+    let text = render_acid(&v);
+    assert!(text.contains("acid status:s1"));
+    assert!(text.contains("necessary=true"));
+    assert!(text.contains("ok=true"));
+}
+
+#[test]
 fn why_sub_render_shows_owners_and_footer() {
     let v = json!({
         "verb":"why","handle":"sub:general","kind":"subscription","found":true,

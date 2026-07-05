@@ -16,6 +16,9 @@ use anyhow::{Context, Result};
 use serde_json::Value;
 use std::sync::Arc;
 
+mod acid;
+mod artifact;
+mod diff;
 mod oracle;
 mod replay;
 mod seams;
@@ -47,6 +50,8 @@ pub(in crate::daemon::server) fn rpc_probe(
         }
         "oracle" => Ok(oracle::oracle_value(state)),
         "seams" => Ok(seams::seams_value()),
+        "diff" => diff::diff_value(state, params),
+        "acid" => acid::acid_value(state, params),
         "replay" => replay::replay_value(state, params),
         "simulate" => simulate::simulate_value(state, params),
         "why" => why::why_value(state, params),

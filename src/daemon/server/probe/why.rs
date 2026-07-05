@@ -26,6 +26,7 @@ pub(super) fn why_value(state: &Arc<DaemonState>, params: &Value) -> Result<Valu
             "owners": why.owners,
             "last_kind": why.last_kind,
             "cause": why.cause,
+            "input_causes": why.input_causes,
             "found": why.last_kind.is_some(),
         }));
     }
