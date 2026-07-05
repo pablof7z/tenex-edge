@@ -1,16 +1,7 @@
 //! The daemon process: sole owner of state.db AND the single relay connection.
 //!
-//! Started as the hidden `tenex-edge __daemon` subcommand by a thin client's
-//! spawn-if-absent path. See docs/daemon-design.md. Responsibilities:
-//!   - bind the UDS under the startup `flock`, reclaiming a stale socket;
-//!   - own one `Store` (single SQLite writer) and one `Transport` (one relay
-//!     connection) with a single union subscription across all hosted agents;
-//!   - run per-session engine tasks (the relocated `run_session_in_daemon`);
-//!   - demux incoming relay events once and route mentions to the right agent's
-//!     inbox (multi-agent aware); prune stale peers; serve RPCs. The daemon is
-//!     resident: it stays up to keep the fabric live (presence heartbeats,
-//!     awareness, real-time receipt) and exits only on explicit `stop` or a
-//!     version-skew handshake — never on idleness.
+//! Started as the hidden daemon subcommand by a thin client's spawn-if-absent
+//! path. See docs/daemon-design.md for responsibilities and lifecycle.
 
 use super::client::StartupLock;
 use super::protocol::{
@@ -221,6 +212,7 @@ mod chat_write;
 mod diagnostics;
 mod engine_lifecycle;
 mod lifecycle;
+mod probe;
 mod profile_rpc;
 mod proposal;
 mod resolution;
@@ -230,6 +222,8 @@ mod session_start;
 mod status_publish;
 mod statusline;
 mod subscriptions;
+#[cfg(test)]
+mod test_support;
 mod turns;
 mod who;
 
@@ -282,6 +276,7 @@ async fn dispatch(state: &Arc<DaemonState>, req: &Request) -> Response {
         "turn_end" => rpc_turn_end(state, &req.params).await,
         "doctor" => rpc_doctor(state).await,
         "explain" => rpc_explain(state, &req.params),
+        "probe" => probe::rpc_probe(state, &req.params),
         "local_backend" => rpc_local_backend(state),
         "project_list" => rpc::rpc_project_list(state).await,
         "project_edit" => rpc::rpc_project_edit(state, &req.params).await,

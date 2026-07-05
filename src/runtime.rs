@@ -184,18 +184,25 @@ pub async fn run_session_in_daemon(
     let turn_first = p.turn_first.as_secs();
     let turn_repeat = p.turn_repeat.as_secs();
 
-    // Scheduling bookkeeping (not session status):
-    //   - the in-flight distill task,
-    //   - last_distill_attempt: wall-clock retry gate (success time lives in the
-    //     session row's last_distill_at),
-    //   - cur_turn_started / prev_working: edge detection against the session's
-    //     working/turn_started_at columns.
     let mut distill_task: Option<tokio::task::JoinHandle<DistillOutput>> = None;
     let mut last_distill_attempt: u64 = 0;
     let mut cur_turn_started: u64 = 0;
     let mut prev_working = false;
+    macro_rules! drive_status {
+        ($trigger:expr, $window_hash:expr, $f:expr) => {
+            drive(
+                &status,
+                &provider,
+                &signing_keys,
+                &store,
+                $trigger,
+                $window_hash,
+                $f,
+            )
+            .await
+        };
+    }
 
-    // Assert liveness immediately and arm the first status.
     if let Err(e) = st!(|s: &Store| s.touch_session(&p.session_id, now_secs())) {
         tracing::error!(session = %p.session_id, error = %e, "touch_session failed — liveness not bumped at startup");
     }
@@ -203,7 +210,7 @@ pub async fn run_session_in_daemon(
         let now = now_secs();
         // Seed the session in the ONE status authority (opening publish).
         let chans = channel_set(&p, &store, &session);
-        drive(&status, &provider, &signing_keys, &store, None, |r| {
+        drive_status!("session_started", None, |r| {
             r.on_session_started(
                 &p.session_id,
                 &p.host,
@@ -216,8 +223,7 @@ pub async fn run_session_in_daemon(
                 &session.activity,
                 now,
             )
-        })
-        .await;
+        });
     }
 
     let mut hb = tokio::time::interval(p.heartbeat);
@@ -236,7 +242,7 @@ pub async fn run_session_in_daemon(
                 if let Err(e) = st!(|s: &Store| s.touch_session(&p.session_id, now)) {
                     tracing::error!(session = %p.session_id, error = %e, "touch_session failed — liveness not re-armed this beat");
                 }
-                drive(&status, &provider, &signing_keys, &store, None, |r| r.on_tick(&p.session_id, now)).await;
+                drive_status!("tick", None, |r| r.on_tick(&p.session_id, now));
             }
             _ = obs.tick() => {
                 let now = now_secs();
@@ -271,10 +277,9 @@ pub async fn run_session_in_daemon(
 
                         // The LLM output enters as a canonical input; the graph
                         // republishes iff title/activity changed (title → 30315 only).
-                        drive(&status, &provider, &signing_keys, &store, window_hash.as_deref(), |r| {
+                        drive_status!("distill", window_hash.as_deref(), |r| {
                             r.on_distill(&p.session_id, &labels.title, &labels.activity, now)
-                        })
-                        .await;
+                        });
                     } else if let Some(err_msg) = error {
                         // Append to the per-session log for post-mortem inspection.
                         // (No DB error table in the new schema.)
@@ -291,16 +296,14 @@ pub async fn run_session_in_daemon(
                 // Feed observed turn state + channel set into the ONE authority; it
                 // dedups (publishes only on a real busy/idle flip or channel change).
                 if working != prev_working {
-                    drive(&status, &provider, &signing_keys, &store, None, |r| {
+                    drive_status!("turn_edge", None, |r| {
                         if working { r.on_turn_start(&p.session_id, now) } else { r.on_turn_end(&p.session_id, now) }
-                    })
-                    .await;
+                    });
                 }
                 if let Some(chans) = session.as_ref().map(|s| channel_set(&p, &store, s)) {
-                    drive(&status, &provider, &signing_keys, &store, None, |r| {
+                    drive_status!("channels_changed", None, |r| {
                         r.on_channels_changed(&p.session_id, chans, now)
-                    })
-                    .await;
+                    });
                 }
 
                 if working {
@@ -369,13 +372,10 @@ pub async fn run_session_in_daemon(
     }
 
     // Deterministic teardown: close the status scope → the reconciler emits a
-    // FINAL, immediately-expiring kind:30315 (activity cleared, expiration = now)
-    // so peers drop the session at once instead of waiting out the TTL.
+    // FINAL, immediately-expiring kind:30315 so peers drop the session at once.
     let end_now = now_secs();
-    drive(&status, &provider, &signing_keys, &store, None, |r| {
-        r.on_session_ended(&p.session_id, end_now)
-    })
-    .await;
+    drive_status!("session_ended", None, |r| r
+        .on_session_ended(&p.session_id, end_now));
 
     // Clean exit: mark the session dead (alive=0, working=0). The TITLE is retained
     // in the row; mention routing (list_alive_sessions) drops it immediately.

@@ -1,24 +1,9 @@
 //! The hook/fabric-context snapshot as a Trellis derived node → materialized
 //! output frame over DECLARED inputs.
 //!
-//! This surface REPLACES the hand-rolled `turn_start_audit` / `turn_check_audit`.
-//! Those diverged from the render (they scoped awareness to a different channel
-//! set than the real renderer and cursor-filtered rows the `<members>` block did
-//! not), and the snapshot itself flipped shape on an ambient cursor and rendered
-//! moving wall-clock strings — untrustworthy and non-replayable.
-//!
-//! Here the snapshot is a derived [`FabricView`] over six inputs: the four
-//! canonical store sources (channel/subchannel metadata, member roster,
-//! presence/status rows, chat/mentions) PLUS the previously-ambient seen `cursor`
-//! and wall-clock `now`, modelled as EXPLICIT inputs. Because the derive reads
-//! ONLY declared inputs (an undeclared read is a Trellis error), the awareness/
-//! render scope mismatch is impossible by construction, and the receipt —
-//! sourced from `why_output_frame` / `why_changed` — cannot drift from the bytes
-//! because it IS the render's dependency trace.
-//!
-//! This graph emits an OUTPUT, not effects, so it wraps a plain `Graph<()>` with
-//! no resource commands. The single reusable node-set is re-pointed each render;
-//! the first render emits a Baseline frame, a changed render a Delta.
+//! It replaces the hand-rolled hook audit with one derived [`FabricView`] over
+//! explicit store inputs plus cursor/now, so the injected bytes and receipt share
+//! the same dependency trace.
 
 mod receipt;
 #[cfg(test)]
@@ -35,19 +20,17 @@ use crate::fabric_context::{
     assemble::assemble_view, render_view_text, FabricView, MembersInput, MessagesInput, MetaInput,
     PresenceInput, ViewInputs,
 };
+use crate::reconcile::labels::{CommitFacts, NodeLabels};
 
 /// One render's product: the byte-exact snapshot (suppressed to `None` when empty
 /// and unforced) plus the graph-sourced receipt — the instrumentation seam a
 /// later `explain` CLI persists and replays.
 pub struct HookContextOutcome {
-    /// The exact `<tenex-edge>` snapshot text agents see, or `None` when suppressed.
     pub text: Option<String>,
-    /// The plain, Trellis-free receipt derived from the render's own trace.
     pub receipt: HookContextReceipt,
-    /// This render's committed transaction id (i64 for the receipts ledger).
     pub transaction_id: i64,
-    /// This render's post-commit graph revision (i64 for the receipts ledger).
     pub revision: i64,
+    pub commit: CommitFacts,
 }
 
 /// Per-graph handles for the reusable snapshot node-set.
@@ -68,6 +51,7 @@ pub struct HookContextReconciler {
     nodes: Option<Nodes>,
     /// Last derived view, so an unchanged commit (no frame) still yields bytes.
     last_view: Option<FabricView>,
+    labels: NodeLabels,
 }
 
 impl Default for HookContextReconciler {
@@ -83,7 +67,12 @@ impl HookContextReconciler {
             graph: Graph::<()>::new(),
             nodes: None,
             last_view: None,
+            labels: NodeLabels::new(),
         }
+    }
+
+    pub fn labels(&self) -> &NodeLabels {
+        &self.labels
     }
 
     /// Render the snapshot for a session over the canonical inputs plus the
@@ -105,7 +94,7 @@ impl HookContextReconciler {
         // empty baseline during setup followed by a Delta).
         let nodes = match self.nodes.take() {
             Some(nodes) => nodes,
-            None => build_nodes(&mut tx)?,
+            None => build_nodes(&mut tx, session_id, &mut self.labels)?,
         };
         tx.set_input(nodes.cursor, cursor)?;
         tx.set_input(nodes.now, now)?;
@@ -115,6 +104,7 @@ impl HookContextReconciler {
         tx.set_input(nodes.messages, inputs.messages)?;
         let result = tx.commit()?;
         drop(tx);
+        let commit = CommitFacts::from_result(&self.labels, &result, self.graph.nodes().count());
         self.nodes = Some(nodes);
         let nodes = self.nodes.as_ref().expect("nodes present");
 
@@ -159,6 +149,7 @@ impl HookContextReconciler {
             receipt,
             transaction_id,
             revision,
+            commit,
         })
     }
 
@@ -220,20 +211,30 @@ impl HookContextReconciler {
 /// Stage the reusable node-set (scope, six inputs, derived view, output) inside a
 /// caller-owned transaction — the first render commits it together with real
 /// inputs so one Baseline frame carries the actual snapshot.
-fn build_nodes(tx: &mut trellis_core::Transaction<'_, ()>) -> GraphResult<Nodes> {
+fn build_nodes(
+    tx: &mut trellis_core::Transaction<'_, ()>,
+    session_id: &str,
+    labels: &mut NodeLabels,
+) -> GraphResult<Nodes> {
     let scope = tx.create_scope("hook-context")?;
 
     let cursor = tx.input::<i64>("cursor")?;
+    labels.record(cursor.id(), format!("hook/{session_id}/cursor"));
     tx.set_input(cursor, 0)?;
     let now = tx.input::<i64>("now")?;
+    labels.record(now.id(), format!("hook/{session_id}/now"));
     tx.set_input(now, 0)?;
     let meta = tx.input::<MetaInput>("channel-meta")?;
+    labels.record(meta.id(), format!("hook/{session_id}/channel-meta"));
     tx.set_input(meta, MetaInput::default())?;
     let members = tx.input::<MembersInput>("members")?;
+    labels.record(members.id(), format!("hook/{session_id}/members"));
     tx.set_input(members, MembersInput::default())?;
     let presence = tx.input::<PresenceInput>("presence")?;
+    labels.record(presence.id(), format!("hook/{session_id}/presence"));
     tx.set_input(presence, PresenceInput::default())?;
     let messages = tx.input::<MessagesInput>("messages")?;
+    labels.record(messages.id(), format!("hook/{session_id}/messages"));
     tx.set_input(messages, MessagesInput::default())?;
 
     let view = tx.derived(
@@ -260,6 +261,7 @@ fn build_nodes(tx: &mut trellis_core::Transaction<'_, ()>) -> GraphResult<Nodes>
             ))
         },
     )?;
+    labels.record(view.id(), format!("hook/{session_id}/view"));
 
     let output = tx.materialized_output(
         "hook-context-snapshot",

@@ -218,6 +218,7 @@ pub(crate) fn assemble_turn_start(
             },
         )
     };
+    let render_start = std::time::Instant::now();
     let outcome = HookContextReconciler::new()
         .render_context(
             &rec.session_id,
@@ -227,6 +228,19 @@ pub(crate) fn assemble_turn_start(
             inputs,
         )
         .expect("hook-context snapshot derivation");
+    // §4.1: ledger EVERY render, incl. suppressed/no-op ones (which record no
+    // receipt) — the hook Unchanged-frame evidence `probe stats` reports.
+    {
+        let s = store.lock().expect("store mutex poisoned");
+        crate::instrument::record_commit(
+            &s,
+            "hook_context",
+            "turn_start",
+            &outcome.commit,
+            render_start.elapsed().as_micros() as i64,
+            crate::instrument::now_millis(),
+        );
+    }
 
     // Advance the awareness high-water mark so the next hook renders only the
     // delta past what we just surfaced.

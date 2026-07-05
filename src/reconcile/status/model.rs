@@ -11,6 +11,8 @@ use trellis_core::{
     TransactionResult,
 };
 
+use crate::reconcile::labels::NodeLabels;
+
 use super::StatusCommand;
 
 /// Static per-session identity/context, fixed for the session's lifetime. Not an
@@ -116,6 +118,7 @@ fn plan_status(
 #[allow(clippy::too_many_arguments)]
 pub(super) fn create_session(
     graph: &mut Graph<StatusCommand>,
+    labels: &mut NodeLabels,
     id: &str,
     info: StaticInfo,
     channels: BTreeSet<String>,
@@ -127,14 +130,19 @@ pub(super) fn create_session(
     let mut tx = graph.begin_transaction_with_options(opts())?;
     let scope = tx.create_scope(format!("status-{id}"))?;
     let working_n = tx.input::<bool>(format!("status-{id}-working"))?;
+    labels.record(working_n.id(), format!("status/{id}/working"));
     tx.set_input(working_n, working)?;
     let title_n = tx.input::<String>(format!("status-{id}-title"))?;
+    labels.record(title_n.id(), format!("status/{id}/title"));
     tx.set_input(title_n, title.to_string())?;
     let activity_n = tx.input::<String>(format!("status-{id}-activity"))?;
+    labels.record(activity_n.id(), format!("status/{id}/activity"));
     tx.set_input(activity_n, activity.to_string())?;
     let channels_n = tx.input::<BTreeSet<String>>(format!("status-{id}-channels"))?;
+    labels.record(channels_n.id(), format!("status/{id}/channels"));
     tx.set_input(channels_n, channels)?;
     let arm_n = tx.input::<u64>(format!("status-{id}-arm"))?;
+    labels.record(arm_n.id(), format!("status/{id}/arm"));
     tx.set_input(arm_n, arm)?;
 
     let content = tx.derived(
@@ -160,6 +168,8 @@ pub(super) fn create_session(
         },
     )?;
 
+    labels.record(content.id(), format!("status/{id}/content"));
+
     let key = id.to_string();
     let coll = tx.map_collection::<String, StatusValue>(
         format!("status-{id}-coll"),
@@ -175,6 +185,7 @@ pub(super) fn create_session(
             )]))
         },
     )?;
+    labels.record(coll.id(), format!("status/{id}/coll"));
     tx.map_resource_planner(coll, scope, plan_status)?;
 
     let result = tx.commit()?;

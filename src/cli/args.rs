@@ -7,6 +7,7 @@ use super::explain::ExplainArgs;
 use super::harness::HarnessAction;
 use super::install::InstallArgs;
 use super::messaging::{ChatAction, PublishArgs};
+use super::probe::ProbeArgs;
 use super::tmux_cli::LaunchArgs;
 use super::who::WhoArgs;
 
@@ -86,6 +87,9 @@ pub(super) enum Cmd {
         #[command(subcommand)]
         action: DebugAction,
     },
+    /// Diagnostic probe over the reconciler frontier: stats/oracle/simulate/why/state.
+    #[command(hide = true)]
+    Probe(ProbeArgs),
     /// Detect local agent harnesses and wire tenex-edge's hook entries into each.
     #[command(hide = true)]
     Install(InstallArgs),

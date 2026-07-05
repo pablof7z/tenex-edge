@@ -16,8 +16,10 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use trellis_core::{NodeId, ResourceCommand};
 
+use crate::reconcile::labels::CommitFacts;
 use crate::state::llm_calls::NewLlmCall;
 use crate::state::receipts::NewReceipt;
+use crate::state::trellis_commits::NewCommit;
 use crate::state::Store;
 
 /// Host wall clock in unix milliseconds, read at the boundary (ledgers never do).
@@ -87,6 +89,45 @@ pub fn record_receipt(store: &Store, row: NewReceipt) {
     if let Err(e) = store.record_receipt(&row) {
         tracing::warn!(surface = %row.surface, error = %e, "record_receipt failed — drive seam not instrumented");
     }
+}
+
+/// Record one commit into the all-commit ledger (§4.1) — the sibling of
+/// [`record_receipt`], but for EVERY transaction (effectful or no-op). The caller
+/// supplies the [`CommitFacts`] (label arrays + counts, already Trellis-free), the
+/// drive `trigger_kind`, the host-measured `duration_us`, and `created_at`. Same
+/// best-effort contract: a ledger insert failure is logged, never propagated, so
+/// instrumentation can never block or fail the reconciler's effect.
+pub fn record_commit(
+    store: &Store,
+    surface: &str,
+    trigger_kind: &str,
+    facts: &CommitFacts,
+    duration_us: i64,
+    created_at: i64,
+) {
+    let row = NewCommit {
+        surface: surface.to_string(),
+        transaction_id: facts.transaction_id,
+        revision: facts.revision,
+        trigger_kind: trigger_kind.to_string(),
+        changed_inputs_json: json_labels(&facts.changed_inputs),
+        changed_derived_json: json_labels(&facts.changed_derived),
+        changed_collections_json: json_labels(&facts.changed_collections),
+        command_count: facts.command_count,
+        output_count: facts.output_count,
+        noop: facts.noop as i64,
+        duration_us,
+        graph_nodes: facts.graph_nodes,
+        created_at,
+    };
+    if let Err(e) = store.record_commit(&row) {
+        tracing::warn!(surface, error = %e, "record_commit failed — commit not ledgered");
+    }
+}
+
+/// Serialize a label array to a compact JSON string, never failing the caller.
+fn json_labels(labels: &[String]) -> String {
+    serde_json::to_string(labels).unwrap_or_else(|_| "[]".into())
 }
 
 /// A changed node summary plus optional join context, as a compact JSON string.

@@ -19,21 +19,50 @@ use crate::state::receipts::NewReceipt;
 use crate::state::Store;
 use crate::util::now_secs;
 
-/// Run one reconciler method, apply its effects, and record its receipt — the
-/// single status seam. `window_hash` is `Some` only for a distill-completion
-/// drive, carrying the join key onto the published 30315's receipt.
+/// Run one reconciler method, apply its effects, and record BOTH its receipt (for
+/// an effectful publish) and its all-commit ledger row (for EVERY commit, incl.
+/// no-ops) — the single status seam. `trigger` names the drive method (`"tick"`,
+/// `"distill"`, …) for the ledger. `window_hash` is `Some` only for a distill-
+/// completion drive, carrying the join key onto the published 30315's receipt.
 pub(crate) async fn drive(
     status: &Mutex<StatusReconciler>,
     provider: &Nip29Provider,
     keys: &Keys,
     store: &Mutex<Store>,
+    trigger: &str,
     window_hash: Option<&str>,
     f: impl FnOnce(&mut StatusReconciler) -> trellis_core::GraphResult<StatusOutcome>,
 ) {
-    let outcome = f(&mut status.lock().expect("status reconciler poisoned")).ok();
+    // Time the commit at the host boundary (the ledgers never read the clock).
+    let start = std::time::Instant::now();
+    let (outcome, facts) = {
+        let mut rec = status.lock().expect("status reconciler poisoned");
+        let outcome = f(&mut rec).ok();
+        // Flatten EVERY commit (incl. no-ops) through the surface's labels.
+        let facts = outcome.as_ref().map(|o| {
+            crate::reconcile::CommitFacts::from_result(
+                rec.labels(),
+                &o.result,
+                rec.graph_node_count(),
+            )
+        });
+        (outcome, facts)
+    };
+    let duration_us = start.elapsed().as_micros() as i64;
     let Some(outcome) = outcome else { return };
     let event_ids = apply_status_effects(outcome.effects, provider, keys, store).await;
     record_status_receipt(store, window_hash, &outcome.result, &event_ids);
+    if let Some(facts) = facts {
+        let g = store.lock().expect("store mutex poisoned");
+        crate::instrument::record_commit(
+            &g,
+            "status",
+            trigger,
+            &facts,
+            duration_us,
+            crate::instrument::now_millis(),
+        );
+    }
 }
 
 /// Flatten a committed status transaction into a receipt keyed by the published

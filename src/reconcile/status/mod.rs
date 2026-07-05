@@ -1,17 +1,10 @@
 //! Per-session kind:30315 status reconciler — the ONE authority that decides
 //! WHEN a session's public status is (re)published.
-//!
-//! It replaces FIVE uncoordinated publish sites (startup, the per-session
-//! heartbeat timer, a second global heartbeat task, distill completion, turn-end)
-//! that had NO content dedup (identical event re-published every ~30s), recorded
-//! no *why*, and let a dead session's status linger a full TTL. Every trigger is
-//! now a canonical INPUT update; the graph emits a publish command ONLY when the
-//! derived content changes — or a distinct `Refresh` when just the NIP-40 window
-//! must be re-armed (`on_tick`). Ending a session closes its scope → a
-//! deterministic closing/expiring command. The graph DECIDES; the host SIGNS +
-//! PUBLISHES via the durable outbox (single executor). No I/O happens here.
+//! One graph owns dedup, refresh, h-tags, and deterministic teardown; the host
+//! only signs and enqueues the emitted effects.
 
 mod model;
+pub(crate) mod probe;
 #[cfg(test)]
 mod tests;
 
@@ -24,6 +17,7 @@ use trellis_core::{
 };
 
 use crate::domain::{AgentRef, Status};
+use crate::reconcile::labels::NodeLabels;
 use crate::util::SessionId;
 
 use model::{create_session, opts, status_key, SessionNodes, StaticInfo};
@@ -33,10 +27,8 @@ use model::{create_session, opts, status_key, SessionNodes, StaticInfo};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StatusCommand {
     pub session_id: String,
-    /// Fan-out channels (`h` tags), archived excluded.
     pub channels: Vec<String>,
     pub title: String,
-    /// Live activity line, empty when idle.
     pub activity: String,
     pub busy: bool,
     pub host: String,
@@ -79,8 +71,8 @@ pub struct StatusReconciler {
     ttl_secs: u64,
     refresh_secs: u64,
     sessions: BTreeMap<String, SessionNodes>,
-    /// Last published command per session, so a payload-free `Close` → expiring publish.
     last: BTreeMap<String, StatusCommand>,
+    labels: NodeLabels,
 }
 
 impl StatusReconciler {
@@ -93,7 +85,16 @@ impl StatusReconciler {
             refresh_secs: refresh_secs.max(1),
             sessions: BTreeMap::new(),
             last: BTreeMap::new(),
+            labels: NodeLabels::new(),
         }
+    }
+
+    pub fn labels(&self) -> &NodeLabels {
+        &self.labels
+    }
+
+    pub fn graph_node_count(&self) -> usize {
+        self.graph.nodes().count()
     }
 
     /// Daemon constructor: TTL from a `Duration`, cadence from the domain heartbeat.
@@ -101,7 +102,6 @@ impl StatusReconciler {
         Self::new(ttl.as_secs(), crate::domain::HEARTBEAT_SECS)
     }
 
-    /// A session became known: create its graph nodes, seed state, emit the opening publish.
     #[allow(clippy::too_many_arguments)]
     pub fn on_session_started(
         &mut self,
@@ -127,6 +127,7 @@ impl StatusReconciler {
         };
         let (nodes, result) = create_session(
             &mut self.graph,
+            &mut self.labels,
             id,
             info,
             channels,
@@ -163,7 +164,6 @@ impl StatusReconciler {
         })
     }
 
-    /// The session's joined-channel set changed (archived already excluded).
     pub fn on_channels_changed(
         &mut self,
         id: &str,
@@ -193,18 +193,14 @@ impl StatusReconciler {
         Ok(StatusOutcome { effects, result })
     }
 
-    /// Audit query: why the latest command for a session's status was emitted.
     pub fn why_command(&self, id: &str) -> Option<&ResourceCommandExplanation> {
         self.graph.why_resource_command(&status_key(id))
     }
 
-    /// The `activity` input node id — instrumentation asserts a distill-triggered
-    /// publish is attributed to it.
     pub fn activity_input(&self, id: &str) -> Option<NodeId> {
         self.sessions.get(id).map(|n| n.activity_id)
     }
 
-    /// The full-recompute oracle: incremental state must equal a rebuild.
     pub fn assert_oracle(&self) -> GraphResult<()> {
         self.graph.assert_incremental_equals_full()?;
         Ok(())

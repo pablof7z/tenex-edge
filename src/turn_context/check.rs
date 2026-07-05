@@ -91,6 +91,7 @@ pub(crate) fn assemble_turn_check(
             },
         )
     };
+    let render_start = std::time::Instant::now();
     let outcome = HookContextReconciler::new()
         .render_context(
             &rec.session_id,
@@ -100,6 +101,18 @@ pub(crate) fn assemble_turn_check(
             inputs,
         )
         .expect("hook-context snapshot derivation");
+    // §4.1: ledger EVERY render, incl. suppressed/no-op ones.
+    {
+        let s = store.lock().expect("store mutex poisoned");
+        crate::instrument::record_commit(
+            &s,
+            "hook_context",
+            "turn_check",
+            &outcome.commit,
+            render_start.elapsed().as_micros() as i64,
+            crate::instrument::now_millis(),
+        );
+    }
     TurnContext {
         text: outcome.text,
         receipt: outcome.receipt,
