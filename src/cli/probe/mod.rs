@@ -9,6 +9,7 @@
 //! causality for a handle, §4.3), and `state` (live per-surface values, §4.3).
 
 mod render;
+mod state_render;
 mod stats_render;
 
 use anyhow::Result;
@@ -85,10 +86,17 @@ enum ProbeAction {
         #[arg(long)]
         now: Option<u64>,
     },
-    /// Explain the latest change to a handle (`sub:<channel>` | `status:<session>`).
+    /// Explain the latest change to a handle (`sub:<channel>` | `status:<session>` | `hook:<session>`).
     Why { handle: String },
     /// Live values for a surface (`status` | `subscriptions` | `hook_context`).
-    State { surface: String },
+    State {
+        surface: String,
+        /// Surface-specific handle; for `hook_context`, this is the session id.
+        handle: Option<String>,
+        /// Include verbose graph debug output when supported by the surface.
+        #[arg(long)]
+        dump: bool,
+    },
 }
 
 impl ProbeAction {
@@ -140,9 +148,13 @@ impl ProbeAction {
             ProbeAction::Why { handle } => {
                 Ok(("why".into(), json!({ "verb": "why", "handle": handle })))
             }
-            ProbeAction::State { surface } => Ok((
+            ProbeAction::State {
+                surface,
+                handle,
+                dump,
+            } => Ok((
                 "state".into(),
-                json!({ "verb": "state", "surface": surface }),
+                json!({ "verb": "state", "surface": surface, "handle": handle, "dump": dump }),
             )),
         }
     }
@@ -198,7 +210,7 @@ fn render(verb: &str, v: &Value) -> String {
         "replay" => render::render_replay(v),
         "simulate" => render::render_simulate(v),
         "why" => render::render_why(v),
-        "state" => render::render_state(v),
+        "state" => state_render::render_state(v),
         _ => format!("{v}\n"),
     }
 }

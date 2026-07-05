@@ -81,11 +81,11 @@ pub struct DaemonState {
     subs: Mutex<crate::reconcile::SubscriptionReconciler>,
     /// The ONE authority deciding when each session's kind:30315 status publishes.
     status: Arc<Mutex<crate::reconcile::StatusReconciler>>,
+    hook_contexts: crate::turn_context::HookContextGraphs,
     /// Structured tail event broadcast replacing the old DomainEvent bus.
     tail_tx: tokio::sync::broadcast::Sender<TailEvent>,
     open_clients: Mutex<u64>,
     shutdown: Notify,
-    /// In-memory peer-session tracking for join/leave derivation.
     /// Peer presence join/leave tracking, keyed by `(pubkey, session_id, channel)`.
     /// A single session status can carry several `h` tags; each channel gets a
     /// tail-facing presence row.

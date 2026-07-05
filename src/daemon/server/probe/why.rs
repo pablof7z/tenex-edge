@@ -1,9 +1,10 @@
 //! `probe why <handle>` (§4.3): live causality for one handle, under the
 //! reconciler lock, from the dependency-path audit already computed on the last
 //! commit. Handles: `sub:<channel>` (the REQ's owners + refcount + last command
-//! cause) and `status:<session>` (the last status command + its input causes).
-//! Everything is rendered through the label registry. When no live audit exists
-//! for a handle, that is reported cleanly rather than faked.
+//! cause), `status:<session>` (the last status command + its input causes), and
+//! `hook:<session>` (the fabric-view input causes). Everything is rendered
+//! through the label registry. When no live audit exists for a handle, that is
+//! reported cleanly rather than faked.
 
 use super::{required_str, DaemonState};
 use anyhow::Result;
@@ -52,8 +53,37 @@ pub(super) fn why_value(state: &Arc<DaemonState>, params: &Value) -> Result<Valu
         });
     }
 
+    if let Some(session) = handle
+        .strip_prefix("hook:")
+        .or_else(|| handle.strip_prefix("hook_context:"))
+    {
+        let r = state
+            .hook_contexts
+            .lock()
+            .expect("hook-context mutex poisoned");
+        return Ok(match r.get(session) {
+            Some(graph) => json!({
+                "verb": "why",
+                "handle": handle,
+                "kind": "hook_context",
+                "resource_key": format!("hook/{session}/view"),
+                "last_kind": "View",
+                "cause": "dependency-path audit",
+                "input_causes": graph.why_view_input_causes(),
+                "found": true,
+            }),
+            None => json!({
+                "verb": "why",
+                "handle": handle,
+                "kind": "hook_context",
+                "found": false,
+                "note": "no live hook_context graph for session",
+            }),
+        });
+    }
+
     Err(anyhow::anyhow!(
-        "probe why: handle must be `sub:<channel>` or `status:<session>`"
+        "probe why: handle must be `sub:<channel>`, `status:<session>`, or `hook:<session>`"
     ))
 }
 

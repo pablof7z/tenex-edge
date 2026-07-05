@@ -42,6 +42,7 @@ impl DaemonState {
             status: Arc::new(Mutex::new(crate::reconcile::StatusReconciler::for_ttl(
                 status_ttl_duration(),
             ))),
+            hook_contexts: Mutex::new(HashMap::new()),
             tail_tx: tokio::sync::broadcast::channel(512).0,
             open_clients: Mutex::new(0),
             shutdown: Notify::new(),

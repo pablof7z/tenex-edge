@@ -1,9 +1,9 @@
 //! `probe state <surface>` (§4.3): live values for a surface, under its lock.
 //! `subscriptions` lists each live REQ with its owner scopes + refcount;
 //! `status` lists each session's currently-published content. `hook_context`
-//! reports the honest not-a-live-graph note.
+//! lists daemon-held per-session fabric snapshot graphs.
 
-use super::{not_live_note, required_str, DaemonState};
+use super::{required_str, DaemonState};
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -43,10 +43,75 @@ pub(super) fn state_value(state: &Arc<DaemonState>, params: &Value) -> Result<Va
                 .collect();
             Ok(json!({ "verb": "state", "surface": "subscriptions", "rows": rows }))
         }
-        "hook_context" => Ok(json!({ "verb": "state", "surface": "hook_context",
-            "rows": [], "note": not_live_note() })),
+        "hook_context" => hook_context_state(state, params),
         other => Err(anyhow::anyhow!("probe state: unknown surface `{other}`")),
     }
+}
+
+fn hook_context_state(state: &Arc<DaemonState>, params: &Value) -> Result<Value> {
+    let handle = params
+        .get("handle")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty());
+    let dump = params.get("dump").and_then(Value::as_bool).unwrap_or(false);
+    let graphs = state
+        .hook_contexts
+        .lock()
+        .expect("hook-context mutex poisoned");
+
+    if let Some(session) = handle {
+        let Some(graph) = graphs.get(session) else {
+            return Ok(json!({
+                "verb": "state",
+                "surface": "hook_context",
+                "handle": session,
+                "found": false,
+                "rows": [],
+                "note": "no live hook_context graph for session",
+            }));
+        };
+        return Ok(json!({
+            "verb": "state",
+            "surface": "hook_context",
+            "handle": session,
+            "found": true,
+            "rows": [hook_row(session, graph, dump)],
+        }));
+    }
+
+    let mut sessions = graphs.keys().cloned().collect::<Vec<_>>();
+    sessions.sort();
+    let rows = sessions
+        .into_iter()
+        .filter_map(|session| {
+            graphs
+                .get(&session)
+                .map(|graph| hook_row(&session, graph, dump))
+        })
+        .collect::<Vec<_>>();
+    Ok(json!({
+        "verb": "state",
+        "surface": "hook_context",
+        "found": !rows.is_empty(),
+        "rows": rows,
+    }))
+}
+
+fn hook_row(session: &str, graph: &crate::reconcile::HookContextReconciler, dump: bool) -> Value {
+    let mut row = json!({
+        "session": session,
+        "revision": graph.revision(),
+        "nodes": graph.graph_node_count(),
+        "render_count": graph.render_count(),
+        "text": graph.current_text(),
+        "input_labels": graph.input_labels(),
+        "view_label": graph.view_label(),
+        "why_input_causes": graph.why_view_input_causes(),
+    });
+    if dump {
+        row["debug_dump"] = Value::String(graph.debug_dump());
+    }
+    row
 }
 
 #[cfg(test)]

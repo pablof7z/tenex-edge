@@ -4,7 +4,7 @@
 //! correct — so the render is scrupulously honest about what was and was not
 //! proven, and names the uncovered (imperative) surfaces.
 
-use super::{not_live_note, DaemonState};
+use super::DaemonState;
 use crate::reconcile::frontier;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -33,6 +33,7 @@ pub(in crate::daemon::server) fn oracle_report(state: &Arc<DaemonState>) -> Orac
         let r = state.subs.lock().expect("subs mutex poisoned");
         r.clone()
     };
+    let hook_context = check_hook_contexts(state);
 
     let mut ok = true;
     let status_row = check(
@@ -49,21 +50,21 @@ pub(in crate::daemon::server) fn oracle_report(state: &Arc<DaemonState>) -> Orac
         subs.graph_node_count(),
     );
     ok &= subs_row.status == "green";
+    ok &= hook_context.status == "green";
 
     OracleReport {
         ok,
-        surfaces: vec![status_row, subs_row],
+        surfaces: vec![status_row, subs_row, hook_context],
     }
 }
 
 pub(super) fn oracle_value(state: &Arc<DaemonState>) -> Value {
     let report = oracle_report(state);
-    let mut surfaces = report
+    let surfaces = report
         .surfaces
         .iter()
         .map(surface_value)
         .collect::<Vec<_>>();
-    surfaces.push(not_live_note());
 
     json!({
         "verb": "oracle",
@@ -75,9 +76,38 @@ pub(super) fn oracle_value(state: &Arc<DaemonState>) -> Value {
         "surface_correctness_proven": false,
         "surface_correctness": "NOT PROVEN",
         "host_seam_coverage_percent": frontier::host_seam_coverage_percent(),
-        "covered": ["status", "subscriptions"],
+        "covered": ["status", "subscriptions", "hook_context"],
         "uncovered": frontier::uncovered_bypass_risks(),
     })
+}
+
+fn check_hook_contexts(state: &Arc<DaemonState>) -> OracleSurface {
+    let graphs = state
+        .hook_contexts
+        .lock()
+        .expect("hook-context mutex poisoned");
+    let mut revision = 0;
+    let mut nodes = 0;
+    for graph in graphs.values() {
+        revision = revision.max(graph.revision());
+        nodes += graph.graph_node_count();
+        if let Err(e) = graph.assert_oracle() {
+            return OracleSurface {
+                surface: "hook_context",
+                status: "red",
+                error: Some(format!("{e}")),
+                revision,
+                nodes,
+            };
+        }
+    }
+    OracleSurface {
+        surface: "hook_context",
+        status: "green",
+        error: None,
+        revision,
+        nodes,
+    }
 }
 
 fn check(

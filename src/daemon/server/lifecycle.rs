@@ -83,7 +83,6 @@ pub async fn run() -> Result<()> {
         .backend_nsec()
         .and_then(|n| Keys::parse(n).ok())
         .map(|k| k.public_key().to_hex());
-
     let state = Arc::new(DaemonState {
         store,
         transport,
@@ -96,6 +95,7 @@ pub async fn run() -> Result<()> {
         subscribed_projects: Mutex::new(Vec::new()),
         subs: Mutex::new(crate::reconcile::SubscriptionReconciler::new().expect("subs")),
         status: Arc::new(Mutex::new(StatusReconciler::for_ttl(status_ttl_duration()))),
+        hook_contexts: Mutex::new(HashMap::new()),
         tail_tx: tokio::sync::broadcast::channel(512).0,
         open_clients: Mutex::new(0),
         shutdown: Notify::new(),

@@ -67,7 +67,7 @@ pub(super) fn doctor_summary_value(s: &Store, since: i64) -> Result<Value> {
 fn surface_mode(surface: &str) -> &'static str {
     match surface {
         "status" | "subscriptions" => "authoritative",
-        "hook_context" => "advisory",
+        "hook_context" => "authoritative",
         _ => "imperative",
     }
 }
