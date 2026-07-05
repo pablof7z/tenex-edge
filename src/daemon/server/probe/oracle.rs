@@ -10,79 +10,123 @@ use std::sync::Arc;
 
 /// Surfaces whose correctness the oracle covers (they are live, daemon-held graphs).
 const COVERED: [&str; 2] = ["status", "subscriptions"];
-/// Imperative surfaces with no live graph the oracle can check (frontier §2 table).
-const UNCOVERED: [&str; 4] = ["turn_lifecycle", "cursor", "session_start", "outbox"];
+/// Imperative mutators with no host-seam oracle yet (frontier §2 table fallback).
+const UNCOVERED: [&str; 4] = [
+    "rpc_turn_start",
+    "cursor CAS",
+    "rpc_session_start",
+    "outbox publish",
+];
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::daemon::server) struct OracleSurface {
+    pub surface: &'static str,
+    pub status: &'static str,
+    pub error: Option<String>,
+    pub revision: u64,
+    pub nodes: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::daemon::server) struct OracleReport {
+    pub ok: bool,
+    pub surfaces: Vec<OracleSurface>,
+}
+
+pub(in crate::daemon::server) fn oracle_report(state: &Arc<DaemonState>) -> OracleReport {
+    let status = {
+        let r = state.status.lock().expect("status mutex poisoned");
+        r.clone()
+    };
+    let subs = {
+        let r = state.subs.lock().expect("subs mutex poisoned");
+        r.clone()
+    };
+
+    let mut ok = true;
+    let status_row = check(
+        "status",
+        status.assert_oracle(),
+        status.revision(),
+        status.graph_node_count(),
+    );
+    ok &= status_row.status == "green";
+    let subs_row = check(
+        "subscriptions",
+        subs.assert_oracle(),
+        subs.revision(),
+        subs.graph_node_count(),
+    );
+    ok &= subs_row.status == "green";
+
+    OracleReport {
+        ok,
+        surfaces: vec![status_row, subs_row],
+    }
+}
 
 pub(super) fn oracle_value(state: &Arc<DaemonState>) -> Value {
-    let mut surfaces = Vec::new();
-    let mut ok = true;
-
-    {
-        let r = state.status.lock().expect("status mutex poisoned");
-        let (row, green) = check(
-            "status",
-            r.assert_oracle(),
-            r.revision(),
-            r.graph_node_count(),
-        );
-        ok &= green;
-        surfaces.push(row);
-    }
-    {
-        let r = state.subs.lock().expect("subs mutex poisoned");
-        let (row, green) = check(
-            "subscriptions",
-            r.assert_oracle(),
-            r.revision(),
-            r.graph_node_count(),
-        );
-        ok &= green;
-        surfaces.push(row);
-    }
+    let report = oracle_report(state);
+    let mut surfaces = report
+        .surfaces
+        .iter()
+        .map(surface_value)
+        .collect::<Vec<_>>();
     surfaces.push(not_live_note());
 
     json!({
         "verb": "oracle",
-        "ok": ok,
+        "ok": report.ok,
+        "oracle": if report.ok { "green" } else { "red" },
         "surfaces": surfaces,
         // The load-bearing honesty (§4.6, §8): a green oracle is graph-bookkeeping
         // correctness, not host-effect correctness.
         "surface_correctness_proven": false,
+        "surface_correctness": "NOT PROVEN",
+        "host_seam_coverage_percent": host_seam_coverage_percent(),
         "covered": COVERED,
         "uncovered": UNCOVERED,
     })
 }
 
-/// Build one surface row from its oracle outcome; returns `(row, is_green)`.
 fn check(
-    surface: &str,
+    surface: &'static str,
     outcome: trellis_core::GraphResult<()>,
     revision: u64,
     nodes: usize,
-) -> (Value, bool) {
+) -> OracleSurface {
     match outcome {
-        Ok(()) => (
-            json!({
-                "surface": surface,
-                "live_graph": true,
-                "status": "green",
-                "revision": revision,
-                "nodes": nodes,
-            }),
-            true,
-        ),
-        Err(e) => (
-            json!({
-                "surface": surface,
-                "live_graph": true,
-                "status": "red",
-                "revision": revision,
-                "nodes": nodes,
-                "error": format!("{e}"),
-            }),
-            false,
-        ),
+        Ok(()) => OracleSurface {
+            surface,
+            status: "green",
+            error: None,
+            revision,
+            nodes,
+        },
+        Err(e) => OracleSurface {
+            surface,
+            status: "red",
+            error: Some(format!("{e}")),
+            revision,
+            nodes,
+        },
     }
+}
+
+fn surface_value(surface: &OracleSurface) -> Value {
+    json!({
+        "surface": surface.surface,
+        "live_graph": true,
+        "status": surface.status,
+        "revision": surface.revision,
+        "nodes": surface.nodes,
+        "error": surface.error,
+    })
+}
+
+fn host_seam_coverage_percent() -> i64 {
+    let total = COVERED.len() + UNCOVERED.len();
+    ((COVERED.len() * 100) / total) as i64
 }
 
 #[cfg(test)]
@@ -125,22 +169,21 @@ mod tests {
         .unwrap();
 
         // Mirror what oracle_value does per surface.
-        let (status_row, s_green) = check(
+        let status_row = check(
             "status",
             status.assert_oracle(),
             status.revision(),
             status.graph_node_count(),
         );
-        let (subs_row, u_green) = check(
+        let subs_row = check(
             "subscriptions",
             subs.assert_oracle(),
             subs.revision(),
             subs.graph_node_count(),
         );
 
-        assert!(s_green && u_green, "both live surfaces green");
-        assert_eq!(status_row["status"], "green");
-        assert_eq!(subs_row["status"], "green");
-        assert!(status_row["nodes"].as_i64().unwrap() > 0);
+        assert_eq!(status_row.status, "green");
+        assert_eq!(subs_row.status, "green");
+        assert!(status_row.nodes > 0);
     }
 }

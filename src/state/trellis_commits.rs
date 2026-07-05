@@ -13,6 +13,10 @@
 
 use super::*;
 
+mod stats;
+#[cfg(test)]
+mod tests;
+
 const COLS: &str = "id, surface, transaction_id, revision, mode, trigger_kind, trigger_ref, \
      changed_inputs_json, changed_derived_json, changed_collections_json, \
      resource_commands_json, output_frames_json, command_count, output_count, \
@@ -86,6 +90,25 @@ pub struct CommitStats {
     pub duration_us_sum: i64,
     pub max_graph_nodes: i64,
     pub max_graph_resources: i64,
+    pub latest_graph_resources: i64,
+    pub open_count: i64,
+    pub close_count: i64,
+    pub replace_count: i64,
+    pub refresh_count: i64,
+    pub live_resource_balance: i64,
+    pub resource_drift: bool,
+    pub hook_unchanged_frames: i64,
+    pub duration_histogram: Vec<HistogramBucket>,
+    pub graph_nodes_histogram: Vec<HistogramBucket>,
+    pub graph_resources_histogram: Vec<HistogramBucket>,
+    pub latest_oracle_status: Option<String>,
+    pub latest_oracle_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HistogramBucket {
+    pub bucket: String,
+    pub count: i64,
 }
 
 fn row_to_commit(row: &rusqlite::Row) -> rusqlite::Result<CommitRow> {
@@ -170,120 +193,26 @@ impl Store {
     /// Aggregate value evidence for `surface` over commits with
     /// `created_at >= since`. Pure over the ledger — the proof `probe stats` works.
     pub fn commit_stats(&self, surface: &str, since: i64) -> Result<CommitStats> {
-        Ok(self.conn.query_row(
-            "SELECT
-                 COUNT(*),
-                 COALESCE(SUM(CASE WHEN noop=0 THEN 1 ELSE 0 END), 0),
-                 COALESCE(SUM(noop), 0),
-                 COALESCE(SUM(command_count), 0),
-                 COALESCE(SUM(output_count), 0),
-                 COALESCE(SUM(effect_count), 0),
-                 COALESCE(SUM(suppressed_count), 0),
-                 COALESCE(SUM(duration_us), 0),
-                 COALESCE(MAX(graph_nodes), 0),
-                 COALESCE(MAX(graph_resources), 0)
-             FROM trellis_commits
-             WHERE surface=?1 AND created_at >= ?2",
-            params![surface, since],
-            |r| {
-                Ok(CommitStats {
-                    commits: r.get(0)?,
-                    effectful: r.get(1)?,
-                    noop: r.get(2)?,
-                    command_count_sum: r.get(3)?,
-                    output_count_sum: r.get(4)?,
-                    effect_count_sum: r.get(5)?,
-                    suppressed_count_sum: r.get(6)?,
-                    duration_us_sum: r.get(7)?,
-                    max_graph_nodes: r.get(8)?,
-                    max_graph_resources: r.get(9)?,
-                })
-            },
+        stats::commit_stats(self, surface, since)
+    }
+
+    /// Stamp the newest ledger row for `surface` with a sampled oracle result.
+    pub fn record_oracle_sample(
+        &self,
+        surface: &str,
+        status: &str,
+        error: Option<&str>,
+    ) -> Result<usize> {
+        Ok(self.conn.execute(
+            "UPDATE trellis_commits
+             SET oracle_status=?2, oracle_error=?3
+             WHERE id=(
+                 SELECT id FROM trellis_commits
+                 WHERE surface=?1
+                 ORDER BY created_at DESC, id DESC
+                 LIMIT 1
+             )",
+            params![surface, status, error],
         )?)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::state::{trellis_commits::NewCommit, Store};
-
-    fn commit(surface: &str, noop: i64, commands: i64, created_at: i64) -> NewCommit {
-        NewCommit {
-            surface: surface.into(),
-            transaction_id: 42,
-            revision: 7,
-            mode: "authoritative".into(),
-            trigger_kind: "tick".into(),
-            trigger_ref: "s1".into(),
-            changed_inputs_json: r#"["status/s1/activity"]"#.into(),
-            changed_derived_json: r#"["status/s1/content"]"#.into(),
-            changed_collections_json: "[]".into(),
-            resource_commands_json: "[]".into(),
-            output_frames_json: "[]".into(),
-            command_count: commands,
-            output_count: 0,
-            effect_count: commands,
-            suppressed_count: noop,
-            noop,
-            oracle_status: None,
-            oracle_error: None,
-            duration_us: 250,
-            graph_nodes: 6,
-            graph_resources: 2,
-            created_at,
-        }
-    }
-
-    #[test]
-    fn record_then_latest_orders_newest_first_and_filters_surface() {
-        let s = Store::open_memory().unwrap();
-        s.record_commit(&commit("status", 0, 1, 1_000)).unwrap();
-        s.record_commit(&commit("status", 1, 0, 3_000)).unwrap();
-        s.record_commit(&commit("status", 0, 2, 2_000)).unwrap();
-        // A different surface must not leak in.
-        s.record_commit(&commit("subscriptions", 0, 1, 4_000))
-            .unwrap();
-
-        let rows = s.latest_commits_for_surface("status", 10).unwrap();
-        assert_eq!(rows.len(), 3);
-        assert_eq!(rows[0].created_at, 3_000);
-        assert_eq!(rows[0].noop, 1);
-        assert_eq!(rows[0].mode, "authoritative");
-        assert_eq!(rows[0].trigger_ref, "s1");
-        assert_eq!(rows[0].suppressed_count, 1);
-        assert_eq!(rows[0].graph_resources, 2);
-        assert_eq!(rows[2].created_at, 1_000);
-        assert_eq!(rows[0].changed_inputs_json, r#"["status/s1/activity"]"#);
-    }
-
-    #[test]
-    fn stats_aggregate_effectful_and_noop() {
-        let s = Store::open_memory().unwrap();
-        // Two effectful (1 + 2 commands) and one no-op, all within the window.
-        s.record_commit(&commit("status", 0, 1, 1_000)).unwrap();
-        s.record_commit(&commit("status", 1, 0, 2_000)).unwrap();
-        s.record_commit(&commit("status", 0, 2, 3_000)).unwrap();
-        // Out-of-window row is excluded by `since`.
-        s.record_commit(&commit("status", 0, 5, 500)).unwrap();
-
-        let stats = s.commit_stats("status", 1_000).unwrap();
-        assert_eq!(stats.commits, 3);
-        assert_eq!(stats.effectful, 2);
-        assert_eq!(stats.noop, 1);
-        assert_eq!(stats.command_count_sum, 3);
-        assert_eq!(stats.effect_count_sum, 3);
-        assert_eq!(stats.suppressed_count_sum, 1);
-        assert_eq!(stats.max_graph_nodes, 6);
-        assert_eq!(stats.max_graph_resources, 2);
-        assert_eq!(stats.duration_us_sum, 750);
-    }
-
-    #[test]
-    fn stats_over_empty_surface_is_zeroed() {
-        let s = Store::open_memory().unwrap();
-        let stats = s.commit_stats("hook_context", 0).unwrap();
-        assert_eq!(stats.commits, 0);
-        assert_eq!(stats.effectful, 0);
-        assert_eq!(stats.max_graph_nodes, 0);
     }
 }

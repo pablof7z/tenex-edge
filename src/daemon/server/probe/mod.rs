@@ -20,6 +20,8 @@ mod state;
 mod stats;
 mod why;
 
+pub(in crate::daemon::server) use oracle::oracle_report;
+
 /// The reconciler surfaces the ledger records; `stats` with no `--surface`
 /// reports all of them.
 pub(super) const SURFACES: [&str; 3] = ["status", "subscriptions", "hook_context"];
@@ -45,6 +47,19 @@ pub(in crate::daemon::server) fn rpc_probe(
         "state" => state::state_value(state, params),
         other => Err(anyhow::anyhow!("probe: unknown verb `{other}`")),
     }
+}
+
+pub(in crate::daemon::server) fn doctor_summary(
+    state: &Arc<DaemonState>,
+) -> Result<serde_json::Value> {
+    let since = today_start_millis();
+    state.with_store(|s| stats::doctor_summary_value(s, since))
+}
+
+fn today_start_millis() -> i64 {
+    const DAY_MS: u64 = 86_400_000;
+    let now = crate::util::now_millis();
+    ((now / DAY_MS) * DAY_MS) as i64
 }
 
 /// Shared param helper: a required string field.

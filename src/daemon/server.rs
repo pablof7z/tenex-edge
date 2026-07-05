@@ -36,7 +36,7 @@ mod rpc;
 mod session_signer;
 mod tmux_rpc;
 
-use background::spawn_pruner;
+use background::{spawn_pruner, spawn_trellis_oracle_sampler};
 use demux::spawn_demux;
 use orchestration_handler::handle_orchestration;
 

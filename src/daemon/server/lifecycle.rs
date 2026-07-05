@@ -112,10 +112,10 @@ pub async fn run() -> Result<()> {
         backend_pubkey,
     });
 
-    // These tolerate a not-yet-connected relay (demux just waits for events;
-    // publishers/subscribers are best-effort and queue), so they start now.
+    // These tolerate a not-yet-connected relay, so they start now.
     spawn_demux(state.clone());
     spawn_pruner(state.clone());
+    spawn_trellis_oracle_sampler(state.clone());
     spawn_outbox_drainer(state.clone());
 
     let accept_state = state.clone();
