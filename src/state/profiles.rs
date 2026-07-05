@@ -53,10 +53,12 @@ impl Store {
     /// Reverse lookup: the pubkey of an agent advertising `slug` on the exact
     /// config.json `backendName` label. Non-backend profiles only.
     pub fn resolve_agent_pubkey(&self, slug: &str, host: &str) -> Result<Option<String>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT pubkey, host FROM relay_profiles WHERE slug=?1 AND is_backend=0")?;
-        let rows = stmt.query_map(params![slug], |r| {
+        let name = crate::idref::agent_label(slug, host);
+        let mut stmt = self.conn.prepare(
+            "SELECT pubkey, host FROM relay_profiles
+                 WHERE is_backend=0 AND (slug=?1 OR name=?2)",
+        )?;
+        let rows = stmt.query_map(params![slug, name], |r| {
             Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
         })?;
         for row in rows {
@@ -90,11 +92,12 @@ impl Store {
         Ok(self
             .conn
             .query_row(
-                "SELECT slug FROM relay_profiles WHERE pubkey=?1",
+                "SELECT slug, host FROM relay_profiles WHERE pubkey=?1",
                 params![pubkey],
-                |r| r.get::<_, String>(0),
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
             )
             .optional()?
+            .map(|(slug, host)| crate::idref::slug_from_profile_name(&slug, &host))
             .filter(|s| !s.is_empty()))
     }
 }

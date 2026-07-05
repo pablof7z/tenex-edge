@@ -100,9 +100,10 @@ pub fn rewrite_body_mentions(store: &Store, text: &str) -> String {
             continue;
         };
         let label = store
-            .resolve_slug_for_pubkey(&pubkey)
+            .get_profile(&pubkey)
             .ok()
             .flatten()
+            .and_then(|p| (!p.name.is_empty()).then_some(p.name))
             .unwrap_or_else(|| pubkey_short(&pubkey));
         out = out.replace(&token, &format!("@{label}"));
     }

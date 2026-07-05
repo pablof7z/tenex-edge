@@ -19,12 +19,13 @@ impl Nip29Provider {
             .ok()?;
 
         let event = events.into_iter().max_by_key(|e| e.created_at)?;
-        let name = display_name_from_metadata(&event.content)?;
+        let display_name = display_name_from_metadata(&event.content)?;
         let host = host_tag(&event).unwrap_or_default();
         let is_backend = backend_tag(&event);
+        let (name, slug) = profile_cache_fields(&display_name, &host, is_backend);
 
         self.with_store(|s| {
-            s.upsert_profile(pubkey, &name, &name, &host, is_backend, now)
+            s.upsert_profile(pubkey, &name, &slug, &host, is_backend, now)
                 .ok()
         });
         Some(name)
@@ -60,6 +61,20 @@ fn backend_tag(event: &nostr_sdk::Event) -> bool {
         .any(|t| t.as_slice().first().map(String::as_str) == Some("backend"))
 }
 
+fn profile_cache_fields(display_name: &str, host: &str, is_backend: bool) -> (String, String) {
+    let slug = if is_backend {
+        display_name.trim().to_string()
+    } else {
+        crate::idref::slug_from_profile_name(display_name, host)
+    };
+    let name = if is_backend {
+        slug.clone()
+    } else {
+        crate::idref::agent_label(&slug, host)
+    };
+    (name, slug)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -81,5 +96,23 @@ mod tests {
         assert_eq!(display_name_from_metadata("{}"), None);
         assert_eq!(display_name_from_metadata(r#"{"name":"  "}"#), None);
         assert_eq!(display_name_from_metadata("not json"), None);
+    }
+
+    #[test]
+    fn cache_fields_keep_qualified_name_and_bare_slug() {
+        assert_eq!(
+            profile_cache_fields("developer1@remoteBackend", "remoteBackend", false),
+            (
+                "developer1@remoteBackend".to_string(),
+                "developer1".to_string()
+            )
+        );
+        assert_eq!(
+            profile_cache_fields("developer1", "remoteBackend", false),
+            (
+                "developer1@remoteBackend".to_string(),
+                "developer1".to_string()
+            )
+        );
     }
 }

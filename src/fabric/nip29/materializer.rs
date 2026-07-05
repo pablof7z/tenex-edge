@@ -82,13 +82,18 @@ impl Nip29Materializer {
     // ── relay_profiles (kind:0) ──────────────────────────────────────────────
 
     /// Materialise a decoded kind:0 profile into `relay_profiles`. Newer
-    /// `updated_at` wins. The kind:0 `name` doubles as the agent slug in our wire
-    /// shape, so both columns carry it.
+    /// `updated_at` wins. Agent profile `name` is the backend-qualified display
+    /// label, while `slug` stays bare for `(slug, backend)` routing.
     pub fn materialize_profile(store: &Store, pf: &Profile, updated_at: u64) {
         let slug = pf.agent.slug.as_str();
+        let name = if pf.is_backend {
+            slug.to_string()
+        } else {
+            crate::idref::agent_label(slug, &pf.host)
+        };
         if let Err(e) = store.upsert_profile(
             &pf.agent.pubkey,
-            slug,
+            &name,
             slug,
             &pf.host,
             pf.is_backend,

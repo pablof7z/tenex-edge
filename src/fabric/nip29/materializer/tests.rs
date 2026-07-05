@@ -108,6 +108,15 @@ fn profile_materializes_to_relay_profiles() {
         store.resolve_slug_for_pubkey(&pk).unwrap().as_deref(),
         Some("smith")
     );
+    let profile = store.get_profile(&pk).unwrap().unwrap();
+    assert_eq!(profile.name, "smith@laptop");
+    assert_eq!(
+        store
+            .resolve_agent_pubkey("smith", "laptop")
+            .unwrap()
+            .as_deref(),
+        Some(pk.as_str())
+    );
 }
 
 #[test]

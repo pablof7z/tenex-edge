@@ -13,18 +13,32 @@ const SKILL_MARKER: &str = "name: tenex-edge";
 struct SkillTarget {
     label: &'static str,
     path: PathBuf,
+    link: SkillLink,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum SkillLink {
+    RepoSource,
+    AgentsSkill,
+}
+
+fn agents_skill_path(home: &Path) -> PathBuf {
+    home.join(".agents/skills/tenex-edge")
 }
 
 fn skill_targets() -> Result<Vec<SkillTarget>> {
     let home = home_dir()?;
+    let agents = agents_skill_path(&home);
     let mut targets = vec![SkillTarget {
         label: "agents",
-        path: home.join(".agents/skills/tenex-edge"),
+        path: agents,
+        link: SkillLink::RepoSource,
     }];
     if claude_detected()? {
         targets.push(SkillTarget {
             label: "claude",
             path: home.join(".claude/skills/tenex-edge"),
+            link: SkillLink::AgentsSkill,
         });
     }
     Ok(targets)
@@ -93,8 +107,34 @@ pub(super) fn print_status() -> Result<()> {
     Ok(())
 }
 
+pub(super) fn selection_label() -> Result<String> {
+    let source = skill_source_dir().ok();
+    let targets = skill_targets()?;
+    let installed = targets
+        .iter()
+        .filter(|target| is_installed(&target.path, source.as_deref()))
+        .count();
+    let status = match installed {
+        0 => "-".dimmed().to_string(),
+        n if n == targets.len() => "installed".green().to_string(),
+        _ => "partial".yellow().to_string(),
+    };
+    let detail = targets
+        .iter()
+        .map(|target| target.path.display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    Ok(format!(
+        "{:<18} {:<14} {}",
+        "tenex-edge skill".cyan().bold(),
+        status,
+        detail.dimmed()
+    ))
+}
+
 pub(super) fn install(opts: &InstallOpts) -> Result<()> {
     let source = skill_source_dir()?;
+    let agents = agents_skill_path(&home_dir()?);
     let verb = if opts.uninstall {
         "Uninstalling skill from"
     } else {
@@ -107,7 +147,11 @@ pub(super) fn install(opts: &InstallOpts) -> Result<()> {
         if opts.uninstall {
             uninstall_target(&target, opts.dry_run)?;
         } else {
-            install_target(&target, &source, opts.dry_run)?;
+            let link_source = match target.link {
+                SkillLink::RepoSource => source.as_path(),
+                SkillLink::AgentsSkill => agents.as_path(),
+            };
+            install_target(&target, link_source, opts.dry_run)?;
         }
     }
     Ok(())
@@ -130,10 +174,11 @@ fn installed_link_detail(path: &Path, expected_source: Option<&Path>) -> Option<
     if !is_installed(path, expected_source) {
         return None;
     }
-    let resolved = path.canonicalize().ok()?;
     if path.is_symlink() {
-        Some(format!("{} -> {}", path.display(), resolved.display()))
+        let target = std::fs::read_link(path).ok()?;
+        Some(format!("{} -> {}", path.display(), target.display()))
     } else {
+        let resolved = path.canonicalize().ok()?;
         Some(resolved.display().to_string())
     }
 }
@@ -239,6 +284,10 @@ mod tests {
 
         let link = temp.path().join(".claude/skills/tenex-edge");
         assert!(link.is_symlink());
+        assert_eq!(
+            std::fs::read_link(&link).unwrap(),
+            temp.path().join(".agents/skills/tenex-edge")
+        );
         assert_eq!(link.canonicalize().unwrap(), source);
     }
 
