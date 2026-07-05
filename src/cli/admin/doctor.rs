@@ -127,7 +127,7 @@ mod tests {
                     { "surface": "status", "mode": "authoritative",
                       "oracle_status": "green", "suppressed_count": 7,
                       "hook_unchanged_frames": 0, "commits": 9 },
-                    { "surface": "hook_context", "mode": "advisory",
+                    { "surface": "hook_context", "mode": "authoritative",
                       "oracle_status": "unknown", "suppressed_count": 0,
                       "hook_unchanged_frames": 3, "commits": 3 }
                 ]
@@ -147,7 +147,7 @@ mod tests {
         assert!(rendered
             .contains("status         authoritative oracle green   7 suppressed publishes today"));
         assert!(rendered
-            .contains("hook_context   advisory      oracle unknown 3 unchanged frames today"));
+            .contains("hook_context   authoritative oracle unknown 3 unchanged frames today"));
         assert!(!rendered.contains("warning:"));
     }
 

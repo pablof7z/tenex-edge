@@ -138,7 +138,7 @@ pub fn record_commit(
 fn surface_mode(surface: &str) -> &'static str {
     match surface {
         "status" | "subscriptions" => "authoritative",
-        "hook_context" => "advisory",
+        "hook_context" => "authoritative",
         _ => "imperative",
     }
 }

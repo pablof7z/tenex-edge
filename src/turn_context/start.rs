@@ -8,7 +8,6 @@ use super::reads::{
 };
 use super::TurnContext;
 use crate::fabric_context::{capture_inputs, inbox_seed, FabricContextInput};
-use crate::reconcile::HookContextReconciler;
 use crate::state::{Session, Store};
 use crate::util::now_secs;
 
@@ -32,7 +31,16 @@ pub(crate) fn assemble_turn_start_context(
     self_host: &str,
     prev_turn_started_at: u64,
 ) -> Option<String> {
-    assemble_turn_start(store, rec, backend_pubkey, self_host, prev_turn_started_at).text
+    let hook_contexts = super::HookContextGraphs::default();
+    assemble_turn_start(
+        store,
+        rec,
+        backend_pubkey,
+        self_host,
+        prev_turn_started_at,
+        &hook_contexts,
+    )
+    .text
 }
 
 pub(crate) fn assemble_turn_start(
@@ -41,6 +49,7 @@ pub(crate) fn assemble_turn_start(
     backend_pubkey: &str,
     self_host: &str,
     _prev_turn_started_at: u64,
+    hook_contexts: &super::HookContextGraphs,
 ) -> TurnContext {
     let first_turn = rec.seen_cursor == 0;
     // Routing scope is the session's `channel_h` — a project channel, or the
@@ -220,15 +229,15 @@ pub(crate) fn assemble_turn_start(
     };
     let render_start = std::time::Instant::now();
     let replay_inputs = inputs.clone();
-    let outcome = HookContextReconciler::new()
-        .render_context(
-            &rec.session_id,
-            "turn_start",
-            rec.seen_cursor as i64,
-            now as i64,
-            inputs,
-        )
-        .expect("hook-context snapshot derivation");
+    let outcome = super::render_hook_context(
+        hook_contexts,
+        &rec.session_id,
+        "turn_start",
+        rec.seen_cursor as i64,
+        now as i64,
+        inputs,
+    )
+    .expect("hook-context snapshot derivation");
     // §4.1: ledger EVERY render, incl. suppressed/no-op ones (which record no
     // receipt) — the hook Unchanged-frame evidence `probe stats` reports.
     {

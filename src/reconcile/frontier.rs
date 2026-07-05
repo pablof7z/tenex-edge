@@ -100,7 +100,7 @@ static REGISTRATIONS: [SurfaceRegistration; 7] = [
     },
     SurfaceRegistration {
         name: "hook_context",
-        mode: SurfaceMode::Advisory,
+        mode: SurfaceMode::Authoritative,
         facts: &["hook call", "cursor", "store snapshot", "now"],
         trellis_inputs: &["ViewInputs"],
         host_effects: &["materialized FabricView output text"],

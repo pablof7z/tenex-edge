@@ -10,12 +10,12 @@ fn frontier_modes_match_epic_baseline() {
         .collect::<BTreeMap<_, _>>();
     assert_eq!(modes["status"], "authoritative");
     assert_eq!(modes["subscriptions"], "authoritative");
-    assert_eq!(modes["hook_context"], "advisory");
+    assert_eq!(modes["hook_context"], "authoritative");
     assert_eq!(modes["turn_lifecycle"], "imperative");
     assert_eq!(modes["cursor"], "imperative");
     assert_eq!(modes["session_start"], "imperative");
     assert_eq!(modes["outbox"], "imperative");
-    assert_eq!(host_seam_coverage_percent(), 28);
+    assert_eq!(host_seam_coverage_percent(), 42);
 }
 
 #[test]
@@ -67,6 +67,23 @@ fn authoritative_effect_executors_require_preview_evidence() {
     let subscriptions = source("src/daemon/server/subscriptions.rs");
     assert!(subscriptions.contains("_preview: &trellis_core::TransactionResult"));
     assert!(subscriptions.contains("preview_matches(&preview, &result)"));
+}
+
+#[test]
+fn no_throwaway_hook_context_reconciler_on_render_path() {
+    assert_only_allowed(
+        scan(["HookContextReconciler::new()"]),
+        [
+            "src/reconcile/hook_context/replay.rs",
+            "src/turn_context.rs",
+        ],
+    );
+    for path in ["src/turn_context/start.rs", "src/turn_context/check.rs"] {
+        assert!(
+            !source(path).contains("HookContextReconciler"),
+            "{path} must use the daemon-held hook-context graph helper"
+        );
+    }
 }
 
 #[test]

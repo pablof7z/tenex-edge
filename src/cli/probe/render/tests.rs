@@ -8,20 +8,20 @@ fn oracle_render_is_honest_about_correctness() {
         "surfaces": [
             {"surface":"status","live_graph":true,"status":"green","revision":812,"nodes":6},
             {"surface":"subscriptions","live_graph":true,"status":"green","revision":44,"nodes":5},
-            {"surface":"hook_context","live_graph":false,"note":"advisory"}
+            {"surface":"hook_context","live_graph":true,"status":"green","revision":2,"nodes":7}
         ],
         "surface_correctness_proven": false,
         "surface_correctness": "NOT PROVEN",
-        "host_seam_coverage_percent": 28,
+        "host_seam_coverage_percent": 42,
         "oracle": "green",
-        "covered": ["status","subscriptions"],
+        "covered": ["status","subscriptions","hook_context"],
         "uncovered": ["rpc_turn_start","cursor CAS","rpc_session_start","outbox publish"]
     });
     let text = render_oracle(&v);
     assert!(text.contains("status          green    (rev 812, 6 nodes)"));
-    assert!(text.contains("hook_context    —        not a live graph (advisory)"));
+    assert!(text.contains("hook_context    green    (rev 2, 7 nodes)"));
     assert!(text.contains("oracle: green / surface-correctness: NOT PROVEN"));
-    assert!(text.contains("host-seam-coverage: 28%"));
+    assert!(text.contains("host-seam-coverage: 42%"));
     assert!(text.contains("uncovered: rpc_turn_start, cursor CAS"));
 }
 
@@ -29,14 +29,14 @@ fn oracle_render_is_honest_about_correctness() {
 fn seams_render_lists_modes_and_risks() {
     let v = json!({
         "verb": "seams",
-        "host_seam_coverage_percent": 28,
+        "host_seam_coverage_percent": 42,
         "surfaces": [
             {"surface":"status","mode":"authoritative","bypass_risks":[]},
             {"surface":"cursor","mode":"imperative","bypass_risks":["cursor CAS"]}
         ]
     });
     let text = render_seams(&v);
-    assert!(text.contains("host-seam-coverage: 28%"));
+    assert!(text.contains("host-seam-coverage: 42%"));
     assert!(text.contains("status"));
     assert!(text.contains("authoritative"));
     assert!(text.contains("cursor"));
@@ -129,4 +129,19 @@ fn state_status_render_lists_sessions() {
     assert!(text.contains("s1"));
     assert!(text.contains("busy"));
     assert!(text.contains("activity=\"reading\""));
+}
+
+#[test]
+fn state_hook_context_render_lists_graph_details() {
+    let v = json!({"verb":"state","surface":"hook_context","rows":[
+        {"session":"s1","revision":2,"nodes":7,"render_count":2,
+         "input_labels":["hook/s1/cursor"],"why_input_causes":["hook/s1/presence"],
+         "text":"Fabric context\nmore"}
+    ]});
+    let text = render_state(&v);
+    assert!(text.contains("state hook_context  (live)"));
+    assert!(text.contains("s1                 rev 2  nodes 7  renders 2"));
+    assert!(text.contains("caused by: hook/s1/presence"));
+    assert!(text.contains("inputs:    hook/s1/cursor"));
+    assert!(text.contains("text:      \"Fabric context\""));
 }

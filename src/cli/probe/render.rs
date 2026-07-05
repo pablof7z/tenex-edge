@@ -7,6 +7,9 @@ use serde_json::Value;
 use std::fmt::Write as _;
 
 #[cfg(test)]
+pub(super) use super::state_render::render_state;
+
+#[cfg(test)]
 mod tests;
 
 fn str_at<'a>(v: &'a Value, k: &str) -> &'a str {
@@ -239,43 +242,5 @@ pub(super) fn render_why(v: &Value) -> String {
         out,
         "(latest change per key; for history use probe stats / the commits ledger)"
     );
-    out
-}
-
-/// `probe state <surface>` — live per-surface values.
-pub(super) fn render_state(v: &Value) -> String {
-    let mut out = String::new();
-    let surface = str_at(v, "surface");
-    let _ = writeln!(out, "state {surface}  (live)");
-    let empty = Vec::new();
-    let rows = v.get("rows").and_then(Value::as_array).unwrap_or(&empty);
-    if rows.is_empty() {
-        let _ = writeln!(out, "  (none)");
-    }
-    for r in rows {
-        if surface == "status" {
-            let _ = writeln!(
-                out,
-                "  {:<10} {:<6} title={:?}  activity={:?}  channels={:?}",
-                str_at(r, "session"),
-                if r.get("busy").and_then(Value::as_bool) == Some(true) {
-                    "busy"
-                } else {
-                    "idle"
-                },
-                str_at(r, "title"),
-                str_at(r, "activity"),
-                strs(r, "channels"),
-            );
-        } else {
-            let _ = writeln!(
-                out,
-                "  {:<18} refcount {}   owners: {}",
-                str_at(r, "resource_key"),
-                i64_at(r, "refcount"),
-                strs(r, "owners").join(", "),
-            );
-        }
-    }
     out
 }

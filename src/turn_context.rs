@@ -15,7 +15,28 @@ pub(crate) use start::assemble_turn_start;
 pub(crate) use start::assemble_turn_start_context;
 
 use crate::fabric_context::ViewInputs;
-use crate::reconcile::{HookContextReceipt, HookContextRenderFact, InputFact};
+use crate::reconcile::{
+    HookContextOutcome, HookContextReceipt, HookContextReconciler, HookContextRenderFact, InputFact,
+};
+use std::collections::HashMap;
+use std::sync::Mutex;
+
+/// Daemon-held, per-session hook-context graphs. Test shims may construct a
+/// local map, but production render paths reuse the daemon-owned instance.
+pub(crate) type HookContextGraphs = Mutex<HashMap<String, HookContextReconciler>>;
+
+pub(crate) fn render_hook_context(
+    graphs: &HookContextGraphs,
+    session_id: &str,
+    kind: &str,
+    cursor: i64,
+    now: i64,
+    inputs: ViewInputs,
+) -> trellis_core::GraphResult<HookContextOutcome> {
+    let mut guard = graphs.lock().expect("hook-context mutex poisoned");
+    let graph = guard.entry(session_id.to_string()).or_default();
+    graph.render_context(session_id, kind, cursor, now, inputs)
+}
 
 /// One turn's assembled fabric snapshot plus its graph-sourced receipt. The text
 /// is what the agent sees (suppressed to `None` when empty); the receipt is the
