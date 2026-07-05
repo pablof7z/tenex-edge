@@ -132,6 +132,9 @@ impl HookContextReconciler {
         // the previous explanation across an unchanged commit, so gate on whether a
         // frame was actually emitted now.
         let frame_kind = FrameKind::from_output_kind(frame.map(|f| &f.kind));
+        if frame_kind == FrameKind::Unchanged {
+            commit.output_frames_json = r#"[{"kind":"unchanged","reason":"no_frame"}]"#.into();
+        }
         let input_causes = if frame.is_some() {
             self.input_cause_labels(output_key)
         } else {

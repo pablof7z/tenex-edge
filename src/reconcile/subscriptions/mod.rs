@@ -59,12 +59,14 @@ pub struct CoverageSnapshot {
 }
 
 /// Handles for one alive session's scope + its joined-channel input.
+#[derive(Clone, Copy)]
 struct SessionNodes {
     scope: ScopeId,
     channels: InputNode<BTreeSet<String>>,
 }
 
 /// Refcounted per-entity subscription reconciler over a `Graph<SubCommand>`.
+#[derive(Clone)]
 pub struct SubscriptionReconciler {
     graph: Graph<SubCommand>,
     daemon_scope: ScopeId,

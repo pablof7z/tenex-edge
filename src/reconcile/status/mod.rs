@@ -66,6 +66,7 @@ pub struct StatusOutcome {
     pub result: TransactionResult<StatusCommand>,
 }
 
+#[derive(Clone)]
 pub struct StatusReconciler {
     graph: Graph<StatusCommand>,
     ttl_secs: u64,

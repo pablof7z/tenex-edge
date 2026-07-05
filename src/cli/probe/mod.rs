@@ -9,6 +9,7 @@
 //! and `state` (live per-surface values, §4.3).
 
 mod render;
+mod stats_render;
 
 use anyhow::Result;
 use clap::{Args, Subcommand};
@@ -131,7 +132,7 @@ fn render(verb: &str, v: &Value) -> String {
         return format!("probe {verb}: {msg}\n");
     }
     match verb {
-        "stats" => render_stats(v),
+        "stats" => stats_render::render_stats(v),
         "oracle" => render::render_oracle(v),
         "simulate" => render::render_simulate(v),
         "why" => render::render_why(v),
@@ -140,77 +141,9 @@ fn render(verb: &str, v: &Value) -> String {
     }
 }
 
-/// The `probe stats` table: one row per surface with the suppression evidence.
-fn render_stats(v: &Value) -> String {
-    use std::fmt::Write as _;
-    let mut out = String::new();
-    let since = v.get("since").and_then(Value::as_i64).unwrap_or(0);
-    let _ = writeln!(out, "probe stats  (since={since})\n");
-    let _ = writeln!(
-        out,
-        "{:<14} {:>7} {:>9} {:>6} {:>7} {:>6} {:>10} {:>6} {:>5}",
-        "surface", "commits", "effectful", "noop", "effects", "supp", "dur_us", "nodes", "res",
-    );
-    let empty = Vec::new();
-    let surfaces = v
-        .get("surfaces")
-        .and_then(Value::as_array)
-        .unwrap_or(&empty);
-    for r in surfaces {
-        let s = |k| r.get(k).and_then(Value::as_str).unwrap_or("");
-        let n = |k| r.get(k).and_then(Value::as_i64).unwrap_or(0);
-        let _ = writeln!(
-            out,
-            "{:<14} {:>7} {:>9} {:>6} {:>7} {:>6} {:>10} {:>6} {:>5}",
-            s("surface"),
-            n("commits"),
-            n("effectful"),
-            n("noop"),
-            n("effect_count_sum"),
-            n("suppressed_count_sum"),
-            n("duration_us_sum"),
-            n("max_graph_nodes"),
-            n("max_graph_resources"),
-        );
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn stats_fixture() -> Value {
-        json!({
-            "verb": "stats",
-            "since": 0,
-            "surfaces": [
-                { "surface": "status", "commits": 3, "effectful": 2, "noop": 1,
-                  "command_count_sum": 3, "output_count_sum": 0,
-                  "effect_count_sum": 3, "suppressed_count_sum": 1,
-                  "duration_us_sum": 750, "max_graph_nodes": 6, "max_graph_resources": 2 },
-                { "surface": "subscriptions", "commits": 1, "effectful": 1, "noop": 0,
-                  "command_count_sum": 1, "output_count_sum": 0,
-                  "effect_count_sum": 1, "suppressed_count_sum": 0,
-                  "duration_us_sum": 100, "max_graph_nodes": 5, "max_graph_resources": 1 },
-            ],
-        })
-    }
-
-    #[test]
-    fn stats_render_tabulates_each_surface() {
-        let text = render("stats", &stats_fixture());
-        assert!(text.contains("probe stats"));
-        assert!(text.contains("surface"));
-        assert!(text.contains("status"));
-        assert!(text.contains("subscriptions"));
-        let status_line = text
-            .lines()
-            .find(|l| l.starts_with("status"))
-            .expect("status row present");
-        assert!(status_line.contains(" 3 "));
-        assert!(status_line.contains(" 1 "));
-    }
 
     #[test]
     fn unimplemented_shape_renders_marker() {
