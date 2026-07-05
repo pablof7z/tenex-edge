@@ -77,8 +77,7 @@ pub async fn run() -> Result<()> {
     ));
     // Backend identity: pubkey of `tenexPrivateKey` (no `userNsec` fallback —
     // the operator key is a human identity, not a backend identity). Used as a
-    // copied admin on every group we create and as the orchestration listener's
-    // `add`-tag matcher.
+    // copied admin on every group we create and as the orchestration matcher.
     let backend_pubkey: Option<String> = cfg
         .backend_nsec()
         .and_then(|n| Keys::parse(n).ok())
@@ -95,6 +94,7 @@ pub async fn run() -> Result<()> {
         subscribed_projects: Mutex::new(Vec::new()),
         subs: Mutex::new(crate::reconcile::SubscriptionReconciler::new().expect("subs")),
         status: Arc::new(Mutex::new(StatusReconciler::for_ttl(status_ttl_duration()))),
+        turn_lifecycle: Mutex::new(crate::reconcile::TurnLifecycleReconciler::new()),
         hook_contexts: Mutex::new(HashMap::new()),
         tail_tx: tokio::sync::broadcast::channel(512).0,
         open_clients: Mutex::new(0),

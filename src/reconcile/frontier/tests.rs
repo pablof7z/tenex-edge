@@ -11,11 +11,11 @@ fn frontier_modes_match_epic_baseline() {
     assert_eq!(modes["status"], "authoritative");
     assert_eq!(modes["subscriptions"], "authoritative");
     assert_eq!(modes["hook_context"], "authoritative");
-    assert_eq!(modes["turn_lifecycle"], "imperative");
+    assert_eq!(modes["turn_lifecycle"], "authoritative");
     assert_eq!(modes["cursor"], "imperative");
     assert_eq!(modes["session_start"], "imperative");
     assert_eq!(modes["outbox"], "imperative");
-    assert_eq!(host_seam_coverage_percent(), 42);
+    assert_eq!(host_seam_coverage_percent(), 57);
 }
 
 #[test]
@@ -67,6 +67,10 @@ fn authoritative_effect_executors_require_preview_evidence() {
     let subscriptions = source("src/daemon/server/subscriptions.rs");
     assert!(subscriptions.contains("_preview: &trellis_core::TransactionResult"));
     assert!(subscriptions.contains("preview_matches(&preview, &result)"));
+
+    let turn_lifecycle = source("src/daemon/server/turn_lifecycle.rs");
+    assert!(turn_lifecycle.contains("preview_turn_started"));
+    assert!(turn_lifecycle.contains("command_plans_match"));
 }
 
 #[test]
@@ -88,10 +92,12 @@ fn no_throwaway_hook_context_reconciler_on_render_path() {
 
 #[test]
 fn no_direct_set_working_outside_declared_lifecycle_seam() {
-    assert_only_allowed(
-        scan(["set_working("]),
-        ["src/daemon/server/turns.rs", "src/state/sessions.rs"],
-    );
+    assert_only_allowed(scan(["set_working("]), ["src/state/sessions.rs"]);
+}
+
+#[test]
+fn no_direct_set_session_transcript_outside_declared_lifecycle_seam() {
+    assert_only_allowed(scan(["set_session_transcript("]), ["src/state/sessions.rs"]);
 }
 
 fn assert_only_allowed<const N: usize>(hits: BTreeSet<String>, allowed: [&str; N]) {

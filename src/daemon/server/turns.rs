@@ -27,26 +27,11 @@ pub(in crate::daemon::server) async fn rpc_turn_start(
     // session id internally, so passing the raw alias is correct. Read the previous
     // turn_started_at BEFORE opening the turn for audit/debug context; durable
     // snapshot-vs-delta gating lives on the session's seen_cursor.
-    let prev_started = state
-        .with_store(|s| s.get_session(&p.session).ok().flatten())
-        .map(|r| r.turn_started_at)
-        .unwrap_or(0);
+    let before = state.with_store(|s| s.get_session(&p.session).ok().flatten());
+    let prev_started = before.as_ref().map(|r| r.turn_started_at).unwrap_or(0);
 
     let now = now_secs();
-    state.with_store(|s| {
-        // Canonical transition: working=1, turn_started_at=now (alias-resolving).
-        if let Err(e) = s.set_working(&p.session, true, now) {
-            tracing::error!(session = %p.session, error = %e, "turn_start: set_working(true) failed — session may not show as working");
-        }
-        if let Some(path) = p.transcript.as_deref().filter(|x| !x.is_empty()) {
-            if let Err(e) = s.set_session_transcript(&p.session, path) {
-                tracing::error!(session = %p.session, error = %e, "turn_start: set_session_transcript failed — distill will lack a transcript path");
-            }
-        }
-    });
-    state.outbox_notify.notify_waiters();
-
-    let rec = match state.with_store(|s| s.get_session(&p.session).ok().flatten()) {
+    let before = match before {
         Some(r) => r,
         None => {
             return Ok(serde_json::json!({
@@ -61,6 +46,23 @@ pub(in crate::daemon::server) async fn rpc_turn_start(
             }));
         }
     };
+    let transcript_ref = p
+        .transcript
+        .as_deref()
+        .filter(|x| !x.is_empty())
+        .map(str::to_string);
+    turn_lifecycle::drive_turn_started(
+        state,
+        turn_lifecycle::seed_from_session(&before),
+        now,
+        transcript_ref,
+    )
+    .context("applying turn_start lifecycle projection")?;
+    state.outbox_notify.notify_waiters();
+
+    let rec = state
+        .with_store(|s| s.get_session(&before.session_id).ok().flatten())
+        .unwrap_or(before);
 
     let instance = state.session_instance(&rec);
     let agent_label = instance.display_slug();
@@ -208,18 +210,16 @@ pub(in crate::daemon::server) async fn rpc_turn_end(
         .as_ref()
         .map(|r| (r.working, r.turn_started_at))
         .unwrap_or((false, 0));
-    state.with_store(|s| {
-        // Canonical transition: working=0 (alias-resolving). The TITLE is retained.
-        if let Err(e) = s.set_working(&p.session, false, 0) {
-            tracing::error!(session = %p.session, error = %e, "turn_end: set_working(false) failed — session may remain stuck as working");
-        }
-    });
+    let now = now_secs();
+    if let Some(rec) = pre.as_ref() {
+        turn_lifecycle::drive_turn_ended(state, turn_lifecycle::seed_from_session(rec), now)
+            .context("applying turn_end lifecycle projection")?;
+    }
     state.outbox_notify.notify_waiters();
 
     let rec = state.with_store(|s| s.get_session(&p.session).ok().flatten());
 
     if was_working {
-        let now = now_secs();
         let elapsed_s = (turn_started_at > 0).then(|| now.saturating_sub(turn_started_at));
         if let Some(rec) = rec.as_ref() {
             let agent_label = state.session_instance(rec).display_slug();

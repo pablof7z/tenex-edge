@@ -13,10 +13,10 @@ pub struct StatusPreview {
 
 impl StatusReconciler {
     pub fn preview_fact(&mut self, fact: &InputFact) -> GraphResult<Option<StatusPreview>> {
-        let InputFact::StatusDrive(drive) = fact else {
+        let Some(drive) = status_drive_from_fact(fact) else {
             return Ok(None);
         };
-        self.preview_drive(drive).map(Some)
+        self.preview_drive(&drive).map(Some)
     }
 
     pub fn preview_drive(&mut self, drive: &StatusDrive) -> GraphResult<StatusPreview> {
@@ -27,6 +27,34 @@ impl StatusReconciler {
         stage_drive(&sessions, &mut labels, refresh_secs, drive, &mut tx)?;
         let result = tx.preview()?;
         Ok(StatusPreview { result, labels })
+    }
+}
+
+pub(super) fn status_drive_from_fact(fact: &InputFact) -> Option<StatusDrive> {
+    match fact {
+        InputFact::StatusDrive(drive) => Some(drive.clone()),
+        InputFact::TurnStarted { session_id, at } => Some(StatusDrive::TurnStarted {
+            session_id: session_id.clone(),
+            at: *at,
+        }),
+        InputFact::TurnEnded { session_id, at } => Some(StatusDrive::TurnEnded {
+            session_id: session_id.clone(),
+            at: *at,
+        }),
+        InputFact::DistillCompleted {
+            session_id,
+            window_hash,
+            title,
+            activity,
+            at,
+        } => Some(StatusDrive::DistillCompleted {
+            session_id: session_id.clone(),
+            title: title.clone(),
+            activity: activity.clone(),
+            window_hash: Some(window_hash.clone()),
+            at: *at,
+        }),
+        _ => None,
     }
 }
 

@@ -28,10 +28,10 @@ pub(super) fn fact_param(params: &Value, key: &str) -> Result<Option<InputFact>>
 
 pub(super) fn infer_surface(fact: &InputFact) -> Option<&'static str> {
     match fact {
-        InputFact::StatusDrive(_)
-        | InputFact::TurnStarted { .. }
+        InputFact::StatusDrive(_) | InputFact::DistillCompleted { .. } => Some("status"),
+        InputFact::TurnStarted { .. }
         | InputFact::TurnEnded { .. }
-        | InputFact::DistillCompleted { .. } => Some("status"),
+        | InputFact::TranscriptWindowCaptured { .. } => Some("turn_lifecycle"),
         InputFact::SubscriptionSync { .. } => Some("subscriptions"),
         _ => None,
     }
@@ -40,6 +40,7 @@ pub(super) fn infer_surface(fact: &InputFact) -> Option<&'static str> {
 pub(super) fn preview_artifact(state: &Arc<DaemonState>, fact: &InputFact) -> Result<Artifact> {
     match infer_surface(fact).context("probe: unsupported InputFact")? {
         "status" => preview_status(state, &normalize_status_fact(fact.clone())?),
+        "turn_lifecycle" => preview_turn_lifecycle(state, fact),
         "subscriptions" => preview_subscriptions(state, fact),
         _ => unreachable!("surface inferred above"),
     }
@@ -84,6 +85,23 @@ fn preview_subscriptions(state: &Arc<DaemonState>, fact: &InputFact) -> Result<A
     ))
 }
 
+fn preview_turn_lifecycle(state: &Arc<DaemonState>, fact: &InputFact) -> Result<Artifact> {
+    let mut r = state
+        .turn_lifecycle
+        .lock()
+        .expect("turn lifecycle mutex poisoned");
+    let preview = r
+        .preview_fact(fact)
+        .map_err(|e| anyhow::anyhow!("turn lifecycle preview failed: {e:?}"))?
+        .context("probe: fact is not supported by turn_lifecycle")?;
+    Ok(plan_artifact(
+        "turn_lifecycle",
+        &preview.labels,
+        &preview.result,
+        None,
+    ))
+}
+
 fn plan_artifact<C>(
     surface: &'static str,
     labels: &NodeLabels,
@@ -117,6 +135,7 @@ pub(super) fn replay_artifact(script: &DataTransactionScript<InputFact>) -> Resu
         "status" => "status",
         "subscriptions" => "subscriptions",
         "hook_context" => "hook_context",
+        "turn_lifecycle" => "turn_lifecycle",
         _ => "unknown",
     };
     Ok(hashed(
@@ -223,8 +242,6 @@ fn op_str<C>(c: &ResourceCommand<C>) -> &'static str {
 fn normalize_status_fact(fact: InputFact) -> Result<InputFact> {
     let drive = match fact {
         InputFact::StatusDrive(_) => return Ok(fact),
-        InputFact::TurnStarted { session_id, at } => StatusDrive::TurnStarted { session_id, at },
-        InputFact::TurnEnded { session_id, at } => StatusDrive::TurnEnded { session_id, at },
         InputFact::DistillCompleted {
             session_id,
             window_hash,

@@ -26,6 +26,7 @@ pub(crate) mod preview;
 pub mod replay;
 pub mod status;
 pub mod subscriptions;
+pub mod turn_lifecycle;
 
 pub use graph::{ReconcileCommand, Reconciler};
 pub use hook_context::{
@@ -36,3 +37,6 @@ pub use labels::{CommitFacts, NodeLabels};
 pub use status::{PublishReason, StatusCommand, StatusEffect, StatusOutcome, StatusReconciler};
 pub(crate) use subscriptions::SubCommand;
 pub use subscriptions::{CoverageSnapshot, SubEffect, SubscriptionReconciler};
+pub use turn_lifecycle::{
+    TurnCommand, TurnEffect, TurnLifecycleOutcome, TurnLifecycleReconciler, TurnProjectionSeed,
+};

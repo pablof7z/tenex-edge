@@ -58,8 +58,21 @@ fn why_causes(state: &Arc<DaemonState>, handle: &str) -> Result<Vec<String>> {
         let r = state.subs.lock().expect("subs mutex poisoned");
         return Ok(r.explain_channel(channel).input_causes);
     }
+    if let Some(session) = handle
+        .strip_prefix("turn:")
+        .or_else(|| handle.strip_prefix("turn_lifecycle:"))
+    {
+        let r = state
+            .turn_lifecycle
+            .lock()
+            .expect("turn lifecycle mutex poisoned");
+        return Ok(r
+            .explain_turn(session)
+            .map(|why| why.input_causes)
+            .unwrap_or_default());
+    }
     Err(anyhow::anyhow!(
-        "probe acid: handle must be `status:<session>` or `sub:<channel>`"
+        "probe acid: handle must be `status:<session>`, `sub:<channel>`, or `turn:<session>`"
     ))
 }
 
@@ -109,6 +122,37 @@ fn remove_cause(state: &Arc<DaemonState>, fact: InputFact, cause: &str) -> Resul
             }
             Ok(InputFact::SubscriptionSync { snapshot, at })
         }
+        InputFact::TurnStarted { session_id, at } => {
+            if !cause.ends_with("/turn_started") {
+                anyhow::bail!("probe acid: unsupported turn cause `{cause}`");
+            }
+            let current = current_turn_row(state, &session_id)?;
+            Ok(InputFact::TurnStarted {
+                session_id,
+                at: current.turn_started_at.min(at),
+            })
+        }
+        InputFact::TurnEnded { session_id, .. } => {
+            if !cause.ends_with("/turn_ended") {
+                anyhow::bail!("probe acid: unsupported turn cause `{cause}`");
+            }
+            Ok(InputFact::TurnEnded { session_id, at: 0 })
+        }
+        InputFact::TranscriptWindowCaptured {
+            session_id,
+            window_hash,
+            at,
+        } => {
+            if !cause.ends_with("/transcript_window") {
+                anyhow::bail!("probe acid: unsupported turn cause `{cause}`");
+            }
+            let current = current_turn_row(state, &session_id)?;
+            Ok(InputFact::TranscriptWindowCaptured {
+                session_id,
+                window_hash: current.transcript_ref.unwrap_or(window_hash),
+                at,
+            })
+        }
         _ => Err(anyhow::anyhow!(
             "probe acid: fact/cause combination is not supported"
         )),
@@ -137,10 +181,35 @@ fn mutate_unrelated(fact: InputFact) -> Result<InputFact> {
             snapshot,
             at: at.saturating_add(999_999),
         }),
+        InputFact::TranscriptWindowCaptured {
+            session_id,
+            window_hash,
+            at,
+        } => Ok(InputFact::TranscriptWindowCaptured {
+            session_id,
+            window_hash,
+            at: at.saturating_add(999_999),
+        }),
+        InputFact::TurnStarted { session_id, at } => Ok(InputFact::TurnStarted { session_id, at }),
+        InputFact::TurnEnded { session_id, at } => Ok(InputFact::TurnEnded { session_id, at }),
         _ => Err(anyhow::anyhow!(
             "probe acid: no unrelated mutation for this fact"
         )),
     }
+}
+
+fn current_turn_row(
+    state: &Arc<DaemonState>,
+    session_id: &str,
+) -> Result<crate::reconcile::turn_lifecycle::TurnStateRow> {
+    state
+        .turn_lifecycle
+        .lock()
+        .expect("turn lifecycle mutex poisoned")
+        .state_rows()
+        .into_iter()
+        .find(|row| row.session == session_id)
+        .with_context(|| format!("probe acid: no turn_lifecycle row for `{session_id}`"))
 }
 
 fn subscription_session_cause(cause: &str) -> Option<String> {
@@ -150,83 +219,4 @@ fn subscription_session_cause(cause: &str) -> Option<String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::reconcile::CoverageSnapshot;
-    use std::collections::{BTreeMap, BTreeSet};
-
-    #[tokio::test]
-    async fn status_acid_verifies_activity_cause_and_unrelated_hash() {
-        let state = DaemonState::new_for_test().await;
-        {
-            let mut r = state.status.lock().unwrap();
-            r.on_session_started(
-                "s1",
-                "host",
-                "agent",
-                "pk",
-                ".",
-                BTreeSet::from(["room".to_string()]),
-                true,
-                "T",
-                "reading",
-                100,
-            )
-            .unwrap();
-            r.on_distill("s1", "T", "reviewing", 130).unwrap();
-        }
-        let fact = InputFact::StatusDrive(StatusDrive::DistillCompleted {
-            session_id: "s1".into(),
-            title: "T".into(),
-            activity: "writing".into(),
-            window_hash: Some("sha256:w2".into()),
-            at: 160,
-        });
-        let v = acid_value(
-            &state,
-            &json!({ "verb": "acid", "handle": "status:s1", "fact": fact }),
-        )
-        .unwrap();
-        assert_eq!(v["ok"], true);
-        assert_eq!(v["necessary"], true);
-        assert_eq!(v["unrelated_stable"], true);
-    }
-
-    #[tokio::test]
-    async fn subscription_acid_verifies_session_channel_cause() {
-        let state = DaemonState::new_for_test().await;
-        let mut sessions = BTreeMap::new();
-        sessions.insert("s1".to_string(), BTreeSet::from(["room".to_string()]));
-        let snapshot = CoverageSnapshot {
-            daemon_channels: BTreeSet::new(),
-            addressed_pubkeys: BTreeSet::new(),
-            archived_channels: BTreeSet::new(),
-            sessions: sessions.clone(),
-        };
-        state.subs.lock().unwrap().sync(&snapshot).unwrap();
-
-        sessions.insert("s2".to_string(), BTreeSet::from(["room2".to_string()]));
-        let fact = InputFact::SubscriptionSync {
-            snapshot: CoverageSnapshot {
-                daemon_channels: BTreeSet::new(),
-                addressed_pubkeys: BTreeSet::new(),
-                archived_channels: BTreeSet::new(),
-                sessions,
-            },
-            at: 200,
-        };
-        let v = acid_value(
-            &state,
-            &json!({
-                "verb": "acid",
-                "handle": "sub:room",
-                "cause": "subscriptions/session/s1/channels",
-                "fact": fact,
-            }),
-        )
-        .unwrap();
-        assert_eq!(v["ok"], true);
-        assert_eq!(v["necessary"], true);
-        assert_eq!(v["unrelated_stable"], true);
-    }
-}
+mod tests;
