@@ -149,8 +149,16 @@ impl Config {
     /// Load from `~/.tenex-edge/config.json` (or `$TENEX_CONFIG` override).
     pub fn load() -> Result<Self> {
         let path = config_path();
-        let s = std::fs::read_to_string(&path)
-            .with_context(|| format!("reading {}", path.display()))?;
+        let s = std::fs::read_to_string(&path).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                anyhow::anyhow!(
+                    "{} does not exist yet — run `tenex-edge install` to set it up",
+                    path.display()
+                )
+            } else {
+                anyhow::Error::new(e).context(format!("reading {}", path.display()))
+            }
+        })?;
         Self::from_json_str(&s, &hostname())
     }
 }

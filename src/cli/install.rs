@@ -4,6 +4,7 @@
 
 mod args;
 mod config;
+mod device_config;
 mod hooks;
 mod io;
 mod skills;
@@ -27,6 +28,14 @@ async fn install_with_opts(opts: InstallOpts) -> Result<()> {
         print_status(&all);
         skills::print_status()?;
         return Ok(());
+    }
+
+    if !opts.uninstall {
+        if opts.dry_run {
+            device_config::note_if_missing();
+        } else {
+            device_config::ensure_device_config()?;
+        }
     }
 
     let selected = resolve_selection(&all, &opts)?;

@@ -247,6 +247,7 @@ fn spawn_if_absent() -> Result<()> {
     config::ensure_dir(&config::edge_home())?;
 
     let mut noted_wait = false;
+    let mut spawned_child: Option<std::process::Child> = None;
     let wait_deadline = Instant::now() + DAEMON_STARTUP_TIMEOUT;
     while Instant::now() < wait_deadline {
         if daemon_answers_ping() {
@@ -258,7 +259,7 @@ fn spawn_if_absent() -> Result<()> {
             if sock.exists() {
                 let _ = std::fs::remove_file(&sock);
             }
-            spawn_detached_daemon()?;
+            spawned_child = Some(spawn_detached_daemon()?);
             drop(lock);
             break;
         }
@@ -269,11 +270,24 @@ fn spawn_if_absent() -> Result<()> {
         std::thread::sleep(Duration::from_millis(100));
     }
 
+    // If *we* just spawned the daemon, also watch its exit status: a daemon
+    // that dies immediately (e.g. missing config.json) should be reported
+    // right away, with its own error from daemon.log, instead of making the
+    // caller sit through the full timeout only to see a generic "did not
+    // answer the handshake".
     let mut noted_ready = false;
     let deadline = Instant::now() + DAEMON_STARTUP_TIMEOUT;
     while Instant::now() < deadline {
         if daemon_answers_ping() {
             return Ok(());
+        }
+        if let Some(child) = spawned_child.as_mut() {
+            if let Ok(Some(status)) = child.try_wait() {
+                bail!(
+                    "daemon exited immediately ({status}); last daemon.log lines:\n{}",
+                    super::tail_daemon_log()
+                );
+            }
         }
         if !noted_ready {
             eprintln!("[tenex-edge] waiting for daemon to answer RPCs...");

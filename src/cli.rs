@@ -168,6 +168,12 @@ pub(super) async fn daemon_call_async(
     client.call(method, params).await
 }
 
+/// Hard cap on how long a hook invocation will wait to connect to (or spawn)
+/// the daemon. Hooks fire on every turn of an unrelated harness session, so
+/// they must never hang for anywhere near `DAEMON_STARTUP_TIMEOUT` — this
+/// bounds the wait independent of whatever the daemon itself is doing.
+const HOOK_DAEMON_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// Hook-path daemon call: returns `Ok(Null)` when the daemon is inhibited
 /// (after `tenex-edge stop`) so hooks fail open rather than spawning it.
 pub(super) async fn daemon_call_hook_async(
@@ -177,7 +183,12 @@ pub(super) async fn daemon_call_hook_async(
     if crate::daemon::is_inhibited() {
         return Ok(serde_json::Value::Null);
     }
-    let mut client = crate::daemon::client::Client::connect_or_spawn().await?;
+    let mut client = tokio::time::timeout(
+        HOOK_DAEMON_CONNECT_TIMEOUT,
+        crate::daemon::client::Client::connect_or_spawn(),
+    )
+    .await
+    .context("hook: timed out connecting to daemon")??;
     client.call(method, params).await
 }
 
@@ -192,7 +203,12 @@ where
     if crate::daemon::is_inhibited() {
         return Ok(serde_json::Value::Null);
     }
-    let mut client = crate::daemon::client::Client::connect_or_spawn().await?;
+    let mut client = tokio::time::timeout(
+        HOOK_DAEMON_CONNECT_TIMEOUT,
+        crate::daemon::client::Client::connect_or_spawn(),
+    )
+    .await
+    .context("hook: timed out connecting to daemon")??;
     client.call_with_items(method, params, on_item).await
 }
 

@@ -35,6 +35,23 @@ pub fn log_path() -> PathBuf {
     config::edge_home().join("daemon.log")
 }
 
+/// Last few lines of `daemon.log`, for surfacing a just-crashed daemon's own
+/// error (e.g. a missing config.json) alongside a generic startup-timeout
+/// failure instead of leaving the caller to go dig for it. Best-effort:
+/// unreadable/absent log yields a placeholder rather than propagating a
+/// second error.
+pub(crate) fn tail_daemon_log() -> String {
+    const MAX_LINES: usize = 20;
+    match std::fs::read_to_string(log_path()) {
+        Ok(contents) => {
+            let lines: Vec<&str> = contents.lines().collect();
+            let start = lines.len().saturating_sub(MAX_LINES);
+            lines[start..].join("\n")
+        }
+        Err(e) => format!("(could not read daemon.log: {e})"),
+    }
+}
+
 pub fn store_path() -> PathBuf {
     config::edge_home().join("state.db")
 }
