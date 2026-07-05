@@ -1,0 +1,39 @@
+{
+  "formatVersion": 1,
+  "steps": [
+    {
+      "name": "session starts",
+      "operations": [
+        {
+          "StatusDrive": {
+            "SessionStarted": {
+              "session_id": "s1",
+              "host": "laptop",
+              "slug": "coder",
+              "pubkey": "pk1",
+              "rel_cwd": ".",
+              "channels": ["room"],
+              "working": true,
+              "title": "T",
+              "activity": "reading",
+              "at": 100
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "same ttl bucket tick",
+      "operations": [
+        {
+          "StatusDrive": {
+            "Tick": {
+              "session_id": "s1",
+              "at": 110
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

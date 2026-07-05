@@ -33,6 +33,8 @@ pub struct ChannelWhy {
     pub last_kind: Option<String>,
     /// What produced the latest command, or `None` if none was ever emitted.
     pub cause: Option<String>,
+    /// Canonical input facts that caused it, as labels.
+    pub input_causes: Vec<String>,
 }
 
 impl SubscriptionReconciler {
@@ -53,12 +55,13 @@ impl SubscriptionReconciler {
             .map(|scopes| scopes.iter().map(|s| self.scope_label(*s)).collect())
             .unwrap_or_default();
         let refcount = self.owner_count(&key);
-        let (last_kind, cause) = match self.why_command(&key) {
+        let (last_kind, cause, input_causes) = match self.why_command(&key) {
             Some(why) => (
                 Some(format!("{:?}", why.kind)),
                 Some(self.cause_label(&why.cause)),
+                self.labels().labels_for(&why.input_causes),
             ),
-            None => (None, None),
+            None => (None, None, Vec::new()),
         };
         ChannelWhy {
             resource_key: key_path(&key),
@@ -66,6 +69,7 @@ impl SubscriptionReconciler {
             owners,
             last_kind,
             cause,
+            input_causes,
         }
     }
 
@@ -162,6 +166,10 @@ mod tests {
             "cause names the planner: {:?}",
             why.cause
         );
+        assert!(why
+            .input_causes
+            .iter()
+            .any(|label| label.starts_with("subscriptions/")));
     }
 
     /// An uncovered channel has refcount 0 and no live audit.

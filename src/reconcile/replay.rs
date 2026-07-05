@@ -122,4 +122,31 @@ mod tests {
         let err = replay_script(&script, false).unwrap_err();
         assert!(err.to_string().contains("mixes surfaces"));
     }
+
+    #[test]
+    fn diagnosis_corpus_replay_fixtures_are_valid() {
+        let leaked_close = replay_script_json(
+            include_str!("../../tests/fixtures/trellis_diagnosis/leaked-close.json"),
+            false,
+        )
+        .unwrap();
+        assert_eq!(leaked_close.surface, "subscriptions");
+        assert_eq!(leaked_close.steps, 2);
+        assert_eq!(
+            leaked_close.resource_commands, 2,
+            "first owner leaving must not close a shared subscription"
+        );
+
+        let false_republish = replay_script_json(
+            include_str!("../../tests/fixtures/trellis_diagnosis/false-republish.json"),
+            false,
+        )
+        .unwrap();
+        assert_eq!(false_republish.surface, "status");
+        assert_eq!(false_republish.steps, 2);
+        assert_eq!(
+            false_republish.resource_commands, 1,
+            "same-bucket unchanged tick must not republish status"
+        );
+    }
 }
