@@ -116,6 +116,13 @@ pub(in crate::daemon::server) async fn rpc_turn_start(
     );
     let audit = turn.receipt.to_json();
     record_hook_receipt(state, &turn);
+    cursor::drive_cursor_request(
+        state,
+        "turn_start",
+        cursor::seed_from_session(&rec),
+        cursor::fact_from_session(&rec, turn.receipt.now.max(0) as u64, true),
+    )
+    .context("applying cursor turn_start projection")?;
     let context = turn
         .text
         .map(serde_json::Value::String)
@@ -159,19 +166,13 @@ pub(in crate::daemon::server) fn rpc_turn_check(
 ) -> Result<serde_json::Value> {
     let rec = resolve_session(state, &CallerAnchor::from_params(params))?;
     let now = now_secs();
-    // The sibling-session delta is rendered from the awareness high-water mark
-    // (`seen_cursor`). We advance the cursor atomically — only the first of any
-    // concurrent PostToolUse hooks wins the CAS; the rest get delta_since=None
-    // and emit nothing, preventing duplicate injections from parallel tool calls.
-    let delta_since = if rec.working {
-        let old = rec.seen_cursor;
-        let won = state
-            .with_store(|s| s.try_advance_seen_cursor(&rec.session_id, old, now))
-            .unwrap_or(false);
-        won.then_some(old)
-    } else {
-        None
-    };
+    let delta_since = cursor::drive_cursor_request(
+        state,
+        "turn_check",
+        cursor::seed_from_session(&rec),
+        cursor::fact_from_session(&rec, now, rec.working),
+    )
+    .context("applying cursor turn_check projection")?;
     let turn = crate::turn_context::assemble_turn_check(
         &state.store,
         &rec,

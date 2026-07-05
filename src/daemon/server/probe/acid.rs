@@ -71,8 +71,18 @@ fn why_causes(state: &Arc<DaemonState>, handle: &str) -> Result<Vec<String>> {
             .map(|why| why.input_causes)
             .unwrap_or_default());
     }
+    if let Some(session) = handle
+        .strip_prefix("cursor:")
+        .or_else(|| handle.strip_prefix("cur:"))
+    {
+        let r = state.cursor.lock().expect("cursor mutex poisoned");
+        return Ok(r
+            .explain_cursor(session)
+            .map(|why| why.input_causes)
+            .unwrap_or_default());
+    }
     Err(anyhow::anyhow!(
-        "probe acid: handle must be `status:<session>`, `sub:<channel>`, or `turn:<session>`"
+        "probe acid: handle must be `status:<session>`, `sub:<channel>`, `turn:<session>`, or `cursor:<session>`"
     ))
 }
 
@@ -153,6 +163,28 @@ fn remove_cause(state: &Arc<DaemonState>, fact: InputFact, cause: &str) -> Resul
                 at,
             })
         }
+        InputFact::TurnCheckRequested {
+            session_id,
+            mut observed_cursor,
+            mut working,
+            mut at,
+        } => {
+            if cause.ends_with("/current_cursor") || cause.ends_with("/observed_cursor") {
+                observed_cursor = observed_cursor.saturating_add(1);
+            } else if cause.ends_with("/working") {
+                working = false;
+            } else if cause.ends_with("/now") {
+                at = observed_cursor;
+            } else {
+                anyhow::bail!("probe acid: unsupported cursor cause `{cause}`");
+            }
+            Ok(InputFact::TurnCheckRequested {
+                session_id,
+                observed_cursor,
+                working,
+                at,
+            })
+        }
         _ => Err(anyhow::anyhow!(
             "probe acid: fact/cause combination is not supported"
         )),
@@ -192,6 +224,17 @@ fn mutate_unrelated(fact: InputFact) -> Result<InputFact> {
         }),
         InputFact::TurnStarted { session_id, at } => Ok(InputFact::TurnStarted { session_id, at }),
         InputFact::TurnEnded { session_id, at } => Ok(InputFact::TurnEnded { session_id, at }),
+        InputFact::TurnCheckRequested {
+            session_id,
+            observed_cursor,
+            working,
+            at,
+        } => Ok(InputFact::TurnCheckRequested {
+            session_id,
+            observed_cursor,
+            working,
+            at,
+        }),
         _ => Err(anyhow::anyhow!(
             "probe acid: no unrelated mutation for this fact"
         )),

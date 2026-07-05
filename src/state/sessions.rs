@@ -224,37 +224,6 @@ impl Store {
         Ok(())
     }
 
-    /// Advance the awareness delta high-water mark for a session (resolves first).
-    pub fn set_seen_cursor(&self, id: &str, cursor: u64) -> Result<()> {
-        let Some(canonical) = self.resolve_canonical_id(id)? else {
-            return Ok(());
-        };
-        self.conn.execute(
-            "UPDATE sessions SET seen_cursor=?2 WHERE session_id=?1",
-            params![canonical, cursor],
-        )?;
-        Ok(())
-    }
-
-    /// Atomically advance seen_cursor from `expected` to `now`, using the
-    /// canonical session id directly (no alias resolution needed — callers that
-    /// already hold a resolved `Session` row pass `rec.session_id`).
-    /// Returns `true` if this call won the race (the cursor was still `expected`).
-    /// Parallel PostToolUse hooks racing on the same session each call this once;
-    /// only the first succeeds, the rest get `false` and emit no delta.
-    pub fn try_advance_seen_cursor(
-        &self,
-        canonical_id: &str,
-        expected: u64,
-        now: u64,
-    ) -> Result<bool> {
-        let n = self.conn.execute(
-            "UPDATE sessions SET seen_cursor=?3 WHERE session_id=?1 AND seen_cursor=?2",
-            params![canonical_id, expected, now],
-        )?;
-        Ok(n > 0)
-    }
-
     /// Update the locally-distilled pre-publish draft (title/activity) and stamp
     /// the distill time (resolves first).
     pub fn set_session_distill(

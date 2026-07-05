@@ -40,6 +40,10 @@ pub(in crate::daemon::server) fn oracle_report(state: &Arc<DaemonState>) -> Orac
             .expect("turn lifecycle mutex poisoned");
         r.clone()
     };
+    let cursor = {
+        let r = state.cursor.lock().expect("cursor mutex poisoned");
+        r.clone()
+    };
     let hook_context = check_hook_contexts(state);
 
     let mut ok = true;
@@ -64,11 +68,18 @@ pub(in crate::daemon::server) fn oracle_report(state: &Arc<DaemonState>) -> Orac
         turn_lifecycle.graph_node_count(),
     );
     ok &= turn_row.status == "green";
+    let cursor_row = check(
+        "cursor",
+        cursor.assert_oracle(),
+        cursor.revision(),
+        cursor.graph_node_count(),
+    );
+    ok &= cursor_row.status == "green";
     ok &= hook_context.status == "green";
 
     OracleReport {
         ok,
-        surfaces: vec![status_row, subs_row, turn_row, hook_context],
+        surfaces: vec![status_row, subs_row, turn_row, cursor_row, hook_context],
     }
 }
 
@@ -90,7 +101,7 @@ pub(super) fn oracle_value(state: &Arc<DaemonState>) -> Value {
         "surface_correctness_proven": false,
         "surface_correctness": "NOT PROVEN",
         "host_seam_coverage_percent": frontier::host_seam_coverage_percent(),
-        "covered": ["status", "subscriptions", "hook_context", "turn_lifecycle"],
+        "covered": ["status", "subscriptions", "hook_context", "turn_lifecycle", "cursor"],
         "uncovered": frontier::uncovered_bypass_risks(),
     })
 }

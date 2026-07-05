@@ -8,40 +8,41 @@ fn oracle_render_is_honest_about_correctness() {
         "surfaces": [
             {"surface":"status","live_graph":true,"status":"green","revision":812,"nodes":6},
             {"surface":"subscriptions","live_graph":true,"status":"green","revision":44,"nodes":5},
-            {"surface":"hook_context","live_graph":true,"status":"green","revision":2,"nodes":7}
+            {"surface":"hook_context","live_graph":true,"status":"green","revision":2,"nodes":7},
+            {"surface":"turn_lifecycle","live_graph":true,"status":"green","revision":3,"nodes":8},
+            {"surface":"cursor","live_graph":true,"status":"green","revision":4,"nodes":9}
         ],
         "surface_correctness_proven": false,
         "surface_correctness": "NOT PROVEN",
-        "host_seam_coverage_percent": 42,
+        "host_seam_coverage_percent": 71,
         "oracle": "green",
-        "covered": ["status","subscriptions","hook_context"],
-        "uncovered": ["rpc_turn_start","cursor CAS","rpc_session_start","outbox publish"]
+        "covered": ["status","subscriptions","hook_context","turn_lifecycle","cursor"],
+        "uncovered": ["rpc_session_start","outbox publish"]
     });
     let text = render_oracle(&v);
     assert!(text.contains("status          green    (rev 812, 6 nodes)"));
     assert!(text.contains("hook_context    green    (rev 2, 7 nodes)"));
     assert!(text.contains("oracle: green / surface-correctness: NOT PROVEN"));
-    assert!(text.contains("host-seam-coverage: 42%"));
-    assert!(text.contains("uncovered: rpc_turn_start, cursor CAS"));
+    assert!(text.contains("host-seam-coverage: 71%"));
+    assert!(text.contains("uncovered: rpc_session_start, outbox publish"));
 }
 
 #[test]
 fn seams_render_lists_modes_and_risks() {
     let v = json!({
         "verb": "seams",
-        "host_seam_coverage_percent": 42,
+        "host_seam_coverage_percent": 71,
         "surfaces": [
             {"surface":"status","mode":"authoritative","bypass_risks":[]},
-            {"surface":"cursor","mode":"imperative","bypass_risks":["cursor CAS"]}
+            {"surface":"cursor","mode":"authoritative","bypass_risks":[]}
         ]
     });
     let text = render_seams(&v);
-    assert!(text.contains("host-seam-coverage: 42%"));
+    assert!(text.contains("host-seam-coverage: 71%"));
     assert!(text.contains("status"));
     assert!(text.contains("authoritative"));
     assert!(text.contains("cursor"));
-    assert!(text.contains("imperative"));
-    assert!(text.contains("cursor CAS"));
+    assert!(text.contains("authoritative"));
 }
 
 #[test]

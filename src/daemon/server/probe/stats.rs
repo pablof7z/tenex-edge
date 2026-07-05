@@ -66,8 +66,9 @@ pub(super) fn doctor_summary_value(s: &Store, since: i64) -> Result<Value> {
 
 fn surface_mode(surface: &str) -> &'static str {
     match surface {
-        "status" | "subscriptions" => "authoritative",
-        "hook_context" => "authoritative",
+        "status" | "subscriptions" | "hook_context" | "turn_lifecycle" | "cursor" => {
+            "authoritative"
+        }
         _ => "imperative",
     }
 }
@@ -150,7 +151,7 @@ mod tests {
         let v = stats_value(&s, None, 0).unwrap();
         assert_eq!(v["verb"], "stats");
         let surfaces = v["surfaces"].as_array().unwrap();
-        assert_eq!(surfaces.len(), 3);
+        assert_eq!(surfaces.len(), 5);
 
         let status = surfaces.iter().find(|r| r["surface"] == "status").unwrap();
         assert_eq!(status["commits"], 3);
@@ -170,6 +171,9 @@ mod tests {
             .unwrap();
         assert_eq!(hook["commits"], 1);
         assert_eq!(hook["hook_unchanged_frames"], 1);
+
+        let cursor = surfaces.iter().find(|r| r["surface"] == "cursor").unwrap();
+        assert_eq!(cursor["commits"], 0);
     }
 
     #[test]

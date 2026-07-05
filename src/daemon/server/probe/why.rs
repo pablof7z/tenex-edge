@@ -1,8 +1,9 @@
 //! `probe why <handle>` (§4.3): live causality for one handle, under the
 //! reconciler lock, from the dependency-path audit already computed on the last
-//! commit. Handles: `sub:<channel>`, `status:<session>`, `turn:<session>`, and
-//! `hook:<session>`. Everything is rendered through the label registry. When no
-//! live audit exists for a handle, that is reported cleanly rather than faked.
+//! commit. Handles: `sub:<channel>`, `status:<session>`, `turn:<session>`,
+//! `cursor:<session>`, and `hook:<session>`. Everything is rendered through the
+//! label registry. When no live audit exists for a handle, that is reported
+//! cleanly rather than faked.
 
 use super::{required_str, DaemonState};
 use anyhow::Result;
@@ -82,6 +83,32 @@ pub(super) fn why_value(state: &Arc<DaemonState>, params: &Value) -> Result<Valu
     }
 
     if let Some(session) = handle
+        .strip_prefix("cursor:")
+        .or_else(|| handle.strip_prefix("cur:"))
+    {
+        let r = state.cursor.lock().expect("cursor mutex poisoned");
+        return Ok(match r.explain_cursor(session) {
+            Some(why) => json!({
+                "verb": "why",
+                "handle": handle,
+                "kind": "cursor",
+                "resource_key": why.resource_key,
+                "last_kind": why.last_kind,
+                "cause": why.cause,
+                "input_causes": why.input_causes,
+                "found": true,
+            }),
+            None => json!({
+                "verb": "why",
+                "handle": handle,
+                "kind": "cursor",
+                "found": false,
+                "note": "no command emitted yet on this daemon graph",
+            }),
+        });
+    }
+
+    if let Some(session) = handle
         .strip_prefix("hook:")
         .or_else(|| handle.strip_prefix("hook_context:"))
     {
@@ -111,7 +138,7 @@ pub(super) fn why_value(state: &Arc<DaemonState>, params: &Value) -> Result<Valu
     }
 
     Err(anyhow::anyhow!(
-        "probe why: handle must be `sub:<channel>`, `status:<session>`, `turn:<session>`, or `hook:<session>`"
+        "probe why: handle must be `sub:<channel>`, `status:<session>`, `turn:<session>`, `cursor:<session>`, or `hook:<session>`"
     ))
 }
 
@@ -190,5 +217,30 @@ mod tests {
             .input_causes
             .iter()
             .any(|l| l == "turn_lifecycle/s1/turn_started"));
+    }
+
+    #[test]
+    fn cursor_handle_explains_projection_cause() {
+        let mut r = crate::reconcile::CursorReconciler::new();
+        r.request(
+            crate::reconcile::CursorSeed {
+                session_id: "s1".into(),
+                seen_cursor: 10,
+            },
+            crate::reconcile::InputFact::TurnCheckRequested {
+                session_id: "s1".into(),
+                observed_cursor: 10,
+                working: true,
+                at: 20,
+            },
+        )
+        .unwrap();
+
+        let why = r.explain_cursor("s1").unwrap();
+        assert_eq!(why.resource_key, "cursor/s1");
+        assert!(why
+            .input_causes
+            .iter()
+            .any(|l| l == "cursor/s1/observed_cursor"));
     }
 }

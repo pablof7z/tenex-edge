@@ -17,6 +17,7 @@
 //! surface reconcilers (real sessions/status/who/outbox planners) land on top
 //! of this spine later; nothing here changes existing daemon behavior yet.
 
+pub mod cursor;
 pub mod frontier;
 pub mod graph;
 pub mod hook_context;
@@ -28,6 +29,7 @@ pub mod status;
 pub mod subscriptions;
 pub mod turn_lifecycle;
 
+pub use cursor::{CursorCommand, CursorEffect, CursorReconciler, CursorSeed};
 pub use graph::{ReconcileCommand, Reconciler};
 pub use hook_context::{
     FrameKind, HookContextOutcome, HookContextReceipt, HookContextReconciler, Shape,

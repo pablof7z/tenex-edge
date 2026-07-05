@@ -143,15 +143,18 @@ pub(in crate::daemon::server) fn rpc_who(
                 }
             }
             if let Some(rec) = rec {
-                state.with_store(|s| {
-                    if let Err(e) = s.set_seen_cursor(&rec.session_id, now) {
-                        tracing::error!(
-                            session = %rec.session_id,
-                            error = ?e,
-                            "who: advancing session fabric cursor failed"
-                        );
-                    }
-                });
+                if let Err(e) = cursor::drive_cursor_request(
+                    state,
+                    "who",
+                    cursor::seed_from_session(rec),
+                    cursor::fact_from_session(rec, now, true),
+                ) {
+                    tracing::error!(
+                        session = %rec.session_id,
+                        error = ?e,
+                        "who: advancing session fabric cursor failed"
+                    );
+                }
             }
         }
     } else if p.all_projects {

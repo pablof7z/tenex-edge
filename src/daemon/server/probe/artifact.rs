@@ -32,6 +32,7 @@ pub(super) fn infer_surface(fact: &InputFact) -> Option<&'static str> {
         InputFact::TurnStarted { .. }
         | InputFact::TurnEnded { .. }
         | InputFact::TranscriptWindowCaptured { .. } => Some("turn_lifecycle"),
+        InputFact::TurnCheckRequested { .. } => Some("cursor"),
         InputFact::SubscriptionSync { .. } => Some("subscriptions"),
         _ => None,
     }
@@ -41,6 +42,7 @@ pub(super) fn preview_artifact(state: &Arc<DaemonState>, fact: &InputFact) -> Re
     match infer_surface(fact).context("probe: unsupported InputFact")? {
         "status" => preview_status(state, &normalize_status_fact(fact.clone())?),
         "turn_lifecycle" => preview_turn_lifecycle(state, fact),
+        "cursor" => preview_cursor(state, fact),
         "subscriptions" => preview_subscriptions(state, fact),
         _ => unreachable!("surface inferred above"),
     }
@@ -102,6 +104,10 @@ fn preview_turn_lifecycle(state: &Arc<DaemonState>, fact: &InputFact) -> Result<
     ))
 }
 
+fn preview_cursor(state: &Arc<DaemonState>, fact: &InputFact) -> Result<Artifact> {
+    super::cursor_artifact::preview_cursor(state, fact)
+}
+
 fn plan_artifact<C>(
     surface: &'static str,
     labels: &NodeLabels,
@@ -136,6 +142,7 @@ pub(super) fn replay_artifact(script: &DataTransactionScript<InputFact>) -> Resu
         "subscriptions" => "subscriptions",
         "hook_context" => "hook_context",
         "turn_lifecycle" => "turn_lifecycle",
+        "cursor" => "cursor",
         _ => "unknown",
     };
     Ok(hashed(
@@ -205,7 +212,7 @@ pub(super) fn field_diff(before: &Value, after: &Value) -> Vec<Value> {
         .collect()
 }
 
-fn hashed(surface: &'static str, value: Value) -> Artifact {
+pub(super) fn hashed(surface: &'static str, value: Value) -> Artifact {
     let bytes = serde_json::to_string(&value).unwrap_or_else(|_| "null".into());
     Artifact {
         surface,

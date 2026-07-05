@@ -43,6 +43,7 @@ impl DaemonState {
                 status_ttl_duration(),
             ))),
             turn_lifecycle: Mutex::new(crate::reconcile::TurnLifecycleReconciler::new()),
+            cursor: Mutex::new(crate::reconcile::CursorReconciler::new()),
             hook_contexts: Mutex::new(HashMap::new()),
             tail_tx: tokio::sync::broadcast::channel(512).0,
             open_clients: Mutex::new(0),

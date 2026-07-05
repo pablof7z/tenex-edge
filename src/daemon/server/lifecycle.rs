@@ -95,6 +95,7 @@ pub async fn run() -> Result<()> {
         subs: Mutex::new(crate::reconcile::SubscriptionReconciler::new().expect("subs")),
         status: Arc::new(Mutex::new(StatusReconciler::for_ttl(status_ttl_duration()))),
         turn_lifecycle: Mutex::new(crate::reconcile::TurnLifecycleReconciler::new()),
+        cursor: Mutex::new(crate::reconcile::CursorReconciler::new()),
         hook_contexts: Mutex::new(HashMap::new()),
         tail_tx: tokio::sync::broadcast::channel(512).0,
         open_clients: Mutex::new(0),
@@ -138,9 +139,8 @@ pub async fn run() -> Result<()> {
         }
     });
 
-    // Relay-DEPENDENT startup runs in the background, OFF the accept path, so the
-    // daemon serves store-only RPCs (`who`, `tmux`, chat/inbox reads, statusline,
-    // who/statusline) immediately even when the relay is slow or unreachable. We warm up
+    // Relay-dependent startup runs off the accept path, so store-only RPCs
+    // respond immediately even when the relay is slow or unreachable. We warm up
     // the connection (await connectivity + NIP-42 auth) BEFORE opening any
     // subscription — a REQ opened pre-auth on an auth-gated relay never delivers.
     let relay_state = state.clone();

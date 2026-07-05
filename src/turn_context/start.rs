@@ -12,10 +12,9 @@ use crate::state::{Session, Store};
 use crate::util::now_secs;
 
 /// The full turn-start context assembly, shared by the daemon's `turn_start` RPC
-/// (the only caller now). Mutating reads (drain inbox → mark delivered, advance
-/// `seen_cursor`) happen here under the shared store; the relay self-fetch is
-/// done by the caller beforehand. Single source of truth → injected text cannot
-/// drift.
+/// (the only caller now). Mutating reads that belong to rendering (drain inbox
+/// → mark delivered) happen here under the shared store; cursor advancement is
+/// applied by the daemon after the graph-derived render.
 ///
 /// `backend_pubkey` is this daemon's signing pubkey, used to decide whether we
 /// manage (admin) the channel. `_prev_turn_started_at` is retained for the daemon
@@ -251,19 +250,6 @@ pub(crate) fn assemble_turn_start(
             render_start.elapsed().as_micros() as i64,
             crate::instrument::now_millis(),
         );
-    }
-
-    // Advance the awareness high-water mark so the next hook renders only the
-    // delta past what we just surfaced.
-    {
-        let s = store.lock().expect("store mutex poisoned");
-        if let Err(e) = s.set_seen_cursor(&rec.session_id, now) {
-            tracing::error!(
-                session = %rec.session_id,
-                error = ?e,
-                "turn_start: advancing seen_cursor failed; next turn may re-surface already-shown awareness"
-            );
-        }
     }
 
     let replay_fact = super::hook_replay_fact(
