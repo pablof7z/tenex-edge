@@ -92,6 +92,58 @@ fn mention_resolution_unknown_handles_remain_silent() {
 }
 
 #[test]
+fn host_qualified_ordinal_mention_resolves_remote_profile() {
+    let store = Store::open_memory().unwrap();
+    store
+        .upsert_profile(
+            "remote-pk",
+            "developer1@remoteBackend",
+            "developer1",
+            "remoteBackend",
+            false,
+            1,
+        )
+        .unwrap();
+
+    let resolved = resolve_recipient(
+        &store,
+        "project",
+        "localBackend",
+        "developer1@remoteBackend",
+    )
+    .unwrap();
+
+    assert_eq!(resolved.pubkey, "remote-pk");
+    assert_eq!(resolved.target_session, None);
+    assert_eq!(resolved.project, "project");
+}
+
+#[test]
+fn host_qualified_mention_tolerates_stale_qualified_slug_cache() {
+    let store = Store::open_memory().unwrap();
+    store
+        .upsert_profile(
+            "remote-pk",
+            "developer1@remoteBackend",
+            "developer1@remoteBackend",
+            "remoteBackend",
+            false,
+            1,
+        )
+        .unwrap();
+
+    let resolved = resolve_recipient(
+        &store,
+        "project",
+        "localBackend",
+        "developer1@remoteBackend",
+    )
+    .unwrap();
+
+    assert_eq!(resolved.pubkey, "remote-pk");
+}
+
+#[test]
 fn local_chat_cache_scope_matches_signed_event_target() {
     assert_eq!(chat_publish_scope("sender-room", None, None), "sender-room");
     assert_eq!(

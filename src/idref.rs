@@ -29,6 +29,21 @@ pub fn agent_label(slug: &str, host: &str) -> String {
     }
 }
 
+/// Strip this backend suffix from a kind:0 profile name to recover the routing
+/// slug. Legacy profiles that publish a bare slug pass through unchanged.
+pub fn slug_from_profile_name(name: &str, host: &str) -> String {
+    let name = name.trim();
+    let host = host.trim();
+    if host.is_empty() {
+        return name.to_string();
+    }
+    let suffix = format!("@{host}");
+    match name.strip_suffix(&suffix) {
+        Some(slug) if !slug.trim().is_empty() => slug.trim().to_string(),
+        _ => name.to_string(),
+    }
+}
+
 /// Backend-aware agent reference as seen from `local_host`: bare `slug` when the
 /// agent is on the local backend (or its backend label is unknown), else
 /// `slug@backend-label`.
@@ -173,6 +188,26 @@ mod tests {
     fn agent_label_preserves_backend_label() {
         assert_eq!(agent_label("codex", "myBackend"), "codex@myBackend");
         assert_eq!(agent_label("claude", "laptop"), "claude@laptop");
+    }
+
+    #[test]
+    fn slug_from_profile_name_strips_matching_backend_suffix() {
+        assert_eq!(
+            slug_from_profile_name("developer1@remoteBackend", "remoteBackend"),
+            "developer1"
+        );
+        assert_eq!(
+            slug_from_profile_name("developer1", "remoteBackend"),
+            "developer1"
+        );
+        assert_eq!(
+            slug_from_profile_name("developer1@otherBackend", "remoteBackend"),
+            "developer1@otherBackend"
+        );
+        assert_eq!(
+            slug_from_profile_name("developer1@remoteBackend", ""),
+            "developer1@remoteBackend"
+        );
     }
 
     #[test]

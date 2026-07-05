@@ -2,7 +2,7 @@
 //!
 //! | Domain      | Wire |
 //! |-------------|------|
-//! | Profile     | kind:0,     content `{"name": slug}`, `["host", host]` |
+//! | Profile     | kind:0,     content `{"name": "slug@host"}`, `["host", host]` |
 //! | Activity    | kind:1,     `["h", project]` — social narrative (no inbox routing) |
 //! | Status      | kind:30315, content = live activity (may be empty when idle), `["d", session_id]`, one or more `["h", channel]`, `["title", title]` (always), `["status", "busy"\|"idle"]`, `["host", host]`, optional `["slug", slug]`, optional `["rel-cwd", rel]`, optional NIP-40 `["expiration", ts]` |
 //! | Chat        | kind:9,     `["h", project]`, optional `["p", mentioned_pubkey]` |
@@ -124,7 +124,12 @@ impl Nip29WireCodec {
                 owners,
                 is_backend,
             }) => {
-                let content = serde_json::json!({ "name": agent.slug }).to_string();
+                let name = if *is_backend {
+                    agent.slug.clone()
+                } else {
+                    crate::idref::agent_label(&agent.slug, host)
+                };
+                let content = serde_json::json!({ "name": name }).to_string();
                 let mut tags = vec![tag(&["host", host])?];
                 for o in owners {
                     tags.push(tag(&["p", o])?); // declare the human owner(s)
@@ -226,12 +231,22 @@ impl Nip29WireCodec {
     pub fn decode_event(&self, event: &Event) -> Option<DomainEvent> {
         let pubkey = event.pubkey.to_hex();
         match event.kind.as_u16() {
-            KIND_PROFILE => Some(DomainEvent::Profile(Profile {
-                agent: AgentRef::new(pubkey, name_from_metadata(&event.content)),
-                host: first_tag(event, "host").unwrap_or_default().to_string(),
-                owners: all_tag_values(event, "p"),
-                is_backend: has_bare_tag(event, "backend"),
-            })),
+            KIND_PROFILE => {
+                let host = first_tag(event, "host").unwrap_or_default().to_string();
+                let is_backend = has_bare_tag(event, "backend");
+                let name = name_from_metadata(&event.content);
+                let slug = if is_backend {
+                    name
+                } else {
+                    crate::idref::slug_from_profile_name(&name, &host)
+                };
+                Some(DomainEvent::Profile(Profile {
+                    agent: AgentRef::new(pubkey, slug),
+                    host,
+                    owners: all_tag_values(event, "p"),
+                    is_backend,
+                }))
+            }
             KIND_STATUS => {
                 let d = first_tag(event, "d")?;
                 let channels = all_tag_values(event, "h");
