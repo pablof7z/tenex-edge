@@ -97,6 +97,6 @@ ready
 
 ## Hosted Artifacts
 
-- Plan page: Generated after publishing.
+- Plan page: https://pablof7z.github.io/tenex-edge/plans/launch-named-command-picker/
 
 - TTS audio: https://blossom.primal.net/d1f883e49f85dd95a1126b52b4bc5c316657f037f097ecc98d0bbe2dde19c37c.mp3
