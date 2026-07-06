@@ -1,0 +1,34 @@
+use super::{row_to_inbox, COLS};
+use crate::state::{InboxRow, Store};
+use anyhow::Result;
+use rusqlite::params;
+
+impl Store {
+    /// Inbound ledger rows whose event id starts with `prefix`, newest first.
+    pub fn inbox_by_event_prefix(&self, prefix: &str) -> Result<Vec<InboxRow>> {
+        let pattern = format!("{}%", prefix.replace(['%', '_'], ""));
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {COLS} FROM inbox
+             WHERE event_id LIKE ?1
+             ORDER BY created_at DESC, target_session ASC"
+        ))?;
+        let rows = stmt.query_map(params![pattern], row_to_inbox)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// One inbound ledger row for an event prefix and exact target session.
+    pub fn inbox_by_event_prefix_and_target(
+        &self,
+        prefix: &str,
+        target_session: &str,
+    ) -> Result<Vec<InboxRow>> {
+        let pattern = format!("{}%", prefix.replace(['%', '_'], ""));
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {COLS} FROM inbox
+             WHERE event_id LIKE ?1 AND target_session=?2
+             ORDER BY created_at DESC"
+        ))?;
+        let rows = stmt.query_map(params![pattern, target_session], row_to_inbox)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+}

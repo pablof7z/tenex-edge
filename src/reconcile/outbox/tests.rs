@@ -47,7 +47,7 @@ fn relay_acceptance_marks_published_from_graph() {
 }
 
 #[test]
-fn relay_failure_keeps_pending_and_bumps_retry() {
+fn retryable_relay_failure_keeps_pending_and_bumps_retry() {
     let mut r = OutboxReconciler::new();
     r.drive(enqueue_fact()).unwrap();
 
@@ -65,6 +65,7 @@ fn relay_failure_keeps_pending_and_bumps_retry() {
         out.effects,
         vec![OutboxEffect::MarkFailed {
             local_id: 7,
+            state: "pending".into(),
             error: "relay rejected".into(),
         }]
     );
@@ -72,6 +73,38 @@ fn relay_failure_keeps_pending_and_bumps_retry() {
     assert_eq!(row.state, "pending");
     assert_eq!(row.retries, 1);
     assert_eq!(row.last_error.as_deref(), Some("relay rejected"));
+}
+
+#[test]
+fn terminal_relay_failure_marks_failed_and_bumps_retry() {
+    let mut r = OutboxReconciler::new();
+    r.drive(enqueue_fact()).unwrap();
+
+    let out = r
+        .drive(InputFact::RelayPublishAccepted {
+            local_id: 7,
+            event_id: "ev7".into(),
+            accepted: false,
+            error: Some("relay rejected event: blocked: unknown member".into()),
+            at: 120,
+        })
+        .unwrap();
+
+    assert_eq!(
+        out.effects,
+        vec![OutboxEffect::MarkFailed {
+            local_id: 7,
+            state: "failed".into(),
+            error: "relay rejected event: blocked: unknown member".into(),
+        }]
+    );
+    let row = &r.state_rows()[0];
+    assert_eq!(row.state, "failed");
+    assert_eq!(row.retries, 1);
+    assert_eq!(
+        row.last_error.as_deref(),
+        Some("relay rejected event: blocked: unknown member")
+    );
 }
 
 #[test]

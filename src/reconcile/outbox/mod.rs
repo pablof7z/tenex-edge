@@ -58,8 +58,14 @@ pub struct OutboxCommand {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum OutboxEffect {
     None,
-    MarkPublished { local_id: i64 },
-    MarkFailed { local_id: i64, error: String },
+    MarkPublished {
+        local_id: i64,
+    },
+    MarkFailed {
+        local_id: i64,
+        state: String,
+        error: String,
+    },
 }
 
 pub struct OutboxOutcome {
@@ -225,6 +231,7 @@ impl OutboxReconciler {
                 },
                 OutboxAction::MarkFailed => OutboxEffect::MarkFailed {
                     local_id: cmd.local_id,
+                    state: cmd.state.clone(),
                     error: cmd
                         .last_error
                         .clone()

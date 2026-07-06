@@ -5,6 +5,18 @@
 
 use super::*;
 
+fn row_to_alias(row: &rusqlite::Row) -> rusqlite::Result<SessionAlias> {
+    Ok(SessionAlias {
+        harness: row.get(0)?,
+        external_id_kind: row.get(1)?,
+        external_id: row.get(2)?,
+        session_id: row.get(3)?,
+        created_at: row.get(4)?,
+    })
+}
+
+const ALIAS_COLS: &str = "harness, external_id_kind, external_id, session_id, created_at";
+
 impl Store {
     /// Point an external id at a canonical session. Re-pointing a reused slot or a
     /// rotated harness id is an ON CONFLICT update to the newest owner.
@@ -98,6 +110,39 @@ impl Store {
             .optional()?)
     }
 
+    /// Alias rows matching one external id. With a `harness`, this is the exact
+    /// schema key; without one, it is the machine-wide lookup used for endpoint
+    /// ids such as `pty_session` and `watch_pid`.
+    pub fn aliases_for_external_id(
+        &self,
+        harness: Option<&str>,
+        external_id_kind: &str,
+        external_id: &str,
+    ) -> Result<Vec<SessionAlias>> {
+        let sql = match harness {
+            Some(_) => {
+                format!(
+                    "SELECT {ALIAS_COLS} FROM session_aliases
+                     WHERE harness=?1 AND external_id_kind=?2 AND external_id=?3
+                     ORDER BY created_at DESC"
+                )
+            }
+            None => {
+                format!(
+                    "SELECT {ALIAS_COLS} FROM session_aliases
+                     WHERE external_id_kind=?1 AND external_id=?2
+                     ORDER BY created_at DESC"
+                )
+            }
+        };
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = match harness {
+            Some(h) => stmt.query_map(params![h, external_id_kind, external_id], row_to_alias)?,
+            None => stmt.query_map(params![external_id_kind, external_id], row_to_alias)?,
+        };
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
     /// All aliases of a given kind across every session, newest first (e.g. all
     /// `pty_session` bindings to enumerate live PTY endpoints).
     pub fn list_aliases_of_kind(&self, external_id_kind: &str) -> Result<Vec<SessionAlias>> {
@@ -105,15 +150,7 @@ impl Store {
             "SELECT harness, external_id_kind, external_id, session_id, created_at
              FROM session_aliases WHERE external_id_kind=?1 ORDER BY created_at DESC",
         )?;
-        let rows = stmt.query_map(params![external_id_kind], |row| {
-            Ok(SessionAlias {
-                harness: row.get(0)?,
-                external_id_kind: row.get(1)?,
-                external_id: row.get(2)?,
-                session_id: row.get(3)?,
-                created_at: row.get(4)?,
-            })
-        })?;
+        let rows = stmt.query_map(params![external_id_kind], row_to_alias)?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
@@ -142,15 +179,7 @@ impl Store {
             "SELECT harness, external_id_kind, external_id, session_id, created_at
              FROM session_aliases WHERE session_id=?1 ORDER BY created_at DESC",
         )?;
-        let rows = stmt.query_map(params![session_id], |row| {
-            Ok(SessionAlias {
-                harness: row.get(0)?,
-                external_id_kind: row.get(1)?,
-                external_id: row.get(2)?,
-                session_id: row.get(3)?,
-                created_at: row.get(4)?,
-            })
-        })?;
+        let rows = stmt.query_map(params![session_id], row_to_alias)?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 }

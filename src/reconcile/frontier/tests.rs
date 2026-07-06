@@ -15,7 +15,11 @@ fn frontier_modes_match_epic_baseline() {
     assert_eq!(modes["cursor"], "authoritative");
     assert_eq!(modes["outbox"], "authoritative");
     assert_eq!(modes["session_start"], "advisory");
-    assert_eq!(host_seam_coverage_percent(), 85);
+    assert_eq!(modes["session_watch"], "advisory");
+    assert_eq!(host_seam_coverage_percent(), 75);
+    assert_eq!(covered_surfaces().len(), 6);
+    assert_eq!(unproven_surfaces(), vec!["session_start", "session_watch"]);
+    assert!(uncovered_bypass_risks().is_empty());
 }
 
 #[test]
@@ -31,6 +35,20 @@ fn session_start_is_capped_at_advisory() {
     assert!(
         !reg.mode.is_authoritative_plus(),
         "session_start must not be promoted past advisory by frontier ratchets"
+    );
+}
+
+#[test]
+fn session_watch_is_capped_at_advisory() {
+    let reg = registrations()
+        .iter()
+        .find(|r| r.name == "session_watch")
+        .expect("session_watch registration");
+    assert_eq!(reg.mode, SurfaceMode::Advisory);
+    assert!(reg.facts.contains(&"InputFact::ProcessExited"));
+    assert!(
+        !reg.mode.is_authoritative_plus(),
+        "session_watch must stay advisory until DB liveness effects are graph-driven"
     );
 }
 

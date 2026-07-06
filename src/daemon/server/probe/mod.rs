@@ -8,6 +8,7 @@
 //! * `seams`    — authority-frontier registrations + host-seam coverage (§4.5).
 //! * `replay`   — replay a stored input capsule and optionally export a trace (§4.4).
 //! * `simulate` — dry-run a fact via `tx.preview()`; the keystone (§3).
+//! * `validate` — combined validation envelope with explanations.
 //! * `why`      — live causality for a surface handle (§4.3).
 //! * `state`    — live values per surface: owners/refcounts, status inputs (§4.3).
 
@@ -20,6 +21,7 @@ mod acid;
 mod artifact;
 mod cursor_artifact;
 mod diff;
+mod fact;
 mod oracle;
 mod outbox_acid;
 mod outbox_artifact;
@@ -28,19 +30,21 @@ mod seams;
 mod simulate;
 mod state;
 mod stats;
+mod validate;
 mod why;
 
 pub(in crate::daemon::server) use oracle::oracle_report;
 
 /// The reconciler surfaces the ledger records; `stats` with no `--surface`
 /// reports all of them.
-pub(super) const SURFACES: [&str; 7] = [
+pub(super) const SURFACES: [&str; 8] = [
     "status",
     "subscriptions",
     "hook_context",
     "turn_lifecycle",
     "cursor",
     "session_start",
+    "session_watch",
     "outbox",
 ];
 
@@ -65,6 +69,7 @@ pub(in crate::daemon::server) fn rpc_probe(
         "acid" => acid::acid_value(state, params),
         "replay" => replay::replay_value(state, params),
         "simulate" => simulate::simulate_value(state, params),
+        "validate" => validate::validate_value(state, params),
         "why" => why::why_value(state, params),
         "state" => state::state_value(state, params),
         other => Err(anyhow::anyhow!("probe: unknown verb `{other}`")),

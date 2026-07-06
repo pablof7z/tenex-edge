@@ -8,7 +8,12 @@ use std::sync::Arc;
 use trellis_testing::DataTransactionScript;
 
 pub(super) fn diff_value(state: &Arc<DaemonState>, params: &Value) -> Result<Value> {
-    if params.get("capsule").is_some() {
+    if params
+        .get("capsule")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .is_some()
+    {
         diff_capsule(state, params)
     } else {
         diff_live_preview(state, params)

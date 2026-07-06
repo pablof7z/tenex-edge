@@ -19,10 +19,13 @@ pub(crate) async fn launch(
         None => crate::project::resolve_or_bail(&std::env::current_dir().unwrap_or_default())?,
     };
     let base_command = if override_command.is_empty() {
-        super::launch_command::resolve_launch_command(&agent, command_name.as_deref())?
+        super::launch_command::resolve_launch_command(&agent, command_name.as_deref(), &extra_args)?
     } else {
         override_command
     };
+    let extra_args =
+        super::launch_command::extra_args_without_duplicate_suffix(&base_command, extra_args);
+    let command = super::launch_command::append_launch_args(base_command.clone(), &extra_args);
     // Show the interactive picker only when --channel "" is explicitly passed.
     // A bare `tenex-edge launch <agent>` with no --channel defaults to the
     // project root channel.
@@ -68,8 +71,6 @@ pub(crate) async fn launch(
     let cwd = std::env::current_dir()
         .ok()
         .map(|p| p.to_string_lossy().to_string());
-    let mut command = base_command.clone();
-    command.extend(extra_args);
     let cwd_path = cwd
         .as_deref()
         .map(std::path::PathBuf::from)

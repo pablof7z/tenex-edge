@@ -1,5 +1,4 @@
 //! `probe acid`: verify a live `why` cause with preview counterfactuals.
-
 use super::artifact;
 use super::{required_str, DaemonState};
 use crate::reconcile::journal::{InputFact, StatusDrive};
@@ -47,7 +46,7 @@ pub(super) fn acid_value(state: &Arc<DaemonState>, params: &Value) -> Result<Val
 }
 
 fn why_causes(state: &Arc<DaemonState>, handle: &str) -> Result<Vec<String>> {
-    if let Some(session) = handle.strip_prefix("status:") {
+    if let Some(session) = strip_handle_id(handle, &["status:", "status/"]) {
         let r = state.status.lock().expect("status mutex poisoned");
         return Ok(r
             .explain_status(session)
@@ -58,10 +57,17 @@ fn why_causes(state: &Arc<DaemonState>, handle: &str) -> Result<Vec<String>> {
         let r = state.subs.lock().expect("subs mutex poisoned");
         return Ok(r.explain_channel(channel).input_causes);
     }
-    if let Some(session) = handle
-        .strip_prefix("turn:")
-        .or_else(|| handle.strip_prefix("turn_lifecycle:"))
-    {
+    if handle.starts_with("sub/") {
+        let r = state.subs.lock().expect("subs mutex poisoned");
+        return Ok(r
+            .explain_resource_path(handle)
+            .map(|why| why.input_causes)
+            .unwrap_or_default());
+    }
+    if let Some(session) = strip_handle_id(
+        handle,
+        &["turn:", "turn/", "turn_lifecycle:", "turn_lifecycle/"],
+    ) {
         let r = state
             .turn_lifecycle
             .lock()
@@ -71,22 +77,28 @@ fn why_causes(state: &Arc<DaemonState>, handle: &str) -> Result<Vec<String>> {
             .map(|why| why.input_causes)
             .unwrap_or_default());
     }
-    if let Some(session) = handle
-        .strip_prefix("cursor:")
-        .or_else(|| handle.strip_prefix("cur:"))
-    {
+    if let Some(session) = strip_handle_id(handle, &["cursor:", "cursor/", "cur:", "cur/"]) {
         let r = state.cursor.lock().expect("cursor mutex poisoned");
         return Ok(r
             .explain_cursor(session)
             .map(|why| why.input_causes)
             .unwrap_or_default());
     }
-    if let Some(raw) = handle.strip_prefix("outbox:") {
+    if let Some(raw) = strip_handle_id(handle, &["outbox:", "outbox/"]) {
         return super::outbox_acid::causes(state, raw);
     }
     Err(anyhow::anyhow!(
-        "probe acid: handle must be `status:<session>`, `sub:<channel>`, `turn:<session>`, `cursor:<session>`, or `outbox:<local_id>`"
+        "probe acid: handle must be `status:<session>`, `sub:<channel>`, `turn:<session>`, `cursor:<session>`, `outbox:<local_id>`, or the matching visible resource path"
     ))
+}
+
+fn strip_handle_id<'a>(handle: &'a str, prefixes: &[&str]) -> Option<&'a str> {
+    prefixes.iter().find_map(|prefix| {
+        handle.strip_prefix(prefix).and_then(|rest| {
+            let id = rest.split('/').next().unwrap_or(rest);
+            (!id.is_empty()).then_some(id)
+        })
+    })
 }
 
 fn remove_cause(state: &Arc<DaemonState>, fact: InputFact, cause: &str) -> Result<InputFact> {
@@ -96,7 +108,7 @@ fn remove_cause(state: &Arc<DaemonState>, fact: InputFact, cause: &str) -> Resul
             mut title,
             mut activity,
             window_hash,
-            at,
+            mut at,
         }) => {
             let current = state
                 .status
@@ -110,6 +122,8 @@ fn remove_cause(state: &Arc<DaemonState>, fact: InputFact, cause: &str) -> Resul
                 activity = current.activity;
             } else if cause.ends_with("/title") {
                 title = current.title;
+            } else if cause.ends_with("/arm") {
+                at = current_status_arm_at(state, &session_id)?;
             } else {
                 anyhow::bail!("probe acid: unsupported status cause `{cause}`");
             }
@@ -120,6 +134,13 @@ fn remove_cause(state: &Arc<DaemonState>, fact: InputFact, cause: &str) -> Resul
                 window_hash,
                 at,
             }))
+        }
+        InputFact::StatusDrive(StatusDrive::Tick { session_id, .. }) => {
+            if !cause.ends_with("/arm") {
+                anyhow::bail!("probe acid: unsupported status cause `{cause}`");
+            }
+            let at = current_status_arm_at(state, &session_id)?;
+            Ok(InputFact::StatusDrive(StatusDrive::Tick { session_id, at }))
         }
         InputFact::SubscriptionSync { mut snapshot, at } => {
             if let Some(session) = subscription_session_cause(cause) {
@@ -195,6 +216,15 @@ fn remove_cause(state: &Arc<DaemonState>, fact: InputFact, cause: &str) -> Resul
             )),
         },
     }
+}
+
+fn current_status_arm_at(state: &Arc<DaemonState>, session_id: &str) -> Result<u64> {
+    state
+        .status
+        .lock()
+        .expect("status mutex poisoned")
+        .current_arm_at(session_id)
+        .with_context(|| format!("probe acid: no status arm for `{session_id}`"))
 }
 
 fn mutate_unrelated(fact: InputFact) -> Result<InputFact> {

@@ -73,11 +73,15 @@ fn apply_effects(store: &Mutex<Store>, effects: Vec<OutboxEffect>) -> Result<()>
                     .expect("store mutex poisoned")
                     .apply_outbox_projection(local_id, "published", None, false)?;
             }
-            OutboxEffect::MarkFailed { local_id, error } => {
+            OutboxEffect::MarkFailed {
+                local_id,
+                state,
+                error,
+            } => {
                 store
                     .lock()
                     .expect("store mutex poisoned")
-                    .apply_outbox_projection(local_id, "pending", Some(&error), true)?;
+                    .apply_outbox_projection(local_id, &state, Some(&error), true)?;
             }
         }
     }

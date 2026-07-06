@@ -1,5 +1,8 @@
 use super::*;
-use crate::reconcile::{CoverageSnapshot, StatusSessionStartedArgs};
+use crate::fabric_context::ViewInputs;
+use crate::reconcile::{
+    CoverageSnapshot, HookContextRenderFact, SessionStartRequestFact, StatusSessionStartedArgs,
+};
 use std::collections::{BTreeMap, BTreeSet};
 
 #[tokio::test]
@@ -138,4 +141,62 @@ async fn simulate_new_status_session_labels_preview_only_nodes() {
         .iter()
         .any(|v| v == "status/s1/activity"));
     assert_eq!(out["revision_before"], out["revision_after"]);
+}
+
+mod extended;
+fn seed_hook_context_graph(state: &std::sync::Arc<DaemonState>) {
+    let inputs: ViewInputs = serde_json::from_value(hook_inputs_json(&[])).unwrap();
+    state
+        .hook_contexts
+        .lock()
+        .unwrap()
+        .entry("s1".into())
+        .or_default()
+        .render_context("s1", "turn_start", 0, 99, inputs)
+        .unwrap();
+}
+
+fn hook_inputs_json(warnings: &[&str]) -> serde_json::Value {
+    json!({
+        "meta": {
+            "self_row": null,
+            "project": { "name": "", "about": "" },
+            "agents": [],
+            "channels": [],
+            "unjoined": [],
+            "warnings": warnings,
+            "self_pubkey": "",
+            "self_ref": "",
+            "force": false
+        },
+        "members": { "roster": {}, "refs": {}, "backend": [] },
+        "presence": { "statuses": {} },
+        "messages": { "channels": {} }
+    })
+}
+
+fn session_start_request() -> SessionStartRequestFact {
+    SessionStartRequestFact {
+        session_id: "s1".into(),
+        agent: "coder".into(),
+        harness: "codex".into(),
+        external_id_kind: "harness_session".into(),
+        external_id: "native-1".into(),
+        native_id: "native-1".into(),
+        work_root: "/repo".into(),
+        channel_h: "room".into(),
+        channel_for_upsert: "room".into(),
+        rel_cwd: ".".into(),
+        room_parent: None,
+        watch_pid: Some(42),
+        pty_session: Some("%1".into()),
+        ring_doorbell: true,
+        base_pubkey: "base".into(),
+        signer_pubkey: "base".into(),
+        signer_label: "coder".into(),
+        signer_ordinal: 0,
+        already_running: false,
+        channel_already_subscribed: false,
+        at: 100,
+    }
 }

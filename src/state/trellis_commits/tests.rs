@@ -72,6 +72,32 @@ fn stats_aggregate_effectful_and_noop() {
 }
 
 #[test]
+fn subscription_live_balance_resets_on_transaction_epoch_restart() {
+    let s = Store::open_memory().unwrap();
+
+    let mut old_epoch = commit("subscriptions", 0, 2, 1_000);
+    old_epoch.transaction_id = 20;
+    old_epoch.revision = 2;
+    old_epoch.resource_commands_json = r#"[{"kind":"open"},{"kind":"open"}]"#.into();
+    old_epoch.graph_resources = 2;
+    s.record_commit(&old_epoch).unwrap();
+
+    let mut new_epoch = commit("subscriptions", 0, 3, 2_000);
+    new_epoch.transaction_id = 1;
+    new_epoch.revision = 2;
+    new_epoch.resource_commands_json =
+        r#"[{"kind":"open"},{"kind":"open"},{"kind":"open"}]"#.into();
+    new_epoch.graph_resources = 3;
+    s.record_commit(&new_epoch).unwrap();
+
+    let stats = s.commit_stats("subscriptions", 0).unwrap();
+    assert_eq!(stats.open_count, 5);
+    assert_eq!(stats.live_resource_balance, 3);
+    assert_eq!(stats.latest_graph_resources, 3);
+    assert!(!stats.resource_drift);
+}
+
+#[test]
 fn stats_over_empty_surface_is_zeroed() {
     let s = Store::open_memory().unwrap();
     let stats = s.commit_stats("hook_context", 0).unwrap();

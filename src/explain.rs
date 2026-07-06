@@ -32,8 +32,12 @@ pub enum Handle {
     Session { id: String, at: Option<i64> },
     /// A hook-context render for a session, optionally at a timestamp.
     Hook { id: String, at: Option<i64> },
-    /// A reconciler transaction on a surface (`txn:<surface>:<id>`).
-    Txn { surface: String, id: i64 },
+    /// A reconciler transaction on a surface (`txn:<surface>:<id>[@<ts>]`).
+    Txn {
+        surface: String,
+        id: i64,
+        at: Option<i64>,
+    },
     /// A subscription channel (`sub:<channel>`).
     Sub { channel: String },
 }
@@ -57,12 +61,14 @@ pub fn parse_handle(s: &str) -> Result<Handle> {
             Handle::Hook { id, at }
         }
         "txn" => {
-            let (surface, id) = value
+            let (surface, raw_id) = value
                 .split_once(':')
                 .context("txn handle must be txn:<surface>:<id>")?;
+            let (id, at) = split_at(raw_id)?;
             Handle::Txn {
                 surface: surface.to_string(),
                 id: id.parse().context("txn id must be an integer")?,
+                at,
             }
         }
         "sub" => Handle::Sub {
@@ -88,7 +94,7 @@ fn split_at(value: &str) -> Result<(String, Option<i64>)> {
 pub fn explain(store: &Store, handle: &Handle) -> Result<Value> {
     match handle {
         Handle::Event(id) => {
-            let receipts = store.receipts_by_artifact_ref(id)?;
+            let receipts = store.receipts_by_artifact_ref_prefix(id)?;
             let llm = receipts
                 .iter()
                 .find_map(|r| join_llm(store, r).transpose())
@@ -118,20 +124,21 @@ pub fn explain(store: &Store, handle: &Handle) -> Result<Value> {
             Ok(record("session", receipts, call))
         }
         Handle::Hook { id, at } => {
-            let mut rows: Vec<ReceiptRow> = store
-                .latest_receipts_for_surface("hook_context", SCAN_LIMIT)?
-                .into_iter()
-                .filter(|r| artifact_is_session(r, id))
-                .collect();
-            select_near(&mut rows, *at);
-            Ok(record("hook", rows.into_iter().take(1).collect(), None))
+            let rows = match at {
+                Some(ts) => store
+                    .find_hook_receipt_for_session_near(id, *ts)?
+                    .into_iter()
+                    .collect(),
+                None => store.latest_hook_receipts_for_session(id, 1)?,
+            };
+            Ok(record("hook", rows, None))
         }
-        Handle::Txn { surface, id } => {
-            let rows: Vec<ReceiptRow> = store
-                .latest_receipts_for_surface(surface, SCAN_LIMIT)?
-                .into_iter()
-                .filter(|r| r.transaction_id == *id)
-                .collect();
+        Handle::Txn { surface, id, at } => {
+            let mut rows = store.receipts_for_surface_transaction(surface, *id)?;
+            select_near(&mut rows, *at);
+            if at.is_some() {
+                rows.truncate(1);
+            }
             Ok(record("txn", rows, None))
         }
         Handle::Sub { channel } => {
@@ -172,15 +179,6 @@ fn window_hash_of(r: &ReceiptRow) -> Option<String> {
         .get("window_hash")?
         .as_str()
         .map(str::to_string)
-}
-
-/// Whether a hook receipt's `artifact_ref` (`<session>:<kind>:<ts>`) is `session`.
-fn artifact_is_session(r: &ReceiptRow, session: &str) -> bool {
-    r.artifact_ref
-        .as_deref()
-        .and_then(|a| a.split(':').next())
-        .map(|s| s == session)
-        .unwrap_or(false)
 }
 
 /// Order rows by proximity to `at` (nearest first); by newest first when absent.

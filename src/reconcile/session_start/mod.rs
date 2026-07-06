@@ -132,7 +132,7 @@ impl SessionStartReconciler {
 
     pub fn drive(&mut self, fact: InputFact) -> GraphResult<SessionStartOutcome> {
         let seq = self.next_seq + 1;
-        let result = self.stage(&fact, seq, false)?;
+        let (result, _) = self.stage(&fact, seq, false)?;
         self.next_seq = seq;
         let command = self.translate(&result);
         Ok(SessionStartOutcome { command, result })
@@ -142,8 +142,7 @@ impl SessionStartReconciler {
         if fact_session_id(fact).is_none() {
             return Ok(None);
         }
-        let labels = self.labels.clone();
-        let result = self.stage(fact, self.next_seq + 1, true)?;
+        let (result, labels) = self.stage(fact, self.next_seq + 1, true)?;
         Ok(Some(SessionStartPreview { labels, result }))
     }
 
@@ -171,6 +170,13 @@ impl SessionStartReconciler {
                 channel_h: cmd.plan.row.channel_h.clone(),
                 signer_pubkey: cmd.plan.row.agent_pubkey.clone(),
                 reassert: cmd.plan.reassert,
+                failure_stage: cmd.failure_stage.clone(),
+                failure_error: cmd.failure_error.clone(),
+                has_channel_ready_intent: cmd.plan.channel_ready.is_some(),
+                has_spawn_intent: cmd.plan.spawn.is_some(),
+                watch_pid: cmd.plan.spawn.as_ref().and_then(|spawn| spawn.watch_pid),
+                ensure_subscription: cmd.plan.ensure_subscription,
+                replay_chat: cmd.plan.replay_chat,
             })
             .collect()
     }
@@ -180,7 +186,7 @@ impl SessionStartReconciler {
         fact: &InputFact,
         seq: u64,
         preview: bool,
-    ) -> GraphResult<TransactionResult<SessionStartCommand>> {
+    ) -> GraphResult<(TransactionResult<SessionStartCommand>, NodeLabels)> {
         let Some(session_id) = fact_session_id(fact) else {
             unreachable!("session-start facts are classified before staging")
         };
@@ -192,9 +198,9 @@ impl SessionStartReconciler {
         let result = if preview { tx.preview()? } else { tx.commit()? };
         if !preview {
             self.nodes = nodes;
-            self.labels = labels;
+            self.labels = labels.clone();
         }
-        Ok(result)
+        Ok((result, labels))
     }
 
     fn translate(
@@ -237,6 +243,13 @@ pub struct SessionStartStateRow {
     pub channel_h: String,
     pub signer_pubkey: String,
     pub reassert: bool,
+    pub failure_stage: Option<String>,
+    pub failure_error: Option<String>,
+    pub has_channel_ready_intent: bool,
+    pub has_spawn_intent: bool,
+    pub watch_pid: Option<i32>,
+    pub ensure_subscription: bool,
+    pub replay_chat: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

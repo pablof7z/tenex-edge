@@ -6,6 +6,38 @@ use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet};
 use trellis_testing::DataTransactionScript;
 
+mod stats;
+mod validate;
+mod validate_alias;
+mod validate_awareness;
+mod validate_channel;
+mod validate_commit;
+mod validate_coverage;
+mod validate_event;
+mod validate_fact_flow;
+mod validate_global;
+mod validate_handles;
+mod validate_hook_context;
+mod validate_identity;
+mod validate_inbox;
+mod validate_inputs;
+mod validate_joined;
+mod validate_llm;
+mod validate_membership;
+mod validate_message;
+mod validate_outbox;
+mod validate_project_root;
+mod validate_projection;
+mod validate_quarantine;
+mod validate_readiness_attempt;
+mod validate_receipt;
+mod validate_recipient;
+mod validate_session;
+mod validate_session_watch;
+mod validate_status;
+mod validate_subscription;
+mod validate_txn;
+
 /// End-to-end proof that the `probe` RPC — the lock/param/dispatch inch in
 /// `rpc_probe` — actually works over a REAL `DaemonState`, not merely that the
 /// pure value-fns compile.
@@ -124,6 +156,7 @@ async fn rpc_probe_reflects_driven_state_for_every_verb() {
     assert_surface_status(&oracle, "turn_lifecycle", "green");
     assert_surface_status(&oracle, "cursor", "green");
     assert_surface_status(&oracle, "session_start", "green");
+    assert_surface_status(&oracle, "session_watch", "green");
     assert_surface_status(&oracle, "outbox", "green");
     assert_surface_status(&oracle, "hook_context", "green");
 
@@ -138,11 +171,12 @@ async fn rpc_probe_reflects_driven_state_for_every_verb() {
     assert_eq!(sstatus["effectful"], 1);
 
     let seams = rpc_probe(&state, &json!({ "verb": "seams" })).unwrap();
-    assert_eq!(seams["host_seam_coverage_percent"], 85);
+    assert_eq!(seams["host_seam_coverage_percent"], 75);
     assert_surface_mode(&seams, "status", "authoritative");
     assert_surface_mode(&seams, "turn_lifecycle", "authoritative");
     assert_surface_mode(&seams, "cursor", "authoritative");
     assert_surface_mode(&seams, "session_start", "advisory");
+    assert_surface_mode(&seams, "session_watch", "advisory");
     assert_surface_mode(&seams, "outbox", "authoritative");
     assert_surface_mode(&seams, "hook_context", "authoritative");
 
@@ -158,13 +192,27 @@ async fn rpc_probe_reflects_driven_state_for_every_verb() {
         &state,
         &json!({
             "verb": "simulate", "surface": "status", "session": "s1",
-            "activity": "compiling", "title": null, "now": null,
+            "activity": "compiling", "title": null, "now": null, "fact": null,
         }),
     )
     .unwrap();
     assert_eq!(sim["would_publish"], true);
     assert_eq!(sim["commands"][0]["op"], "Replace");
     assert_eq!(sim["revision_before"], sim["revision_after"]);
+
+    let fact = InputFact::StatusDrive(StatusDrive::DistillCompleted {
+        session_id: "s1".into(),
+        title: "T".into(),
+        activity: "compiling".into(),
+        window_hash: Some("sha256:w2".into()),
+        at: 1_700_000_020,
+    });
+    let diff = rpc_probe(
+        &state,
+        &json!({ "verb": "diff", "surface": "status", "fact": fact, "capsule": null }),
+    )
+    .unwrap();
+    assert_eq!(diff["mode"], "live-preview");
 
     let why = rpc_probe(&state, &json!({ "verb": "why", "handle": "status:s1" })).unwrap();
     assert_eq!(why["found"], true);
@@ -223,71 +271,4 @@ fn assert_surface_mode(v: &serde_json::Value, surface: &str, mode: &str) {
 
 fn assert_array_contains(v: &serde_json::Value, needle: &str) {
     assert!(v.as_array().unwrap().iter().any(|l| l == needle));
-}
-
-#[tokio::test]
-async fn rpc_probe_stats_quantifies_shared_subscription_beachhead() {
-    let state = DaemonState::new_for_test().await;
-
-    drive_subscription_sync_for_stats(&state, subscription_snapshot(&["s1", "s2"]), 1_000);
-    drive_subscription_sync_for_stats(&state, subscription_snapshot(&["s2"]), 2_000);
-
-    let after_first_owner = rpc_probe(
-        &state,
-        &json!({ "verb": "stats", "surface": "subscriptions", "since": 0 }),
-    )
-    .unwrap();
-    let first_row = &after_first_owner["surfaces"][0];
-    assert_eq!(first_row["open_count"], 2);
-    assert_eq!(first_row["close_count"], 0);
-    assert_eq!(first_row["latest_graph_resources"], 2);
-    assert_eq!(first_row["resource_drift"], false);
-
-    drive_subscription_sync_for_stats(&state, subscription_snapshot(&[]), 3_000);
-
-    let final_stats = rpc_probe(
-        &state,
-        &json!({ "verb": "stats", "surface": "subscriptions", "since": 0 }),
-    )
-    .unwrap();
-    let row = &final_stats["surfaces"][0];
-    assert_eq!(row["open_count"], 2);
-    assert_eq!(row["close_count"], 2);
-    assert_eq!(row["live_resource_balance"], 0);
-    assert_eq!(row["latest_graph_resources"], 0);
-    assert_eq!(row["resource_drift"], false);
-}
-
-fn drive_subscription_sync_for_stats(
-    state: &std::sync::Arc<DaemonState>,
-    snapshot: CoverageSnapshot,
-    created_at: i64,
-) {
-    let facts = {
-        let mut rec = state.subs.lock().unwrap();
-        let (_effects, result) = rec.sync(&snapshot).unwrap();
-        let mut facts = crate::reconcile::CommitFacts::from_result(
-            rec.labels(),
-            &result,
-            rec.graph_node_count(),
-        );
-        facts.graph_resources = rec.state_rows().len() as i64;
-        facts
-    };
-    state.with_store(|s| {
-        crate::instrument::record_commit(s, "subscriptions", "sync", None, &facts, 0, created_at)
-    });
-}
-
-fn subscription_snapshot(session_ids: &[&str]) -> CoverageSnapshot {
-    let sessions = session_ids
-        .iter()
-        .map(|id| ((*id).to_string(), BTreeSet::from(["room".to_string()])))
-        .collect();
-    CoverageSnapshot {
-        daemon_channels: BTreeSet::new(),
-        addressed_pubkeys: BTreeSet::new(),
-        archived_channels: BTreeSet::new(),
-        sessions,
-    }
 }

@@ -13,11 +13,15 @@ use trellis_core::{ResourceCommand, TransactionResult};
 
 const STATUS_KIND: u64 = 30315;
 
+mod session_surfaces;
+
 pub(super) fn simulate_value(state: &Arc<DaemonState>, params: &Value) -> Result<Value> {
     let Some(fact) = fact_param(params)? else {
         return simulate_legacy_status(state, params);
     };
-    let inferred = infer_surface(&fact).context("probe simulate: unsupported InputFact")?;
+    let Some(inferred) = infer_surface(&fact) else {
+        return Ok(super::fact::unsupported_simulation(&fact));
+    };
     let surface = params
         .get("surface")
         .and_then(Value::as_str)
@@ -33,6 +37,9 @@ pub(super) fn simulate_value(state: &Arc<DaemonState>, params: &Value) -> Result
         "cursor" => simulate_cursor_fact(state, fact),
         "outbox" => simulate_outbox_fact(state, fact),
         "subscriptions" => simulate_subscription_fact(state, fact),
+        "session_start" => session_surfaces::simulate_session_start_fact(state, fact),
+        "session_watch" => session_surfaces::simulate_session_watch_fact(state, fact),
+        "hook_context" => session_surfaces::simulate_hook_context_fact(state, fact),
         other => Err(anyhow::anyhow!("probe simulate: unknown surface `{other}`")),
     }
 }
@@ -178,6 +185,7 @@ fn fact_param(params: &Value) -> Result<Option<InputFact>> {
         return Ok(None);
     };
     let fact = match raw {
+        Value::Null => return Ok(None),
         Value::String(s) => serde_json::from_str(s).context("probe simulate: invalid fact JSON")?,
         value => serde_json::from_value(value.clone()).context("probe simulate: invalid fact")?,
     };
@@ -195,6 +203,14 @@ fn infer_surface(fact: &InputFact) -> Option<&'static str> {
             Some("outbox")
         }
         InputFact::SubscriptionSync { .. } => Some("subscriptions"),
+        InputFact::SessionStartRequested(_)
+        | InputFact::SessionStarted { .. }
+        | InputFact::SessionStartFailed(_) => Some("session_start"),
+        InputFact::ProcessExited {
+            session_id: Some(_),
+            ..
+        } => Some("session_watch"),
+        InputFact::HookContextRender(_) => Some("hook_context"),
         _ => None,
     }
 }
@@ -233,13 +249,15 @@ struct PlanJson<'a, C> {
 
 fn plan_value<C>(input: PlanJson<'_, C>) -> Value {
     let commands = command_values(input.plan.resource_plan.commands(), input.wire_kind);
-    let would_effect = !commands.is_empty();
+    let output_frames = input.plan.output_frames.len();
+    let would_effect = !commands.is_empty() || output_frames > 0;
     let mut out = json!({
         "verb": "simulate",
         "surface": input.surface,
         "fact": input.fact,
         "commands": commands,
         "changed": input.labels.labels_for(&input.plan.changed_inputs),
+        "output_frames": output_frames,
         "revision_before": input.revision_before,
         "revision_after": input.revision_after,
         "would_effect": would_effect,

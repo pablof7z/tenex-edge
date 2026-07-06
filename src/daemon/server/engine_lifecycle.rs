@@ -1,5 +1,7 @@
 use super::*;
 
+mod session_watch;
+
 pub(in crate::daemon::server) async fn spawn_session(
     state: &Arc<DaemonState>,
     params: EngineParams,
@@ -7,6 +9,7 @@ pub(in crate::daemon::server) async fn spawn_session(
     let session_id = params.session_id.clone();
     let pubkey = params.instance.pubkey.clone();
     let project = params.project.clone();
+    let watch_pid = params.watch_pid;
 
     tracing::info!(
         agent = %params.instance.base_slug,
@@ -15,9 +18,6 @@ pub(in crate::daemon::server) async fn spawn_session(
         "spawning session engine"
     );
 
-    // Register THIS instance's signing keys under its selected pubkey, so
-    // `keys_for(selected_pubkey)` returns the key that actually authored its
-    // events.
     state.hosted.lock().unwrap().insert(
         pubkey.clone(),
         HostedAgent {
@@ -32,6 +32,14 @@ pub(in crate::daemon::server) async fn spawn_session(
         SessionHandle {
             cancel: cancel.clone(),
         },
+    );
+    session_watch::started(
+        state,
+        &session_id,
+        &project,
+        &pubkey,
+        watch_pid,
+        "spawn-session",
     );
 
     let st = state.clone();
@@ -48,6 +56,7 @@ pub(in crate::daemon::server) async fn spawn_session(
         }
         membership_cleanup::remove_session_memberships(&st, &sid, "engine-exit");
         st.release_session_signer(&sid);
+        session_watch::exited(&st, &sid, watch_pid, "engine-exit");
         // Mark the bound identity dead but keep the row for resume (issue #47).
         st.with_store(|s| {
             if let Err(e) = s.mark_identity_dead_for_session(&sid) {
@@ -120,6 +129,13 @@ pub(in crate::daemon::server) async fn reconcile_sessions(state: &Arc<DaemonStat
                     tracing::error!(session = %session_id, error = %e, "reconcile GC: failed to mark identity dead for dead session");
                 }
             });
+            session_watch::exited_at(
+                state,
+                &session_id,
+                snap.child_pid,
+                now,
+                "reconcile-dead-pid",
+            );
             membership_cleanup::remove_session_memberships(
                 state,
                 &session_id,

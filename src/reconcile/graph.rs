@@ -19,6 +19,12 @@ use trellis_core::{
 };
 
 use super::journal::InputFact;
+use super::labels::NodeLabels;
+
+mod probe;
+pub(crate) mod replay;
+
+pub use probe::{SessionWatchPreview, SessionWatchStateRow, SessionWatchWhy};
 
 /// Host-defined command payload emitted by the reconciler's planners.
 ///
@@ -31,10 +37,12 @@ pub enum ReconcileCommand {
 }
 
 /// Reconciler spine: canonical [`InputFact`]s in, resource plans + receipts out.
+#[derive(Clone)]
 pub struct Reconciler {
     graph: Graph<ReconcileCommand>,
     /// Canonical input: the set of session ids the world says are live.
     live_sessions: InputNode<BTreeSet<String>>,
+    labels: NodeLabels,
 }
 
 impl Reconciler {
@@ -48,6 +56,8 @@ impl Reconciler {
 
         // Canonical input: live session ids handed to us by the host.
         let live_sessions = tx.input::<BTreeSet<String>>("live-sessions")?;
+        let mut labels = NodeLabels::new();
+        labels.record(live_sessions.id(), "session_watch/live_sessions");
         tx.set_input(live_sessions, BTreeSet::new())?;
 
         // Derived node: the watched-session set (identity here, but a real node
@@ -57,6 +67,7 @@ impl Reconciler {
             DependencyList::new([live_sessions.id()])?,
             move |ctx| Ok(ctx.input(live_sessions)?.clone()),
         )?;
+        labels.record(watched.id(), "session_watch/watched_sessions");
 
         // Set-collection: structurally diffed against the previous commit.
         let watch_set = tx.set_collection(
@@ -64,6 +75,7 @@ impl Reconciler {
             DependencyList::new([watched.id()])?,
             move |ctx| Ok(ctx.derived(watched)?.clone()),
         )?;
+        labels.record(watch_set.id(), "session_watch/resources");
 
         // Resource planner: turn the diff into open/close commands (data only).
         tx.set_resource_planner(watch_set, scope, move |ctx| {
@@ -87,6 +99,7 @@ impl Reconciler {
         Ok(Self {
             graph,
             live_sessions,
+            labels,
         })
     }
 
@@ -96,20 +109,7 @@ impl Reconciler {
     /// still commits (yielding an empty plan), which is exactly what the spine
     /// needs to prove: facts flow in, decisions come out, always as data.
     pub fn apply(&mut self, fact: &InputFact) -> GraphResult<TransactionResult<ReconcileCommand>> {
-        let mut live = self.current_live_sessions();
-        match fact {
-            InputFact::SessionStarted { session_id, .. } => {
-                live.insert(session_id.clone());
-            }
-            InputFact::ProcessExited {
-                session_id: Some(session_id),
-                ..
-            } => {
-                live.remove(session_id);
-            }
-            _ => {}
-        }
-
+        let live = self.next_live_sessions(fact);
         let mut tx = self.graph.begin_transaction()?;
         tx.set_input(self.live_sessions, live)?;
         let result = tx.commit()?;
@@ -125,6 +125,23 @@ impl Reconciler {
             .flatten()
             .cloned()
             .unwrap_or_default()
+    }
+
+    fn next_live_sessions(&self, fact: &InputFact) -> BTreeSet<String> {
+        let mut live = self.current_live_sessions();
+        match fact {
+            InputFact::SessionStarted { session_id, .. } => {
+                live.insert(session_id.clone());
+            }
+            InputFact::ProcessExited {
+                session_id: Some(session_id),
+                ..
+            } => {
+                live.remove(session_id);
+            }
+            _ => {}
+        }
+        live
     }
 
     /// Audit query: why the latest command for a resource key was emitted.

@@ -2,7 +2,6 @@
 //!
 //! Started as the hidden daemon subcommand by a thin client's spawn-if-absent
 //! path. See docs/daemon-design.md for responsibilities and lifecycle.
-
 use super::client::StartupLock;
 use super::protocol::{
     protocol_version, Hello, PleaseExit, Request, Response, Welcome, ERR_PROTOCOL_SKEW,
@@ -42,7 +41,6 @@ use background::{spawn_pruner, spawn_trellis_oracle_sampler};
 use demux::spawn_demux;
 use management_command::{handle_management_command, is_management_command_for_backend};
 use orchestration_handler::handle_orchestration;
-
 #[derive(Clone)]
 struct HostedAgent {
     keys: Keys,
@@ -72,6 +70,7 @@ pub struct DaemonState {
     provider: Arc<Nip29Provider>,
     cfg: Config,
     host: String,
+    started_at: u64,
     owners: Vec<String>,
     hosted: Mutex<HashMap<String, HostedAgent>>,
     sessions: Mutex<HashMap<String, SessionHandle>>,
@@ -81,6 +80,7 @@ pub struct DaemonState {
     turn_lifecycle: Mutex<crate::reconcile::TurnLifecycleReconciler>,
     cursor: Mutex<crate::reconcile::CursorReconciler>,
     session_start: Mutex<crate::reconcile::SessionStartReconciler>,
+    session_watch: Mutex<crate::reconcile::Reconciler>,
     outbox: Arc<Mutex<crate::reconcile::OutboxReconciler>>,
     hook_contexts: crate::turn_context::HookContextGraphs,
     tail_tx: tokio::sync::broadcast::Sender<TailEvent>,

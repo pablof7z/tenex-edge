@@ -69,7 +69,7 @@ fn surface_mode(surface: &str) -> &'static str {
         "status" | "subscriptions" | "hook_context" | "turn_lifecycle" | "cursor" | "outbox" => {
             "authoritative"
         }
-        "session_start" => "advisory",
+        "session_start" | "session_watch" => "advisory",
         _ => "imperative",
     }
 }
@@ -152,7 +152,7 @@ mod tests {
         let v = stats_value(&s, None, 0).unwrap();
         assert_eq!(v["verb"], "stats");
         let surfaces = v["surfaces"].as_array().unwrap();
-        assert_eq!(surfaces.len(), 7);
+        assert_eq!(surfaces.len(), 8);
 
         let status = surfaces.iter().find(|r| r["surface"] == "status").unwrap();
         assert_eq!(status["commits"], 3);
@@ -180,6 +180,11 @@ mod tests {
             .find(|r| r["surface"] == "session_start")
             .unwrap();
         assert_eq!(session_start["commits"], 0);
+        let session_watch = surfaces
+            .iter()
+            .find(|r| r["surface"] == "session_watch")
+            .unwrap();
+        assert_eq!(session_watch["commits"], 0);
         let outbox = surfaces.iter().find(|r| r["surface"] == "outbox").unwrap();
         assert_eq!(outbox["commits"], 0);
     }

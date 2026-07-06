@@ -70,6 +70,7 @@ pub fn replay_script(
         ReplaySurface::SessionStart => {
             super::session_start::replay::replay_script(script, export_trace)
         }
+        ReplaySurface::SessionWatch => super::graph::replay::replay_script(script, export_trace),
     })
 }
 
@@ -82,9 +83,29 @@ enum ReplaySurface {
     Cursor,
     Outbox,
     SessionStart,
+    SessionWatch,
 }
 
 fn script_surface(script: &DataTransactionScript<InputFact>) -> Result<ReplaySurface> {
+    let has_process_exit = script.steps().iter().any(|step| {
+        step.operations().iter().any(|operation| {
+            matches!(
+                operation,
+                InputFact::ProcessExited {
+                    session_id: Some(_),
+                    ..
+                }
+            )
+        })
+    });
+    let has_session_start_specific = script.steps().iter().any(|step| {
+        step.operations().iter().any(|operation| {
+            matches!(
+                operation,
+                InputFact::SessionStartRequested(_) | InputFact::SessionStartFailed(_)
+            )
+        })
+    });
     let mut surface = None;
     for step in script.steps() {
         for operation in step.operations() {
@@ -99,9 +120,19 @@ fn script_surface(script: &DataTransactionScript<InputFact>) -> Result<ReplaySur
                 InputFact::OutboxEnqueueApplied { .. } | InputFact::RelayPublishAccepted { .. } => {
                     ReplaySurface::Outbox
                 }
-                InputFact::SessionStartRequested(_)
-                | InputFact::SessionStartFailed(_)
-                | InputFact::SessionStarted { .. } => ReplaySurface::SessionStart,
+                InputFact::SessionStartRequested(_) | InputFact::SessionStartFailed(_) => {
+                    ReplaySurface::SessionStart
+                }
+                InputFact::SessionStarted { .. }
+                    if has_process_exit && !has_session_start_specific =>
+                {
+                    ReplaySurface::SessionWatch
+                }
+                InputFact::SessionStarted { .. } => ReplaySurface::SessionStart,
+                InputFact::ProcessExited {
+                    session_id: Some(_),
+                    ..
+                } => ReplaySurface::SessionWatch,
                 other => anyhow::bail!(
                     "replay capsule operation is not a supported surface drive fact: {other:?}"
                 ),
@@ -119,139 +150,4 @@ fn script_surface(script: &DataTransactionScript<InputFact>) -> Result<ReplaySur
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn rejects_mixed_surface_scripts() {
-        let mut script = DataTransactionScript::new();
-        script
-            .step("one")
-            .operation(InputFact::SubscriptionSync {
-                snapshot: Default::default(),
-                at: 1,
-            })
-            .commit();
-        script
-            .step("two")
-            .operation(InputFact::StatusDrive(
-                crate::reconcile::StatusDrive::Tick {
-                    session_id: "s1".into(),
-                    at: 1,
-                },
-            ))
-            .commit();
-        let err = replay_script(&script, false).unwrap_err();
-        assert!(err.to_string().contains("mixes surfaces"));
-    }
-
-    #[test]
-    fn diagnosis_corpus_replay_fixtures_are_valid() {
-        let leaked_close = replay_script_json(
-            include_str!("../../tests/fixtures/trellis_diagnosis/leaked-close.json"),
-            false,
-        )
-        .unwrap();
-        assert_eq!(leaked_close.surface, "subscriptions");
-        assert_eq!(leaked_close.steps, 2);
-        assert_eq!(
-            leaked_close.resource_commands, 2,
-            "first owner leaving must not close a shared subscription"
-        );
-
-        let false_republish = replay_script_json(
-            include_str!("../../tests/fixtures/trellis_diagnosis/false-republish.json"),
-            false,
-        )
-        .unwrap();
-        assert_eq!(false_republish.surface, "status");
-        assert_eq!(false_republish.steps, 2);
-        assert_eq!(
-            false_republish.resource_commands, 1,
-            "same-bucket unchanged tick must not republish status"
-        );
-    }
-
-    #[test]
-    fn turn_lifecycle_replay_accepts_canonical_turn_facts() {
-        let mut script = DataTransactionScript::new();
-        script
-            .step("start")
-            .operation(InputFact::TurnStarted {
-                session_id: "s1".into(),
-                at: 100,
-            })
-            .commit();
-        script
-            .step("end")
-            .operation(InputFact::TurnEnded {
-                session_id: "s1".into(),
-                at: 130,
-            })
-            .commit();
-
-        let report = replay_script(&script, false).unwrap();
-        assert_eq!(report.surface, "turn_lifecycle");
-        assert_eq!(report.steps, 2);
-        assert_eq!(report.resource_commands, 2);
-    }
-
-    #[test]
-    fn cursor_replay_accepts_canonical_turn_check_facts() {
-        let mut script = DataTransactionScript::new();
-        script
-            .step("first")
-            .operation(InputFact::TurnCheckRequested {
-                session_id: "s1".into(),
-                observed_cursor: 10,
-                working: true,
-                at: 20,
-            })
-            .commit();
-        script
-            .step("stale")
-            .operation(InputFact::TurnCheckRequested {
-                session_id: "s1".into(),
-                observed_cursor: 10,
-                working: true,
-                at: 21,
-            })
-            .commit();
-
-        let report = replay_script(&script, false).unwrap();
-        assert_eq!(report.surface, "cursor");
-        assert_eq!(report.steps, 2);
-        assert_eq!(report.resource_commands, 2);
-    }
-
-    #[test]
-    fn outbox_replay_accepts_enqueue_and_publish_result_facts() {
-        let mut script = DataTransactionScript::new();
-        script
-            .step("enqueue")
-            .operation(InputFact::OutboxEnqueueApplied {
-                local_id: 7,
-                event_id: "ev7".into(),
-                event_hash: "sha256:event".into(),
-                source_surface: "status".into(),
-                source_ref: "status/s1#tx:1".into(),
-                at: 100,
-            })
-            .commit();
-        script
-            .step("accepted")
-            .operation(InputFact::RelayPublishAccepted {
-                local_id: 7,
-                event_id: "ev7".into(),
-                accepted: true,
-                error: None,
-                at: 120,
-            })
-            .commit();
-
-        let report = replay_script(&script, false).unwrap();
-        assert_eq!(report.surface, "outbox");
-        assert_eq!(report.steps, 2);
-        assert_eq!(report.resource_commands, 2);
-    }
-}
+mod tests;

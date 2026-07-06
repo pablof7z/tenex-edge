@@ -57,6 +57,22 @@ pub fn host_seam_coverage_percent() -> i64 {
     ((covered * 100) / REGISTRATIONS.len()) as i64
 }
 
+pub fn covered_surfaces() -> Vec<&'static str> {
+    REGISTRATIONS
+        .iter()
+        .filter(|r| r.mode.is_authoritative_plus())
+        .map(|r| r.name)
+        .collect()
+}
+
+pub fn unproven_surfaces() -> Vec<&'static str> {
+    REGISTRATIONS
+        .iter()
+        .filter(|r| !r.mode.is_authoritative_plus())
+        .map(|r| r.name)
+        .collect()
+}
+
 pub fn uncovered_bypass_risks() -> Vec<&'static str> {
     REGISTRATIONS
         .iter()
@@ -65,7 +81,7 @@ pub fn uncovered_bypass_risks() -> Vec<&'static str> {
         .collect()
 }
 
-static REGISTRATIONS: [SurfaceRegistration; 7] = [
+static REGISTRATIONS: [SurfaceRegistration; 8] = [
     SurfaceRegistration {
         name: "status",
         mode: SurfaceMode::Authoritative,
@@ -83,7 +99,7 @@ static REGISTRATIONS: [SurfaceRegistration; 7] = [
             "now",
         ],
         host_effects: &["status_seam::drive enqueues signed kind:30315 events"],
-        bypass_risks: &["direct kind:30315 publish outside status_seam"],
+        bypass_risks: &[],
     },
     SurfaceRegistration {
         name: "subscriptions",
@@ -96,7 +112,7 @@ static REGISTRATIONS: [SurfaceRegistration; 7] = [
         ],
         trellis_inputs: &["CoverageSnapshot"],
         host_effects: &["daemon/server/subscriptions.rs applies Open/Close/Replace"],
-        bypass_risks: &["direct relay subscribe/unsubscribe outside subscription executor"],
+        bypass_risks: &[],
     },
     SurfaceRegistration {
         name: "hook_context",
@@ -152,12 +168,22 @@ static REGISTRATIONS: [SurfaceRegistration; 7] = [
         bypass_risks: &[],
     },
     SurfaceRegistration {
+        name: "session_watch",
+        // Advisory: Trellis derives open/close watch decisions, but runtime and
+        // restart recovery still apply DB liveness effects outside this graph.
+        mode: SurfaceMode::Advisory,
+        facts: &["InputFact::SessionStarted", "InputFact::ProcessExited"],
+        trellis_inputs: &["InputFact::SessionStarted", "InputFact::ProcessExited"],
+        host_effects: &["session_watch graph derives watch open/close decisions"],
+        bypass_risks: &[],
+    },
+    SurfaceRegistration {
         name: "outbox",
         mode: SurfaceMode::Authoritative,
         facts: &[
             "InputFact::OutboxEnqueueApplied",
-            "RelayPublishAccepted",
-            "RelayPublishFailed",
+            "InputFact::RelayPublishAccepted",
+            "InputFact::RelayPublishAccepted { accepted: false }",
         ],
         trellis_inputs: &[
             "InputFact::OutboxEnqueueApplied",

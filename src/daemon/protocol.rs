@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 /// The compiled-in protocol version, bumped on any breaking RPC change.
-const PROTOCOL_VERSION_BASE: u32 = 4;
+const PROTOCOL_VERSION_BASE: u32 = 57;
 
 /// Effective protocol version. A client refuses to talk to a daemon whose
 /// protocol differs (older daemon → ask it to exit & respawn; newer daemon →
@@ -183,24 +183,24 @@ mod tests {
 
     #[test]
     fn protocol_compare_covers_equal_older_and_newer_daemons() {
-        assert_eq!(compare_protocols(4, 4), HandshakeDecision::Ready);
+        assert_eq!(compare_protocols(57, 57), HandshakeDecision::Ready);
         assert_eq!(
-            compare_protocols(3, 4),
+            compare_protocols(56, 57),
             HandshakeDecision::AskOlderDaemonToExit
         );
         assert_eq!(
-            compare_protocols(5, 4),
+            compare_protocols(58, 57),
             HandshakeDecision::DaemonTooNew {
-                daemon_protocol: 5,
-                client_protocol: 4
+                daemon_protocol: 58,
+                client_protocol: 57
             }
         );
     }
 
     #[test]
     fn daemon_too_new_message_matches_client_paths() {
-        let msg = daemon_too_new_message(5, 4);
-        assert!(msg.contains("daemon protocol 5 is newer"));
+        let msg = daemon_too_new_message(58, 57);
+        assert!(msg.contains("daemon protocol 58 is newer"));
         assert!(msg.contains("restart your tenex-edge session"));
     }
 }

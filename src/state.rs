@@ -25,8 +25,6 @@ pub struct Store {
     conn: Connection,
 }
 
-// ── relay_* cache row types ──────────────────────────────────────────────────
-
 /// kind:39000 group metadata. A channel and a project are one abstraction;
 /// `parent` is the only distinction (`""` = top-level project channel).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -156,8 +154,6 @@ pub struct MessageRecipient {
     pub delivered_at: Option<u64>,
 }
 
-// ── local plumbing row types ─────────────────────────────────────────────────
-
 /// A local agent process THIS daemon hosts. OS handles only — never agent
 /// identity (that lives in `relay_status`/`relay_profiles`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -249,7 +245,6 @@ pub struct OutboxRow {
     pub enqueued_at: u64,
 }
 
-// ── canonical id minting ─────────────────────────────────────────────────────
 // Canonical ids use wall-clock nanos plus a monotonic counter: `te-<nanos_hex>-<counter_hex>`.
 
 static ID_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -268,6 +263,8 @@ pub(super) fn mint_session_id() -> String {
 mod agent_roster;
 pub use agent_roster::{AgentAvailability, AgentRoster};
 mod aliases;
+mod channel_readiness_attempts;
+pub use channel_readiness_attempts::{ChannelReadinessAttempt, NewChannelReadinessAttempt};
 mod channels;
 mod schema;
 pub use channels::{archived_channel_about, is_archived_channel_about, CHANNEL_ABOUT_MAX_CHARS};
@@ -277,11 +274,14 @@ mod identities;
 mod inbox;
 pub mod llm_calls;
 mod members;
+pub use members::ChannelMemberSet;
 mod messages;
 mod outbox;
 mod profiles;
 mod project_roots;
+pub use project_roots::ProjectRootBinding;
 mod quarantine;
+pub use quarantine::QuarantinedEvent;
 mod reader;
 pub(crate) use reader::StoreReader;
 pub mod receipts;

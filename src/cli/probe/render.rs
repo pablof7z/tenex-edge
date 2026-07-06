@@ -12,6 +12,9 @@ pub(super) use super::state_render::render_state;
 #[cfg(test)]
 mod tests;
 
+mod simulate;
+pub(super) use simulate::render_simulate;
+
 fn str_at<'a>(v: &'a Value, k: &str) -> &'a str {
     v.get(k).and_then(Value::as_str).unwrap_or("")
 }
@@ -136,51 +139,6 @@ pub(super) fn render_replay(v: &Value) -> String {
     out
 }
 
-/// `probe simulate` — the would-be plan; nothing is applied.
-pub(super) fn render_simulate(v: &Value) -> String {
-    let mut out = String::new();
-    let surface = str_at(v, "surface");
-    let _ = writeln!(
-        out,
-        "simulate {surface}  ← what committing this fact would do (nothing is applied)\n"
-    );
-    let fact = v.get("fact").cloned().unwrap_or(Value::Null);
-    let _ = writeln!(out, "  fact:     {}", fact_line(&fact));
-
-    let empty = Vec::new();
-    let cmds = v
-        .get("commands")
-        .and_then(Value::as_array)
-        .unwrap_or(&empty);
-    if v.get("would_publish").and_then(Value::as_bool) == Some(true) {
-        for c in cmds {
-            let _ = writeln!(
-                out,
-                "  result:   WOULD PUBLISH  kind:{}  ({} {})",
-                i64_at(c, "kind"),
-                str_at(c, "op"),
-                str_at(c, "resource"),
-            );
-        }
-    } else if v.get("would_effect").and_then(Value::as_bool) == Some(true) {
-        for c in cmds {
-            let _ = writeln!(
-                out,
-                "  result:   WOULD APPLY    ({} {})",
-                str_at(c, "op"),
-                str_at(c, "resource"),
-            );
-        }
-    } else {
-        let _ = writeln!(out, "  result:   NO CHANGE (deduped)");
-    }
-    let changed = strs(v, "changed");
-    if !changed.is_empty() {
-        let _ = writeln!(out, "  changed:  {}", changed.join(", "));
-    }
-    out
-}
-
 /// `probe diff` — before/after artifact hashes plus changed fields.
 pub(super) fn render_diff(v: &Value) -> String {
     let mut out = String::new();
@@ -232,28 +190,6 @@ pub(super) fn render_acid(v: &Value) -> String {
     let _ = writeln!(out, "  removed:  {}", str_at(v, "removed_hash"));
     let _ = writeln!(out, "  unrelated: {}", str_at(v, "unrelated_hash"));
     out
-}
-
-fn fact_line(fact: &Value) -> String {
-    let mut parts = Vec::new();
-    if let Some(a) = fact.get("activity").and_then(Value::as_str) {
-        parts.push(format!("activity={a:?}"));
-    }
-    if let Some(t) = fact.get("title").and_then(Value::as_str) {
-        parts.push(format!("title={t:?}"));
-    }
-    if !parts.is_empty() || fact.get("kind").is_some() {
-        return format!(
-            "{} → {}",
-            fact.get("kind").and_then(Value::as_str).unwrap_or("fact"),
-            if parts.is_empty() {
-                "(no fields)".to_string()
-            } else {
-                parts.join(", ")
-            }
-        );
-    }
-    serde_json::to_string(fact).unwrap_or_else(|_| "fact".into())
 }
 
 /// `probe why <handle>` — live causality + the latest-per-key footer.

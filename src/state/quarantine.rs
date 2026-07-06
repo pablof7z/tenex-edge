@@ -6,6 +6,36 @@
 
 use super::*;
 
+/// A relay event held out of the normal cache until admission prerequisites
+/// become true, such as channel roster hydration for inbound chat.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QuarantinedEvent {
+    pub id: String,
+    pub kind: u32,
+    pub pubkey: String,
+    pub created_at: u64,
+    pub channel_h: String,
+    pub event_json: String,
+    pub reason: String,
+    pub quarantined_at: u64,
+}
+
+fn row_to_quarantined_event(row: &rusqlite::Row) -> rusqlite::Result<QuarantinedEvent> {
+    Ok(QuarantinedEvent {
+        id: row.get(0)?,
+        kind: row.get::<_, i64>(1)? as u32,
+        pubkey: row.get(2)?,
+        created_at: row.get(3)?,
+        channel_h: row.get(4)?,
+        event_json: row.get(5)?,
+        reason: row.get(6)?,
+        quarantined_at: row.get(7)?,
+    })
+}
+
+const QUARANTINE_COLS: &str =
+    "id, kind, pubkey, created_at, channel_h, event_json, reason, quarantined_at";
+
 impl Store {
     pub fn quarantine_event(
         &self,
@@ -45,6 +75,30 @@ impl Store {
              ORDER BY created_at ASC, id ASC",
         )?;
         let rows = stmt.query_map(params![channel_h], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Quarantined rows whose event id starts with `prefix`, newest first.
+    pub fn quarantined_events_by_prefix(&self, prefix: &str) -> Result<Vec<QuarantinedEvent>> {
+        if prefix.len() >= 64 {
+            return Ok(self
+                .conn
+                .query_row(
+                    &format!("SELECT {QUARANTINE_COLS} FROM relay_event_quarantine WHERE id=?1"),
+                    params![prefix],
+                    row_to_quarantined_event,
+                )
+                .optional()?
+                .into_iter()
+                .collect());
+        }
+        let pattern = format!("{prefix}*");
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {QUARANTINE_COLS} FROM relay_event_quarantine
+             WHERE id GLOB ?1
+             ORDER BY quarantined_at DESC, id DESC"
+        ))?;
+        let rows = stmt.query_map(params![pattern], row_to_quarantined_event)?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 

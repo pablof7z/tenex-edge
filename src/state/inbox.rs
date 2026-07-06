@@ -8,12 +8,12 @@
 //! synthetic `target_session` keys: `processing` while a backend is mutating that
 //! target, `pending` when it should be retried, and `delivered` once that exact
 //! target is complete.
-
 use super::*;
 
 const COLS: &str = "event_id, target_session, state, from_pubkey, channel_h, body, created_at, \
      delivered_at";
 const ORCHESTRATION_PROCESSING_LEASE_SECS: u64 = 10 * 60;
+mod prefix_lookup;
 
 fn row_to_inbox(row: &rusqlite::Row) -> rusqlite::Result<InboxRow> {
     Ok(InboxRow {

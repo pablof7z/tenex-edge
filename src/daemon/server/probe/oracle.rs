@@ -51,6 +51,13 @@ pub(in crate::daemon::server) fn oracle_report(state: &Arc<DaemonState>) -> Orac
             .expect("session_start mutex poisoned");
         r.clone()
     };
+    let session_watch = {
+        let r = state
+            .session_watch
+            .lock()
+            .expect("session_watch mutex poisoned");
+        r.clone()
+    };
     let outbox = {
         let r = state.outbox.lock().expect("outbox mutex poisoned");
         r.clone()
@@ -93,6 +100,13 @@ pub(in crate::daemon::server) fn oracle_report(state: &Arc<DaemonState>) -> Orac
         session_start.graph_node_count(),
     );
     ok &= session_start_row.status == "green";
+    let session_watch_row = check(
+        "session_watch",
+        session_watch.assert_oracle(),
+        session_watch.revision(),
+        session_watch.graph_node_count(),
+    );
+    ok &= session_watch_row.status == "green";
     let outbox_row = check(
         "outbox",
         outbox.assert_oracle(),
@@ -110,6 +124,7 @@ pub(in crate::daemon::server) fn oracle_report(state: &Arc<DaemonState>) -> Orac
             turn_row,
             cursor_row,
             session_start_row,
+            session_watch_row,
             outbox_row,
             hook_context,
         ],
@@ -134,7 +149,8 @@ pub(super) fn oracle_value(state: &Arc<DaemonState>) -> Value {
         "surface_correctness_proven": false,
         "surface_correctness": "NOT PROVEN",
         "host_seam_coverage_percent": frontier::host_seam_coverage_percent(),
-        "covered": ["status", "subscriptions", "hook_context", "turn_lifecycle", "cursor", "session_start", "outbox"],
+        "covered": frontier::covered_surfaces(),
+        "unproven_surfaces": frontier::unproven_surfaces(),
         "uncovered": frontier::uncovered_bypass_risks(),
     })
 }

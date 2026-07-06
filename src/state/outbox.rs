@@ -39,6 +39,36 @@ impl Store {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
+    /// Fetch one outbound publish row by local id.
+    pub fn get_outbox(&self, local_id: i64) -> Result<Option<OutboxRow>> {
+        Ok(self
+            .conn
+            .query_row(
+                &format!("SELECT {COLS} FROM outbox WHERE local_id=?1"),
+                params![local_id],
+                row_to_outbox,
+            )
+            .optional()?)
+    }
+
+    /// Fetch outbound publish rows whose signed event JSON id starts with the
+    /// supplied prefix, newest first. The outbox table stores raw signed JSON, so
+    /// this parses candidate rows rather than trusting text search.
+    pub fn outbox_by_event_id_prefix(&self, prefix: &str) -> Result<Vec<OutboxRow>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {COLS} FROM outbox ORDER BY enqueued_at DESC, local_id DESC"
+        ))?;
+        let rows = stmt.query_map([], row_to_outbox)?;
+        let mut matched = Vec::new();
+        for row in rows {
+            let row = row?;
+            if event_json_id(&row.event_json).is_some_and(|id| id.starts_with(prefix)) {
+                matched.push(row);
+            }
+        }
+        Ok(matched)
+    }
+
     /// Apply a Trellis-derived publish result to the durable queue row.
     pub fn apply_outbox_projection(
         &self,
@@ -61,5 +91,46 @@ impl Store {
             )?;
         }
         Ok(())
+    }
+}
+
+fn event_json_id(event_json: &str) -> Option<String> {
+    serde_json::from_str::<serde_json::Value>(event_json)
+        .ok()
+        .and_then(|v| {
+            v.get("id")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+        })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn get_outbox_reads_non_pending_rows() {
+        let s = Store::open_memory().unwrap();
+        let id = s.enqueue_outbox(r#"{"id":"ev1"}"#, 100).unwrap();
+        s.apply_outbox_projection(id, "published", None, false)
+            .unwrap();
+
+        let row = s.get_outbox(id).unwrap().unwrap();
+        assert_eq!(row.local_id, id);
+        assert_eq!(row.state, "published");
+        assert_eq!(row.enqueued_at, 100);
+        assert!(s.get_outbox(id + 1).unwrap().is_none());
+    }
+
+    #[test]
+    fn outbox_by_event_id_prefix_reads_signed_json_ids() {
+        let s = Store::open_memory().unwrap();
+        let first = s.enqueue_outbox(r#"{"id":"evt-123"}"#, 100).unwrap();
+        s.enqueue_outbox(r#"{"id":"other"}"#, 101).unwrap();
+
+        let rows = s.outbox_by_event_id_prefix("evt-").unwrap();
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].local_id, first);
     }
 }

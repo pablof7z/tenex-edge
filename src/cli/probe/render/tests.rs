@@ -12,20 +12,21 @@ fn oracle_render_is_honest_about_correctness() {
             {"surface":"turn_lifecycle","live_graph":true,"status":"green","revision":3,"nodes":8},
             {"surface":"cursor","live_graph":true,"status":"green","revision":4,"nodes":9},
             {"surface":"session_start","live_graph":true,"status":"green","revision":5,"nodes":10},
+            {"surface":"session_watch","live_graph":true,"status":"green","revision":5,"nodes":4},
             {"surface":"outbox","live_graph":true,"status":"green","revision":5,"nodes":10}
         ],
         "surface_correctness_proven": false,
         "surface_correctness": "NOT PROVEN",
-        "host_seam_coverage_percent": 85,
+        "host_seam_coverage_percent": 75,
         "oracle": "green",
-        "covered": ["status","subscriptions","hook_context","turn_lifecycle","cursor","session_start","outbox"],
+        "covered": ["status","subscriptions","hook_context","turn_lifecycle","cursor","outbox"],
         "uncovered": []
     });
     let text = render_oracle(&v);
     assert!(text.contains("status          green    (rev 812, 6 nodes)"));
     assert!(text.contains("hook_context    green    (rev 2, 7 nodes)"));
     assert!(text.contains("oracle: green / surface-correctness: NOT PROVEN"));
-    assert!(text.contains("host-seam-coverage: 85%"));
+    assert!(text.contains("host-seam-coverage: 75%"));
     assert!(text.contains("uncovered: "));
     assert!(!text.contains("rpc_session_start"));
 }
@@ -34,20 +35,22 @@ fn oracle_render_is_honest_about_correctness() {
 fn seams_render_lists_modes_and_risks() {
     let v = json!({
         "verb": "seams",
-        "host_seam_coverage_percent": 85,
+        "host_seam_coverage_percent": 75,
         "surfaces": [
             {"surface":"status","mode":"authoritative","bypass_risks":[]},
             {"surface":"cursor","mode":"authoritative","bypass_risks":[]},
             {"surface":"session_start","mode":"advisory","bypass_risks":[]},
+            {"surface":"session_watch","mode":"advisory","bypass_risks":[]},
             {"surface":"outbox","mode":"authoritative","bypass_risks":[]}
         ]
     });
     let text = render_seams(&v);
-    assert!(text.contains("host-seam-coverage: 85%"));
+    assert!(text.contains("host-seam-coverage: 75%"));
     assert!(text.contains("status"));
     assert!(text.contains("authoritative"));
     assert!(text.contains("cursor"));
     assert!(text.contains("session_start"));
+    assert!(text.contains("session_watch"));
     assert!(text.contains("advisory"));
     assert!(text.contains("outbox"));
     assert!(text.contains("authoritative"));
@@ -92,6 +95,29 @@ fn simulate_render_subscription_effect() {
     let text = render_simulate(&v);
     assert!(text.contains("simulate subscriptions"));
     assert!(text.contains("WOULD APPLY    (Open sub/h/room)"));
+}
+
+#[test]
+fn simulate_render_not_simulated_fact() {
+    let v = json!({
+        "verb":"simulate",
+        "surface":null,
+        "fact":{"ClockTick":{"at":100}},
+        "simulated":false,
+        "ok":false,
+        "would_effect":false,
+        "commands":[],
+        "changed":[],
+        "fact_evidence":{
+            "kind":"ClockTick",
+            "frontier":"timekeeping",
+            "reason":"clock ticks still feed several imperative loops"
+        }
+    });
+    let text = render_simulate(&v);
+    assert!(text.contains("simulate timekeeping"));
+    assert!(text.contains("NOT SIMULATED"));
+    assert!(text.contains("clock ticks still feed several imperative loops"));
 }
 
 #[test]
@@ -161,7 +187,7 @@ fn state_status_render_lists_sessions() {
     ]});
     let text = render_state(&v);
     assert!(text.contains("state status  (live)"));
-    assert!(text.contains("s1"));
+    assert!(text.contains("status/s1"));
     assert!(text.contains("busy"));
     assert!(text.contains("activity=\"reading\""));
 }
@@ -175,8 +201,54 @@ fn state_hook_context_render_lists_graph_details() {
     ]});
     let text = render_state(&v);
     assert!(text.contains("state hook_context  (live)"));
-    assert!(text.contains("s1                 rev 2  nodes 7  renders 2"));
+    assert!(text.contains("hook/s1/view"));
+    assert!(text.contains("rev 2  nodes 7  renders 2"));
     assert!(text.contains("caused by: hook/s1/presence"));
     assert!(text.contains("inputs:    hook/s1/cursor"));
     assert!(text.contains("text:      \"Fabric context\""));
+}
+
+#[test]
+fn state_non_subscription_surfaces_render_useful_rows() {
+    let turn = render_state(&json!({"verb":"state","surface":"turn_lifecycle","rows":[{
+        "session":"s1","working":true,"turn_started_at":42,"transcript_ref":"rollout.jsonl"
+    }]}));
+    assert!(turn.contains("turn_lifecycle/s1"));
+    assert!(turn.contains("working  started=42"));
+    assert!(turn.contains("transcript=rollout.jsonl"));
+
+    let cursor = render_state(&json!({"verb":"state","surface":"cursor","rows":[{
+        "session":"s1","cursor":9,"last_frame":8,"delta_since":4
+    }]}));
+    assert!(cursor.contains("cursor/s1"));
+    assert!(cursor.contains("cursor=9"));
+    assert!(cursor.contains("delta_since=4"));
+
+    let session_start = render_state(&json!({"verb":"state","surface":"session_start","rows":[{
+        "session":"s1","action":"spawn","channel_h":"room",
+        "signer_pubkey":"abcdef1234567890","reassert":false
+    }]}));
+    assert!(session_start.contains("session_start/s1"));
+    assert!(session_start.contains("spawn"));
+    assert!(session_start.contains("signer=abcdef123456"));
+
+    let failed_start = render_state(&json!({"verb":"state","surface":"session_start","rows":[{
+        "session":"s1","action":"RecordFailed","channel_h":"room",
+        "signer_pubkey":"abcdef1234567890","reassert":false,
+        "has_channel_ready_intent":true,"has_spawn_intent":true,
+        "ensure_subscription":true,"replay_chat":false,
+        "failure_stage":"channel_ready","failure_error":"relay rejected event: timeout"
+    }]}));
+    assert!(failed_start.contains("intents: channel_ready, spawn, subscription"));
+    assert!(failed_start.contains("failed at channel_ready: relay rejected event: timeout"));
+
+    let outbox = render_state(&json!({"verb":"state","surface":"outbox","rows":[{
+        "local_id":13,"event_id":"e9db050d0587e0b4","state":"pending",
+        "retries":3,"last_error":"relay rejected event","source_ref":"status/s1#tx:2"
+    }]}));
+    assert!(outbox.contains("outbox/13"));
+    assert!(outbox.contains("pending   retries=3"));
+    assert!(outbox.contains("event=e9db050d058"));
+    assert!(outbox.contains("source=status/s1#tx:2"));
+    assert!(outbox.contains("error: relay rejected event"));
 }

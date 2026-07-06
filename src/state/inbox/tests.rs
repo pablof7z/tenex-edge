@@ -52,3 +52,21 @@ fn orchestration_target_claim_retries_only_failed_targets() {
         "delivered"
     );
 }
+
+#[test]
+fn inbox_event_prefix_lookup_can_filter_target() {
+    let s = Store::open_memory().unwrap();
+    s.enqueue_inbox("evt-abc", "s1", "pk", "room", "one", 10)
+        .unwrap();
+    s.enqueue_inbox("evt-abc", "s2", "pk", "room", "two", 11)
+        .unwrap();
+    s.enqueue_inbox("evt-other", "s1", "pk", "room", "three", 12)
+        .unwrap();
+
+    let rows = s.inbox_by_event_prefix("evt-a").unwrap();
+    assert_eq!(rows.len(), 2);
+
+    let row = s.inbox_by_event_prefix_and_target("evt-a", "s2").unwrap();
+    assert_eq!(row.len(), 1);
+    assert_eq!(row[0].body, "two");
+}

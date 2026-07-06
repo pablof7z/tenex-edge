@@ -8,6 +8,8 @@ use std::sync::Arc;
 use trellis_core::{ResourceCommand, TransactionResult};
 use trellis_testing::DataTransactionScript;
 
+mod session_surfaces;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Artifact {
     pub surface: &'static str,
@@ -20,6 +22,7 @@ pub(super) fn fact_param(params: &Value, key: &str) -> Result<Option<InputFact>>
         return Ok(None);
     };
     let fact = match raw {
+        Value::Null => return Ok(None),
         Value::String(s) => serde_json::from_str(s).context("probe: invalid fact JSON")?,
         value => serde_json::from_value(value.clone()).context("probe: invalid fact")?,
     };
@@ -37,6 +40,14 @@ pub(super) fn infer_surface(fact: &InputFact) -> Option<&'static str> {
             Some("outbox")
         }
         InputFact::SubscriptionSync { .. } => Some("subscriptions"),
+        InputFact::SessionStartRequested(_)
+        | InputFact::SessionStarted { .. }
+        | InputFact::SessionStartFailed(_) => Some("session_start"),
+        InputFact::ProcessExited {
+            session_id: Some(_),
+            ..
+        } => Some("session_watch"),
+        InputFact::HookContextRender(_) => Some("hook_context"),
         _ => None,
     }
 }
@@ -48,6 +59,9 @@ pub(super) fn preview_artifact(state: &Arc<DaemonState>, fact: &InputFact) -> Re
         "cursor" => preview_cursor(state, fact),
         "outbox" => preview_outbox(state, fact),
         "subscriptions" => preview_subscriptions(state, fact),
+        "session_start" => session_surfaces::preview_session_start(state, fact),
+        "session_watch" => session_surfaces::preview_session_watch(state, fact),
+        "hook_context" => session_surfaces::preview_hook_context(state, fact),
         _ => unreachable!("surface inferred above"),
     }
 }
@@ -152,6 +166,7 @@ pub(super) fn replay_artifact(script: &DataTransactionScript<InputFact>) -> Resu
         "turn_lifecycle" => "turn_lifecycle",
         "cursor" => "cursor",
         "session_start" => "session_start",
+        "session_watch" => "session_watch",
         "outbox" => "outbox",
         _ => "unknown",
     };

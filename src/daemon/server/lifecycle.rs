@@ -7,7 +7,6 @@ pub async fn run() -> Result<()> {
     let storage = crate::daemon::storage_paths::StoragePaths::current();
     config::ensure_dir(&storage.edge_home)?;
     crate::logging::init_daemon_logging(&storage.daemon_log_path)?;
-
     let lock = match StartupLock::try_acquire()? {
         Some(l) => l,
         None => {
@@ -28,11 +27,10 @@ pub async fn run() -> Result<()> {
         "daemon storage paths"
     );
     tracing::info!(socket = %socket_path().display(), "daemon listening");
-
     let cfg = Config::load().context("loading config")?;
     let host = cfg.host.clone();
     let owners = cfg.whitelisted_pubkeys.clone();
-
+    let started_at = now_secs();
     // One relay connection. AUTH identity is irrelevant to delivery (verified:
     // an A-authed connection receives events p-tagged to B), so authenticate
     // with the backend's own key (`tenexPrivateKey`) rather than minting a
@@ -83,6 +81,7 @@ pub async fn run() -> Result<()> {
         provider,
         cfg,
         host,
+        started_at,
         owners,
         hosted: Mutex::new(HashMap::new()),
         sessions: Mutex::new(HashMap::new()),
@@ -92,6 +91,7 @@ pub async fn run() -> Result<()> {
         turn_lifecycle: Mutex::new(crate::reconcile::TurnLifecycleReconciler::new()),
         cursor: Mutex::new(crate::reconcile::CursorReconciler::new()),
         session_start: Mutex::new(crate::reconcile::SessionStartReconciler::new()),
+        session_watch: Mutex::new(crate::reconcile::Reconciler::new().expect("session_watch")),
         outbox: Arc::new(Mutex::new(crate::reconcile::OutboxReconciler::new())),
         hook_contexts: Mutex::new(HashMap::new()),
         tail_tx: tokio::sync::broadcast::channel(512).0,
