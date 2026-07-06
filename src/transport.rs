@@ -79,6 +79,17 @@ fn assert_relay_accepted(output: &Output<EventId>, event: Option<&Event>) -> Res
 
 // ── Transport ─────────────────────────────────────────────────────────────────
 
+/// `connect_with_indexer` kicks off the relay connection in the background and
+/// returns immediately (see its doc), and the daemon opens its RPC accept loop
+/// before that connection finishes (relay warmup runs off the startup critical
+/// path too) — so a client that races a freshly-spawned daemon can reach a
+/// publish call before any relay has finished its handshake. `nostr-relay-pool`
+/// treats that as a hard per-relay failure (`Error::NotConnected`) rather than
+/// queuing, so every publish path below waits (briefly, bounded) for the
+/// connection first. Once connected this returns immediately, so it's free on
+/// the steady-state path.
+const PUBLISH_CONNECT_WAIT: Duration = Duration::from_secs(8);
+
 impl Transport {
     /// Connect to the configured relays and authenticate.
     pub async fn connect(relays: &[String], keys: Keys) -> Result<Self> {
@@ -152,6 +163,7 @@ impl Transport {
     /// main relays (see [`Transport::write_relay_urls`] doc on why this can't
     /// just call the pool's implicit broadcast).
     pub async fn publish_builder(&self, builder: EventBuilder) -> Result<EventId> {
+        self.client.wait_for_connection(PUBLISH_CONNECT_WAIT).await;
         let out = self
             .client
             .send_event_builder_to(self.write_relay_urls.iter().cloned(), builder)
@@ -167,6 +179,7 @@ impl Transport {
     /// confirmed NIP-01 `OK,true`. Use this whenever a green result must mean the
     /// relay actually stored the event.
     pub async fn publish_builder_checked(&self, builder: EventBuilder) -> Result<EventId> {
+        self.client.wait_for_connection(PUBLISH_CONNECT_WAIT).await;
         let out = self
             .client
             .send_event_builder_to(self.write_relay_urls.iter().cloned(), builder)
@@ -187,6 +200,7 @@ impl Transport {
         scrub_unsigned(&mut unsigned);
         let signed = keys.sign_event(unsigned).await.context("signing event")?;
         crate::relay_log::log_outgoing_event(&signed);
+        self.client.wait_for_connection(PUBLISH_CONNECT_WAIT).await;
         let out = self
             .client
             .send_event_to(self.write_relay_urls.iter().cloned(), &signed)
@@ -214,6 +228,7 @@ impl Transport {
         scrub_unsigned(&mut unsigned);
         let signed = keys.sign_event(unsigned).await.context("signing event")?;
         crate::relay_log::log_outgoing_event(&signed);
+        self.client.wait_for_connection(PUBLISH_CONNECT_WAIT).await;
         let out = self
             .client
             .send_event_to(self.write_relay_urls.iter().cloned(), &signed)
@@ -236,6 +251,7 @@ impl Transport {
     /// Publish an already-signed event (see [`sign`]).
     pub async fn publish_event(&self, signed: &Event) -> Result<EventId> {
         crate::relay_log::log_outgoing_event(signed);
+        self.client.wait_for_connection(PUBLISH_CONNECT_WAIT).await;
         let out = self
             .client
             .send_event_to(self.write_relay_urls.iter().cloned(), signed)
@@ -254,6 +270,7 @@ impl Transport {
     /// any retry policy; this function reports the relay verdict once.
     pub async fn publish_event_checked(&self, signed: &Event) -> Result<EventId> {
         crate::relay_log::log_outgoing_event(signed);
+        self.client.wait_for_connection(PUBLISH_CONNECT_WAIT).await;
         let out = self
             .client
             .send_event_to(self.write_relay_urls.iter().cloned(), signed)
@@ -271,6 +288,7 @@ impl Transport {
     /// setups with no indexer configured).
     pub async fn publish_event_to(&self, signed: &Event, urls: &[String]) -> Result<EventId> {
         crate::relay_log::log_outgoing_event(signed);
+        self.client.wait_for_connection(PUBLISH_CONNECT_WAIT).await;
         if urls.is_empty() {
             let out = self
                 .client
