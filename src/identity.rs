@@ -99,6 +99,19 @@ fn validate_slug(slug: &str) -> Result<()> {
 
 /// Load the agent's keypair, generating + persisting it on first use.
 pub fn load_or_create(edge_home: &Path, slug: &str, now: u64) -> Result<AgentIdentity> {
+    load_or_create_with_command(edge_home, slug, now, None)
+}
+
+/// Like `load_or_create`, but when the identity doesn't exist yet, persists
+/// `command` as its spawn command (e.g. the real argv of a direct `claude
+/// --agent <slug>` invocation detected outside `tenex-edge launch`). Ignored
+/// — never overwrites an existing identity's stored command.
+pub fn load_or_create_with_command(
+    edge_home: &Path,
+    slug: &str,
+    now: u64,
+    command: Option<Vec<String>>,
+) -> Result<AgentIdentity> {
     validate_slug(slug)?;
     let path = key_path(edge_home, slug);
     if path.exists() {
@@ -122,7 +135,7 @@ pub fn load_or_create(edge_home: &Path, slug: &str, now: u64) -> Result<AgentIde
         secret_key: keys.secret_key().to_secret_hex(),
         public_key: keys.public_key().to_hex(),
         created_at: now,
-        command: None,
+        command,
         agent: None,
         byline: None,
     };
@@ -134,7 +147,7 @@ pub fn load_or_create(edge_home: &Path, slug: &str, now: u64) -> Result<AgentIde
     Ok(AgentIdentity {
         slug: slug.to_string(),
         keys,
-        command: None,
+        command: stored.command,
     })
 }
 

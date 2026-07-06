@@ -6,6 +6,11 @@ mod stale;
 #[derive(serde::Deserialize, Default)]
 pub(in crate::daemon::server) struct SessionStartParams {
     agent: String,
+    /// Real argv of a direct `claude --agent <slug>` invocation, detected by
+    /// the hook when TENEX_EDGE_AGENT was absent. Seeds a brand-new agent's
+    /// spawn command; ignored when the agent already exists.
+    #[serde(default)]
+    provision_command: Option<Vec<String>>,
     /// The harness-native external session id. Hooks send it as
     /// `harness_session_id`; the legacy/CLI path sends `session_id`. Either is
     /// accepted — it is ONLY a locator for `session_aliases`, never the identity.
@@ -101,7 +106,12 @@ pub(in crate::daemon::server) async fn rpc_session_start(
             format!("loading local key for agent {}", p.agent),
         );
     }
-    let id = identity::load_or_create(&edge, &p.agent, now_secs())?;
+    let id = identity::load_or_create_with_command(
+        &edge,
+        &p.agent,
+        now_secs(),
+        p.provision_command.clone(),
+    )?;
     let cwd = p
         .cwd
         .map(std::path::PathBuf::from)

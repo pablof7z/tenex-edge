@@ -5,7 +5,7 @@ use std::path::PathBuf;
 mod hook_forensics;
 mod observation;
 
-use observation::{find_ancestor_pid, report_observation};
+use observation::{find_ancestor_pid, find_direct_agent_invocation, report_observation};
 
 // ── hook adapter registry ─────────────────────────────────────────────────────
 //
@@ -193,7 +193,20 @@ async fn hook_dispatch(
             }
         },
     };
-    let agent_slug = agent_env_slug().unwrap_or_else(|| host.agent_slug.to_string());
+    // A slug from TENEX_EDGE_AGENT (set by `tenex-edge launch`) is always
+    // authoritative. Otherwise, look for a live ancestor directly running
+    // `claude --agent <name>` (bypassing `tenex-edge launch`) and treat it the
+    // same as if it had been launched under that identity — including, for a
+    // brand-new slug, provisioning it with the real invocation as its spawn
+    // command (see `report_observation`'s `provision_command`).
+    let env_slug = agent_env_slug();
+    let (agent_slug, provision_command): (String, Option<Vec<String>>) = match &env_slug {
+        Some(s) => (s.clone(), None),
+        None if host.name == "claude-code" => find_direct_agent_invocation()
+            .map(|(slug, argv)| (slug, Some(argv)))
+            .unwrap_or_else(|| (host.agent_slug.to_string(), None)),
+        None => (host.agent_slug.to_string(), None),
+    };
 
     // Parse stdin — fail open if JSON is absent or malformed.
     let obj = raw.as_object();
@@ -317,6 +330,7 @@ async fn hook_dispatch(
                 harness_session_id,
                 resume_id,
                 watch_pid,
+                provision_command,
             )
             .await?;
 
@@ -356,6 +370,7 @@ async fn hook_dispatch(
                     Some(sid.clone()),
                     resume_id.clone(),
                     watch_pid,
+                    provision_command,
                 )
                 .await
                 {

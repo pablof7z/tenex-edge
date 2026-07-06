@@ -15,6 +15,28 @@ fn generates_then_reloads_same_key() {
 }
 
 #[test]
+fn load_or_create_with_command_seeds_command_only_on_creation() {
+    let dir = tempfile::tempdir().unwrap();
+    let seeded = vec![
+        "claude".to_string(),
+        "--agent".to_string(),
+        "smith".to_string(),
+    ];
+    let a = load_or_create_with_command(dir.path(), "smith", 1, Some(seeded.clone())).unwrap();
+    assert_eq!(a.command.as_deref(), Some(seeded.as_slice()));
+
+    // A second call with a different command must NOT overwrite the stored one.
+    let other = vec![
+        "claude".to_string(),
+        "--agent".to_string(),
+        "other".to_string(),
+    ];
+    let b = load_or_create_with_command(dir.path(), "smith", 2, Some(other)).unwrap();
+    assert_eq!(b.command.as_deref(), Some(seeded.as_slice()));
+    assert_eq!(a.pubkey_hex(), b.pubkey_hex());
+}
+
+#[test]
 fn distinct_slugs_get_distinct_keys() {
     let dir = tempfile::tempdir().unwrap();
     let a = load_or_create(dir.path(), "coder", 1).unwrap();
