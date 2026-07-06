@@ -28,7 +28,7 @@ The live view command is `who --live`. The old README's advertisement of a `tail
 
 ## Launch
 
-The `tenex-edge launch` CLI command spawns an agent harness (e.g. claude, codex) inside a detached tmux session. <!-- [^abce9-05e58] -->
+The `tenex-edge launch` CLI command spawns an agent harness (e.g. claude, codex) inside a detached pty session. <!-- [^abce9-05e58] -->
 
 Agent launch configuration uses a `commands` array in `~/.tenex-edge/agents/<slug>.json`, with entries shaped as `{"name":"safe","argv":["claude"]}`. The old singular `command` field is not a compatibility fallback; files that only contain `command` behave as if no command is configured.
 

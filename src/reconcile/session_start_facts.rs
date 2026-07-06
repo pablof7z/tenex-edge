@@ -19,7 +19,7 @@ pub struct SessionStartRequestFact {
     pub rel_cwd: String,
     pub room_parent: Option<String>,
     pub watch_pid: Option<i32>,
-    pub tmux_pane: Option<String>,
+    pub pty_session: Option<String>,
     pub ring_doorbell: bool,
     pub base_pubkey: String,
     pub signer_pubkey: String,

@@ -16,7 +16,7 @@
 use crate::domain::Lifecycle;
 
 // The canonical session id IS `util::SessionId`. The daemon mints it; harness
-// ids / resume tokens / tmux panes become aliases that resolve to it. Re-exported
+// ids / resume tokens / hosted endpoints become aliases that resolve to it. Re-exported
 // so downstream code can say `session::SessionId` for the canonical id.
 pub use crate::domain::STATUS_TTL_SECS;
 pub use crate::util::SessionId;
@@ -58,16 +58,16 @@ impl Harness {
 
 /// The kind of external identifier carried by a `session_aliases` row. Together
 /// with `harness` + the raw `external_id` it forms the alias PK, so the same
-/// pane id under two harnesses (or a resume token vs a harness-native id) never
-/// collide.
+/// endpoint id under two harnesses (or a resume token vs a harness-native id)
+/// never collide.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AliasKind {
     /// The harness-native session id (claude/codex adopt it; opencode `ses_*`).
     HarnessSession,
     /// A `--resume` token distinct from the harness id (opencode).
     Resume,
-    /// A tmux pane id (e.g. `%5`).
-    TmuxPane,
+    /// A hosted PTY session id.
+    PtySession,
     /// The watched host PID, stringified.
     WatchPid,
     /// A daemon-generated `te-*` id (when the harness supplied none).
@@ -79,7 +79,7 @@ impl AliasKind {
         match self {
             AliasKind::HarnessSession => "harness",
             AliasKind::Resume => "resume",
-            AliasKind::TmuxPane => "tmux_pane",
+            AliasKind::PtySession => "pty_session",
             AliasKind::WatchPid => "watch_pid",
             AliasKind::Generated => "generated",
         }
@@ -130,8 +130,8 @@ pub struct SessionKey {
     pub harness_session_id: Option<String>,
     /// Resume token (claude/codex == harness id; opencode `ses_*`).
     pub resume_id: Option<String>,
-    /// tmux pane id (e.g. `%5`), when running inside tmux.
-    pub tmux_pane: Option<String>,
+    /// Hosted PTY session id, when launched through tenex-edge.
+    pub pty_session: Option<String>,
     /// Watched host PID.
     pub watch_pid: Option<i32>,
 }
@@ -149,7 +149,7 @@ pub struct SessionObservation {
     pub harness: Harness,
     pub harness_session_id: Option<String>,
     pub resume_id: Option<String>,
-    pub tmux_pane: Option<String>,
+    pub pty_session: Option<String>,
     pub watch_pid: Option<i32>,
     /// Wall-clock seconds the hook fired; becomes `last_seen`/`first_seen`.
     pub observed_at: u64,
@@ -166,7 +166,7 @@ impl SessionObservation {
             harness: self.harness,
             harness_session_id: self.harness_session_id.clone(),
             resume_id: self.resume_id.clone(),
-            tmux_pane: self.tmux_pane.clone(),
+            pty_session: self.pty_session.clone(),
             watch_pid: self.watch_pid,
         }
     }
@@ -358,7 +358,7 @@ pub struct LiveLocator {
     pub session_id: SessionId,
     pub harness_session_id: Option<String>,
     pub resume_id: Option<String>,
-    pub tmux_pane: Option<String>,
+    pub pty_session: Option<String>,
     pub watch_pid: Option<i32>,
 }
 
@@ -381,7 +381,7 @@ pub enum IdentityDecision {
 /// (host, project, agent). Precedence, highest first:
 ///   1. `alias_hit`            → Existing (a stored alias already names the id)
 ///   2. same harness id / resume token among live → Reattach (restart in place)
-///   3. same tmux pane / watch_pid among live      → Supersede (slot reused by a
+///   3. same PTY session / watch_pid among live    → Supersede (slot reused by a
 ///      new logical session)
 ///   4. otherwise                                  → Mint
 ///
@@ -409,15 +409,15 @@ pub fn resolve_identity(
         }
     }
 
-    // 3. Same pane or watched pid, but no id/resume match → new session in the
+    // 3. Same hosted endpoint or watched pid, but no id/resume match → new session in the
     //    same slot; supersede the incumbent.
     for c in live {
-        let same_pane = eq_some(&c.tmux_pane, &obs.tmux_pane);
+        let same_endpoint = eq_some(&c.pty_session, &obs.pty_session);
         let same_pid = match (c.watch_pid, obs.watch_pid) {
             (Some(x), Some(y)) => x == y,
             _ => false,
         };
-        if same_pane || same_pid {
+        if same_endpoint || same_pid {
             return IdentityDecision::Supersede {
                 old: c.session_id.clone(),
             };

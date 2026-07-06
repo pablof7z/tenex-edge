@@ -53,7 +53,7 @@ Chat mention extraction in extract_mentions accepts agent-slug-shaped tokens ([A
 <!-- citations: [^bd868-17c6e] [^bd868-b43e5] -->
 ## Session Resume
 
-tmux resume resolves sessions by exact raw session_id then session_id prefix only. resume_by_codename is deleted. The Resume CLI help text reads 'Session id (prefix) to resume.' The HookTail CLI help text reads 'Filter panes/events to a session id (or prefix)'. The codename field is dropped from session_start and hook JSON responses.
+pty resume resolves sessions by exact raw session_id then session_id prefix only. resume_by_codename is deleted. The Resume CLI help text reads 'Session id (prefix) to resume.' The HookTail CLI help text reads 'Filter panes/events to a session id (or prefix)'. The codename field is dropped from session_start and hook JSON responses.
 
 <!-- citations: [^bd868-7dcbb] [^bd868-eafc6] [^bd868-a51fb] -->
 ## Operator Surface and Logging

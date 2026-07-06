@@ -14,7 +14,7 @@ pub(in crate::daemon::server) struct WhoParams {
     #[serde(default, alias = "env_session")]
     harness_session: Option<String>,
     #[serde(default)]
-    tmux_pane: Option<String>,
+    pty_session: Option<String>,
     #[serde(default)]
     watch_pid: Option<i32>,
     #[serde(default)]
@@ -36,7 +36,7 @@ pub(in crate::daemon::server) fn rpc_who(
     let anchor = CallerAnchor::from_params(params);
     let caller_rec = if p.all_projects {
         None
-    } else if p.tmux_pane.as_deref().filter(|s| !s.is_empty()).is_some()
+    } else if p.pty_session.as_deref().filter(|s| !s.is_empty()).is_some()
         || p.harness_session
             .as_deref()
             .filter(|s| !s.is_empty())

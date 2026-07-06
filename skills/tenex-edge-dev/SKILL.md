@@ -1,6 +1,6 @@
 ---
 name: tenex-edge-dev
-description: Use for tenex-edge development live labs: run a local croissant relay, configure one or more container backends with real host AI auth, launch Claude/Codex/OpenCode agents, and inspect tmux panes, hook logs, relay logs, and Nostr events with nak.
+description: Use for tenex-edge development live labs: run a local croissant relay, configure one or more container backends with real host AI auth, launch Claude/Codex/OpenCode agents, and inspect pty panes, hook logs, relay logs, and Nostr events with nak.
 allowed-tools: Bash
 ---
 
@@ -8,7 +8,7 @@ allowed-tools: Bash
 
 Use this skill when validating tenex-edge changes in a real local environment:
 a host croissant relay, one or more isolated container backends, real host
-Claude/Codex/OpenCode auth, live agent UIs in tmux, relay-level traffic, hook
+Claude/Codex/OpenCode auth, live agent UIs in pty, relay-level traffic, hook
 logs, and Nostr events inspected with `nak`.
 
 This is the replacement mindset for the old scripted e2e harness. Prefer a
@@ -25,20 +25,20 @@ Read these files from this skill directory as needed:
   flows.
 - `references/container-backends.md`: how host credentials, container state,
   profile configs, model choices, and launch modes fit together.
-- `references/observability.md`: how to inspect tmux panes, croissant logs,
+- `references/observability.md`: how to inspect pty panes, croissant logs,
   Nostr events, hook logs, daemon logs, and what counts as evidence.
 - `references/troubleshooting.md`: common failures and the concrete checks to
   run before escalating.
-- `scripts/start-croissant-relay`: starts croissant in host tmux, creates a
+- `scripts/start-croissant-relay`: starts croissant in host pty, creates a
   per-run work directory, waits for NIP-11, and writes `lab.env`.
 - `scripts/write-container-profiles`: writes one or more disposable
   `.container-state/<profile>/tenex/config.json` files against the relay.
-- `scripts/launch-agent-tmux`: launches an agent through the container runner
-  inside a host tmux session, either direct or through `tenex-edge launch`.
-- `scripts/probe-lab`: captures relay NIP-11, relay tmux output, selected Nostr
-  event kinds, and optional agent tmux panes into a probe directory.
-- `scripts/cleanup-lab`: stops tmux-launched agent containers by their recorded
-  names/cidfiles, kills agent tmux sessions, then stops the relay tmux session.
+- `scripts/launch-agent-pty`: launches an agent through the container runner
+  inside a host pty session, either direct or through `tenex-edge launch`.
+- `scripts/probe-lab`: captures relay NIP-11, relay pty output, selected Nostr
+  event kinds, and optional agent pty panes into a probe directory.
+- `scripts/cleanup-lab`: stops pty-launched agent containers by their recorded
+  names/cidfiles, kills agent pty sessions, then stops the relay pty session.
 
 ## Non-Negotiables
 
@@ -56,7 +56,7 @@ Read these files from this skill directory as needed:
   container.
 - Use the cheapest useful model for each provider. The lab only needs enough
   model ability to run commands and surface UI/hook behavior.
-- Use host tmux for every agent run, even direct harness runs, so the testing
+- Use host pty for every agent run, even direct harness runs, so the testing
   agent can capture exactly what the agent UI is showing.
 - Use `tenex-edge who` for identity/fabric inspection. Do not rely on obsolete
   identity commands.
@@ -72,7 +72,7 @@ bash containers/tenex-edge/run doctor
 ```
 
 `doctor` must verify the installed backends and support tools, including
-Claude/Codex/OpenCode where configured, `nak`, `tmux`, and hook/plugin
+Claude/Codex/OpenCode where configured, `nak`, `pty`, and hook/plugin
 installation inside container state. If auth checks fail, stop and report the
 missing host path; do not silently switch to new credentials.
 
@@ -109,28 +109,28 @@ fabric; model-provider auth still comes from the host credential mounts.
 
 ## Launch Patterns
 
-Direct harness run in host tmux:
+Direct harness run in host pty:
 
 ```bash
-skills/tenex-edge-dev/scripts/launch-agent-tmux "${LAB_ENV}" direct claude --model haiku
+skills/tenex-edge-dev/scripts/launch-agent-pty "${LAB_ENV}" direct claude --model haiku
 ```
 
-Run through `tenex-edge launch` in host tmux:
+Run through `tenex-edge launch` in host pty:
 
 ```bash
-skills/tenex-edge-dev/scripts/launch-agent-tmux "${LAB_ENV}" launch claude --model haiku
+skills/tenex-edge-dev/scripts/launch-agent-pty "${LAB_ENV}" launch claude --model haiku
 ```
 
 Codex example:
 
 ```bash
-skills/tenex-edge-dev/scripts/launch-agent-tmux "${LAB_ENV}" direct codex -m gpt-5.3-codex-spark
+skills/tenex-edge-dev/scripts/launch-agent-pty "${LAB_ENV}" direct codex -m gpt-5.3-codex-spark
 ```
 
 OpenCode example:
 
 ```bash
-skills/tenex-edge-dev/scripts/launch-agent-tmux "${LAB_ENV}" direct opencode-ollama "${TENEX_EDGE_OPENCODE_OLLAMA_MODEL:-ollama/deepseek-r1:8b}"
+skills/tenex-edge-dev/scripts/launch-agent-pty "${LAB_ENV}" direct opencode-ollama "${TENEX_EDGE_OPENCODE_OLLAMA_MODEL:-ollama/deepseek-r1:8b}"
 ```
 
 If a CLI rejects the model flag, record the rejection and fall back to the
@@ -142,13 +142,13 @@ name unless the feature under test depends on that provider/model.
 Capture agent UI:
 
 ```bash
-tmux capture-pane -pt <agent-session> -S -240 -e
+pty capture-pane -pt <agent-session> -S -240 -e
 ```
 
 Drive a prompt:
 
 ```bash
-tmux send-keys -t <agent-session> "Run tenex-edge who and summarize the self header." C-m
+pty send-keys -t <agent-session> "Run tenex-edge who and summarize the self header." C-m
 ```
 
 Probe everything into files:
@@ -166,7 +166,7 @@ tail -n 200 .container-state/claude/tenex/edge/relay.log
 ```
 
 Croissant logs all inbound/outbound traffic and rejected event reasons in its
-tmux pane. Use those logs together with `nak` event probes and agent tmux
+pty pane. Use those logs together with `nak` event probes and agent pty
 captures; a passing lab needs live evidence from more than one surface.
 
 ## Evidence Standard
@@ -175,7 +175,7 @@ A useful report contains:
 
 - relay URL, run id, profile names, and whether this was direct or launch mode
 - exact agent commands and accepted model flags
-- tmux capture excerpts showing the settled agent UI, no persistent
+- pty capture excerpts showing the settled agent UI, no persistent
   `@te_session` warning, and injected tenex-edge context
 - croissant log excerpts showing traffic or rejection reasons
 - `nak` evidence for the expected event kinds
@@ -191,9 +191,9 @@ Give this to a simple agent to validate that the skill works:
 Use the tenex-edge-dev skill. Start a fresh local croissant relay on the host,
 use the printed relay URL without forcing port 9888, configure one claude
 container profile against it using real host Claude auth and disposable local
-fabric keys, run the container doctor, launch Claude in a host tmux session
+fabric keys, run the container doctor, launch Claude in a host pty session
 with the cheapest Haiku-class model available, ask it to run or describe
-tenex-edge who, then capture the tmux pane, croissant logs, hook-tail or hook
+tenex-edge who, then capture the pty pane, croissant logs, hook-tail or hook
 call output, and nak relay probes. Clean up with scripts/cleanup-lab. Do not
 print any secret or auth file contents. If it fails, write concise lessons to
 skills/tenex-edge-dev/lessons. Report whether the skill worked and include the

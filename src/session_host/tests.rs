@@ -75,14 +75,6 @@ fn shape_is_keyed_by_binary_not_slug() {
     assert!(resume_shape_for_bin("npx").is_none());
 }
 
-#[test]
-fn default_tmux_statusline_uses_harness_subcommand() {
-    let cmd = super::launch::default_statusline_cmd("/tmp/tenex-edge");
-    assert!(cmd.contains("/tmp/tenex-edge harness statusline --tmux"));
-    assert!(!cmd.contains("/tmp/tenex-edge statusline --tmux"));
-    assert!(cmd.contains("@te_session"));
-}
-
 fn sample_session() -> crate::state::Session {
     crate::state::Session {
         session_id: "sess-target".into(),
@@ -116,7 +108,7 @@ fn pending_message_prompt_contains_the_actual_message_body() {
         state: "pending".into(),
         from_pubkey: "pk-sender".into(),
         channel_h: "proj".into(),
-        body: "please review the tmux delivery path".into(),
+        body: "please review the PTY delivery path".into(),
         created_at: 100,
         delivered_at: 0,
     };
@@ -125,11 +117,11 @@ fn pending_message_prompt_contains_the_actual_message_body() {
     // the framed `[tenex-edge mention] <@name> body` line. With no cached slug the
     // name falls back to the short sender pubkey ("pk-sende").
     let store = crate::state::Store::open_memory().unwrap();
-    let prompt = crate::injection::render_tmux_mention(&store, &[row], &[], 120).unwrap();
+    let prompt = crate::injection::render_terminal_mention(&store, &[row], &[], 120).unwrap();
 
     assert_eq!(
         prompt,
-        "[tenex-edge mention] <@pk-sende> please review the tmux delivery path\n\
+        "[tenex-edge mention] <@pk-sende> please review the PTY delivery path\n\
          [reply via `tenex-edge chat write --message \"...\"` — replies do not auto-publish]"
     );
 }
@@ -150,7 +142,8 @@ fn whitelisted_human_mention_renders_bare_with_provenance() {
     let store = crate::state::Store::open_memory().unwrap();
     // Sender is whitelisted → minimal provenance, no `[tenex-edge mention]` frame.
     let prompt =
-        crate::injection::render_tmux_mention(&store, &[row], &["human-pk".into()], 120).unwrap();
+        crate::injection::render_terminal_mention(&store, &[row], &["human-pk".into()], 120)
+            .unwrap();
     assert_eq!(
         prompt,
         "<@human-pk> @developer hey there\n\

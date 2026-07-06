@@ -6,7 +6,7 @@ pub(in crate::daemon::server) enum TargetChannel {
 }
 
 /// Resolve the calling agent's OWN session for a membership mutation, in
-/// `Strict` scope: the pane anchor (`$TMUX_PANE`) identifies the exact session,
+/// `Strict` scope: the PTY/session anchor identifies the exact session,
 /// and a miss fails loud rather than binding an arbitrary sibling. `join`/
 /// `leave`/`switch` are per-session mutations, so picking "some session in this
 /// project" would be wrong.

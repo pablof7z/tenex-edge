@@ -1,8 +1,8 @@
 use super::*;
 
 #[test]
-fn tmux_spawn_gets_slow_response_budget() {
-    assert!(method_policy("tmux_spawn").response_timeout > Duration::from_secs(20));
+fn pty_spawn_gets_slow_response_budget() {
+    assert!(method_policy("pty_spawn").response_timeout > Duration::from_secs(20));
     assert_eq!(
         method_policy("ping").response_timeout,
         DEFAULT_RESPONSE_IO_TIMEOUT
@@ -10,8 +10,8 @@ fn tmux_spawn_gets_slow_response_budget() {
 }
 
 #[test]
-fn tmux_spawn_slow_budget_does_not_make_it_retryable_after_delivery() {
-    let policy = method_policy("tmux_spawn");
+fn pty_spawn_slow_budget_does_not_make_it_retryable_after_delivery() {
+    let policy = method_policy("pty_spawn");
     assert!(policy.response_timeout > Duration::from_secs(20));
     assert!(!policy.retry_after_delivery);
 }
@@ -21,7 +21,7 @@ fn non_idempotent_method_is_not_retried_after_request_may_have_delivered() {
     let mut attempts = 0;
     let mut spawns = 0;
     let err = call_with_attempt(
-        "tmux_send",
+        "pty_send",
         &serde_json::json!({}),
         |_, _| {
             attempts += 1;
@@ -73,7 +73,7 @@ fn pre_request_failure_can_retry_non_idempotent_method() {
     let mut attempts = 0;
     let mut spawns = 0;
     let value = call_with_attempt(
-        "tmux_send",
+        "pty_send",
         &serde_json::json!({}),
         |_, _| {
             attempts += 1;

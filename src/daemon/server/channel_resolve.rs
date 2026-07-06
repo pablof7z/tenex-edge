@@ -12,7 +12,7 @@ use super::*;
 /// no relay calls. Returns `Some(h)` when the value resolves without provisioning:
 ///   1. An existing `(parent, name)` row wins (the durable key for that handle).
 ///   2. A value that is ALREADY a known `channel_h` is returned unchanged —
-///      backward-compat for callers passing a literal id (tmux_resume re-scope,
+///      backward-compat for callers passing a literal id (resume re-scope,
 ///      `channels switch`, a launch whose picker already returned an id).
 ///   3. A value SHAPED like an opaque id (`[0-9a-f]{8}`) that missed 1–2 is an
 ///      already-resolved id whose kind:39000 has not yet materialized into the
@@ -180,7 +180,7 @@ pub(in crate::daemon::server) fn resolve_channel_ref(
     if reference.is_empty() {
         return ChannelResolution::NotFound;
     }
-    // Id passthrough: a caller (tmux resume, launch picker) may pass a literal id.
+    // Id passthrough: a caller (resume, launch picker) may pass a literal id.
     if store.get_channel(reference).ok().flatten().is_some() {
         return ChannelResolution::Unique(reference.to_string());
     }

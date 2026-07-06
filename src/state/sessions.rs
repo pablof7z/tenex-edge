@@ -195,7 +195,7 @@ impl Store {
     }
 
     /// Find a session (alive or dead) whose canonical id starts with `prefix`,
-    /// newest first. Used by `tmux resume` to accept a short id prefix.
+    /// newest first. Used by resume flows to accept a short id prefix.
     pub fn find_session_by_prefix(&self, prefix: &str) -> Result<Option<Session>> {
         let pattern = format!("{}%", prefix.replace(['%', '_'], ""));
         Ok(self

@@ -239,7 +239,7 @@ fn turn_check_delta_shows_siblings_with_activity_excludes_self() {
         &store,
         "pk-sib",
         "sib",
-        "Refactor tmux",
+        "Refactor PTY hosting",
         "editing hooks.rs",
         true,
         180,
@@ -280,7 +280,16 @@ fn turn_check_delta_shows_siblings_with_activity_excludes_self() {
 fn turn_check_delta_suppressed_when_not_due() {
     let store = Store::open_memory().unwrap();
     seed_channel(&store);
-    pub_status(&store, "pk-sib", "sib", "Refactor tmux", "", true, 180, 200);
+    pub_status(
+        &store,
+        "pk-sib",
+        "sib",
+        "Refactor PTY hosting",
+        "",
+        true,
+        180,
+        200,
+    );
     let m = Mutex::new(store);
 
     let ctx = assemble_turn_check_context(&m, &test_session("sess-me"), "laptop", None, 200);

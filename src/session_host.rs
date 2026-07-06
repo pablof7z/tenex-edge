@@ -1,0 +1,26 @@
+//! Reattachable session hosting for tenex-edge.
+//!
+//! Two public surfaces:
+//!
+//!   • `ring_doorbells(state)` — called after chat delivery events.
+//!     Finds sessions that have unread chat mentions + a live PTY endpoint, then
+//!     injects the rendered pending messages into the agent.
+//!
+//!   • `spawn_agent(state, slug, project, launch_args)` — spawns a new
+//!     PTY-hosted harness. Manual spawns start clean; no prompt is injected.
+//!
+//! Delivery is fail-open: endpoint failures are logged and pending inbox rows are
+//! returned to the queue so another path can deliver them.
+
+mod delivery;
+mod launch;
+mod registry;
+
+pub use delivery::{inject_pending_messages_pty, inject_spawn_message, ring_doorbells};
+pub use launch::{resume_agent, resume_agent_in_channel, spawn_agent};
+pub(crate) use registry::builtin_spawn_commands;
+pub use registry::spawnable_agents;
+
+#[cfg(test)]
+#[path = "session_host/tests.rs"]
+mod resume_command_tests;

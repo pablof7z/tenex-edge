@@ -50,7 +50,7 @@ Only kill an existing process if you know it belongs to a stale test.
 Capture the relay pane:
 
 ```bash
-tmux capture-pane -pt "${RELAY_TMUX}" -S -120 -e
+pty capture-pane -pt "${RELAY_PTY}" -S -120 -e
 ```
 
 Check:
@@ -104,7 +104,7 @@ The expected fix is host-side auth or host-auth projection repair.
 
 ## Claude Stops At OAuth
 
-Symptom: the Claude tmux pane shows a login, OAuth, paste-code, or first-run
+Symptom: the Claude pty pane shows a login, OAuth, paste-code, or first-run
 auth prompt instead of accepting the prompt.
 
 Treat this as a failed auth staging check. Do not paste OAuth codes, do not run
@@ -179,10 +179,10 @@ not make host credential directories writable from the container.
 
 ## Model Flag Rejected
 
-Capture the exact CLI output from tmux:
+Capture the exact CLI output from pty:
 
 ```bash
-tmux capture-pane -pt "${AGENT_TMUX}" -S -120 -e
+pty capture-pane -pt "${AGENT_PTY}" -S -120 -e
 ```
 
 Then retry with the cheapest model the installed CLI accepts. Record both the
@@ -200,7 +200,7 @@ cargo test --no-run
 or rebuild the specific binary/image that failed. Do not delete broad cache
 directories unless the user asks or the failure clearly points to that cache.
 For fresh profiles, a long first run is usually a cold build, not a hung agent.
-Prewarm the exact profile before tmux launch.
+Prewarm the exact profile before pty launch.
 
 ## Stale Daemon Socket Or State
 
@@ -244,7 +244,7 @@ If the profile state is already fresh, check for shared relay contamination:
 
 ```bash
 nak req -k 39000 "${RELAY_WS}" | head
-tmux capture-pane -pt "${RELAY_TMUX}" -S -160 -e
+pty capture-pane -pt "${RELAY_PTY}" -S -160 -e
 ```
 
 A fresh lab should not show old profile pubkeys creating `workspace` before the
@@ -258,10 +258,10 @@ or background repair warning. It becomes a failing symptom when it is paired
 with `management key is not admin`, `not in channel workspace`, a missing
 session anchor, or missing channel/member events.
 
-After a tmux-launched lab, run cleanup before stopping or reusing the relay:
+After a pty-launched lab, run cleanup before stopping or reusing the relay:
 
 ```bash
-skills/tenex-edge-dev/scripts/cleanup-lab "${LAB_ENV}" "${AGENT_TMUX}"
+skills/tenex-edge-dev/scripts/cleanup-lab "${LAB_ENV}" "${AGENT_PTY}"
 ```
 
 ## Croissant pprof Conflict
@@ -283,7 +283,7 @@ Check in order:
 1. Agent actually launched and accepted the prompt.
 2. Agent profile config points at the croissant relay.
 3. The backend profile has a generated key and whitelist.
-4. Croissant tmux pane shows a subscription or connection.
+4. Croissant pty pane shows a subscription or connection.
 5. `nak req` is pointed at the same relay URL.
 6. Hook/daemon logs show the action that should have published.
 
@@ -291,24 +291,24 @@ An empty `nak` output is useful only if paired with these checks.
 
 ## Agent UI Is Not Inspectable
 
-Every run should be inside host tmux. If an agent was started in the foreground,
+Every run should be inside host pty. If an agent was started in the foreground,
 stop and relaunch through:
 
 ```bash
-skills/tenex-edge-dev/scripts/launch-agent-tmux "${LAB_ENV}" direct claude --model haiku
+skills/tenex-edge-dev/scripts/launch-agent-pty "${LAB_ENV}" direct claude --model haiku
 ```
 
 or:
 
 ```bash
-skills/tenex-edge-dev/scripts/launch-agent-tmux "${LAB_ENV}" launch claude --model haiku
+skills/tenex-edge-dev/scripts/launch-agent-pty "${LAB_ENV}" launch claude --model haiku
 ```
 
 Use:
 
 ```bash
-tmux list-sessions
-tmux capture-pane -pt <session> -S -240 -e
+pty list-sessions
+pty capture-pane -pt <session> -S -240 -e
 ```
 
 ## Stale Active Strings
@@ -329,7 +329,7 @@ If the report only says "passed" or "failed", it is not done. Add:
 
 - relay URL and run id
 - profile names
-- tmux session names
+- pty session names
 - exact launch commands
 - probe directory
 - croissant evidence

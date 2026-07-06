@@ -1,21 +1,21 @@
 //! Stale-session reaping on harness restart. Extracted from `session_start.rs`
 //! to keep the parent under the 500-LOC ceiling (AGENTS.md file-size rule).
 //!
-//! When a new logical session arrives on the SAME watched pid OR tmux pane (same
-//! agent, same work root) it means the harness restarted without emitting a
+//! When a new logical session arrives on the SAME watched pid OR PTY endpoint
+//! (same agent, same work root), the harness restarted without emitting a
 //! session-end. The previous session's engine task is cancelled, its signer
 //! reservation released, and its row marked dead so `who` doesn't show ghosts.
 //! (All sessions in this DB are this machine's.)
 
 use super::super::*;
-use super::{session_pane, work_root_for_scope};
+use super::{session_endpoint, work_root_for_scope};
 
 pub(super) fn cancel_stale_sessions_on_restart(
     state: &Arc<DaemonState>,
     new_session_id: &str,
     agent_slug: &str,
     watch_pid: Option<i32>,
-    tmux_pane: Option<&str>,
+    pty_session: Option<&str>,
     new_work_root: &str,
 ) {
     let alive = state.with_store(|s| s.list_alive_sessions().unwrap_or_default());
@@ -30,14 +30,18 @@ pub(super) fn cancel_stale_sessions_on_restart(
             continue;
         }
         let same_pid = watch_pid.is_some() && rec.child_pid == watch_pid;
-        let same_pane = tmux_pane.is_some_and(|pane| {
+        let same_endpoint = pty_session.is_some_and(|endpoint| {
             state
-                .with_store(|s| session_pane(s, &rec.session_id))
+                .with_store(|s| session_endpoint(s, &rec.session_id))
                 .as_deref()
-                == Some(pane)
+                == Some(endpoint)
         });
-        if same_pid || same_pane {
-            let reason = if same_pid { "same_pid" } else { "same_pane" };
+        if same_pid || same_endpoint {
+            let reason = if same_pid {
+                "same_pid"
+            } else {
+                "same_endpoint"
+            };
             tracing::info!(
                 stale_session = %rec.session_id,
                 new_session = %new_session_id,

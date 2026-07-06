@@ -131,7 +131,7 @@ pub(crate) fn assemble_turn_start(
     //   - First turn: only messages since this session started (pre-join history
     //     is announced as a compact count, not dumped inline).
     //   - Subsequent turns: messages since the last seen_cursor high-water mark.
-    // First turn uses session creation time as the ambient floor. Tmux-pasted
+    // First turn uses session creation time as the ambient floor. Directly injected
     // direct mentions are tracked in the inbox ledger, not by advancing this
     // awareness cursor, so first-turn orientation/pre-history still renders.
     let ambient_since = if first_turn {

@@ -25,7 +25,7 @@ struct InviteParams {
     #[serde(default)]
     harness: Option<String>,
     #[serde(default)]
-    tmux_pane: Option<String>,
+    pty_session: Option<String>,
     #[serde(default)]
     watch_pid: Option<i32>,
     #[serde(default)]
@@ -93,7 +93,7 @@ enum TargetChannel {
 
 fn resolve_target_channel(state: &Arc<DaemonState>, p: &InviteParams) -> Result<TargetChannel> {
     let anchor = CallerAnchor {
-        tmux_pane: p.tmux_pane.as_deref(),
+        pty_session: p.pty_session.as_deref(),
         harness_session: p.harness_session.as_deref(),
         watch_pid: p.watch_pid,
         harness: p.harness.as_deref(),
@@ -158,15 +158,14 @@ pub(super) async fn invite_agent(
             "agent": target.slug,
             "online_agent": online,
             "channel": channel_h,
-            "pane_id": "",
+            "pty_id": "",
             "orchestration_event_id": event_id,
         }));
     }
 
     let before = live_session_ids(state);
-    super::tmux_rpc::provision_before_spawn(state, &target.slug, work_root, Some(channel_h))
-        .await?;
-    let pane_id = crate::tmux::spawn_agent(
+    super::pty_rpc::provision_before_spawn(state, &target.slug, work_root, Some(channel_h)).await?;
+    let pty_id = crate::session_host::spawn_agent(
         state,
         &target.slug,
         work_root,
@@ -179,7 +178,7 @@ pub(super) async fn invite_agent(
     .await?;
     let online = wait_local_agent_online(state, channel_h, &target.slug, &before).await?;
     Ok(serde_json::json!({
-        "pane_id": pane_id,
+        "pty_id": pty_id,
         "agent": target.slug,
         "online_agent": online,
         "channel": channel_h,
@@ -193,15 +192,15 @@ async fn invite_session(
     session_id: &str,
 ) -> Result<serde_json::Value> {
     if let Some(rec) = local_session(state, session_id) {
-        let resume_id = super::tmux_rpc::resume_token_for(&rec).with_context(|| {
+        let resume_id = super::pty_rpc::resume_token_for(&rec).with_context(|| {
             format!(
                 "session {} has no resume token (not resumable)",
                 rec.session_id
             )
         })?;
-        super::tmux_rpc::provision_before_spawn(state, &rec.agent_slug, work_root, Some(channel_h))
+        super::pty_rpc::provision_before_spawn(state, &rec.agent_slug, work_root, Some(channel_h))
             .await?;
-        let pane_id = crate::tmux::resume_agent_in_channel(
+        let pty_id = crate::session_host::resume_agent_in_channel(
             state,
             &rec.agent_slug,
             work_root,
@@ -211,7 +210,7 @@ async fn invite_session(
         .await?;
         let online = wait_local_session_online(state, channel_h, &rec.session_id).await?;
         return Ok(serde_json::json!({
-            "pane_id": pane_id,
+            "pty_id": pty_id,
             "session_id": rec.session_id,
             "agent": rec.agent_slug,
             "online_agent": online,
@@ -240,7 +239,7 @@ async fn invite_session(
     .await?;
     let online = wait_remote_session_online(state, channel_h, &remote).await?;
     Ok(serde_json::json!({
-        "pane_id": "",
+        "pty_id": "",
         "session_id": remote.session_id,
         "agent": remote.slug,
         "online_agent": online,

@@ -6,9 +6,10 @@ use super::debug::DebugAction;
 use super::explain::ExplainArgs;
 use super::harness::HarnessAction;
 use super::install::InstallArgs;
+use super::launch_cli::LaunchArgs;
 use super::messaging::{ChatAction, PublishArgs};
 use super::probe::ProbeArgs;
-use super::tmux_cli::LaunchArgs;
+use super::pty::{PtyAction, PtySupervisorArgs};
 use super::who::WhoArgs;
 
 #[derive(Parser)]
@@ -76,7 +77,7 @@ pub(super) enum Cmd {
     },
     /// Publish a long-form proposal (kind:30023) from this agent's session.
     Publish(PublishArgs),
-    /// Launch an agent harness in a new tmux session, with tmux chrome hidden.
+    /// Launch an agent harness in a reattachable portable-pty session.
     Launch(LaunchArgs),
     /// Stop the daemon and prevent hooks from restarting it.
     #[command(hide = true)]
@@ -90,6 +91,15 @@ pub(super) enum Cmd {
     /// Diagnostic probe over the reconciler frontier: stats/oracle/simulate/why/state.
     #[command(hide = true)]
     Probe(ProbeArgs),
+    /// Experimental portable-pty supervisor test surface.
+    #[command(hide = true)]
+    Pty {
+        #[command(subcommand)]
+        action: PtyAction,
+    },
+    /// Internal portable-pty supervisor process.
+    #[command(name = "__pty-supervisor", hide = true)]
+    PtySupervisor(PtySupervisorArgs),
     /// Detect local agent harnesses and wire tenex-edge's hook entries into each.
     #[command(hide = true)]
     Install(InstallArgs),

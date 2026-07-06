@@ -34,9 +34,9 @@ mod invite_rpc;
 mod management_command;
 mod membership_cleanup;
 mod orchestration_handler;
+mod pty_rpc;
 mod rpc;
 mod session_signer;
-mod tmux_rpc;
 
 use background::{spawn_pruner, spawn_trellis_oracle_sampler};
 use demux::spawn_demux;
@@ -298,13 +298,13 @@ async fn dispatch(state: &Arc<DaemonState>, req: &Request) -> Response {
         "channels_leave" => rpc_channels_leave(state, &req.params).await,
         "channels_switch" => rpc_channels_switch(state, &req.params).await,
         "statusline" => rpc_statusline(state, &req.params),
-        "tmux_status" => tmux_rpc::rpc_tmux_status(state).await,
-        "tmux_send" => tmux_rpc::rpc_tmux_send(state, &req.params).await,
-        "tmux_spawn" => tmux_rpc::rpc_tmux_spawn(state, &req.params).await,
+        "pty_status" => pty_rpc::rpc_pty_status().await,
+        "pty_send" => pty_rpc::rpc_pty_send(state, &req.params).await,
+        "pty_spawn" => pty_rpc::rpc_pty_spawn(state, &req.params).await,
         "invite" => invite_rpc::rpc_invite(state, &req.params).await,
-        "tmux_attach" => tmux_rpc::rpc_tmux_attach(state, &req.params),
-        "tmux_resume" => tmux_rpc::rpc_tmux_resume(state, &req.params).await,
-        "tmux_resumable" => tmux_rpc::rpc_tmux_resumable(state).await,
+        "pty_attach" => pty_rpc::rpc_pty_attach(state, &req.params),
+        "pty_resume" => pty_rpc::rpc_pty_resume(state, &req.params).await,
+        "pty_resumable" => pty_rpc::rpc_pty_resumable(state).await,
         other => Err(anyhow::anyhow!("unknown method {other}")),
     };
     match result {

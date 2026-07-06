@@ -20,6 +20,7 @@ pub(crate) struct WhoSnapshot {
     pub(crate) now: u64,
     pub(crate) rows: Vec<WhoRow>,
     pub(crate) other_projects: Vec<OtherProjectSummary>,
+    /// Agents tenex-edge has an identity for that can be spawned locally.
     #[serde(default)]
     pub(crate) spawnable: Vec<SpawnableRow>,
     /// When the current scope is a per-session room, the work-root project it is
@@ -85,8 +86,7 @@ pub(crate) struct WhoRow {
     /// Local sessions and same-machine peers are never remote (the §8e fix).
     #[serde(default)]
     pub(crate) remote: bool,
-    /// True when this session has a live tmux endpoint registered — i.e. it
-    /// can be attached to via `tenex-edge tmux attach`.
+    /// True when this session has a live PTY endpoint registered.
     #[serde(default)]
     pub(crate) attachable: bool,
     /// Top-level work-root project for UI grouping. `project` remains the live
@@ -216,19 +216,51 @@ pub(crate) fn load_who_snapshot(
         })
         .collect();
 
+    let local_spawnable = crate::session_host::spawnable_agents()
+        .into_iter()
+        .map(|(slug, command, byline)| (slug, (command, byline)))
+        .collect::<BTreeMap<_, _>>();
     let roster_scope = current_project.map(|p| work_root_for(store, p));
-    let spawnable: Vec<SpawnableRow> = match roster_scope.as_deref() {
+    let mut seen_spawnable = BTreeSet::new();
+    let mut spawnable: Vec<SpawnableRow> = match roster_scope.as_deref() {
         Some(root) => store.list_agent_roster_for_channel(root)?,
         None => store.list_agent_roster()?,
     }
     .into_iter()
-    .map(|row| SpawnableRow {
-        host: row.host,
-        slug: row.slug,
-        command: String::new(),
-        byline: Some(row.use_criteria).filter(|s| !s.trim().is_empty()),
+    .map(|row| {
+        let local = (row.host == local_host)
+            .then(|| local_spawnable.get(&row.slug))
+            .flatten();
+        seen_spawnable.insert((row.host.clone(), row.slug.clone()));
+        SpawnableRow {
+            host: row.host,
+            slug: row.slug,
+            command: local
+                .map(|(command, _)| command.clone())
+                .unwrap_or_default(),
+            byline: Some(row.use_criteria)
+                .filter(|s| !s.trim().is_empty())
+                .or_else(|| local.and_then(|(_, byline)| byline.clone())),
+        }
     })
     .collect();
+    for (slug, (command, byline)) in local_spawnable {
+        if !seen_spawnable.insert((local_host.clone(), slug.clone())) {
+            continue;
+        }
+        spawnable.push(SpawnableRow {
+            host: local_host.clone(),
+            slug,
+            command,
+            byline,
+        });
+    }
+    spawnable.sort_by(|a, b| {
+        a.host
+            .cmp(&b.host)
+            .then_with(|| a.slug.cmp(&b.slug))
+            .then_with(|| a.command.cmp(&b.command))
+    });
 
     // Session/task channel parent lets the renderer label channel vs project.
     let channel_parent = current_project.and_then(|p| {

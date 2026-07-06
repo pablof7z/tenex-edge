@@ -2,7 +2,6 @@ use super::*;
 use nostr_sdk::prelude::{Client as NostrClient, ClientOptions, Filter, Keys, Kind};
 use nostr_sdk::NostrSigner;
 use std::path::Path;
-use std::process::Command;
 use std::time::Duration;
 use tenex_edge::daemon::client::Client as DaemonClient;
 use tenex_edge::domain::{AgentRef, ChatMessage, DomainEvent};
@@ -43,10 +42,8 @@ fn harness_command(native_session: &str, cwd: &Path, injected_log: &Path) -> Vec
     vec!["sh".to_string(), "-lc".to_string(), script]
 }
 
-fn kill_pane(pane_id: &str) {
-    let _ = Command::new("tmux")
-        .args(["kill-pane", "-t", pane_id])
-        .status();
+fn kill_pty(pty_id: &str) {
+    let _ = tenex_edge::pty::kill(pty_id);
 }
 
 fn find_alive_session(home: &Home, slug: &str, scope: &str) -> Option<Session> {
@@ -87,7 +84,7 @@ fn wait_for_injected_log(log: &Path, body: &str) {
         wait_until(Duration::from_secs(25), || std::fs::read_to_string(log)
             .map(|s| s.contains(body))
             .unwrap_or(false)),
-        "tmux pane did not receive injected body {body:?}; log={}",
+        "PTY session did not receive injected body {body:?}; log={}",
         log.display()
     );
 }
@@ -147,11 +144,11 @@ fn operator_kind9_injects_into_running_launch_session() {
     let native_session = unique_session("launch-native");
     let agent = "launch-kind9";
 
-    let pane_id = rt().block_on(async {
+    let pty_id = rt().block_on(async {
         let mut c = DaemonClient::connect_or_spawn().await.expect("connect");
         let v = c
             .call(
-                "tmux_spawn",
+                "pty_spawn",
                 serde_json::json!({
                     "agent": agent,
                     "project": project,
@@ -161,8 +158,8 @@ fn operator_kind9_injects_into_running_launch_session() {
                 }),
             )
             .await
-            .expect("tmux_spawn");
-        v["pane_id"].as_str().unwrap().to_string()
+            .expect("pty_spawn");
+        v["pty_id"].as_str().unwrap().to_string()
     });
 
     let rec = wait_for_alive_session(&home, agent, &project);
@@ -183,7 +180,7 @@ fn operator_kind9_injects_into_running_launch_session() {
         "operator kind:9 should be materialized as user-authored chat"
     );
 
-    kill_pane(&pane_id);
+    kill_pty(&pty_id);
     stop_daemon(&home);
 }
 
@@ -248,7 +245,7 @@ fn operator_kind9_to_offline_local_agent_spawns_and_injects() {
     assert_eq!(instance.pubkey, rec.agent_pubkey);
     wait_for_injected_log(&log, &body);
 
-    let pane_id = tmux_pane_for_session(&store, &rec.session_id).expect("spawned tmux endpoint");
-    kill_pane(&pane_id);
+    let pty_id = pty_session_for_session(&store, &rec.session_id).expect("spawned pty endpoint");
+    kill_pty(&pty_id);
     stop_daemon(&home);
 }

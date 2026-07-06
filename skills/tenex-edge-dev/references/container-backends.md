@@ -65,7 +65,7 @@ Use profile-specific state even for one-off tests. Avoid sharing state across
 profiles because it makes hook behavior, logs, and relays harder to attribute.
 Also avoid running two containers against the same profile at once. A launched
 agent can own the daemon socket while a second diagnostic container waits or
-times out. Use tmux captures and logs first, or stop the agent pane before
+times out. Use pty captures and logs first, or stop the agent pane before
 same-profile RPC checks.
 
 `write-container-profiles` resets `.container-state/<profile>/tenex/edge` by
@@ -117,14 +117,14 @@ The script:
 - prints only profile names, config paths, and pubkey prefixes
 
 If you add a custom profile, use a simple lowercase name without spaces. The
-name becomes part of file paths and tmux session names.
+name becomes part of file paths and pty session names.
 
 ## Launch Modes
 
 Direct mode:
 
 ```bash
-skills/tenex-edge-dev/scripts/launch-agent-tmux "${LAB_ENV}" direct claude --model haiku
+skills/tenex-edge-dev/scripts/launch-agent-pty "${LAB_ENV}" direct claude --model haiku
 ```
 
 Use direct mode when validating:
@@ -132,12 +132,12 @@ Use direct mode when validating:
 - the backend CLI starts inside the container
 - real host auth works
 - hook/plugin installation is visible to the backend CLI
-- agent UI can be captured through host tmux
+- agent UI can be captured through host pty
 
 Launch mode:
 
 ```bash
-skills/tenex-edge-dev/scripts/launch-agent-tmux "${LAB_ENV}" launch claude --model haiku
+skills/tenex-edge-dev/scripts/launch-agent-pty "${LAB_ENV}" launch claude --model haiku
 ```
 
 Use launch mode when validating:
@@ -145,10 +145,10 @@ Use launch mode when validating:
 - `tenex-edge launch` selects and starts the backend correctly
 - launch-time environment is correct
 - tenex-edge hook context is injected
-- tmux session naming/attachment behavior is correct
+- pty session naming/attachment behavior is correct
 - the launched agent appears as expected in fabric state
 
-The tmux launch helper names the Apple container after the tmux session and
+The pty launch helper names the Apple container after the pty session and
 writes a cidfile in the lab work directory. Clean up with
 `scripts/cleanup-lab` so the container-side daemon exits before the relay is
 stopped.
@@ -188,7 +188,7 @@ bash containers/tenex-edge/run doctor
 The doctor should prove:
 
 - required CLIs are installed in the image
-- `tmux` is available
+- `pty` is available
 - `nak` is available
 - host auth projections are present for configured providers
 - Claude hooks can be installed into writable staged settings
@@ -242,6 +242,6 @@ For each backend include:
 - exact command
 - model flag accepted or fallback used
 - whether host auth was accepted
-- tmux session name
+- pty session name
 - log paths inspected
 - pass/fail and the next concrete failing command

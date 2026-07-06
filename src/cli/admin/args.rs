@@ -165,7 +165,7 @@ pub(in crate::cli) enum ChannelsAction {
         /// Channel name, project-relative path, or opaque NIP-29 `h` value.
         channel: String,
     },
-    /// Switch the active channel for the current tmux pane to a different NIP-29 subgroup.
+    /// Switch the active channel for the current session to a different NIP-29 subgroup.
     Switch {
         /// Channel name, project-relative path, or opaque NIP-29 `h` value.
         channel: String,

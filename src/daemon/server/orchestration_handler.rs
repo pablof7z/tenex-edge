@@ -156,7 +156,7 @@ async fn resume_target(
             return false;
         }
     };
-    let Some(resume_id) = super::tmux_rpc::resume_token_for(&rec) else {
+    let Some(resume_id) = super::pty_rpc::resume_token_for(&rec) else {
         tracing::warn!(
             session_id = %rec.session_id,
             child = %op.child_h,
@@ -165,7 +165,7 @@ async fn resume_target(
         return false;
     };
     let work_root = state.with_store(|s| work_root_for(s, &op.child_h));
-    match crate::tmux::resume_agent_in_channel(
+    match crate::session_host::resume_agent_in_channel(
         state,
         &rec.agent_slug,
         &work_root,
@@ -217,7 +217,7 @@ async fn spawn_target(
     drop(id);
 
     let work_root = state.with_store(|s| work_root_for(s, &op.child_h));
-    match crate::tmux::spawn_agent(
+    match crate::session_host::spawn_agent(
         state,
         slug,
         &work_root,

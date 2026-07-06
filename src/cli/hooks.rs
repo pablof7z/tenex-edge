@@ -45,7 +45,7 @@ pub(super) struct HostDef {
     /// When true, the hook echoes the daemon-minted canonical session id back on
     /// stdout so a programmatic host (e.g. opencode) can adopt it for subsequent
     /// hooks. Such hosts own NO harness-assigned id — the daemon decides identity
-    /// from their resume token / tmux pane / watched pid (registered as aliases),
+    /// from their resume token / PTY endpoint / watched pid (registered as aliases),
     /// so a missing harness id at session-start is normal, not malformed.
     /// When false (Claude Code, Codex), an empty harness id is a fail-open no-op:
     /// those harnesses always supply their own id, so a missing one means a
@@ -299,7 +299,7 @@ async fn hook_dispatch(
                 .or_else(|| host.pid_search.and_then(find_ancestor_pid));
 
             // The raw hook id is NOT canonical identity — it is the harness's
-            // external session id, one locator among several (resume token, tmux
+            // external session id, one locator among several (resume token, hosted
             // pane, watched pid). We REPORT what we observed; the daemon owns
             // identity and decides whether to mint, reattach, or supersede.
             let harness_session_id = if sid.is_empty() {

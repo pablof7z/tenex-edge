@@ -27,7 +27,7 @@ captured_at: 2026-07-03T11:12:17Z
 
 ## Prior State
 
-providers.json and llms.json (which drive model resolution per role, e.g. edge-distillation) lived under ~/.tenex-edge and were read-only from tenex-edge's side. Users had to edit them by hand. No CLI subcommand or TUI existed for managing them; the only TUI in the codebase was the session-spawner picker (tmux_cli/tui_*.rs), unrelated to model config.
+providers.json and llms.json (which drive model resolution per role, e.g. edge-distillation) lived under ~/.tenex-edge and were read-only from tenex-edge's side. Users had to edit them by hand. No CLI subcommand or TUI existed for managing them; the only TUI in the codebase was the session-spawner picker (pty_cli/tui_*.rs), unrelated to model config.
 
 ## Trigger
 

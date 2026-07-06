@@ -25,10 +25,11 @@ mod explain;
 mod harness;
 mod hooks;
 mod install;
+mod launch_cli;
 mod messaging;
 mod probe;
+mod pty;
 mod statusline;
-mod tmux_cli;
 mod turn;
 mod who;
 
@@ -61,15 +62,14 @@ pub(crate) fn channel_env() -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
-/// The tmux pane (`$TMUX_PANE`) this CLI invocation runs in — the durable
-/// in-session anchor. It is present in the harness env from process birth and is
-/// 1:1 with the session, so the daemon resolves it (via the pane's `tmux_pane`
-/// alias) to the caller's canonical session. Empty outside tmux (e.g. opencode),
-/// where the daemon falls back to the agent+cwd scan. This REPLACES the old
-/// `TENEX_EDGE_SESSION` env var, which could never be set (the canonical id is
-/// minted only after the harness starts).
-pub(crate) fn tmux_pane_env() -> Option<String> {
-    std::env::var("TMUX_PANE").ok().filter(|s| !s.is_empty())
+/// The hosted PTY session this CLI invocation runs in. It is present in the
+/// harness env from process birth and is 1:1 with the session, so the daemon
+/// resolves it to the caller's canonical session. Native harness shells outside
+/// tenex-edge launch fall back to harness ids, watched pid, or project scan.
+pub(crate) fn pty_session_env() -> Option<String> {
+    std::env::var("TENEX_EDGE_PTY_SESSION")
+        .ok()
+        .filter(|s| !s.is_empty())
 }
 
 /// Build the typed caller identity and project it into the daemon's stable RPC
@@ -117,10 +117,12 @@ pub async fn run(cli: Cli) -> Result<()> {
         Cmd::Agents { action } => admin::agents(action).await,
         Cmd::Invite(args) => admin::invite(args).await,
         Cmd::Harness { action } => harness::harness(action).await,
-        Cmd::Launch(args) => tmux_cli::launch(args).await,
+        Cmd::Launch(args) => launch_cli::launch(args).await,
         Cmd::Stop => stop_daemon(),
         Cmd::Debug { action } => debug::debug(action).await,
         Cmd::Probe(args) => probe::probe(args).await,
+        Cmd::Pty { action } => pty::pty(action),
+        Cmd::PtySupervisor(args) => pty::pty_supervisor(args),
         Cmd::Install(args) => install::install(args).await,
         Cmd::Daemon => crate::daemon::server::run().await,
     }
