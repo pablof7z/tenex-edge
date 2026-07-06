@@ -1,6 +1,7 @@
 use super::*;
 
 mod byline;
+mod commands;
 
 #[test]
 fn generates_then_reloads_same_key() {
@@ -12,28 +13,6 @@ fn generates_then_reloads_same_key() {
         a.keys.secret_key().to_secret_hex(),
         b.keys.secret_key().to_secret_hex()
     );
-}
-
-#[test]
-fn load_or_create_with_command_seeds_command_only_on_creation() {
-    let dir = tempfile::tempdir().unwrap();
-    let seeded = vec![
-        "claude".to_string(),
-        "--agent".to_string(),
-        "smith".to_string(),
-    ];
-    let a = load_or_create_with_command(dir.path(), "smith", 1, Some(seeded.clone())).unwrap();
-    assert_eq!(a.command.as_deref(), Some(seeded.as_slice()));
-
-    // A second call with a different command must NOT overwrite the stored one.
-    let other = vec![
-        "claude".to_string(),
-        "--agent".to_string(),
-        "other".to_string(),
-    ];
-    let b = load_or_create_with_command(dir.path(), "smith", 2, Some(other)).unwrap();
-    assert_eq!(b.command.as_deref(), Some(seeded.as_slice()));
-    assert_eq!(a.pubkey_hex(), b.pubkey_hex());
 }
 
 #[test]
@@ -71,29 +50,6 @@ fn add_local_agent_creates_then_is_idempotent() {
 }
 
 #[test]
-fn add_local_agent_sets_and_overwrites_command() {
-    let dir = tempfile::tempdir().unwrap();
-    let (a, _) = add_local_agent(
-        dir.path(),
-        "dev",
-        Some(vec![
-            "claude".into(),
-            "--dangerously-skip-permissions".into(),
-        ]),
-        1,
-    )
-    .unwrap();
-    assert_eq!(
-        a.command.as_deref().unwrap(),
-        &["claude", "--dangerously-skip-permissions"]
-    );
-    let (b, created) = add_local_agent(dir.path(), "dev", Some(vec!["codex".into()]), 2).unwrap();
-    assert!(!created);
-    assert_eq!(a.pubkey_hex(), b.pubkey_hex());
-    assert_eq!(b.command.as_deref().unwrap(), &["codex"]);
-}
-
-#[test]
 fn remove_local_agent_parks_then_reports_missing() {
     let dir = tempfile::tempdir().unwrap();
     load_or_create(dir.path(), "coder", 1).unwrap();
@@ -108,40 +64,6 @@ fn remove_local_agent_parks_then_reports_missing() {
     assert!(list_local_pubkeys(dir.path()).is_empty());
 
     assert!(remove_local_agent(dir.path(), "coder").unwrap().is_none());
-}
-
-#[test]
-fn list_local_agent_details_surfaces_pubkey_and_command() {
-    let dir = tempfile::tempdir().unwrap();
-    let (a, _) = add_local_agent(dir.path(), "coder", None, 1).unwrap();
-    add_local_agent(dir.path(), "dev", Some(vec!["codex".into()]), 1).unwrap();
-    let rows = list_local_agent_details(dir.path());
-    assert_eq!(rows.len(), 2);
-    assert_eq!(rows[0].slug, "coder");
-    assert_eq!(rows[0].pubkey, a.pubkey_hex());
-    assert!(rows[0].command.is_none());
-    assert_eq!(rows[1].slug, "dev");
-    assert_eq!(rows[1].command.as_deref().unwrap(), &["codex"]);
-}
-
-#[test]
-fn command_round_trips() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join("agents")).unwrap();
-    std::fs::write(
-        dir.path().join("agents/dev.json"),
-        r#"{"slug":"dev","secret_key":"0000000000000000000000000000000000000000000000000000000000000001","public_key":"","created_at":1,"command":["claude","--dangerously-skip-permissions"]}"#,
-    )
-    .unwrap();
-    let agents = list_local_agents(dir.path());
-    assert_eq!(agents.len(), 1);
-    assert_eq!(agents[0].0, "dev");
-    assert_eq!(
-        agents[0].1.as_deref().unwrap(),
-        &["claude", "--dangerously-skip-permissions"]
-    );
-    assert!(agents[0].2.is_none());
-    assert!(agents[0].3.is_none());
 }
 
 fn test_tenex_secret() -> SecretKey {

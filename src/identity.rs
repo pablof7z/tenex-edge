@@ -12,12 +12,19 @@ use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+mod commands;
 mod keys;
 mod local_agent;
+pub(crate) use commands::adapt_argv_for_slug;
+pub use commands::{LaunchCommand, DEFAULT_COMMAND_NAME};
 pub use keys::{
     agent_ordinal_label, derive_agent_ordinal_keys, derive_session_keys, AgentInstance,
 };
-pub use local_agent::{remove_local_agent, set_local_agent_byline};
+pub(crate) use local_agent::add_local_agent_with_commands;
+pub use local_agent::{
+    add_local_agent, list_invitable_agents, list_local_agent_details, list_local_agents,
+    list_local_pubkeys, remove_local_agent, set_local_agent_byline, LocalAgent, SpawnAgentEntry,
+};
 
 #[derive(Debug, Serialize, Deserialize)]
 struct StoredKey {
@@ -25,11 +32,11 @@ struct StoredKey {
     secret_key: String, // hex
     public_key: String, // hex
     created_at: u64,
-    /// Harness command to use when spawning a new tmux session for this agent.
-    /// E.g. `["claude", "--dangerously-skip-permissions"]`.
-    /// When absent, the spawn logic falls back to the built-in SPAWN_DEFS table.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    command: Option<Vec<String>>,
+    /// Named harness commands to use when spawning a new tmux session for this
+    /// agent. The old singular `command` field is intentionally not deserialized:
+    /// files that still carry it behave as if no commands are configured.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    commands: Vec<LaunchCommand>,
     /// Inline agent definition forwarded to the harness at spawn time.
     /// For Claude: becomes `--agents '{"<slug>": <def>}' --agent <slug>`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -63,13 +70,12 @@ impl StoredKey {
     }
 }
 
-/// A resolved agent identity: its slug, signing keys, and optional harness command.
+/// A resolved agent identity: its slug, signing keys, and named harness commands.
 #[derive(Debug, Clone)]
 pub struct AgentIdentity {
     pub slug: String,
     pub keys: Keys,
-    /// Harness command from the agent file, if present.
-    pub command: Option<Vec<String>>,
+    pub commands: Vec<LaunchCommand>,
 }
 
 impl AgentIdentity {
@@ -125,17 +131,21 @@ pub fn load_or_create_with_command(
         return Ok(AgentIdentity {
             slug: slug.to_string(),
             keys,
-            command: stored.command,
+            commands: commands::normalize_commands(stored.commands),
         });
     }
 
     let keys = Keys::generate();
+    let commands = command
+        .and_then(LaunchCommand::default)
+        .into_iter()
+        .collect();
     let stored = StoredKey {
         slug: slug.to_string(),
         secret_key: keys.secret_key().to_secret_hex(),
         public_key: keys.public_key().to_hex(),
         created_at: now,
-        command,
+        commands,
         agent: None,
         byline: None,
     };
@@ -147,227 +157,8 @@ pub fn load_or_create_with_command(
     Ok(AgentIdentity {
         slug: slug.to_string(),
         keys,
-        command: stored.command,
+        commands: stored.commands,
     })
-}
-
-/// Every agent in the local keystore (their hex pubkeys). Your own fleet trusts
-/// itself automatically, so agents on one device see each other without the
-/// operator having to pre-whitelist keys that are generated on first use.
-pub fn list_local_pubkeys(edge_home: &Path) -> Vec<String> {
-    let dir = agents_dir(edge_home);
-    let mut out = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(&dir) {
-        for e in entries.flatten() {
-            let path = e.path();
-            if path.extension().and_then(|x| x.to_str()) != Some("json") {
-                continue;
-            }
-            // This list is the self-trust whitelist: a key silently skipped here
-            // drops an agent's own fleet member out of the trusted set, so a
-            // read/parse failure is loud at error! before we skip it.
-            match std::fs::read_to_string(&path) {
-                Ok(s) => match serde_json::from_str::<StoredKey>(&s) {
-                    Ok(k) => out.push(k.public_key),
-                    Err(e) => tracing::error!(
-                        path = %path.display(),
-                        error = %e,
-                        "list_local_pubkeys: skipping corrupt keystore file — agent dropped from self-trust whitelist"
-                    ),
-                },
-                Err(e) => tracing::error!(
-                    path = %path.display(),
-                    error = %e,
-                    "list_local_pubkeys: skipping unreadable keystore file — agent dropped from self-trust whitelist"
-                ),
-            }
-        }
-    }
-    out
-}
-
-/// All agents in the local keystore with their configured harness command (if
-/// any) and display byline. Used by the spawn machinery: command from the agent
-/// file takes priority over SPAWN_DEFS.
-#[allow(clippy::type_complexity)]
-pub fn list_local_agents(
-    edge_home: &Path,
-) -> Vec<(
-    String,
-    Option<Vec<String>>,
-    Option<serde_json::Value>,
-    Option<String>,
-)> {
-    let dir = agents_dir(edge_home);
-    let mut out = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(&dir) {
-        for e in entries.flatten() {
-            let path = e.path();
-            if path.extension().and_then(|x| x.to_str()) != Some("json") {
-                continue;
-            }
-            match std::fs::read_to_string(&path) {
-                Ok(s) => match serde_json::from_str::<StoredKey>(&s) {
-                    Ok(k) => {
-                        let byline = k.effective_byline();
-                        out.push((k.slug, k.command, k.agent, byline));
-                    }
-                    Err(e) => tracing::warn!(
-                        path = %path.display(),
-                        error = %e,
-                        "list_local_agents: skipping corrupt keystore file"
-                    ),
-                },
-                Err(e) => tracing::warn!(
-                    path = %path.display(),
-                    error = %e,
-                    "list_local_agents: skipping unreadable keystore file"
-                ),
-            }
-        }
-    }
-    out.sort_by(|a, b| a.0.cmp(&b.0));
-    out
-}
-
-/// A local agent as listed by `tenex-edge agent list`: its slug, hex pubkey, and
-/// optional harness launch command. Distinct from `list_local_agents` (which the
-/// spawn path uses) in that it also surfaces the pubkey for the operator.
-#[derive(Debug, Clone)]
-pub struct LocalAgent {
-    pub slug: String,
-    pub pubkey: String,
-    pub command: Option<Vec<String>>,
-}
-
-/// The invitable roster as `(slug, byline, created_at)`, sorted by slug. The
-/// `created_at` lets the awareness delta surface only AGENTS THAT BECAME
-/// available since a session's last turn (decision D — roster shown on change,
-/// not every turn).
-pub fn list_invitable_agents(edge_home: &Path) -> Vec<(String, Option<String>, u64)> {
-    let dir = agents_dir(edge_home);
-    let mut out = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(&dir) {
-        for e in entries.flatten() {
-            let path = e.path();
-            if path.extension().and_then(|x| x.to_str()) != Some("json") {
-                continue;
-            }
-            match std::fs::read_to_string(&path) {
-                Ok(s) => match serde_json::from_str::<StoredKey>(&s) {
-                    Ok(k) => {
-                        let byline = k.effective_byline();
-                        out.push((k.slug, byline, k.created_at));
-                    }
-                    Err(e) => tracing::warn!(
-                        path = %path.display(),
-                        error = %e,
-                        "list_invitable_agents: skipping corrupt keystore file"
-                    ),
-                },
-                Err(e) => tracing::warn!(
-                    path = %path.display(),
-                    error = %e,
-                    "list_invitable_agents: skipping unreadable keystore file"
-                ),
-            }
-        }
-    }
-    out.sort_by(|a, b| a.0.cmp(&b.0));
-    out
-}
-
-/// Every agent in the local keystore, with slug + pubkey + command, sorted by slug.
-pub fn list_local_agent_details(edge_home: &Path) -> Vec<LocalAgent> {
-    let dir = agents_dir(edge_home);
-    let mut out = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(&dir) {
-        for e in entries.flatten() {
-            let path = e.path();
-            if path.extension().and_then(|x| x.to_str()) != Some("json") {
-                continue;
-            }
-            match std::fs::read_to_string(&path) {
-                Ok(s) => match serde_json::from_str::<StoredKey>(&s) {
-                    Ok(k) => out.push(LocalAgent {
-                        slug: k.slug,
-                        pubkey: k.public_key,
-                        command: k.command,
-                    }),
-                    Err(e) => tracing::warn!(
-                        path = %path.display(),
-                        error = %e,
-                        "list_local_agent_details: skipping corrupt keystore file"
-                    ),
-                },
-                Err(e) => tracing::warn!(
-                    path = %path.display(),
-                    error = %e,
-                    "list_local_agent_details: skipping unreadable keystore file"
-                ),
-            }
-        }
-    }
-    out.sort_by(|a, b| a.slug.cmp(&b.slug));
-    out
-}
-
-/// Add a local agent: mint + persist a keypair if the slug is new. When `command`
-/// is `Some`, set (or overwrite) the harness launch command — so this doubles as
-/// "set the command for an existing agent". Returns the resolved identity and
-/// whether the keypair was newly created (`true`) or already existed (`false`).
-pub fn add_local_agent(
-    edge_home: &Path,
-    slug: &str,
-    command: Option<Vec<String>>,
-    now: u64,
-) -> Result<(AgentIdentity, bool)> {
-    validate_slug(slug)?;
-    let path = key_path(edge_home, slug);
-    if path.exists() {
-        let s = std::fs::read_to_string(&path)
-            .with_context(|| format!("reading key {}", path.display()))?;
-        let mut stored: StoredKey =
-            serde_json::from_str(&s).with_context(|| format!("parsing key {}", path.display()))?;
-        let keys = Keys::parse(&stored.secret_key)
-            .with_context(|| format!("parsing secret key for {slug}"))?;
-        if command.is_some() {
-            stored.command = command;
-            let body = serde_json::to_string_pretty(&stored)?;
-            atomic_write(&path, &body)?;
-        }
-        return Ok((
-            AgentIdentity {
-                slug: slug.to_string(),
-                keys,
-                command: stored.command,
-            },
-            false,
-        ));
-    }
-
-    let keys = Keys::generate();
-    let stored = StoredKey {
-        slug: slug.to_string(),
-        secret_key: keys.secret_key().to_secret_hex(),
-        public_key: keys.public_key().to_hex(),
-        created_at: now,
-        command: command.clone(),
-        agent: None,
-        byline: None,
-    };
-    std::fs::create_dir_all(agents_dir(edge_home))
-        .with_context(|| format!("creating {}", agents_dir(edge_home).display()))?;
-    let body = serde_json::to_string_pretty(&stored)?;
-    atomic_write(&path, &body)?;
-    Ok((
-        AgentIdentity {
-            slug: slug.to_string(),
-            keys,
-            command,
-        },
-        true,
-    ))
 }
 
 /// Write via a temp file + rename so a crash never leaves a half-written key.

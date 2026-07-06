@@ -19,10 +19,13 @@ pub(in crate::cli) struct LaunchArgs {
     /// as a second personality.
     #[arg(long, num_args(0..=1), default_missing_value = "")]
     channel: Option<String>,
-    /// Override the entire launch command (shell-word split). Replaces the command
-    /// stored in the agent file. Example: `-c 'ollama launch claude -- --dangerously-skip-permissions'`
+    /// Override the entire launch command for this launch (shell-word split).
+    /// Example: `-c 'ollama launch claude -- --dangerously-skip-permissions'`
     #[arg(short = 'c', long = "command", value_name = "COMMAND")]
     command_str: Option<String>,
+    /// Select a named command from the agent file's `commands` list.
+    #[arg(long = "command-name", value_name = "NAME")]
+    command_name: Option<String>,
     /// Extra args passed after `--`; appended to the launch command.
     /// Example: `tenex-edge launch codex -- --yolo`
     #[arg(last = true, value_name = "ARGS")]
@@ -38,6 +41,7 @@ pub(in crate::cli) async fn launch(args: LaunchArgs) -> Result<()> {
         args.slug,
         args.project,
         args.channel,
+        args.command_name,
         override_command,
         args.extra_args,
     )
@@ -72,5 +76,25 @@ mod tests {
         assert_eq!(channel(omitted), None);
         assert_eq!(channel(picker).as_deref(), Some(""));
         assert_eq!(channel(named).as_deref(), Some("ops"));
+    }
+
+    #[test]
+    fn launch_command_name_parses_independently_from_override() {
+        let cli = crate::cli::args::Cli::try_parse_from([
+            "tenex-edge",
+            "launch",
+            "codex",
+            "--command-name",
+            "safe",
+        ])
+        .expect("launch with command name parses");
+
+        match cli.cmd {
+            crate::cli::args::Cmd::Launch(args) => {
+                assert_eq!(args.command_name.as_deref(), Some("safe"));
+                assert!(args.command_str.is_none());
+            }
+            _ => panic!("expected launch command"),
+        }
     }
 }

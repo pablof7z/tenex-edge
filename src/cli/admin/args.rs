@@ -3,13 +3,14 @@ use clap::{Args, Subcommand};
 
 #[derive(Subcommand)]
 pub(in crate::cli) enum AgentAction {
-    /// List the agents in this machine's local keystore (slug, pubkey, command).
+    /// List the agents in this machine's local keystore (slug, pubkey, commands).
     List,
     /// Add a local agent: mint + persist its keypair if the slug is new. Pass a
-    /// harness launch command after `--` to set how it spawns (e.g.
+    /// harness launch command after `--` to set its default named command (e.g.
     /// `tenex-edge agent add reviewer -- claude --dangerously-skip-permissions`);
-    /// re-running with a new command overwrites it. With no command, spawning
-    /// falls back to the built-in defaults for claude/codex/opencode.
+    /// re-running with a new command overwrites that default. With no commands,
+    /// interactive launch prompts for one and daemon/TUI spawns use built-in
+    /// defaults only for built-in harness slugs.
     ///
     /// Repeat `--project <p>` to also assign the agent to one or more projects
     /// in the same step (adds its pubkey to each NIP-29 group).
