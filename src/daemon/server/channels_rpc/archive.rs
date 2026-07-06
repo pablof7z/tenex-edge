@@ -15,8 +15,15 @@ pub(in crate::daemon::server) async fn rpc_channels_archive(
         TargetChannel::Ambiguous(v) => return Ok(v),
     };
 
+    archive_channel(state, &channel).await
+}
+
+pub(in crate::daemon::server) async fn archive_channel(
+    state: &Arc<DaemonState>,
+    channel: &str,
+) -> Result<serde_json::Value> {
     let current = state
-        .with_store(|s| s.get_channel(&channel))?
+        .with_store(|s| s.get_channel(channel))?
         .with_context(|| format!("resolved channel {channel:?} has no metadata row"))?;
     let archived_about = crate::state::archived_channel_about(&current.about);
 
@@ -25,25 +32,25 @@ pub(in crate::daemon::server) async fn rpc_channels_archive(
     } else {
         let mgmt_keys = state.management_keys()?;
         let builder =
-            crate::fabric::nip29::lifecycle::group_edit_metadata(&channel, &archived_about)?;
+            crate::fabric::nip29::lifecycle::group_edit_metadata(channel, &archived_about)?;
         state
             .transport
             .publish_signed(builder, &mgmt_keys)
             .await?
             .to_hex()
     };
-    let _ = state.provider.fetch_and_materialize_channel(&channel).await;
-    let metadata_confirmed = state.with_store(|s| s.is_archived_channel(&channel))?;
+    let _ = state.provider.fetch_and_materialize_channel(channel).await;
+    let metadata_confirmed = state.with_store(|s| s.is_archived_channel(channel))?;
 
-    refresh_project_members_cache(state, &channel).await;
-    let members = state.with_store(|s| s.list_channel_members(&channel))?;
+    refresh_project_members_cache(state, channel).await;
+    let members = state.with_store(|s| s.list_channel_members(channel))?;
     let admins = members.iter().filter(|m| m.role == "admin").count();
     let remove_targets = archive_removal_targets(&members);
     let mut failures = Vec::new();
     for pubkey in &remove_targets {
         let outcome = state
             .provider
-            .remove_member_confirmed(&channel, pubkey)
+            .remove_member_confirmed(channel, pubkey)
             .await;
         if !outcome.is_confirmed() {
             failures.push(format!("{}:{outcome:?}", crate::util::pubkey_short(pubkey)));
