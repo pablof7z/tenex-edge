@@ -1,9 +1,8 @@
 //! Local persistence in SQLite (the persistence foundation).
 //! The store is two things and nothing else:
-//!   1. `relay_*` materialized caches — channels, members, profiles, status, and
-//!      a verbatim event log. Every one is rebuildable from the relay and is
-//!      identical for local and remote agents. Agent identity, status, channels,
-//!      and membership are NEVER authoritative local tables; they are caches.
+//!   1. `relay_*` materialized caches — channels, members, profiles, roster,
+//!      status, and a verbatim event log. Every one is rebuildable from the
+//!      relay and is identical for local and remote agents.
 //!   2. local plumbing the relay can't carry — OS process handles (`sessions`),
 //!      joined-channel state (`session_channels`), external-id aliases
 //!      (`session_aliases`), derived signing keys (`identities`), the inbound
@@ -209,9 +208,8 @@ pub struct SessionAlias {
     pub created_at: u64,
 }
 
-/// A derived signing key the daemon publishes as. Ordinal 0 == the base agent
-/// key. Binds an ordinal/per-session pubkey to its owning agent/session and the
-/// harness-native id used to resume it.
+/// A derived signing key the daemon publishes as. Binds an ordinal pubkey to its
+/// owning local capability/session and the harness-native id used to resume it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Identity {
     pub pubkey: String,
@@ -267,6 +265,8 @@ pub(super) fn mint_session_id() -> String {
     format!("te-{nanos:x}-{seq:x}")
 }
 
+mod agent_roster;
+pub use agent_roster::{AgentAvailability, AgentRoster};
 mod aliases;
 mod channels;
 mod schema;

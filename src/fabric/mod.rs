@@ -66,11 +66,7 @@ pub struct MaterializationOutcome {
 
 /// Decode one raw envelope and apply all store side-effects.
 ///
-/// Every observed event is materialized into exactly one cache by kind:
-///   * 39000 → relay_channels, 39001/39002 → relay_channel_members,
-///   * 0 → relay_profiles, 30315 → relay_status,
-///   * every other kind → relay_events (verbatim log, NIP-01 replacement).
-///
+/// Every observed event is materialized into one cache by kind.
 /// Chat (kind:9) is additionally routed into the inbox ledger for local sessions
 /// in its channel. The same ledger stores per-target orchestration claims.
 ///
@@ -121,18 +117,18 @@ pub fn materialize(
                 ),
             };
         }
+        crate::fabric::nip29::wire::KIND_AGENT_ROSTER => {
+            Nip29Materializer::materialize_agent_roster(store, event);
+            return MaterializationOutcome::default();
+        }
         _ => {}
     }
 
-    // Decode via the NIP-29 wire codec. Kinds the codec does not recognise are
-    // still cached verbatim in relay_events (e.g. reactions, foreign kinds) —
-    // EXCEPT the dedicated-cache kinds (0, 30315), which must never land in the
-    // verbatim log. A kind:30315 that fails to decode is simply dropped rather
-    // than cached as a generic event.
+    // Unknown kinds land in relay_events except dedicated-cache kinds.
     let codec = Nip29WireCodec;
     let Some(de) = codec.decode(env) else {
         let k = event.kind.as_u16();
-        if k != 0 && k != 30315 {
+        if k != 0 && k != 30315 && k != crate::fabric::nip29::wire::KIND_AGENT_ROSTER {
             Nip29Materializer::materialize_event(store, event);
         }
         return MaterializationOutcome::default();

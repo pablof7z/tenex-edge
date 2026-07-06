@@ -14,6 +14,7 @@ use crate::domain::{ChatMessage, Profile};
 use crate::state::{RelayEvent, Store};
 use nostr_sdk::Event;
 
+mod agent_roster;
 mod messages;
 
 pub struct Nip29Materializer;
@@ -147,6 +148,10 @@ impl Nip29Materializer {
                 );
             }
         }
+    }
+
+    pub fn materialize_agent_roster(store: &Store, event: &Event) {
+        agent_roster::materialize(store, event);
     }
 
     // ── relay_events (every other kind, verbatim) ────────────────────────────
