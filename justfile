@@ -29,8 +29,8 @@ test-local-relay:
     cargo test --test daemon_mechanics
     cargo test --test e2e_transport
 
-# Local NIP-29 relay tests. Requires croissant at `$NIP29_RELAY_BIN` or
-# `$HOME/Work/croissant/croissant`.
+# Local NIP-29 relay tests. Requires croissant at `$NIP29_RELAY_BIN`,
+# `/tmp/croissant-smallmap/croissant`, or `$HOME/Work/croissant/croissant`.
 test-local-nip29:
     cargo test --test daemon_integration -- --test-threads=1
 

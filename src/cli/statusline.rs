@@ -34,9 +34,9 @@ use super::*;
 const TITLE_MAX_CHARS: usize = 48;
 const ACTIVITY_MAX_CHARS: usize = 48;
 
-pub(super) fn statusline(session: Option<String>, tmux_fmt: bool) -> Result<()> {
+pub(super) fn statusline(session: Option<String>) -> Result<()> {
     // Harness payload on stdin (absent when invoked by hand from a terminal or
-    // from the tmux status-format #(...) invocation).
+    // from another non-interactive host integration).
     let raw: serde_json::Value = if io::stdin().is_terminal() {
         serde_json::Value::Null
     } else {
@@ -45,7 +45,7 @@ pub(super) fn statusline(session: Option<String>, tmux_fmt: bool) -> Result<()> 
         serde_json::from_str(&buf).unwrap_or(serde_json::Value::Null)
     };
     // Session ID from stdin payload (Claude Code harness) takes precedence over
-    // the explicit --session arg (tmux status-format invocation).
+    // the explicit --session arg.
     let session_id = raw
         .get("session_id")
         .and_then(|v| v.as_str())
@@ -53,18 +53,12 @@ pub(super) fn statusline(session: Option<String>, tmux_fmt: bool) -> Result<()> 
         .map(str::to_string)
         .or_else(|| session.filter(|s| !s.is_empty()));
 
-    // No session ID from either source — the daemon hasn't stamped @te_session
-    // yet (or the format string is wrong). Show a loud error instead of silently
+    // No session ID from either source. Show a loud error instead of silently
     // querying with null and hiding behind "@unknown".
     let session_id = match session_id {
         Some(id) => id,
         None => {
-            let msg = if tmux_fmt {
-                "#[fg=colour1,bold][te: @te_session not set — check tenex-edge launch]#[default]"
-            } else {
-                "[te: no session id — @te_session not set]"
-            };
-            println!("{msg}");
+            println!("[te: no session id]");
             return Ok(());
         }
     };
@@ -82,20 +76,11 @@ pub(super) fn statusline(session: Option<String>, tmux_fmt: bool) -> Result<()> 
     let view = match serde_json::from_value::<StatuslineView>(v) {
         Ok(v) => v,
         Err(e) => {
-            let msg = if tmux_fmt {
-                format!("#[fg=colour1,bold][te: bad daemon response: {e}]#[default]")
-            } else {
-                format!("[te: bad daemon response: {e}]")
-            };
-            println!("{msg}");
+            println!("[te: bad daemon response: {e}]");
             return Ok(());
         }
     };
-    let line = if tmux_fmt {
-        render_statusline_tmux(&view)
-    } else {
-        render_statusline(&view, true)
-    };
+    let line = render_statusline(&view, true);
     println!("{line}");
     Ok(())
 }
@@ -156,30 +141,13 @@ fn default_true() -> bool {
     true
 }
 
-/// Map an ANSI SGR code string to a tmux `#[style]` attribute string.
-fn ansi_to_tmux_style(code: &str) -> &'static str {
-    match code {
-        "36" => "fg=colour6",        // cyan
-        "2" => "dim",                // dim
-        "32" => "fg=colour2",        // green
-        "1;31" => "fg=colour1,bold", // bold red
-        _ => "default",
-    }
-}
-
 pub fn render_statusline(v: &StatuslineView, color: bool) -> String {
-    render_statusline_inner(v, color, false)
+    render_statusline_inner(v, color)
 }
 
-pub fn render_statusline_tmux(v: &StatuslineView) -> String {
-    render_statusline_inner(v, true, true)
-}
-
-fn render_statusline_inner(v: &StatuslineView, color: bool, tmux_fmt: bool) -> String {
+fn render_statusline_inner(v: &StatuslineView, color: bool) -> String {
     let paint = |s: String, code: &str| -> String {
-        if tmux_fmt {
-            format!("#[{}]{}#[default]", ansi_to_tmux_style(code), s)
-        } else if color {
+        if color {
             format!("\x1b[{code}m{s}\x1b[0m")
         } else {
             s

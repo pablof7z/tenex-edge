@@ -19,8 +19,16 @@ set -euo pipefail
 RELAY_WS="ws://${RELAY_HOST}:${RELAY_PORT}"
 RELAY_HTTP="http://${RELAY_HOST}:${RELAY_PORT}"
 
+default_nip29_relay_dir() {
+  if [[ -x /tmp/croissant-smallmap/croissant ]]; then
+    printf '%s\n' /tmp/croissant-smallmap
+  else
+    printf '%s\n' "${HOME}/Work/croissant"
+  fi
+}
+
 # NIP-29 relay source checkout + built binary. Build is done once by run.sh.
-: "${NIP29_RELAY_DIR:=/Users/pablofernandez/Work/croissant}"
+: "${NIP29_RELAY_DIR:=$(default_nip29_relay_dir)}"
 : "${NIP29_RELAY_BIN:=${NIP29_RELAY_DIR}/croissant}"
 
 # The tenex-edge binary under test: this worktree's debug build, resolved

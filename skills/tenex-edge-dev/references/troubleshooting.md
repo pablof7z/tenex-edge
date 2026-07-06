@@ -47,15 +47,16 @@ Only kill an existing process if you know it belongs to a stale test.
 
 ## Relay Does Not Become Ready
 
-Capture the relay pane:
+Inspect the relay log:
 
 ```bash
-tmux capture-pane -pt "${RELAY_TMUX}" -S -120 -e
+tail -n 120 "${RELAY_LOG}"
 ```
 
 Check:
 
-- croissant checkout exists at `/Users/pablofernandez/Work/croissant`
+- croissant checkout exists at `${HOME}/Work/croissant` or
+  `TENEX_EDGE_DEV_CROISSANT_DIR`
 - `go build` succeeds there
 - `HOST` is the Apple container bridge IP, usually `192.168.64.1`
 - `PORT` is not in use
@@ -104,7 +105,7 @@ The expected fix is host-side auth or host-auth projection repair.
 
 ## Claude Stops At OAuth
 
-Symptom: the Claude tmux pane shows a login, OAuth, paste-code, or first-run
+Symptom: the Claude terminal UI shows a login, OAuth, paste-code, or first-run
 auth prompt instead of accepting the prompt.
 
 Treat this as a failed auth staging check. Do not paste OAuth codes, do not run
@@ -137,7 +138,7 @@ container profile must use:
 Rerun the profile after staging has sanitized Claude settings. Do not edit host
 Claude settings just to make a container lab pass.
 
-## Launch Pane Has No Session Anchor
+## Launch Session Has No Session Anchor
 
 Symptom: Claude launches and is authenticated, but the statusline says:
 
@@ -145,7 +146,7 @@ Symptom: Claude launches and is authenticated, but the statusline says:
 [te: @te_session not set ...]
 ```
 
-This means the launch pane did not get a successful SessionStart hook before the
+This means the launch session did not get a successful SessionStart hook before the
 statusline rendered. A brief startup frame can show this before SessionStart
 settles; it is a failure when the warning persists after the prompt is accepted
 or after the agent runs `tenex-edge who`. Check that auth staging did not
@@ -158,7 +159,7 @@ find .container-state/<profile>/tenex/edge/sessions -name hook-calls.jsonl -prin
 
 For Claude launch mode, `containers/tenex-edge/run tenex-edge ...` must install
 the `claude-code` harness after staging auth, even though the agent slug is
-`claude`. A passing pane shows an identity like
+`claude`. A passing session shows an identity like
 `claude1@<profile> workspace workspace [idle]` instead of the warning.
 
 ## Claude Hooks Cannot Install
@@ -179,10 +180,10 @@ not make host credential directories writable from the container.
 
 ## Model Flag Rejected
 
-Capture the exact CLI output from tmux:
+Capture the exact CLI output from the foreground terminal or attached PTY:
 
 ```bash
-tmux capture-pane -pt "${AGENT_TMUX}" -S -120 -e
+bash containers/tenex-edge/run --profile claude tenex-edge pty attach "${PTY_ID}"
 ```
 
 Then retry with the cheapest model the installed CLI accepts. Record both the
@@ -200,7 +201,7 @@ cargo test --no-run
 or rebuild the specific binary/image that failed. Do not delete broad cache
 directories unless the user asks or the failure clearly points to that cache.
 For fresh profiles, a long first run is usually a cold build, not a hung agent.
-Prewarm the exact profile before tmux launch.
+Prewarm the exact profile before pty launch.
 
 ## Stale Daemon Socket Or State
 
@@ -244,7 +245,7 @@ If the profile state is already fresh, check for shared relay contamination:
 
 ```bash
 nak req -k 39000 "${RELAY_WS}" | head
-tmux capture-pane -pt "${RELAY_TMUX}" -S -160 -e
+tail -n 160 "${RELAY_LOG}"
 ```
 
 A fresh lab should not show old profile pubkeys creating `workspace` before the
@@ -258,10 +259,10 @@ or background repair warning. It becomes a failing symptom when it is paired
 with `management key is not admin`, `not in channel workspace`, a missing
 session anchor, or missing channel/member events.
 
-After a tmux-launched lab, run cleanup before stopping or reusing the relay:
+After a launch-mode lab, run cleanup before stopping or reusing the relay:
 
 ```bash
-skills/tenex-edge-dev/scripts/cleanup-lab "${LAB_ENV}" "${AGENT_TMUX}"
+skills/tenex-edge-dev/scripts/cleanup-lab "${LAB_ENV}"
 ```
 
 ## Croissant pprof Conflict
@@ -283,7 +284,7 @@ Check in order:
 1. Agent actually launched and accepted the prompt.
 2. Agent profile config points at the croissant relay.
 3. The backend profile has a generated key and whitelist.
-4. Croissant tmux pane shows a subscription or connection.
+4. Croissant relay log shows a subscription or connection.
 5. `nak req` is pointed at the same relay URL.
 6. Hook/daemon logs show the action that should have published.
 
@@ -291,24 +292,18 @@ An empty `nak` output is useful only if paired with these checks.
 
 ## Agent UI Is Not Inspectable
 
-Every run should be inside host tmux. If an agent was started in the foreground,
-stop and relaunch through:
+Reattach and injection evidence requires launch mode. If an agent was started
+as a direct foreground run, stop it and relaunch through:
 
 ```bash
-skills/tenex-edge-dev/scripts/launch-agent-tmux "${LAB_ENV}" direct claude --model haiku
-```
-
-or:
-
-```bash
-skills/tenex-edge-dev/scripts/launch-agent-tmux "${LAB_ENV}" launch claude --model haiku
+skills/tenex-edge-dev/scripts/launch-agent-pty "${LAB_ENV}" launch claude --model haiku
 ```
 
 Use:
 
 ```bash
-tmux list-sessions
-tmux capture-pane -pt <session> -S -240 -e
+bash containers/tenex-edge/run --profile claude tenex-edge pty list
+bash containers/tenex-edge/run --profile claude tenex-edge pty attach <pty-id>
 ```
 
 ## Stale Active Strings
@@ -329,7 +324,7 @@ If the report only says "passed" or "failed", it is not done. Add:
 
 - relay URL and run id
 - profile names
-- tmux session names
+- PTY ids
 - exact launch commands
 - probe directory
 - croissant evidence

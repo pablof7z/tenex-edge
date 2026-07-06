@@ -32,8 +32,6 @@ agent_slug_for_profile() {
   esac
 }
 
-need tmux
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 if [[ $# -lt 3 ]]; then
@@ -52,15 +50,11 @@ shift 3
 # shellcheck source=/dev/null
 source "${ENV_FILE}"
 
-SESSION="${TENEX_EDGE_DEV_AGENT_TMUX:-te-${MODE}-${PROFILE}-${RUN_ID}}"
+SESSION="${TENEX_EDGE_DEV_AGENT_SESSION:-te-${MODE}-${PROFILE}-${RUN_ID}}"
 BACKEND_CMD="${TENEX_EDGE_DEV_BACKEND_CMD:-$(backend_command_for_profile "${PROFILE}")}"
 AGENT_SLUG="${TENEX_EDGE_DEV_AGENT_SLUG:-$(agent_slug_for_profile "${PROFILE}")}"
 CONTAINER_NAME="${TENEX_EDGE_DEV_CONTAINER_NAME:-${SESSION}}"
 CONTAINER_CIDFILE="${WORK_DIR}/container-${SESSION}.cid"
-if tmux has-session -t "${SESSION}" 2>/dev/null; then
-  echo "tmux session already exists: ${SESSION}" >&2
-  exit 1
-fi
 
 case "${MODE}" in
   direct)
@@ -75,11 +69,12 @@ case "${MODE}" in
     ;;
 esac
 
-tmux new-session -d -s "${SESSION}" "cd $(printf '%q' "${REPO_ROOT}") && $(quote_cmd "${cmd[@]}")"
-echo "agent_tmux=${SESSION}"
+echo "agent_session=${SESSION}"
 echo "mode=${MODE}"
 echo "profile=${PROFILE}"
 echo "backend_command=${BACKEND_CMD}"
 echo "agent_slug=${AGENT_SLUG}"
 echo "container_name=${CONTAINER_NAME}"
 echo "container_cidfile=${CONTAINER_CIDFILE}"
+cd "${REPO_ROOT}"
+exec "${cmd[@]}"

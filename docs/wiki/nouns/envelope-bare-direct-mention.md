@@ -9,4 +9,4 @@ source_refs:
 
 # envelope (bare direct mention)
 
-tmux+human format: a mention injected as bare `@developer hey there` without wrapper or marker
+pty+human format: a mention injected as bare `@developer hey there` without wrapper or marker

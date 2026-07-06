@@ -42,8 +42,6 @@ pub struct Config {
     /// create and is the address the orchestration listener matches `add`
     /// tags against.
     pub tenex_private_key: Option<String>,
-    /// Custom tmux status-format string. None means use the default.
-    pub tmux_status_command: Option<String>,
     /// Whether human-initiated sessions (no `TENEX_EDGE_CHANNEL` override) mint
     /// their own per-session NIP-29 subgroup. Default `false`: such sessions
     /// land in the bare project channel, and `tenex-edge launch` (without
@@ -105,15 +103,6 @@ struct RawConfig {
     /// backend identity.
     #[serde(default, rename = "tenexPrivateKey")]
     tenex_private_key: Option<String>,
-    /// Custom tmux status-format string for agent sessions. When set, overrides
-    /// the default `tenex-edge harness statusline` command. Use tmux format variables
-    /// `#{q:@te_session}` (the canonical session id, stamped by the daemon once
-    /// the session-start hook fires), `#{@te_agent}`, and `#{q:@te_cwd}` to
-    /// reference the session's identity. `#{q:@te_session}` is the preferred key:
-    /// it disambiguates panes of the same agent in the same project; the others
-    /// are fallbacks for the brief window before the hook fires.
-    #[serde(default, rename = "tmuxStatusCommand")]
-    tmux_status_command: Option<String>,
     /// Opt-in: mint a per-session subgroup for human-initiated sessions.
     /// Defaults to `false` (use the project channel; `launch` opens the picker).
     #[serde(default, rename = "perSessionRooms")]
@@ -144,7 +133,6 @@ impl Config {
             host,
             user_nsec: raw.user_nsec,
             tenex_private_key: raw.tenex_private_key,
-            tmux_status_command: raw.tmux_status_command,
             per_session_rooms: raw.per_session_rooms,
         })
     }

@@ -19,7 +19,7 @@ fn request(already_running: bool, ordinal: u32) -> InputFact {
         rel_cwd: ".".into(),
         room_parent: None,
         watch_pid: Some(42),
-        tmux_pane: Some("%1".into()),
+        pty_session: Some("%1".into()),
         ring_doorbell: true,
         base_pubkey: "base".into(),
         signer_pubkey: if ordinal > 0 {
@@ -46,7 +46,7 @@ fn request_derives_execute_plan() {
     let cmd = out.command.unwrap();
     assert_eq!(cmd.action, SessionStartAction::Execute);
     assert_eq!(cmd.plan.row.agent_pubkey, "ord");
-    assert!(cmd.plan.admit_pubkey.is_none());
+    assert_eq!(cmd.plan.admit_pubkey.as_deref(), Some("ord"));
     assert_eq!(
         cmd.plan
             .channel_ready
@@ -61,13 +61,13 @@ fn request_derives_execute_plan() {
 }
 
 #[test]
-fn reassert_suppresses_effects_after_row_and_tmux() {
+fn reassert_suppresses_effects_after_row_and_endpoint() {
     let mut r = SessionStartReconciler::new();
     let out = r.drive(request(true, 0)).unwrap();
     let cmd = out.command.unwrap();
     assert_eq!(cmd.action, SessionStartAction::Reassert);
     assert_eq!(cmd.plan.row.channel_h, "old-room");
-    assert!(cmd.plan.tmux_pane.is_some());
+    assert!(cmd.plan.pty_session.is_some());
     assert!(cmd.plan.ring_doorbell);
     assert!(cmd.plan.channel_ready.is_none());
     assert!(cmd.plan.spawn.is_none());

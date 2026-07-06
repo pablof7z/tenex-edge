@@ -245,9 +245,9 @@ pub(crate) fn session_identity_pubkey(
         .map(|i| i.pubkey)
 }
 
-/// The tmux pane id bound to a session via its `tmux_pane` alias, if any.
-/// Replaces the removed `get_session_endpoint(session, "tmux")`.
-pub(crate) fn tmux_pane_for_session(
+/// The PTY supervisor id bound to a session via its `pty_session` alias, if any.
+/// Replaces the removed `get_session_endpoint(session, "pty")`.
+pub(crate) fn pty_session_for_session(
     store: &tenex_edge::state::Store,
     session_id: &str,
 ) -> Option<String> {
@@ -255,7 +255,7 @@ pub(crate) fn tmux_pane_for_session(
         .aliases_for_session(session_id)
         .unwrap()
         .into_iter()
-        .find(|a| a.external_id_kind == "tmux_pane")
+        .find(|a| a.external_id_kind == "pty_session")
         .map(|a| a.external_id)
 }
 

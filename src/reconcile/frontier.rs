@@ -133,7 +133,7 @@ static REGISTRATIONS: [SurfaceRegistration; 7] = [
     SurfaceRegistration {
         name: "session_start",
         // Advisory is the intentional ceiling for this surface (#228 §8): Trellis
-        // can derive staged intents, but cannot prove DB/relay/spawn/tmux effects.
+        // can derive staged intents, but cannot prove DB/relay/spawn/endpoint effects.
         mode: SurfaceMode::Advisory,
         facts: &[
             "InputFact::SessionStartRequested",

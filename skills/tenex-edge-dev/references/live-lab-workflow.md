@@ -25,7 +25,7 @@ what it sees.
 Start from the repo root:
 
 ```bash
-cd /Users/pablofernandez/src/tenex-edge
+cd /path/to/tenex-edge
 git status -sb
 find skills/tenex-edge-dev -maxdepth 3 -type f -print | sort
 ```
@@ -38,7 +38,7 @@ bash containers/tenex-edge/run doctor
 ```
 
 `doctor` should verify container commands, provider auth projections, `nak`,
-`tmux`, and hook/plugin setup. If the doctor fails, use
+and hook/plugin setup. If the doctor fails, use
 `references/troubleshooting.md` before attempting a live run.
 
 ## Start The Relay
@@ -55,7 +55,7 @@ Expected output:
 run_id=...
 env=/tmp/.../tenex-edge-live-lab-.../lab.env
 relay=ws://192.168.64.1:<auto-port>
-relay_tmux=te-relay-...
+relay_pid=...
 owner_pubkey=...
 ```
 
@@ -67,15 +67,16 @@ LAB_ENV=/tmp/.../lab.env
 
 The relay command:
 
-- uses `/Users/pablofernandez/Work/croissant`
+- uses `/tmp/croissant-smallmap` when present, else `${HOME}/Work/croissant`;
+  set `TENEX_EDGE_DEV_CROISSANT_DIR` to override
 - binds to `TENEX_EDGE_DEV_RELAY_HOST` or the Apple container bridge IP
 - uses `TENEX_EDGE_DEV_RELAY_PORT` or an unused high port from
   `TENEX_EDGE_DEV_RELAY_PORT_BASE` (default `19888`)
 - creates a temp work directory under `${TMPDIR:-/tmp}`
 - creates a relay owner key without printing the secret
-- starts croissant in a host tmux session
+- starts croissant as a host process
 - waits for NIP-11 before returning
-- writes all run metadata to `lab.env`
+- writes all run metadata, including `RELAY_LOG`, to `lab.env`
 
 The auto port is intentional. Reusing a shared bridge port such as `9888` lets
 stale live agents from older labs connect to the new relay and create the
@@ -126,7 +127,7 @@ jq '{relays,indexerRelay,backendName,whitelistedPubkeys}' .container-state/claud
 
 Do not print `userNsec` or `tenexPrivateKey`.
 
-Prewarm the exact profile before opening a tmux agent UI. This avoids confusing
+Prewarm the exact profile before opening an agent UI. This avoids confusing
 cold Cargo builds with agent startup failures, and it proves staged auth before
 the interactive run:
 
@@ -140,57 +141,40 @@ Use the same pattern for other providers with their cheapest working command.
 ## Direct Agent Runs
 
 Use direct mode when testing the raw backend CLI plus container auth/hook
-installation:
+installation. Direct mode runs in the foreground terminal and is not
+reattachable:
 
 ```bash
-skills/tenex-edge-dev/scripts/launch-agent-tmux "${LAB_ENV}" direct claude --model haiku
+skills/tenex-edge-dev/scripts/launch-agent-pty "${LAB_ENV}" direct claude --model haiku
 ```
 
 Codex:
 
 ```bash
-skills/tenex-edge-dev/scripts/launch-agent-tmux "${LAB_ENV}" direct codex -m gpt-5.3-codex-spark
+skills/tenex-edge-dev/scripts/launch-agent-pty "${LAB_ENV}" direct codex -m gpt-5.3-codex-spark
 ```
 
 OpenCode through the Ollama Cloud helper:
 
 ```bash
-skills/tenex-edge-dev/scripts/launch-agent-tmux "${LAB_ENV}" direct opencode-ollama "${TENEX_EDGE_OPENCODE_OLLAMA_MODEL:-ollama/deepseek-r1:8b}"
+skills/tenex-edge-dev/scripts/launch-agent-pty "${LAB_ENV}" direct opencode-ollama "${TENEX_EDGE_OPENCODE_OLLAMA_MODEL:-ollama/deepseek-r1:8b}"
 ```
 
-The helper prints the tmux session name. Save it:
-
-```bash
-AGENT_TMUX=te-direct-claude-...
-```
-
-It also names the Apple container after the tmux session and records a cidfile
-under the lab work directory. Use `scripts/cleanup-lab` rather than killing only
-tmux, so container-side daemons do not continue retrying after the relay stops.
-
-Drive the session:
-
-```bash
-tmux send-keys -t "${AGENT_TMUX}" "Run tenex-edge who and summarize the self header." C-m
-```
-
-Read the session:
-
-```bash
-tmux capture-pane -pt "${AGENT_TMUX}" -S -240 -e
-```
+The helper records a container cidfile under the lab work directory when the
+container runtime provides one. Use `scripts/cleanup-lab` so container-side
+daemons do not continue retrying after the relay stops.
 
 Do not run a second diagnostic container against the same profile while this
-tmux session is still active. If you need same-profile `tenex-edge` RPC checks,
-stop the agent session first or use the profile logs.
+foreground agent is still active. If you need same-profile `tenex-edge` RPC
+checks, stop the agent first or use the profile logs.
 
 ## Launch Mode Runs
 
 Use launch mode when testing `tenex-edge launch` behavior, launch-time hook
-setup, tmux integration, and context injection:
+setup, portable PTY integration, reattach, and context injection:
 
 ```bash
-skills/tenex-edge-dev/scripts/launch-agent-tmux "${LAB_ENV}" launch claude --model haiku
+skills/tenex-edge-dev/scripts/launch-agent-pty "${LAB_ENV}" launch claude --model haiku
 ```
 
 The command runs:
@@ -199,9 +183,26 @@ The command runs:
 bash containers/tenex-edge/run --profile claude tenex-edge launch claude -- --model haiku
 ```
 
-inside a host tmux session. Inspect the host tmux pane first. If
-`tenex-edge launch` creates or names a nested tmux session, inspect that nested
-session too.
+The command starts a portable PTY supervisor, prints a line like:
+
+```text
+[tenex-edge pty] session: claude-...
+```
+
+Save that id:
+
+```bash
+PTY_ID=claude-...
+```
+
+Inspect or drive it from another terminal with the same profile/home context:
+
+```bash
+bash containers/tenex-edge/run --profile claude tenex-edge pty list
+bash containers/tenex-edge/run --profile claude tenex-edge pty attach "${PTY_ID}"
+bash containers/tenex-edge/run --profile claude tenex-edge pty inject "${PTY_ID}" \
+  "Run tenex-edge who and summarize the self header."
+```
 
 ## Multi-Agent Runs
 
@@ -209,53 +210,46 @@ For a multi-backend test:
 
 ```bash
 skills/tenex-edge-dev/scripts/write-container-profiles "${LAB_ENV}" claude codex opencode
-skills/tenex-edge-dev/scripts/launch-agent-tmux "${LAB_ENV}" launch claude --model haiku
-skills/tenex-edge-dev/scripts/launch-agent-tmux "${LAB_ENV}" launch codex -m gpt-5.3-codex-spark
-skills/tenex-edge-dev/scripts/launch-agent-tmux "${LAB_ENV}" launch opencode-ollama "${TENEX_EDGE_OPENCODE_OLLAMA_MODEL:-ollama/deepseek-r1:8b}"
+skills/tenex-edge-dev/scripts/launch-agent-pty "${LAB_ENV}" launch claude --model haiku
+skills/tenex-edge-dev/scripts/launch-agent-pty "${LAB_ENV}" launch codex -m gpt-5.3-codex-spark
+skills/tenex-edge-dev/scripts/launch-agent-pty "${LAB_ENV}" launch opencode-ollama "${TENEX_EDGE_OPENCODE_OLLAMA_MODEL:-ollama/deepseek-r1:8b}"
 ```
 
-Use separate tmux sessions for every backend. Send small prompts that force
+Use separate portable PTY sessions for every backend. Send small prompts that force
 observable fabric behavior, such as running `tenex-edge who`, posting a project
 message, or responding to a mention. Keep prompts narrow; the goal is event and
 hook proof, not task completion.
 
 ## Probe And Report
 
-Capture the relay, event kinds, and agent panes:
+Capture the relay and event kinds:
 
 ```bash
-skills/tenex-edge-dev/scripts/probe-lab "${LAB_ENV}" "${AGENT_TMUX}"
-```
-
-For multiple sessions:
-
-```bash
-skills/tenex-edge-dev/scripts/probe-lab "${LAB_ENV}" "${CLAUDE_TMUX}" "${CODEX_TMUX}" "${OPENCODE_TMUX}"
+skills/tenex-edge-dev/scripts/probe-lab "${LAB_ENV}"
 ```
 
 Open the probe directory and inspect:
 
 ```text
 nip11.json
-relay-pane.txt
+relay.log
 kind-39000.jsonl
 kind-39001.jsonl
 kind-39002.jsonl
 kind-30315.jsonl
 kind-9.jsonl
-tmux-<session>.txt
 ```
 
 Your final report should name the feature under test and include the concrete
-evidence surfaces. Do not summarize only from memory; cite the tmux/probe/log
-files you generated.
+evidence surfaces. Do not summarize only from memory; cite the PTY id,
+probe directory, and log files you generated.
 
 ## Cleanup
 
 Stop sessions explicitly:
 
 ```bash
-skills/tenex-edge-dev/scripts/cleanup-lab "${LAB_ENV}" "${AGENT_TMUX}"
+skills/tenex-edge-dev/scripts/cleanup-lab "${LAB_ENV}"
 ```
 
 Remove disposable state only when it is no longer needed for debugging:

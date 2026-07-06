@@ -3,7 +3,7 @@
 //! One row per (inbound event, target local session). An event is "handled"
 //! because a row exists. Direct-message rows start `pending` (parked for the next
 //! hook), become `delivered` when surfaced by turn context, or `injected` when
-//! pasted into tmux as a prompt awaiting echo suppression. Consumed tmux echoes
+//! submitted through a hosted PTY as a prompt awaiting echo suppression. Consumed echoes
 //! become `echo_consumed`. Orchestration target claims reuse the same ledger with
 //! synthetic `target_session` keys: `processing` while a backend is mutating that
 //! target, `pending` when it should be retried, and `delivered` once that exact
@@ -93,7 +93,7 @@ impl Store {
 
     /// Atomically claim every pending row for a session: flip each to
     /// `delivered` AND return it in a single statement. The FIRST caller — the
-    /// tmux paste path or a hook — wins; any concurrent caller gets an empty
+    /// direct injection path or a hook — wins; any concurrent caller gets an empty
     /// vec. This atomicity IS the dedup: a message can only be injected once,
     /// with no separate "notified" flag or external gate. Rows come back
     /// oldest-first (RETURNING order is unspecified, so we sort). Resolves the
@@ -118,7 +118,7 @@ impl Store {
     }
 
     /// Roll claimed rows back to `pending` so they are retried rather than lost.
-    /// Used only when a tmux paste fails AFTER the atomic claim (e.g. the pane
+    /// Used only when direct injection fails AFTER the atomic claim (e.g. the session
     /// died between liveness check and paste) — without this, an atomically
     /// claimed-but-undelivered message would silently vanish. Resolves first.
     pub fn reenqueue_pending(&self, event_ids: &[String], target_session: &str) -> Result<()> {
@@ -157,7 +157,7 @@ impl Store {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    /// Mark successfully tmux-pasted rows as awaiting user-prompt echo
+    /// Mark successfully injected rows as awaiting user-prompt echo
     /// suppression. These rows are no longer pending for turn context delivery,
     /// but remain queryable as explicit injection records until consumed/pruned.
     pub fn mark_injected_for_echo(&self, event_ids: &[String], target_session: &str) -> Result<()> {

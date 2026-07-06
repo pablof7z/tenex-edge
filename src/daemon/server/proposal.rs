@@ -10,7 +10,7 @@ pub(in crate::daemon::server) struct ProposeParams {
     #[serde(default, alias = "env_session")]
     harness_session: Option<String>,
     #[serde(default)]
-    tmux_pane: Option<String>,
+    pty_session: Option<String>,
     #[serde(default)]
     cwd: Option<String>,
     #[serde(default)]

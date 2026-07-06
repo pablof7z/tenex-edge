@@ -45,7 +45,7 @@ pub(super) struct HostDef {
     /// When true, the hook echoes the daemon-minted canonical session id back on
     /// stdout so a programmatic host (e.g. opencode) can adopt it for subsequent
     /// hooks. Such hosts own NO harness-assigned id — the daemon decides identity
-    /// from their resume token / tmux pane / watched pid (registered as aliases),
+    /// from their resume token / PTY endpoint / watched pid (registered as aliases),
     /// so a missing harness id at session-start is normal, not malformed.
     /// When false (Claude Code, Codex), an empty harness id is a fail-open no-op:
     /// those harnesses always supply their own id, so a missing one means a
@@ -86,7 +86,7 @@ static HOOK_HOSTS: &[HostDef] = &[
         // opencode is a programmatic TS plugin, not a stdin-JSON harness in the
         // usual sense: it pipes a small JSON payload to `hook` and reads stdout.
         // It owns no harness-assigned session id, so it no longer mints a
-        // competing identity each start: it reports its resume token / pane / PID
+        // competing identity each start: it reports its resume token / PTY / PID
         // as locators and the daemon resolves (and reattaches to) the canonical
         // id, which the hook echoes back on stdout. It passes its own PID in the
         // payload (no pid_search).
@@ -299,8 +299,8 @@ async fn hook_dispatch(
                 .or_else(|| host.pid_search.and_then(find_ancestor_pid));
 
             // The raw hook id is NOT canonical identity — it is the harness's
-            // external session id, one locator among several (resume token, tmux
-            // pane, watched pid). We REPORT what we observed; the daemon owns
+            // external session id, one locator among several (resume token, hosted
+            // PTY, watched pid). We REPORT what we observed; the daemon owns
             // identity and decides whether to mint, reattach, or supersede.
             let harness_session_id = if sid.is_empty() {
                 None

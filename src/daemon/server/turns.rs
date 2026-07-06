@@ -233,7 +233,7 @@ pub(in crate::daemon::server) async fn rpc_turn_end(
                 elapsed_s,
             });
         }
-        crate::tmux::ring_doorbells(state.clone());
+        crate::session_host::ring_doorbells(state.clone());
     }
     Ok(serde_json::json!({ "ok": true }))
 }

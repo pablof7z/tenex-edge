@@ -1,10 +1,10 @@
 //! Prompt rendering for fabric message injection.
 //!
-//! Two tmux envelope forms, chosen by `(sender, directedness)`:
+//! Two terminal-injection envelope forms, chosen by `(sender, directedness)`:
 //!
-//!   1. **tmux + human mention** — pasted into the pane as a real turn, minimal
-//!      provenance: `<@pablo> @developer hey there`.
-//!   2. **tmux + agent mention** — pasted as a turn, framed so the agent knows it
+//!   1. **human mention** — submitted as a real turn with minimal provenance:
+//!      `<@pablo> @developer hey there`.
+//!   2. **agent mention** — submitted as a turn, framed so the agent knows it
 //!      arrived via the fabric: `[tenex-edge mention] <@agent1> hi @developer`.
 //!
 //! Publishing no longer happens automatically on the agent's behalf — the
@@ -14,7 +14,7 @@
 //! Hook-delivered mentions and ambient channel activity are rendered by the
 //! unified fabric context view, not by this envelope module.
 //!
-//! Echo suppression no longer lives in this text; tmux delivery records the
+//! Echo suppression no longer lives in this text; direct delivery records the
 //! pasted inbox event ids as explicit `injected` ledger rows. Envelopes are free
 //! to be bare. Message ids are intentionally absent: replies target `@name`.
 
@@ -47,14 +47,14 @@ fn is_whitelisted(whitelisted: &[String], pubkey: &str) -> bool {
 const REPLY_REMINDER: &str =
     "[reply via `tenex-edge chat write --message \"...\"` — replies do not auto-publish]";
 
-/// Form ① / ② — direct mentions pasted into a live tmux pane as a real turn.
+/// Form ① / ② — direct mentions submitted into a live terminal as a real turn.
 /// Human senders render bare with a `<@name>` prefix (it reads as a near-natural
 /// turn that still carries provenance); agent senders are prefixed
 /// `[tenex-edge mention]` so the agent knows it is a fabric relay, not its
 /// operator typing. No message id — replies target `@name` — but every
 /// envelope carries an explicit reminder to reply via `chat write`, since
 /// replies no longer auto-publish.
-pub(crate) fn render_tmux_mention(
+pub(crate) fn render_terminal_mention(
     store: &Store,
     rows: &[InboxRow],
     whitelisted: &[String],

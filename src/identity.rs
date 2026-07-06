@@ -32,7 +32,7 @@ struct StoredKey {
     secret_key: String, // hex
     public_key: String, // hex
     created_at: u64,
-    /// Named harness commands to use when spawning a new tmux session for this
+    /// Named harness commands to use when spawning a new hosted session for this
     /// agent. The old singular `command` field is intentionally not deserialized:
     /// files that still carry it behave as if no commands are configured.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

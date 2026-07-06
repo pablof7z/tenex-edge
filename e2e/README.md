@@ -32,8 +32,8 @@ empty data, and exits non-zero with a clear `FAIL` line if anything is wrong.
 ## The Relay
 
 The default local relay binary is [`croissant`](https://viewsource.win) (at
-`/Users/pablofernandez/Work/croissant`), a Go relay built on `khatru` + the
-`fiatjaf.com/nostr/nip29` library.
+`/tmp/croissant-smallmap` when present, else `${HOME}/Work/croissant`), a Go
+relay built on `khatru` + the `fiatjaf.com/nostr/nip29` library.
 
 **It fully implements NIP-29 relay-based groups.** Evidence:
 
@@ -117,7 +117,7 @@ the backend's admins and the session agent (`src/fabric/provider.rs`).
    `tenex-edge project init`):
    ```bash
    echo '{"session_id":"…","cwd":"…/work/e2e-demo"}' \
-     | TENEX_EDGE_AGENT=claude tenex-edge hook --host claude-code --type session-start
+     | TENEX_EDGE_AGENT=claude tenex-edge harness hook claude-code --type session-start
    ```
    → daemon-a creates the NIP-29 group `e2e-demo` on the relay.
 2. **Direct relay check:** `nak req -k 39000 -d e2e-demo ws://127.0.0.1:10547`
@@ -157,7 +157,7 @@ ok  PASS — backend-b observed backend-a's group 'e2e-demo' through ws://127.0.
 | `E2E_PROJECT`          | `e2e-demo`                                | project slug / group id driven by the test |
 | `E2E_WORK`             | `$TMPDIR/tenex-edge-e2e`                  | scratch root (relay data, backend homes, logs) |
 | `E2E_TENEX_EDGE_BIN`   | `<repo>/target/debug/tenex-edge`          | binary under test (override only via THIS var) |
-| `NIP29_RELAY_DIR`      | `/Users/pablofernandez/Work/croissant`    | NIP-29 relay checkout |
+| `NIP29_RELAY_DIR`      | `/tmp/croissant-smallmap` if present, else `$HOME/Work/croissant` | NIP-29 relay checkout |
 | `NIP29_RELAY_BIN`      | `$NIP29_RELAY_DIR/croissant`              | NIP-29 relay binary |
 | `TENEX_EDGE_DEBUG`     | `1`                                       | verbose daemon logging |
 

@@ -111,7 +111,7 @@ fn handle_incoming(state: &Arc<DaemonState>, event: &Event) {
         }
     }
     if outcome.wake_mentions {
-        crate::tmux::ring_doorbells(state.clone());
+        crate::session_host::ring_doorbells(state.clone());
     }
 
     // When a kind:39002 membership snapshot arrives, ensure we have a group
@@ -221,7 +221,7 @@ async fn handle_offline_agent_mention(state: &Arc<DaemonState>, mentioned_pk: &s
             "resuming bound native session"
         );
         if let Err(e) =
-            crate::tmux::resume_agent(state, &agent_slug, project, &route.native_id).await
+            crate::session_host::resume_agent(state, &agent_slug, project, &route.native_id).await
         {
             tracing::warn!(agent = %agent_slug, project, error = %e, "session resume failed — falling through to fresh spawn");
         } else {
@@ -262,7 +262,7 @@ async fn handle_offline_agent_mention(state: &Arc<DaemonState>, mentioned_pk: &s
         work_root = %work_root,
         "spawning agent on mention"
     );
-    match crate::tmux::spawn_agent(
+    match crate::session_host::spawn_agent(
         state,
         &agent_slug,
         &work_root,
@@ -274,8 +274,8 @@ async fn handle_offline_agent_mention(state: &Arc<DaemonState>, mentioned_pk: &s
     )
     .await
     {
-        Ok(pane_id) => {
-            tracing::info!(agent = %agent_slug, pane_id = %pane_id, project, "agent spawned successfully")
+        Ok(pty_id) => {
+            tracing::info!(agent = %agent_slug, pty_id = %pty_id, project, "agent spawned successfully")
         }
         Err(e) => tracing::warn!(agent = %agent_slug, project, error = %e, "agent spawn failed"),
     }

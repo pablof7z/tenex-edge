@@ -9,4 +9,4 @@ source_refs:
 
 # LiveRow
 
-A TUI data-struct representing a live session row with fields slug, host, project, session_id (full raw id for RPC calls + correlation), status, and attachable (whether it has a live tmux endpoint).
+A TUI data-struct representing a live session row with fields slug, host, project, session_id (full raw id for RPC calls + correlation), status, and attachable (whether it has a live pty endpoint).

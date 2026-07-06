@@ -9,6 +9,6 @@
   ],
   [
     "assistant",
-    "Found and fixed the missing colors bug in `src/tmux/launch.rs` by setting `default-terminal`/`terminal-overrides` globally before spawning the harness; the `@te_session not set` issue is attributed to a stale production daemon rather than a repo bug. Validated with real screenshots reviewed via Haiku agents, all 382 tests pass, and branch `fix-launch-color-tesession` is uncommitted in a worktree pending user decision on committing and restarting the daemon."
+    "Found and fixed the missing colors bug in `src/pty/launch.rs` by setting `default-terminal`/`terminal-overrides` globally before spawning the harness; the `@te_session not set` issue is attributed to a stale production daemon rather than a repo bug. Validated with real screenshots reviewed via Haiku agents, all 382 tests pass, and branch `fix-launch-color-tesession` is uncommitted in a worktree pending user decision on committing and restarting the daemon."
   ]
 ]

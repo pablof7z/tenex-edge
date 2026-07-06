@@ -132,7 +132,7 @@ impl Transport {
         // Kick off the connection in the BACKGROUND (non-blocking) and return
         // immediately. Awaiting connectivity + NIP-42 auth is `warmup()`'s job,
         // which the daemon runs OFF its startup critical path so store-only RPCs
-        // (`who`, `tmux`, chat/inbox reads) serve instantly even when the relay
+        // (`who`, hosted sessions, chat/inbox reads) serve instantly even when the relay
         // is slow or unreachable.
         client.connect().await;
         Ok(Self {

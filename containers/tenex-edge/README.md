@@ -44,9 +44,9 @@ before launching the harness. That means Claude hooks, Codex hooks, and the
 OpenCode plugin are installed through the same code path users run on a real
 machine.
 
-Tmux-launched live labs can set `TENEX_EDGE_CONTAINER_NAME` and
+PTY-launched live labs can set `TENEX_EDGE_CONTAINER_NAME` and
 `TENEX_EDGE_CONTAINER_CIDFILE` so a cleanup script can stop the exact Apple
-container if the host tmux pane is killed before the agent exits.
+container if the host pty pane is killed before the agent exits.
 
 The runner defaults `OLLAMA_HOST` to `http://192.168.64.1:11434`, the Apple
 container VM's gateway to the host on this machine. Override it with

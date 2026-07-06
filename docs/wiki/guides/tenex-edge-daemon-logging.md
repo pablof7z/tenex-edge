@@ -54,13 +54,13 @@ NIP-29 role decision logs are emitted at `tracing::debug!` level with structured
 
 The first-sight log for kind:30315 status heartbeat events is downgraded to `tracing::debug!` because they fire every ~30s per peer and are too noisy at info level. <!-- [^47f3c-fc46e] -->
 
-## Tmux Spawn Events
+## PTY Spawn Events
 
-Tmux spawn events (identity resolution failure, concurrent instance launch, pre-provisioning channel, provisioning timeout) are logged via `tracing::warn!` or `tracing::info!` with structured fields. <!-- [^47f3c-63b9b] -->
+PTY spawn events (identity resolution failure, concurrent instance launch, pre-provisioning channel, provisioning timeout) are logged via `tracing::warn!` or `tracing::info!` with structured fields. <!-- [^47f3c-63b9b] -->
 
 ## Session Lifecycle
 
-Session lifecycle logs include session_start hook received, stale session cancelled (with reason: same_pid/same_pane), re-assert when engine already running, session engine spawned with agent+channel+session, and session engine exited. <!-- [^47f3c-0b6d2] -->
+Session lifecycle logs include session_start hook received, stale session cancelled (with reason: same_pid/same_endpoint), re-assert when engine already running, session engine spawned with agent+channel+session, and session engine exited. <!-- [^47f3c-0b6d2] -->
 
 ## Ordinal Allocation
 

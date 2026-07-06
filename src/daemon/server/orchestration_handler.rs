@@ -156,7 +156,7 @@ async fn resume_target(
             return false;
         }
     };
-    let Some(resume_id) = super::tmux_rpc::resume_token_for(&rec) else {
+    let Some(resume_id) = super::pty_rpc::resume_token_for(&rec) else {
         tracing::warn!(
             session_id = %rec.session_id,
             child = %op.child_h,
@@ -165,7 +165,7 @@ async fn resume_target(
         return false;
     };
     let work_root = state.with_store(|s| work_root_for(s, &op.child_h));
-    match crate::tmux::resume_agent_in_channel(
+    match crate::session_host::resume_agent_in_channel(
         state,
         &rec.agent_slug,
         &work_root,
@@ -174,12 +174,12 @@ async fn resume_target(
     )
     .await
     {
-        Ok(pane) => {
+        Ok(pty_id) => {
             tracing::info!(
                 session_id = %rec.session_id,
                 slug = %rec.agent_slug,
                 child = %op.child_h,
-                pane = %pane,
+                pty_id = %pty_id,
                 "orchestration: session resumed"
             );
             true
@@ -217,7 +217,7 @@ async fn spawn_target(
     drop(id);
 
     let work_root = state.with_store(|s| work_root_for(s, &op.child_h));
-    match crate::tmux::spawn_agent(
+    match crate::session_host::spawn_agent(
         state,
         slug,
         &work_root,
@@ -229,8 +229,8 @@ async fn spawn_target(
     )
     .await
     {
-        Ok(pane) => {
-            tracing::info!(slug = %slug, child = %op.child_h, pane = %pane, "orchestration: agent spawned");
+        Ok(pty_id) => {
+            tracing::info!(slug = %slug, child = %op.child_h, pty_id = %pty_id, "orchestration: agent spawned");
             true
         }
         Err(e) => {

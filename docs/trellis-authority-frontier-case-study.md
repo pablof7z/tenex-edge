@@ -24,7 +24,7 @@ Trellis is authoritative for six of the seven registered surfaces:
 `probe seams` reports 85% host-seam coverage: six authoritative surfaces out of
 seven registered surfaces. `session_start` intentionally stops at advisory
 because Trellis can derive the intended row/check/admit/subscription/spawn plan,
-but cannot prove SQLite, relay, signer, tmux, and process-spawn effects.
+but cannot prove SQLite, relay, signer, pty, and process-spawn effects.
 
 ## Exp A: diagnosis metric
 

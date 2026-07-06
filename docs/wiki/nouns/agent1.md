@@ -10,4 +10,4 @@ source_refs:
 
 # agent1
 
-The claude1 profile launched in direct mode — a raw Claude session, host-tmux-observed but not daemon-anchored, into which the user types the initial mention instruction.
+The claude1 profile launched in direct mode — a raw Claude session, host-pty-observed but not daemon-anchored, into which the user types the initial mention instruction.

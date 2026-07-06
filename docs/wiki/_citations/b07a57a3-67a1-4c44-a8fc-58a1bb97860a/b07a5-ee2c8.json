@@ -2,5 +2,5 @@
   "id": "b07a5-ee2c8",
   "ts": "2026-06-29T10:35:23Z",
   "session": "b07a57a3-67a1-4c44-a8fc-58a1bb97860a",
-  "text": "Assistant: Yes, it's explicitly passed through. `tmux/launch.rs:68` loops over `[\"TENEX_EDGE_HOME\", \"TENEX_CONFIG\", \"TENEX_EDGE_BIN\"]` and forwards each one that's set in the parent environment into the new tmux session via `env` — so the spawned agent and all its harness hook calls will see the same `TENEX_EDGE_HOME` you launched with."
+  "text": "Assistant: Yes, it's explicitly passed through. `pty/launch.rs:68` loops over `[\"TENEX_EDGE_HOME\", \"TENEX_CONFIG\", \"TENEX_EDGE_BIN\"]` and forwards each one that's set in the parent environment into the new pty session via `env` — so the spawned agent and all its harness hook calls will see the same `TENEX_EDGE_HOME` you launched with."
 }

@@ -8,7 +8,7 @@ status: active
 subjects:
   - mention-injection
   - reply-hint
-  - render-tmux-mention
+  - render-pty-mention
   - render-messages
   - tenex-edge-chat-write
 supersedes: []
@@ -23,20 +23,20 @@ captured_at: 2026-07-03T10:33:06Z
 
 ## Prior State
 
-Both mention injection paths (hook-only fabric context rendering and tmux-wrapped injection) deliberately included no reply hint. The doc comment in injection.rs explicitly stated 'No reply hint, no message id — the reply auto-publishes', because replies were expected to be auto-captured by the publish_agent_reply flow.
+Both mention injection paths (hook-only fabric context rendering and pty-wrapped injection) deliberately included no reply hint. The doc comment in injection.rs explicitly stated 'No reply hint, no message id — the reply auto-publishes', because replies were expected to be auto-captured by the publish_agent_reply flow.
 
 ## Trigger
 
-User directive: 'when we bring in a mention into an agent's attention (whether via hook or via tmux-wrapped injection), let's explicitly add an instruction reminding the agent to respond via tenex-edge chat write.' This is also a consequence of removing auto-publish — without auto-publish, agents need to know how to reply explicitly.
+User directive: 'when we bring in a mention into an agent's attention (whether via hook or via pty-wrapped injection), let's explicitly add an instruction reminding the agent to respond via tenex-edge chat write.' This is also a consequence of removing auto-publish — without auto-publish, agents need to know how to reply explicitly.
 
 ## Decision
 
-Add an explicit reply-instruction reminder (referencing 'tenex-edge chat write') to both mention injection paths: the hook-only path in render.rs (render_messages, around the [MENTIONS YOU] marker at line 146-147) and the tmux-wrapped path in injection.rs (render_tmux_mention, around lines 56-65).
+Add an explicit reply-instruction reminder (referencing 'tenex-edge chat write') to both mention injection paths: the hook-only path in render.rs (render_messages, around the [MENTIONS YOU] marker at line 146-147) and the pty-wrapped path in injection.rs (render_pty_mention, around lines 56-65).
 
 ## Consequences
 
 - render_messages in fabric_context/render.rs must append a reply hint near the [MENTIONS YOU] flag
-- render_tmux_mention in injection.rs must append a reply instruction to the joined output
+- render_pty_mention in injection.rs must append a reply instruction to the joined output
 - The canonical command name is 'tenex-edge chat write' (confirmed by existing usage in who/render.rs and channel_membership_rpc.rs)
 - The doc comment in injection.rs stating 'No reply hint' must be updated to reflect the new behavior
 

@@ -15,19 +15,19 @@ pub(super) struct SessionStartParams {
     pub(super) cwd: Option<String>,
     #[serde(default)]
     pub(super) watch_pid: Option<i32>,
-    /// Stable tmux pane id from $TMUX_PANE, e.g. "%5".
+    /// Portable-pty supervisor session id from TENEX_EDGE_PTY_SESSION.
     #[serde(default)]
-    pub(super) tmux_pane: Option<String>,
-    /// Value of $TMUX: socket path, session id, pane id.
+    pub(super) pty_session: Option<String>,
+    /// Portable-pty supervisor socket path from TENEX_EDGE_PTY_SOCKET.
     #[serde(default)]
-    pub(super) tmux_socket: Option<String>,
+    pub(super) pty_socket: Option<String>,
     /// Harness-native resume token. Opencode forwards its `ses_*` id here.
     #[serde(default)]
     pub(super) resume_id: Option<String>,
     /// Which harness produced this hook (`claude-code`|`codex`|`opencode`).
     #[serde(default)]
     pub(super) harness: Option<String>,
-    /// NIP-29 channel (`h`) this pane was spawned into.
+    /// NIP-29 channel (`h`) this hosted process was spawned into.
     #[serde(default)]
     pub(super) channel: Option<String>,
     /// Exact ordinal to allocate for this session.
