@@ -79,12 +79,21 @@ pub async fn channels(action: ChannelsAction) -> Result<()> {
     fn shell_quote(s: &str) -> String {
         format!("'{}'", s.replace('\'', "'\\''"))
     }
+    fn with_session(mut params: serde_json::Value, session: Option<&str>) -> serde_json::Value {
+        if let Some(session) = session.filter(|s| !s.is_empty()) {
+            if let Some(obj) = params.as_object_mut() {
+                obj.insert("session".into(), serde_json::json!(session));
+            }
+        }
+        params
+    }
     match action {
         ChannelsAction::Create {
             name,
             about,
             agents,
             parent_channel,
+            session,
         } => {
             // `--agent` is optional: an agent may carve out an empty channel and
             // populate it later. Each target is `slug@backend-label`; the backend
@@ -101,15 +110,18 @@ pub async fn channels(action: ChannelsAction) -> Result<()> {
             }
             let v = daemon_call_async(
                 "channels_create",
-                crate::cli::rpc_params(serde_json::json!({
-                    // No `parent` here: the daemon defaults the new channel under
-                    // the creating session's CURRENT channel. `--parent-channel`
-                    // overrides that with a project-relative reference.
-                    "parent_channel": parent_channel,
-                    "name": name,
-                    "about": about,
-                    "agents": parsed,
-                })),
+                crate::cli::rpc_params(with_session(
+                    serde_json::json!({
+                        // No `parent` here: the daemon defaults the new channel under
+                        // the creating session's CURRENT channel. `--parent-channel`
+                        // overrides that with a project-relative reference.
+                        "parent_channel": parent_channel,
+                        "name": name,
+                        "about": about,
+                        "agents": parsed,
+                    }),
+                    session.as_deref(),
+                )),
             )
             .await?;
             // Ambiguous `--parent-channel`: the daemon returns candidate paths
@@ -133,13 +145,20 @@ pub async fn channels(action: ChannelsAction) -> Result<()> {
                 println!("  orchestration kind:9 {}", &oid[..oid.len().min(8)]);
             }
         }
-        ChannelsAction::Edit { channel, about } => {
+        ChannelsAction::Edit {
+            channel,
+            about,
+            session,
+        } => {
             let v = daemon_call_async(
                 "channels_edit",
-                crate::cli::rpc_params(serde_json::json!({
-                    "channel": channel.clone(),
-                    "about": about.clone(),
-                })),
+                crate::cli::rpc_params(with_session(
+                    serde_json::json!({
+                        "channel": channel.clone(),
+                        "about": about.clone(),
+                    }),
+                    session.as_deref(),
+                )),
             )
             .await?;
             if let Some(refs) = v["ambiguous"].as_array() {
@@ -209,10 +228,13 @@ pub async fn channels(action: ChannelsAction) -> Result<()> {
                 }
             }
         }
-        ChannelsAction::Join { channel } => {
+        ChannelsAction::Join { channel, session } => {
             let v = daemon_call_async(
                 "channels_join",
-                crate::cli::rpc_params(serde_json::json!({ "channel": channel.clone() })),
+                crate::cli::rpc_params(with_session(
+                    serde_json::json!({ "channel": channel.clone() }),
+                    session.as_deref(),
+                )),
             )
             .await?;
             if v["ambiguous"].is_array() {
@@ -223,10 +245,13 @@ pub async fn channels(action: ChannelsAction) -> Result<()> {
                 v["channel"].as_str().unwrap_or(&channel)
             );
         }
-        ChannelsAction::Leave { channel } => {
+        ChannelsAction::Leave { channel, session } => {
             let v = daemon_call_async(
                 "channels_leave",
-                crate::cli::rpc_params(serde_json::json!({ "channel": channel.clone() })),
+                crate::cli::rpc_params(with_session(
+                    serde_json::json!({ "channel": channel.clone() }),
+                    session.as_deref(),
+                )),
             )
             .await?;
             if v["ambiguous"].is_array() {
@@ -234,10 +259,13 @@ pub async fn channels(action: ChannelsAction) -> Result<()> {
             }
             println!("left channel {}", v["channel"].as_str().unwrap_or(&channel));
         }
-        ChannelsAction::Archive { channel } => {
+        ChannelsAction::Archive { channel, session } => {
             let v = daemon_call_async(
                 "channels_archive",
-                crate::cli::rpc_params(serde_json::json!({ "channel": channel.clone() })),
+                crate::cli::rpc_params(with_session(
+                    serde_json::json!({ "channel": channel.clone() }),
+                    session.as_deref(),
+                )),
             )
             .await?;
             if v["ambiguous"].is_array() {
@@ -250,10 +278,13 @@ pub async fn channels(action: ChannelsAction) -> Result<()> {
                 removed
             );
         }
-        ChannelsAction::Switch { channel } => {
+        ChannelsAction::Switch { channel, session } => {
             let v = daemon_call_async(
                 "channels_switch",
-                crate::cli::rpc_params(serde_json::json!({ "channel": channel.clone() })),
+                crate::cli::rpc_params(with_session(
+                    serde_json::json!({ "channel": channel.clone() }),
+                    session.as_deref(),
+                )),
             )
             .await?;
             // Ambiguous reference: the daemon returns the candidate paths instead

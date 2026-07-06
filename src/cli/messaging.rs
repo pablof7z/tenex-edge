@@ -6,11 +6,13 @@ pub(super) use args::{chat, publish, ChatAction, PublishArgs};
 pub(super) async fn chat_write(
     message: String,
     channel: Option<String>,
+    session: Option<String>,
     long_message: bool,
 ) -> Result<()> {
     let params = crate::cli::rpc_params(serde_json::json!({
         "message": message,
         "long_message": long_message,
+        "session": session,
         // Explicit `--channel` is destination targeting only. Caller identity
         // still comes from the session anchors added by `rpc_params`.
         "channel": channel,
@@ -29,21 +31,24 @@ pub(super) async fn chat_write(
     Ok(())
 }
 
-pub(super) async fn chat_read(
-    id: Option<String>,
-    since: Option<String>,
-    limit: Option<u64>,
-    offset: Option<u64>,
-    tail: bool,
-    live: bool,
-    channel: Option<String>,
-) -> Result<()> {
+pub(super) struct ChatReadRequest {
+    pub id: Option<String>,
+    pub since: Option<String>,
+    pub limit: Option<u64>,
+    pub offset: Option<u64>,
+    pub tail: bool,
+    pub live: bool,
+    pub channel: Option<String>,
+    pub session: Option<String>,
+}
+
+pub(super) async fn chat_read(req: ChatReadRequest) -> Result<()> {
     use std::io::IsTerminal as _;
 
-    let since_ts = since.as_deref().map(super::admin::parse_since);
-    let effective_tail = tail || since.is_none();
-    let effective_limit = limit.or_else(|| {
-        if since.is_none() || tail {
+    let since_ts = req.since.as_deref().map(super::admin::parse_since);
+    let effective_tail = req.tail || req.since.is_none();
+    let effective_limit = req.limit.or_else(|| {
+        if req.since.is_none() || req.tail {
             Some(10)
         } else {
             None
@@ -52,13 +57,14 @@ pub(super) async fn chat_read(
     let use_color = std::env::var("NO_COLOR").is_err() && std::io::stdout().is_terminal();
 
     let params = crate::cli::rpc_params(serde_json::json!({
-        "id": id,
-        "channel": channel,
+        "id": req.id,
+        "channel": req.channel,
+        "session": req.session,
         "since": since_ts,
         "limit": effective_limit,
-        "offset": offset.unwrap_or(0),
+        "offset": req.offset.unwrap_or(0),
         "tail": effective_tail,
-        "live": live,
+        "live": req.live,
     }));
     let mut client = crate::daemon::client::Client::connect_or_spawn().await?;
     client

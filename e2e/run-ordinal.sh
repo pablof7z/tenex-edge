@@ -8,35 +8,32 @@
 # does not depend on e2e/run.sh's two-backend smoke having run first. It never
 # modifies run.sh / run-subgroup.sh / lib.sh / teardown.sh.
 #
-# WHAT IT VERIFIES (and current implementation status on this branch)
+# WHAT IT VERIFIES
 #   1. Ordinal allocation — two concurrent sessions of the SAME agent in the
-#      SAME room get DISTINCT routable ordinal pubkeys (`smith1`, then
-#      `smith2`). The same ordinal may be reused in a different room, but never
-#      concurrently in the same room.
-#   2. Room-independent reuse — `smithN`'s pubkey must be identical wherever it
-#      appears. Pure derivation property; not assertable from the CLI without
-#      daemon internals (no command dumps the (agent,ordinal)->pubkey family).
-#      → documented SKIP with a TODO. Unit coverage lives in
-#        identity.rs::ordinal_derivation_is_deterministic_and_room_independent.
+#      SAME room get DISTINCT routable ordinal pubkeys and labels (`smithN`).
+#      The same ordinal may be reused in a different room, but never
+#      concurrently in the same room. The bootstrap session intentionally keeps
+#      `smith1` occupied, so the concurrent pair usually lands as `smith2` and
+#      `smith3`.
+#   2. Room-independent reuse — `smithN`'s pubkey is identical wherever it
+#      appears. The rig creates a second channel, starts `smith1` there, and
+#      compares it with the bootstrap `smith1` in the project root.
 #   3. Chat routing by (pubkey, h) — one session writes a chat mentioning the
 #      other; the mention must resolve to the recipient session and the on-wire
 #      kind:9 must carry BOTH the room `#h` and the recipient `#p` pubkey. That
 #      `(#p, #h)` pair IS the ordinal routing key.
 #      → assertable when the mention resolves + the relay accepts the write;
 #        SKIP-guarded if the mention does not resolve or the relay drops it.
-#   4. Switch-reject (Phase 5) — `channels switch` of a session into a channel
+#   4. Switch-reject — `channels switch` of a session into a channel
 #      where the same ordinal is already live must be rejected with an error
-#      containing "already active". NOT implemented on this branch
-#      (rpc_channels_switch validates existence + membership only, no liveness
-#      collision check; the string "already active" appears nowhere in src/).
-#      → SKIP-guarded, with an adaptive probe that auto-upgrades to a hard PASS
-#        the moment the rejection lands.
+#      containing "already active".
 #
 # DEGRADATION CONTRACT: only INFRASTRUCTURE problems are hard failures (relay
-# down, binary missing, backend won't boot, project group never created). Every
-# behavioral check that depends on an unlanded feature degrades to `SKIP: …` and
-# the script still exits 0, so it is runnable NOW and becomes a full gate as the
-# features land. The run exits nonzero iff a hard check FAILS.
+# down, binary missing, backend won't boot, project group never created).
+# Behavioral invariants that are fully wired are hard failures. Relay-dependent
+# chat-routing observability remains SKIP-guarded when local routing works but
+# the relay does not echo the proof event. The run exits nonzero iff a hard check
+# FAILS.
 #
 # Tunables: see e2e/lib.sh. Extra knobs:
 #   E2E_ORD_PROJECT   project/room slug (default: ord-demo)
@@ -171,9 +168,10 @@ session_start_payload() {
 # $()) so the append persists, and redirects the sleep's fds so a caller using
 # $() would not block on the inherited pipe.
 new_watch() { sleep 900 >/dev/null 2>&1 & LAST_WATCH=$!; WATCH_PIDS+=("$LAST_WATCH"); }
+new_watch; WP_BOOT="$LAST_WATCH"
 (
   cd "${A_PROJ}"
-  echo "$(session_start_payload "${BOOT_SID}" "${A_PROJ}")" \
+  echo "$(session_start_payload "${BOOT_SID}" "${A_PROJ}" "${WP_BOOT}")" \
     | TENEX_EDGE_AGENT="${AGENT_SLUG}" edge edge-a harness hook claude-code --type session-start
 ) || die "bootstrap session-start failed (see ${A_EDGE}/daemon.log)"
 snapshot_daemon_pid
@@ -195,11 +193,11 @@ SID1="ord-s1-$$-$(date +%s)"
 # Launch BOTH session-start hooks concurrently, scoped to the SAME room via
 # TENEX_EDGE_CHANNEL, SAME agent slug, SAME cwd, DIFFERENT session ids.
 start_session() {
-  local sid="$1" wp="$2"
+  local sid="$1" wp="$2" channel="${3:-${E2E_PROJECT}}"
   (
     cd "${A_PROJ}"
     echo "$(session_start_payload "${sid}" "${A_PROJ}" "${wp}")" \
-      | TENEX_EDGE_AGENT="${AGENT_SLUG}" TENEX_EDGE_CHANNEL="${E2E_PROJECT}" \
+      | TENEX_EDGE_AGENT="${AGENT_SLUG}" TENEX_EDGE_CHANNEL="${channel}" \
         edge edge-a harness hook claude-code --type session-start
   )
 }
@@ -242,8 +240,10 @@ session_identity_row() {
     LIMIT 1;
   " 2>/dev/null || true
 }
+IFS=$'\t' read -r PK_BOOT AG_BOOT <<<"$(session_identity_row "${BOOT_SID}")"
 IFS=$'\t' read -r PK0 AG0 <<<"$(session_identity_row "${SID0}")"
 IFS=$'\t' read -r PK1 AG1 <<<"$(session_identity_row "${SID1}")"
+dim "  bootstrap ${BOOT_SID}: agent=${AG_BOOT} pubkey=${PK_BOOT:0:12}"
 dim "  session0 ${SID0}: agent=${AG0} pubkey=${PK0:0:12}"
 dim "  session1 ${SID1}: agent=${AG1} pubkey=${PK1:0:12}"
 
@@ -255,13 +255,16 @@ else
   check_skip "1 ordinal allocation — both sessions share one pubkey (${PK0:0:8}); distinct-identity allocation not active for this concurrency"
 fi
 
-# 1b. ordinal LABELS smith / smith1 — best-effort. Auto-upgrades
-# to PASS once derive_agent_ordinal_keys is wired and a label is exposed.
-if [[ "${AG0}" == "${AGENT_SLUG}" && "${AG1}" == "${AGENT_SLUG}1" ]] \
-   || [[ "${AG1}" == "${AGENT_SLUG}" && "${AG0}" == "${AGENT_SLUG}1" ]]; then
-  check_pass "1b ordinal labels — sessions surface '${AGENT_SLUG}' and '${AGENT_SLUG}1'"
+is_ordinal_label() {
+  local label="$1" suffix
+  suffix="${label#"${AGENT_SLUG}"}"
+  [[ "${label}" != "${suffix}" && "${suffix}" =~ ^[1-9][0-9]*$ ]]
+}
+
+if is_ordinal_label "${AG0}" && is_ordinal_label "${AG1}" && [[ "${AG0}" != "${AG1}" ]]; then
+  check_pass "1b ordinal labels — sessions surface distinct live labels '${AG0}' and '${AG1}'"
 else
-  check_skip "1b ordinal labels '${AGENT_SLUG}'/'${AGENT_SLUG}1' not surfaced — live signer still uses derive_session_keys; derive_agent_ordinal_keys is unit-tested but not wired (got agents '${AG0}'/'${AG1}')"
+  check_fail "1b ordinal labels — expected distinct '${AGENT_SLUG}N' labels, got '${AG0}'/'${AG1}'"
 fi
 
 # 1c. AUTHORITATIVE wire check: kind:30315 presence in the room must carry TWO
@@ -284,18 +287,32 @@ else
   check_fail "1c presence — expected >=2 distinct kind:30315 authors in '${E2E_PROJECT}', saw ${DISTINCT_PUBKEYS} (ordinal allocation not reaching the wire)"
 fi
 
-# ── 5. CHECK 2: room-independent reuse (documented TODO) ──────────────────────
+# ── 5. CHECK 2: room-independent reuse ────────────────────────────────────────
 log "check 2: room-independent ordinal reuse"
-# An ordinal identity (e.g. smith1) must derive to the SAME pubkey regardless of
-# which room it appears in (derive_agent_ordinal_keys has NO room/project input).
-# This is not assertable from the CLI: no command dumps the (agent,ordinal)->
-# pubkey family, and ordinals are not yet allocated to live sessions, so there is
-# no second room to compare the same ordinal in. The property is covered by the
-# unit test identity.rs::ordinal_derivation_is_deterministic_and_room_independent.
-# TODO(#47): once `who --all-projects` (or a `tenex-edge identities` surface)
-# lists durable (agent,ordinal,pubkey) routes, drive the same ordinal into a
-# second channel and assert pubkey equality here.
-check_skip "2 room-independent reuse — not assertable from the CLI yet (no route-dump surface; covered by identity.rs room-independence unit test) — TODO(#47)"
+ALT_NAME="ord-alt-$$"
+(
+  cd "${A_PROJ}"
+  edge edge-a channels create --name "${ALT_NAME}" --about "ordinal alternate room" >/dev/null
+) || die "alternate channel create failed (see ${A_EDGE}/daemon.log)"
+ALT_H="$(sqlite3 "$(backend_edge_home edge-a)/state.db" \
+  "SELECT channel_h FROM relay_channels WHERE parent='${E2E_PROJECT}' AND name='${ALT_NAME}' ORDER BY updated_at DESC LIMIT 1;" \
+  2>/dev/null || true)"
+[[ -n "${ALT_H}" ]] || die "alternate channel '${ALT_NAME}' did not materialize in state.db"
+dim "  alternate channel ${ALT_NAME}: ${ALT_H}"
+
+SID2="ord-s2-$$-$(date +%s)"
+new_watch; WP2="$LAST_WATCH"
+start_session "${SID2}" "${WP2}" "${ALT_H}" >/dev/null 2>&1 || warn "session ${SID2} start returned nonzero"
+sleep 1
+IFS=$'\t' read -r PK2 AG2 <<<"$(session_identity_row "${SID2}")"
+dim "  alternate session ${SID2}: agent=${AG2} pubkey=${PK2:0:12}"
+if [[ -z "${PK_BOOT}" || -z "${PK2}" || -z "${AG_BOOT}" || -z "${AG2}" ]]; then
+  check_fail "2 room-independent reuse — could not resolve bootstrap and alternate session identities"
+elif [[ "${AG_BOOT}" == "${AG2}" && "${PK_BOOT}" == "${PK2}" ]]; then
+  check_pass "2 room-independent reuse — ${AG2} has the same pubkey in project root and ${ALT_H}"
+else
+  check_fail "2 room-independent reuse — expected bootstrap ${AG_BOOT}/${PK_BOOT:0:8} to match alternate ${AG2}/${PK2:0:8}"
+fi
 
 # ── 6. CHECK 3: chat routing by (pubkey, h) ──────────────────────────────────
 log "check 3: chat routing — session0 mentions session1 in room '${E2E_PROJECT}'"
@@ -305,9 +322,8 @@ else
   CHAT_BODY="ordinal-routing-probe-$$ ping @${AG1} please ack"
   CHAT_OUT="$(
     cd "${A_PROJ}"
-    TENEX_EDGE_SESSION="${SID0}" TENEX_EDGE_AGENT="${AGENT_SLUG}" \
-      TENEX_EDGE_CHANNEL="${E2E_PROJECT}" \
-      edge edge-a chat write "${CHAT_BODY}" --channel "${E2E_PROJECT}" 2>&1
+    TENEX_EDGE_AGENT="${AGENT_SLUG}" TENEX_EDGE_CHANNEL="${E2E_PROJECT}" \
+      edge edge-a chat write "${CHAT_BODY}" --channel "${E2E_PROJECT}" --session "${SID0}" 2>&1
   )" || true
   dim "  chat write: ${CHAT_OUT}"
 
@@ -328,9 +344,8 @@ else
   READ_OK=0
   READ_OUT="$(
     cd "${A_PROJ}"
-    TENEX_EDGE_SESSION="${SID1}" TENEX_EDGE_AGENT="${AGENT_SLUG}" \
-      TENEX_EDGE_CHANNEL="${E2E_PROJECT}" \
-      edge edge-a chat read --channel "${E2E_PROJECT}" --limit 20 2>/dev/null
+    TENEX_EDGE_AGENT="${AGENT_SLUG}" TENEX_EDGE_CHANNEL="${E2E_PROJECT}" \
+      edge edge-a chat read --channel "${E2E_PROJECT}" --session "${SID1}" --limit 20 2>/dev/null
   )" || true
   if echo "${READ_OUT}" | grep -q "ordinal-routing-probe"; then
     READ_OK=1
@@ -348,32 +363,20 @@ fi
 
 # ── 7. CHECK 4: switch-reject (Phase 5) ──────────────────────────────────────
 log "check 4: channels switch rejects a live-ordinal collision (Phase 5)"
-# Real collision scenario: session0 holds ordinal 1 (`smith1`) in
-# '${E2E_PROJECT}'. Start a SECOND 'smith' in its own per-session room — it may
-# reuse the same ordinal-1 pubkey because the room differs. When that session
-# tries to switch INTO '${E2E_PROJECT}', its ordinal-1 pubkey is already live
-# there (session0, a DIFFERENT session) → the daemon must reject with "already
-# active".
-SID2="ord-s2-$$-$(date +%s)"
-new_watch; WP2="$LAST_WATCH"
-(
-  cd "${A_PROJ}"
-  echo "$(session_start_payload "${SID2}" "${A_PROJ}" "${WP2}")" \
-    | TENEX_EDGE_AGENT="${AGENT_SLUG}" edge edge-a harness hook claude-code --type session-start
-) >/dev/null 2>&1 || warn "session ${SID2} start returned nonzero"
-sleep 1
+# Real collision scenario: the bootstrap session holds ${AG_BOOT} in
+# '${E2E_PROJECT}', and session2 holds that same ordinal in ${ALT_H}. Switching
+# session2 into '${E2E_PROJECT}' would create two live sessions with the same
+# (pubkey, h), so the daemon must reject with "already active".
 SWITCH_OUT="$(
   cd "${A_PROJ}"
-  TENEX_EDGE_SESSION="${SID2}" TENEX_EDGE_AGENT="${AGENT_SLUG}" \
-    edge edge-a channels switch "${E2E_PROJECT}" 2>&1
+  TENEX_EDGE_AGENT="${AGENT_SLUG}" \
+    edge edge-a channels switch --session "${SID2}" "${E2E_PROJECT}" 2>&1
 )" || true
-dim "  channels switch (smith2 -> ${E2E_PROJECT}): ${SWITCH_OUT}"
+dim "  channels switch (${AG2} ${ALT_H} -> ${E2E_PROJECT}): ${SWITCH_OUT}"
 if echo "${SWITCH_OUT}" | grep -qi "already active"; then
   check_pass "4 switch-reject — daemon rejected the live-ordinal collision with 'already active'"
-elif echo "${SWITCH_OUT}" | grep -qi "must be run from within a tenex-edge agent session"; then
-  check_skip "4 switch-reject — CLI has no exact session anchor for this synthetic probe yet"
 else
-  check_skip "4 switch-reject — collision guard not landed yet; switch output was: ${SWITCH_OUT}"
+  check_fail "4 switch-reject — expected 'already active' rejection, got: ${SWITCH_OUT}"
 fi
 
 # ── 8. summary ───────────────────────────────────────────────────────────────

@@ -16,6 +16,10 @@ pub(in crate::cli) enum ChatAction {
         /// exactly one joined channel exists.
         #[arg(long)]
         channel: Option<String>,
+        /// Explicit sender session id instead of resolving from the current
+        /// PTY/harness process or project scan.
+        #[arg(long)]
+        session: Option<String>,
         /// Allow publishing a message longer than the default 600-character cap.
         #[arg(long)]
         long_message: bool,
@@ -45,6 +49,10 @@ pub(in crate::cli) enum ChatAction {
         /// one joined channel exists.
         #[arg(long)]
         channel: Option<String>,
+        /// Explicit reader session id instead of resolving from the current
+        /// PTY/harness process or project scan.
+        #[arg(long)]
+        session: Option<String>,
     },
 }
 
@@ -54,10 +62,11 @@ pub(in crate::cli) async fn chat(action: ChatAction) -> Result<()> {
             message,
             message_flag,
             channel,
+            session,
             long_message,
         } => {
             let message = super::resolve_send_message_body(message_flag.or(message))?;
-            super::chat_write(message, channel, long_message).await
+            super::chat_write(message, channel, session, long_message).await
         }
         ChatAction::Read {
             id,
@@ -67,7 +76,20 @@ pub(in crate::cli) async fn chat(action: ChatAction) -> Result<()> {
             tail,
             live,
             channel,
-        } => super::chat_read(id, since, limit, offset, tail, live, channel).await,
+            session,
+        } => {
+            super::chat_read(super::ChatReadRequest {
+                id,
+                since,
+                limit,
+                offset,
+                tail,
+                live,
+                channel,
+                session,
+            })
+            .await
+        }
     }
 }
 
@@ -138,6 +160,38 @@ mod tests {
                 action: ChatAction::Read { channel, .. },
             } => assert_eq!(channel.as_deref(), Some("ops")),
             _ => panic!("expected chat read command"),
+        }
+    }
+
+    #[test]
+    fn chat_write_accepts_explicit_session_anchor() {
+        let cli = crate::cli::args::Cli::try_parse_from([
+            "tenex-edge",
+            "chat",
+            "write",
+            "hello",
+            "--channel",
+            "ops",
+            "--session",
+            "session-1",
+        ])
+        .unwrap();
+
+        match cli.cmd {
+            crate::cli::args::Cmd::Chat {
+                action:
+                    ChatAction::Write {
+                        message,
+                        channel,
+                        session,
+                        ..
+                    },
+            } => {
+                assert_eq!(message.as_deref(), Some("hello"));
+                assert_eq!(channel.as_deref(), Some("ops"));
+                assert_eq!(session.as_deref(), Some("session-1"));
+            }
+            _ => panic!("expected chat write command"),
         }
     }
 
