@@ -55,6 +55,20 @@ reconciler commit records a `receipts` row (surface, transaction, changed
 summary, commands, `artifact_ref` = the published event id). The same
 `window_hash` threads distill → status publish → receipt.
 
+Replay capsules live in `trellis_replay_capsules` as versioned
+`DataTransactionScript<InputFact>` JSON captured at the drive seam. Retention is
+bounded to the newest 512 capsules and 16 MiB of serialized script bytes; the
+same off-values used by `TENEX_EDGE_HOOK_CALL_LOG` also disable capsule capture
+unless `TENEX_EDGE_REPLAY_CAPSULES` overrides the gate.
+
+`tenex-edge probe simulate <surface> --fact '<InputFact JSON>'` stages one fact
+against the daemon-held status or subscription graph and calls
+`Transaction::preview()` instead of committing. The returned plan is the resource
+commands and changed labels that would result; the live revision stays unchanged.
+For those authoritative surfaces, the live effect seam also previews the same
+fact/snapshot before applying host effects and blocks the effect if the committed
+plan does not match the previewed plan.
+
 ```
 tenex-edge explain event:<30315-id>   # the receipt + the exact LLM inputs behind the activity
 tenex-edge explain hook:<session>[@ts] # why the injected snapshot had this shape
@@ -77,10 +91,18 @@ render regression fails the build.
 
 ## Adoption boundary left imperative
 
-`rpc_session_start` (interleaved DB writes, relay round-trips, spawns, tmux
-calls, inline rollback) was intentionally left imperative — Trellis earns its
-keep on the three derived-resource surfaces without that surgery. The
-cross-process PostToolUse cursor CAS is likewise unchanged (the within-graph
-cursor input makes the shape decision explicit; eliminating the cross-process
-race would move cursor advancement into the daemon graph). Both are noted
-follow-ups.
+`rpc_session_start` remains effect-imperative by design: it performs DB writes,
+relay checks, signer admission, tmux stamping, subscriptions, replay, and engine
+spawn. It is nevertheless advisory now: `InputFact::SessionStartRequested`
+derives the staged row/check/admit/subscription/spawn intents, the RPC executes
+that plan, and `SessionStarted`/`SessionStartFailed` outcome facts feed the graph
+back. Each request logs a one-request shadow comparison (`shadow_matches=1`,
+`shadow_total=1` when the derived plan matches the host-observed intent) and
+records replay capsules for the request/outcome facts. This surface is capped at
+advisory because Trellis can prove its graph bookkeeping, not the external
+effects themselves.
+
+Cursor advancement is graph-owned: render requests enter as
+`InputFact::TurnCheckRequested`, the daemon-held cursor graph derives `HookFrame`
+or `NoFrame`, and the host only applies the resulting `sessions.seen_cursor`
+projection. The non-status direct publishers remain explicit follow-ups.

@@ -1,9 +1,11 @@
 //! `probe state <surface>` (§4.3): live values for a surface, under its lock.
 //! `subscriptions` lists each live REQ with its owner scopes + refcount;
-//! `status` lists each session's currently-published content. `hook_context`
-//! reports the honest not-a-live-graph note.
+//! `status` lists each session's currently-published content, `turn_lifecycle`
+//! lists local turn projections, `cursor` lists high-water decisions,
+//! `session_start` lists advisory staged intents, `outbox` lists publish
+//! results, and `hook_context` lists daemon-held per-session graphs.
 
-use super::{not_live_note, required_str, DaemonState};
+use super::{required_str, DaemonState};
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -43,10 +45,148 @@ pub(super) fn state_value(state: &Arc<DaemonState>, params: &Value) -> Result<Va
                 .collect();
             Ok(json!({ "verb": "state", "surface": "subscriptions", "rows": rows }))
         }
-        "hook_context" => Ok(json!({ "verb": "state", "surface": "hook_context",
-            "rows": [], "note": not_live_note() })),
+        "turn_lifecycle" => {
+            let r = state
+                .turn_lifecycle
+                .lock()
+                .expect("turn lifecycle mutex poisoned");
+            let rows: Vec<Value> = r
+                .state_rows()
+                .into_iter()
+                .map(|row| {
+                    json!({
+                        "session": row.session,
+                        "working": row.working,
+                        "turn_started_at": row.turn_started_at,
+                        "transcript_ref": row.transcript_ref,
+                    })
+                })
+                .collect();
+            Ok(json!({ "verb": "state", "surface": "turn_lifecycle", "rows": rows }))
+        }
+        "cursor" => {
+            let r = state.cursor.lock().expect("cursor mutex poisoned");
+            let rows: Vec<Value> = r
+                .state_rows()
+                .into_iter()
+                .map(|row| {
+                    json!({
+                        "session": row.session,
+                        "cursor": row.cursor,
+                        "last_frame": row.last_frame,
+                        "delta_since": row.delta_since,
+                    })
+                })
+                .collect();
+            Ok(json!({ "verb": "state", "surface": "cursor", "rows": rows }))
+        }
+        "session_start" => {
+            let r = state
+                .session_start
+                .lock()
+                .expect("session_start mutex poisoned");
+            let rows: Vec<Value> = r
+                .state_rows()
+                .into_iter()
+                .map(|row| {
+                    json!({
+                        "session": row.session_id,
+                        "action": row.action,
+                        "channel_h": row.channel_h,
+                        "signer_pubkey": row.signer_pubkey,
+                        "reassert": row.reassert,
+                    })
+                })
+                .collect();
+            Ok(json!({ "verb": "state", "surface": "session_start", "rows": rows }))
+        }
+        "outbox" => {
+            let r = state.outbox.lock().expect("outbox mutex poisoned");
+            let rows: Vec<Value> = r
+                .state_rows()
+                .into_iter()
+                .map(|row| {
+                    json!({
+                        "local_id": row.local_id,
+                        "event_id": row.event_id,
+                        "state": row.state,
+                        "retries": row.retries,
+                        "last_error": row.last_error,
+                        "source_ref": row.source_ref,
+                    })
+                })
+                .collect();
+            Ok(json!({ "verb": "state", "surface": "outbox", "rows": rows }))
+        }
+        "hook_context" => hook_context_state(state, params),
         other => Err(anyhow::anyhow!("probe state: unknown surface `{other}`")),
     }
+}
+
+fn hook_context_state(state: &Arc<DaemonState>, params: &Value) -> Result<Value> {
+    let handle = params
+        .get("handle")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty());
+    let dump = params.get("dump").and_then(Value::as_bool).unwrap_or(false);
+    let graphs = state
+        .hook_contexts
+        .lock()
+        .expect("hook-context mutex poisoned");
+
+    if let Some(session) = handle {
+        let Some(graph) = graphs.get(session) else {
+            return Ok(json!({
+                "verb": "state",
+                "surface": "hook_context",
+                "handle": session,
+                "found": false,
+                "rows": [],
+                "note": "no live hook_context graph for session",
+            }));
+        };
+        return Ok(json!({
+            "verb": "state",
+            "surface": "hook_context",
+            "handle": session,
+            "found": true,
+            "rows": [hook_row(session, graph, dump)],
+        }));
+    }
+
+    let mut sessions = graphs.keys().cloned().collect::<Vec<_>>();
+    sessions.sort();
+    let rows = sessions
+        .into_iter()
+        .filter_map(|session| {
+            graphs
+                .get(&session)
+                .map(|graph| hook_row(&session, graph, dump))
+        })
+        .collect::<Vec<_>>();
+    Ok(json!({
+        "verb": "state",
+        "surface": "hook_context",
+        "found": !rows.is_empty(),
+        "rows": rows,
+    }))
+}
+
+fn hook_row(session: &str, graph: &crate::reconcile::HookContextReconciler, dump: bool) -> Value {
+    let mut row = json!({
+        "session": session,
+        "revision": graph.revision(),
+        "nodes": graph.graph_node_count(),
+        "render_count": graph.render_count(),
+        "text": graph.current_text(),
+        "input_labels": graph.input_labels(),
+        "view_label": graph.view_label(),
+        "why_input_causes": graph.why_view_input_causes(),
+    });
+    if dump {
+        row["debug_dump"] = Value::String(graph.debug_dump());
+    }
+    row
 }
 
 #[cfg(test)]

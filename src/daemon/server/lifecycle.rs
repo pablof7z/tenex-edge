@@ -75,15 +75,12 @@ pub async fn run() -> Result<()> {
         cfg.whitelisted_pubkeys.clone(),
         &cfg.relays, // provider_instance hashes main relays only, not indexer
     ));
-    // Backend identity: pubkey of `tenexPrivateKey` (no `userNsec` fallback —
-    // the operator key is a human identity, not a backend identity). Used as a
-    // copied admin on every group we create and as the orchestration listener's
-    // `add`-tag matcher.
+    // Backend identity: pubkey of `tenexPrivateKey` (no `userNsec` fallback).
+    // Used as a copied admin on groups and as the orchestration matcher.
     let backend_pubkey: Option<String> = cfg
         .backend_nsec()
         .and_then(|n| Keys::parse(n).ok())
         .map(|k| k.public_key().to_hex());
-
     let state = Arc::new(DaemonState {
         store,
         transport,
@@ -96,6 +93,11 @@ pub async fn run() -> Result<()> {
         subscribed_projects: Mutex::new(Vec::new()),
         subs: Mutex::new(crate::reconcile::SubscriptionReconciler::new().expect("subs")),
         status: Arc::new(Mutex::new(StatusReconciler::for_ttl(status_ttl_duration()))),
+        turn_lifecycle: Mutex::new(crate::reconcile::TurnLifecycleReconciler::new()),
+        cursor: Mutex::new(crate::reconcile::CursorReconciler::new()),
+        session_start: Mutex::new(crate::reconcile::SessionStartReconciler::new()),
+        outbox: Arc::new(Mutex::new(crate::reconcile::OutboxReconciler::new())),
+        hook_contexts: Mutex::new(HashMap::new()),
         tail_tx: tokio::sync::broadcast::channel(512).0,
         open_clients: Mutex::new(0),
         shutdown: Notify::new(),
@@ -112,10 +114,10 @@ pub async fn run() -> Result<()> {
         backend_pubkey,
     });
 
-    // These tolerate a not-yet-connected relay (demux just waits for events;
-    // publishers/subscribers are best-effort and queue), so they start now.
+    // These tolerate a not-yet-connected relay, so they start now.
     spawn_demux(state.clone());
     spawn_pruner(state.clone());
+    spawn_trellis_oracle_sampler(state.clone());
     spawn_outbox_drainer(state.clone());
 
     let accept_state = state.clone();
@@ -138,9 +140,7 @@ pub async fn run() -> Result<()> {
         }
     });
 
-    // Relay-DEPENDENT startup runs in the background, OFF the accept path, so the
-    // daemon serves store-only RPCs (`who`, `tmux`, chat/inbox reads, statusline,
-    // who/statusline) immediately even when the relay is slow or unreachable. We warm up
+    // Relay startup runs off the accept path; store-only RPCs respond immediately. We warm up
     // the connection (await connectivity + NIP-42 auth) BEFORE opening any
     // subscription — a REQ opened pre-auth on an auth-gated relay never delivers.
     let relay_state = state.clone();

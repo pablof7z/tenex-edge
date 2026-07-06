@@ -153,13 +153,16 @@ fn second_turn_ambient_gates_on_seen_cursor() {
         let s = m.lock().unwrap();
         insert_chat(&s, ch, OTHER_PK, 50, "pre-join-event");
     }
-    // First turn: consumes pre-join notice; seen_cursor → now_secs().
+    // First turn: consumes pre-join notice.
     {
         let rec = m.lock().unwrap().get_session(&sid).unwrap().unwrap();
         let _ = super::assemble_turn_start_context(&m, &rec, "", "", 0);
     }
     // Manually peg the cursor at t=150 so the second turn only sees t>150.
-    m.lock().unwrap().set_seen_cursor(&sid, 150).unwrap();
+    m.lock()
+        .unwrap()
+        .apply_cursor_projection(&sid, 150)
+        .unwrap();
     // Event after the cursor — should appear in the second turn.
     {
         let s = m.lock().unwrap();

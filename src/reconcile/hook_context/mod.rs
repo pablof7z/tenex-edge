@@ -5,7 +5,9 @@
 //! explicit store inputs plus cursor/now, so the injected bytes and receipt share
 //! the same dependency trace.
 
+mod probe;
 mod receipt;
+pub(crate) mod replay;
 #[cfg(test)]
 mod tests;
 
@@ -51,6 +53,8 @@ pub struct HookContextReconciler {
     nodes: Option<Nodes>,
     /// Last derived view, so an unchanged commit (no frame) still yields bytes.
     last_view: Option<FabricView>,
+    last_text: Option<String>,
+    render_count: u64,
     labels: NodeLabels,
 }
 
@@ -67,12 +71,10 @@ impl HookContextReconciler {
             graph: Graph::<()>::new(),
             nodes: None,
             last_view: None,
+            last_text: None,
+            render_count: 0,
             labels: NodeLabels::new(),
         }
-    }
-
-    pub fn labels(&self) -> &NodeLabels {
-        &self.labels
     }
 
     /// Render the snapshot for a session over the canonical inputs plus the
@@ -104,9 +106,11 @@ impl HookContextReconciler {
         tx.set_input(nodes.messages, inputs.messages)?;
         let result = tx.commit()?;
         drop(tx);
-        let commit = CommitFacts::from_result(&self.labels, &result, self.graph.nodes().count());
+        let mut commit =
+            CommitFacts::from_result(&self.labels, &result, self.graph.nodes().count());
         self.nodes = Some(nodes);
         let nodes = self.nodes.as_ref().expect("nodes present");
+        commit.graph_resources = 1;
 
         let output_key = nodes.output;
         let transaction_id = result.transaction_id.get() as i64;
@@ -126,10 +130,15 @@ impl HookContextReconciler {
             .expect("a view was materialized at least once");
 
         let text = (force || !view.is_empty()).then(|| render_view_text(&view));
+        self.last_text = text.clone();
+        self.render_count += 1;
         // Attribute from THIS transaction's frame only: `why_output_frame` retains
         // the previous explanation across an unchanged commit, so gate on whether a
         // frame was actually emitted now.
         let frame_kind = FrameKind::from_output_kind(frame.map(|f| &f.kind));
+        if frame_kind == FrameKind::Unchanged {
+            commit.output_frames_json = r#"[{"kind":"unchanged","reason":"no_frame"}]"#.into();
+        }
         let input_causes = if frame.is_some() {
             self.input_cause_labels(output_key)
         } else {

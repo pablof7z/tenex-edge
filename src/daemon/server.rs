@@ -36,7 +36,7 @@ mod rpc;
 mod session_signer;
 mod tmux_rpc;
 
-use background::spawn_pruner;
+use background::{spawn_pruner, spawn_trellis_oracle_sampler};
 use demux::spawn_demux;
 use orchestration_handler::handle_orchestration;
 
@@ -61,9 +61,8 @@ struct PeerTracked {
 type StatusTailKey = (String, String, String);
 type StatusTailSnapshot = (String, bool);
 
-/// Shared daemon state. The `Store` is behind an `Arc<Mutex<…>>` shared with
-/// session tasks; the guard is held only across synchronous rusqlite calls,
-/// NEVER across `.await`. One process + one connection = the single writer.
+/// Shared daemon state. Store guards are held only across synchronous rusqlite
+/// calls, never across `.await`. One process + one connection = one writer.
 pub struct DaemonState {
     store: Arc<Mutex<Store>>,
     transport: Arc<Transport>,
@@ -71,21 +70,19 @@ pub struct DaemonState {
     cfg: Config,
     host: String,
     owners: Vec<String>,
-    /// Hosted local agent pubkeys (the "me set" for self-skip + routing).
     hosted: Mutex<HashMap<String, HostedAgent>>,
     sessions: Mutex<HashMap<String, SessionHandle>>,
     subscribed_projects: Mutex<Vec<String>>,
-    /// Refcounted per-entity relay-subscription reconciler: ONE narrow REQ per
-    /// covered channel `#h` / group-state `#d` / addressed pubkey `#p`, closed
-    /// when the last owner drops it. See `crate::reconcile::subscriptions`.
     subs: Mutex<crate::reconcile::SubscriptionReconciler>,
-    /// The ONE authority deciding when each session's kind:30315 status publishes.
     status: Arc<Mutex<crate::reconcile::StatusReconciler>>,
-    /// Structured tail event broadcast replacing the old DomainEvent bus.
+    turn_lifecycle: Mutex<crate::reconcile::TurnLifecycleReconciler>,
+    cursor: Mutex<crate::reconcile::CursorReconciler>,
+    session_start: Mutex<crate::reconcile::SessionStartReconciler>,
+    outbox: Arc<Mutex<crate::reconcile::OutboxReconciler>>,
+    hook_contexts: crate::turn_context::HookContextGraphs,
     tail_tx: tokio::sync::broadcast::Sender<TailEvent>,
     open_clients: Mutex<u64>,
     shutdown: Notify,
-    /// In-memory peer-session tracking for join/leave derivation.
     /// Peer presence join/leave tracking, keyed by `(pubkey, session_id, channel)`.
     /// A single session status can carry several `h` tags; each channel gets a
     /// tail-facing presence row.
@@ -115,8 +112,8 @@ pub struct DaemonState {
     session_signers: Mutex<session_signer::SignerReservations>,
     /// Hex pubkey of this backend's identity (pubkey of `tenexPrivateKey`;
     /// no `userNsec` fallback). Added as an admin to every group we create
-    /// and the address the subgroup orchestration listener matches `add` tags
-    /// against. `None` only when no `tenexPrivateKey` is configured.
+    /// and the address matched by subgroup orchestration `add` tags.
+    /// `None` only when no `tenexPrivateKey` is configured.
     backend_pubkey: Option<String>,
 }
 
@@ -209,6 +206,7 @@ mod channels_rpc;
 mod chat_read_tail;
 mod chat_target;
 mod chat_write;
+mod cursor;
 mod diagnostics;
 mod engine_lifecycle;
 mod lifecycle;
@@ -224,6 +222,7 @@ mod statusline;
 mod subscriptions;
 #[cfg(test)]
 mod test_support;
+mod turn_lifecycle;
 mod turns;
 mod who;
 

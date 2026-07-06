@@ -15,6 +15,7 @@ pub(in crate::daemon::server) async fn rpc_doctor(
         "probe_pubkey": probe,
         "publish": publish,
         "readback": readback,
+        "trellis": super::probe::doctor_summary(state)?,
     }))
 }
 

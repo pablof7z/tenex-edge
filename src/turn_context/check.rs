@@ -1,5 +1,4 @@
 use crate::fabric_context::{capture_inputs, inbox_seed, FabricContextInput};
-use crate::reconcile::HookContextReconciler;
 use crate::state::{Session, Store};
 
 use super::reads::{ambient_by_joined_channel, context_instance, joined_channels, take_inbox};
@@ -15,7 +14,8 @@ pub(crate) fn assemble_turn_check_context(
     delta_since: Option<u64>,
     now: u64,
 ) -> Option<String> {
-    assemble_turn_check(store, rec, self_host, delta_since, now).text
+    let hook_contexts = super::HookContextGraphs::default();
+    assemble_turn_check(store, rec, self_host, delta_since, now, &hook_contexts).text
 }
 
 /// Mid-turn context for the PostToolUse `turn_check` hook.
@@ -25,6 +25,7 @@ pub(crate) fn assemble_turn_check(
     self_host: &str,
     delta_since: Option<u64>,
     now: u64,
+    hook_contexts: &super::HookContextGraphs,
 ) -> TurnContext {
     let mut warnings: Vec<String> = Vec::new();
     let scope = rec.channel_h.clone();
@@ -92,15 +93,16 @@ pub(crate) fn assemble_turn_check(
         )
     };
     let render_start = std::time::Instant::now();
-    let outcome = HookContextReconciler::new()
-        .render_context(
-            &rec.session_id,
-            "turn_check",
-            cursor as i64,
-            now as i64,
-            inputs,
-        )
-        .expect("hook-context snapshot derivation");
+    let replay_inputs = inputs.clone();
+    let outcome = super::render_hook_context(
+        hook_contexts,
+        &rec.session_id,
+        "turn_check",
+        cursor as i64,
+        now as i64,
+        inputs,
+    )
+    .expect("hook-context snapshot derivation");
     // §4.1: ledger EVERY render, incl. suppressed/no-op ones.
     {
         let s = store.lock().expect("store mutex poisoned");
@@ -108,15 +110,26 @@ pub(crate) fn assemble_turn_check(
             &s,
             "hook_context",
             "turn_check",
+            Some(&rec.session_id),
             &outcome.commit,
             render_start.elapsed().as_micros() as i64,
             crate::instrument::now_millis(),
         );
     }
+    let replay_fact = super::hook_replay_fact(
+        &rec.session_id,
+        "turn_check",
+        cursor as i64,
+        now as i64,
+        false,
+        &replay_inputs,
+        outcome.text.as_deref(),
+    );
     TurnContext {
         text: outcome.text,
         receipt: outcome.receipt,
         transaction_id: outcome.transaction_id,
         revision: outcome.revision,
+        replay_fact,
     }
 }

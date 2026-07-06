@@ -13,71 +13,102 @@
 
 use super::*;
 
-const COLS: &str = "id, surface, transaction_id, revision, trigger_kind, \
+mod stats;
+#[cfg(test)]
+mod tests;
+
+const COLS: &str = "id, surface, transaction_id, revision, mode, trigger_kind, trigger_ref, \
      changed_inputs_json, changed_derived_json, changed_collections_json, \
-     command_count, output_count, noop, duration_us, graph_nodes, created_at";
+     resource_commands_json, output_frames_json, command_count, output_count, \
+     effect_count, suppressed_count, noop, oracle_status, oracle_error, \
+     duration_us, graph_nodes, graph_resources, created_at";
 
 /// One persisted all-commit ledger row, flattened to plain fields.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommitRow {
     pub id: i64,
-    /// Which surface committed: `"status"` | `"subscriptions"` | `"hook_context"`.
     pub surface: String,
     pub transaction_id: i64,
     pub revision: i64,
-    /// Which drive method / fact triggered the commit (e.g. `"tick"`, `"distill"`).
+    pub mode: String,
     pub trigger_kind: String,
-    /// JSON array of changed INPUT node labels (§4.2).
+    pub trigger_ref: String,
     pub changed_inputs_json: String,
-    /// JSON array of changed DERIVED node labels.
     pub changed_derived_json: String,
-    /// JSON array of changed COLLECTION node labels.
     pub changed_collections_json: String,
+    pub resource_commands_json: String,
+    pub output_frames_json: String,
     pub command_count: i64,
     pub output_count: i64,
-    /// 1 when the commit emitted no command and no frame (committed, changed
-    /// nothing observable); 0 otherwise.
+    pub effect_count: i64,
+    pub suppressed_count: i64,
     pub noop: i64,
+    pub oracle_status: Option<String>,
+    pub oracle_error: Option<String>,
     pub duration_us: i64,
     pub graph_nodes: i64,
+    pub graph_resources: i64,
     pub created_at: i64,
 }
 
-/// Input shape for recording a new commit. `id` is assigned by the store.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewCommit {
     pub surface: String,
     pub transaction_id: i64,
     pub revision: i64,
+    pub mode: String,
     pub trigger_kind: String,
+    pub trigger_ref: String,
     pub changed_inputs_json: String,
     pub changed_derived_json: String,
     pub changed_collections_json: String,
+    pub resource_commands_json: String,
+    pub output_frames_json: String,
     pub command_count: i64,
     pub output_count: i64,
+    pub effect_count: i64,
+    pub suppressed_count: i64,
     pub noop: i64,
+    pub oracle_status: Option<String>,
+    pub oracle_error: Option<String>,
     pub duration_us: i64,
     pub graph_nodes: i64,
+    pub graph_resources: i64,
     pub created_at: i64,
 }
 
 /// Aggregate value evidence for a surface over a window, powering `probe stats`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CommitStats {
-    /// Total commits recorded (effectful + no-op).
     pub commits: i64,
-    /// Commits that emitted at least one command or frame.
     pub effectful: i64,
-    /// Commits that changed nothing observable (the suppression evidence).
     pub noop: i64,
-    /// Sum of resource commands across the window.
     pub command_count_sum: i64,
-    /// Sum of output frames across the window.
     pub output_count_sum: i64,
-    /// Sum of per-commit durations (µs) — the latency budget.
+    pub effect_count_sum: i64,
+    pub suppressed_count_sum: i64,
     pub duration_us_sum: i64,
-    /// Largest graph node count observed — the graph-size high-water mark.
     pub max_graph_nodes: i64,
+    pub max_graph_resources: i64,
+    pub latest_graph_resources: i64,
+    pub open_count: i64,
+    pub close_count: i64,
+    pub replace_count: i64,
+    pub refresh_count: i64,
+    pub live_resource_balance: i64,
+    pub resource_drift: bool,
+    pub hook_unchanged_frames: i64,
+    pub duration_histogram: Vec<HistogramBucket>,
+    pub graph_nodes_histogram: Vec<HistogramBucket>,
+    pub graph_resources_histogram: Vec<HistogramBucket>,
+    pub latest_oracle_status: Option<String>,
+    pub latest_oracle_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HistogramBucket {
+    pub bucket: String,
+    pub count: i64,
 }
 
 fn row_to_commit(row: &rusqlite::Row) -> rusqlite::Result<CommitRow> {
@@ -86,16 +117,25 @@ fn row_to_commit(row: &rusqlite::Row) -> rusqlite::Result<CommitRow> {
         surface: row.get(1)?,
         transaction_id: row.get(2)?,
         revision: row.get(3)?,
-        trigger_kind: row.get(4)?,
-        changed_inputs_json: row.get(5)?,
-        changed_derived_json: row.get(6)?,
-        changed_collections_json: row.get(7)?,
-        command_count: row.get(8)?,
-        output_count: row.get(9)?,
-        noop: row.get(10)?,
-        duration_us: row.get(11)?,
-        graph_nodes: row.get(12)?,
-        created_at: row.get(13)?,
+        mode: row.get(4)?,
+        trigger_kind: row.get(5)?,
+        trigger_ref: row.get(6)?,
+        changed_inputs_json: row.get(7)?,
+        changed_derived_json: row.get(8)?,
+        changed_collections_json: row.get(9)?,
+        resource_commands_json: row.get(10)?,
+        output_frames_json: row.get(11)?,
+        command_count: row.get(12)?,
+        output_count: row.get(13)?,
+        effect_count: row.get(14)?,
+        suppressed_count: row.get(15)?,
+        noop: row.get(16)?,
+        oracle_status: row.get(17)?,
+        oracle_error: row.get(18)?,
+        duration_us: row.get(19)?,
+        graph_nodes: row.get(20)?,
+        graph_resources: row.get(21)?,
+        created_at: row.get(22)?,
     })
 }
 
@@ -104,23 +144,35 @@ impl Store {
     pub fn record_commit(&self, row: &NewCommit) -> Result<i64> {
         self.conn.execute(
             "INSERT INTO trellis_commits
-                 (surface, transaction_id, revision, trigger_kind,
+                 (surface, transaction_id, revision, mode, trigger_kind, trigger_ref,
                   changed_inputs_json, changed_derived_json, changed_collections_json,
-                  command_count, output_count, noop, duration_us, graph_nodes, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                  resource_commands_json, output_frames_json,
+                  command_count, output_count, effect_count, suppressed_count, noop,
+                  oracle_status, oracle_error, duration_us, graph_nodes, graph_resources, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
+                     ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
             params![
                 row.surface,
                 row.transaction_id,
                 row.revision,
+                row.mode,
                 row.trigger_kind,
+                row.trigger_ref,
                 row.changed_inputs_json,
                 row.changed_derived_json,
                 row.changed_collections_json,
+                row.resource_commands_json,
+                row.output_frames_json,
                 row.command_count,
                 row.output_count,
+                row.effect_count,
+                row.suppressed_count,
                 row.noop,
+                row.oracle_status,
+                row.oracle_error,
                 row.duration_us,
                 row.graph_nodes,
+                row.graph_resources,
                 row.created_at,
             ],
         )?;
@@ -141,98 +193,26 @@ impl Store {
     /// Aggregate value evidence for `surface` over commits with
     /// `created_at >= since`. Pure over the ledger — the proof `probe stats` works.
     pub fn commit_stats(&self, surface: &str, since: i64) -> Result<CommitStats> {
-        Ok(self.conn.query_row(
-            "SELECT
-                 COUNT(*),
-                 COALESCE(SUM(CASE WHEN noop=0 THEN 1 ELSE 0 END), 0),
-                 COALESCE(SUM(noop), 0),
-                 COALESCE(SUM(command_count), 0),
-                 COALESCE(SUM(output_count), 0),
-                 COALESCE(SUM(duration_us), 0),
-                 COALESCE(MAX(graph_nodes), 0)
-             FROM trellis_commits
-             WHERE surface=?1 AND created_at >= ?2",
-            params![surface, since],
-            |r| {
-                Ok(CommitStats {
-                    commits: r.get(0)?,
-                    effectful: r.get(1)?,
-                    noop: r.get(2)?,
-                    command_count_sum: r.get(3)?,
-                    output_count_sum: r.get(4)?,
-                    duration_us_sum: r.get(5)?,
-                    max_graph_nodes: r.get(6)?,
-                })
-            },
+        stats::commit_stats(self, surface, since)
+    }
+
+    /// Stamp the newest ledger row for `surface` with a sampled oracle result.
+    pub fn record_oracle_sample(
+        &self,
+        surface: &str,
+        status: &str,
+        error: Option<&str>,
+    ) -> Result<usize> {
+        Ok(self.conn.execute(
+            "UPDATE trellis_commits
+             SET oracle_status=?2, oracle_error=?3
+             WHERE id=(
+                 SELECT id FROM trellis_commits
+                 WHERE surface=?1
+                 ORDER BY created_at DESC, id DESC
+                 LIMIT 1
+             )",
+            params![surface, status, error],
         )?)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::state::{trellis_commits::NewCommit, Store};
-
-    fn commit(surface: &str, noop: i64, commands: i64, created_at: i64) -> NewCommit {
-        NewCommit {
-            surface: surface.into(),
-            transaction_id: 42,
-            revision: 7,
-            trigger_kind: "tick".into(),
-            changed_inputs_json: r#"["status/s1/activity"]"#.into(),
-            changed_derived_json: r#"["status/s1/content"]"#.into(),
-            changed_collections_json: "[]".into(),
-            command_count: commands,
-            output_count: 0,
-            noop,
-            duration_us: 250,
-            graph_nodes: 6,
-            created_at,
-        }
-    }
-
-    #[test]
-    fn record_then_latest_orders_newest_first_and_filters_surface() {
-        let s = Store::open_memory().unwrap();
-        s.record_commit(&commit("status", 0, 1, 1_000)).unwrap();
-        s.record_commit(&commit("status", 1, 0, 3_000)).unwrap();
-        s.record_commit(&commit("status", 0, 2, 2_000)).unwrap();
-        // A different surface must not leak in.
-        s.record_commit(&commit("subscriptions", 0, 1, 4_000))
-            .unwrap();
-
-        let rows = s.latest_commits_for_surface("status", 10).unwrap();
-        assert_eq!(rows.len(), 3);
-        assert_eq!(rows[0].created_at, 3_000);
-        assert_eq!(rows[0].noop, 1);
-        assert_eq!(rows[2].created_at, 1_000);
-        assert_eq!(rows[0].changed_inputs_json, r#"["status/s1/activity"]"#);
-    }
-
-    #[test]
-    fn stats_aggregate_effectful_and_noop() {
-        let s = Store::open_memory().unwrap();
-        // Two effectful (1 + 2 commands) and one no-op, all within the window.
-        s.record_commit(&commit("status", 0, 1, 1_000)).unwrap();
-        s.record_commit(&commit("status", 1, 0, 2_000)).unwrap();
-        s.record_commit(&commit("status", 0, 2, 3_000)).unwrap();
-        // Out-of-window row is excluded by `since`.
-        s.record_commit(&commit("status", 0, 5, 500)).unwrap();
-
-        let stats = s.commit_stats("status", 1_000).unwrap();
-        assert_eq!(stats.commits, 3);
-        assert_eq!(stats.effectful, 2);
-        assert_eq!(stats.noop, 1);
-        assert_eq!(stats.command_count_sum, 3);
-        assert_eq!(stats.max_graph_nodes, 6);
-        assert_eq!(stats.duration_us_sum, 750);
-    }
-
-    #[test]
-    fn stats_over_empty_surface_is_zeroed() {
-        let s = Store::open_memory().unwrap();
-        let stats = s.commit_stats("hook_context", 0).unwrap();
-        assert_eq!(stats.commits, 0);
-        assert_eq!(stats.effectful, 0);
-        assert_eq!(stats.max_graph_nodes, 0);
     }
 }

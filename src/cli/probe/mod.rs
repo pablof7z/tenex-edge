@@ -4,15 +4,19 @@
 //! the raw daemon JSON instead of the human view.
 //!
 //! Verbs: `stats` (aggregate value evidence, §4.1), `oracle` (live
-//! incremental-equals-full correctness, §4.6), `simulate` (dry-run a fact via
-//! `tx.preview()`, the keystone, §3), `why` (live causality for a handle, §4.3),
+//! incremental-equals-full correctness, §4.6), `seams` (frontier modes, §4.5),
+//! `simulate` (dry-run a fact via `tx.preview()`, the keystone, §3), `diff` /
+//! `acid` (counterfactual checks), `why` (live causality for a handle, §4.3),
 //! and `state` (live per-surface values, §4.3).
 
 mod render;
+mod state_render;
+mod stats_render;
 
 use anyhow::Result;
 use clap::{Args, Subcommand};
 use serde_json::{json, Value};
+use std::path::PathBuf;
 
 #[derive(Args)]
 pub(in crate::cli) struct ProbeArgs {
@@ -28,7 +32,7 @@ enum ProbeAction {
     /// Aggregate value evidence per surface over the all-commit ledger:
     /// commits, effectful vs suppressed no-ops, command/output totals, latency.
     Stats {
-        /// One surface (`status` | `subscriptions` | `hook_context`); omit for all.
+        /// One surface (`status` | `subscriptions` | `session_start` | ...); omit for all.
         #[arg(long)]
         surface: Option<String>,
         /// Only count commits with `created_at` at/after this unix-millis stamp.
@@ -45,18 +49,34 @@ enum ProbeAction {
         #[arg(long)]
         surface: Option<String>,
     },
+    /// Show the code-owned authority-frontier registrations and bypass risks.
+    Seams,
+    /// Replay a stored input capsule by id; `--assert` checks deterministic replay.
+    Replay {
+        /// Capsule id from the replay-capsule store.
+        capsule: String,
+        /// Assert two independent replays match, including Trellis ledgers.
+        #[arg(long = "assert")]
+        assert_replay: bool,
+        /// Write a Flight Recorder SerializedScenario trace JSON to this path.
+        #[arg(long, value_name = "PATH")]
+        export_trace: Option<PathBuf>,
+    },
     /// Dry-run a fact against a surface via `tx.preview()` — nothing is applied.
     Simulate {
-        /// The surface to simulate (`status`; `subscriptions` is a v2 follow-up).
+        /// The surface to simulate (`status` | `subscriptions`).
         #[arg(default_value = "status")]
         surface: String,
-        /// Session whose status the fact applies to.
+        /// Exact serde JSON for `InputFact`; preferred over the status shorthand.
+        #[arg(long, value_name = "JSON")]
+        fact: Option<String>,
+        /// Session whose status the legacy shorthand applies to.
         #[arg(long)]
-        session: String,
-        /// The distilled live-activity line the fact would set.
+        session: Option<String>,
+        /// Legacy status shorthand: distilled live-activity line to set.
         #[arg(long)]
         activity: Option<String>,
-        /// The distilled title the fact would set.
+        /// Legacy status shorthand: distilled title to set.
         #[arg(long)]
         title: Option<String>,
         /// Unix **seconds** (NOT millis) — the reconciler's clock unit. When set,
@@ -67,50 +87,158 @@ enum ProbeAction {
         #[arg(long)]
         now: Option<u64>,
     },
-    /// Explain the latest change to a handle (`sub:<channel>` | `status:<session>`).
+    /// Compare a live preview or replay capsule against a counterfactual fact.
+    Diff {
+        /// Surface hint (`status` | `subscriptions`); inferred from `--fact`.
+        #[arg(default_value = "status")]
+        surface: String,
+        /// Exact serde JSON for `InputFact`.
+        #[arg(long, value_name = "JSON")]
+        fact: String,
+        /// Optional replay capsule id; when set, replaces the capsule's last fact.
+        #[arg(long)]
+        capsule: Option<String>,
+        /// Optional mutation fact for capsule mode; defaults to `--fact`.
+        #[arg(long = "mutate-fact", value_name = "JSON")]
+        mutate_fact: Option<String>,
+    },
+    /// Verify a live `why` cause by previewing cause-removed and unrelated facts.
+    Acid {
+        /// Handle to verify (`status:<session>` | `sub:<channel>`).
+        handle: String,
+        /// Exact serde JSON for `InputFact`.
+        #[arg(long, value_name = "JSON")]
+        fact: String,
+        /// Specific cause label; defaults to the first live why input cause.
+        #[arg(long)]
+        cause: Option<String>,
+    },
+    /// Explain the latest change to a handle (`sub:<channel>` | `status:<session>` | `hook:<session>`).
     Why { handle: String },
-    /// Live values for a surface (`status` | `subscriptions` | `hook_context`).
-    State { surface: String },
+    /// Live values for a surface (`status` | `subscriptions` | `session_start` | `hook_context`).
+    State {
+        surface: String,
+        /// Surface-specific handle; for `hook_context`, this is the session id.
+        handle: Option<String>,
+        /// Include verbose graph debug output when supported by the surface.
+        #[arg(long)]
+        dump: bool,
+    },
 }
 
 impl ProbeAction {
     /// Project the parsed verb into the `{verb, ...}` RPC params the daemon's
     /// `probe` arm dispatches on.
-    fn to_rpc(&self) -> (String, Value) {
+    fn to_rpc(&self) -> Result<(String, Value)> {
         match self {
-            ProbeAction::Stats { surface, since } => (
+            ProbeAction::Stats { surface, since } => Ok((
                 "stats".into(),
                 json!({ "verb": "stats", "surface": surface, "since": since }),
-            ),
-            ProbeAction::Oracle { surface, .. } => (
+            )),
+            ProbeAction::Oracle { surface, .. } => Ok((
                 "oracle".into(),
                 json!({ "verb": "oracle", "surface": surface }),
-            ),
+            )),
+            ProbeAction::Seams => Ok(("seams".into(), json!({ "verb": "seams" }))),
+            ProbeAction::Replay {
+                capsule,
+                assert_replay,
+                export_trace,
+            } => Ok((
+                "replay".into(),
+                json!({
+                    "verb": "replay",
+                    "capsule": capsule,
+                    "assert": assert_replay,
+                    "export_trace": export_trace.is_some(),
+                }),
+            )),
             ProbeAction::Simulate {
                 surface,
+                fact,
                 session,
                 activity,
                 title,
                 now,
-            } => (
-                "simulate".into(),
-                json!({ "verb": "simulate", "surface": surface, "session": session,
-                        "activity": activity, "title": title, "now": now }),
-            ),
-            ProbeAction::Why { handle } => {
-                ("why".into(), json!({ "verb": "why", "handle": handle }))
+            } => {
+                let fact = fact
+                    .as_deref()
+                    .map(serde_json::from_str::<Value>)
+                    .transpose()?;
+                Ok((
+                    "simulate".into(),
+                    json!({ "verb": "simulate", "surface": surface, "fact": fact,
+                            "session": session, "activity": activity, "title": title,
+                            "now": now }),
+                ))
             }
-            ProbeAction::State { surface } => (
+            ProbeAction::Diff {
+                surface,
+                fact,
+                capsule,
+                mutate_fact,
+            } => {
+                let fact = serde_json::from_str::<Value>(fact)?;
+                let mutate_fact = mutate_fact
+                    .as_deref()
+                    .map(serde_json::from_str::<Value>)
+                    .transpose()?;
+                Ok((
+                    "diff".into(),
+                    json!({ "verb": "diff", "surface": surface, "fact": fact,
+                            "capsule": capsule, "mutate_fact": mutate_fact }),
+                ))
+            }
+            ProbeAction::Acid {
+                handle,
+                fact,
+                cause,
+            } => {
+                let fact = serde_json::from_str::<Value>(fact)?;
+                Ok((
+                    "acid".into(),
+                    json!({ "verb": "acid", "handle": handle, "fact": fact, "cause": cause }),
+                ))
+            }
+            ProbeAction::Why { handle } => {
+                Ok(("why".into(), json!({ "verb": "why", "handle": handle })))
+            }
+            ProbeAction::State {
+                surface,
+                handle,
+                dump,
+            } => Ok((
                 "state".into(),
-                json!({ "verb": "state", "surface": surface }),
-            ),
+                json!({ "verb": "state", "surface": surface, "handle": handle, "dump": dump }),
+            )),
+        }
+    }
+
+    fn export_trace_path(&self) -> Option<PathBuf> {
+        match self {
+            ProbeAction::Replay { export_trace, .. } => export_trace.clone(),
+            _ => None,
         }
     }
 }
 
 pub(in crate::cli) async fn probe(args: ProbeArgs) -> Result<()> {
-    let (verb, params) = args.action.to_rpc();
-    let v = super::daemon_call_async("probe", params).await?;
+    let export_trace_path = args.action.export_trace_path();
+    let (verb, params) = args.action.to_rpc()?;
+    let mut v = super::daemon_call_async("probe", params).await?;
+    if let Some(path) = export_trace_path {
+        let trace = v
+            .get("trace_json")
+            .and_then(Value::as_str)
+            .ok_or_else(|| anyhow::anyhow!("probe replay did not return trace_json"))?;
+        std::fs::write(&path, trace)?;
+        if let Some(obj) = v.as_object_mut() {
+            obj.insert(
+                "trace_path".into(),
+                Value::String(path.display().to_string()),
+            );
+        }
+    }
     if args.json {
         println!("{}", serde_json::to_string_pretty(&v)?);
     } else {
@@ -131,121 +259,18 @@ fn render(verb: &str, v: &Value) -> String {
         return format!("probe {verb}: {msg}\n");
     }
     match verb {
-        "stats" => render_stats(v),
+        "stats" => stats_render::render_stats(v),
         "oracle" => render::render_oracle(v),
+        "seams" => render::render_seams(v),
+        "replay" => render::render_replay(v),
         "simulate" => render::render_simulate(v),
+        "diff" => render::render_diff(v),
+        "acid" => render::render_acid(v),
         "why" => render::render_why(v),
-        "state" => render::render_state(v),
+        "state" => state_render::render_state(v),
         _ => format!("{v}\n"),
     }
 }
 
-/// The `probe stats` table: one row per surface with the suppression evidence.
-fn render_stats(v: &Value) -> String {
-    use std::fmt::Write as _;
-    let mut out = String::new();
-    let since = v.get("since").and_then(Value::as_i64).unwrap_or(0);
-    let _ = writeln!(out, "probe stats  (since={since})\n");
-    let _ = writeln!(
-        out,
-        "{:<14} {:>7} {:>9} {:>6} {:>8} {:>8} {:>10} {:>6}",
-        "surface", "commits", "effectful", "noop", "cmds", "frames", "dur_us", "nodes",
-    );
-    let empty = Vec::new();
-    let surfaces = v
-        .get("surfaces")
-        .and_then(Value::as_array)
-        .unwrap_or(&empty);
-    for r in surfaces {
-        let s = |k| r.get(k).and_then(Value::as_str).unwrap_or("");
-        let n = |k| r.get(k).and_then(Value::as_i64).unwrap_or(0);
-        let _ = writeln!(
-            out,
-            "{:<14} {:>7} {:>9} {:>6} {:>8} {:>8} {:>10} {:>6}",
-            s("surface"),
-            n("commits"),
-            n("effectful"),
-            n("noop"),
-            n("command_count_sum"),
-            n("output_count_sum"),
-            n("duration_us_sum"),
-            n("max_graph_nodes"),
-        );
-    }
-    out
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn stats_fixture() -> Value {
-        json!({
-            "verb": "stats",
-            "since": 0,
-            "surfaces": [
-                { "surface": "status", "commits": 3, "effectful": 2, "noop": 1,
-                  "command_count_sum": 3, "output_count_sum": 0,
-                  "duration_us_sum": 750, "max_graph_nodes": 6 },
-                { "surface": "subscriptions", "commits": 1, "effectful": 1, "noop": 0,
-                  "command_count_sum": 1, "output_count_sum": 0,
-                  "duration_us_sum": 100, "max_graph_nodes": 5 },
-            ],
-        })
-    }
-
-    #[test]
-    fn stats_render_tabulates_each_surface() {
-        let text = render("stats", &stats_fixture());
-        assert!(text.contains("probe stats"));
-        assert!(text.contains("surface"));
-        assert!(text.contains("status"));
-        assert!(text.contains("subscriptions"));
-        let status_line = text
-            .lines()
-            .find(|l| l.starts_with("status"))
-            .expect("status row present");
-        assert!(status_line.contains(" 3 "));
-        assert!(status_line.contains(" 1 "));
-    }
-
-    #[test]
-    fn unimplemented_shape_renders_marker() {
-        let v = json!({ "verb": "simulate", "implemented": false,
-                        "message": "subscriptions simulate is a v2 follow-up" });
-        let text = render("simulate", &v);
-        assert_eq!(
-            text,
-            "probe simulate: subscriptions simulate is a v2 follow-up\n"
-        );
-    }
-
-    #[test]
-    fn stats_action_projects_rpc_params() {
-        let action = ProbeAction::Stats {
-            surface: Some("status".into()),
-            since: 42,
-        };
-        let (verb, params) = action.to_rpc();
-        assert_eq!(verb, "stats");
-        assert_eq!(params["verb"], "stats");
-        assert_eq!(params["surface"], "status");
-        assert_eq!(params["since"], 42);
-    }
-
-    #[test]
-    fn simulate_action_projects_rpc_params() {
-        let action = ProbeAction::Simulate {
-            surface: "status".into(),
-            session: "s1".into(),
-            activity: Some("reviewing the PR".into()),
-            title: None,
-            now: None,
-        };
-        let (verb, params) = action.to_rpc();
-        assert_eq!(verb, "simulate");
-        assert_eq!(params["session"], "s1");
-        assert_eq!(params["activity"], "reviewing the PR");
-        assert!(params["title"].is_null());
-    }
-}
+mod tests;

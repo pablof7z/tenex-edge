@@ -17,18 +17,34 @@
 //! surface reconcilers (real sessions/status/who/outbox planners) land on top
 //! of this spine later; nothing here changes existing daemon behavior yet.
 
+pub mod cursor;
+pub mod frontier;
 pub mod graph;
 pub mod hook_context;
 pub mod journal;
 pub mod labels;
+pub mod outbox;
+pub(crate) mod preview;
+pub mod replay;
+pub mod session_start;
+mod session_start_facts;
 pub mod status;
 pub mod subscriptions;
+pub mod turn_lifecycle;
 
+pub use cursor::{CursorCommand, CursorEffect, CursorReconciler, CursorSeed};
 pub use graph::{ReconcileCommand, Reconciler};
 pub use hook_context::{
     FrameKind, HookContextOutcome, HookContextReceipt, HookContextReconciler, Shape,
 };
-pub use journal::InputFact;
+pub use journal::{HookContextRenderFact, InputFact, StatusDrive, StatusSessionStartedArgs};
 pub use labels::{CommitFacts, NodeLabels};
+pub use outbox::{OutboxEffect, OutboxReconciler};
+pub use session_start::{SessionStartCommand, SessionStartReconciler};
+pub use session_start_facts::{SessionStartFailedFact, SessionStartRequestFact};
 pub use status::{PublishReason, StatusCommand, StatusEffect, StatusOutcome, StatusReconciler};
+pub(crate) use subscriptions::SubCommand;
 pub use subscriptions::{CoverageSnapshot, SubEffect, SubscriptionReconciler};
+pub use turn_lifecycle::{
+    TurnCommand, TurnEffect, TurnLifecycleOutcome, TurnLifecycleReconciler, TurnProjectionSeed,
+};

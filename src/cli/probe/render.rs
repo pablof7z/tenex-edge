@@ -6,6 +6,12 @@
 use serde_json::Value;
 use std::fmt::Write as _;
 
+#[cfg(test)]
+pub(super) use super::state_render::render_state;
+
+#[cfg(test)]
+mod tests;
+
 fn str_at<'a>(v: &'a Value, k: &str) -> &'a str {
     v.get(k).and_then(Value::as_str).unwrap_or("")
 }
@@ -50,20 +56,93 @@ pub(super) fn render_oracle(v: &Value) -> String {
     let _ = writeln!(out);
     let _ = writeln!(
         out,
-        "surface-correctness: NOT proven (oracle checks the graph's bookkeeping, not host effects)"
+        "oracle: {} / surface-correctness: {} / host-seam-coverage: {}% / uncovered: {}",
+        str_at(v, "oracle"),
+        str_at(v, "surface_correctness"),
+        i64_at(v, "host_seam_coverage_percent"),
+        strs(v, "uncovered").join(", "),
     );
-    let _ = writeln!(out, "covered:   {}", strs(v, "covered").join(", "));
-    let _ = writeln!(out, "uncovered: {}", strs(v, "uncovered").join(", "));
+    let _ = writeln!(
+        out,
+        "surface-correctness detail: oracle checks graph bookkeeping, not host effects"
+    );
+    let _ = writeln!(out, "covered: {}", strs(v, "covered").join(", "));
     out
 }
 
-/// `probe simulate status/<id>` — the would-be plan; nothing is applied.
-pub(super) fn render_simulate(v: &Value) -> String {
+/// `probe seams` — static authority-frontier registrations plus coverage.
+pub(super) fn render_seams(v: &Value) -> String {
     let mut out = String::new();
-    let session = str_at(v, "session");
     let _ = writeln!(
         out,
-        "simulate status/{session}  ← what committing this fact would do (nothing is applied)\n"
+        "seams  (host-seam-coverage: {}%)",
+        i64_at(v, "host_seam_coverage_percent")
+    );
+    let _ = writeln!(out, "{:<16} {:<17} bypass risks", "surface", "mode");
+    let empty = Vec::new();
+    for row in v
+        .get("surfaces")
+        .and_then(Value::as_array)
+        .unwrap_or(&empty)
+    {
+        let risks = strs(row, "bypass_risks").join(", ");
+        let _ = writeln!(
+            out,
+            "{:<16} {:<17} {}",
+            str_at(row, "surface"),
+            str_at(row, "mode"),
+            if risks.is_empty() {
+                "-"
+            } else {
+                risks.as_str()
+            },
+        );
+    }
+    out
+}
+
+/// `probe replay <capsule>` — stored input capsule metadata + replay result.
+pub(super) fn render_replay(v: &Value) -> String {
+    let mut out = String::new();
+    let capsule = v.get("capsule").unwrap_or(&Value::Null);
+    let id = i64_at(capsule, "id");
+    let surface = str_at(capsule, "surface");
+    let trigger = str_at(capsule, "trigger_kind");
+    let trigger_ref = str_at(capsule, "trigger_ref");
+    let _ = writeln!(
+        out,
+        "replay capsule {id}  ({surface}/{trigger} {trigger_ref})"
+    );
+    let _ = writeln!(
+        out,
+        "  stored:   {} bytes, trace format v{}",
+        i64_at(capsule, "script_bytes"),
+        i64_at(capsule, "format_version"),
+    );
+    if v.get("asserted").and_then(Value::as_bool) == Some(true) {
+        let _ = writeln!(
+            out,
+            "  assert:   ok  ({} steps, {} commands, {} frames)",
+            i64_at(v, "steps"),
+            i64_at(v, "resource_commands"),
+            i64_at(v, "output_frames"),
+        );
+    } else {
+        let _ = writeln!(out, "  assert:   not run");
+    }
+    if let Some(path) = v.get("trace_path").and_then(Value::as_str) {
+        let _ = writeln!(out, "  trace:    {path}");
+    }
+    out
+}
+
+/// `probe simulate` — the would-be plan; nothing is applied.
+pub(super) fn render_simulate(v: &Value) -> String {
+    let mut out = String::new();
+    let surface = str_at(v, "surface");
+    let _ = writeln!(
+        out,
+        "simulate {surface}  ← what committing this fact would do (nothing is applied)\n"
     );
     let fact = v.get("fact").cloned().unwrap_or(Value::Null);
     let _ = writeln!(out, "  fact:     {}", fact_line(&fact));
@@ -83,13 +162,75 @@ pub(super) fn render_simulate(v: &Value) -> String {
                 str_at(c, "resource"),
             );
         }
+    } else if v.get("would_effect").and_then(Value::as_bool) == Some(true) {
+        for c in cmds {
+            let _ = writeln!(
+                out,
+                "  result:   WOULD APPLY    ({} {})",
+                str_at(c, "op"),
+                str_at(c, "resource"),
+            );
+        }
     } else {
-        let _ = writeln!(out, "  result:   NO CHANGE (deduped — no publish)");
+        let _ = writeln!(out, "  result:   NO CHANGE (deduped)");
     }
     let changed = strs(v, "changed");
     if !changed.is_empty() {
         let _ = writeln!(out, "  changed:  {}", changed.join(", "));
     }
+    out
+}
+
+/// `probe diff` — before/after artifact hashes plus changed fields.
+pub(super) fn render_diff(v: &Value) -> String {
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
+        "diff {}  ({})",
+        str_at(v, "surface"),
+        str_at(v, "mode")
+    );
+    let verdict = if v.get("artifact_changed").and_then(Value::as_bool) == Some(true) {
+        "CHANGED"
+    } else {
+        "UNCHANGED"
+    };
+    let _ = writeln!(out, "  artifact: {verdict}");
+    let _ = writeln!(out, "  before:   {}", str_at(v, "before_hash"));
+    let _ = writeln!(out, "  after:    {}", str_at(v, "after_hash"));
+    let empty = Vec::new();
+    for row in v
+        .get("field_diff")
+        .and_then(Value::as_array)
+        .unwrap_or(&empty)
+    {
+        let _ = writeln!(out, "  changed:  {}", str_at(row, "field"));
+    }
+    out
+}
+
+/// `probe acid` — necessity and unrelated-input stability verdicts.
+pub(super) fn render_acid(v: &Value) -> String {
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
+        "acid {}  ({})",
+        str_at(v, "handle"),
+        str_at(v, "surface")
+    );
+    let _ = writeln!(out, "  cause:    {}", str_at(v, "cause"));
+    let _ = writeln!(
+        out,
+        "  verdict:  necessary={}  unrelated_stable={}  ok={}",
+        v.get("necessary").and_then(Value::as_bool).unwrap_or(false),
+        v.get("unrelated_stable")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        v.get("ok").and_then(Value::as_bool).unwrap_or(false),
+    );
+    let _ = writeln!(out, "  original: {}", str_at(v, "original_hash"));
+    let _ = writeln!(out, "  removed:  {}", str_at(v, "removed_hash"));
+    let _ = writeln!(out, "  unrelated: {}", str_at(v, "unrelated_hash"));
     out
 }
 
@@ -101,15 +242,18 @@ fn fact_line(fact: &Value) -> String {
     if let Some(t) = fact.get("title").and_then(Value::as_str) {
         parts.push(format!("title={t:?}"));
     }
-    format!(
-        "{} → {}",
-        fact.get("kind").and_then(Value::as_str).unwrap_or("fact"),
-        if parts.is_empty() {
-            "(no fields)".to_string()
-        } else {
-            parts.join(", ")
-        }
-    )
+    if !parts.is_empty() || fact.get("kind").is_some() {
+        return format!(
+            "{} → {}",
+            fact.get("kind").and_then(Value::as_str).unwrap_or("fact"),
+            if parts.is_empty() {
+                "(no fields)".to_string()
+            } else {
+                parts.join(", ")
+            }
+        );
+    }
+    serde_json::to_string(fact).unwrap_or_else(|_| "fact".into())
 }
 
 /// `probe why <handle>` — live causality + the latest-per-key footer.
@@ -152,141 +296,4 @@ pub(super) fn render_why(v: &Value) -> String {
         "(latest change per key; for history use probe stats / the commits ledger)"
     );
     out
-}
-
-/// `probe state <surface>` — live per-surface values.
-pub(super) fn render_state(v: &Value) -> String {
-    let mut out = String::new();
-    let surface = str_at(v, "surface");
-    let _ = writeln!(out, "state {surface}  (live)");
-    let empty = Vec::new();
-    let rows = v.get("rows").and_then(Value::as_array).unwrap_or(&empty);
-    if rows.is_empty() {
-        let _ = writeln!(out, "  (none)");
-    }
-    for r in rows {
-        if surface == "status" {
-            let _ = writeln!(
-                out,
-                "  {:<10} {:<6} title={:?}  activity={:?}  channels={:?}",
-                str_at(r, "session"),
-                if r.get("busy").and_then(Value::as_bool) == Some(true) {
-                    "busy"
-                } else {
-                    "idle"
-                },
-                str_at(r, "title"),
-                str_at(r, "activity"),
-                strs(r, "channels"),
-            );
-        } else {
-            let _ = writeln!(
-                out,
-                "  {:<18} refcount {}   owners: {}",
-                str_at(r, "resource_key"),
-                i64_at(r, "refcount"),
-                strs(r, "owners").join(", "),
-            );
-        }
-    }
-    out
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn oracle_render_is_honest_about_correctness() {
-        let v = json!({
-            "verb": "oracle", "ok": true,
-            "surfaces": [
-                {"surface":"status","live_graph":true,"status":"green","revision":812,"nodes":6},
-                {"surface":"subscriptions","live_graph":true,"status":"green","revision":44,"nodes":5},
-                {"surface":"hook_context","live_graph":false,"note":"advisory"}
-            ],
-            "surface_correctness_proven": false,
-            "covered": ["status","subscriptions"],
-            "uncovered": ["turn_lifecycle","cursor","session_start","outbox"]
-        });
-        let text = render_oracle(&v);
-        assert!(text.contains("status          green    (rev 812, 6 nodes)"));
-        assert!(text.contains("hook_context    —        not a live graph (advisory)"));
-        assert!(text.contains("surface-correctness: NOT proven"));
-        assert!(text.contains("uncovered: turn_lifecycle, cursor, session_start, outbox"));
-    }
-
-    #[test]
-    fn simulate_render_would_publish() {
-        let v = json!({
-            "verb":"simulate","session":"s1",
-            "fact":{"kind":"distill","activity":"reviewing the PR","title":null},
-            "would_publish": true,
-            "commands":[{"op":"Replace","resource":"status/s1","kind":30315,"publish":true}],
-            "changed":["status/s1/activity"],
-        });
-        let text = render_simulate(&v);
-        assert!(text.contains("nothing is applied"));
-        assert!(text.contains("activity=\"reviewing the PR\""));
-        assert!(text.contains("WOULD PUBLISH  kind:30315  (Replace status/s1)"));
-        assert!(text.contains("changed:  status/s1/activity"));
-    }
-
-    #[test]
-    fn simulate_render_no_change() {
-        let v = json!({
-            "verb":"simulate","session":"s1",
-            "fact":{"kind":"distill","activity":"reading","title":null},
-            "would_publish": false, "commands": [], "changed": [],
-        });
-        let text = render_simulate(&v);
-        assert!(text.contains("NO CHANGE (deduped — no publish)"));
-    }
-
-    #[test]
-    fn why_sub_render_shows_owners_and_footer() {
-        let v = json!({
-            "verb":"why","handle":"sub:general","kind":"subscription","found":true,
-            "resource_key":"sub/h/general","refcount":2,
-            "owners":["daemon-subs","session-s1"],
-            "last_kind":"Open","cause":"planner: subscriptions/daemon/subs",
-        });
-        let text = render_why(&v);
-        assert!(text.contains("resource:  sub/h/general"));
-        assert!(text.contains("owners:    daemon-subs, session-s1   (refcount 2)"));
-        assert!(text.contains("last:      Open  ← planner: subscriptions/daemon/subs"));
-        assert!(text.contains("(latest change per key;"));
-    }
-
-    #[test]
-    fn why_status_render_shows_cause() {
-        let v = json!({
-            "verb":"why","handle":"status:s1","kind":"status","found":true,
-            "resource_key":"status/s1","last_kind":"Replace",
-            "cause":"planner: status/s1/coll","input_causes":["status/s1/activity"],
-        });
-        let text = render_why(&v);
-        assert!(text.contains("caused by: status/s1/activity"));
-    }
-
-    #[test]
-    fn why_not_found_is_clean() {
-        let v = json!({"verb":"why","handle":"status:ghost","found":false,
-                       "note":"no command emitted yet on this daemon graph"});
-        let text = render_why(&v);
-        assert!(text.contains("no command emitted yet"));
-    }
-
-    #[test]
-    fn state_status_render_lists_sessions() {
-        let v = json!({"verb":"state","surface":"status","rows":[
-            {"session":"s1","title":"T","activity":"reading","busy":true,"channels":["room"]}
-        ]});
-        let text = render_state(&v);
-        assert!(text.contains("state status  (live)"));
-        assert!(text.contains("s1"));
-        assert!(text.contains("busy"));
-        assert!(text.contains("activity=\"reading\""));
-    }
 }

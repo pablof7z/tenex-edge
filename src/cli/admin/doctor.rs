@@ -51,7 +51,28 @@ pub(super) fn render_doctor(v: &serde_json::Value) -> String {
     }
     writeln!(out, "publish: {}", v["publish"].as_str().unwrap_or("?")).ok();
     writeln!(out, "read-back: {}", v["readback"].as_str().unwrap_or("?")).ok();
+    render_trellis_summary(v, &mut out);
     out
+}
+
+fn render_trellis_summary(v: &serde_json::Value, out: &mut String) {
+    let Some(rows) = v["trellis"]["surfaces"].as_array() else {
+        return;
+    };
+    writeln!(out, "trellis:").ok();
+    for row in rows {
+        let surface = row["surface"].as_str().unwrap_or("?");
+        let mode = row["mode"].as_str().unwrap_or("?");
+        let oracle = row["oracle_status"].as_str().unwrap_or("unknown");
+        let suppressed = row["suppressed_count"].as_i64().unwrap_or(0);
+        let unchanged = row["hook_unchanged_frames"].as_i64().unwrap_or(0);
+        let extra = if surface == "hook_context" {
+            format!("{unchanged} unchanged frames today")
+        } else {
+            format!("{suppressed} suppressed publishes today")
+        };
+        writeln!(out, "{surface:<14} {mode:<13} oracle {oracle:<7} {extra}").ok();
+    }
 }
 
 fn storage_str<'a>(storage: &'a serde_json::Map<String, serde_json::Value>, key: &str) -> &'a str {
@@ -99,7 +120,18 @@ mod tests {
             "relays": ["wss://relay.example"],
             "probe_pubkey": "abc",
             "publish": "ok",
-            "readback": "ok"
+            "readback": "ok",
+            "trellis": {
+                "since": 1,
+                "surfaces": [
+                    { "surface": "status", "mode": "authoritative",
+                      "oracle_status": "green", "suppressed_count": 7,
+                      "hook_unchanged_frames": 0, "commits": 9 },
+                    { "surface": "hook_context", "mode": "authoritative",
+                      "oracle_status": "unknown", "suppressed_count": 0,
+                      "hook_unchanged_frames": 3, "commits": 3 }
+                ]
+            }
         })
     }
 
@@ -112,6 +144,10 @@ mod tests {
         assert!(rendered.contains("lock: /tmp/te/daemon.lock"));
         assert!(rendered.contains("state db: /tmp/te/state.db"));
         assert!(rendered.contains("daemon log: /tmp/te/daemon.log"));
+        assert!(rendered
+            .contains("status         authoritative oracle green   7 suppressed publishes today"));
+        assert!(rendered
+            .contains("hook_context   authoritative oracle unknown 3 unchanged frames today"));
         assert!(!rendered.contains("warning:"));
     }
 
