@@ -89,12 +89,11 @@ pub(super) fn push_session_watch_check(
         && evidence.get("process_alive").and_then(Value::as_bool) == Some(true)
     {
         "passed"
-    } else if bool_at(evidence, "graph_open")
+    } else if (bool_at(evidence, "graph_open")
         && bool_at(evidence, "session_alive")
-        && evidence.get("child_pid").is_some_and(Value::is_null)
+        && evidence.get("child_pid").is_some_and(Value::is_null))
+        || (!bool_at(evidence, "graph_open") && !bool_at(evidence, "session_row_found"))
     {
-        "not_proven"
-    } else if !bool_at(evidence, "graph_open") && !bool_at(evidence, "session_row_found") {
         "not_proven"
     } else {
         "failed"

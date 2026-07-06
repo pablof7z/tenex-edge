@@ -26,8 +26,6 @@ pub struct Store {
     conn: Connection,
 }
 
-// ── relay_* cache row types ──────────────────────────────────────────────────
-
 /// kind:39000 group metadata. A channel and a project are one abstraction;
 /// `parent` is the only distinction (`""` = top-level project channel).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -66,14 +64,6 @@ impl Channel {
 pub struct ChannelMember {
     pub channel_h: String,
     pub pubkey: String,
-    pub role: String,
-    pub updated_at: u64,
-}
-
-/// High-water mark for a materialized channel member/admin replacement set.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ChannelMemberSet {
-    pub channel_h: String,
     pub role: String,
     pub updated_at: u64,
 }
@@ -121,20 +111,6 @@ pub struct RelayEvent {
     pub tags_json: String,
 }
 
-/// A relay event held out of the normal cache until admission prerequisites
-/// become true, such as channel roster hydration for inbound chat.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct QuarantinedEvent {
-    pub id: String,
-    pub kind: u32,
-    pub pubkey: String,
-    pub created_at: u64,
-    pub channel_h: String,
-    pub event_json: String,
-    pub reason: String,
-    pub quarantined_at: u64,
-}
-
 /// Canonical chat/message read-model row. `author_session` is the return
 /// envelope: when present, replies can target the exact session that authored the
 /// row instead of degrading to pubkey/agent-level addressing.
@@ -178,44 +154,6 @@ pub struct MessageRecipient {
     pub target_session: Option<String>,
     pub delivered_at: Option<u64>,
 }
-
-/// Local filesystem binding for a fabric project/root channel on this machine.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProjectRootBinding {
-    pub channel_h: String,
-    pub abs_path: String,
-    pub updated_at: u64,
-}
-
-/// Durable record of a host/provider channel readiness attempt. These are not
-/// authoritative channel state; they explain local provisioning decisions that
-/// otherwise only existed in daemon logs.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ChannelReadinessAttempt {
-    pub id: i64,
-    pub channel_h: String,
-    pub expect_member: String,
-    pub parent_hint: Option<String>,
-    pub name: Option<String>,
-    pub source: String,
-    pub outcome: String,
-    pub reason: String,
-    pub created_at: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NewChannelReadinessAttempt {
-    pub channel_h: String,
-    pub expect_member: String,
-    pub parent_hint: Option<String>,
-    pub name: Option<String>,
-    pub source: String,
-    pub outcome: String,
-    pub reason: String,
-    pub created_at: u64,
-}
-
-// ── local plumbing row types ─────────────────────────────────────────────────
 
 /// A local agent process THIS daemon hosts. OS handles only — never agent
 /// identity (that lives in `relay_status`/`relay_profiles`).
@@ -309,7 +247,6 @@ pub struct OutboxRow {
     pub enqueued_at: u64,
 }
 
-// ── canonical id minting ─────────────────────────────────────────────────────
 // Canonical ids use wall-clock nanos plus a monotonic counter: `te-<nanos_hex>-<counter_hex>`.
 
 static ID_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -327,6 +264,7 @@ pub(super) fn mint_session_id() -> String {
 
 mod aliases;
 mod channel_readiness_attempts;
+pub use channel_readiness_attempts::{ChannelReadinessAttempt, NewChannelReadinessAttempt};
 mod channels;
 mod schema;
 pub use channels::{archived_channel_about, is_archived_channel_about, CHANNEL_ABOUT_MAX_CHARS};
@@ -336,11 +274,14 @@ mod identities;
 mod inbox;
 pub mod llm_calls;
 mod members;
+pub use members::ChannelMemberSet;
 mod messages;
 mod outbox;
 mod profiles;
 mod project_roots;
+pub use project_roots::ProjectRootBinding;
 mod quarantine;
+pub use quarantine::QuarantinedEvent;
 mod reader;
 pub(crate) use reader::StoreReader;
 pub mod receipts;

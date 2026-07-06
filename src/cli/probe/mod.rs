@@ -6,9 +6,8 @@
 //! Verbs: `stats` (aggregate value evidence, §4.1), `oracle` (live
 //! incremental-equals-full correctness, §4.6), `seams` (frontier modes, §4.5),
 //! `simulate` (dry-run a fact via `tx.preview()`, the keystone, §3), `diff` /
-//! `acid` (counterfactual checks), `validate` (combined checks with
-//! explanations), `why` (live causality for a handle, §4.3), and `state`
-//! (live per-surface values, §4.3).
+//! `acid` (counterfactual checks), `why` (live causality for a handle, §4.3),
+//! and `state` (live per-surface values, §4.3).
 
 mod render;
 mod state_render;
@@ -115,27 +114,6 @@ enum ProbeAction {
         #[arg(long)]
         cause: Option<String>,
     },
-    /// Validate a surface, handle, event/message/recipient target, awareness
-    /// target, channel/readiness/readiness_attempt target, commit target, fact,
-    /// or replay capsule with explanations.
-    Validate {
-        /// Optional surface, probe handle, Trellis resource path, explain handle,
-        /// event/message/recipient target, awareness target,
-        /// channel/readiness/readiness_attempt target, commit target, or `capsule:<id>`.
-        target: Option<String>,
-        /// Exact serde JSON for `InputFact`; adds preview and acid evidence.
-        #[arg(long, value_name = "JSON")]
-        fact: Option<String>,
-        /// Replay capsule id to assert; equivalent to target `capsule:<id>`.
-        #[arg(long)]
-        capsule: Option<String>,
-        /// Specific cause label for acid validation.
-        #[arg(long)]
-        cause: Option<String>,
-        /// Only count stats evidence with `created_at` at/after this unix-millis stamp.
-        #[arg(long, default_value = "0")]
-        since: i64,
-    },
     /// Explain the latest change to a handle or Trellis resource path.
     Why { handle: String },
     /// Live values for a surface (`status` | `subscriptions` | `turn_lifecycle` | `cursor` | `session_start` | `session_watch` | `outbox` | `hook_context`).
@@ -223,23 +201,6 @@ impl ProbeAction {
                     json!({ "verb": "acid", "handle": handle, "fact": fact, "cause": cause }),
                 ))
             }
-            ProbeAction::Validate {
-                target,
-                fact,
-                capsule,
-                cause,
-                since,
-            } => Ok((
-                "validate".into(),
-                super::rpc_params(json!({
-                    "verb": "validate",
-                    "target": target,
-                    "fact": fact,
-                    "capsule": capsule,
-                    "cause": cause,
-                    "since": since,
-                })),
-            )),
             ProbeAction::Why { handle } => {
                 Ok(("why".into(), json!({ "verb": "why", "handle": handle })))
             }
@@ -306,7 +267,6 @@ fn render(verb: &str, v: &Value) -> String {
         "simulate" => render::render_simulate(v),
         "diff" => render::render_diff(v),
         "acid" => render::render_acid(v),
-        "validate" => validate_render::render_validate(v),
         "why" => render::render_why(v),
         "state" => state_render::render_state(v),
         _ => format!("{v}\n"),

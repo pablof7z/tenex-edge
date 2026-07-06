@@ -8,6 +8,14 @@
 
 use super::*;
 
+/// High-water mark for a materialized channel member/admin replacement set.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChannelMemberSet {
+    pub channel_h: String,
+    pub role: String,
+    pub updated_at: u64,
+}
+
 fn row_to_member(row: &rusqlite::Row) -> rusqlite::Result<ChannelMember> {
     Ok(ChannelMember {
         channel_h: row.get(0)?,

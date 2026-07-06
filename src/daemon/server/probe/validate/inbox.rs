@@ -125,8 +125,6 @@ pub(super) fn push_inbox_check(
         "failed"
     } else if bool_at(evidence, "ok") {
         "passed"
-    } else if !bool_at(evidence, "found") {
-        "not_proven"
     } else {
         "not_proven"
     };

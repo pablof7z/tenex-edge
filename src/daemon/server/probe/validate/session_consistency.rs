@@ -122,9 +122,7 @@ pub(super) fn push_session_consistency_check(
 ) {
     let status = if !str_at(evidence, "error").is_empty() {
         "failed"
-    } else if int_at(evidence, "session_count") == 0 {
-        "not_proven"
-    } else if bool_at(evidence, "warmup_suspected") {
+    } else if int_at(evidence, "session_count") == 0 || bool_at(evidence, "warmup_suspected") {
         "not_proven"
     } else if int_at(evidence, "failed_count") > 0 {
         "failed"

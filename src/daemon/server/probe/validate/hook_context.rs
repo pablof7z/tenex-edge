@@ -5,6 +5,12 @@ use super::DaemonState;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
+mod graph;
+
+mod receipt;
+
+use receipt::latest_receipt;
+
 pub(super) fn hook_context_target(target: &str) -> Option<&str> {
     target
         .strip_prefix("hook:")
@@ -22,7 +28,7 @@ pub(super) fn hook_context_evidence(
     session_id: &str,
 ) -> Value {
     let session_channel = session_channel_evidence(state, session_id);
-    let graph = graph_evidence(state, session_id, &session_channel);
+    let graph = graph::evidence(state, session_id, &session_channel);
     let explanation = match state.with_store(|s| {
         crate::explain::explain(
             s,
@@ -129,55 +135,6 @@ pub(super) fn push_hook_context_check(
     }
 }
 
-fn graph_evidence(state: &Arc<DaemonState>, session_id: &str, session_channel: &Value) -> Value {
-    let graphs = state
-        .hook_contexts
-        .lock()
-        .expect("hook-context mutex poisoned");
-    let Some(graph) = graphs.get(session_id) else {
-        return json!({
-            "graph_found": false,
-            "resource_key": format!("hook/{session_id}/view"),
-        });
-    };
-    let text = graph.current_text();
-    let channel_h = str_at(session_channel, "channel_h");
-    let channel_confirmed = bool_at(session_channel, "confirmed");
-    let rendered_unconfirmed_channel = text
-        .as_ref()
-        .is_some_and(|text| !channel_confirmed && renders_channel_block(text, channel_h));
-    let missing_channel_warning_rendered = text
-        .as_ref()
-        .is_some_and(|text| renders_missing_channel_warning(text, channel_h));
-    let rendered_local_agents = text.as_ref().is_some_and(|text| renders_local_agents(text));
-    let rendered_member_roster = text
-        .as_ref()
-        .is_some_and(|text| renders_member_roster(text));
-    let rendered_legacy_agents_roster = text
-        .as_ref()
-        .is_some_and(|text| renders_legacy_agents_roster(text));
-    json!({
-        "graph_found": true,
-        "resource_key": graph
-            .view_label()
-            .unwrap_or_else(|| format!("hook/{session_id}/view")),
-        "revision": graph.revision(),
-        "nodes": graph.graph_node_count(),
-        "render_count": graph.render_count(),
-        "emitted": text.is_some(),
-        "text_bytes": text.as_ref().map(String::len).unwrap_or(0),
-        "rendered_unconfirmed_channel": rendered_unconfirmed_channel,
-        "missing_channel_warning_rendered": missing_channel_warning_rendered,
-        "rendered_local_agents": rendered_local_agents,
-        "rendered_member_roster": rendered_member_roster,
-        "rendered_legacy_agents_roster": rendered_legacy_agents_roster,
-        "local_agent_rows": text.as_ref().map(|text| count_marker(text, "<agent ref=\"@")).unwrap_or(0),
-        "member_rows": text.as_ref().map(|text| count_marker(text, "<member ref=\"@")).unwrap_or(0),
-        "input_labels": graph.input_labels(),
-        "why_input_causes": graph.why_view_input_causes(),
-    })
-}
-
 fn session_channel_evidence(state: &Arc<DaemonState>, session_id: &str) -> Value {
     match state.with_store(|s| {
         let session = s.get_session(session_id)?;
@@ -225,34 +182,6 @@ fn session_channel_evidence(state: &Arc<DaemonState>, session_id: &str) -> Value
             "error": e.to_string(),
         }),
     }
-}
-
-fn latest_receipt(explanation: &Value) -> Option<Value> {
-    let receipt = explanation
-        .get("receipts")
-        .and_then(Value::as_array)?
-        .first()?;
-    let changed = serde_json::from_str::<Value>(str_at(receipt, "changed_summary")).ok();
-    Some(json!({
-        "id": receipt.get("id").and_then(Value::as_i64),
-        "transaction_id": receipt.get("transaction_id").and_then(Value::as_i64),
-        "revision": receipt.get("revision").and_then(Value::as_i64),
-        "artifact_ref": receipt.get("artifact_ref").and_then(Value::as_str),
-        "created_at": receipt.get("created_at").and_then(Value::as_i64),
-        "kind": changed.as_ref().and_then(|v| v.get("kind")).and_then(Value::as_str),
-        "shape": changed.as_ref().and_then(|v| v.get("shape")).and_then(Value::as_str),
-        "frame": changed.as_ref().and_then(|v| v.get("frame")).and_then(Value::as_str),
-        "emitted": changed.as_ref()
-            .and_then(|v| v.pointer("/output/emitted"))
-            .and_then(Value::as_bool),
-        "bytes": changed.as_ref()
-            .and_then(|v| v.pointer("/output/bytes"))
-            .and_then(Value::as_u64),
-        "input_causes": changed.as_ref()
-            .and_then(|v| v.get("input_causes"))
-            .cloned()
-            .unwrap_or_else(|| json!([])),
-    }))
 }
 
 fn hook_at(target: &str) -> Option<i64> {
@@ -315,29 +244,4 @@ fn reason(
     } else {
         "no hook_context graph or receipt was found for this session"
     }
-}
-
-fn renders_channel_block(text: &str, channel_h: &str) -> bool {
-    !channel_h.is_empty() && text.contains(&format!("<channel name=\"#{channel_h}\""))
-}
-
-fn renders_missing_channel_warning(text: &str, channel_h: &str) -> bool {
-    !channel_h.is_empty()
-        && text.contains(&format!("Fabric channel \"{channel_h}\" is unavailable"))
-}
-
-fn renders_local_agents(text: &str) -> bool {
-    text.contains("<local-agents>")
-}
-
-fn renders_member_roster(text: &str) -> bool {
-    text.contains("<members>")
-}
-
-fn renders_legacy_agents_roster(text: &str) -> bool {
-    text.contains("<agents>")
-}
-
-fn count_marker(text: &str, marker: &str) -> usize {
-    text.match_indices(marker).count()
 }

@@ -4,6 +4,8 @@ use super::super::{state, DaemonState, SURFACES};
 use serde_json::{json, Value};
 use std::sync::Arc;
 
+mod samples;
+
 pub(super) fn all_surface_state_checks(
     daemon_state: &Arc<DaemonState>,
 ) -> (Vec<Value>, Vec<Value>) {
@@ -48,7 +50,7 @@ pub(super) fn annotated_surface_state(mut state: Value, status: &str, summary: &
         .get("rows")
         .and_then(Value::as_array)
         .map_or(0, Vec::len);
-    let samples = sample_targets(&state, 3);
+    let samples = samples::sample_targets(&state, 3);
     if let Some(obj) = state.as_object_mut() {
         obj.insert("check_status".into(), json!(status));
         obj.insert("check_summary".into(), json!(summary));
@@ -56,42 +58,6 @@ pub(super) fn annotated_surface_state(mut state: Value, status: &str, summary: &
         obj.insert("sample_targets".into(), json!(samples));
     }
     state
-}
-
-fn sample_targets(state: &Value, limit: usize) -> Vec<Value> {
-    let surface = str_at(state, "surface");
-    state
-        .get("rows")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|row| sample_target(surface, row))
-        .take(limit)
-        .collect()
-}
-
-fn sample_target(surface: &str, row: &Value) -> Option<Value> {
-    let target = match surface {
-        "status" => format!("status:{}", str_at(row, "session")),
-        "subscriptions" => str_at(row, "resource_key").to_string(),
-        "turn_lifecycle" => format!("turn:{}", str_at(row, "session")),
-        "cursor" => format!("cursor:{}", str_at(row, "session")),
-        "session_start" => format!("session_start:{}", str_at(row, "session")),
-        "session_watch" => format!("session_watch:{}", str_at(row, "session")),
-        "outbox" => row
-            .get("local_id")
-            .and_then(Value::as_i64)
-            .map(|id| format!("outbox:{id}"))
-            .unwrap_or_else(|| str_at(row, "resource_key").replace('/', ":")),
-        "hook_context" => format!("hook:{}", str_at(row, "session")),
-        _ => return None,
-    };
-    (!target.ends_with(':') && !target.is_empty()).then(|| {
-        json!({
-            "target": target,
-            "resource_key": str_at(row, "resource_key"),
-        })
-    })
 }
 
 pub(super) fn state_check_summary(
@@ -324,103 +290,4 @@ fn str_at<'a>(v: &'a Value, k: &str) -> &'a str {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn surface_state_without_rows_is_not_proven() {
-        let state = json!({ "surface": "status", "rows": [] });
-
-        let (status, summary) = state_check_summary(&state, None, None);
-
-        assert_eq!(status, "not_proven");
-        assert!(summary.contains("no live state rows"));
-    }
-
-    #[test]
-    fn surface_state_with_rows_passes() {
-        let state = json!({
-            "surface": "status",
-            "rows": [{ "resource_key": "status/s1" }]
-        });
-
-        let (status, summary) = state_check_summary(&state, None, None);
-
-        assert_eq!(status, "passed");
-        assert!(summary.contains("1 live row"));
-    }
-
-    #[test]
-    fn annotated_surface_state_adds_summary_and_sample_targets() {
-        let state = json!({
-            "surface": "status",
-            "rows": [{
-                "session": "s1",
-                "resource_key": "status/s1"
-            }]
-        });
-
-        let annotated = annotated_surface_state(state, "passed", "surface status has 1 live row");
-
-        assert_eq!(annotated["check_status"], "passed");
-        assert_eq!(annotated["row_count"], 1);
-        assert_eq!(annotated["sample_targets"][0]["target"], "status:s1");
-        assert_eq!(annotated["sample_targets"][0]["resource_key"], "status/s1");
-    }
-
-    #[test]
-    fn outbox_surface_with_publish_error_fails() {
-        let state = json!({
-            "surface": "outbox",
-            "rows": [{
-                "local_id": 13,
-                "resource_key": "outbox/13",
-                "state": "pending",
-                "last_error": "relay rejected event",
-            }]
-        });
-
-        let (status, summary) = state_check_summary(&state, None, None);
-
-        assert_eq!(status, "failed");
-        assert!(summary.contains("failed publish"));
-        assert!(summary.contains("outbox/13"));
-    }
-
-    #[test]
-    fn outbox_surface_with_pending_rows_is_not_proven() {
-        let state = json!({
-            "surface": "outbox",
-            "rows": [{
-                "local_id": 14,
-                "resource_key": "outbox/14",
-                "state": "pending",
-                "last_error": "",
-            }]
-        });
-
-        let (status, summary) = state_check_summary(&state, None, None);
-
-        assert_eq!(status, "not_proven");
-        assert!(summary.contains("pending relay acceptance"));
-    }
-
-    #[test]
-    fn outbox_surface_with_published_rows_passes() {
-        let state = json!({
-            "surface": "outbox",
-            "rows": [{
-                "local_id": 15,
-                "resource_key": "outbox/15",
-                "state": "published",
-                "last_error": "",
-            }]
-        });
-
-        let (status, summary) = state_check_summary(&state, None, None);
-
-        assert_eq!(status, "passed");
-        assert!(summary.contains("live published"));
-    }
-}
+mod tests;

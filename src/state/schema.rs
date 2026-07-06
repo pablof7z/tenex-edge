@@ -2,14 +2,12 @@
 //! Six `relay_*` tables are materialized caches and may be dropped/rebuilt from
 //! relay state. The remaining local tables are non-rebuildable daemon state:
 //! session bindings, aliases, identities, inbox/outbox, and project roots.
-
 use anyhow::{Context, Result};
 use rusqlite::Connection;
 use std::path::Path;
 
 mod trellis_commits;
 mod trellis_replay_capsules;
-
 const SCHEMA_VERSION: u32 = 1;
 
 const SCHEMA: &str = r#"
@@ -219,20 +217,8 @@ CREATE TABLE IF NOT EXISTS project_roots (
     updated_at  INTEGER NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS channel_readiness_attempts (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    channel_h     TEXT NOT NULL,
-    expect_member TEXT NOT NULL DEFAULT '',
-    parent_hint   TEXT,
-    name          TEXT,
-    source        TEXT NOT NULL DEFAULT '',
-    outcome       TEXT NOT NULL DEFAULT '',
-    reason        TEXT NOT NULL DEFAULT '',
-    created_at    INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_channel_readiness_attempts_channel
-    ON channel_readiness_attempts(channel_h, created_at);
-
+CREATE TABLE IF NOT EXISTS channel_readiness_attempts (id INTEGER PRIMARY KEY AUTOINCREMENT, channel_h TEXT NOT NULL, expect_member TEXT NOT NULL DEFAULT '', parent_hint TEXT, name TEXT, source TEXT NOT NULL DEFAULT '', outcome TEXT NOT NULL DEFAULT '', reason TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_channel_readiness_attempts_channel ON channel_readiness_attempts(channel_h, created_at);
 CREATE TABLE IF NOT EXISTS llm_calls (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id       TEXT NOT NULL,

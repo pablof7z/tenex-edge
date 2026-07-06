@@ -114,10 +114,10 @@ pub(super) fn push_receipt_check(
     }
 }
 
-fn nearest_commit<'a>(
-    commits: &'a [crate::state::trellis_commits::CommitRow],
+fn nearest_commit(
+    commits: &[crate::state::trellis_commits::CommitRow],
     receipt_created_at: i64,
-) -> Option<&'a crate::state::trellis_commits::CommitRow> {
+) -> Option<&crate::state::trellis_commits::CommitRow> {
     commits
         .iter()
         .min_by_key(|row| (row.created_at - receipt_created_at).abs())

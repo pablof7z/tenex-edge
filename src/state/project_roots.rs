@@ -3,6 +3,14 @@
 
 use super::*;
 
+/// Local filesystem binding for a fabric project/root channel on this machine.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectRootBinding {
+    pub channel_h: String,
+    pub abs_path: String,
+    pub updated_at: u64,
+}
+
 fn row_to_project_root(row: &rusqlite::Row) -> rusqlite::Result<ProjectRootBinding> {
     Ok(ProjectRootBinding {
         channel_h: row.get(0)?,

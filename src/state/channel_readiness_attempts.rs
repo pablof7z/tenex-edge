@@ -5,6 +5,34 @@
 
 use super::*;
 
+/// Durable record of a host/provider channel readiness attempt. These are not
+/// authoritative channel state; they explain local provisioning decisions that
+/// otherwise only existed in daemon logs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChannelReadinessAttempt {
+    pub id: i64,
+    pub channel_h: String,
+    pub expect_member: String,
+    pub parent_hint: Option<String>,
+    pub name: Option<String>,
+    pub source: String,
+    pub outcome: String,
+    pub reason: String,
+    pub created_at: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewChannelReadinessAttempt {
+    pub channel_h: String,
+    pub expect_member: String,
+    pub parent_hint: Option<String>,
+    pub name: Option<String>,
+    pub source: String,
+    pub outcome: String,
+    pub reason: String,
+    pub created_at: u64,
+}
+
 const COLS: &str = "id, channel_h, expect_member, parent_hint, name, source, outcome, reason, \
                    created_at";
 

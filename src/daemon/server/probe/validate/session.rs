@@ -108,9 +108,7 @@ pub(super) fn push_session_check(
 ) {
     let status = if !str_at(evidence, "error").is_empty() {
         "failed"
-    } else if !bool_at(evidence, "found") {
-        "not_proven"
-    } else if !bool_at(evidence, "alive") {
+    } else if !bool_at(evidence, "found") || !bool_at(evidence, "alive") {
         "not_proven"
     } else if bool_at(evidence, "ok") {
         "passed"

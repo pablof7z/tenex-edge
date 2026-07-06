@@ -1,5 +1,4 @@
 //! `probe acid`: verify a live `why` cause with preview counterfactuals.
-
 use super::artifact;
 use super::{required_str, DaemonState};
 use crate::reconcile::journal::{InputFact, StatusDrive};

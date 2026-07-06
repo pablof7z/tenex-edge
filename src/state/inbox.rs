@@ -8,12 +8,12 @@
 //! synthetic `target_session` keys: `processing` while a backend is mutating that
 //! target, `pending` when it should be retried, and `delivered` once that exact
 //! target is complete.
-
 use super::*;
 
 const COLS: &str = "event_id, target_session, state, from_pubkey, channel_h, body, created_at, \
      delivered_at";
 const ORCHESTRATION_PROCESSING_LEASE_SECS: u64 = 10 * 60;
+mod prefix_lookup;
 
 fn row_to_inbox(row: &rusqlite::Row) -> rusqlite::Result<InboxRow> {
     Ok(InboxRow {
@@ -88,36 +88,6 @@ impl Store {
              WHERE target_session=?1 AND state='pending' ORDER BY created_at ASC"
         ))?;
         let rows = stmt.query_map(params![target], row_to_inbox)?;
-        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
-    }
-
-    /// Inbound ledger rows whose event id starts with `prefix`, newest first.
-    /// This is read-only validation/debug evidence; mutation paths still use the
-    /// exact event id plus target session.
-    pub fn inbox_by_event_prefix(&self, prefix: &str) -> Result<Vec<InboxRow>> {
-        let pattern = format!("{}%", prefix.replace(['%', '_'], ""));
-        let mut stmt = self.conn.prepare(&format!(
-            "SELECT {COLS} FROM inbox
-             WHERE event_id LIKE ?1
-             ORDER BY created_at DESC, target_session ASC"
-        ))?;
-        let rows = stmt.query_map(params![pattern], row_to_inbox)?;
-        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
-    }
-
-    /// One inbound ledger row for an event prefix and exact target session.
-    pub fn inbox_by_event_prefix_and_target(
-        &self,
-        prefix: &str,
-        target_session: &str,
-    ) -> Result<Vec<InboxRow>> {
-        let pattern = format!("{}%", prefix.replace(['%', '_'], ""));
-        let mut stmt = self.conn.prepare(&format!(
-            "SELECT {COLS} FROM inbox
-             WHERE event_id LIKE ?1 AND target_session=?2
-             ORDER BY created_at DESC"
-        ))?;
-        let rows = stmt.query_map(params![pattern, target_session], row_to_inbox)?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 

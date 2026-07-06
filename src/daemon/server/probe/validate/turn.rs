@@ -63,7 +63,7 @@ pub(super) fn turn_evidence(state: &Arc<DaemonState>, target: &str, session_id: 
         && !matches!(working_matches, Some(false))
         && !matches!(started_matches, Some(false))
         && !matches!(transcript_matches, Some(false))
-        && !(session_row_found && !session_alive);
+        && (!session_row_found || session_alive);
 
     json!({
         "target": target,
@@ -95,9 +95,9 @@ pub(super) fn push_turn_check(
 ) {
     let status = if !str_at(evidence, "error").is_empty() {
         "failed"
-    } else if bool_at(evidence, "ok") {
-        "passed"
-    } else if bool_at(evidence, "graph_found") && !bool_at(evidence, "session_row_found") {
+    } else if bool_at(evidence, "ok")
+        || (bool_at(evidence, "graph_found") && !bool_at(evidence, "session_row_found"))
+    {
         "passed"
     } else if !bool_at(evidence, "found") {
         "not_proven"

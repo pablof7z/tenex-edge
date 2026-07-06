@@ -3,8 +3,7 @@
 //! and changed labels before any host effect is allowed to run.
 
 use super::{required_str, DaemonState};
-use crate::fabric_context::ViewInputs;
-use crate::reconcile::journal::{HookContextRenderFact, InputFact, StatusDrive};
+use crate::reconcile::journal::{InputFact, StatusDrive};
 use crate::reconcile::labels::{key_path, NodeLabels};
 use crate::reconcile::status::probe::would_publish;
 use anyhow::{Context, Result};
@@ -13,6 +12,8 @@ use std::sync::Arc;
 use trellis_core::{ResourceCommand, TransactionResult};
 
 const STATUS_KIND: u64 = 30315;
+
+mod session_surfaces;
 
 pub(super) fn simulate_value(state: &Arc<DaemonState>, params: &Value) -> Result<Value> {
     let Some(fact) = fact_param(params)? else {
@@ -36,9 +37,9 @@ pub(super) fn simulate_value(state: &Arc<DaemonState>, params: &Value) -> Result
         "cursor" => simulate_cursor_fact(state, fact),
         "outbox" => simulate_outbox_fact(state, fact),
         "subscriptions" => simulate_subscription_fact(state, fact),
-        "session_start" => simulate_session_start_fact(state, fact),
-        "session_watch" => simulate_session_watch_fact(state, fact),
-        "hook_context" => simulate_hook_context_fact(state, fact),
+        "session_start" => session_surfaces::simulate_session_start_fact(state, fact),
+        "session_watch" => session_surfaces::simulate_session_watch_fact(state, fact),
+        "hook_context" => session_surfaces::simulate_hook_context_fact(state, fact),
         other => Err(anyhow::anyhow!("probe simulate: unknown surface `{other}`")),
     }
 }
@@ -146,85 +147,6 @@ fn simulate_subscription_fact(state: &Arc<DaemonState>, fact: InputFact) -> Resu
     }))
 }
 
-fn simulate_session_start_fact(state: &Arc<DaemonState>, fact: InputFact) -> Result<Value> {
-    let mut r = state
-        .session_start
-        .lock()
-        .expect("session_start mutex poisoned");
-    let revision_before = r.revision();
-    let preview = r
-        .preview_fact(&fact)
-        .map_err(|e| anyhow::anyhow!("session_start preview failed: {e:?}"))?
-        .context("probe simulate: fact is not supported by session_start")?;
-    let revision_after = r.revision();
-    Ok(plan_value(PlanJson {
-        surface: "session_start",
-        fact: serde_json::to_value(&fact).unwrap_or(Value::Null),
-        labels: &preview.labels,
-        plan: &preview.result,
-        revision_before,
-        revision_after,
-        wire_kind: None,
-        would_publish: None,
-    }))
-}
-
-fn simulate_session_watch_fact(state: &Arc<DaemonState>, fact: InputFact) -> Result<Value> {
-    let mut r = state
-        .session_watch
-        .lock()
-        .expect("session_watch mutex poisoned");
-    let revision_before = r.revision();
-    let preview = r
-        .preview_fact(&fact)
-        .map_err(|e| anyhow::anyhow!("session_watch preview failed: {e:?}"))?
-        .context("probe simulate: fact is not supported by session_watch")?;
-    let revision_after = r.revision();
-    Ok(plan_value(PlanJson {
-        surface: "session_watch",
-        fact: serde_json::to_value(&fact).unwrap_or(Value::Null),
-        labels: &preview.labels,
-        plan: &preview.result,
-        revision_before,
-        revision_after,
-        wire_kind: None,
-        would_publish: None,
-    }))
-}
-
-fn simulate_hook_context_fact(state: &Arc<DaemonState>, fact: InputFact) -> Result<Value> {
-    let InputFact::HookContextRender(render) = &fact else {
-        anyhow::bail!("probe simulate: fact is not a hook_context fact");
-    };
-    let inputs = decode_hook_inputs(render)?;
-    let mut guard = state
-        .hook_contexts
-        .lock()
-        .expect("hook-context mutex poisoned");
-    let graph = guard.get_mut(&render.session_id).with_context(|| {
-        format!(
-            "probe simulate: hook_context graph for `{}` has not rendered",
-            render.session_id
-        )
-    })?;
-    let revision_before = graph.revision();
-    let preview_result = graph
-        .preview_context(&render.session_id, render.cursor, render.now, inputs)
-        .map(|preview| (preview, revision_before, graph.revision()));
-    let (preview, revision_before, revision_after) =
-        preview_result.map_err(|e| anyhow::anyhow!("hook_context preview failed: {e:?}"))?;
-    Ok(plan_value(PlanJson {
-        surface: "hook_context",
-        fact: serde_json::to_value(&fact).unwrap_or(Value::Null),
-        labels: &preview.labels,
-        plan: &preview.result,
-        revision_before,
-        revision_after,
-        wire_kind: None,
-        would_publish: None,
-    }))
-}
-
 fn simulate_legacy_status(state: &Arc<DaemonState>, params: &Value) -> Result<Value> {
     let surface = params
         .get("surface")
@@ -291,10 +213,6 @@ fn infer_surface(fact: &InputFact) -> Option<&'static str> {
         InputFact::HookContextRender(_) => Some("hook_context"),
         _ => None,
     }
-}
-
-fn decode_hook_inputs(fact: &HookContextRenderFact) -> Result<ViewInputs> {
-    serde_json::from_value(fact.inputs_json.clone()).context("decoding hook_context inputs")
 }
 
 fn normalize_status_fact(fact: InputFact) -> Result<InputFact> {

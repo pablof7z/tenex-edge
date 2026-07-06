@@ -1,5 +1,4 @@
 //! Target-specific evidence collection for non-Trellis validation targets.
-
 use super::report::bool_at;
 use super::{
     alias, awareness, channel, commit, coverage, cursor, event, hook_context, identity, inbox,
@@ -8,7 +7,6 @@ use super::{
 };
 use serde_json::Value;
 use std::sync::Arc;
-
 #[derive(Default)]
 pub(super) struct TargetChecks {
     pub(super) channel_evidence: Option<Value>,
@@ -174,13 +172,11 @@ impl TargetChecks {
             .and_then(|v| v.get("surface").and_then(Value::as_str))
             .or_else(|| self.event_receipt_surface())
     }
-
     pub(super) fn global_seams_checked(&self) -> bool {
         self.coverage_evidence
             .as_ref()
             .is_some_and(|v| v.get("kind").and_then(Value::as_str) == Some("validation_coverage"))
     }
-
     pub(super) fn push_checks(&self, checks: &mut Vec<Value>, limitations: &mut Vec<String>) {
         if let Some(v) = &self.channel_evidence {
             channel::push_channel_check(checks, limitations, v);

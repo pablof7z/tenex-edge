@@ -46,7 +46,7 @@ pub(super) fn cursor_evidence(state: &Arc<DaemonState>, target: &str, session_id
             .as_ref()
             .is_some_and(|row| row.cursor == s.seen_cursor)
     });
-    let ok = graph_found && cursor_matches != Some(false) && !(session_row_found && !session_alive);
+    let ok = graph_found && cursor_matches != Some(false) && (!session_row_found || session_alive);
 
     json!({
         "target": target,
@@ -74,9 +74,9 @@ pub(super) fn push_cursor_check(
 ) {
     let status = if !str_at(evidence, "error").is_empty() {
         "failed"
-    } else if bool_at(evidence, "ok") {
-        "passed"
-    } else if bool_at(evidence, "graph_found") && !bool_at(evidence, "session_row_found") {
+    } else if bool_at(evidence, "ok")
+        || (bool_at(evidence, "graph_found") && !bool_at(evidence, "session_row_found"))
+    {
         "passed"
     } else if !bool_at(evidence, "found") {
         "not_proven"

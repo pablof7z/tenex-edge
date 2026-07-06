@@ -71,11 +71,9 @@ pub(super) fn txn_evidence(
         .iter()
         .map(|row| row.revision)
         .collect::<Vec<_>>();
-    let receipts_match = selected_receipts.iter().all(|receipt| {
-        revisions
-            .iter()
-            .any(|revision| *revision == receipt.revision)
-    });
+    let receipts_match = selected_receipts
+        .iter()
+        .all(|receipt| revisions.contains(&receipt.revision));
     let found = commit_count > 0 || receipt_count > 0;
     let ok = commit_count == 1 && receipts_match;
     let at_delta_ms = selected_commits
@@ -115,9 +113,7 @@ pub(super) fn push_txn_check(
         "passed"
     } else if int_at(evidence, "commit_count") == 0 && int_at(evidence, "receipt_count") > 0 {
         "failed"
-    } else if !bool_at(evidence, "found") {
-        "not_proven"
-    } else if bool_at(evidence, "receipt_revisions_match_commits") {
+    } else if !bool_at(evidence, "found") || bool_at(evidence, "receipt_revisions_match_commits") {
         "not_proven"
     } else {
         "failed"
@@ -165,10 +161,10 @@ fn receipt_json(row: &crate::state::receipts::ReceiptRow) -> Value {
     })
 }
 
-fn select_commits<'a>(
-    rows: &'a [crate::state::trellis_commits::CommitRow],
+fn select_commits(
+    rows: &[crate::state::trellis_commits::CommitRow],
     at: Option<i64>,
-) -> Vec<&'a crate::state::trellis_commits::CommitRow> {
+) -> Vec<&crate::state::trellis_commits::CommitRow> {
     let Some(at) = at else {
         return rows.iter().collect();
     };

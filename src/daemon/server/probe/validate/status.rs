@@ -135,18 +135,14 @@ pub(super) fn push_status_check(
     limitations: &mut Vec<String>,
     evidence: &Value,
 ) {
-    let status = if !str_at(evidence, "error").is_empty() {
-        "failed"
-    } else if bool_at(evidence, "graph_found")
-        && bool_at(evidence, "session_row_found")
-        && !bool_at(evidence, "session_alive")
+    let status = if !str_at(evidence, "error").is_empty()
+        || (bool_at(evidence, "graph_found")
+            && bool_at(evidence, "session_row_found")
+            && !bool_at(evidence, "session_alive"))
+        || (!bool_at(evidence, "graph_found") && bool_at(evidence, "session_alive"))
     {
         "failed"
-    } else if !bool_at(evidence, "graph_found") && bool_at(evidence, "session_alive") {
-        "failed"
-    } else if bool_at(evidence, "graph_found") {
-        "passed"
-    } else if bool_at(evidence, "relay_status_live") {
+    } else if bool_at(evidence, "graph_found") || bool_at(evidence, "relay_status_live") {
         "passed"
     } else {
         "not_proven"

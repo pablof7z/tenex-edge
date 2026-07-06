@@ -5,18 +5,10 @@ use super::DaemonState;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-pub(super) struct RecipientTarget {
-    message_prefix: String,
-    recipient_pubkey: String,
-    target_session: Option<String>,
-}
+mod target;
 
-pub(super) fn recipient_target(target: &str) -> Option<RecipientTarget> {
-    colon_target(target, "recipient:")
-        .or_else(|| colon_target(target, "delivery:"))
-        .or_else(|| path_target(target, "recipient/"))
-        .or_else(|| path_target(target, "delivery/"))
-}
+mod outcome;
+pub(super) use target::{recipient_target, RecipientTarget};
 
 pub(super) fn recipient_evidence(
     state: &Arc<DaemonState>,
@@ -106,17 +98,17 @@ pub(super) fn recipient_evidence(
             .error
             .as_deref()
             .is_some_and(|error| !error.is_empty());
-    let summary = summary(
-        &message.message_id,
-        &parsed.recipient_pubkey,
-        resolved_target.as_deref(),
-        !matching_rows.is_empty(),
+    let summary = outcome::summary(&outcome::RecipientSummary {
+        message_id: &message.message_id,
+        pubkey: &parsed.recipient_pubkey,
+        target_session: resolved_target.as_deref(),
+        found: !matching_rows.is_empty(),
         delivered,
         pending,
         failed_sync,
-        recipients.len(),
-    );
-    let reason = reason(
+        recipient_count: recipients.len(),
+    });
+    let reason = outcome::reason(
         !matching_rows.is_empty(),
         delivered,
         pending,
@@ -208,106 +200,6 @@ pub(super) fn push_recipient_check(
             "recipient edge is delivered, but no relay profile is cached for the pubkey".into(),
         );
     }
-}
-
-fn colon_target(target: &str, prefix: &str) -> Option<RecipientTarget> {
-    let rest = target.strip_prefix(prefix)?;
-    let mut parts = rest.splitn(3, ':');
-    let message_prefix = parts.next()?;
-    let recipient_pubkey = parts.next()?;
-    let target_session = parts.next();
-    build_target(message_prefix, recipient_pubkey, target_session)
-}
-
-fn path_target(target: &str, prefix: &str) -> Option<RecipientTarget> {
-    let rest = target.strip_prefix(prefix)?;
-    let mut parts = rest.splitn(3, '/');
-    let message_prefix = parts.next()?;
-    let recipient_pubkey = parts.next()?;
-    let target_session = parts.next();
-    build_target(message_prefix, recipient_pubkey, target_session)
-}
-
-fn build_target(
-    message_prefix: &str,
-    recipient_pubkey: &str,
-    target_session: Option<&str>,
-) -> Option<RecipientTarget> {
-    (!message_prefix.trim().is_empty() && !recipient_pubkey.trim().is_empty()).then(|| {
-        RecipientTarget {
-            message_prefix: message_prefix.to_string(),
-            recipient_pubkey: recipient_pubkey.to_string(),
-            target_session: target_session
-                .filter(|session| !session.trim().is_empty())
-                .map(str::to_string),
-        }
-    })
-}
-
-fn summary(
-    message_id: &str,
-    pubkey: &str,
-    target_session: Option<&str>,
-    found: bool,
-    delivered: bool,
-    pending: bool,
-    failed_sync: bool,
-    recipient_count: usize,
-) -> String {
-    let suffix = target_session
-        .map(|session| format!(" session `{session}`"))
-        .unwrap_or_default();
-    if failed_sync {
-        return format!(
-            "message `{message_id}` failed before recipient `{pubkey}` could be proven"
-        );
-    }
-    if delivered {
-        return format!("message `{message_id}` was delivered to recipient `{pubkey}`{suffix}");
-    }
-    if pending {
-        return format!(
-            "message `{message_id}` addresses recipient `{pubkey}`{suffix}, delivery pending"
-        );
-    }
-    if found {
-        return format!("message `{message_id}` has recipient `{pubkey}`{suffix}");
-    }
-    if recipient_count > 0 {
-        format!("message `{message_id}` does not address recipient `{pubkey}`{suffix}")
-    } else {
-        format!("message `{message_id}` has no durable recipient edges")
-    }
-}
-
-fn reason(
-    found: bool,
-    delivered: bool,
-    pending: bool,
-    failed_sync: bool,
-    recipient_count: usize,
-    pubkey_row_count: usize,
-    target_session_requested: bool,
-) -> &'static str {
-    if failed_sync {
-        return "message row records a failed/rejected sync state";
-    }
-    if delivered {
-        return "message_recipients contains a delivered edge for this recipient";
-    }
-    if pending {
-        return "message_recipients contains the recipient edge, but delivered_at is not set";
-    }
-    if found {
-        return "message_recipients contains the recipient edge";
-    }
-    if target_session_requested && pubkey_row_count > 0 {
-        return "recipient pubkey is present, but not for the requested target session";
-    }
-    if recipient_count > 0 {
-        return "message has hydrated recipient edges and this pubkey is absent";
-    }
-    "recipient edges are not hydrated for this message"
 }
 
 fn is_failed_state(state: &str) -> bool {

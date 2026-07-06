@@ -6,6 +6,20 @@
 
 use super::*;
 
+/// A relay event held out of the normal cache until admission prerequisites
+/// become true, such as channel roster hydration for inbound chat.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QuarantinedEvent {
+    pub id: String,
+    pub kind: u32,
+    pub pubkey: String,
+    pub created_at: u64,
+    pub channel_h: String,
+    pub event_json: String,
+    pub reason: String,
+    pub quarantined_at: u64,
+}
+
 fn row_to_quarantined_event(row: &rusqlite::Row) -> rusqlite::Result<QuarantinedEvent> {
     Ok(QuarantinedEvent {
         id: row.get(0)?,
