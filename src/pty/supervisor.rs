@@ -86,9 +86,14 @@ pub fn run_supervisor(args: SupervisorArgs) -> Result<()> {
                 stream
                     .set_nonblocking(false)
                     .context("setting accepted pty client socket blocking")?;
-                if let Err(e) =
-                    handle_client(stream, &pair.master, &writer, &killer, &clients, &backlog)
-                {
+                if let Err(e) = handle_client(
+                    stream,
+                    pair.master.as_ref(),
+                    &writer,
+                    &killer,
+                    &clients,
+                    &backlog,
+                ) {
                     eprintln!("[tenex-edge pty supervisor] client error: {e:#}");
                 }
             }
@@ -108,7 +113,7 @@ type Clients = Arc<Mutex<Vec<Client>>>;
 
 fn handle_client(
     stream: UnixStream,
-    master: &Box<dyn portable_pty::MasterPty + Send>,
+    master: &(dyn portable_pty::MasterPty + Send),
     writer: &Arc<Mutex<Box<dyn Write + Send>>>,
     killer: &Arc<Mutex<Box<dyn portable_pty::ChildKiller + Send + Sync>>>,
     clients: &Clients,

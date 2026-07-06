@@ -14,7 +14,13 @@ quote_env() {
 }
 
 bridge_host() {
-  ipconfig getifaddr bridge100 2>/dev/null || echo 192.168.64.1
+  local host
+  host="$(ipconfig getifaddr bridge100 2>/dev/null || true)"
+  if [[ -n "${host}" ]]; then
+    printf '%s\n' "${host}"
+  else
+    printf '%s\n' "127.0.0.1"
+  fi
 }
 
 pick_port() {
@@ -50,7 +56,6 @@ wait_for_relay() {
 }
 
 need curl
-need go
 need jq
 need lsof
 need nak
@@ -59,7 +64,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 
 RUN_ID="${TENEX_EDGE_DEV_RUN_ID:-$(date +%Y%m%d-%H%M%S)}"
-CROISSANT_DIR="${TENEX_EDGE_DEV_CROISSANT_DIR:-${HOME}/Work/croissant}"
+default_croissant_dir() {
+  if [[ -x /tmp/croissant-smallmap/croissant ]]; then
+    printf '%s\n' /tmp/croissant-smallmap
+  else
+    printf '%s\n' "${HOME}/Work/croissant"
+  fi
+}
+CROISSANT_DIR="${TENEX_EDGE_DEV_CROISSANT_DIR:-$(default_croissant_dir)}"
 RELAY_HOST="${TENEX_EDGE_DEV_RELAY_HOST:-$(bridge_host)}"
 RELAY_PORT="${TENEX_EDGE_DEV_RELAY_PORT:-$(pick_port)}"
 RELAY_WS="ws://${RELAY_HOST}:${RELAY_PORT}"
@@ -95,6 +107,7 @@ fi
 OWNER_PK="$(nak key public "$(cat "${OWNER_SK_FILE}")")"
 
 if [[ ! -x "${CROISSANT_DIR}/croissant" || "${TENEX_EDGE_DEV_FORCE_RELAY_BUILD:-0}" == "1" ]]; then
+  need go
   (cd "${CROISSANT_DIR}" && CGO_ENABLED=1 go build -o ./croissant)
 fi
 

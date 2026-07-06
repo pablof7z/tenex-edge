@@ -60,11 +60,11 @@ async fn open_agent_session(
 fn prepend_env(mut command: Vec<String>, key: &str, value: &str) -> Vec<String> {
     let mut wrapped = vec![
         "env".to_string(),
-        format!("{key}={value}"),
-        "-u".to_string(),
-        "CLAUDE_CODE_SESSION_ID".to_string(),
         "-u".to_string(),
         "CLAUDE_CODE_CHILD_SESSION".to_string(),
+        "-u".to_string(),
+        "CLAUDE_CODE_SESSION_ID".to_string(),
+        format!("{key}={value}"),
     ];
     wrapped.append(&mut command);
     wrapped
@@ -132,4 +132,29 @@ pub async fn resume_agent_in_channel(
     // session_id, so select_session_signer recovers its ordinal from the existing
     // (pubkey,h) route — no explicit hint needed.
     open_agent_session(slug, project, &abs_path, &resume_command, Some(group), None).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::prepend_env;
+
+    #[test]
+    fn env_options_precede_assignments_for_bsd_env() {
+        let got = prepend_env(vec!["sh".into(), "-lc".into(), "true".into()], "ORD", "1");
+
+        assert_eq!(
+            got,
+            vec![
+                "env",
+                "-u",
+                "CLAUDE_CODE_CHILD_SESSION",
+                "-u",
+                "CLAUDE_CODE_SESSION_ID",
+                "ORD=1",
+                "sh",
+                "-lc",
+                "true"
+            ]
+        );
+    }
 }

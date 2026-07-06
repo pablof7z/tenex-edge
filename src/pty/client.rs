@@ -53,7 +53,7 @@ pub fn inject(id_or_path: &str, text: &str, bracketed: bool, submit: bool) -> Re
 fn send_inject(id_or_path: &str, payload: &[u8]) -> Result<()> {
     let mut stream = connect(id_or_path)?;
     writeln!(stream, "INJECT {}", payload.len())?;
-    stream.write_all(&payload)?;
+    stream.write_all(payload)?;
     stream.flush()?;
     Ok(())
 }

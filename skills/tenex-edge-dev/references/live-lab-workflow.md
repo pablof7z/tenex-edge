@@ -67,7 +67,8 @@ LAB_ENV=/tmp/.../lab.env
 
 The relay command:
 
-- uses `${HOME}/Work/croissant` unless `TENEX_EDGE_DEV_CROISSANT_DIR` is set
+- uses `/tmp/croissant-smallmap` when present, else `${HOME}/Work/croissant`;
+  set `TENEX_EDGE_DEV_CROISSANT_DIR` to override
 - binds to `TENEX_EDGE_DEV_RELAY_HOST` or the Apple container bridge IP
 - uses `TENEX_EDGE_DEV_RELAY_PORT` or an unused high port from
   `TENEX_EDGE_DEV_RELAY_PORT_BASE` (default `19888`)

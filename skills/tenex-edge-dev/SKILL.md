@@ -51,8 +51,8 @@ Read these files from this skill directory as needed:
   values, or raw private keys in the transcript or final report.
 - Keep fabric state isolated. Generated state belongs under `.container-state/`
   or a temp live-lab work directory, not in the host `~/.tenex-edge`.
-- Run croissant on the host at `${HOME}/Work/croissant`, or set
-  `TENEX_EDGE_DEV_CROISSANT_DIR` for another checkout.
+- Run croissant on the host at `/tmp/croissant-smallmap` when present, else
+  `${HOME}/Work/croissant`; set `TENEX_EDGE_DEV_CROISSANT_DIR` to override.
   Containers point at the host relay URL; croissant itself does not need a
   container.
 - Use the cheapest useful model for each provider. The lab only needs enough
