@@ -2,7 +2,7 @@
 //!
 //! This surface is capped at advisory: Trellis derives staged intents that
 //! `rpc_session_start` consults, but the daemon still performs every DB, relay,
-//! tmux, signer, and spawn effect imperatively.
+//! endpoint, signer, and spawn effect imperatively.
 
 mod model;
 pub(crate) mod replay;
@@ -37,7 +37,7 @@ pub struct ChannelReadyIntent {
     pub channel_h: String,
     pub work_root: String,
     pub room_parent: Option<String>,
-    pub base_pubkey: String,
+    pub signer_pubkey: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -55,7 +55,7 @@ pub struct SessionStartPlan {
     pub row: SessionRowIntent,
     pub channel_ready: Option<ChannelReadyIntent>,
     pub admit_pubkey: Option<String>,
-    pub tmux_pane: Option<String>,
+    pub pty_session: Option<String>,
     pub ring_doorbell: bool,
     pub notify_outbox: bool,
     pub ensure_subscription: bool,
@@ -278,10 +278,10 @@ pub(crate) fn plan_from_request(req: &SessionStartRequestFact) -> SessionStartPl
             channel_h: req.channel_h.clone(),
             work_root: req.work_root.clone(),
             room_parent: req.room_parent.clone(),
-            base_pubkey: req.base_pubkey.clone(),
+            signer_pubkey: req.signer_pubkey.clone(),
         }),
         admit_pubkey: (active && req.signer_ordinal > 0).then(|| req.signer_pubkey.clone()),
-        tmux_pane: req.tmux_pane.clone(),
+        pty_session: req.pty_session.clone(),
         ring_doorbell: req.ring_doorbell,
         notify_outbox: active,
         ensure_subscription: active,

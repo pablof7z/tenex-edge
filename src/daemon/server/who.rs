@@ -14,7 +14,7 @@ pub(in crate::daemon::server) struct WhoParams {
     #[serde(default, alias = "env_session")]
     harness_session: Option<String>,
     #[serde(default)]
-    tmux_pane: Option<String>,
+    pty_session: Option<String>,
     #[serde(default)]
     watch_pid: Option<i32>,
     #[serde(default)]
@@ -36,7 +36,7 @@ pub(in crate::daemon::server) fn rpc_who(
     let anchor = CallerAnchor::from_params(params);
     let caller_rec = if p.all_projects {
         None
-    } else if p.tmux_pane.as_deref().filter(|s| !s.is_empty()).is_some()
+    } else if p.pty_session.as_deref().filter(|s| !s.is_empty()).is_some()
         || p.harness_session
             .as_deref()
             .filter(|s| !s.is_empty())
@@ -92,7 +92,6 @@ pub(in crate::daemon::server) fn rpc_who(
             .as_ref()
             .map(|i| (i.display_slug(), i.pubkey.clone()))
             .unwrap_or_default();
-        let edge = crate::config::edge_home();
         let fabric = state.with_store(|s| {
             crate::fabric_context::render_fabric_context(
                 s,
@@ -104,7 +103,6 @@ pub(in crate::daemon::server) fn rpc_who(
                     self_slug: &self_slug,
                     self_pubkey: &self_pubkey,
                     local_host: &host,
-                    edge_home: Some(&edge),
                     forced_messages: &[],
                     warnings: &[],
                     force: true,
@@ -125,7 +123,6 @@ pub(in crate::daemon::server) fn rpc_who(
                             self_slug: &self_slug,
                             self_pubkey: &self_pubkey,
                             local_host: &host,
-                            edge_home: Some(&edge),
                             forced_messages: &[],
                             warnings: &[],
                             force: true,
@@ -162,7 +159,6 @@ pub(in crate::daemon::server) fn rpc_who(
         // the same fabric renderer applied once per root project instead of
         // falling back to the old snapshot table (issue: `who` and
         // `who --all-projects` must not diverge in output format).
-        let edge = crate::config::edge_home();
         let roots = state.with_store(project_roots)?;
         let fabric = state.with_store(|s| {
             crate::fabric_context::render_fabric_all_projects(s, &roots, now, &host)
@@ -174,7 +170,6 @@ pub(in crate::daemon::server) fn rpc_who(
                 &roots,
                 now,
                 &host,
-                Some(&edge),
                 p.human_color,
             )
         });

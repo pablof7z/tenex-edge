@@ -18,7 +18,7 @@ pub(in crate::daemon::server) fn rpc_statusline(
     let p: StatuslineParams = serde_json::from_value(params.clone()).unwrap_or_default();
     // Session ID is the only locator needed. Fail open (empty bar) when it is
     // absent or stale — the next session_start reassert will refresh @te_session
-    // on the tmux session and the bar recovers on the next status-interval tick.
+    // on the host integration and the bar recovers on the next refresh tick.
     let session_id = p.session.as_deref().filter(|s| !s.is_empty());
     let rec = match session_id {
         Some(id) => match state.with_store(|s| s.get_session(id)).ok().flatten() {

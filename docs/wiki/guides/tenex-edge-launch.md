@@ -2,7 +2,7 @@
 title: Tenex-Edge Launch
 slug: tenex-edge-launch
 topic: tenex-edge
-summary: When `tenex-edge launch` spawns an agent harness in tmux, `default-terminal` and `terminal-overrides` are set globally (`-g`) before `new-session` forks the chi
+summary: When `tenex-edge launch` spawns an agent harness in pty, `default-terminal` and `terminal-overrides` are set globally (`-g`) before `new-session` forks the chi
 tags:
   - capture
 volatility: warm
@@ -24,13 +24,13 @@ Agent launch commands are stored as named entries in `~/.tenex-edge/agents/<slug
 
 `tenex-edge launch <agent>` chooses the command before calling the daemon. A single configured command launches directly. Multiple configured commands open a TTY picker unless `--command-name <name>` selects one explicitly. `-c/--command <command>` remains a one-shot full argv override. If no commands exist, interactive launch suggests commands from other agents' `commands` entries with conservative slug/path adaptation; if no local suggestions exist, it suggests built-in harness commands.
 
-## tmux Environment Inheritance
+## pty Environment Inheritance
 
-When `tenex-edge launch` spawns an agent harness in tmux, `default-terminal` and `terminal-overrides` are set globally (`-g`) before `new-session` forks the child process so the child inherits `tmux-256color` and color support from the first frame. The `terminal-overrides` value uses the format `*:Tc:RGB:extkeys` (term-pattern-prefixed capability tokens), not the previous orphaned format `,*:Tc,RGB,extkeys`.
+When `tenex-edge launch` spawns an agent harness in pty, `default-terminal` and `terminal-overrides` are set globally (`-g`) before `new-session` forks the child process so the child inherits `pty-256color` and color support from the first frame. The `terminal-overrides` value uses the format `*:Tc:RGB:extkeys` (term-pattern-prefixed capability tokens), not the previous orphaned format `,*:Tc,RGB,extkeys`.
 
 With these settings in place, the fixed `tenex-edge launch` window renders agent harness colors identically to a direct launch — including the colored robot logo, orange banner, and yellow warning.
 
-`@te_session` is a tmux session option stamped by the daemon that the agent harness expects to be set. When correctly configured, the status line reads `claude@isolated-test-mac project project [idle]` instead of showing a red `@te_session not set` error.
+`@te_session` is a pty session option stamped by the daemon that the agent harness expects to be set. When correctly configured, the status line reads `claude@isolated-test-mac project project [idle]` instead of showing a red `@te_session not set` error.
 
 The `tenex-edge launch` status line displays the agent identifier and session state in the format `<agent>@<host> <project> <project> [idle]` (e.g. `claude@isolated-test-mac project project [idle]`).
 
@@ -42,4 +42,4 @@ Mention injection into a `tenex-edge launch` agent must occur in the `userPrompt
 
 ## Agent Roles
 
-Agent1 is a raw `claude` session (direct mode, host-tmux-observed but not daemon-anchored) that the user types the initial instruction into. Agent2 is a `claude` session launched via `tenex-edge launch` that is expected to receive live daemon-pushed, attributed mentions. <!-- [^fea53-1e000] -->
+Agent1 is a raw `claude` session (direct mode, host-pty-observed but not daemon-anchored) that the user types the initial instruction into. Agent2 is a `claude` session launched via `tenex-edge launch` that is expected to receive live daemon-pushed, attributed mentions. <!-- [^fea53-1e000] -->

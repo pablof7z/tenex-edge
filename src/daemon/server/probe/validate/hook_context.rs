@@ -203,7 +203,7 @@ fn summary(
     if rendered_unconfirmed_channel {
         format!("hook context `{session_id}` rendered an unconfirmed channel as active")
     } else if rendered_legacy_agents_roster {
-        format!("hook context `{session_id}` rendered local config as an agent roster")
+        format!("hook context `{session_id}` rendered legacy local config as an agent roster")
     } else if !member_roster_corroborated {
         format!("hook context `{session_id}` rendered an uncorroborated member roster")
     } else if revision_matches {
@@ -230,7 +230,7 @@ fn reason(
     if rendered_unconfirmed_channel {
         "hook context must render missing/unverified channels as degraded warnings, not normal channel blocks"
     } else if rendered_legacy_agents_roster {
-        "configured local agents must render as local-agents; active channel roster must come from confirmed members/presence"
+        "configured local agents must render as available-agents; active channel roster must come from confirmed members/presence"
     } else if !member_roster_corroborated {
         "hook context rendered members, but the session channel does not have a hydrated relay membership snapshot"
     } else if revision_matches {

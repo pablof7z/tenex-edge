@@ -1,90 +1,11 @@
-/// CLI verb handlers for tmux commands
 use anyhow::{Context as _, Result};
-
-// ── status ────────────────────────────────────────────────────────────────────
-
-pub(super) async fn tmux_status() -> Result<()> {
-    use owo_colors::OwoColorize as _;
-
-    let v = crate::daemon::blocking::call("tmux_status", serde_json::json!({}))
-        .context("tmux_status RPC")?;
-
-    let endpoints = v["endpoints"].as_array().cloned().unwrap_or_default();
-
-    if endpoints.is_empty() {
-        println!("No tmux endpoints registered.");
-        return Ok(());
-    }
-
-    println!(
-        "{:<22} {:<8} {:<12} {}",
-        "session".bold(),
-        "pane".bold(),
-        "command".bold(),
-        "alive".bold()
-    );
-    for ep in &endpoints {
-        let sid = ep["session_id"].as_str().unwrap_or("");
-        let pane = ep["pane_id"].as_str().unwrap_or("");
-        let cmd = ep["pane_command"].as_str().unwrap_or("");
-        let alive = ep["alive"].as_bool().unwrap_or(false);
-        let alive_str = if alive {
-            "yes".green().to_string()
-        } else {
-            "DEAD".red().to_string()
-        };
-        println!("{sid:<22} {pane:<8} {cmd:<12} {alive_str}");
-    }
-    Ok(())
-}
-
-// ── send (manual doorbell) ────────────────────────────────────────────────────
-
-pub(super) async fn tmux_send(session: String) -> Result<()> {
-    let v = crate::daemon::blocking::call("tmux_send", serde_json::json!({ "session": session }))
-        .context("tmux_send RPC")?;
-
-    let injected = v["injected"].as_bool().unwrap_or(false);
-    if injected {
-        println!("Doorbell injected.");
-    } else {
-        let reason = v["reason"].as_str().unwrap_or("unknown");
-        println!("Doorbell not sent: {reason}");
-    }
-    Ok(())
-}
-
-// ── spawn ─────────────────────────────────────────────────────────────────────
-
-pub(super) async fn tmux_spawn(agent: String, project: Option<String>) -> Result<()> {
-    let project = match project {
-        Some(p) => p,
-        None => crate::project::resolve_or_bail(&std::env::current_dir().unwrap_or_default())?,
-    };
-    let cwd = std::env::current_dir()
-        .ok()
-        .map(|p| p.to_string_lossy().to_string());
-    let v = crate::daemon::blocking::call(
-        "tmux_spawn",
-        serde_json::json!({ "agent": agent, "project": project, "command": [], "cwd": cwd }),
-    )
-    .context("tmux_spawn RPC")?;
-
-    let pane_id = v["pane_id"].as_str().unwrap_or("?");
-    println!("Spawned pane {pane_id} for agent {agent} in project {project}.");
-    Ok(())
-}
 
 // ── launch ───────────────────────────────────────────────────────────────────
 
 /// Launch a fresh harness session and hand the current terminal to it.
 ///
-/// Identical to `tmux_spawn` (same `tmux_spawn` RPC, same transparent-session
-/// options applied inside `open_agent_session`) — the only difference is that
-/// `launch` then attaches the current terminal to the new session, while
-/// `tmux_spawn` just prints the pane id. Both paths produce a session with the
-/// tmux chrome already hidden and the prefix key unbound, so no per-verb
-/// `hide_session_chrome` step is needed here.
+/// Spawns an independent portable-pty supervisor, starts the selected harness
+/// inside it, then attaches the current terminal to the new session.
 pub(crate) async fn launch(
     agent: String,
     project: Option<String>,
@@ -104,7 +25,7 @@ pub(crate) async fn launch(
     };
     let extra_args =
         super::launch_command::extra_args_without_duplicate_suffix(&base_command, extra_args);
-    let full_command = super::launch_command::append_launch_args(base_command.clone(), &extra_args);
+    let command = super::launch_command::append_launch_args(base_command.clone(), &extra_args);
     // Show the interactive picker only when --channel "" is explicitly passed.
     // A bare `tenex-edge launch <agent>` with no --channel defaults to the
     // project root channel.
@@ -150,32 +71,30 @@ pub(crate) async fn launch(
     let cwd = std::env::current_dir()
         .ok()
         .map(|p| p.to_string_lossy().to_string());
-    let v = crate::daemon::blocking::call(
-        "tmux_spawn",
-        serde_json::json!({
-            "agent": agent,
-            "project": project,
-            "channel": channel,
-            "command": extra_args,
-            "base_command": base_command,
-            "cwd": cwd,
-        }),
-    )
-    .context("tmux_spawn RPC")?;
-
-    let pane_id = v["pane_id"]
-        .as_str()
-        .context("tmux_spawn response did not include pane_id")?;
-    if crate::cli::tmux_cli::attach::session_of_pane(pane_id).is_none() {
-        eprintln!("Launch command exited before tenex-edge could attach.");
-        eprintln!(
-            "Command: {}",
-            super::launch_command::display_argv(&full_command)
-        );
-        eprintln!("Run that command directly to see the harness startup error.");
+    let cwd_path = cwd
+        .as_deref()
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+    let meta = crate::pty::spawn_session(crate::pty::SpawnSessionArgs {
+        id: None,
+        agent: agent.clone(),
+        project,
+        cwd: cwd_path,
+        channel,
+        command,
+    })?;
+    eprintln!("[tenex-edge pty] session: {}", meta.id);
+    eprintln!("[tenex-edge pty] detach: close this attach terminal");
+    eprintln!(
+        "[tenex-edge pty] reattach: tenex-edge pty attach {}",
+        meta.id
+    );
+    use std::io::IsTerminal;
+    if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
+        eprintln!("[tenex-edge pty] attach skipped: not running on a TTY");
         return Ok(());
     }
-    crate::cli::tmux_cli::attach::attach_pane(pane_id)
+    crate::pty::attach(&meta.socket)
 }
 
 /// Fetch all rooms under `project` and present an interactive fuzzy picker.
@@ -256,42 +175,4 @@ async fn create_channel_interactive(
         .to_string();
     eprintln!("created channel {child_h}");
     Ok(child_h)
-}
-
-// ── attach ────────────────────────────────────────────────────────────────────
-
-pub(super) async fn tmux_attach(session: String) -> Result<()> {
-    super::attach::attach_session(&session)
-}
-
-// ── resume ────────────────────────────────────────────────────────────────────
-
-pub(super) async fn tmux_resume(session: String) -> Result<()> {
-    let pane = super::attach::resume_to_pane(&session)?;
-    match pane {
-        Some(pane_id) => super::attach::attach_pane(&pane_id),
-        None => Ok(()),
-    }
-}
-
-/// Session id of the currently-selected row IF it is resumable — any local Live
-/// row (attachable or not: an in-tmux session can still be replayed) or any
-/// Resumable row. `None` for Spawnable rows. The daemon makes the final call on
-/// whether a token exists; this just maps cursor → session id.
-pub(super) fn selected_resume_sid(
-    live: &[&super::tui_model::LiveRow],
-    spawnable_count: usize,
-    resumable: &[&super::tui_model::ResumeRow],
-    selected: usize,
-) -> Option<String> {
-    if selected < live.len() {
-        return Some(live[selected].session_id.clone());
-    }
-    let resume_base = live.len() + spawnable_count;
-    if selected >= resume_base {
-        return resumable
-            .get(selected - resume_base)
-            .map(|r| r.session_id.clone());
-    }
-    None
 }

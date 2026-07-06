@@ -19,7 +19,6 @@ RUN apt-get update \
         npm \
         pkg-config \
         sqlite3 \
-        tmux \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=nak-builder /go/bin/nak /usr/local/bin/nak

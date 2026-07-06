@@ -14,6 +14,7 @@ use crate::domain::{ChatMessage, Profile};
 use crate::state::{RelayEvent, Store};
 use nostr_sdk::Event;
 
+mod agent_roster;
 mod messages;
 
 pub struct Nip29Materializer;
@@ -149,6 +150,10 @@ impl Nip29Materializer {
         }
     }
 
+    pub fn materialize_agent_roster(store: &Store, event: &Event) {
+        agent_roster::materialize(store, event);
+    }
+
     // ── relay_events (every other kind, verbatim) ────────────────────────────
 
     /// Cache one relay event verbatim in `relay_events` (NIP-01 replacement is
@@ -160,7 +165,7 @@ impl Nip29Materializer {
 
     /// Route a chat message into the `inbox` ledger for every alive local session
     /// whose agent is explicitly p-tagged in the event. Non-mention channel chat
-    /// stays in `relay_events` for ambient context but does not ring the tmux
+    /// stays in `relay_events` for ambient context but does not ring the direct
     /// doorbell. Returns `true` if at least one new inbox row was enqueued.
     /// Idempotent: a duplicate `(event_id, target_session)` is ignored by the store.
     pub fn route_chat(store: &Store, event: &Event, chat: &ChatMessage) -> bool {

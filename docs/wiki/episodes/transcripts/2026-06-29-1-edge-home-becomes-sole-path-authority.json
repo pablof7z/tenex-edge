@@ -37,7 +37,7 @@
   ],
   [
     "assistant",
-    "Confirmed that `TENEX_EDGE_HOME` is explicitly forwarded into spawned tmux sessions, so the agent and all harness hooks see the same value."
+    "Confirmed that `TENEX_EDGE_HOME` is explicitly forwarded into spawned pty sessions, so the agent and all harness hooks see the same value."
   ],
   [
     "user",

@@ -1,4 +1,3 @@
-use crate::tmux::pane::tmux_available;
 use anyhow::{Context, Result};
 
 use crate::identity::LaunchCommand;
@@ -6,8 +5,6 @@ use crate::identity::LaunchCommand;
 pub(super) struct SpawnDef {
     /// Harness slug (matches agent_slug / TENEX_EDGE_AGENT).
     pub(super) slug: &'static str,
-    /// Window name shown in the tmux status bar.
-    pub(super) window_name: &'static str,
     /// Command to run (first word of the exec, plus args).
     command: &'static [&'static str],
 }
@@ -29,22 +26,18 @@ pub(super) enum ResumeShape {
 static SPAWN_DEFS: &[SpawnDef] = &[
     SpawnDef {
         slug: "claude",
-        window_name: "claude·tenex-edge",
         command: &["claude"],
     },
     SpawnDef {
         slug: "codex",
-        window_name: "codex·tenex-edge",
         command: &["codex"],
     },
     SpawnDef {
         slug: "opencode",
-        window_name: "opencode·tenex-edge",
         command: &["opencode"],
     },
     SpawnDef {
         slug: "grok",
-        window_name: "grok·tenex-edge",
         command: &["grok"],
     },
 ];
@@ -107,12 +100,8 @@ pub(super) fn build_resume_command(
 }
 
 /// Returns `(slug, display_command, byline)` tuples for agents tenex-edge has
-/// an identity for. Returns an empty vec when tmux is absent.
+/// an identity for.
 pub fn spawnable_agents() -> Vec<(String, String, Option<String>)> {
-    if !tmux_available() {
-        tracing::debug!("spawnable_agents: tmux not available");
-        return Vec::new();
-    }
     let edge_home = crate::config::edge_home();
     let agents = crate::identity::list_local_agents(&edge_home);
     tracing::debug!(count = agents.len(), "spawnable_agents: agents in store");

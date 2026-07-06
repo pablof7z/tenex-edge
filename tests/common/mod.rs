@@ -74,6 +74,10 @@ fn nip29_relay_bin() -> PathBuf {
     if let Ok(p) = std::env::var("NIP29_RELAY_BIN") {
         return PathBuf::from(p);
     }
+    let smallmap = PathBuf::from("/tmp/croissant-smallmap/croissant");
+    if smallmap.exists() {
+        return smallmap;
+    }
     let home = std::env::var("HOME").unwrap_or_default();
     PathBuf::from(home).join("Work/croissant/croissant")
 }

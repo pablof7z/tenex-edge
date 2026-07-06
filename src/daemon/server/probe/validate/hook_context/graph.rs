@@ -29,7 +29,7 @@ pub(super) fn evidence(
         .is_some_and(|text| renders_missing_channel_warning(text, channel_h));
     let rendered_local_agents = text
         .as_ref()
-        .is_some_and(|text| text.contains("<local-agents>"));
+        .is_some_and(|text| text.contains("<available-agents>"));
     let rendered_member_roster = text.as_ref().is_some_and(|text| text.contains("<members>"));
     let rendered_legacy_agents_roster = text.as_ref().is_some_and(|text| text.contains("<agents>"));
     json!({

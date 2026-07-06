@@ -92,7 +92,7 @@ render regression fails the build.
 ## Adoption boundary left imperative
 
 `rpc_session_start` remains effect-imperative by design: it performs DB writes,
-relay checks, signer admission, tmux stamping, subscriptions, replay, and engine
+relay checks, signer admission, pty stamping, subscriptions, replay, and engine
 spawn. It is nevertheless advisory now: `InputFact::SessionStartRequested`
 derives the staged row/check/admit/subscription/spawn intents, the RPC executes
 that plan, and `SessionStarted`/`SessionStartFailed` outcome facts feed the graph

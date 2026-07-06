@@ -8,18 +8,19 @@ use std::path::Path;
 /// canonical session id the daemon resolved for it.
 ///
 /// Hooks no longer decide identity: they describe what they observed (harness,
-/// the harness-owned external id if any, the resume token, tmux pane, watched
-/// pid, cwd) and the daemon resolves the canonical id — minting a new one,
+/// the harness-owned external id if any, the resume token, hosted PTY session,
+/// watched pid, cwd) and the daemon resolves the canonical id — minting a new one,
 /// reattaching to an existing one via an alias, or superseding a stale one.
 ///
 /// `harness_session_id` is `Some` only for harnesses that own an id of their own
 /// (claude-code, codex); it is `None` for programmatic hosts (opencode) whose
-/// only stable anchors are the resume token / tmux pane / watched pid. Each
+/// only stable anchors are the resume token / hosted PTY session / watched pid. Each
 /// present locator becomes a session alias the registry uses to reattach future
 /// starts to the same canonical id.
 ///
-/// `tmux_pane` / `tmux_socket` are read from the hook's environment so the daemon
-/// can register a tmux endpoint and (via the pane) reattach a resumed session.
+/// `pty_session` / `pty_socket` are read from the hook's environment so the
+/// daemon can register a local attach/injection endpoint and reattach a resumed
+/// session.
 pub(super) async fn report_observation(
     host: &HostDef,
     agent_slug: &str,
@@ -29,11 +30,11 @@ pub(super) async fn report_observation(
     watch_pid: Option<i32>,
     provision_command: Option<Vec<String>>,
 ) -> Result<String> {
-    let tmux_pane = std::env::var("TMUX_PANE").ok().filter(|s| !s.is_empty());
-    // $TMUX is "socket_path,server_pid,session_id" — extract only the socket path.
-    let tmux_socket = std::env::var("TMUX")
+    let pty_session = std::env::var("TENEX_EDGE_PTY_SESSION")
         .ok()
-        .and_then(|v| v.split(',').next().map(str::to_string))
+        .filter(|s| !s.is_empty());
+    let pty_socket = std::env::var("TENEX_EDGE_PTY_SOCKET")
+        .ok()
         .filter(|s| !s.is_empty());
     let params = serde_json::json!({
         "agent": agent_slug,
@@ -42,13 +43,13 @@ pub(super) async fn report_observation(
         "resume_id": resume_id,
         "cwd": cwd.to_string_lossy(),
         "watch_pid": watch_pid,
-        "tmux_pane": tmux_pane,
-        "tmux_socket": tmux_socket,
+        "pty_session": pty_session,
+        "pty_socket": pty_socket,
         // Real argv of a direct `claude --agent <slug>` invocation, detected
         // when TENEX_EDGE_AGENT was absent. Only used by the daemon to seed a
         // brand-new identity's spawn command; ignored for an existing one.
         "provision_command": provision_command,
-        // NIP-29 subgroup id this pane was spawned into (TENEX_EDGE_CHANNEL), when
+        // NIP-29 subgroup id this hosted process was spawned into, when
         // present. The daemon stores the session under this `h` instead of the
         // cwd-derived project so its presence/chat publish into the subgroup.
         "channel": crate::cli::channel_env(),

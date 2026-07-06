@@ -302,12 +302,12 @@ pub(super) async fn invite_target(
         std::process::exit(2);
     }
     let slug = v["agent"].as_str().unwrap_or("session");
-    let pane = v["pane_id"].as_str().unwrap_or("");
+    let pty = v["pty_id"].as_str().unwrap_or("");
     let online = v["online_agent"].as_str().unwrap_or(slug);
-    if pane.is_empty() {
+    if pty.is_empty() {
         println!("{} is now online", online.bold());
     } else {
-        println!("{} is now online (pane {})", online.bold(), pane.dimmed());
+        println!("{} is now online (pty {})", online.bold(), pty.dimmed());
     }
     Ok(())
 }

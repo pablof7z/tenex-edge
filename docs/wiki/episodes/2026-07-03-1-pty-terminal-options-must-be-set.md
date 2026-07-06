@@ -6,7 +6,7 @@ transcript: /Users/pablofernandez/.claude/projects/-Users-pablofernandez-src-ten
 salience: root-cause
 status: active
 subjects:
-  - tmux-launch
+  - pty-launch
   - terminal-options
   - color-support
   - term-env
@@ -21,11 +21,11 @@ source_lines:
 captured_at: 2026-07-03T10:34:00Z
 ---
 
-# Episode: tmux terminal options must be set globally before session fork, not per-session after
+# Episode: pty terminal options must be set globally before session fork, not per-session after
 
 ## Prior State
 
-make_session_transparent() set default-terminal and terminal-overrides via `tmux set-option -t <session>` AFTER `tmux new-session -d` had already forked the child agent process. The terminal-overrides value was also malformed: `,*:Tc,RGB,extkeys` had orphaned capability tokens with no term-pattern prefix.
+make_session_transparent() set default-terminal and terminal-overrides via `pty set-option -t <session>` AFTER `pty new-session -d` had already forked the child agent process. The terminal-overrides value was also malformed: `,*:Tc,RGB,extkeys` had orphaned capability tokens with no term-pattern prefix.
 
 ## Trigger
 
@@ -33,11 +33,11 @@ User reported that launching any agent harness via `tenex-edge launch` produced 
 
 ## Decision
 
-Introduced `ensure_global_terminal_options()` that sets `default-terminal tmux-256color` and `terminal-overrides *:Tc:RGB:extkeys` via `tmux set-option -g` BEFORE `new-session` forks the harness child. Removed the per-session `set-option -t` calls for these two options from `make_session_transparent()`. Also corrected the terminal-overrides format from `,*:Tc,RGB,extkeys` to `*:Tc:RGB:extkeys`.
+Introduced `ensure_global_terminal_options()` that sets `default-terminal pty-256color` and `terminal-overrides *:Tc:RGB:extkeys` via `pty set-option -g` BEFORE `new-session` forks the harness child. Removed the per-session `set-option -t` calls for these two options from `make_session_transparent()`. Also corrected the terminal-overrides format from `,*:Tc,RGB,extkeys` to `*:Tc:RGB:extkeys`.
 
 ## Consequences
 
-- Child agent processes now inherit the correct $TERM (tmux-256color) and $COLORTERM (truecolor) at fork time, restoring ANSI 256-color and truecolor rendering inside tmux-spawned panes.
+- Child agent processes now inherit the correct $TERM (pty-256color) and $COLORTERM (truecolor) at fork time, restoring ANSI 256-color and truecolor rendering inside pty-spawned panes.
 - The terminal options are now a server-wide global invariant set before any session spawn, not a per-session override — any future code that relies on per-session terminal overrides will not work and must use the global pre-fork path instead.
 - The malformed terminal-overrides string is now a historical artifact; the corrected format uses colon-separated capabilities under a single term-pattern prefix.
 
@@ -55,5 +55,5 @@ Introduced `ensure_global_terminal_options()` that sets `default-terminal tmux-2
 
 ## Conversation
 
-- Cleaned transcript (verbatim user words, abbreviated agent replies): [`transcripts/2026-07-03-1-tmux-terminal-options-must-be-set.json`](transcripts/2026-07-03-1-tmux-terminal-options-must-be-set.json)
-- Raw transcript (verbatim user words, full agent replies): [`transcripts/raw/2026-07-03-1-tmux-terminal-options-must-be-set.json`](transcripts/raw/2026-07-03-1-tmux-terminal-options-must-be-set.json)
+- Cleaned transcript (verbatim user words, abbreviated agent replies): [`transcripts/2026-07-03-1-pty-terminal-options-must-be-set.json`](transcripts/2026-07-03-1-pty-terminal-options-must-be-set.json)
+- Raw transcript (verbatim user words, full agent replies): [`transcripts/raw/2026-07-03-1-pty-terminal-options-must-be-set.json`](transcripts/raw/2026-07-03-1-pty-terminal-options-must-be-set.json)

@@ -31,12 +31,13 @@ pub mod cli;
 pub mod daemon;
 pub mod distill;
 pub mod fabric;
+pub mod pty;
 pub mod relay_log;
 pub mod replay_capsules;
 pub mod runtime;
+pub mod session_host;
 pub mod state;
 pub mod status_seam;
-pub mod tmux;
 pub mod transcript;
 pub mod transport;
 

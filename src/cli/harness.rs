@@ -26,10 +26,6 @@ pub(in crate::cli) enum HarnessAction {
         /// Session id; if omitted, taken from the stdin payload.
         #[arg(long)]
         session: Option<String>,
-        /// Emit tmux #[style] format strings instead of ANSI codes. Required
-        /// when the output is consumed by tmux's status-format (#(...)).
-        #[arg(long)]
-        tmux: bool,
     },
 }
 
@@ -52,7 +48,7 @@ pub(in crate::cli) async fn harness(action: HarnessAction) -> Result<()> {
             }
             Ok(())
         }
-        HarnessAction::Statusline { session, tmux } => super::statusline::statusline(session, tmux),
+        HarnessAction::Statusline { session } => super::statusline::statusline(session),
     }
 }
 
@@ -69,16 +65,14 @@ mod tests {
             "statusline",
             "--session",
             "s1",
-            "--tmux",
         ])
         .expect("harness statusline parses");
 
         match cli.cmd {
             crate::cli::args::Cmd::Harness {
-                action: HarnessAction::Statusline { session, tmux },
+                action: HarnessAction::Statusline { session },
             } => {
                 assert_eq!(session.as_deref(), Some("s1"));
-                assert!(tmux);
             }
             _ => panic!("expected harness statusline command"),
         }

@@ -1,6 +1,6 @@
 //! `session_aliases` — external id -> canonical session (N:1, repointable).
 //!
-//! Reused OS slots (tmux pane, watch pid) and rotated harness ids repoint to the
+//! Reused OS slots (PTY endpoint, watch pid) and rotated harness ids repoint to the
 //! newest live owner. Keyed by `(harness, external_id_kind, external_id)`.
 
 use super::*;
@@ -47,14 +47,14 @@ impl Store {
 
     /// Resolve an external id of a SPECIFIC kind to its newest ALIVE session.
     /// Type-safe (matches `external_id_kind`, not just the raw id) and never
-    /// returns a dead row — the in-session anchors (`tmux_pane`,
+    /// returns a dead row — the in-session anchors (`pty_session`,
     /// `harness_session`) must resolve to a LIVE session, never a ghost whose
     /// alias has not yet been repointed.
     ///
     /// `harness` full-keys the match `(harness, kind, external_id)` per the alias
     /// schema. Pass `Some` for harness-native ids (a harness session id is only
-    /// unique within its harness); pass `None` for `tmux_pane`, whose ids are
-    /// machine-globally unique (assigned by the tmux server, harness-independent).
+    /// unique within its harness); pass `None` for `pty_session`, whose ids are
+    /// host-local endpoint ids.
     pub fn alive_session_for_alias(
         &self,
         harness: Option<&str>,
@@ -144,7 +144,7 @@ impl Store {
     }
 
     /// All aliases of a given kind across every session, newest first (e.g. all
-    /// `tmux_pane` bindings to enumerate live tmux endpoints).
+    /// `pty_session` bindings to enumerate live PTY endpoints).
     pub fn list_aliases_of_kind(&self, external_id_kind: &str) -> Result<Vec<SessionAlias>> {
         let mut stmt = self.conn.prepare(
             "SELECT harness, external_id_kind, external_id, session_id, created_at
@@ -154,15 +154,20 @@ impl Store {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    /// Drop the `tmux_pane` alias(es) for a session (resolves the id first). Used
-    /// when the bound pane is found dead, so it is no longer treated as an endpoint.
-    pub fn clear_tmux_pane(&self, session_id: &str) -> Result<()> {
+    /// Drop the `pty_session` alias(es) for a session (resolves the id first). Used
+    /// when the bound PTY is found dead, so it is no longer treated as an endpoint.
+    pub fn clear_pty_session(&self, session_id: &str) -> Result<()> {
+        self.clear_alias_kind(session_id, "pty_session")
+    }
+
+    /// Drop a specific alias kind for a session after its endpoint is found dead.
+    pub fn clear_alias_kind(&self, session_id: &str, external_id_kind: &str) -> Result<()> {
         let target = self
             .resolve_canonical_id(session_id)?
             .unwrap_or_else(|| session_id.to_string());
         self.conn.execute(
-            "DELETE FROM session_aliases WHERE session_id=?1 AND external_id_kind='tmux_pane'",
-            params![target],
+            "DELETE FROM session_aliases WHERE session_id=?1 AND external_id_kind=?2",
+            params![target, external_id_kind],
         )?;
         Ok(())
     }

@@ -2,5 +2,5 @@
   "id": "fea53-1e000",
   "ts": "2026-07-03T11:29:36Z",
   "session": "fea5307b-d9a0-46fe-977c-408e5e0e0ff4",
-  "text": "- **agent1** = `claude1` launched in **direct** mode (raw Claude, host-tmux-observed but not daemon-anchored) — the one you type the initial instruction into.\n- **agent2** = `claude2` launched via **`tenex-edge launch`** — the one expected to get a live daemon-pushed, attributed mention."
+  "text": "- **agent1** = `claude1` launched in **direct** mode (raw Claude, host-pty-observed but not daemon-anchored) — the one you type the initial instruction into.\n- **agent2** = `claude2` launched via **`tenex-edge launch`** — the one expected to get a live daemon-pushed, attributed mention."
 }

@@ -109,11 +109,11 @@ async fn execute_claimed(
 async fn add_agent(state: &Arc<DaemonState>, channel_h: &str, spec: &str) -> Result<String> {
     let work_root = state.with_store(|s| work_root_for(s, channel_h));
     let out = super::invite_rpc::invite_agent(state, channel_h, &work_root, spec, None).await?;
-    let pane = out
-        .get("pane_id")
+    let pty = out
+        .get("pty_id")
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
-        .map(|s| format!(" pane={s}"))
+        .map(|s| format!(" pty={s}"))
         .unwrap_or_default();
     let orchestration = out
         .get("orchestration_event_id")
@@ -122,7 +122,7 @@ async fn add_agent(state: &Arc<DaemonState>, channel_h: &str, spec: &str) -> Res
         .map(|s| format!(" orchestration={}", short(s)))
         .unwrap_or_default();
     Ok(format!(
-        "mgmt ok: added {spec} to {}.{pane}{orchestration}",
+        "mgmt ok: added {spec} to {}.{pty}{orchestration}",
         channel_label(state, channel_h)
     ))
 }
@@ -251,17 +251,10 @@ async fn stop_local_process(
     state: &Arc<DaemonState>,
     rec: &crate::state::Session,
 ) -> Result<String> {
-    if let Some(pane) = tmux_pane_for_session(state, &rec.session_id) {
-        let status = tokio::process::Command::new("tmux")
-            .args(["kill-pane", "-t", &pane])
-            .status()
-            .await
-            .context("tmux kill-pane")?;
-        state.with_store(|s| s.clear_tmux_pane(&rec.session_id).ok());
-        if status.success() {
-            return Ok(format!(" pane={pane}"));
-        }
-        anyhow::bail!("tmux kill-pane exited with {status}");
+    if let Some(pty_id) = pty_session_for_session(state, &rec.session_id) {
+        crate::pty::kill(&pty_id).with_context(|| format!("killing PTY session {pty_id}"))?;
+        state.with_store(|s| s.clear_pty_session(&rec.session_id).ok());
+        return Ok(format!(" pty={pty_id}"));
     }
     if let Some(pid) = rec.child_pid {
         nix::sys::signal::kill(
@@ -274,14 +267,14 @@ async fn stop_local_process(
     Ok(String::new())
 }
 
-fn tmux_pane_for_session(state: &Arc<DaemonState>, session_id: &str) -> Option<String> {
+fn pty_session_for_session(state: &Arc<DaemonState>, session_id: &str) -> Option<String> {
     state
         .with_store(|s| s.aliases_for_session(session_id))
         .ok()
         .and_then(|aliases| {
             aliases
                 .into_iter()
-                .find(|a| a.external_id_kind == "tmux_pane")
+                .find(|a| a.external_id_kind == "pty_session")
                 .map(|a| a.external_id)
         })
 }

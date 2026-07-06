@@ -226,7 +226,7 @@ fn session_start_request() -> SessionStartRequestFact {
         rel_cwd: ".".into(),
         room_parent: None,
         watch_pid: Some(42),
-        tmux_pane: Some("%1".into()),
+        pty_session: Some("%1".into()),
         ring_doorbell: true,
         base_pubkey: "base".into(),
         signer_pubkey: "base".into(),

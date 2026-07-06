@@ -108,5 +108,5 @@ async fn rpc_probe_validate_hook_target_fails_legacy_agents_roster() {
     assert!(v["hook_context_evidence"]["reason"]
         .as_str()
         .unwrap()
-        .contains("local-agents"));
+        .contains("available-agents"));
 }

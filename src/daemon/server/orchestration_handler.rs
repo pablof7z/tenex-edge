@@ -156,7 +156,7 @@ async fn resume_target(
             return false;
         }
     };
-    let Some(resume_id) = super::tmux_rpc::resume_token_for(&rec) else {
+    let Some(resume_id) = super::pty_rpc::resume_token_for(&rec) else {
         tracing::warn!(
             session_id = %rec.session_id,
             child = %op.child_h,
@@ -165,7 +165,7 @@ async fn resume_target(
         return false;
     };
     let work_root = state.with_store(|s| work_root_for(s, &op.child_h));
-    match crate::tmux::resume_agent_in_channel(
+    match crate::session_host::resume_agent_in_channel(
         state,
         &rec.agent_slug,
         &work_root,
@@ -174,12 +174,12 @@ async fn resume_target(
     )
     .await
     {
-        Ok(pane) => {
+        Ok(pty_id) => {
             tracing::info!(
                 session_id = %rec.session_id,
                 slug = %rec.agent_slug,
                 child = %op.child_h,
-                pane = %pane,
+                pty_id = %pty_id,
                 "orchestration: session resumed"
             );
             true
@@ -206,7 +206,7 @@ async fn spawn_target(
     let edge = config::edge_home();
     let id = match crate::identity::load_or_create(&edge, slug, now_secs()) {
         Ok(id) => {
-            tracing::info!(slug = %slug, child = %op.child_h, "minting/loading agent identity for orchestration target");
+            tracing::info!(slug = %slug, child = %op.child_h, "loading local derivation root for orchestration target");
             id
         }
         Err(e) => {
@@ -214,37 +214,10 @@ async fn spawn_target(
             return false;
         }
     };
-    let agent_pk = id.pubkey_hex();
-    log_nip29_role_decision(
-        &op.child_h,
-        &agent_pk,
-        "member",
-        "handle_orchestration target agent durable pubkey",
-    );
-
-    let profile = DomainEvent::Profile(crate::domain::Profile {
-        agent: crate::domain::AgentRef::new(agent_pk.clone(), slug.clone()),
-        host: state.host.clone(),
-        owners: state.owners.clone(),
-        is_backend: false,
-    });
-    let _ = state.provider.publish(&profile, &id.keys).await;
-
-    let confirmed = state
-        .provider
-        .grant_member_confirmed(&op.child_h, &agent_pk)
-        .await;
-    if !confirmed.is_confirmed() {
-        tracing::warn!(
-            slug = %slug,
-            child = %op.child_h,
-            "member-add not confirmed after all retries — skipping spawn"
-        );
-        return false;
-    }
+    drop(id);
 
     let work_root = state.with_store(|s| work_root_for(s, &op.child_h));
-    match crate::tmux::spawn_agent(
+    match crate::session_host::spawn_agent(
         state,
         slug,
         &work_root,
@@ -256,8 +229,8 @@ async fn spawn_target(
     )
     .await
     {
-        Ok(pane) => {
-            tracing::info!(slug = %slug, child = %op.child_h, pane = %pane, "orchestration: agent spawned");
+        Ok(pty_id) => {
+            tracing::info!(slug = %slug, child = %op.child_h, pty_id = %pty_id, "orchestration: agent spawned");
             true
         }
         Err(e) => {

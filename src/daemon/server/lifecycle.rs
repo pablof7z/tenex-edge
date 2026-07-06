@@ -1,6 +1,8 @@
 use super::*;
 use crate::reconcile::StatusReconciler;
 
+mod roster_bootstrap;
+
 pub async fn run() -> Result<()> {
     let storage = crate::daemon::storage_paths::StoragePaths::current();
     config::ensure_dir(&storage.edge_home)?;
@@ -156,42 +158,9 @@ pub async fn run() -> Result<()> {
             let _ = relay_state.provider.publish(&ev, &backend_keys).await;
         }
 
+        roster_bootstrap::publish_startup_roster(&relay_state).await;
         membership_cleanup::cleanup_dead_local_sessions(&relay_state);
-
-        // Discover groups where local agents are already members so kind:9 chat
-        // arrives even when no session is alive (spawn-on-mention path), and record
-        // them in `subscribed_projects`. We DON'T open a REQ per group here — the
-        // single `resubscribe` below folds all of them (plus owned groups and the
-        // backend identity) into the three stable aggregate REQs. New memberships
-        // discovered from 39002 events extend coverage via `ensure_subscription`.
-        {
-            let edge = crate::config::edge_home();
-            let local_pks: Vec<String> = crate::identity::list_local_pubkeys(&edge);
-            let member_groups: Vec<String> = relay_state.with_store(|s| {
-                let mut groups = Vec::new();
-                for pk in &local_pks {
-                    if let Ok(gs) = s.list_channels_where_member(pk) {
-                        groups.extend(gs);
-                    }
-                }
-                groups.sort_unstable();
-                groups.dedup();
-                groups
-            });
-            {
-                let mut projs = relay_state.subscribed_projects.lock().unwrap();
-                for group in &member_groups {
-                    if !projs.iter().any(|p| p == group) {
-                        projs.push(group.clone());
-                    }
-                }
-            }
-            tracing::info!(
-                local_agents = local_pks.len(),
-                member_groups = member_groups.len(),
-                "spawn-on-mention coverage seeded"
-            );
-        }
+        roster_bootstrap::seed_spawn_on_mention_coverage(&relay_state);
 
         // Seed the three stable aggregate REQs (#h / #p / group-state) once. This
         // replaces both the per-member-group subscription loop and the standalone

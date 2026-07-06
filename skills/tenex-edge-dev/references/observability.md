@@ -8,8 +8,8 @@ daemon/relay logs.
 
 Minimum useful surfaces:
 
-- host tmux pane for every agent session
-- host tmux pane for the croissant relay
+- portable PTY id plus attach/inject evidence for launch-mode agent sessions
+- croissant relay log named in `lab.env`
 - NIP-11 response from the relay
 - `nak` event probes for the relevant kinds
 - profile daemon and relay logs under `.container-state`
@@ -20,37 +20,33 @@ while relay publication still fails. Croissant may show rejected events that do
 not appear in tenex-edge logs. `nak` may show persisted events after the UI has
 scrolled away.
 
-## Capturing Agent UI
+## Inspecting Agent UI
 
-Use host tmux session names printed by `launch-agent-tmux`:
+For launch-mode runs, use the PTY id printed by `tenex-edge launch`:
 
 ```bash
-tmux capture-pane -pt "${AGENT_TMUX}" -S -240 -e
+bash containers/tenex-edge/run --profile claude tenex-edge pty list
+bash containers/tenex-edge/run --profile claude tenex-edge pty attach "${PTY_ID}"
 ```
 
-The `-e` flag keeps escape sequences and screen state that can matter for TUIs.
-If the capture is noisy, take a second plain capture:
+To send a small prompt or hook-like injection from another terminal:
 
 ```bash
-tmux capture-pane -pt "${AGENT_TMUX}" -S -240
-```
-
-To send a small prompt:
-
-```bash
-tmux send-keys -t "${AGENT_TMUX}" "Run tenex-edge who and summarize the self header." C-m
+bash containers/tenex-edge/run --profile claude tenex-edge pty inject "${PTY_ID}" \
+  "Run tenex-edge who and summarize the self header."
 ```
 
 Keep prompts short and verifiable. Ask the agent to run one command or describe
-one visible injection surface at a time.
+one visible injection surface at a time. Direct-mode runs are foreground
+auth/plugin checks; inspect them in the terminal where they are running.
 
 ## Capturing Croissant
 
-Relay tmux session comes from `lab.env`:
+Relay log path comes from `lab.env`:
 
 ```bash
 source "${LAB_ENV}"
-tmux capture-pane -pt "${RELAY_TMUX}" -S -300 -e
+tail -n 300 "${RELAY_LOG}"
 ```
 
 Croissant is valuable because it logs traffic at the relay boundary. Look for:
@@ -88,7 +84,7 @@ from `lab.env`.
 Use the probe helper:
 
 ```bash
-skills/tenex-edge-dev/scripts/probe-lab "${LAB_ENV}" "${AGENT_TMUX}"
+skills/tenex-edge-dev/scripts/probe-lab "${LAB_ENV}"
 ```
 
 It captures these kinds by default:
@@ -153,7 +149,7 @@ tail -n 200 .container-state/claude/tenex/edge/daemon.log
 tail -n 200 .container-state/claude/tenex/edge/relay.log
 ```
 
-Do not mark the lab failed on hook-tail alone when tmux, daemon logs, relay logs,
+Do not mark the lab failed on hook-tail alone when pty, daemon logs, relay logs,
 and croissant traffic provide the evidence needed for the feature under test.
 
 ## Probe Directory Shape
@@ -163,13 +159,12 @@ and croissant traffic provide the evidence needed for the feature under test.
 ```text
 probe-YYYYmmdd-HHMMSS/
   nip11.json
-  relay-pane.txt
+  relay.log
   kind-39000.jsonl
   kind-39001.jsonl
   kind-39002.jsonl
   kind-30315.jsonl
   kind-9.jsonl
-  tmux-<session>.txt
 ```
 
 Use file paths in the final report. If a file is empty, say that explicitly and
@@ -177,10 +172,10 @@ tie it to the likely cause. An empty event file can be meaningful evidence.
 
 ## Screenshots
 
-For terminal evidence, tmux pane capture is usually better than a bitmap because
-it preserves text for search and review. Use a screenshot only when the UI
-layout itself is under test or escape-sequence rendering matters. If using a
-screenshot, still keep the text capture.
+For terminal evidence, attach output or a short terminal transcript is usually
+better than a bitmap because it preserves text for search and review. Use a
+screenshot only when the UI layout itself is under test or escape-sequence
+rendering matters.
 
 ## Final Report Shape
 
@@ -194,7 +189,7 @@ Run:
 - probe: /tmp/.../probe-...
 
 Evidence:
-- tmux <session>: showed ...
+- pty <id>: showed ...
 - croissant: showed ...
 - nak kind <kind>: showed ...
 - hook-tail: showed ...

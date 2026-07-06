@@ -133,7 +133,7 @@ session_start_payload() { printf '{"session_id":"%s","cwd":"%s"}' "$1" "$2"; }
 (
   cd "${A_PROJ}"
   echo "$(session_start_payload "${A_SESSION}" "${A_PROJ}")" \
-    | TENEX_EDGE_AGENT=claude edge edge-a hook --host claude-code --type session-start
+    | TENEX_EDGE_AGENT=claude edge edge-a harness hook claude-code --type session-start
 ) || die "backend-a session-start failed (see $(backend_edge_home edge-a)/daemon.log)"
 snapshot_daemon_pid edge-a
 ok "backend-a session-start completed"

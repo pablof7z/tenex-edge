@@ -10,4 +10,4 @@ source_refs:
 
 # @te_session
 
-A tmux session option that stores the tenex-edge session id, set via `tmux set-option -t <session> @te_session <session_id>` and read by the statusline command to render the current session.
+A pty session option that stores the tenex-edge session id, set via `pty set-option -t <session> @te_session <session_id>` and read by the statusline command to render the current session.

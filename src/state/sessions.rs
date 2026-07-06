@@ -67,7 +67,7 @@ impl Store {
     /// lets `rpc_session_start` learn the id, select the ordinal signer (whose
     /// reservation is keyed by session id), and THEN write the row already
     /// carrying the correct ordinal pubkey — "born right" rather than registered
-    /// with the base key and patched afterward.
+    /// with the local derivation-root key and patched afterward.
     pub fn resolve_or_mint_session_id(
         &self,
         harness: &str,
@@ -195,7 +195,7 @@ impl Store {
     }
 
     /// Find a session (alive or dead) whose canonical id starts with `prefix`,
-    /// newest first. Used by `tmux resume` to accept a short id prefix.
+    /// newest first. Used by resume flows to accept a short id prefix.
     pub fn find_session_by_prefix(&self, prefix: &str) -> Result<Option<Session>> {
         let pattern = format!("{}%", prefix.replace(['%', '_'], ""));
         Ok(self

@@ -10,7 +10,7 @@ fn obs() -> SessionObservation {
         harness: Harness::ClaudeCode,
         harness_session_id: None,
         resume_id: None,
-        tmux_pane: None,
+        pty_session: None,
         watch_pid: None,
         observed_at: 100,
     }
@@ -56,7 +56,7 @@ fn resume_match_reattaches() {
         session_id: SessionId::from("canon"),
         harness_session_id: None,
         resume_id: Some("ses_x".into()),
-        tmux_pane: Some("%5".into()),
+        pty_session: Some("%5".into()),
         watch_pid: Some(10),
     }];
     assert_eq!(
@@ -66,15 +66,15 @@ fn resume_match_reattaches() {
 }
 
 #[test]
-fn same_pane_different_session_supersedes() {
+fn same_endpoint_different_session_supersedes() {
     let mut o = obs();
-    o.tmux_pane = Some("%5".into());
+    o.pty_session = Some("%5".into());
     o.harness_session_id = Some("new".into());
     let live = vec![LiveLocator {
         session_id: SessionId::from("old"),
         harness_session_id: Some("old".into()),
         resume_id: None,
-        tmux_pane: Some("%5".into()),
+        pty_session: Some("%5".into()),
         watch_pid: None,
     }];
     assert_eq!(

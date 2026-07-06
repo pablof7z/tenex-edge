@@ -235,7 +235,7 @@ fn session_start_request(
         rel_cwd: ".".into(),
         room_parent: None,
         watch_pid: Some(42),
-        tmux_pane: None,
+        pty_session: None,
         ring_doorbell: false,
         base_pubkey: "pk-base".into(),
         signer_pubkey: "pk-signer".into(),

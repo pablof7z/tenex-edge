@@ -5,7 +5,7 @@
   ],
   [
     "assistant",
-    "No, there isn't. `providers.json`/`llms.json` (which drive model selection per role, e.g. `edge-distillation`) live under `~/.tenex-edge` and are read-only from tenex-edge's side — you'd edit them by hand. There's no `tenex-edge` subcommand or TUI to manage them; the only TUI in the codebase (`tmux_cli/tui_*.rs`) is the session-spawner picker, unrelated to model config.\n\nIf you want, I can sketch a small `tenex-edge models` TUI/subcommand for editing roles/configurations — is that something you'd like scoped as a task, or were you just checking if one already existed?"
+    "No, there isn't. `providers.json`/`llms.json` (which drive model selection per role, e.g. `edge-distillation`) live under `~/.tenex-edge` and are read-only from tenex-edge's side — you'd edit them by hand. There's no `tenex-edge` subcommand or TUI to manage them; the only TUI in the codebase (`pty_cli/tui_*.rs`) is the session-spawner picker, unrelated to model config.\n\nIf you want, I can sketch a small `tenex-edge models` TUI/subcommand for editing roles/configurations — is that something you'd like scoped as a task, or were you just checking if one already existed?"
   ],
   [
     "user",

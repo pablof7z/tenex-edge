@@ -9,4 +9,4 @@ source_refs:
 
 # envelope (framed agent mention)
 
-tmux+agent format: `[tenex-edge mention] <@agent1> Hello @developer` pasted as a real turn
+pty+agent format: `[tenex-edge mention] <@agent1> Hello @developer` pasted as a real turn

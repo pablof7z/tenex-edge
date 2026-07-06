@@ -14,7 +14,6 @@ impl DaemonState {
             host: "test-host".into(),
             user_nsec: None,
             tenex_private_key: Some(backend_key.clone()),
-            tmux_status_command: None,
             per_session_rooms: false,
         };
         let host = cfg.host.clone();

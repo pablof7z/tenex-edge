@@ -5,6 +5,7 @@
 //! | Profile     | kind:0,     content `{"name": "slug@host"}`, `["host", host]` |
 //! | Activity    | kind:1,     `["h", project]` — social narrative (no inbox routing) |
 //! | Status      | kind:30315, content = live activity (may be empty when idle), `["d", session_id]`, one or more `["h", channel]`, `["title", title]` (always), `["status", "busy"\|"idle"]`, `["host", host]`, optional `["slug", slug]`, optional `["rel-cwd", rel]`, optional NIP-40 `["expiration", ts]` |
+//! | AgentRoster | kind:30555, backend management-key signed, `["d", capability_slug]`, `["hostname", host]`, `["use-criteria", text]`, one or more root-channel `["h", channel]` |
 //! | Chat        | kind:9,     `["h", project]`, optional `["p", mentioned_pubkey]` |
 //!
 //! Status is the single self-contained per-session signal: ONE kind:30315 event
@@ -22,9 +23,7 @@
 //! uses an inline `@<agent-instance-label>` in the chat body, which adds a `p`
 //! tag for the mentioned instance pubkey.
 //!
-//! Most events do not carry a slug: it is resolved downstream from the signer's
-//! kind:0 profile (authoritative) or the local `profiles` table. Status carries
-//! an optional `slug` convenience tag for immediate rendering. Authorization
+//! Most events resolve slug downstream; status carries an optional render-hint slug. Authorization
 //! uses only event.pubkey (signer); self-asserted `agent` tags have no authority
 //! and are never written or read.
 
@@ -37,6 +36,7 @@ use nostr_sdk::prelude::*;
 pub const KIND_PROFILE: u16 = 0;
 pub const KIND_CHAT: u16 = 9;
 pub const KIND_STATUS: u16 = 30315;
+pub const KIND_AGENT_ROSTER: u16 = 30555;
 
 // NIP-29 group management (tenexPrivateKey-signed) + relay-authored state.
 pub const KIND_GROUP_CREATE: u16 = 9007;

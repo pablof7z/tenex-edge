@@ -24,7 +24,7 @@ captured_at: 2026-06-29T10:52:47Z
 
 ## Prior State
 
-The daemon used bare `eprintln!` calls scattered across lifecycle.rs, demux.rs, engine_lifecycle.rs, session_start.rs, session_signer.rs, identity.rs, idle.rs, diagnostics.rs, tmux_rpc.rs, and relay_log.rs. There was no structured logging framework, no log-level policy, no colorized output, and no dual stdout+file logging. The `__daemon` subcommand was hidden from CLI help.
+The daemon used bare `eprintln!` calls scattered across lifecycle.rs, demux.rs, engine_lifecycle.rs, session_start.rs, session_signer.rs, identity.rs, idle.rs, diagnostics.rs, pty_rpc.rs, and relay_log.rs. There was no structured logging framework, no log-level policy, no colorized output, and no dual stdout+file logging. The `__daemon` subcommand was hidden from CLI help.
 
 ## Trigger
 

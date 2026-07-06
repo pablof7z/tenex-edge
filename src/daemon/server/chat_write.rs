@@ -16,7 +16,7 @@ pub(in crate::daemon::server) struct ChatWriteParams {
     #[serde(default, alias = "env_session")]
     harness_session: Option<String>,
     #[serde(default)]
-    tmux_pane: Option<String>,
+    pty_session: Option<String>,
     #[serde(default)]
     cwd: Option<String>,
     #[serde(default)]
@@ -234,7 +234,7 @@ pub(in crate::daemon::server) async fn rpc_chat_write(
         routed
     });
     if routed {
-        crate::tmux::ring_doorbells(state.clone());
+        crate::session_host::ring_doorbells(state.clone());
     }
 
     let from_label = instance.display_slug();

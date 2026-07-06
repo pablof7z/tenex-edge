@@ -4,7 +4,7 @@ use serde_json::Value;
 /// "which session am I" identically. The daemon-side mirror is
 /// `CallerAnchor::from_params`.
 pub(crate) struct InvocationContext {
-    tmux_pane: Option<String>,
+    pty_session: Option<String>,
     harness: Option<&'static str>,
     watch_pid: Option<i32>,
     agent: Option<String>,
@@ -14,8 +14,8 @@ pub(crate) struct InvocationContext {
 
 impl InvocationContext {
     pub(crate) fn from_current_process() -> Self {
-        let tmux_pane = super::tmux_pane_env();
-        let watch_anchor = if tmux_pane.is_none() {
+        let pty_session = super::pty_session_env();
+        let watch_anchor = if pty_session.is_none() {
             super::hooks::caller_watch_pid_anchor()
         } else {
             None
@@ -24,7 +24,7 @@ impl InvocationContext {
             .map(|(harness, pid)| (Some(harness), Some(pid)))
             .unwrap_or((None, None));
         Self {
-            tmux_pane,
+            pty_session,
             harness,
             watch_pid,
             agent: super::agent_env_slug(),
@@ -37,7 +37,7 @@ impl InvocationContext {
 
     pub(crate) fn to_rpc_json(&self) -> Value {
         serde_json::json!({
-            "tmux_pane": self.tmux_pane,
+            "pty_session": self.pty_session,
             "harness": self.harness,
             "watch_pid": self.watch_pid,
             "agent": self.agent,

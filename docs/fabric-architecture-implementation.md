@@ -368,7 +368,7 @@ Run this after each phase, broadening only when the phase touches more surface:
    - start two sessions in the same project;
    - `tenex-edge who`;
    - send a chat mention with `tenex-edge chat write --message "@<agent> ..."`;
-   - verify the target receives the mention through its host hook or tmux
+   - verify the target receives the mention through its host hook or pty
      delivery path;
    - verify no duplicate after a fetch or hook-injected turn context;
    - edit project metadata and confirm local read-model update.

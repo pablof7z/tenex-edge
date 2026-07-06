@@ -74,6 +74,12 @@ pub(super) const DURABLE_TABLES: &[TableCoverage] = &[
         "channel metadata and readiness",
     ),
     row(
+        "relay_agent_roster",
+        "aggregate",
+        "awareness:<channel> | who:<channel>",
+        "backend capability advertisements",
+    ),
+    row(
         "relay_event_quarantine",
         "direct",
         "quarantine:<event>",

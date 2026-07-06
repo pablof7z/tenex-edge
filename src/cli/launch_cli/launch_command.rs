@@ -202,7 +202,7 @@ fn agent_command_suggestions(
 }
 
 fn builtin_command_suggestions(target_slug: &str) -> Vec<CommandSuggestion> {
-    let mut commands = crate::tmux::builtin_spawn_commands();
+    let mut commands = crate::session_host::builtin_spawn_commands();
     commands.sort_by_key(|command| {
         if command.name == target_slug {
             (0, command.name.clone())

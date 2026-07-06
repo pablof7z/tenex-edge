@@ -2,6 +2,7 @@ use super::*;
 use crate::state::{RegisterSession, Store};
 use nostr_sdk::prelude::{EventBuilder, Keys, Kind, Tag, Timestamp};
 
+mod agent_roster;
 mod membership;
 
 fn make_tag(parts: &[&str]) -> Tag {
@@ -219,17 +220,15 @@ fn chat_routes_to_channel_sessions_and_skips_sender() {
     assert!(store.has_event(&mention_event.id.to_hex()).unwrap());
 }
 
-/// Two concurrent sessions of the SAME agent slug but DIFFERENT ordinal
-/// pubkeys (ordinal 0 and ordinal 1) must route independently: a mention
-/// p-tagging only ordinal 0's pubkey reaches ONLY that session, never the
-/// sibling ordinal. Regression for the double-delivery bug where every
-/// ordinal of an agent shared the base pubkey, so one mention woke both.
+/// Two concurrent sessions of the SAME agent slug but DIFFERENT ordinal pubkeys
+/// must route independently: a mention p-tagging only one ordinal's pubkey
+/// reaches ONLY that session, never the sibling ordinal.
 #[test]
 fn mention_to_one_ordinal_does_not_route_to_sibling_ordinal() {
     let store = Store::open_memory().unwrap();
     let sender = Keys::generate();
-    let ord0 = Keys::generate(); // ordinal 0 (base) pubkey
-    let ord1 = Keys::generate(); // ordinal 1 (HKDF-derived) pubkey — distinct
+    let ord0 = Keys::generate();
+    let ord1 = Keys::generate();
     let sender_pk = sender.public_key().to_hex();
     let ord0_pk = ord0.public_key().to_hex();
     let ord1_pk = ord1.public_key().to_hex();
@@ -238,17 +237,17 @@ fn mention_to_one_ordinal_does_not_route_to_sibling_ordinal() {
     let ord0_sid = register(&store, &ord0_pk, "proj", "ord0-ext");
     let ord1_sid = register(&store, &ord1_pk, "proj", "ord1-ext");
 
-    // Mention p-tags ONLY ordinal 0.
+    // Mention p-tags ONLY one ordinal.
     let event = build(
         &sender,
         9,
-        "hey ordinal zero",
+        "hey one ordinal",
         vec![make_tag(&["h", "proj"]), make_tag(&["p", &ord0_pk])],
     );
     let chat = ChatMessage {
         from: crate::domain::AgentRef::new(sender_pk, String::new()),
         project: "proj".into(),
-        body: "hey ordinal zero".into(),
+        body: "hey one ordinal".into(),
         mentioned_pubkey: Some(ord0_pk),
     };
     assert!(Nip29Materializer::route_chat(&store, &event, &chat));
@@ -263,7 +262,7 @@ fn mention_to_one_ordinal_does_not_route_to_sibling_ordinal() {
             .peek_pending_for_session(&ord1_sid)
             .unwrap()
             .is_empty(),
-        "the sibling ordinal must NOT receive a mention addressed to ordinal 0"
+        "the sibling ordinal must NOT receive a mention addressed to another ordinal"
     );
 }
 

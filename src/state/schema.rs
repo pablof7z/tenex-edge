@@ -6,9 +6,10 @@ use anyhow::{Context, Result};
 use rusqlite::Connection;
 use std::path::Path;
 
+mod identity_migration;
 mod trellis_commits;
 mod trellis_replay_capsules;
-const SCHEMA_VERSION: u32 = 1;
+mod version;
 
 const SCHEMA: &str = r#"
 -- ── relay_* materialized caches (drop & rebuild from relay anytime) ───────────
@@ -65,6 +66,20 @@ CREATE INDEX IF NOT EXISTS idx_relay_status_channel
     ON relay_status(channel_h, expiration);
 CREATE INDEX IF NOT EXISTS idx_relay_status_session
     ON relay_status(pubkey, session_id);
+
+CREATE TABLE IF NOT EXISTS relay_agent_roster (
+    backend_pubkey TEXT NOT NULL,
+    agent_slug     TEXT NOT NULL,
+    channel_h      TEXT NOT NULL,
+    host           TEXT NOT NULL DEFAULT '',
+    use_criteria   TEXT NOT NULL DEFAULT '',
+    updated_at     INTEGER NOT NULL,
+    PRIMARY KEY (backend_pubkey, agent_slug, channel_h)
+);
+CREATE INDEX IF NOT EXISTS idx_relay_agent_roster_channel
+    ON relay_agent_roster(channel_h, host, agent_slug);
+CREATE INDEX IF NOT EXISTS idx_relay_agent_roster_backend
+    ON relay_agent_roster(backend_pubkey, agent_slug);
 
 CREATE TABLE IF NOT EXISTS relay_events (
     id          TEXT PRIMARY KEY,
@@ -171,7 +186,7 @@ CREATE INDEX IF NOT EXISTS idx_session_aliases_external
     ON session_aliases(external_id);
 
 CREATE TABLE IF NOT EXISTS identities (
-    pubkey       TEXT PRIMARY KEY,
+    pubkey       TEXT NOT NULL,
     base_pubkey  TEXT NOT NULL,
     agent_slug   TEXT NOT NULL DEFAULT '',
     ordinal      INTEGER NOT NULL DEFAULT 0,
@@ -179,7 +194,8 @@ CREATE TABLE IF NOT EXISTS identities (
     channel_h    TEXT NOT NULL DEFAULT '',
     native_id    TEXT NOT NULL DEFAULT '',
     alive        INTEGER NOT NULL DEFAULT 0,
-    created_at   INTEGER NOT NULL
+    created_at   INTEGER NOT NULL,
+    PRIMARY KEY (pubkey, session_id)
 );
 CREATE INDEX IF NOT EXISTS idx_identities_base
     ON identities(base_pubkey, channel_h);
@@ -249,52 +265,19 @@ CREATE TABLE IF NOT EXISTS trellis_commits (id INTEGER PRIMARY KEY AUTOINCREMENT
 CREATE INDEX IF NOT EXISTS idx_trellis_commits_surface ON trellis_commits(surface, created_at);
 "#;
 pub(super) fn initialize_file(conn: &Connection, path: &Path) -> Result<()> {
-    check_schema_version(conn, path)?;
+    version::check(conn, path)?;
     conn.execute_batch(SCHEMA).context("creating schema")?;
+    identity_migration::ensure_session_primary_key(conn)?;
     trellis_commits::ensure_columns(conn)?;
     trellis_replay_capsules::ensure_table(conn)?;
-    stamp_schema_version(conn)
+    version::stamp(conn)
 }
 
 pub(super) fn initialize_memory(conn: &Connection) -> Result<()> {
     conn.execute_batch(SCHEMA)
         .context("creating in-memory schema")?;
+    identity_migration::ensure_session_primary_key(conn)?;
     trellis_commits::ensure_columns(conn)?;
     trellis_replay_capsules::ensure_table(conn)?;
-    stamp_schema_version(conn)
-}
-
-fn stamp_schema_version(conn: &Connection) -> Result<()> {
-    conn.pragma_update(None, "user_version", SCHEMA_VERSION)
-        .context("stamping schema version")
-}
-
-fn check_schema_version(conn: &Connection, path: &Path) -> Result<()> {
-    let version: u32 = conn
-        .pragma_query_value(None, "user_version", |row| row.get(0))
-        .context("reading schema user_version")?;
-    let has_tables = conn
-        .query_row(
-            "SELECT EXISTS(
-                SELECT 1 FROM sqlite_master
-                WHERE type='table' AND name NOT LIKE 'sqlite_%'
-            )",
-            [],
-            |row| row.get::<_, bool>(0),
-        )
-        .context("checking for existing schema tables")?;
-    if version == 0 && has_tables {
-        anyhow::bail!(
-            "refusing to open {}: existing state.db has no schema version stamp; \
-             move it aside or export non-rebuildable local state before rebuilding",
-            path.display()
-        );
-    }
-    if version != 0 && version != SCHEMA_VERSION {
-        anyhow::bail!(
-            "refusing to open {}: schema version {version} is incompatible with expected {SCHEMA_VERSION}",
-            path.display()
-        );
-    }
-    Ok(())
+    version::stamp(conn)
 }
