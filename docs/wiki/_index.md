@@ -2,7 +2,7 @@
 
 > Derived cache — do not hand-edit. Rebuilt by proactive-context after each capture.
 
-Last updated: 2026-07-05
+Last updated: 2026-07-06
 
 ## agent-skills (2 guides)
 
