@@ -10,15 +10,15 @@
     <main class="shell">
       <nav class="topbar">
         <a href="../../">Planning pages</a>
-        <a href="https://github.com/pablof7z/tenex-edge/pull/263">Open PR</a>
+        
       </nav>
       <section class="hero">
         <div class="eyebrow">Architecture plan</div>
         <h1>Launch Named Command Picker for Issue 258</h1>
-        <p class="summary">Plan an additive launch-command model for tenex-edge agents: named command choices in local agent JSON, CLI-side selection for interactive launches, conservative cross-agent suggestions when a command is missing, and daemon-safe fallback behavior for noninteractive spawns.</p>
+        <p class="summary">Plan a clean launch-command model for tenex-edge agents: `commands` is the only local launch-command schema, CLI-side selection handles interactive launches, missing commands get guided suggestions, and daemon paths stay noninteractive.</p>
         <div class="meta">
           <span class="pill ready">Ready to implement</span>
-          <span class="pill">84 percent certainty</span>
+          <span class="pill">91 percent certainty</span>
         </div>
       </section>
       <div class="grid">
@@ -27,7 +27,7 @@
           <section class="section">
             <h2>Boundaries</h2>
             <pre class="mermaid">flowchart LR
-  JSON[Local agent JSON\nlegacy command + commands array] --&gt; Identity[identity launch-command API]
+  JSON[Local agent JSON\ncommands array only] --&gt; Identity[identity launch-command API]
   Identity --&gt; CLI[tenex-edge launch\nTTY picker / command-name / override]
   Identity --&gt; Registry[tmux registry\nnoninteractive default]
   CLI --&gt; RPC[tmux_spawn RPC\nconcrete base_command argv]
@@ -36,45 +36,45 @@
           </section>
           <section class="section">
             <h2>Very High Level</h2>
-            <p>Issue #258 should be implemented as an additive launch-command layer around the existing agent identity files and tmux spawn path. Add a structured `commands` field to local agent JSON using object entries like `{&quot;name&quot;: &quot;read-only&quot;, &quot;argv&quot;: [&quot;claude&quot;]}`. Keep the current singular `command` field as a legacy read fallback, but make new writes use `commands` so config state does not diverge.
+            <p>Issue #258 should replace the singular agent launch `command` field with one canonical `commands` field. Use structured entries like `{&quot;name&quot;: &quot;read-only&quot;, &quot;argv&quot;: [&quot;claude&quot;]}` and do not keep a legacy read fallback. If an existing agent file only has `command`, launch should treat it as having no configured commands and enter the missing-command flow. That avoids duplicate state and makes the schema contract unambiguous.
 
 Keep prompting out of the daemon. `tenex-edge launch &lt;agent&gt;` should resolve command choices before calling `tmux_spawn`: `-c/--command` remains a full argv override, a new noninteractive selector such as `--command-name &lt;name&gt;` selects one configured choice, and a TTY picker appears only when multiple choices exist and no selector was provided. The daemon RPC continues to receive a concrete `base_command`, preserving scripted and TUI spawn behavior.
 
-When no command exists, the CLI should prompt from suggestions built from other local agent files first, then built-in harness defaults. Cross-agent adaptation should be conservative: support an explicit `{slug}` placeholder and only replace exact source-slug tokens or path filename stems, avoiding broad substring rewrites. Selecting or entering a command persists a named command atomically before spawn.
+When no `commands` entries exist, the CLI should prompt from suggestions built from other local agent files first, then built-in harness defaults. Cross-agent adaptation should be conservative: support an explicit `{slug}` placeholder and only replace exact source-slug tokens or path filename stems, avoiding broad substring rewrites. Selecting or entering a command persists a named command atomically before spawn.
 
-Validation should cover legacy compatibility, multi-command precedence, non-TTY errors, suggestion adaptation, CLI parsing, and the tmux resolver’s deterministic fallback. Update the launch and CLI docs after implementation; the planning PR itself is temporary and should be retired when the issue is completed.</p>
+Validation should cover strict schema parsing, multi-command precedence, no fallback from singular `command`, non-TTY errors, suggestion adaptation, CLI parsing, and the tmux resolver’s deterministic fallback. Update the launch and CLI docs after implementation; the planning PR itself is temporary and should be retired when the issue is completed.</p>
           </section>
           <section class="section">
             <h2>Existing Rules Or ADRs</h2>
-            <ul><li>No ADR files exist in this repository; governing constraints are AGENTS.md plus durable architecture/product docs.</li><li>The GitHub issue remains the backlog source of truth; the generated docs/plans artifact is a temporary planning PR artifact and must be retired or collapsed after implementation.</li><li>The implementation should respect the 300-line soft and 500-line hard file-size rule: identity.rs is already 382 lines, so added launch-command parsing or suggestion logic should move into a cohesive submodule with narrow visibility.</li><li>The product doctrine says agent identity persists across hosts; this plan keeps launch commands as local per-agent configuration attached to the existing local agent identity file, not to transient sessions.</li><li>The daemon RPC stays noninteractive and receives concrete argv, preserving existing ownership boundaries between CLI UX, daemon provisioning, and tmux spawning.</li></ul>
+            <ul><li>No ADR files exist in this repository; governing constraints are AGENTS.md plus durable architecture/product docs.</li><li>The GitHub issue remains the backlog source of truth; the generated docs/plans artifact is a temporary planning PR artifact and must be retired or collapsed after implementation.</li><li>The implementation should respect the 300-line soft and 500-line hard file-size rule: identity.rs is already 382 lines, so launch-command parsing or suggestion logic should move into a cohesive submodule with narrow visibility.</li><li>The product doctrine says agent identity persists across hosts; this plan keeps launch commands as local per-agent configuration attached to the existing local agent identity file, not to transient sessions.</li><li>The daemon RPC stays noninteractive and receives concrete argv, preserving existing ownership boundaries between CLI UX, daemon provisioning, and tmux spawning.</li><li>No compatibility layer is required for the old singular command field; strict replacement is an owner decision for this issue.</li></ul>
           </section>
           <section class="section">
             <h2>Rule Tension And Tightening</h2>
             <h3>Possible loosening</h3>
-            <ul><li>No permanent repository rule needs loosening.</li><li>The only rule tension is the planning PR artifact itself; it is acceptable only as a temporary publication mechanism for this planning workflow, not as durable backlog state.</li></ul>
+            <ul><li>No permanent repository rule needs loosening.</li><li>This intentionally accepts local config breakage for files that only use the old singular command field; that is a product/schema decision, not a repository-rule violation.</li></ul>
             <h3>Possible tightening</h3>
-            <ul><li>Consider documenting that daemon RPC handlers and background spawn paths must never prompt on stdin; all interactive selection belongs in explicit CLI/TUI layers.</li><li>Consider documenting local config schema migrations: legacy fields may be read as fallback, but new writes should have one canonical representation.</li></ul>
+            <ul><li>Consider documenting that daemon RPC handlers and background spawn paths must never prompt on stdin; all interactive selection belongs in explicit CLI/TUI layers.</li><li>Consider documenting that local config schema replacements should avoid read fallbacks and aliases unless the owner explicitly asks for compatibility.</li></ul>
           </section>
           <section class="section">
             <h2>Alternatives Considered</h2>
-            <ul><li>Array-of-tuples schema: compact, but weaker for validation and future fields than object entries with name and argv.</li><li>Prompt inside resolve_spawn_entry or the daemon: fewer call sites, but unsafe for RPC, TUI, and background spawn callers because it can hang noninteractive paths.</li><li>Always pick the first configured command silently: simplest, but fails the requested launch-time choice behavior and hides privileged command variants.</li><li>Broad string substitution for cross-agent suggestions: convenient, but too likely to mutate unrelated paths or flags; explicit placeholders plus exact token/stem replacement is safer.</li></ul>
+            <ul><li>Keep legacy command as a read fallback: lower short-term friction, but rejected because the owner wants no legacy path and duplicate config state is not worth preserving.</li><li>Array-of-tuples schema: compact, but weaker for validation and future fields than object entries with name and argv.</li><li>Prompt inside resolve_spawn_entry or the daemon: fewer call sites, but unsafe for RPC, TUI, and background spawn callers because it can hang noninteractive paths.</li><li>Always pick the first configured command silently: simplest, but fails the requested launch-time choice behavior and hides privileged command variants.</li><li>Broad string substitution for cross-agent suggestions: convenient, but too likely to mutate unrelated paths or flags; explicit placeholders plus exact token/stem replacement is safer.</li></ul>
           </section>
         </div>
         <aside>
           <section class="card">
             <h2>TTS Version</h2>
-            <audio controls preload="metadata" src="https://blossom.primal.net/bdcbcd9a4aa9e23ef945d77c7ccad3c33bef5ba3ba65f0fb010faad8ec92f404.mp3"></audio>
+            <audio controls preload="metadata" src="https://blossom.primal.net/d1f883e49f85dd95a1126b52b4bc5c316657f037f097ecc98d0bbe2dde19c37c.mp3"></audio>
             <p>Audio-friendly narration generated from the planning payload.</p>
           </section>
           <section class="card">
             <h2>Certainty</h2>
-            <div class="certainty ">84%</div>
+            <div class="certainty ">91%</div>
             <p>Ready to implement.</p>
           </section>
           <section class="card links">
             <h2>Links</h2>
-            <a href="https://github.com/pablof7z/tenex-edge/pull/263">Open PR</a>
-            <a href="https://blossom.primal.net/bdcbcd9a4aa9e23ef945d77c7ccad3c33bef5ba3ba65f0fb010faad8ec92f404.mp3">Open narration</a>
+            
+            <a href="https://blossom.primal.net/d1f883e49f85dd95a1126b52b4bc5c316657f037f097ecc98d0bbe2dde19c37c.mp3">Open narration</a>
             <a href="../../docs/plans/launch-named-command-picker/plan.md">Detailed plan file</a>
           </section>
         </aside>
