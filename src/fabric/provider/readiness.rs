@@ -13,6 +13,7 @@ impl Nip29Provider {
         // which is a caller bug, not a group to create — fail closed.
         if ctx.channel.trim().is_empty() {
             eprintln!("[daemon] ensure_channel_ready: refusing to provision an empty channel id");
+            record_readiness_attempt(self, &ctx, "degraded", "empty channel id");
             return ChannelGate::Degraded;
         }
         ensure_channel_ready_inner(self, ctx, 0).await
@@ -30,7 +31,12 @@ fn ensure_channel_ready_inner<'a>(
                 "[daemon] ensure_channel_ready: recursion depth limit reached for {:?}",
                 ctx.channel
             );
-            return ChannelGate::Degraded;
+            return readiness_gate(
+                provider,
+                &ctx,
+                ChannelGate::Degraded,
+                "recursion depth limit reached",
+            );
         }
 
         // Normalize: Some("") is the DB's sentinel for "known root channel" but
@@ -51,7 +57,12 @@ fn ensure_channel_ready_inner<'a>(
         }
 
         let Some(mgmt_keys) = provider.management_keys() else {
-            return ChannelGate::Degraded;
+            return readiness_gate(
+                provider,
+                &ctx,
+                ChannelGate::Degraded,
+                "management signing key unavailable",
+            );
         };
         let mgmt_pubkey = mgmt_keys.public_key().to_hex();
 
@@ -72,7 +83,12 @@ fn ensure_channel_ready_inner<'a>(
                     "[daemon] ensure_channel_ready: parent {:?} is degraded; aborting for {:?}",
                     parent, ctx.channel
                 );
-                return ChannelGate::Degraded;
+                return readiness_gate(
+                    provider,
+                    &ctx,
+                    ChannelGate::Degraded,
+                    format!("parent channel {parent} readiness degraded"),
+                );
             }
             provider.with_store(|s| {
                 s.list_channel_members(parent)
@@ -98,7 +114,12 @@ fn ensure_channel_ready_inner<'a>(
                     error = %format!("{e:#}"),
                     "ensure_channel_ready: relay fetch failed — degrading without attempting creation (no fabrication-by-omission)"
                 );
-                return ChannelGate::Degraded;
+                return readiness_gate(
+                    provider,
+                    &ctx,
+                    ChannelGate::Degraded,
+                    format!("relay fetch failed: {e:#}"),
+                );
             }
         };
         let mut repaired = false;
@@ -165,7 +186,12 @@ fn ensure_channel_ready_inner<'a>(
                          after create; degrading (no local fabrication)",
                         ctx.channel
                     );
-                    return ChannelGate::Degraded;
+                    return readiness_gate(
+                        provider,
+                        &ctx,
+                        ChannelGate::Degraded,
+                        "kind:39000 did not materialize after create",
+                    );
                 }
                 for attempt in 0..6u32 {
                     let roles_now = provider.fetch_group_roles(ctx.channel).await;
@@ -184,7 +210,12 @@ fn ensure_channel_ready_inner<'a>(
                     "[daemon] ensure_channel_ready: failed to create {:?}",
                     ctx.channel
                 );
-                return ChannelGate::Degraded;
+                return readiness_gate(
+                    provider,
+                    &ctx,
+                    ChannelGate::Degraded,
+                    "group creation failed and relay metadata is absent",
+                );
             }
             // else: group pre-existed on the relay (create rejected because it was
             // already there); fall through to membership / admin checks.
@@ -198,7 +229,12 @@ fn ensure_channel_ready_inner<'a>(
                      and self-grant failed",
                     ctx.channel
                 );
-                return ChannelGate::Degraded;
+                return readiness_gate(
+                    provider,
+                    &ctx,
+                    ChannelGate::Degraded,
+                    "management key is not admin and self-grant failed",
+                );
             }
         }
 
@@ -211,6 +247,7 @@ fn ensure_channel_ready_inner<'a>(
         }
 
         let mut invariant_ok = true;
+        let mut invariant_failures = Vec::new();
         {
             let mut required_admins: Vec<String> = vec![mgmt_pubkey.clone()];
             if ctx.repair_whitelisted_admins {
@@ -238,12 +275,18 @@ fn ensure_channel_ready_inner<'a>(
                         ctx.channel
                     );
                     invariant_ok = false;
+                    invariant_failures.push(format!("admin grant for {pk} not confirmed"));
                 }
             }
         }
 
         if !invariant_ok {
-            return ChannelGate::Degraded;
+            return readiness_gate(
+                provider,
+                &ctx,
+                ChannelGate::Degraded,
+                invariant_reason(&invariant_failures),
+            );
         }
 
         let expect_already_admin = mgmt_pubkey == ctx.expect_member
@@ -268,6 +311,10 @@ fn ensure_channel_ready_inner<'a>(
                     ctx.expect_member, ctx.channel
                 );
                 invariant_ok = false;
+                invariant_failures.push(format!(
+                    "member add for {} not confirmed",
+                    ctx.expect_member
+                ));
             }
         } else {
             let locally = provider.with_store(|s| {
@@ -305,16 +352,75 @@ fn ensure_channel_ready_inner<'a>(
         }
 
         if !invariant_ok {
-            return ChannelGate::Degraded;
+            return readiness_gate(
+                provider,
+                &ctx,
+                ChannelGate::Degraded,
+                invariant_reason(&invariant_failures),
+            );
         }
 
         provider
             .readiness
             .mark_ready(ctx.channel, ctx.expect_member);
         if repaired {
-            ChannelGate::Repaired
+            readiness_gate(
+                provider,
+                &ctx,
+                ChannelGate::Repaired,
+                "channel readiness repaired and verified",
+            )
         } else {
-            ChannelGate::Ready
+            readiness_gate(
+                provider,
+                &ctx,
+                ChannelGate::Ready,
+                "channel readiness verified",
+            )
         }
     })
+}
+
+fn readiness_gate(
+    provider: &Nip29Provider,
+    ctx: &ChannelCtx<'_>,
+    gate: ChannelGate,
+    reason: impl Into<String>,
+) -> ChannelGate {
+    let outcome = match &gate {
+        ChannelGate::Ready => "ready",
+        ChannelGate::Repaired => "repaired",
+        ChannelGate::Degraded => "degraded",
+    };
+    record_readiness_attempt(provider, ctx, outcome, reason);
+    gate
+}
+
+fn record_readiness_attempt(
+    provider: &Nip29Provider,
+    ctx: &ChannelCtx<'_>,
+    outcome: &str,
+    reason: impl Into<String>,
+) {
+    let reason = reason.into();
+    provider.with_store(|s| {
+        let _ = s.record_channel_readiness_attempt(&crate::state::NewChannelReadinessAttempt {
+            channel_h: ctx.channel.to_string(),
+            expect_member: ctx.expect_member.to_string(),
+            parent_hint: ctx.parent_hint.map(str::to_string),
+            name: ctx.name.map(str::to_string),
+            source: "provider.ensure_channel_ready".to_string(),
+            outcome: outcome.to_string(),
+            reason,
+            created_at: now_secs(),
+        });
+    });
+}
+
+fn invariant_reason(failures: &[String]) -> String {
+    if failures.is_empty() {
+        "required admin/member invariant was not confirmed".to_string()
+    } else {
+        failures.join("; ")
+    }
 }

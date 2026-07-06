@@ -140,6 +140,19 @@ pub(super) fn render_replay(v: &Value) -> String {
 pub(super) fn render_simulate(v: &Value) -> String {
     let mut out = String::new();
     let surface = str_at(v, "surface");
+    if v.get("simulated").and_then(Value::as_bool) == Some(false) {
+        let fact = v.get("fact").cloned().unwrap_or(Value::Null);
+        let evidence = v.get("fact_evidence").unwrap_or(&Value::Null);
+        let _ = writeln!(
+            out,
+            "simulate {}  ← no Trellis preview is available for this fact\n",
+            str_at(evidence, "frontier")
+        );
+        let _ = writeln!(out, "  fact:     {}", fact_line(&fact));
+        let _ = writeln!(out, "  result:   NOT SIMULATED");
+        let _ = writeln!(out, "  reason:   {}", str_at(evidence, "reason"));
+        return out;
+    }
     let _ = writeln!(
         out,
         "simulate {surface}  ← what committing this fact would do (nothing is applied)\n"
@@ -163,13 +176,21 @@ pub(super) fn render_simulate(v: &Value) -> String {
             );
         }
     } else if v.get("would_effect").and_then(Value::as_bool) == Some(true) {
-        for c in cmds {
+        if cmds.is_empty() && i64_at(v, "output_frames") > 0 {
             let _ = writeln!(
                 out,
-                "  result:   WOULD APPLY    ({} {})",
-                str_at(c, "op"),
-                str_at(c, "resource"),
+                "  result:   WOULD EMIT     {} output frame(s)",
+                i64_at(v, "output_frames")
             );
+        } else {
+            for c in cmds {
+                let _ = writeln!(
+                    out,
+                    "  result:   WOULD APPLY    ({} {})",
+                    str_at(c, "op"),
+                    str_at(c, "resource"),
+                );
+            }
         }
     } else {
         let _ = writeln!(out, "  result:   NO CHANGE (deduped)");

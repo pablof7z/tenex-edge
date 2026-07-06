@@ -1,5 +1,6 @@
 use super::DaemonState;
-use crate::reconcile::journal::{InputFact, StatusDrive};
+use crate::fabric_context::ViewInputs;
+use crate::reconcile::journal::{HookContextRenderFact, InputFact, StatusDrive};
 use crate::reconcile::labels::{key_path, NodeLabels};
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
@@ -20,6 +21,7 @@ pub(super) fn fact_param(params: &Value, key: &str) -> Result<Option<InputFact>>
         return Ok(None);
     };
     let fact = match raw {
+        Value::Null => return Ok(None),
         Value::String(s) => serde_json::from_str(s).context("probe: invalid fact JSON")?,
         value => serde_json::from_value(value.clone()).context("probe: invalid fact")?,
     };
@@ -37,6 +39,14 @@ pub(super) fn infer_surface(fact: &InputFact) -> Option<&'static str> {
             Some("outbox")
         }
         InputFact::SubscriptionSync { .. } => Some("subscriptions"),
+        InputFact::SessionStartRequested(_)
+        | InputFact::SessionStarted { .. }
+        | InputFact::SessionStartFailed(_) => Some("session_start"),
+        InputFact::ProcessExited {
+            session_id: Some(_),
+            ..
+        } => Some("session_watch"),
+        InputFact::HookContextRender(_) => Some("hook_context"),
         _ => None,
     }
 }
@@ -48,6 +58,9 @@ pub(super) fn preview_artifact(state: &Arc<DaemonState>, fact: &InputFact) -> Re
         "cursor" => preview_cursor(state, fact),
         "outbox" => preview_outbox(state, fact),
         "subscriptions" => preview_subscriptions(state, fact),
+        "session_start" => preview_session_start(state, fact),
+        "session_watch" => preview_session_watch(state, fact),
+        "hook_context" => preview_hook_context(state, fact),
         _ => unreachable!("surface inferred above"),
     }
 }
@@ -116,6 +129,70 @@ fn preview_outbox(state: &Arc<DaemonState>, fact: &InputFact) -> Result<Artifact
     super::outbox_artifact::preview_outbox(state, fact)
 }
 
+fn preview_session_start(state: &Arc<DaemonState>, fact: &InputFact) -> Result<Artifact> {
+    let mut r = state
+        .session_start
+        .lock()
+        .expect("session_start mutex poisoned");
+    let preview = r
+        .preview_fact(fact)
+        .map_err(|e| anyhow::anyhow!("session_start preview failed: {e:?}"))?
+        .context("probe: fact is not supported by session_start")?;
+    Ok(plan_artifact(
+        "session_start",
+        &preview.labels,
+        &preview.result,
+        None,
+    ))
+}
+
+fn preview_session_watch(state: &Arc<DaemonState>, fact: &InputFact) -> Result<Artifact> {
+    let mut r = state
+        .session_watch
+        .lock()
+        .expect("session_watch mutex poisoned");
+    let preview = r
+        .preview_fact(fact)
+        .map_err(|e| anyhow::anyhow!("session_watch preview failed: {e:?}"))?
+        .context("probe: fact is not supported by session_watch")?;
+    Ok(plan_artifact(
+        "session_watch",
+        &preview.labels,
+        &preview.result,
+        None,
+    ))
+}
+
+fn preview_hook_context(state: &Arc<DaemonState>, fact: &InputFact) -> Result<Artifact> {
+    let InputFact::HookContextRender(fact) = fact else {
+        anyhow::bail!("probe: fact is not a hook_context fact");
+    };
+    let inputs = decode_hook_inputs(fact)?;
+    let mut guard = state
+        .hook_contexts
+        .lock()
+        .expect("hook-context mutex poisoned");
+    let graph = guard.get_mut(&fact.session_id).with_context(|| {
+        format!(
+            "probe: hook_context graph for `{}` has not rendered",
+            fact.session_id
+        )
+    })?;
+    let preview = graph
+        .preview_context(&fact.session_id, fact.cursor, fact.now, inputs)
+        .map_err(|e| anyhow::anyhow!("hook_context preview failed: {e:?}"))?;
+    Ok(plan_artifact(
+        "hook_context",
+        &preview.labels,
+        &preview.result,
+        None,
+    ))
+}
+
+fn decode_hook_inputs(fact: &HookContextRenderFact) -> Result<ViewInputs> {
+    serde_json::from_value(fact.inputs_json.clone()).context("decoding hook_context inputs")
+}
+
 fn plan_artifact<C>(
     surface: &'static str,
     labels: &NodeLabels,
@@ -152,6 +229,7 @@ pub(super) fn replay_artifact(script: &DataTransactionScript<InputFact>) -> Resu
         "turn_lifecycle" => "turn_lifecycle",
         "cursor" => "cursor",
         "session_start" => "session_start",
+        "session_watch" => "session_watch",
         "outbox" => "outbox",
         _ => "unknown",
     };

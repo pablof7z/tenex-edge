@@ -11,6 +11,10 @@ fn i64_at(v: &Value, k: &str) -> i64 {
     v.get(k).and_then(Value::as_i64).unwrap_or(0)
 }
 
+fn bool_at(v: &Value, k: &str) -> bool {
+    v.get(k).and_then(Value::as_bool).unwrap_or(false)
+}
+
 fn strs(v: &Value, k: &str) -> Vec<String> {
     v.get(k)
         .and_then(Value::as_array)
@@ -40,17 +44,22 @@ pub(super) fn render_state(v: &Value) -> String {
         match surface {
             "status" => render_status_row(&mut out, r),
             "hook_context" => render_hook_row(&mut out, r),
-            _ => render_subscription_row(&mut out, r),
+            "turn_lifecycle" => render_turn_lifecycle_row(&mut out, r),
+            "cursor" => render_cursor_row(&mut out, r),
+            "session_start" => render_session_start_row(&mut out, r),
+            "outbox" => render_outbox_row(&mut out, r),
+            _ => render_resource_row(&mut out, r),
         }
     }
     out
 }
 
 fn render_status_row(out: &mut String, r: &Value) {
+    let handle = row_handle(r, "status");
     let _ = writeln!(
         out,
-        "  {:<10} {:<6} title={:?}  activity={:?}  channels={:?}",
-        str_at(r, "session"),
+        "  {:<24} {:<6} title={:?}  activity={:?}  channels={:?}",
+        handle,
         if r.get("busy").and_then(Value::as_bool) == Some(true) {
             "busy"
         } else {
@@ -63,10 +72,17 @@ fn render_status_row(out: &mut String, r: &Value) {
 }
 
 fn render_hook_row(out: &mut String, r: &Value) {
+    let handle = if !str_at(r, "resource_key").is_empty() {
+        str_at(r, "resource_key").to_string()
+    } else if str_at(r, "view_label").is_empty() {
+        format!("hook/{}/view", str_at(r, "session"))
+    } else {
+        str_at(r, "view_label").to_string()
+    };
     let _ = writeln!(
         out,
-        "  {:<18} rev {}  nodes {}  renders {}",
-        str_at(r, "session"),
+        "  {:<24} rev {}  nodes {}  renders {}",
+        handle,
         i64_at(r, "revision"),
         i64_at(r, "nodes"),
         i64_at(r, "render_count"),
@@ -88,12 +104,119 @@ fn render_hook_row(out: &mut String, r: &Value) {
     }
 }
 
-fn render_subscription_row(out: &mut String, r: &Value) {
+fn render_turn_lifecycle_row(out: &mut String, r: &Value) {
+    let handle = row_handle(r, "turn_lifecycle");
+    let mode = if bool_at(r, "working") {
+        "working"
+    } else {
+        "idle"
+    };
+    let transcript = str_at(r, "transcript_ref");
+    let transcript = if transcript.is_empty() {
+        "-"
+    } else {
+        transcript
+    };
     let _ = writeln!(
         out,
-        "  {:<18} refcount {}   owners: {}",
+        "  {:<24} {:<8} started={}  transcript={}",
+        handle,
+        mode,
+        i64_at(r, "turn_started_at"),
+        transcript,
+    );
+}
+
+fn render_cursor_row(out: &mut String, r: &Value) {
+    let handle = row_handle(r, "cursor");
+    let _ = writeln!(
+        out,
+        "  {:<24} cursor={}  last_frame={}  delta_since={}",
+        handle,
+        i64_at(r, "cursor"),
+        i64_at(r, "last_frame"),
+        i64_at(r, "delta_since"),
+    );
+}
+
+fn render_session_start_row(out: &mut String, r: &Value) {
+    let handle = row_handle(r, "session_start");
+    let signer = str_at(r, "signer_pubkey");
+    let _ = writeln!(
+        out,
+        "  {:<24} {:<13} channel={}  signer={}  reassert={}",
+        handle,
+        str_at(r, "action"),
+        str_at(r, "channel_h"),
+        clipped(signer, 12),
+        bool_at(r, "reassert"),
+    );
+    let mut intents = Vec::new();
+    if bool_at(r, "has_channel_ready_intent") {
+        intents.push("channel_ready");
+    }
+    if bool_at(r, "has_spawn_intent") {
+        intents.push("spawn");
+    }
+    if bool_at(r, "ensure_subscription") {
+        intents.push("subscription");
+    }
+    if bool_at(r, "replay_chat") {
+        intents.push("chat_replay");
+    }
+    if !intents.is_empty() {
+        let _ = writeln!(out, "      intents: {}", intents.join(", "));
+    }
+    if !str_at(r, "failure_stage").is_empty() || !str_at(r, "failure_error").is_empty() {
+        let _ = writeln!(
+            out,
+            "      failed at {}: {}",
+            str_at(r, "failure_stage"),
+            str_at(r, "failure_error")
+        );
+    }
+}
+
+fn render_outbox_row(out: &mut String, r: &Value) {
+    let handle = if str_at(r, "resource_key").is_empty() {
+        format!("outbox/{}", i64_at(r, "local_id"))
+    } else {
+        str_at(r, "resource_key").to_string()
+    };
+    let source = str_at(r, "source_ref");
+    let source = if source.is_empty() { "-" } else { source };
+    let _ = writeln!(
+        out,
+        "  {:<24} {:<9} retries={:<4} event={}  source={}",
+        handle,
+        str_at(r, "state"),
+        i64_at(r, "retries"),
+        clipped(str_at(r, "event_id"), 12),
+        source,
+    );
+    if !str_at(r, "last_error").is_empty() {
+        let _ = writeln!(out, "      error: {}", str_at(r, "last_error"));
+    }
+}
+
+fn render_resource_row(out: &mut String, r: &Value) {
+    let _ = writeln!(
+        out,
+        "  {:<24} refcount {}   owners: {}",
         str_at(r, "resource_key"),
         i64_at(r, "refcount"),
         strs(r, "owners").join(", "),
     );
+}
+
+fn row_handle(r: &Value, prefix: &str) -> String {
+    if str_at(r, "resource_key").is_empty() {
+        format!("{}/{}", prefix, str_at(r, "session"))
+    } else {
+        str_at(r, "resource_key").to_string()
+    }
+}
+
+fn clipped(s: &str, max_chars: usize) -> String {
+    s.chars().take(max_chars).collect()
 }

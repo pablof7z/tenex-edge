@@ -98,10 +98,13 @@ pub(crate) async fn launch(
         None => crate::project::resolve_or_bail(&std::env::current_dir().unwrap_or_default())?,
     };
     let base_command = if override_command.is_empty() {
-        super::launch_command::resolve_launch_command(&agent, command_name.as_deref())?
+        super::launch_command::resolve_launch_command(&agent, command_name.as_deref(), &extra_args)?
     } else {
         override_command
     };
+    let extra_args =
+        super::launch_command::extra_args_without_duplicate_suffix(&base_command, extra_args);
+    let full_command = super::launch_command::append_launch_args(base_command.clone(), &extra_args);
     // Show the interactive picker only when --channel "" is explicitly passed.
     // A bare `tenex-edge launch <agent>` with no --channel defaults to the
     // project root channel.
@@ -163,6 +166,15 @@ pub(crate) async fn launch(
     let pane_id = v["pane_id"]
         .as_str()
         .context("tmux_spawn response did not include pane_id")?;
+    if crate::cli::tmux_cli::attach::session_of_pane(pane_id).is_none() {
+        eprintln!("Launch command exited before tenex-edge could attach.");
+        eprintln!(
+            "Command: {}",
+            super::launch_command::display_argv(&full_command)
+        );
+        eprintln!("Run that command directly to see the harness startup error.");
+        return Ok(());
+    }
     crate::cli::tmux_cli::attach::attach_pane(pane_id)
 }
 

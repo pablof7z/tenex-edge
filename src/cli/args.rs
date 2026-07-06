@@ -9,6 +9,7 @@ use super::install::InstallArgs;
 use super::messaging::{ChatAction, PublishArgs};
 use super::probe::ProbeArgs;
 use super::tmux_cli::LaunchArgs;
+use super::validate::ValidateArgs;
 use super::who::WhoArgs;
 
 #[derive(Parser)]
@@ -34,6 +35,10 @@ pub(super) enum Cmd {
     /// Explain a published artifact: the reconciler receipt + the exact LLM
     /// inputs (system prompt, transcript slice, model, raw response) behind it.
     Explain(ExplainArgs),
+    /// Validate a surface, handle, event/message/recipient target, awareness
+    /// target, channel/readiness/readiness_attempt target, commit target, fact,
+    /// or replay capsule with explanations.
+    Validate(ValidateArgs),
     /// Write or read NIP-29 project chat.
     Chat {
         #[command(subcommand)]

@@ -213,24 +213,21 @@ fn decision_node(
                 RESULT_FAILED => OutboxAction::MarkFailed,
                 _ => OutboxAction::TrackPending,
             };
+            let error = ctx.input(nodes.error)?.clone();
             Ok(Decision {
                 local_id: id,
                 event_id: ctx.input(nodes.event_id)?.clone(),
                 event_hash: ctx.input(nodes.event_hash)?.clone(),
                 source_surface: ctx.input(nodes.source_surface)?.clone(),
                 source_ref: ctx.input(nodes.source_ref)?.clone(),
-                state: if result == RESULT_ACCEPTED {
-                    "published".into()
-                } else {
-                    "pending".into()
-                },
+                state: state_for_result(result, &error).into(),
                 retries: if result == RESULT_FAILED {
                     retries.saturating_add(1)
                 } else {
                     retries
                 },
                 last_error: if result == RESULT_FAILED {
-                    Some(ctx.input(nodes.error)?.clone())
+                    Some(error)
                 } else {
                     None
                 },
@@ -274,4 +271,28 @@ fn command_of(decision: &Decision) -> OutboxCommand {
         last_error: decision.last_error.clone(),
         action: decision.action.clone(),
     }
+}
+
+fn state_for_result(result: i64, error: &str) -> &'static str {
+    match result {
+        RESULT_ACCEPTED => "published",
+        RESULT_FAILED if terminal_publish_failure(error) => "failed",
+        _ => "pending",
+    }
+}
+
+fn terminal_publish_failure(error: &str) -> bool {
+    let error = error.to_ascii_lowercase();
+    [
+        "blocked: unknown member",
+        "unknown member",
+        "not a member",
+        "bad event json",
+        "blocked: kind",
+        "not allowed",
+        "forbidden",
+        "unauthorized",
+    ]
+    .iter()
+    .any(|needle| error.contains(needle))
 }

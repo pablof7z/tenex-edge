@@ -109,6 +109,16 @@ impl StatusReconciler {
             .collect()
     }
 
+    /// Current TTL arm converted back to the timestamp bucket boundary.
+    pub(crate) fn current_arm_at(&self, id: &str) -> Option<u64> {
+        let nodes = self.sessions.get(id)?;
+        self.graph
+            .input_value(nodes.arm)
+            .ok()
+            .flatten()
+            .map(|arm| arm.saturating_mul(self.refresh_secs))
+    }
+
     /// Explain the latest command emitted for a session's status, resolved through
     /// the label registry. `None` when no command has ever been emitted for `id`
     /// on this daemon graph (no live audit to report — say so, don't fake it).

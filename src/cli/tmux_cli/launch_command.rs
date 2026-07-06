@@ -13,6 +13,7 @@ struct CommandSuggestion {
 pub(super) fn resolve_launch_command(
     agent: &str,
     command_name: Option<&str>,
+    launch_args: &[String],
 ) -> Result<Vec<String>> {
     let edge_home = crate::config::edge_home();
     let agents = crate::identity::list_local_agents(&edge_home);
@@ -31,7 +32,7 @@ pub(super) fn resolve_launch_command(
     ensure_tty(agent)?;
 
     let suggestions = missing_command_suggestions(agent, &agents);
-    let command = pick_missing_command(agent, suggestions)?;
+    let command = pick_missing_command(agent, suggestions, launch_args)?;
     crate::identity::add_local_agent_with_commands(
         &edge_home,
         agent,
@@ -86,7 +87,11 @@ fn ensure_tty(agent: &str) -> Result<()> {
     )
 }
 
-fn pick_missing_command(agent: &str, suggestions: Vec<CommandSuggestion>) -> Result<LaunchCommand> {
+fn pick_missing_command(
+    agent: &str,
+    suggestions: Vec<CommandSuggestion>,
+    launch_args: &[String],
+) -> Result<LaunchCommand> {
     let custom_label = "Custom command...".to_string();
     let mut labels = suggestions
         .iter()
@@ -104,19 +109,62 @@ fn pick_missing_command(agent: &str, suggestions: Vec<CommandSuggestion>) -> Res
     if idx < suggestions.len() {
         return Ok(suggestions[idx].command.clone());
     }
-    prompt_custom_command()
+    prompt_custom_command(launch_args)
 }
 
-fn prompt_custom_command() -> Result<LaunchCommand> {
+fn prompt_custom_command(launch_args: &[String]) -> Result<LaunchCommand> {
     let name: String = dialoguer::Input::with_theme(&dialoguer::theme::ColorfulTheme::default())
         .with_prompt("Command name")
         .default(crate::identity::DEFAULT_COMMAND_NAME.to_string())
         .interact_text()?;
+    let prompt = if launch_args.is_empty() {
+        "Command".to_string()
+    } else {
+        format!(
+            "Command to save ({} appended for this launch)",
+            display_argv(launch_args)
+        )
+    };
     let raw: String = dialoguer::Input::with_theme(&dialoguer::theme::ColorfulTheme::default())
-        .with_prompt("Command")
+        .with_prompt(prompt)
         .interact_text()?;
     let argv = shlex::split(&raw).unwrap_or_else(|| vec![raw]);
     LaunchCommand::new(name, argv).context("command name and argv must be non-empty")
+}
+
+pub(super) fn extra_args_without_duplicate_suffix(
+    base_command: &[String],
+    extra_args: Vec<String>,
+) -> Vec<String> {
+    if !extra_args.is_empty() && base_command.ends_with(extra_args.as_slice()) {
+        Vec::new()
+    } else {
+        extra_args
+    }
+}
+
+pub(super) fn append_launch_args(
+    mut base_command: Vec<String>,
+    extra_args: &[String],
+) -> Vec<String> {
+    base_command.extend(extra_args.iter().cloned());
+    base_command
+}
+
+pub(super) fn display_argv(argv: &[String]) -> String {
+    argv.iter()
+        .map(|arg| {
+            if arg
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | ':'))
+            {
+                arg.clone()
+            } else {
+                format!("'{}'", arg.replace('\'', "'\\''"))
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn missing_command_suggestions(
@@ -215,5 +263,30 @@ mod tests {
         let suggestions = builtin_command_suggestions("codex");
         assert_eq!(suggestions[0].command.name, "codex");
         assert_eq!(suggestions[0].command.argv, argv(&["codex"]));
+    }
+
+    #[test]
+    fn duplicate_extra_args_are_not_appended_twice() {
+        let base = argv(&["codex", "--yolo"]);
+        let extra = argv(&["--yolo"]);
+        assert!(extra_args_without_duplicate_suffix(&base, extra).is_empty());
+    }
+
+    #[test]
+    fn distinct_extra_args_are_preserved() {
+        let base = argv(&["codex", "--model", "gpt-5"]);
+        let extra = argv(&["--yolo"]);
+        assert_eq!(
+            extra_args_without_duplicate_suffix(&base, extra),
+            argv(&["--yolo"])
+        );
+    }
+
+    #[test]
+    fn display_argv_quotes_shell_sensitive_args() {
+        assert_eq!(
+            display_argv(&argv(&["codex", "--profile", "work profile"])),
+            "codex --profile 'work profile'"
+        );
     }
 }

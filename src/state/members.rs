@@ -17,7 +17,16 @@ fn row_to_member(row: &rusqlite::Row) -> rusqlite::Result<ChannelMember> {
     })
 }
 
+fn row_to_member_set(row: &rusqlite::Row) -> rusqlite::Result<ChannelMemberSet> {
+    Ok(ChannelMemberSet {
+        channel_h: row.get(0)?,
+        role: row.get(1)?,
+        updated_at: row.get(2)?,
+    })
+}
+
 const COLS: &str = "channel_h, pubkey, role, updated_at";
+const SET_COLS: &str = "channel_h, role, updated_at";
 
 impl Store {
     /// Replace the admin set for a channel (kind:39001 materialization). Member
@@ -129,6 +138,15 @@ impl Store {
             |r| r.get(0),
         )?;
         Ok(n >= 2)
+    }
+
+    pub fn channel_member_sets(&self, channel_h: &str) -> Result<Vec<ChannelMemberSet>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {SET_COLS} FROM relay_channel_member_sets
+             WHERE channel_h=?1 ORDER BY role"
+        ))?;
+        let rows = stmt.query_map(params![channel_h], row_to_member_set)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
     /// All members (admins and members) of a channel.

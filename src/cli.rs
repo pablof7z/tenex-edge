@@ -30,6 +30,7 @@ mod probe;
 mod statusline;
 mod tmux_cli;
 mod turn;
+mod validate;
 mod who;
 
 #[cfg(test)]
@@ -108,6 +109,7 @@ pub async fn run(cli: Cli) -> Result<()> {
         Cmd::Publish(args) => messaging::publish(args).await,
         Cmd::Who(args) => who::who(args),
         Cmd::Explain(args) => explain::explain(args),
+        Cmd::Validate(args) => validate::validate(args).await,
         Cmd::Chat { action } => messaging::chat(action).await,
         Cmd::Project { action } => admin::project(action).await,
         Cmd::Doctor => admin::doctor().await,

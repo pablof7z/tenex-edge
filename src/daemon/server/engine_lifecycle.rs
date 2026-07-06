@@ -7,6 +7,7 @@ pub(in crate::daemon::server) async fn spawn_session(
     let session_id = params.session_id.clone();
     let pubkey = params.instance.pubkey.clone();
     let project = params.project.clone();
+    let watch_pid = params.watch_pid;
 
     tracing::info!(
         agent = %params.instance.base_slug,
@@ -33,6 +34,17 @@ pub(in crate::daemon::server) async fn spawn_session(
             cancel: cancel.clone(),
         },
     );
+    drive_session_watch(
+        state,
+        crate::reconcile::InputFact::SessionStarted {
+            session_id: session_id.clone(),
+            channel_h: Some(project.clone()),
+            agent_pubkey: Some(pubkey.clone()),
+            pid: watch_pid,
+            at: now_secs(),
+        },
+        "spawn-session",
+    );
 
     let st = state.clone();
     let sid = session_id.clone();
@@ -48,6 +60,15 @@ pub(in crate::daemon::server) async fn spawn_session(
         }
         membership_cleanup::remove_session_memberships(&st, &sid, "engine-exit");
         st.release_session_signer(&sid);
+        drive_session_watch(
+            &st,
+            crate::reconcile::InputFact::ProcessExited {
+                session_id: Some(sid.clone()),
+                pid: watch_pid.unwrap_or(0),
+                at: now_secs(),
+            },
+            "engine-exit",
+        );
         // Mark the bound identity dead but keep the row for resume (issue #47).
         st.with_store(|s| {
             if let Err(e) = s.mark_identity_dead_for_session(&sid) {
@@ -120,6 +141,15 @@ pub(in crate::daemon::server) async fn reconcile_sessions(state: &Arc<DaemonStat
                     tracing::error!(session = %session_id, error = %e, "reconcile GC: failed to mark identity dead for dead session");
                 }
             });
+            drive_session_watch(
+                state,
+                crate::reconcile::InputFact::ProcessExited {
+                    session_id: Some(session_id.clone()),
+                    pid: snap.child_pid.unwrap_or(0),
+                    at: now,
+                },
+                "reconcile-dead-pid",
+            );
             membership_cleanup::remove_session_memberships(
                 state,
                 &session_id,
@@ -275,4 +305,19 @@ pub(in crate::daemon::server) fn engine_params_for(
 
 pub(in crate::daemon::server) fn pid_alive(pid: i32) -> bool {
     nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None).is_ok()
+}
+
+fn drive_session_watch(
+    state: &Arc<DaemonState>,
+    fact: crate::reconcile::InputFact,
+    source: &'static str,
+) {
+    if let Err(e) = state
+        .session_watch
+        .lock()
+        .expect("session_watch mutex poisoned")
+        .apply(&fact)
+    {
+        tracing::warn!(source, error = ?e, "session_watch fact application failed");
+    }
 }

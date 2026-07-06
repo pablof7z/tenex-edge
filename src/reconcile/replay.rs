@@ -70,6 +70,7 @@ pub fn replay_script(
         ReplaySurface::SessionStart => {
             super::session_start::replay::replay_script(script, export_trace)
         }
+        ReplaySurface::SessionWatch => super::graph::replay::replay_script(script, export_trace),
     })
 }
 
@@ -82,9 +83,29 @@ enum ReplaySurface {
     Cursor,
     Outbox,
     SessionStart,
+    SessionWatch,
 }
 
 fn script_surface(script: &DataTransactionScript<InputFact>) -> Result<ReplaySurface> {
+    let has_process_exit = script.steps().iter().any(|step| {
+        step.operations().iter().any(|operation| {
+            matches!(
+                operation,
+                InputFact::ProcessExited {
+                    session_id: Some(_),
+                    ..
+                }
+            )
+        })
+    });
+    let has_session_start_specific = script.steps().iter().any(|step| {
+        step.operations().iter().any(|operation| {
+            matches!(
+                operation,
+                InputFact::SessionStartRequested(_) | InputFact::SessionStartFailed(_)
+            )
+        })
+    });
     let mut surface = None;
     for step in script.steps() {
         for operation in step.operations() {
@@ -99,9 +120,19 @@ fn script_surface(script: &DataTransactionScript<InputFact>) -> Result<ReplaySur
                 InputFact::OutboxEnqueueApplied { .. } | InputFact::RelayPublishAccepted { .. } => {
                     ReplaySurface::Outbox
                 }
-                InputFact::SessionStartRequested(_)
-                | InputFact::SessionStartFailed(_)
-                | InputFact::SessionStarted { .. } => ReplaySurface::SessionStart,
+                InputFact::SessionStartRequested(_) | InputFact::SessionStartFailed(_) => {
+                    ReplaySurface::SessionStart
+                }
+                InputFact::SessionStarted { .. }
+                    if has_process_exit && !has_session_start_specific =>
+                {
+                    ReplaySurface::SessionWatch
+                }
+                InputFact::SessionStarted { .. } => ReplaySurface::SessionStart,
+                InputFact::ProcessExited {
+                    session_id: Some(_),
+                    ..
+                } => ReplaySurface::SessionWatch,
                 other => anyhow::bail!(
                     "replay capsule operation is not a supported surface drive fact: {other:?}"
                 ),
@@ -251,6 +282,34 @@ mod tests {
 
         let report = replay_script(&script, false).unwrap();
         assert_eq!(report.surface, "outbox");
+        assert_eq!(report.steps, 2);
+        assert_eq!(report.resource_commands, 2);
+    }
+
+    #[test]
+    fn session_watch_replay_accepts_start_and_exit_facts() {
+        let mut script = DataTransactionScript::new();
+        script
+            .step("start")
+            .operation(InputFact::SessionStarted {
+                session_id: "s1".into(),
+                channel_h: Some("room".into()),
+                agent_pubkey: Some("pk".into()),
+                pid: Some(42),
+                at: 100,
+            })
+            .commit();
+        script
+            .step("exit")
+            .operation(InputFact::ProcessExited {
+                session_id: Some("s1".into()),
+                pid: 42,
+                at: 120,
+            })
+            .commit();
+
+        let report = replay_script(&script, false).unwrap();
+        assert_eq!(report.surface, "session_watch");
         assert_eq!(report.steps, 2);
         assert_eq!(report.resource_commands, 2);
     }

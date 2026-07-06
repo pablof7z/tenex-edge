@@ -1,7 +1,7 @@
 //! Shared test harness: spin up a real in-memory relay via `nak serve`.
 
 use std::net::TcpStream;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -27,6 +27,42 @@ fn free_port() -> u16 {
     let port = listener.local_addr().unwrap().port();
     drop(listener);
     port
+}
+
+fn tail_file(path: &Path) -> String {
+    let bytes = std::fs::read(path).unwrap_or_default();
+    if bytes.is_empty() {
+        return "<empty>".to_string();
+    }
+
+    let text = String::from_utf8_lossy(&bytes);
+    let mut lines = text.lines().rev().take(40).collect::<Vec<_>>();
+    lines.reverse();
+    lines.join("\n")
+}
+
+fn nip29_failure_message(
+    bin: &Path,
+    port: u16,
+    data: &Path,
+    status: &str,
+    stdout_path: &Path,
+    stderr_path: &Path,
+) -> String {
+    format!(
+        "NIP-29 relay did not come up on port {port}\n\
+         binary: {}\n\
+         data: {}\n\
+         status: {status}\n\
+         stdout ({}):\n{}\n\
+         stderr ({}):\n{}",
+        bin.display(),
+        data.display(),
+        stdout_path.display(),
+        tail_file(stdout_path),
+        stderr_path.display(),
+        tail_file(stderr_path)
+    )
 }
 
 /// Path to the NIP-29 relay binary — `nak serve` does NOT implement NIP-29
@@ -56,12 +92,17 @@ impl TestRelay {
         );
         let data = std::env::temp_dir().join(format!("nip29-relay-test-{port}"));
         let _ = std::fs::remove_dir_all(&data);
-        let child = Command::new(&bin)
+        std::fs::create_dir_all(&data).expect("create NIP-29 relay data dir");
+        let stdout_path = data.join("relay.stdout.log");
+        let stderr_path = data.join("relay.stderr.log");
+        let stdout = std::fs::File::create(&stdout_path).expect("create NIP-29 relay stdout log");
+        let stderr = std::fs::File::create(&stderr_path).expect("create NIP-29 relay stderr log");
+        let mut child = Command::new(&bin)
             .env("PORT", port.to_string())
             .env("HOST", "127.0.0.1")
             .env("DATAPATH", &data)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stdout(Stdio::from(stdout))
+            .stderr(Stdio::from(stderr))
             .spawn()
             .expect("spawn NIP-29 relay");
 
@@ -70,8 +111,31 @@ impl TestRelay {
             if TcpStream::connect(("127.0.0.1", port)).is_ok() {
                 break;
             }
+            if let Some(status) = child.try_wait().expect("poll NIP-29 relay") {
+                panic!(
+                    "{}",
+                    nip29_failure_message(
+                        &bin,
+                        port,
+                        &data,
+                        &status.to_string(),
+                        &stdout_path,
+                        &stderr_path
+                    )
+                );
+            }
             if Instant::now() > deadline {
-                panic!("NIP-29 relay did not come up on port {port}");
+                panic!(
+                    "{}",
+                    nip29_failure_message(
+                        &bin,
+                        port,
+                        &data,
+                        "still running after startup deadline",
+                        &stdout_path,
+                        &stderr_path
+                    )
+                );
             }
             std::thread::sleep(Duration::from_millis(50));
         }

@@ -2,6 +2,10 @@ use super::*;
 
 impl DaemonState {
     pub(crate) async fn new_for_test() -> Arc<DaemonState> {
+        Self::new_for_test_with_started_at(0).await
+    }
+
+    pub(crate) async fn new_for_test_with_started_at(started_at: u64) -> Arc<DaemonState> {
         let backend_key = Keys::generate().secret_key().to_secret_hex();
         let cfg = Config {
             whitelisted_pubkeys: Vec::new(),
@@ -35,6 +39,7 @@ impl DaemonState {
             provider,
             cfg,
             host,
+            started_at,
             owners,
             hosted: Mutex::new(HashMap::new()),
             sessions: Mutex::new(HashMap::new()),
@@ -46,6 +51,7 @@ impl DaemonState {
             turn_lifecycle: Mutex::new(crate::reconcile::TurnLifecycleReconciler::new()),
             cursor: Mutex::new(crate::reconcile::CursorReconciler::new()),
             session_start: Mutex::new(crate::reconcile::SessionStartReconciler::new()),
+            session_watch: Mutex::new(crate::reconcile::Reconciler::new().expect("session_watch")),
             outbox: Arc::new(Mutex::new(crate::reconcile::OutboxReconciler::new())),
             hook_contexts: Mutex::new(HashMap::new()),
             tail_tx: tokio::sync::broadcast::channel(512).0,

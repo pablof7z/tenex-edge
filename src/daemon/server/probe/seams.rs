@@ -20,6 +20,8 @@ pub(super) fn seams_value() -> Value {
     json!({
         "verb": "seams",
         "host_seam_coverage_percent": frontier::host_seam_coverage_percent(),
+        "covered_surfaces": frontier::covered_surfaces(),
+        "unproven_surfaces": frontier::unproven_surfaces(),
         "uncovered": frontier::uncovered_bypass_risks(),
         "surfaces": surfaces,
     })

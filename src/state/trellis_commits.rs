@@ -190,6 +190,35 @@ impl Store {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
+    /// One durable commit-ledger row by its stable SQLite row id.
+    pub fn get_commit(&self, id: i64) -> Result<Option<CommitRow>> {
+        Ok(self
+            .conn
+            .query_row(
+                &format!("SELECT {COLS} FROM trellis_commits WHERE id=?1"),
+                params![id],
+                row_to_commit,
+            )
+            .optional()?)
+    }
+
+    /// Commit-ledger rows for one surface transaction id, newest first.
+    /// Transaction ids are graph-local and can repeat after a daemon epoch
+    /// restart, so callers should treat multiple rows as ambiguous evidence.
+    pub fn commits_for_surface_transaction(
+        &self,
+        surface: &str,
+        transaction_id: i64,
+    ) -> Result<Vec<CommitRow>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {COLS} FROM trellis_commits
+             WHERE surface=?1 AND transaction_id=?2
+             ORDER BY created_at DESC, id DESC"
+        ))?;
+        let rows = stmt.query_map(params![surface, transaction_id], row_to_commit)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
     /// Aggregate value evidence for `surface` over commits with
     /// `created_at >= since`. Pure over the ledger — the proof `probe stats` works.
     pub fn commit_stats(&self, surface: &str, since: i64) -> Result<CommitStats> {
@@ -214,5 +243,13 @@ impl Store {
              )",
             params![surface, status, error],
         )?)
+    }
+}
+
+#[cfg(test)]
+impl Store {
+    pub(crate) fn drop_trellis_commits_for_test(&self) -> Result<()> {
+        self.conn.execute("DROP TABLE trellis_commits", [])?;
+        Ok(())
     }
 }

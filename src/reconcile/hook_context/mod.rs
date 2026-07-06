@@ -5,6 +5,7 @@
 //! explicit store inputs plus cursor/now, so the injected bytes and receipt share
 //! the same dependency trace.
 
+mod preview;
 mod probe;
 mod receipt;
 pub(crate) mod replay;
@@ -36,6 +37,7 @@ pub struct HookContextOutcome {
 }
 
 /// Per-graph handles for the reusable snapshot node-set.
+#[derive(Clone)]
 struct Nodes {
     cursor: InputNode<i64>,
     now: InputNode<i64>,

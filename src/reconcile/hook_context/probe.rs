@@ -62,4 +62,9 @@ impl HookContextReconciler {
     pub fn why_view_input_causes(&self) -> Vec<String> {
         self.labels.labels_for(&self.why_view_causes())
     }
+
+    #[cfg(test)]
+    pub fn set_current_text_for_test(&mut self, text: impl Into<String>) {
+        self.last_text = Some(text.into());
+    }
 }

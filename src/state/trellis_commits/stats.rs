@@ -6,6 +6,8 @@ use std::collections::BTreeMap;
 
 #[derive(Debug)]
 struct StatsRow {
+    transaction_id: i64,
+    revision: i64,
     resource_commands_json: String,
     output_frames_json: String,
     command_count: i64,
@@ -25,9 +27,17 @@ struct KindOnly {
     kind: Option<String>,
 }
 
+#[derive(Default)]
+struct CommandCounts {
+    open: i64,
+    close: i64,
+    replace: i64,
+    refresh: i64,
+}
+
 pub(super) fn commit_stats(store: &Store, surface: &str, since: i64) -> Result<CommitStats> {
     let mut stmt = store.conn.prepare(
-        "SELECT resource_commands_json, output_frames_json, command_count,
+        "SELECT transaction_id, revision, resource_commands_json, output_frames_json, command_count,
                 output_count, effect_count, suppressed_count, noop, oracle_status,
                 oracle_error, duration_us, graph_nodes, graph_resources
          FROM trellis_commits
@@ -36,18 +46,20 @@ pub(super) fn commit_stats(store: &Store, surface: &str, since: i64) -> Result<C
     )?;
     let rows = stmt.query_map(params![surface, since], |r| {
         Ok(StatsRow {
-            resource_commands_json: r.get(0)?,
-            output_frames_json: r.get(1)?,
-            command_count: r.get(2)?,
-            output_count: r.get(3)?,
-            effect_count: r.get(4)?,
-            suppressed_count: r.get(5)?,
-            noop: r.get(6)?,
-            oracle_status: r.get(7)?,
-            oracle_error: r.get(8)?,
-            duration_us: r.get(9)?,
-            graph_nodes: r.get(10)?,
-            graph_resources: r.get(11)?,
+            transaction_id: r.get(0)?,
+            revision: r.get(1)?,
+            resource_commands_json: r.get(2)?,
+            output_frames_json: r.get(3)?,
+            command_count: r.get(4)?,
+            output_count: r.get(5)?,
+            effect_count: r.get(6)?,
+            suppressed_count: r.get(7)?,
+            noop: r.get(8)?,
+            oracle_status: r.get(9)?,
+            oracle_error: r.get(10)?,
+            duration_us: r.get(11)?,
+            graph_nodes: r.get(12)?,
+            graph_resources: r.get(13)?,
         })
     })?;
 
@@ -55,9 +67,19 @@ pub(super) fn commit_stats(store: &Store, surface: &str, since: i64) -> Result<C
     let mut durations = BTreeMap::new();
     let mut graph_nodes = BTreeMap::new();
     let mut graph_resources = BTreeMap::new();
+    let mut last_transaction_id = None;
+    let mut last_revision = None;
+    let mut epoch_balance = None;
 
     for row in rows {
         let row = row?;
+        let counts = count_command_kinds(&row.resource_commands_json);
+        let delta = counts.open - counts.close;
+        let epoch_restarted = last_transaction_id.is_some_and(|prev| row.transaction_id < prev)
+            || last_revision.is_some_and(|prev| row.revision < prev);
+        if epoch_balance.is_none() || epoch_restarted {
+            epoch_balance = Some(row.graph_resources - delta);
+        }
         out.commits += 1;
         out.effectful += i64::from(row.noop == 0);
         out.noop += row.noop;
@@ -74,7 +96,13 @@ pub(super) fn commit_stats(store: &Store, surface: &str, since: i64) -> Result<C
             out.latest_oracle_error = row.oracle_error;
         }
 
-        count_command_kinds(&row.resource_commands_json, &mut out);
+        out.open_count += counts.open;
+        out.close_count += counts.close;
+        out.replace_count += counts.replace;
+        out.refresh_count += counts.refresh;
+        epoch_balance = epoch_balance.map(|balance| balance + delta);
+        last_transaction_id = Some(row.transaction_id);
+        last_revision = Some(row.revision);
         if surface == "hook_context" {
             out.hook_unchanged_frames += count_kind(&row.output_frames_json, "unchanged");
         }
@@ -83,7 +111,7 @@ pub(super) fn commit_stats(store: &Store, surface: &str, since: i64) -> Result<C
         bump(&mut graph_resources, size_bucket(row.graph_resources));
     }
 
-    out.live_resource_balance = out.open_count - out.close_count;
+    out.live_resource_balance = epoch_balance.unwrap_or_default();
     out.resource_drift =
         surface == "subscriptions" && out.live_resource_balance != out.latest_graph_resources;
     out.duration_histogram = buckets(durations);
@@ -92,16 +120,18 @@ pub(super) fn commit_stats(store: &Store, surface: &str, since: i64) -> Result<C
     Ok(out)
 }
 
-fn count_command_kinds(json: &str, out: &mut CommitStats) {
+fn count_command_kinds(json: &str) -> CommandCounts {
+    let mut out = CommandCounts::default();
     for kind in kinds(json) {
         match kind.as_str() {
-            "open" => out.open_count += 1,
-            "close" => out.close_count += 1,
-            "replace" => out.replace_count += 1,
-            "refresh" => out.refresh_count += 1,
+            "open" => out.open += 1,
+            "close" => out.close += 1,
+            "replace" => out.replace += 1,
+            "refresh" => out.refresh += 1,
             _ => {}
         }
     }
+    out
 }
 
 fn count_kind(json: &str, target: &str) -> i64 {

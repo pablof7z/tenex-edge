@@ -2,8 +2,9 @@
 //! `subscriptions` lists each live REQ with its owner scopes + refcount;
 //! `status` lists each session's currently-published content, `turn_lifecycle`
 //! lists local turn projections, `cursor` lists high-water decisions,
-//! `session_start` lists advisory staged intents, `outbox` lists publish
-//! results, and `hook_context` lists daemon-held per-session graphs.
+//! `session_start` lists advisory staged intents, `session_watch` lists live
+//! watched sessions, `outbox` lists publish results, and `hook_context` lists
+//! daemon-held per-session graphs.
 
 use super::{required_str, DaemonState};
 use anyhow::Result;
@@ -19,8 +20,11 @@ pub(super) fn state_value(state: &Arc<DaemonState>, params: &Value) -> Result<Va
                 .state_rows()
                 .into_iter()
                 .map(|row| {
+                    let session = row.session;
+                    let resource_key = format!("status/{session}");
                     json!({
-                        "session": row.session,
+                        "session": session,
+                        "resource_key": resource_key,
                         "title": row.title,
                         "activity": row.activity,
                         "busy": row.busy,
@@ -54,8 +58,11 @@ pub(super) fn state_value(state: &Arc<DaemonState>, params: &Value) -> Result<Va
                 .state_rows()
                 .into_iter()
                 .map(|row| {
+                    let session = row.session;
+                    let resource_key = format!("turn_lifecycle/{session}");
                     json!({
-                        "session": row.session,
+                        "session": session,
+                        "resource_key": resource_key,
                         "working": row.working,
                         "turn_started_at": row.turn_started_at,
                         "transcript_ref": row.transcript_ref,
@@ -70,8 +77,11 @@ pub(super) fn state_value(state: &Arc<DaemonState>, params: &Value) -> Result<Va
                 .state_rows()
                 .into_iter()
                 .map(|row| {
+                    let session = row.session;
+                    let resource_key = format!("cursor/{session}");
                     json!({
-                        "session": row.session,
+                        "session": session,
+                        "resource_key": resource_key,
                         "cursor": row.cursor,
                         "last_frame": row.last_frame,
                         "delta_since": row.delta_since,
@@ -89,16 +99,45 @@ pub(super) fn state_value(state: &Arc<DaemonState>, params: &Value) -> Result<Va
                 .state_rows()
                 .into_iter()
                 .map(|row| {
+                    let session = row.session_id;
+                    let resource_key = format!("session_start/{session}");
                     json!({
-                        "session": row.session_id,
+                        "session": session,
+                        "resource_key": resource_key,
                         "action": row.action,
                         "channel_h": row.channel_h,
                         "signer_pubkey": row.signer_pubkey,
                         "reassert": row.reassert,
+                        "failure_stage": row.failure_stage,
+                        "failure_error": row.failure_error,
+                        "has_channel_ready_intent": row.has_channel_ready_intent,
+                        "has_spawn_intent": row.has_spawn_intent,
+                        "watch_pid": row.watch_pid,
+                        "ensure_subscription": row.ensure_subscription,
+                        "replay_chat": row.replay_chat,
                     })
                 })
                 .collect();
             Ok(json!({ "verb": "state", "surface": "session_start", "rows": rows }))
+        }
+        "session_watch" => {
+            let r = state
+                .session_watch
+                .lock()
+                .expect("session_watch mutex poisoned");
+            let rows: Vec<Value> = r
+                .state_rows()
+                .into_iter()
+                .map(|row| {
+                    json!({
+                        "session": row.session,
+                        "resource_key": row.resource_key,
+                        "refcount": row.refcount,
+                        "owners": row.owners,
+                    })
+                })
+                .collect();
+            Ok(json!({ "verb": "state", "surface": "session_watch", "rows": rows }))
         }
         "outbox" => {
             let r = state.outbox.lock().expect("outbox mutex poisoned");
@@ -106,8 +145,10 @@ pub(super) fn state_value(state: &Arc<DaemonState>, params: &Value) -> Result<Va
                 .state_rows()
                 .into_iter()
                 .map(|row| {
+                    let resource_key = format!("outbox/{}", row.local_id);
                     json!({
                         "local_id": row.local_id,
+                        "resource_key": resource_key,
                         "event_id": row.event_id,
                         "state": row.state,
                         "retries": row.retries,
@@ -173,14 +214,18 @@ fn hook_context_state(state: &Arc<DaemonState>, params: &Value) -> Result<Value>
 }
 
 fn hook_row(session: &str, graph: &crate::reconcile::HookContextReconciler, dump: bool) -> Value {
+    let view_label = graph.view_label();
     let mut row = json!({
         "session": session,
+        "resource_key": view_label
+            .clone()
+            .unwrap_or_else(|| format!("hook/{session}/view")),
         "revision": graph.revision(),
         "nodes": graph.graph_node_count(),
         "render_count": graph.render_count(),
         "text": graph.current_text(),
         "input_labels": graph.input_labels(),
-        "view_label": graph.view_label(),
+        "view_label": view_label,
         "why_input_causes": graph.why_view_input_causes(),
     });
     if dump {

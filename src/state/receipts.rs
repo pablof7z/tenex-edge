@@ -106,6 +106,70 @@ impl Store {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
+    /// Receipts for an exact artifact id or unambiguous artifact id prefix.
+    /// Multiple receipts for the same artifact are expected; multiple distinct
+    /// artifacts sharing the prefix are ambiguous and must be named more fully.
+    pub fn receipts_by_artifact_ref_prefix(&self, prefix: &str) -> Result<Vec<ReceiptRow>> {
+        if prefix.len() >= 64 {
+            return self.receipts_by_artifact_ref(prefix);
+        }
+        let pattern = format!("{prefix}*");
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {COLS} FROM receipts
+             WHERE artifact_ref GLOB ?1
+             ORDER BY created_at ASC, id ASC"
+        ))?;
+        let rows = stmt.query_map(params![pattern], row_to_receipt)?;
+        let rows = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut artifact_refs = rows
+            .iter()
+            .filter_map(|r| r.artifact_ref.as_deref())
+            .collect::<Vec<_>>();
+        artifact_refs.sort_unstable();
+        artifact_refs.dedup();
+        if artifact_refs.len() > 1 {
+            anyhow::bail!("ambiguous artifact prefix {prefix:?}: matches more than one event");
+        }
+        Ok(rows)
+    }
+
+    /// Most recent hook-context receipts for one session, newest first.
+    pub fn latest_hook_receipts_for_session(
+        &self,
+        session_id: &str,
+        limit: u32,
+    ) -> Result<Vec<ReceiptRow>> {
+        let pattern = format!("{}:%", escape_like(session_id));
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {COLS} FROM receipts
+             WHERE surface='hook_context' AND artifact_ref LIKE ?1 ESCAPE '\\'
+             ORDER BY created_at DESC, id DESC LIMIT ?2"
+        ))?;
+        let rows = stmt.query_map(params![pattern, limit], row_to_receipt)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Hook-context receipt for one session nearest to `at_millis`.
+    pub fn find_hook_receipt_for_session_near(
+        &self,
+        session_id: &str,
+        at_millis: i64,
+    ) -> Result<Option<ReceiptRow>> {
+        let pattern = format!("{}:%", escape_like(session_id));
+        Ok(self
+            .conn
+            .query_row(
+                &format!(
+                    "SELECT {COLS} FROM receipts
+                     WHERE surface='hook_context' AND artifact_ref LIKE ?1 ESCAPE '\\'
+                     ORDER BY ABS(created_at - ?2) ASC, created_at DESC, id DESC LIMIT 1"
+                ),
+                params![pattern, at_millis],
+                row_to_receipt,
+            )
+            .optional()?)
+    }
+
     /// Most recent receipts for a surface, newest first, capped at `limit`.
     pub fn latest_receipts_for_surface(
         &self,
@@ -118,6 +182,23 @@ impl Store {
              ORDER BY created_at DESC, id DESC LIMIT ?2"
         ))?;
         let rows = stmt.query_map(params![surface, limit], row_to_receipt)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Receipts for one surface transaction id, newest first. Transaction ids
+    /// can repeat across daemon epochs, so callers must decide whether multiple
+    /// rows are acceptable evidence or an ambiguity.
+    pub fn receipts_for_surface_transaction(
+        &self,
+        surface: &str,
+        transaction_id: i64,
+    ) -> Result<Vec<ReceiptRow>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {COLS} FROM receipts
+             WHERE surface=?1 AND transaction_id=?2
+             ORDER BY created_at DESC, id DESC"
+        ))?;
+        let rows = stmt.query_map(params![surface, transaction_id], row_to_receipt)?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
@@ -136,6 +217,13 @@ impl Store {
             )
             .optional()?)
     }
+}
+
+fn escape_like(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
 }
 
 #[cfg(test)]
@@ -209,6 +297,21 @@ mod tests {
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].created_at, 1_000);
         assert_eq!(rows[1].created_at, 2_000);
+    }
+
+    #[test]
+    fn by_artifact_ref_prefix_requires_one_artifact() {
+        let s = Store::open_memory().unwrap();
+        s.record_receipt(&receipt("status", Some("evt-abc"), 2_000))
+            .unwrap();
+        s.record_receipt(&receipt("hook_context", Some("evt-abc"), 1_000))
+            .unwrap();
+        s.record_receipt(&receipt("status", Some("evt-def"), 3_000))
+            .unwrap();
+
+        let rows = s.receipts_by_artifact_ref_prefix("evt-a").unwrap();
+        assert_eq!(rows.len(), 2);
+        assert!(s.receipts_by_artifact_ref_prefix("evt-").is_err());
     }
 
     #[test]

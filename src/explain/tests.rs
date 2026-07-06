@@ -153,6 +153,19 @@ fn explain_hook_filters_by_session_and_selects_nearest() {
             created_at: 120,
         })
         .unwrap();
+    for i in 0..600 {
+        store
+            .record_receipt(&NewReceipt {
+                surface: "hook_context".into(),
+                transaction_id: 1,
+                revision: 1,
+                changed_summary: "{}".into(),
+                commands: "[]".into(),
+                artifact_ref: Some(format!("sid-noise:turn_check:{}", 10_000 + i)),
+                created_at: 10_000 + i,
+            })
+            .unwrap();
+    }
     let v = explain(
         &store,
         &Handle::Hook {
@@ -197,7 +210,16 @@ fn parse_handle_covers_every_scheme() {
         parse_handle("txn:status:7").unwrap(),
         Handle::Txn {
             surface: "status".into(),
-            id: 7
+            id: 7,
+            at: None
+        }
+    );
+    assert_eq!(
+        parse_handle("txn:status:7@1234").unwrap(),
+        Handle::Txn {
+            surface: "status".into(),
+            id: 7,
+            at: Some(1234)
         }
     );
     assert_eq!(

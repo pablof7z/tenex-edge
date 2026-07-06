@@ -1,6 +1,6 @@
 //! Probe-facing, non-mutating causality queries over the live subscription graph
 //! (frontier design §4.3 why + §4.4 state). Read-only: it reports the current
-//! owner set + refcount of a channel's REQ and why its latest command was
+//! owner set + refcount of a subscription REQ and why its latest command was
 //! emitted, resolved through the label registry — no relay I/O, no mutation.
 
 use std::collections::BTreeSet;
@@ -20,7 +20,7 @@ pub struct SubStateRow {
     pub owners: Vec<String>,
 }
 
-/// Plain, Trellis-free explanation of a channel `#h` REQ's live state + last change.
+/// Plain, Trellis-free explanation of a subscription REQ's live state + last change.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChannelWhy {
     /// Human resource path, e.g. `sub/h/general`.
@@ -43,12 +43,30 @@ impl SubscriptionReconciler {
         self.graph.revision().get()
     }
 
-    /// Explain a channel's `#h` REQ: its live owner set + refcount, and why its
-    /// latest command was emitted. Always returns a value (the refcount/owners are
-    /// live even for a never-commanded key); `last_kind`/`cause` are `None` when no
-    /// command has been emitted — reported honestly rather than faked.
+    /// Explain a channel's `#h` REQ.
     pub fn explain_channel(&self, h: &str) -> ChannelWhy {
-        let key = sub_key(Space::ChannelH, h);
+        self.explain_entity(Space::ChannelH, h)
+    }
+
+    /// Explain a visible state row resource key, such as `sub/h/general`.
+    pub fn explain_resource_path(&self, path: &str) -> Option<ChannelWhy> {
+        let rest = path.strip_prefix("sub/")?;
+        let (space, entity) = rest.split_once('/')?;
+        let space = match space {
+            "h" => Space::ChannelH,
+            "d" => Space::GroupStateD,
+            "p" => Space::PubkeyP,
+            _ => return None,
+        };
+        (!entity.is_empty()).then(|| self.explain_entity(space, entity))
+    }
+
+    /// Explain a REQ's live owner set + refcount and why its latest command was
+    /// emitted. Always returns a value (the refcount/owners are live even for a
+    /// never-commanded key); `last_kind`/`cause` are `None` when no command has
+    /// been emitted — reported honestly rather than faked.
+    fn explain_entity(&self, space: Space, entity: &str) -> ChannelWhy {
+        let key = sub_key(space, entity);
         let owners = self
             .graph
             .resource_owners(&key)

@@ -3,6 +3,14 @@
 
 use super::*;
 
+fn row_to_project_root(row: &rusqlite::Row) -> rusqlite::Result<ProjectRootBinding> {
+    Ok(ProjectRootBinding {
+        channel_h: row.get(0)?,
+        abs_path: row.get(1)?,
+        updated_at: row.get(2)?,
+    })
+}
+
 impl Store {
     /// Record (or update) the absolute on-disk path for a channel/project.
     pub fn upsert_project_root(
@@ -29,6 +37,18 @@ impl Store {
                 "SELECT abs_path FROM project_roots WHERE channel_h=?1",
                 params![channel_h],
                 |r| r.get::<_, String>(0),
+            )
+            .optional()?)
+    }
+
+    /// The local filesystem binding row for a channel/project on this machine.
+    pub fn project_root_binding(&self, channel_h: &str) -> Result<Option<ProjectRootBinding>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT channel_h, abs_path, updated_at FROM project_roots WHERE channel_h=?1",
+                params![channel_h],
+                row_to_project_root,
             )
             .optional()?)
     }

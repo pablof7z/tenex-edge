@@ -70,6 +70,14 @@ pub struct ChannelMember {
     pub updated_at: u64,
 }
 
+/// High-water mark for a materialized channel member/admin replacement set.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChannelMemberSet {
+    pub channel_h: String,
+    pub role: String,
+    pub updated_at: u64,
+}
+
 /// kind:0 metadata for any pubkey.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Profile {
@@ -111,6 +119,20 @@ pub struct RelayEvent {
     pub d_tag: String,
     pub content: String,
     pub tags_json: String,
+}
+
+/// A relay event held out of the normal cache until admission prerequisites
+/// become true, such as channel roster hydration for inbound chat.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QuarantinedEvent {
+    pub id: String,
+    pub kind: u32,
+    pub pubkey: String,
+    pub created_at: u64,
+    pub channel_h: String,
+    pub event_json: String,
+    pub reason: String,
+    pub quarantined_at: u64,
 }
 
 /// Canonical chat/message read-model row. `author_session` is the return
@@ -155,6 +177,42 @@ pub struct MessageRecipient {
     pub recipient_pubkey: String,
     pub target_session: Option<String>,
     pub delivered_at: Option<u64>,
+}
+
+/// Local filesystem binding for a fabric project/root channel on this machine.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectRootBinding {
+    pub channel_h: String,
+    pub abs_path: String,
+    pub updated_at: u64,
+}
+
+/// Durable record of a host/provider channel readiness attempt. These are not
+/// authoritative channel state; they explain local provisioning decisions that
+/// otherwise only existed in daemon logs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChannelReadinessAttempt {
+    pub id: i64,
+    pub channel_h: String,
+    pub expect_member: String,
+    pub parent_hint: Option<String>,
+    pub name: Option<String>,
+    pub source: String,
+    pub outcome: String,
+    pub reason: String,
+    pub created_at: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewChannelReadinessAttempt {
+    pub channel_h: String,
+    pub expect_member: String,
+    pub parent_hint: Option<String>,
+    pub name: Option<String>,
+    pub source: String,
+    pub outcome: String,
+    pub reason: String,
+    pub created_at: u64,
 }
 
 // ── local plumbing row types ─────────────────────────────────────────────────
@@ -268,6 +326,7 @@ pub(super) fn mint_session_id() -> String {
 }
 
 mod aliases;
+mod channel_readiness_attempts;
 mod channels;
 mod schema;
 pub use channels::{archived_channel_about, is_archived_channel_about, CHANNEL_ABOUT_MAX_CHARS};

@@ -6,6 +6,7 @@
 //! Transcript lines look like:
 //!   {"type":"user","message":{"role":"user","content":"..."| [blocks]}, ...}
 //!   {"type":"assistant","message":{"role":"assistant","content":[{type:text,text},{type:tool_use,name,input}]}}
+//!   {"type":"response_item","payload":{"type":"message","role":"assistant","content":[{type:output_text,text}]}}
 //! We extract recent user prompts + assistant text + tool uses, skipping
 //! tool-result noise, and return a compact chronological snippet.
 
@@ -42,21 +43,13 @@ pub fn read_recent(path: &Path, max_msgs: usize, max_chars: usize) -> Option<Str
             continue;
         };
 
-        // Two accepted shapes:
+        // Three accepted shapes:
         //  - Claude Code: top-level `type` ("user"/"assistant"), content nested
         //    under `message.content` (string or block array).
         //  - Flat (opencode plugin, like pc): top-level `role` + `content` string.
-        let (role, content) = if let Some(t) = v.get("type").and_then(|x| x.as_str()) {
-            if t != "user" && t != "assistant" {
-                continue;
-            }
-            (t, v.get("message").and_then(|m| m.get("content")))
-        } else if let Some(r) = v.get("role").and_then(|x| x.as_str()) {
-            if r != "user" && r != "assistant" {
-                continue;
-            }
-            (r, v.get("content"))
-        } else {
+        //  - Codex rollout JSONL: top-level `response_item`, message nested
+        //    under `payload` with `input_text`/`output_text` blocks.
+        let Some((role, content)) = message_record(&v) else {
             continue;
         };
 
@@ -75,6 +68,33 @@ pub fn read_recent(path: &Path, max_msgs: usize, max_chars: usize) -> Option<Str
     Some(cap_tail(&joined, max_chars))
 }
 
+fn message_record(v: &Value) -> Option<(&str, Option<&Value>)> {
+    if v.get("type").and_then(|x| x.as_str()) == Some("response_item") {
+        let payload = v.get("payload")?;
+        if payload.get("type").and_then(|x| x.as_str()) != Some("message") {
+            return None;
+        }
+        let role = payload.get("role").and_then(|x| x.as_str())?;
+        if role != "user" && role != "assistant" {
+            return None;
+        }
+        return Some((role, payload.get("content")));
+    }
+
+    if let Some(t) = v.get("type").and_then(|x| x.as_str()) {
+        if t != "user" && t != "assistant" {
+            return None;
+        }
+        return Some((t, v.get("message").and_then(|m| m.get("content"))));
+    }
+
+    let role = v.get("role").and_then(|x| x.as_str())?;
+    if role != "user" && role != "assistant" {
+        return None;
+    }
+    Some((role, v.get("content")))
+}
+
 fn extract(content: Option<&Value>, _role: &str) -> String {
     match content {
         Some(Value::String(s)) => s.clone(),
@@ -82,7 +102,10 @@ fn extract(content: Option<&Value>, _role: &str) -> String {
             let mut parts = Vec::new();
             for b in blocks {
                 // tool_use, tool_result, and others are noise for distillation.
-                if let Some("text") = b.get("type").and_then(|x| x.as_str()) {
+                if matches!(
+                    b.get("type").and_then(|x| x.as_str()),
+                    Some("text" | "input_text" | "output_text")
+                ) {
                     if let Some(t) = b.get("text").and_then(|x| x.as_str()) {
                         parts.push(t.to_string());
                     }
@@ -178,6 +201,53 @@ mod tests {
         assert!(
             !out.contains("noise"),
             "non user/assistant roles should be skipped: {out}"
+        );
+    }
+
+    #[test]
+    fn extracts_codex_rollout_response_items() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("codex.jsonl");
+        let mut f = File::create(&p).unwrap();
+        writeln!(
+            f,
+            r#"{{"type":"response_item","payload":{{"type":"message","role":"developer","content":[{{"type":"input_text","text":"policy noise"}}]}}}}"#
+        )
+        .unwrap();
+        writeln!(
+            f,
+            r#"{{"type":"response_item","payload":{{"type":"message","role":"user","content":[{{"type":"input_text","text":"fix empty distillations"}}]}}}}"#
+        )
+        .unwrap();
+        writeln!(
+            f,
+            r#"{{"type":"response_item","payload":{{"type":"function_call","name":"exec_command","arguments":"{{}}"}}}}"#
+        )
+        .unwrap();
+        writeln!(
+            f,
+            r#"{{"type":"response_item","payload":{{"type":"function_call_output","output":"large tool result"}}}}"#
+        )
+        .unwrap();
+        writeln!(
+            f,
+            r#"{{"type":"response_item","payload":{{"type":"message","role":"assistant","content":[{{"type":"output_text","text":"Tracing the transcript parser"}}]}}}}"#
+        )
+        .unwrap();
+
+        let out = read_recent(&p, 10, 5000).unwrap();
+        assert!(out.contains("User: fix empty distillations"), "got: {out}");
+        assert!(
+            out.contains("Assistant: Tracing the transcript parser"),
+            "got: {out}"
+        );
+        assert!(
+            !out.contains("policy noise"),
+            "developer messages are noise: {out}"
+        );
+        assert!(
+            !out.contains("large tool result"),
+            "tool output should be skipped: {out}"
         );
     }
 
