@@ -2,7 +2,7 @@ use std::io::IsTerminal;
 
 use anyhow::{bail, Context, Result};
 
-use crate::identity::{adapt_argv_for_slug, LaunchCommand};
+use crate::identity::{adapt_argv_for_slug, LaunchCommand, SpawnAgentEntry};
 
 #[derive(Clone)]
 struct CommandSuggestion {
@@ -121,12 +121,7 @@ fn prompt_custom_command() -> Result<LaunchCommand> {
 
 fn missing_command_suggestions(
     target_slug: &str,
-    agents: &[(
-        String,
-        Vec<LaunchCommand>,
-        Option<serde_json::Value>,
-        Option<String>,
-    )],
+    agents: &[SpawnAgentEntry],
 ) -> Vec<CommandSuggestion> {
     let local = agent_command_suggestions(target_slug, agents);
     if !local.is_empty() {
@@ -137,12 +132,7 @@ fn missing_command_suggestions(
 
 fn agent_command_suggestions(
     target_slug: &str,
-    agents: &[(
-        String,
-        Vec<LaunchCommand>,
-        Option<serde_json::Value>,
-        Option<String>,
-    )],
+    agents: &[SpawnAgentEntry],
 ) -> Vec<CommandSuggestion> {
     let mut out = Vec::new();
     for (source_slug, commands, _, _) in agents {
