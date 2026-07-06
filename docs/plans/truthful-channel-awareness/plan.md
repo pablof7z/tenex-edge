@@ -81,6 +81,6 @@ ready
 
 ## Hosted Artifacts
 
-- Plan page: Generated after publishing.
+- Plan page: https://pablof7z.github.io/tenex-edge/plans/truthful-channel-awareness/
 
 - TTS audio: https://blossom.primal.net/8cdc19878d006b587fce4ccba5345287b423175652c99b4cab3ff784ca2a69d7.mp3
