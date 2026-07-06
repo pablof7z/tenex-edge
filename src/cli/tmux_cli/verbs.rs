@@ -89,12 +89,18 @@ pub(crate) async fn launch(
     agent: String,
     project: Option<String>,
     channel: Option<String>,
+    command_name: Option<String>,
     override_command: Vec<String>,
     extra_args: Vec<String>,
 ) -> Result<()> {
     let project = match project {
         Some(p) => p,
         None => crate::project::resolve_or_bail(&std::env::current_dir().unwrap_or_default())?,
+    };
+    let base_command = if override_command.is_empty() {
+        super::launch_command::resolve_launch_command(&agent, command_name.as_deref())?
+    } else {
+        override_command
     };
     // Show the interactive picker only when --channel "" is explicitly passed.
     // A bare `tenex-edge launch <agent>` with no --channel defaults to the
@@ -148,7 +154,7 @@ pub(crate) async fn launch(
             "project": project,
             "channel": channel,
             "command": extra_args,
-            "base_command": override_command,
+            "base_command": base_command,
             "cwd": cwd,
         }),
     )

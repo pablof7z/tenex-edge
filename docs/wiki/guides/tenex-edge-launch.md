@@ -8,8 +8,8 @@ tags:
 volatility: warm
 confidence: medium
 created: 2026-07-03
-updated: 2026-07-03
-verified: 2026-07-03
+updated: 2026-07-06
+verified: 2026-07-06
 compiled-from: conversation
 sources:
   - session:abce9e9f-8f3e-4561-9dd3-684afd59be80
@@ -17,6 +17,12 @@ sources:
 ---
 
 # Tenex-Edge Launch
+
+## Named Commands
+
+Agent launch commands are stored as named entries in `~/.tenex-edge/agents/<slug>.json` under `commands`, for example `{"commands":[{"name":"full","argv":["claude","--dangerously-skip-permissions"]}]}`. The removed singular `command` field is ignored by launch resolution; it is not read as a legacy fallback.
+
+`tenex-edge launch <agent>` chooses the command before calling the daemon. A single configured command launches directly. Multiple configured commands open a TTY picker unless `--command-name <name>` selects one explicitly. `-c/--command <command>` remains a one-shot full argv override. If no commands exist, interactive launch suggests commands from other agents' `commands` entries with conservative slug/path adaptation; if no local suggestions exist, it suggests built-in harness commands.
 
 ## tmux Environment Inheritance
 

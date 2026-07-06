@@ -12,8 +12,11 @@ use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+mod commands;
 mod keys;
 mod local_agent;
+pub(crate) use commands::adapt_argv_for_slug;
+pub use commands::{LaunchCommand, DEFAULT_COMMAND_NAME};
 pub use keys::{
     agent_ordinal_label, derive_agent_ordinal_keys, derive_session_keys, AgentInstance,
 };
@@ -25,11 +28,11 @@ struct StoredKey {
     secret_key: String, // hex
     public_key: String, // hex
     created_at: u64,
-    /// Harness command to use when spawning a new tmux session for this agent.
-    /// E.g. `["claude", "--dangerously-skip-permissions"]`.
-    /// When absent, the spawn logic falls back to the built-in SPAWN_DEFS table.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    command: Option<Vec<String>>,
+    /// Named harness commands to use when spawning a new tmux session for this
+    /// agent. The old singular `command` field is intentionally not deserialized:
+    /// files that still carry it behave as if no commands are configured.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    commands: Vec<LaunchCommand>,
     /// Inline agent definition forwarded to the harness at spawn time.
     /// For Claude: becomes `--agents '{"<slug>": <def>}' --agent <slug>`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -63,13 +66,12 @@ impl StoredKey {
     }
 }
 
-/// A resolved agent identity: its slug, signing keys, and optional harness command.
+/// A resolved agent identity: its slug, signing keys, and named harness commands.
 #[derive(Debug, Clone)]
 pub struct AgentIdentity {
     pub slug: String,
     pub keys: Keys,
-    /// Harness command from the agent file, if present.
-    pub command: Option<Vec<String>>,
+    pub commands: Vec<LaunchCommand>,
 }
 
 impl AgentIdentity {
@@ -125,17 +127,21 @@ pub fn load_or_create_with_command(
         return Ok(AgentIdentity {
             slug: slug.to_string(),
             keys,
-            command: stored.command,
+            commands: commands::normalize_commands(stored.commands),
         });
     }
 
     let keys = Keys::generate();
+    let commands = command
+        .and_then(LaunchCommand::default)
+        .into_iter()
+        .collect();
     let stored = StoredKey {
         slug: slug.to_string(),
         secret_key: keys.secret_key().to_secret_hex(),
         public_key: keys.public_key().to_hex(),
         created_at: now,
-        command,
+        commands,
         agent: None,
         byline: None,
     };
@@ -147,7 +153,7 @@ pub fn load_or_create_with_command(
     Ok(AgentIdentity {
         slug: slug.to_string(),
         keys,
-        command: stored.command,
+        commands: stored.commands,
     })
 }
 
@@ -186,15 +192,15 @@ pub fn list_local_pubkeys(edge_home: &Path) -> Vec<String> {
     out
 }
 
-/// All agents in the local keystore with their configured harness command (if
-/// any) and display byline. Used by the spawn machinery: command from the agent
-/// file takes priority over SPAWN_DEFS.
+/// All agents in the local keystore with their configured harness commands and
+/// display byline. Used by the spawn machinery: commands from the agent file
+/// take priority over SPAWN_DEFS.
 #[allow(clippy::type_complexity)]
 pub fn list_local_agents(
     edge_home: &Path,
 ) -> Vec<(
     String,
-    Option<Vec<String>>,
+    Vec<LaunchCommand>,
     Option<serde_json::Value>,
     Option<String>,
 )> {
@@ -210,7 +216,12 @@ pub fn list_local_agents(
                 Ok(s) => match serde_json::from_str::<StoredKey>(&s) {
                     Ok(k) => {
                         let byline = k.effective_byline();
-                        out.push((k.slug, k.command, k.agent, byline));
+                        out.push((
+                            k.slug,
+                            commands::normalize_commands(k.commands),
+                            k.agent,
+                            byline,
+                        ));
                     }
                     Err(e) => tracing::warn!(
                         path = %path.display(),
@@ -231,13 +242,13 @@ pub fn list_local_agents(
 }
 
 /// A local agent as listed by `tenex-edge agent list`: its slug, hex pubkey, and
-/// optional harness launch command. Distinct from `list_local_agents` (which the
+/// configured harness launch commands. Distinct from `list_local_agents` (which the
 /// spawn path uses) in that it also surfaces the pubkey for the operator.
 #[derive(Debug, Clone)]
 pub struct LocalAgent {
     pub slug: String,
     pub pubkey: String,
-    pub command: Option<Vec<String>>,
+    pub commands: Vec<LaunchCommand>,
 }
 
 /// The invitable roster as `(slug, byline, created_at)`, sorted by slug. The
@@ -292,7 +303,7 @@ pub fn list_local_agent_details(edge_home: &Path) -> Vec<LocalAgent> {
                     Ok(k) => out.push(LocalAgent {
                         slug: k.slug,
                         pubkey: k.public_key,
-                        command: k.command,
+                        commands: commands::normalize_commands(k.commands),
                     }),
                     Err(e) => tracing::warn!(
                         path = %path.display(),
@@ -312,9 +323,9 @@ pub fn list_local_agent_details(edge_home: &Path) -> Vec<LocalAgent> {
     out
 }
 
-/// Add a local agent: mint + persist a keypair if the slug is new. When `command`
-/// is `Some`, set (or overwrite) the harness launch command — so this doubles as
-/// "set the command for an existing agent". Returns the resolved identity and
+/// Add a local agent: mint + persist a keypair if the slug is new. When
+/// `command` is `Some`, set (or overwrite) the default named harness launch
+/// command. Returns the resolved identity and
 /// whether the keypair was newly created (`true`) or already existed (`false`).
 pub fn add_local_agent(
     edge_home: &Path,
@@ -322,7 +333,21 @@ pub fn add_local_agent(
     command: Option<Vec<String>>,
     now: u64,
 ) -> Result<(AgentIdentity, bool)> {
+    let commands = command
+        .and_then(LaunchCommand::default)
+        .into_iter()
+        .collect();
+    add_local_agent_with_commands(edge_home, slug, commands, now)
+}
+
+pub(crate) fn add_local_agent_with_commands(
+    edge_home: &Path,
+    slug: &str,
+    commands: Vec<LaunchCommand>,
+    now: u64,
+) -> Result<(AgentIdentity, bool)> {
     validate_slug(slug)?;
+    let commands = commands::normalize_commands(commands);
     let path = key_path(edge_home, slug);
     if path.exists() {
         let s = std::fs::read_to_string(&path)
@@ -331,16 +356,17 @@ pub fn add_local_agent(
             serde_json::from_str(&s).with_context(|| format!("parsing key {}", path.display()))?;
         let keys = Keys::parse(&stored.secret_key)
             .with_context(|| format!("parsing secret key for {slug}"))?;
-        if command.is_some() {
-            stored.command = command;
+        if !commands.is_empty() {
+            stored.commands = commands;
             let body = serde_json::to_string_pretty(&stored)?;
             atomic_write(&path, &body)?;
         }
+        let commands = commands::normalize_commands(stored.commands);
         return Ok((
             AgentIdentity {
                 slug: slug.to_string(),
                 keys,
-                command: stored.command,
+                commands,
             },
             false,
         ));
@@ -352,7 +378,7 @@ pub fn add_local_agent(
         secret_key: keys.secret_key().to_secret_hex(),
         public_key: keys.public_key().to_hex(),
         created_at: now,
-        command: command.clone(),
+        commands: commands.clone(),
         agent: None,
         byline: None,
     };
@@ -364,7 +390,7 @@ pub fn add_local_agent(
         AgentIdentity {
             slug: slug.to_string(),
             keys,
-            command,
+            commands,
         },
         true,
     ))

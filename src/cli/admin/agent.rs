@@ -14,11 +14,7 @@ pub async fn agent(action: AgentAction) -> Result<()> {
             }
             let max_slug = rows.iter().map(|r| r.slug.len()).max().unwrap_or(0);
             for r in &rows {
-                let cmd = r
-                    .command
-                    .as_ref()
-                    .map(|c| c.join(" "))
-                    .unwrap_or_else(|| "(default harness)".to_string());
+                let cmd = display_commands(&r.commands);
                 println!(
                     "{:<max_slug$}  {}  {}",
                     r.slug.bold(),
@@ -47,9 +43,9 @@ pub async fn agent(action: AgentAction) -> Result<()> {
                 slug.bold(),
                 pubkey_short(&id.pubkey_hex()).cyan()
             );
-            match &id.command {
-                Some(c) => println!("  spawns: {}", c.join(" ").dimmed()),
-                None => println!("  spawns: {}", "(default harness)".dimmed()),
+            match id.commands.first() {
+                Some(c) => println!("  spawns: {}", c.display().dimmed()),
+                None => println!("  spawns: {}", "(no commands)".dimmed()),
             }
             // Publish the kind:0 identity card so the agent is discoverable on the
             // indexer relay immediately, not just after its first session. Best
@@ -95,6 +91,17 @@ pub async fn agent(action: AgentAction) -> Result<()> {
     Ok(())
 }
 
+fn display_commands(commands: &[crate::identity::LaunchCommand]) -> String {
+    if commands.is_empty() {
+        return "(no commands)".to_string();
+    }
+    commands
+        .iter()
+        .map(crate::identity::LaunchCommand::display)
+        .collect::<Vec<_>>()
+        .join(" | ")
+}
+
 fn prompt_use_criteria() -> Result<Option<String>> {
     if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
         return Ok(None);
@@ -131,7 +138,7 @@ async fn agents_roster() -> Result<()> {
         return Ok(());
     }
     println!("Agents you can invite:");
-    for (slug, _command, _agent_def, byline) in &rows {
+    for (slug, _commands, _agent_def, byline) in &rows {
         match byline.as_deref().map(str::trim).filter(|b| !b.is_empty()) {
             Some(b) => println!("  @{} — {}", slug.bold(), b),
             None => println!("  @{}", slug.bold()),

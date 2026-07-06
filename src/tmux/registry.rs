@@ -1,6 +1,8 @@
 use crate::tmux::pane::tmux_available;
 use anyhow::{Context, Result};
 
+use crate::identity::LaunchCommand;
+
 pub(super) struct SpawnDef {
     /// Harness slug (matches agent_slug / TENEX_EDGE_AGENT).
     pub(super) slug: &'static str,
@@ -49,6 +51,19 @@ static SPAWN_DEFS: &[SpawnDef] = &[
 
 pub(super) fn find_spawn_def(slug: &str) -> Option<&'static SpawnDef> {
     SPAWN_DEFS.iter().find(|d| d.slug == slug)
+}
+
+pub(crate) fn builtin_spawn_commands() -> Vec<LaunchCommand> {
+    SPAWN_DEFS
+        .iter()
+        .filter_map(|d| {
+            LaunchCommand::new(d.slug, d.command.iter().map(|s| s.to_string()).collect())
+        })
+        .collect()
+}
+
+fn builtin_spawn_command_for_slug(slug: &str) -> Option<Vec<String>> {
+    find_spawn_def(slug).map(|d| d.command.iter().map(|s| s.to_string()).collect())
 }
 
 pub(super) fn resume_shape_for_bin(bin: &str) -> Option<ResumeShape> {
@@ -103,11 +118,10 @@ pub fn spawnable_agents() -> Vec<(String, String, Option<String>)> {
     tracing::debug!(count = agents.len(), "spawnable_agents: agents in store");
     let result: Vec<(String, String, Option<String>)> = agents
         .into_iter()
-        .filter_map(|(slug, file_cmd, _agent_def, byline)| {
-            let display_cmd = file_cmd
-                .as_ref()
-                .filter(|c| !c.is_empty())
-                .map(|c| c.join(" "))
+        .filter_map(|(slug, commands, _agent_def, byline)| {
+            let display_cmd = commands
+                .first()
+                .map(|c| c.display())
                 .or_else(|| find_spawn_def(&slug).map(|d| d.command.join(" ")));
             tracing::debug!(slug = %slug, display_cmd = ?display_cmd, "spawnable_agents: candidate");
             Some((slug, display_cmd?, byline))
@@ -118,18 +132,19 @@ pub fn spawnable_agents() -> Vec<(String, String, Option<String>)> {
 }
 
 /// Resolve the base harness command and inline agent definition for `slug`.
-/// The agent file's `command` field takes priority, with SPAWN_DEFS as fallback.
+/// The first configured `commands` entry takes priority, with SPAWN_DEFS as
+/// fallback. The removed singular `command` field is intentionally ignored.
 pub(super) fn resolve_spawn_entry(slug: &str) -> Result<(Vec<String>, Option<serde_json::Value>)> {
     let edge_home = crate::config::edge_home();
     let entry = crate::identity::list_local_agents(&edge_home)
         .into_iter()
         .find(|(s, _, _, _)| s == slug);
     let (file_cmd, agent_def) = entry
-        .map(|(_, cmd, def, _)| (cmd.filter(|c| !c.is_empty()), def))
+        .map(|(_, commands, def, _)| (commands.first().map(|c| c.argv.clone()), def))
         .unwrap_or((None, None));
     let base = file_cmd
-        .or_else(|| find_spawn_def(slug).map(|d| d.command.iter().map(|s| s.to_string()).collect()))
-        .with_context(|| format!("no harness command for agent {slug:?}: add a \"command\" field to ~/.tenex-edge/agents/{slug}.json"))?;
+        .or_else(|| builtin_spawn_command_for_slug(slug))
+        .with_context(|| format!("no harness command for agent {slug:?}: add a \"commands\" field to ~/.tenex-edge/agents/{slug}.json"))?;
     Ok((base, agent_def))
 }
 

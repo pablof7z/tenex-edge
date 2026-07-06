@@ -2,6 +2,7 @@
 
 mod args;
 pub mod attach;
+mod launch_command;
 #[cfg(test)]
 mod tests;
 pub mod tui_model;
