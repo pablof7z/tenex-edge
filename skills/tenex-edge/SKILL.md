@@ -130,6 +130,10 @@ tenex-edge channels switch <channel>
 tenex-edge channels create --name "focused topic" --about "short stable description"
 ```
 
+For operator/debug commands that must target a specific live session, add
+`--session <session-id>` to `chat read`, `chat write`, or channel mutations
+(`create`, `edit`, `join`, `leave`, `archive`, `switch`).
+
 Refresh awareness only when the injected snapshot is unavailable or stale:
 
 ```bash

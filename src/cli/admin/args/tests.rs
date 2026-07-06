@@ -63,9 +63,40 @@ fn channels_archive_parses_channel_reference() {
 
     match cli.cmd {
         crate::cli::args::Cmd::Channels {
-            action: ChannelsAction::Archive { channel },
+            action:
+                ChannelsAction::Archive {
+                    channel,
+                    session: None,
+                },
         } => assert_eq!(channel, "ops"),
         _ => panic!("expected channels archive command"),
+    }
+}
+
+#[test]
+fn channels_switch_accepts_explicit_session_anchor() {
+    let cli = crate::cli::args::Cli::try_parse_from([
+        "tenex-edge",
+        "channels",
+        "switch",
+        "ops",
+        "--session",
+        "session-1",
+    ])
+    .expect("channels switch parses with explicit session");
+
+    match cli.cmd {
+        crate::cli::args::Cmd::Channels {
+            action:
+                ChannelsAction::Switch {
+                    channel,
+                    session: Some(session),
+                },
+        } => {
+            assert_eq!(channel, "ops");
+            assert_eq!(session, "session-1");
+        }
+        _ => panic!("expected channels switch command"),
     }
 }
 
@@ -123,7 +154,12 @@ fn channels_edit_about_parses() {
 
     match cli.cmd {
         crate::cli::args::Cmd::Channels {
-            action: ChannelsAction::Edit { channel, about },
+            action:
+                ChannelsAction::Edit {
+                    channel,
+                    about,
+                    session: None,
+                },
         } => {
             assert_eq!(channel, "epic/planning");
             assert_eq!(about, "new description");

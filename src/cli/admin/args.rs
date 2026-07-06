@@ -134,6 +134,10 @@ pub(in crate::cli) enum ChannelsAction {
         /// `planning` or `epic999/planning`) to nest it elsewhere in the project.
         #[arg(long = "parent-channel", value_name = "CHANNEL")]
         parent_channel: Option<String>,
+        /// Explicit session id to mutate instead of resolving the caller from
+        /// the current PTY/harness process.
+        #[arg(long)]
+        session: Option<String>,
     },
     /// Edit metadata on an existing subgroup task channel.
     Edit {
@@ -142,6 +146,9 @@ pub(in crate::cli) enum ChannelsAction {
         /// New durable channel description.
         #[arg(long, value_parser = crate::channel_about::parse_channel_about)]
         about: String,
+        /// Explicit session id to use as the project-relative resolution anchor.
+        #[arg(long)]
+        session: Option<String>,
     },
     /// List the subgroup task channels under a project.
     List {
@@ -154,21 +161,36 @@ pub(in crate::cli) enum ChannelsAction {
     Join {
         /// Channel name, project-relative path, or opaque NIP-29 `h` value.
         channel: String,
+        /// Explicit session id to mutate instead of resolving the caller from
+        /// the current PTY/harness process.
+        #[arg(long)]
+        session: Option<String>,
     },
     /// Stop listening to a passively joined channel.
     Leave {
         /// Channel name, project-relative path, or opaque NIP-29 `h` value.
         channel: String,
+        /// Explicit session id to mutate instead of resolving the caller from
+        /// the current PTY/harness process.
+        #[arg(long)]
+        session: Option<String>,
     },
     /// Mark a channel archived and remove all non-admin members.
     Archive {
         /// Channel name, project-relative path, or opaque NIP-29 `h` value.
         channel: String,
+        /// Explicit session id to use as the project-relative resolution anchor.
+        #[arg(long)]
+        session: Option<String>,
     },
     /// Switch the active channel for the current session to a different NIP-29 subgroup.
     Switch {
         /// Channel name, project-relative path, or opaque NIP-29 `h` value.
         channel: String,
+        /// Explicit session id to mutate instead of resolving the caller from
+        /// the current PTY/harness process.
+        #[arg(long)]
+        session: Option<String>,
     },
 }
 
