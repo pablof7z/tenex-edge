@@ -2,6 +2,7 @@ use super::turn::{turn_check, turn_end, turn_start, EmitFormat};
 use super::*;
 use std::path::PathBuf;
 
+mod class_b;
 mod hook_forensics;
 mod observation;
 
@@ -9,9 +10,7 @@ use observation::{find_ancestor_pid, find_direct_agent_invocation, report_observ
 
 // ── hook adapter registry ─────────────────────────────────────────────────────
 //
-// Adding a new agent harness: add one entry to HOOK_HOSTS. Zero new code needed
-// for harnesses that follow the standard pattern (JSON stdin, plain/JSON stdout).
-// Non-standard needs (custom PID detection, exotic output formats) extend the
+// Standard harnesses add one HOOK_HOSTS entry; non-standard needs extend
 // HostDef fields rather than adding branches to hook_run.
 
 /// How context blocks are returned to the model by a given harness.
@@ -410,6 +409,7 @@ async fn hook_dispatch(
         "stop" => {
             if !sid.is_empty() {
                 turn_end(sid).await?;
+                class_b::inject_idle_nudge(&agent_slug);
             }
         }
         other => {

@@ -10,6 +10,8 @@ pub struct LaunchMetadata {
     pub agent: String,
     pub project: String,
     pub cwd: String,
+    #[serde(default)]
+    pub ephemeral: bool,
     pub command: Vec<String>,
 }
 

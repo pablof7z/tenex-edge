@@ -41,6 +41,7 @@ async fn open_agent_session(
     command: &[String],
     group: Option<&str>,
     ordinal: Option<u32>,
+    ephemeral: bool,
 ) -> Result<crate::pty::LaunchMetadata> {
     let mut command = command.to_vec();
     if let Some(ord) = ordinal {
@@ -52,6 +53,7 @@ async fn open_agent_session(
         project: project.to_string(),
         cwd: std::path::PathBuf::from(abs_path),
         channel: group.filter(|g| !g.is_empty()).map(str::to_string),
+        ephemeral,
         command,
     })?;
     Ok(meta)
@@ -83,6 +85,57 @@ pub async fn spawn_agent(
     client_cwd: Option<&std::path::Path>,
     ordinal: Option<u32>,
 ) -> Result<String> {
+    spawn_agent_inner(
+        state,
+        slug,
+        project,
+        launch_args,
+        base_override,
+        group,
+        client_cwd,
+        ordinal,
+        false,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn spawn_ephemeral_agent(
+    state: &Arc<DaemonState>,
+    slug: &str,
+    project: &str,
+    launch_args: Vec<String>,
+    base_override: Option<Vec<String>>,
+    group: Option<&str>,
+    client_cwd: Option<&std::path::Path>,
+    ordinal: Option<u32>,
+) -> Result<String> {
+    spawn_agent_inner(
+        state,
+        slug,
+        project,
+        launch_args,
+        base_override,
+        group,
+        client_cwd,
+        ordinal,
+        true,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn spawn_agent_inner(
+    state: &Arc<DaemonState>,
+    slug: &str,
+    project: &str,
+    launch_args: Vec<String>,
+    base_override: Option<Vec<String>>,
+    group: Option<&str>,
+    client_cwd: Option<&std::path::Path>,
+    ordinal: Option<u32>,
+    ephemeral: bool,
+) -> Result<String> {
     let (base_command, agent_def) = match base_override {
         Some(cmd) => (cmd, None),
         None => resolve_spawn_entry(slug)?,
@@ -94,7 +147,16 @@ pub async fn spawn_agent(
     let _ = find_spawn_def(slug);
 
     let abs_path = project_abs_path(state, project, client_cwd)?;
-    let meta = open_agent_session(slug, project, &abs_path, &agent_command, group, ordinal).await?;
+    let meta = open_agent_session(
+        slug,
+        project,
+        &abs_path,
+        &agent_command,
+        group,
+        ordinal,
+        ephemeral,
+    )
+    .await?;
     let pty_id = meta.id.clone();
     if let Err(e) = crate::daemon::server::session_start::bootstrap_pty_session_start(
         state, &meta, group, None, ordinal,
@@ -141,8 +203,16 @@ pub async fn resume_agent_in_channel(
     // ordinal=None: a resumed claude/codex session re-registers under the SAME
     // session_id, so select_session_signer recovers its ordinal from the existing
     // (pubkey,h) route — no explicit hint needed.
-    let meta =
-        open_agent_session(slug, project, &abs_path, &resume_command, Some(group), None).await?;
+    let meta = open_agent_session(
+        slug,
+        project,
+        &abs_path,
+        &resume_command,
+        Some(group),
+        None,
+        false,
+    )
+    .await?;
     let pty_id = meta.id.clone();
     if let Err(e) = crate::daemon::server::session_start::bootstrap_pty_session_start(
         state,
