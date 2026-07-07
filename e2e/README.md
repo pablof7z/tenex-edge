@@ -187,10 +187,41 @@ tag rules, so a new test can have edge-a create a child group
 the child's 39000. Add a new `run-*.sh` that sources `lib.sh` and reuses the
 `edge()` / `wait_for` helpers.
 
+## BDD scenario matrix
+
+Use this matrix when validating the recent launch/session/fabric integration
+PRs together. A scenario is complete only when the named evidence passes on the
+current binary under test.
+
+| id | Given | When | Then | Evidence |
+|----|-------|------|------|----------|
+| BDD-01 | a clean croissant relay and two isolated backends | backend-a starts a session in a project | the project group is created on the relay | `e2e/run.sh` |
+| BDD-02 | backend-b shares only the relay with backend-a | backend-b lists projects | backend-b sees backend-a's project through relay state, not shared files | `e2e/run.sh` |
+| BDD-03 | an existing project group and two backend admins | backend-a creates a child channel with agents on both backends | the child 39000 carries `parent=<project>` and 39001 includes both admins | `e2e/run-subgroup.sh` |
+| BDD-04 | a relayed add-agents orchestration event names a role on backend-b | backend-b receives the kind:9 | backend-b mints the role and adds it as a child member | `e2e/run-subgroup.sh` |
+| BDD-05 | two live sessions of the same agent in the same room | both session-start hooks run concurrently | the sessions get distinct ordinal labels and pubkeys | `e2e/run-ordinal.sh` |
+| BDD-06 | the same ordinal is free in a different room | that agent starts in an alternate channel | the ordinal label and pubkey are reused across rooms | `e2e/run-ordinal.sh` |
+| BDD-07 | two same-agent sessions are live in one room | one session mentions the other using `chat write --session` | the mention resolves to the recipient and the kind:9 carries both `#p` and `#h` | `e2e/run-ordinal.sh` |
+| BDD-08 | a session already holds an ordinal in the destination room | `channels switch --session` would collide that ordinal | the daemon rejects the switch with `already active` | `e2e/run-ordinal.sh` |
+| BDD-09 | a portable PTY supervisor is live | `pty list` resolves its metadata | the session is reported live | `e2e/run-pty.sh` |
+| BDD-10 | an attach client connects to a live PTY socket | the supervisor has backlog output | the attach client receives the backlog and later fanout | `e2e/run-pty.sh` |
+| BDD-11 | multiline text is piped to `pty inject --bracketed --no-submit` | a separate submit is sent | the PTY receives one bracketed multiline paste and submit | `e2e/run-pty.sh` |
+| BDD-12 | multiline text is piped to `pty inject --no-submit` | a separate submit is sent | the PTY receives the plain multiline payload | `e2e/run-pty.sh` |
+| BDD-13 | a live PTY session is attached | injected input is echoed by the terminal | the attach client sees the live echo | `e2e/run-pty.sh` |
+| BDD-14 | a PTY session is live | `pty resize` and `pty kill` are issued | resize succeeds, the child exits, and metadata is removed | `e2e/run-pty.sh` |
+| BDD-15 | a launched PTY-backed session has a `pty_session` alias | a user-authored kind:9 mentions that session | the daemon injects the message into the running PTY | `cargo test --test daemon_integration operator_kind9_injects_into_running_launch_session -- --test-threads=1` |
+| BDD-16 | a user-authored kind:9 mentions an offline local agent identity | the agent is available locally | the daemon spawns a PTY-backed session and injects the triggering message | `cargo test --test daemon_integration operator_kind9_to_offline_local_agent_spawns_and_injects -- --test-threads=1` |
+| BDD-17 | validation targets reference PTY aliases and session surfaces | `tenex-edge validate` renders the target | evidence uses `pty_session:<id>` and reports exact proof boundaries | `cargo test --lib probe validate_render` |
+| BDD-18 | exact session targeting is needed for chat/channel operations | `--session <session-id>` is supplied | the requested session anchor wins over ambient environment hints | `cargo test chat_write_accepts_explicit_session_anchor channels_switch_accepts_explicit_session_anchor` |
+| BDD-19 | backend-addressed management commands arrive as p-tagged kind:9 events | add/list/kill/archive commands are parsed | the daemon routes them through the management-command handler | `cargo test daemon::server::management_command` |
+| BDD-20 | hosted-session transport has moved to portable PTY | the tree is searched for replaced transport vocabulary | no current source, docs, tests, or filenames retain the replaced host path | `git grep -n -i <old-term> HEAD` plus filename search |
+
 ## Files
 
 - `lib.sh` — shared config, paths, key minting, the `edge()` / `wait_for` helpers.
 - `run.sh` — boot + smoke test (idempotent; tears down first).
+- `run-pty.sh` — portable PTY controls: attach protocol, multiline inject,
+  resize, kill, and metadata cleanup.
 - `teardown.sh` — stop relay + daemons, reclaim the relay port, wipe scratch.
 
 ## Caveats
