@@ -28,6 +28,20 @@ pub(super) fn message_rows(
         .filter(|e| e.kind == crate::fabric::nip29::wire::KIND_CHAT as u32)
         .filter(|e| e.pubkey != input.self_pubkey)
         .collect::<Vec<_>>();
+    // Messages already pasted verbatim into the pane (e.g. the mention that
+    // spawned this turn) would otherwise also show up here, duplicating the
+    // same text the agent already saw as literal prompt input.
+    if let Some(session) = input.session {
+        let injected: HashSet<String> = store
+            .injected_for_session(&session.session_id)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|row| row.event_id)
+            .collect();
+        if !injected.is_empty() {
+            events.retain(|e| !injected.contains(&e.id));
+        }
+    }
     let omitted = if input.cursor == 0 {
         let total = events.len();
         events = recent_cluster(events);
