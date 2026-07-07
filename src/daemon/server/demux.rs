@@ -11,8 +11,9 @@
 //! module calls them (the accept-loop bootstrap and the channels_create local
 //! fast-path); everything else is private to this module.
 
-use super::resolution::work_root_for;
 use super::*;
+
+mod offline_mention;
 
 /// Proactively fetch + cache the `kind:0` for any of `pubkeys` we do not already
 /// have a name for. Called on every inbound event (a peer newly seen in a
@@ -166,13 +167,14 @@ fn handle_incoming(state: &Arc<DaemonState>, event: &Event) {
                         let st = state.clone();
                         let mentioned_pk = mentioned_pk.clone();
                         let project = chat.project.clone();
+                        let body = chat.body.clone();
                         tracing::info!(
                             mentioned_pk = %crate::util::pubkey_short(&mentioned_pk),
                             project = %project,
                             "dispatching offline-agent-mention handler"
                         );
                         tokio::spawn(async move {
-                            handle_offline_agent_mention(&st, &mentioned_pk, &project).await;
+                            offline_mention::handle(&st, &mentioned_pk, &project, &body).await;
                         });
                     }
                 }
@@ -239,120 +241,6 @@ fn handle_incoming(state: &Arc<DaemonState>, event: &Event) {
                 handle_management_command(&st, &ev).await;
             });
         }
-    }
-}
-
-/// Spawn a local agent that was p-tagged in a kind:9 message but had no alive
-/// session. Idempotency: `first_sight` prevents duplicate spawns within a run;
-/// `has_alive` prevents re-spawn across restarts when the previous spawn registered.
-/// Delivery: `rpc_session_start` calls `ensure_subscription`, which triggers a
-/// relay replay of recent kind:9 events; those are re-materialized against the
-/// now-alive session and delivered via `ring_doorbells`.
-async fn handle_offline_agent_mention(state: &Arc<DaemonState>, mentioned_pk: &str, project: &str) {
-    let has_alive = state.with_store(|s| {
-        s.list_alive_sessions()
-            .unwrap_or_default()
-            .into_iter()
-            .any(|rec| {
-                rec.agent_pubkey == mentioned_pk
-                    && s.is_session_joined_channel(&rec.session_id, project)
-                        .unwrap_or(rec.channel_h == project)
-            })
-    });
-    if has_alive {
-        tracing::debug!(
-            mentioned_pk = %crate::util::pubkey_short(mentioned_pk),
-            project,
-            "agent already has alive session — skipping spawn"
-        );
-        return;
-    }
-
-    // Resolve the mentioned pubkey to a known ordinal identity row. Local
-    // derivation-root keys are not fabric agent identities under the roster model.
-    let Some(idn) = state.with_store(|s| {
-        s.get_identity_for_channel(mentioned_pk, project)
-            .ok()
-            .flatten()
-            .or_else(|| s.get_identity(mentioned_pk).ok().flatten())
-    }) else {
-        return;
-    };
-    let (agent_slug, ordinal) = (idn.agent_slug, idn.ordinal);
-
-    // Resume vs fresh: if this identity previously ran in this channel and left a
-    // bound native session, RESUME that harness (restores its conversation);
-    // otherwise spawn fresh with the exact ordinal.
-    let bound = state.with_store(|s| {
-        s.resolve_identity_pubkey_for_channel(mentioned_pk, project)
-            .ok()
-            .flatten()
-    });
-    if let Some(route) = bound.filter(|r| !r.native_id.is_empty()) {
-        tracing::info!(
-            agent = %route.agent_slug,
-            project,
-            native_id = %route.native_id,
-            "resuming bound native session"
-        );
-        if let Err(e) =
-            crate::session_host::resume_agent(state, &agent_slug, project, &route.native_id).await
-        {
-            tracing::warn!(agent = %agent_slug, project, error = %e, "session resume failed — falling through to fresh spawn");
-        } else {
-            return;
-        }
-    }
-
-    let is_member =
-        state.with_store(|s| s.is_channel_member(project, mentioned_pk).unwrap_or(false));
-    if !is_member {
-        let (_, _, members) = state.provider.fetch_group_state(project).await;
-        if !members.contains(mentioned_pk) {
-            tracing::info!(agent = %agent_slug, ordinal, project, "provisioning ordinal pubkey into channel via mgmt key");
-            if !state
-                .provider
-                .grant_member_confirmed(project, mentioned_pk)
-                .await
-                .is_confirmed()
-            {
-                tracing::warn!(agent = %agent_slug, ordinal, project, "mgmt-key add_member was not confirmed — skipping spawn");
-                return;
-            }
-        }
-    }
-
-    let work_root = state.with_store(|s| work_root_for(s, project));
-    let has_path = state.with_store(|s| s.project_root(&work_root).ok().flatten().is_some());
-    if !has_path {
-        tracing::warn!(agent = %agent_slug, work_root = %work_root, project, "no local project root found — cannot spawn");
-        return;
-    }
-
-    let group_arg = Some(project);
-    tracing::info!(
-        agent = %agent_slug,
-        ordinal,
-        project,
-        work_root = %work_root,
-        "spawning agent on mention"
-    );
-    match crate::session_host::spawn_agent(
-        state,
-        &agent_slug,
-        &work_root,
-        Vec::new(),
-        None,
-        group_arg,
-        None,
-        Some(ordinal),
-    )
-    .await
-    {
-        Ok(pty_id) => {
-            tracing::info!(agent = %agent_slug, pty_id = %pty_id, project, "agent spawned successfully")
-        }
-        Err(e) => tracing::warn!(agent = %agent_slug, project, error = %e, "agent spawn failed"),
     }
 }
 

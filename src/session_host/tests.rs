@@ -1,4 +1,7 @@
-use super::registry::{build_resume_command, resume_shape_for_bin, ResumeShape};
+use super::registry::{
+    build_headless_command, build_resume_command, headless_shape_for_bin, resume_shape_for_bin,
+    HeadlessShape, ResumeShape,
+};
 
 fn cmd(parts: &[&str]) -> Vec<String> {
     parts.iter().map(|s| s.to_string()).collect()
@@ -73,6 +76,90 @@ fn shape_is_keyed_by_binary_not_slug() {
         Some(ResumeShape::AppendFlag("--resume"))
     ));
     assert!(resume_shape_for_bin("npx").is_none());
+}
+
+#[test]
+fn headless_shape_is_keyed_by_binary() {
+    assert!(matches!(
+        headless_shape_for_bin("claude"),
+        Some(HeadlessShape::ClaudePrint)
+    ));
+    assert!(matches!(
+        headless_shape_for_bin("/opt/homebrew/bin/codex"),
+        Some(HeadlessShape::CodexExec)
+    ));
+    assert!(headless_shape_for_bin("opencode").is_none());
+}
+
+#[test]
+fn claude_headless_fresh_preserves_flags_and_adds_print_prompt() {
+    let base = cmd(&["claude", "--dangerously-skip-permissions"]);
+    let got = build_headless_command(&base, HeadlessShape::ClaudePrint, None, "ship it");
+    assert_eq!(
+        got,
+        cmd(&["claude", "--dangerously-skip-permissions", "-p", "ship it"])
+    );
+}
+
+#[test]
+fn claude_headless_resume_adds_resume_before_prompt() {
+    let base = cmd(&["claude", "--model", "sonnet"]);
+    let got = build_headless_command(
+        &base,
+        HeadlessShape::ClaudePrint,
+        Some("claude-session"),
+        "follow up",
+    );
+    assert_eq!(
+        got,
+        cmd(&[
+            "claude",
+            "--model",
+            "sonnet",
+            "-p",
+            "--resume",
+            "claude-session",
+            "follow up"
+        ])
+    );
+}
+
+#[test]
+fn codex_headless_fresh_inserts_exec_after_binary() {
+    let base = cmd(&["codex", "--dangerously-bypass-approvals-and-sandbox"]);
+    let got = build_headless_command(&base, HeadlessShape::CodexExec, None, "ship it");
+    assert_eq!(
+        got,
+        cmd(&[
+            "codex",
+            "exec",
+            "--dangerously-bypass-approvals-and-sandbox",
+            "ship it"
+        ])
+    );
+}
+
+#[test]
+fn codex_headless_resume_uses_exec_resume() {
+    let base = cmd(&["codex", "-m", "gpt-5"]);
+    let got = build_headless_command(
+        &base,
+        HeadlessShape::CodexExec,
+        Some("codex-session"),
+        "follow up",
+    );
+    assert_eq!(
+        got,
+        cmd(&[
+            "codex",
+            "exec",
+            "resume",
+            "codex-session",
+            "-m",
+            "gpt-5",
+            "follow up"
+        ])
+    );
 }
 
 fn sample_session() -> crate::state::Session {
