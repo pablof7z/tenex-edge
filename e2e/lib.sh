@@ -90,8 +90,44 @@ require_nak() {
 nak_req_contains() {
   local needle="$1"; shift
   local out
-  out="$(nak req "$@" 2>/dev/null || true)"
+  out="$(nak_req_limited 4 "$@" 2>/dev/null || true)"
   [[ "${out}" == *"${needle}"* ]]
+}
+
+run_limited() {
+  local seconds="$1"; shift
+  "$@" &
+  local cmd_pid=$!
+  (
+    sleep "${seconds}"
+    terminate_tree TERM "${cmd_pid}"
+    sleep 1
+    terminate_tree KILL "${cmd_pid}"
+  ) &
+  local killer_pid=$!
+  local rc=0
+  wait "${cmd_pid}" 2>/dev/null || rc=$?
+  kill "${killer_pid}" 2>/dev/null || true
+  wait "${killer_pid}" 2>/dev/null || true
+  return "${rc}"
+}
+
+child_pids() {
+  local parent="$1"
+  ps -axo pid=,ppid= | awk -v p="${parent}" '$2 == p { print $1 }'
+}
+
+terminate_tree() {
+  local signal="$1" pid="$2" child
+  for child in $(child_pids "${pid}"); do
+    terminate_tree "${signal}" "${child}"
+  done
+  kill "-${signal}" "${pid}" 2>/dev/null || true
+}
+
+nak_req_limited() {
+  local seconds="$1"; shift
+  run_limited "${seconds}" nak req "$@" || true
 }
 
 # Mint a backend's identity key once and cache it under KEYS_DIR. Idempotent:
