@@ -14,6 +14,7 @@ pub(crate) struct ExecLaunch {
     pub(crate) id: String,
     pub(crate) child: Child,
     pub(crate) log_path: PathBuf,
+    pub(crate) started_at: u64,
 }
 
 impl ExecLaunch {
@@ -73,6 +74,7 @@ fn spawn_process(
         anyhow::bail!("headless exec command must not be empty");
     }
     let id = exec_id(slug);
+    let started_at = crate::util::now_secs();
     let dir = exec_session_dir();
     std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
     let log_path = dir.join(format!("{id}.log"));
@@ -118,6 +120,7 @@ fn spawn_process(
         id,
         child,
         log_path,
+        started_at,
     })
 }
 
