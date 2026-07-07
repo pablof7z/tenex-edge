@@ -2,12 +2,17 @@ use super::*;
 
 mod abort;
 mod advisory;
+mod alias_resolution;
+mod bootstrap;
 mod channel_ready;
 mod params;
 mod stale;
 
 use abort::abort_session_start;
+use alias_resolution::resolve_session_id;
 use params::SessionStartParams;
+
+pub(crate) use bootstrap::bootstrap_pty_session_start;
 
 /// The top-level project channel for a route scope.
 fn work_root_for_scope(s: &Store, scope: &str) -> String {
@@ -146,25 +151,19 @@ pub(in crate::daemon::server) async fn rpc_session_start(
     if let Some(prog) = &progress {
         prog.emit("session_registry", "registering or reasserting session");
     }
-    // Canonical identity: the daemon MINTS a stable session id; the harness id /
-    // resume token / endpoint / pid become rows in `session_aliases`. The primary
-    // external id selects which harness-native locator keys the canonical session;
-    // claude/codex use their native id, opencode its resume token, else the pid.
-    let (ext_kind, ext_id) = if let Some(hs) = &harness_session_id {
-        ("harness_session", hs.clone())
-    } else if let Some(r) = &resume_id {
-        ("resume", r.clone())
-    } else if let Some(pid) = p.watch_pid {
-        ("watch_pid", pid.to_string())
-    } else {
-        ("harness_session", String::new())
-    };
     // Resolve (or mint) the canonical session id WITHOUT writing the row yet. The
     // row is written further down, AFTER signer selection, so it is born carrying
     // this session's ordinal pubkey (never the base) — see the `upsert_session_row`
     // call below.
-    let session_id =
-        state.with_store(|s| s.resolve_or_mint_session_id(harness_str, ext_kind, &ext_id, now))?;
+    let (session_id, ext_kind, ext_id) = resolve_session_id(
+        state,
+        harness_str,
+        pty_session.as_deref(),
+        harness_session_id.as_deref(),
+        resume_id.as_deref(),
+        p.watch_pid,
+        now,
+    )?;
     if let Some(prog) = &progress {
         prog.emit(
             "session_registry",

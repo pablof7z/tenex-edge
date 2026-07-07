@@ -41,7 +41,7 @@ async fn open_agent_session(
     command: &[String],
     group: Option<&str>,
     ordinal: Option<u32>,
-) -> Result<String> {
+) -> Result<crate::pty::LaunchMetadata> {
     let mut command = command.to_vec();
     if let Some(ord) = ordinal {
         command = prepend_env(command, "TENEX_EDGE_ORDINAL", &ord.to_string());
@@ -54,7 +54,7 @@ async fn open_agent_session(
         channel: group.filter(|g| !g.is_empty()).map(str::to_string),
         command,
     })?;
-    Ok(meta.id)
+    Ok(meta)
 }
 
 fn prepend_env(mut command: Vec<String>, key: &str, value: &str) -> Vec<String> {
@@ -94,7 +94,17 @@ pub async fn spawn_agent(
     let _ = find_spawn_def(slug);
 
     let abs_path = project_abs_path(state, project, client_cwd)?;
-    open_agent_session(slug, project, &abs_path, &agent_command, group, ordinal).await
+    let meta = open_agent_session(slug, project, &abs_path, &agent_command, group, ordinal).await?;
+    let pty_id = meta.id.clone();
+    if let Err(e) = crate::daemon::server::session_start::bootstrap_pty_session_start(
+        state, &meta, group, None, ordinal,
+    )
+    .await
+    {
+        let _ = crate::pty::kill(&pty_id);
+        return Err(e.context("registering PTY-hosted session"));
+    }
+    Ok(pty_id)
 }
 
 /// Resume a prior session by replaying its harness with the native resume token.
@@ -131,7 +141,22 @@ pub async fn resume_agent_in_channel(
     // ordinal=None: a resumed claude/codex session re-registers under the SAME
     // session_id, so select_session_signer recovers its ordinal from the existing
     // (pubkey,h) route — no explicit hint needed.
-    open_agent_session(slug, project, &abs_path, &resume_command, Some(group), None).await
+    let meta =
+        open_agent_session(slug, project, &abs_path, &resume_command, Some(group), None).await?;
+    let pty_id = meta.id.clone();
+    if let Err(e) = crate::daemon::server::session_start::bootstrap_pty_session_start(
+        state,
+        &meta,
+        Some(group),
+        Some(resume_id),
+        None,
+    )
+    .await
+    {
+        let _ = crate::pty::kill(&pty_id);
+        return Err(e.context("registering resumed PTY-hosted session"));
+    }
+    Ok(pty_id)
 }
 
 #[cfg(test)]
