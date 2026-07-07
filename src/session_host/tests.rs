@@ -94,10 +94,23 @@ fn headless_shape_is_keyed_by_binary() {
 #[test]
 fn claude_headless_fresh_preserves_flags_and_adds_print_prompt() {
     let base = cmd(&["claude", "--dangerously-skip-permissions"]);
-    let got = build_headless_command(&base, HeadlessShape::ClaudePrint, None, "ship it");
+    let got = build_headless_command(
+        &base,
+        HeadlessShape::ClaudePrint,
+        None,
+        Some("00000000-0000-4000-8000-000000000001"),
+        "ship it",
+    );
     assert_eq!(
         got,
-        cmd(&["claude", "--dangerously-skip-permissions", "-p", "ship it"])
+        cmd(&[
+            "claude",
+            "--dangerously-skip-permissions",
+            "--session-id",
+            "00000000-0000-4000-8000-000000000001",
+            "-p",
+            "ship it"
+        ])
     );
 }
 
@@ -108,6 +121,7 @@ fn claude_headless_resume_adds_resume_before_prompt() {
         &base,
         HeadlessShape::ClaudePrint,
         Some("claude-session"),
+        None,
         "follow up",
     );
     assert_eq!(
@@ -127,12 +141,13 @@ fn claude_headless_resume_adds_resume_before_prompt() {
 #[test]
 fn codex_headless_fresh_inserts_exec_after_binary() {
     let base = cmd(&["codex", "--dangerously-bypass-approvals-and-sandbox"]);
-    let got = build_headless_command(&base, HeadlessShape::CodexExec, None, "ship it");
+    let got = build_headless_command(&base, HeadlessShape::CodexExec, None, None, "ship it");
     assert_eq!(
         got,
         cmd(&[
             "codex",
             "exec",
+            "--json",
             "--dangerously-bypass-approvals-and-sandbox",
             "ship it"
         ])
@@ -146,6 +161,7 @@ fn codex_headless_resume_uses_exec_resume() {
         &base,
         HeadlessShape::CodexExec,
         Some("codex-session"),
+        None,
         "follow up",
     );
     assert_eq!(
@@ -153,6 +169,7 @@ fn codex_headless_resume_uses_exec_resume() {
         cmd(&[
             "codex",
             "exec",
+            "--json",
             "resume",
             "codex-session",
             "-m",

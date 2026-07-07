@@ -31,6 +31,37 @@ pub(crate) async fn bootstrap_pty_session_start(
         .ok_or_else(|| anyhow::anyhow!("session_start bootstrap returned no session_id"))
 }
 
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn bootstrap_exec_session_start(
+    state: &Arc<DaemonState>,
+    agent: &str,
+    harness: Harness,
+    cwd: &str,
+    channel: Option<&str>,
+    watch_pid: i32,
+    native_id: Option<&str>,
+    preferred_ordinal: Option<u32>,
+) -> Result<String> {
+    let response = rpc_session_start(
+        state,
+        &serde_json::json!({
+            "agent": agent,
+            "harness": harness.as_str(),
+            "cwd": cwd,
+            "channel": channel,
+            "watch_pid": watch_pid,
+            "session_id": native_id,
+            "preferred_ordinal": preferred_ordinal,
+        }),
+        None,
+    )
+    .await?;
+    response["session_id"]
+        .as_str()
+        .map(str::to_string)
+        .ok_or_else(|| anyhow::anyhow!("exec session_start bootstrap returned no session_id"))
+}
+
 fn infer_harness(command: &[String]) -> Harness {
     match command_binary(command).as_deref() {
         Some("claude" | "claude-code") => Harness::ClaudeCode,

@@ -124,11 +124,16 @@ pub(super) fn build_headless_command(
     base: &[String],
     shape: HeadlessShape,
     resume_id: Option<&str>,
+    fresh_session_id: Option<&str>,
     prompt: &str,
 ) -> Vec<String> {
     match shape {
         HeadlessShape::ClaudePrint => {
             let mut out = base.to_vec();
+            if let Some(id) = fresh_session_id {
+                out.push("--session-id".to_string());
+                out.push(id.to_string());
+            }
             out.push("-p".to_string());
             if let Some(id) = resume_id {
                 out.push("--resume".to_string());
@@ -144,6 +149,7 @@ pub(super) fn build_headless_command(
                 out.push(bin.clone());
             }
             out.push("exec".to_string());
+            out.push("--json".to_string());
             if let Some(id) = resume_id {
                 out.push("resume".to_string());
                 out.push(id.to_string());
