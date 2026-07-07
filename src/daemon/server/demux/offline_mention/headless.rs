@@ -1,6 +1,8 @@
 use crate::daemon::server::DaemonState;
 use std::sync::Arc;
 
+mod notice;
+
 pub(super) async fn spawn_headless_mention(
     state: &Arc<DaemonState>,
     agent_slug: &str,
@@ -52,11 +54,12 @@ fn reap_headless_on_exit(
         id,
         mut child,
         log_path,
+        started_at,
     } = launch;
     let pid = child.id() as i32;
     tokio::spawn(async move {
         let waited = tokio::task::spawn_blocking(move || child.wait()).await;
-        match waited {
+        let outcome = match waited {
             Ok(Ok(status)) => {
                 tracing::info!(
                     agent = %agent_slug,
@@ -67,6 +70,7 @@ fn reap_headless_on_exit(
                     log = %log_path.display(),
                     "headless agent exited"
                 );
+                notice::HeadlessOutcome::Exited(status.to_string())
             }
             Ok(Err(e)) => {
                 tracing::warn!(
@@ -78,6 +82,7 @@ fn reap_headless_on_exit(
                     log = %log_path.display(),
                     "headless agent wait failed"
                 );
+                notice::HeadlessOutcome::WaitFailed(e.to_string())
             }
             Err(e) => {
                 tracing::warn!(
@@ -89,7 +94,29 @@ fn reap_headless_on_exit(
                     log = %log_path.display(),
                     "headless agent wait task failed"
                 );
+                notice::HeadlessOutcome::WaitTaskFailed(e.to_string())
             }
+        };
+        let session = state.with_store(|s| s.get_session(&pid.to_string()).ok().flatten());
+        let session_id = session.as_ref().map(|rec| rec.session_id.clone());
+        let has_reply = session
+            .as_ref()
+            .map(|rec| notice::session_published_reply_since(&state, rec, started_at))
+            .unwrap_or(false);
+        if !has_reply {
+            notice::publish_no_reply_notice(
+                &state,
+                notice::NoReplyNotice {
+                    agent_slug: &agent_slug,
+                    project: &project,
+                    session_id: session_id.as_deref(),
+                    exec_id: &id,
+                    pid,
+                    outcome: &outcome,
+                    log_path: &log_path,
+                },
+            )
+            .await;
         }
         if let Err(e) = super::super::super::rpc_session_end(
             &state,

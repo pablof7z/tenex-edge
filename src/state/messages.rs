@@ -218,6 +218,24 @@ impl Store {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
+    pub fn session_has_outbound_message_since(&self, session_id: &str, since: u64) -> Result<bool> {
+        let Some(canonical) = self.resolve_canonical_id(session_id)? else {
+            return Ok(false);
+        };
+        let exists: i64 = self.conn.query_row(
+            "SELECT EXISTS(
+                 SELECT 1 FROM messages
+                 WHERE author_session=?1
+                   AND direction='outbound'
+                   AND sync_state='accepted'
+                   AND created_at >= ?2
+             )",
+            params![canonical, since],
+            |row| row.get(0),
+        )?;
+        Ok(exists != 0)
+    }
+
     pub fn message_recipients(&self, message_id: &str) -> Result<Vec<MessageRecipient>> {
         let mut stmt = self.conn.prepare(&format!(
             "SELECT {RECIPIENT_COLS} FROM message_recipients

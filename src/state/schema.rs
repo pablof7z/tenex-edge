@@ -128,6 +128,8 @@ CREATE INDEX IF NOT EXISTS idx_messages_channel
     ON messages(channel_h, created_at, message_id);
 CREATE INDEX IF NOT EXISTS idx_messages_native
     ON messages(native_event_id);
+CREATE INDEX IF NOT EXISTS idx_messages_author_session
+    ON messages(author_session, direction, sync_state, created_at);
 
 CREATE TABLE IF NOT EXISTS message_recipients (
     message_id       TEXT NOT NULL,
