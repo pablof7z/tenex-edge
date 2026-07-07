@@ -3,6 +3,8 @@ use super::channel_membership_rpc::{
 };
 use super::*;
 
+const CHANNEL_CREATE_READY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
+
 pub(in crate::daemon::server) async fn ensure_session_room(
     state: &Arc<DaemonState>,
     room_h: &str,
@@ -188,7 +190,7 @@ Switch into it instead: tenex-edge channels switch {}",
     // thing that differs between callers is where the name comes from and who the
     // member is. Fail loudly if the relay could not provision it.
     let expect_member = creator.as_deref().unwrap_or(&mgmt_pk);
-    let gate = state
+    let ready = state
         .provider
         .ensure_channel_ready(crate::fabric::nip29::readiness::ChannelCtx {
             channel: &child_h,
@@ -198,12 +200,24 @@ Switch into it instead: tenex-edge channels switch {}",
             // kind:39000 echo lands it in the cache (no local fabrication).
             name: Some(&p.name),
             repair_whitelisted_admins: true,
-        })
-        .await;
+        });
+    let gate = match tokio::time::timeout(CHANNEL_CREATE_READY_TIMEOUT, ready).await {
+        Ok(gate) => gate,
+        Err(_) => {
+            tracing::warn!(
+                channel = %child_h,
+                parent = %parent,
+                timeout_secs = CHANNEL_CREATE_READY_TIMEOUT.as_secs(),
+                "channels_create readiness timed out"
+            );
+            crate::fabric::nip29::readiness::ChannelGate::Degraded
+        }
+    };
     if matches!(gate, crate::fabric::nip29::readiness::ChannelGate::Degraded) {
         anyhow::bail!(
-            "relay did not provision subgroup {child_h} (parent {parent}); does the relay \
-             support NIP-29 subgroups and is the signing key an admin?"
+            "relay did not provision subgroup {child_h} (parent {parent}) within {}s; does the \
+             relay support NIP-29 subgroups and is the signing key an admin?",
+            CHANNEL_CREATE_READY_TIMEOUT.as_secs()
         );
     }
     let _ = ensure_subscription(state, &child_h).await;

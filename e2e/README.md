@@ -221,6 +221,8 @@ current binary under test.
 
 - `lib.sh` — shared config, paths, key minting, the `edge()` / `wait_for` helpers.
 - `run.sh` — boot + smoke test (idempotent; tears down first).
+- `run-subgroup.sh` — child channel orchestration across two isolated backends.
+- `run-ordinal.sh` — same-agent ordinal identity, routing, and collision checks.
 - `run-pty.sh` — portable PTY controls: attach protocol, multiline inject,
   `tenex-edge launch <agent>`, resize, kill, and metadata cleanup.
 - `teardown.sh` — stop relay + daemons, reclaim the relay port, wipe scratch.

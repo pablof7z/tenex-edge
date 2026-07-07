@@ -35,8 +35,27 @@ stop_backend() {
   rm -f "$sock"
 }
 
+stop_pty_supervisors() {
+  local pids pid
+  pids="$(ps -axo pid=,command= | awk -v bin="${TENEX_EDGE_BIN}" -v work="${E2E_WORK}" '
+    index($0, bin " __pty-supervisor") && index($0, work) { print $1 }
+  ')"
+  [[ -n "${pids}" ]] || return 0
+  for pid in ${pids}; do
+    if kill -0 "${pid}" 2>/dev/null; then
+      log "stopping e2e PTY supervisor (pid ${pid})"
+      kill "${pid}" 2>/dev/null || true
+    fi
+  done
+  sleep 0.5
+  for pid in ${pids}; do
+    kill -0 "${pid}" 2>/dev/null && kill -9 "${pid}" 2>/dev/null || true
+  done
+}
+
 log "tearing down tenex-edge e2e rig"
 
+stop_pty_supervisors
 stop_backend edge-a
 stop_backend edge-b
 kill_pidfile "${RELAY_PIDFILE}" "NIP-29 relay"
@@ -60,6 +79,8 @@ if pgrep -f "${TENEX_EDGE_BIN} __daemon" >/dev/null 2>&1; then
   warn "sweeping stray __daemon processes"
   pkill -9 -f "${TENEX_EDGE_BIN} __daemon" 2>/dev/null || true
 fi
+
+stop_pty_supervisors
 
 if [[ "${E2E_KEEP_DATA:-0}" == "1" ]]; then
   ok "processes stopped; data kept at ${E2E_WORK}"
