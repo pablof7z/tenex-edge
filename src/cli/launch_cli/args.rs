@@ -1,10 +1,16 @@
-use anyhow::Result;
+use anyhow::{bail, Context as _, Result};
 use clap::Args;
+use std::io::{self, Read as _};
 
 #[derive(Args)]
 pub(in crate::cli) struct LaunchArgs {
     /// Agent slug: "claude", "codex", "opencode", or a local custom agent.
+    #[arg(index = 1)]
     slug: String,
+    /// Opening user prompt to inject into the fresh session. Use "-" to read
+    /// from stdin.
+    #[arg(index = 2, value_name = "PROMPT")]
+    prompt: Option<String>,
     /// Project slug; defaults to project resolved from current directory.
     #[arg(long)]
     project: Option<String>,
@@ -28,11 +34,12 @@ pub(in crate::cli) struct LaunchArgs {
     command_name: Option<String>,
     /// Extra args passed after `--`; appended to the launch command.
     /// Example: `tenex-edge launch codex -- --yolo`
-    #[arg(last = true, value_name = "ARGS")]
+    #[arg(index = 3, last = true, value_name = "ARGS")]
     extra_args: Vec<String>,
 }
 
 pub(in crate::cli) async fn launch(args: LaunchArgs) -> Result<()> {
+    let prompt = resolve_initial_prompt(args.prompt)?;
     let override_command = args
         .command_str
         .map(|s| shlex::split(&s).unwrap_or_else(|| vec![s]))
@@ -44,8 +51,40 @@ pub(in crate::cli) async fn launch(args: LaunchArgs) -> Result<()> {
         args.command_name,
         override_command,
         args.extra_args,
+        prompt,
     )
     .await
+}
+
+fn resolve_initial_prompt(raw: Option<String>) -> Result<Option<String>> {
+    match raw {
+        Some(prompt) if prompt == "-" => read_stdin_prompt().map(Some),
+        Some(prompt) if prompt.is_empty() => bail!("prompt must not be empty"),
+        Some(prompt) => Ok(Some(prompt)),
+        None => Ok(None),
+    }
+}
+
+fn read_stdin_prompt() -> Result<String> {
+    let mut prompt = String::new();
+    io::stdin()
+        .read_to_string(&mut prompt)
+        .context("failed to read prompt from stdin")?;
+    let prompt = strip_single_trailing_newline(prompt);
+    if prompt.is_empty() {
+        bail!("prompt from stdin was empty");
+    }
+    Ok(prompt)
+}
+
+fn strip_single_trailing_newline(mut s: String) -> String {
+    if s.ends_with('\n') {
+        s.pop();
+        if s.ends_with('\r') {
+            s.pop();
+        }
+    }
+    s
 }
 
 #[cfg(test)]
@@ -93,6 +132,47 @@ mod tests {
             crate::cli::args::Cmd::Launch(args) => {
                 assert_eq!(args.command_name.as_deref(), Some("safe"));
                 assert!(args.command_str.is_none());
+            }
+            _ => panic!("expected launch command"),
+        }
+    }
+
+    #[test]
+    fn launch_prompt_parses_before_forwarded_args() {
+        let cli = crate::cli::args::Cli::try_parse_from([
+            "tenex-edge",
+            "launch",
+            "codex",
+            "check on the deploy",
+            "--",
+            "--yolo",
+        ])
+        .expect("launch with prompt and forwarded args parses");
+
+        match cli.cmd {
+            crate::cli::args::Cmd::Launch(args) => {
+                assert_eq!(args.prompt.as_deref(), Some("check on the deploy"));
+                assert_eq!(args.extra_args, vec!["--yolo"]);
+            }
+            _ => panic!("expected launch command"),
+        }
+    }
+
+    #[test]
+    fn launch_forwarded_args_do_not_become_prompt() {
+        let cli = crate::cli::args::Cli::try_parse_from([
+            "tenex-edge",
+            "launch",
+            "codex",
+            "--",
+            "--yolo",
+        ])
+        .expect("launch with only forwarded args parses");
+
+        match cli.cmd {
+            crate::cli::args::Cmd::Launch(args) => {
+                assert_eq!(args.prompt.as_deref(), None);
+                assert_eq!(args.extra_args, vec!["--yolo"]);
             }
             _ => panic!("expected launch command"),
         }

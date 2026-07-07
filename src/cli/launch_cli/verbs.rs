@@ -13,6 +13,7 @@ pub(crate) async fn launch(
     command_name: Option<String>,
     override_command: Vec<String>,
     extra_args: Vec<String>,
+    prompt: Option<String>,
 ) -> Result<()> {
     let project = match project {
         Some(p) => p,
@@ -89,6 +90,11 @@ pub(crate) async fn launch(
         "[tenex-edge pty] reattach: tenex-edge pty attach {}",
         meta.id
     );
+    if let Some(prompt) = prompt {
+        crate::session_host::inject_spawn_message(&meta.id, &prompt)
+            .await
+            .with_context(|| format!("injecting initial prompt into pty session {}", meta.id))?;
+    }
     use std::io::IsTerminal;
     if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
         eprintln!("[tenex-edge pty] attach skipped: not running on a TTY");
