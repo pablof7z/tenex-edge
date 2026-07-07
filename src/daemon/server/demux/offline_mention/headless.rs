@@ -55,6 +55,7 @@ fn reap_headless_on_exit(
         mut child,
         log_path,
         started_at,
+        harness,
     } = launch;
     let pid = child.id() as i32;
     tokio::spawn(async move {
@@ -97,6 +98,7 @@ fn reap_headless_on_exit(
                 notice::HeadlessOutcome::WaitTaskFailed(e.to_string())
             }
         };
+        crate::session_host::bind_native_id_from_log(&state, &pid.to_string(), &harness, &log_path);
         let session = state.with_store(|s| s.get_session(&pid.to_string()).ok().flatten());
         let session_id = session.as_ref().map(|rec| rec.session_id.clone());
         let has_reply = session

@@ -15,7 +15,6 @@
 //! the canonical id BEFORE writing. A session has one active publishing channel
 //! (`sessions.channel_h`) and may listen in additional joined channels
 //! (`session_channels`).
-
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use std::path::Path;
@@ -290,6 +289,7 @@ pub use retention::{
     RetentionPruneReport, COMPLETED_LEDGER_RETENTION_SECS, RELAY_EVENT_RETENTION_SECS,
 };
 pub(crate) mod session_claims;
+mod session_native;
 mod sessions;
 mod status;
 #[cfg(test)]

@@ -12,7 +12,7 @@ use abort::abort_session_start;
 use alias_resolution::resolve_session_id;
 use params::SessionStartParams;
 
-pub(crate) use bootstrap::bootstrap_pty_session_start;
+pub(crate) use bootstrap::{bootstrap_exec_session_start, bootstrap_pty_session_start};
 
 /// The top-level project channel for a route scope.
 fn work_root_for_scope(s: &Store, scope: &str) -> String {
