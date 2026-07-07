@@ -203,6 +203,42 @@ fn mention_rows_are_marked_important_and_truncated_with_recovery_id() {
 }
 
 #[test]
+fn injected_mention_row_is_hidden_from_chatter() {
+    let store = seed_store();
+    let rec = session(&store);
+    let tags = format!("[[\"p\",\"{SELF_PK}\"]]");
+    chat(
+        &store,
+        "mention-inj",
+        "root",
+        210,
+        "please pick this up",
+        &tags,
+    );
+
+    store
+        .enqueue_inbox(
+            "mention-inj",
+            &rec.session_id,
+            OTHER_PK,
+            "root",
+            "please pick this up",
+            210,
+        )
+        .unwrap();
+    store
+        .claim_pending_for_session(&rec.session_id, 210)
+        .unwrap();
+    store
+        .mark_injected_for_echo(&["mention-inj".to_string()], &rec.session_id)
+        .unwrap();
+
+    let text = render_fabric_context(&store, input(Some(&rec), "root", 200, 300, true))
+        .expect("forced context should still render");
+    assert!(!text.contains("please pick this up"));
+}
+
+#[test]
 fn empty_delta_is_silent_unless_forced() {
     let store = seed_store();
     let rec = session(&store);
