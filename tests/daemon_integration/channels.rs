@@ -14,6 +14,8 @@ mod launch_mentions;
 mod native_context;
 #[path = "channels/orchestration.rs"]
 mod orchestration;
+#[path = "channels/pty_bootstrap.rs"]
+mod pty_bootstrap;
 #[path = "channels/session_lifecycle.rs"]
 mod session_lifecycle;
 #[path = "channels/session_rooms.rs"]

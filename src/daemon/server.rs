@@ -227,7 +227,7 @@ mod proposal;
 mod resolution;
 mod session_end;
 mod session_signing;
-mod session_start;
+pub(crate) mod session_start;
 mod status_publish;
 mod statusline;
 mod subscriptions;
