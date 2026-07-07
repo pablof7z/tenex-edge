@@ -23,6 +23,15 @@ pub(super) enum ResumeShape {
     Subcommand(&'static str),
 }
 
+/// How a harness command is transformed into a one-shot, run-to-exit launch.
+#[derive(Clone, Copy)]
+pub(super) enum HeadlessShape {
+    /// Claude Code: `claude <flags> -p [--resume <id>] <prompt>`.
+    ClaudePrint,
+    /// Codex: `codex exec [resume <id>] <flags> <prompt>`.
+    CodexExec,
+}
+
 static SPAWN_DEFS: &[SpawnDef] = &[
     SpawnDef {
         slug: "claude",
@@ -73,6 +82,18 @@ pub(super) fn resume_shape_for_bin(bin: &str) -> Option<ResumeShape> {
     }
 }
 
+pub(super) fn headless_shape_for_bin(bin: &str) -> Option<HeadlessShape> {
+    let name = std::path::Path::new(bin)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(bin);
+    match name {
+        "claude" => Some(HeadlessShape::ClaudePrint),
+        "codex" => Some(HeadlessShape::CodexExec),
+        _ => None,
+    }
+}
+
 pub(super) fn build_resume_command(
     base: &[String],
     shape: ResumeShape,
@@ -94,6 +115,41 @@ pub(super) fn build_resume_command(
             out.push(sub.to_string());
             out.push(resume_id.to_string());
             out.extend(it.cloned());
+            out
+        }
+    }
+}
+
+pub(super) fn build_headless_command(
+    base: &[String],
+    shape: HeadlessShape,
+    resume_id: Option<&str>,
+    prompt: &str,
+) -> Vec<String> {
+    match shape {
+        HeadlessShape::ClaudePrint => {
+            let mut out = base.to_vec();
+            out.push("-p".to_string());
+            if let Some(id) = resume_id {
+                out.push("--resume".to_string());
+                out.push(id.to_string());
+            }
+            out.push(prompt.to_string());
+            out
+        }
+        HeadlessShape::CodexExec => {
+            let mut out = Vec::with_capacity(base.len() + 4);
+            let mut it = base.iter();
+            if let Some(bin) = it.next() {
+                out.push(bin.clone());
+            }
+            out.push("exec".to_string());
+            if let Some(id) = resume_id {
+                out.push("resume".to_string());
+                out.push(id.to_string());
+            }
+            out.extend(it.cloned());
+            out.push(prompt.to_string());
             out
         }
     }

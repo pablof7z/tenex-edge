@@ -6,7 +6,7 @@ use crate::session_host::registry::{
 use anyhow::{Context, Result};
 use std::sync::Arc;
 
-fn project_abs_path(
+pub(super) fn project_abs_path(
     state: &Arc<DaemonState>,
     project: &str,
     client_cwd: Option<&std::path::Path>,
