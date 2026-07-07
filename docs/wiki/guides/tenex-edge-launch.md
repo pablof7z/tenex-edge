@@ -8,8 +8,8 @@ tags:
 volatility: warm
 confidence: medium
 created: 2026-07-03
-updated: 2026-07-06
-verified: 2026-07-06
+updated: 2026-07-07
+verified: 2026-07-07
 compiled-from: conversation
 sources:
   - session:abce9e9f-8f3e-4561-9dd3-684afd59be80
@@ -23,6 +23,10 @@ sources:
 Agent launch commands are stored as named entries in `~/.tenex-edge/agents/<slug>.json` under `commands`, for example `{"commands":[{"name":"full","argv":["claude","--dangerously-skip-permissions"]}]}`. The removed singular `command` field is ignored by launch resolution; it is not read as a legacy fallback.
 
 `tenex-edge launch <agent>` chooses the command before calling the daemon. A single configured command launches directly. Multiple configured commands open a TTY picker unless `--command-name <name>` selects one explicitly. `-c/--command <command>` remains a one-shot full argv override. If no commands exist, interactive launch suggests commands from other agents' `commands` entries with conservative slug/path adaptation; if no local suggestions exist, it suggests built-in harness commands.
+
+## Initial Prompt
+
+`tenex-edge launch <agent> "prompt"` spawns the PTY session, waits for the harness input to become interactive, then injects and submits the prompt as the opening user turn before attaching the terminal. Omit the prompt for the normal clean interactive launch. Use `-` as the prompt value to read the opening prompt from stdin.
 
 ## pty Environment Inheritance
 
