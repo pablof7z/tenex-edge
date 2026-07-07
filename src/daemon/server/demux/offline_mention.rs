@@ -151,7 +151,7 @@ pub(super) async fn handle(
             tracing::warn!(agent = %agent_slug, project, error = %e, "headless spawn failed - falling back to PTY spawn");
         }
     }
-    match crate::session_host::spawn_agent(
+    match crate::session_host::spawn_ephemeral_agent(
         state,
         &agent_slug,
         &work_root,

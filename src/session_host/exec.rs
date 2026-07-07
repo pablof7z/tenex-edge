@@ -92,6 +92,7 @@ fn spawn_process(
         .env("TENEX_EDGE_SPAWNED", "1")
         .env("TENEX_EDGE_AGENT", slug)
         .env_remove("TENEX_EDGE_SESSION")
+        .env_remove("TENEX_EDGE_EPHEMERAL")
         .env_remove("TENEX_EDGE_PTY_SESSION")
         .env_remove("TENEX_EDGE_PTY_SOCKET")
         .env_remove("CLAUDE_CODE_CHILD_SESSION")

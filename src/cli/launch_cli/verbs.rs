@@ -82,6 +82,7 @@ pub(crate) async fn launch(
         project,
         cwd: cwd_path,
         channel,
+        ephemeral: false,
         command,
     })?;
     eprintln!("[tenex-edge pty] session: {}", meta.id);

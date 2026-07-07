@@ -217,7 +217,7 @@ async fn spawn_target(
     drop(id);
 
     let work_root = state.with_store(|s| work_root_for(s, &op.child_h));
-    match crate::session_host::spawn_agent(
+    match crate::session_host::spawn_ephemeral_agent(
         state,
         slug,
         &work_root,

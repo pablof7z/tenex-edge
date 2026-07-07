@@ -10,6 +10,7 @@ use super::launch_cli::LaunchArgs;
 use super::messaging::{ChatAction, PublishArgs};
 use super::probe::ProbeArgs;
 use super::pty::{PtyAction, PtySupervisorArgs};
+use super::session::SessionAction;
 use super::validate::ValidateArgs;
 use super::who::WhoArgs;
 
@@ -25,12 +26,12 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub(super) enum Cmd {
-    // session-start / session-end / turn-start / turn-check / turn-end are NOT
+    // session-start / turn-start / turn-check / turn-end are NOT
     // subcommands. They are hook-driven lifecycle steps invoked only through
     // `harness <name> hook --type <…>`, which parses the harness's stdin payload and calls the
-    // corresponding private fn (session_start_inner / session_end / turn_start /
-    // turn_check / turn_end). There is no host-facing way — or need — to invoke
-    // them by hand.
+    // corresponding private fn (session_start_inner / turn_start / turn_check /
+    // turn_end). Session end has a small public surface for agents to end
+    // themselves explicitly.
     /// List agents currently visible in the project/channel.
     Who(WhoArgs),
     /// Explain a published artifact: the reconciler receipt + the exact LLM
@@ -84,6 +85,11 @@ pub(super) enum Cmd {
     Publish(PublishArgs),
     /// Launch an agent harness in a reattachable portable-pty session.
     Launch(LaunchArgs),
+    /// Manage the current local session.
+    Session {
+        #[command(subcommand)]
+        action: SessionAction,
+    },
     /// Stop the daemon and prevent hooks from restarting it.
     #[command(hide = true)]
     Stop,
@@ -130,5 +136,19 @@ mod tests {
         let err = parse_err(&["tenex-edge", "tail", "--live"]);
 
         assert_eq!(err.kind(), ErrorKind::InvalidSubcommand);
+    }
+
+    #[test]
+    fn session_end_self_parses() {
+        let cli = Cli::try_parse_from(["tenex-edge", "session", "end", "--self"]).unwrap();
+        match cli.cmd {
+            Cmd::Session {
+                action: SessionAction::End(args),
+            } => {
+                assert!(args.self_session);
+                assert!(args.session.is_none());
+            }
+            _ => panic!("expected session end action"),
+        }
     }
 }

@@ -29,6 +29,7 @@ mod launch_cli;
 mod messaging;
 mod probe;
 mod pty;
+mod session;
 mod statusline;
 mod turn;
 mod validate;
@@ -61,6 +62,10 @@ pub(crate) fn channel_env() -> Option<String> {
     std::env::var("TENEX_EDGE_CHANNEL")
         .ok()
         .filter(|s| !s.is_empty())
+}
+
+pub(crate) fn ephemeral_session_env() -> bool {
+    std::env::var("TENEX_EDGE_EPHEMERAL").ok().as_deref() == Some("1")
 }
 
 /// The hosted PTY session this CLI invocation runs in. It is present in the
@@ -120,6 +125,7 @@ pub async fn run(cli: Cli) -> Result<()> {
         Cmd::Invite(args) => admin::invite(args).await,
         Cmd::Harness { action } => harness::harness(action).await,
         Cmd::Launch(args) => launch_cli::launch(args).await,
+        Cmd::Session { action } => session::session(action),
         Cmd::Stop => stop_daemon(),
         Cmd::Debug { action } => debug::debug(action).await,
         Cmd::Probe(args) => probe::probe(args).await,

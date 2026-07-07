@@ -12,6 +12,7 @@ pub struct SpawnSessionArgs {
     pub project: String,
     pub cwd: PathBuf,
     pub channel: Option<String>,
+    pub ephemeral: bool,
     pub command: Vec<String>,
 }
 
@@ -45,6 +46,9 @@ pub fn spawn_session(args: SpawnSessionArgs) -> Result<LaunchMetadata> {
     if let Some(channel) = &args.channel {
         child.arg("--channel").arg(channel);
     }
+    if args.ephemeral {
+        child.arg("--ephemeral");
+    }
     child.arg("--").args(&args.command);
     child
         .stdin(Stdio::null())
@@ -67,6 +71,7 @@ pub fn spawn_session(args: SpawnSessionArgs) -> Result<LaunchMetadata> {
         agent: args.agent,
         project: args.project,
         cwd: args.cwd.to_string_lossy().to_string(),
+        ephemeral: args.ephemeral,
         command: args.command,
     };
     super::meta::write_metadata(&meta)?;

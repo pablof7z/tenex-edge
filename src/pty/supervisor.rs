@@ -17,6 +17,7 @@ pub struct SupervisorArgs {
     pub cwd: PathBuf,
     pub agent: String,
     pub channel: Option<String>,
+    pub ephemeral: bool,
     pub command: Vec<String>,
 }
 
@@ -49,6 +50,11 @@ pub fn run_supervisor(args: SupervisorArgs) -> Result<()> {
     cmd.env("TENEX_EDGE_AGENT", &args.agent);
     cmd.env("TENEX_EDGE_PTY_SESSION", &args.id);
     cmd.env("TENEX_EDGE_PTY_SOCKET", args.socket.as_os_str());
+    if args.ephemeral {
+        cmd.env("TENEX_EDGE_EPHEMERAL", "1");
+    } else {
+        cmd.env_remove("TENEX_EDGE_EPHEMERAL");
+    }
     let term = std::env::var("TERM")
         .ok()
         .filter(|term| !term.is_empty() && term != "dumb")
