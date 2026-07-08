@@ -1,6 +1,7 @@
 use super::*;
 use crate::who_snapshot::OtherProjectSummary;
 use owo_colors::OwoColorize as _;
+use std::collections::BTreeSet;
 use std::fmt::Write as _;
 
 #[derive(serde::Deserialize, Default)]
@@ -188,13 +189,20 @@ pub(in crate::daemon::server) fn rpc_who(
 /// Top-level project channels (`parent` empty), non-archived — the set
 /// `--all-projects` fans its unified fabric render across.
 fn project_roots(store: &crate::state::Store) -> Result<Vec<String>> {
-    Ok(store
+    let mut roots = store
         .reader()
         .list_channels()?
         .into_iter()
         .filter(|c| c.parent.is_empty() && !c.is_archived())
         .map(|c| c.channel_h)
-        .collect())
+        .collect::<BTreeSet<_>>();
+    roots.extend(
+        store
+            .list_project_root_bindings()?
+            .into_iter()
+            .map(|binding| binding.channel_h),
+    );
+    Ok(roots.into_iter().collect())
 }
 
 fn append_other_projects_human(

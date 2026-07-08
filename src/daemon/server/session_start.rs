@@ -5,6 +5,7 @@ mod advisory;
 mod alias_resolution;
 mod bootstrap;
 mod channel_ready;
+mod effects;
 mod params;
 mod stale;
 
@@ -68,15 +69,17 @@ pub(in crate::daemon::server) async fn rpc_session_start(
     // resolver here. This is the single load-bearing conversion that kills the
     // name-vs-id double-create: every downstream consumer shares one id, and the
     // literal-name subgroup is never minted.
+    let mut channel_provision_name: Option<String> = None;
     let mut project = match p.channel.clone().filter(|g| !g.is_empty()) {
-        // The relay must provision/confirm the named channel before the session can
-        // be scoped to it. A degraded resolve used to fail OPEN to the work-root,
-        // silently relocating the agent out of `launch --channel X` into the project
-        // root; instead propagate the error so the launch command fails visibly. No
-        // fabrication, no silent re-scope.
-        Some(name) => super::resolve_channel(state, &work_root, &name, Some(&p.agent), true)
-            .await
-            .with_context(|| format!("resolving launch channel {name:?}"))?,
+        // Session-start is a hook edge, so resolving a human channel name must not
+        // await relay provisioning. Reserve one opaque id locally and let the
+        // background readiness effect publish/materialize it.
+        Some(name) => {
+            let resolved = super::resolve_channel_for_session_start(state, &work_root, &name)
+                .with_context(|| format!("resolving launch channel {name:?}"))?;
+            channel_provision_name = resolved.provision_name;
+            resolved.channel_h
+        }
         None => work_root.clone(),
     };
     let rel_cwd = crate::project::rel_cwd(&cwd);
@@ -194,8 +197,12 @@ pub(in crate::daemon::server) async fn rpc_session_start(
         if let Some(r) = &resume_id {
             s.put_alias(harness_str, "resume", r, &session_id, now).ok();
         }
-        s.upsert_project_root(&project, &cwd.to_string_lossy(), now)
+        s.upsert_project_root(&work_root, &cwd.to_string_lossy(), now)
             .ok();
+        if project != work_root {
+            s.upsert_project_root(&project, &cwd.to_string_lossy(), now)
+                .ok();
+        }
     });
 
     membership_cleanup::cleanup_dead_local_sessions(state);
@@ -270,6 +277,7 @@ pub(in crate::daemon::server) async fn rpc_session_start(
         channel_for_upsert,
         &rel_cwd,
         room_parent.clone(),
+        channel_provision_name.clone(),
         p.watch_pid,
         effective_endpoint.clone(),
         pty_session.is_some(),
@@ -327,75 +335,28 @@ pub(in crate::daemon::server) async fn rpc_session_start(
         }));
     }
 
-    // Make sure the channel exists + this agent is a member BEFORE the engine
-    // starts publishing. Session start fails closed when relay readiness cannot
-    // be verified; otherwise the engine could publish into phantom state.
+    // Session-start is the harness-critical edge: record local state and tell the
+    // daemon what relay work needs doing, but never make the harness wait for
+    // network proof or roster fan-out.
     if let Some(prog) = &progress {
-        prog.emit(
-            "nip29",
-            "checking NIP-29 channel state and membership on the relay",
-        );
+        prog.emit("nip29", "scheduling channel readiness work");
     }
-    if let Some(check) = &plan.channel_ready {
-        if let Err(e) = channel_ready::ensure_start_channel_ready(
-            state,
-            &check.channel_h,
-            &check.work_root,
-            check.room_parent.as_deref(),
-            &check.signer_pubkey,
-            &session_id,
-            progress.as_ref(),
-        )
-        .await
-        {
-            advisory::record_failed(state, &session_id, "channel_ready", &e, now_secs());
-            return Err(e);
-        }
-        let is_root = state.with_store(|s| s.is_root_channel(&check.channel_h).unwrap_or(false));
-        if is_root {
-            match publish_local_agent_roster(state, None).await {
-                Ok(report) => tracing::info!(
-                    channel = %check.channel_h,
-                    published = report.published,
-                    removed = report.removed,
-                    failed = report.failed.len(),
-                    "published backend agent roster for root channel"
-                ),
-                Err(e) => tracing::warn!(
-                    channel = %check.channel_h,
-                    error = %e,
-                    "backend agent roster publish failed for root channel"
-                ),
-            }
-        }
-    }
+    effects::schedule_channel_ready(
+        state.clone(),
+        session_id.clone(),
+        plan.channel_ready.clone(),
+    );
 
     if plan.notify_outbox {
         state.outbox_notify.notify_waiters();
     }
 
     if let Some(prog) = &progress {
-        prog.emit(
-            "subscription",
-            "opening or refreshing project subscriptions",
-        );
-    }
-    if plan.ensure_subscription {
-        if let Err(e) = ensure_subscription(state, &project).await {
-            tracing::warn!(channel = %project, error = %e, "subscription setup failed (session will continue)");
-            if let Some(prog) = &progress {
-                prog.emit(
-                    "subscription",
-                    format!("subscription setup failed but session will continue: {e:#}"),
-                );
-            }
-        } else if let Some(prog) = &progress {
-            prog.emit("subscription", "project subscription is active");
-        }
+        prog.emit("subscription", "scheduling subscription work");
     }
 
     if plan.replay_chat {
-        replay_channel_chat(state, &project).await;
+        effects::schedule_replay_chat(state.clone(), project.clone());
     }
 
     let Some(spawn) = &plan.spawn else {

@@ -1,4 +1,5 @@
 use super::*;
+use std::time::Duration;
 
 #[test]
 fn session_start_without_tenex_private_key_generates_key_and_provisions_project() {
@@ -17,6 +18,16 @@ fn session_start_without_tenex_private_key_generates_key_and_provisions_project(
         .expect("session_start should generate a management key and provision");
     });
 
+    assert!(
+        wait_until(Duration::from_secs(25), || {
+            std::fs::read_to_string(home.dir.path().join("config.json"))
+                .ok()
+                .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+                .and_then(|cfg| cfg["tenexPrivateKey"].as_str().map(str::to_string))
+                .is_some()
+        }),
+        "background readiness should generate tenexPrivateKey"
+    );
     let cfg: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(home.dir.path().join("config.json")).unwrap(),
     )
@@ -27,7 +38,21 @@ fn session_start_without_tenex_private_key_generates_key_and_provisions_project(
     let backend_pk = pubkey_of(generated);
     let user_pk = pubkey_of(EXAMPLE_USER_NSEC);
 
-    refresh_project_members("tmp");
+    assert!(
+        wait_until(Duration::from_secs(25), || {
+            refresh_project_members("tmp");
+            let members = Store::open(&home.store_path())
+                .and_then(|store| store.list_channel_members("tmp"))
+                .unwrap_or_default();
+            members
+                .iter()
+                .any(|m| m.pubkey == backend_pk && m.role == "admin")
+                && members
+                    .iter()
+                    .any(|m| m.pubkey == user_pk && m.role == "admin")
+        }),
+        "background readiness should grant generated management and user admin keys"
+    );
     let members = Store::open(&home.store_path())
         .unwrap()
         .list_channel_members("tmp")
@@ -89,12 +114,36 @@ fn generated_management_key_self_grants_on_existing_user_owned_project() {
         .expect("session_start should self-grant generated management key");
     });
 
+    assert!(
+        wait_until(Duration::from_secs(25), || {
+            std::fs::read_to_string(home.dir.path().join("config.json"))
+                .ok()
+                .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+                .and_then(|cfg| cfg["tenexPrivateKey"].as_str().map(str::to_string))
+                .is_some()
+        }),
+        "background readiness should generate tenexPrivateKey"
+    );
     let cfg: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(home.dir.path().join("config.json")).unwrap(),
     )
     .unwrap();
     let backend_pk = pubkey_of(cfg["tenexPrivateKey"].as_str().unwrap());
-    refresh_project_members(&project);
+    if !wait_until(Duration::from_secs(25), || {
+        refresh_project_members(&project);
+        let members = Store::open(&home.store_path())
+            .and_then(|store| store.list_channel_members(&project))
+            .unwrap_or_default();
+        members
+            .iter()
+            .any(|m| m.pubkey == backend_pk && m.role == "admin")
+    }) {
+        panic!(
+            "background readiness should self-grant generated management key; daemon_log={}; group_log={}",
+            test_log(&home, "daemon.log"),
+            test_log(&home, "logs/group-mgmt.log")
+        );
+    }
     let members = Store::open(&home.store_path())
         .unwrap()
         .list_channel_members(&project)
@@ -109,36 +158,35 @@ fn generated_management_key_self_grants_on_existing_user_owned_project() {
     stop_daemon(&home);
 }
 
+fn test_log(home: &Home, rel: &str) -> String {
+    std::fs::read_to_string(home.dir.path().join(rel)).unwrap_or_else(|e| format!("<{e}>"))
+}
+
 #[test]
-fn session_start_refuses_unverified_channel() {
+fn session_start_schedules_unverified_channel_work_without_blocking() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let home = Home::new();
 
     rt().block_on(async {
         let mut c = Client::connect_or_spawn().await.expect("connect");
-        let err = c
-            .call(
-                "session_start",
-                serde_json::json!({"agent": "coder", "session_id": "sess-nogrp", "cwd": "/tmp"}),
-            )
-            .await
-            .expect_err("session_start must fail closed when channel readiness is unverified");
-        assert!(
-            format!("{err:#}").contains("not verified ready"),
-            "unexpected session_start error: {err:#}"
-        );
+        c.call(
+            "session_start",
+            serde_json::json!({"agent": "coder", "session_id": "sess-nogrp", "cwd": "/tmp"}),
+        )
+        .await
+        .expect("session_start should register locally without waiting on relay readiness");
     });
 
-    // Fail-closed: if the relay cannot verify NIP-29 readiness, the daemon must
-    // not leave a live session pointed at phantom channel state.
+    // Relay readiness is daemon-side work now; session_start itself is the local
+    // registration edge and must not block the harness on relay proof.
     let store = Store::open(&home.store_path()).unwrap();
     assert!(
         store
             .get_session("sess-nogrp")
             .unwrap()
-            .map(|rec| !rec.alive)
-            .unwrap_or(true),
-        "failed readiness must not leave a live session row"
+            .map(|rec| rec.alive)
+            .unwrap_or(false),
+        "session_start should leave a live local session row"
     );
 
     stop_daemon(&home);

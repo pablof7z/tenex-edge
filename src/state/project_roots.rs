@@ -60,4 +60,16 @@ impl Store {
             )
             .optional()?)
     }
+
+    /// All locally known project/root channel ids with on-disk bindings.
+    pub fn list_project_root_bindings(&self) -> Result<Vec<ProjectRootBinding>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT channel_h, abs_path, updated_at FROM project_roots
+             ORDER BY channel_h",
+        )?;
+        let rows = stmt
+            .query_map([], row_to_project_root)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
 }

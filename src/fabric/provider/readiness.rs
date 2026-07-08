@@ -52,6 +52,17 @@ fn ensure_channel_ready_inner<'a>(
         if is_ready {
             return ChannelGate::Ready;
         }
+        if locally_materialized_ready(provider, &ctx) {
+            provider
+                .readiness
+                .mark_ready(ctx.channel, ctx.expect_member);
+            return attempt::finish(
+                provider,
+                &ctx,
+                ChannelGate::Ready,
+                "channel readiness verified from materialized relay cache",
+            );
+        }
 
         let Some(mgmt_keys) = provider.management_keys() else {
             return attempt::degraded(provider, &ctx, "management signing key unavailable");
@@ -96,7 +107,9 @@ fn ensure_channel_ready_inner<'a>(
         // A relay fetch FAILURE must never be read as "group absent" — that would
         // drive spurious group re-creation (fabrication-by-omission). Degrade
         // loudly without attempting to create anything.
-        let (group_exists, roles, members) = match provider.try_fetch_group_state(ctx.channel).await
+        let (group_exists, mut roles, members) = match provider
+            .try_fetch_group_state(ctx.channel)
+            .await
         {
             Ok(state) => state,
             Err(e) => {
@@ -207,7 +220,7 @@ fn ensure_channel_ready_inner<'a>(
             let granted = provider
                 .try_grant_mgmt_admin_via_user_nsec(ctx.channel, &mgmt_pubkey)
                 .await;
-            if !granted {
+            if !granted.is_confirmed() {
                 eprintln!(
                     "[daemon] ensure_channel_ready: management key is not admin of {:?} \
                      and self-grant failed",
@@ -219,6 +232,8 @@ fn ensure_channel_ready_inner<'a>(
                     "management key is not admin and self-grant failed",
                 );
             }
+            roles.insert(mgmt_pubkey.clone(), "admin".to_string());
+            repaired = true;
         }
 
         // SOOT guarantee: a ready channel must be present in `relay_channels` from
@@ -262,4 +277,137 @@ fn ensure_channel_ready_inner<'a>(
             )
         }
     })
+}
+
+fn locally_materialized_ready(provider: &Nip29Provider, ctx: &ChannelCtx<'_>) -> bool {
+    let Some(required_admins) = local_ready_required_admins(provider, ctx) else {
+        return false;
+    };
+    provider.with_store(|store| store_locally_materialized_ready(store, ctx, &required_admins))
+}
+
+fn local_ready_required_admins(
+    provider: &Nip29Provider,
+    ctx: &ChannelCtx<'_>,
+) -> Option<Vec<String>> {
+    let mut admins = vec![provider.management_pubkey()?];
+    if ctx.repair_whitelisted_admins {
+        for pk in &provider.whitelisted_pubkeys {
+            if !admins.contains(pk) {
+                admins.push(pk.clone());
+            }
+        }
+    }
+    Some(admins)
+}
+
+fn store_locally_materialized_ready(
+    store: &crate::state::Store,
+    ctx: &ChannelCtx<'_>,
+    required_admins: &[String],
+) -> bool {
+    let channel_found = store.get_channel(ctx.channel).ok().flatten().is_some();
+    if !channel_found {
+        return false;
+    }
+    if !store
+        .has_channel_membership_snapshot(ctx.channel)
+        .unwrap_or(false)
+    {
+        return false;
+    }
+    let member_ready = ctx.expect_member.is_empty()
+        || store
+            .is_channel_member(ctx.channel, ctx.expect_member)
+            .unwrap_or(false);
+    let admins_ready = required_admins
+        .iter()
+        .all(|pk| store.is_channel_admin(ctx.channel, pk).unwrap_or(false));
+    member_ready && admins_ready
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn materialized_relay_cache_proves_existing_member_ready() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = crate::state::Store::open(&dir.path().join("state.db")).unwrap();
+        store.upsert_channel("room", "room", "", "", 100).unwrap();
+        store
+            .replace_channel_admins("room", &["admin".to_string()], 101)
+            .unwrap();
+        store
+            .replace_channel_members("room", &["member".to_string()], 102)
+            .unwrap();
+
+        let ctx = ChannelCtx {
+            channel: "room",
+            expect_member: "member",
+            parent_hint: None,
+            name: None,
+            repair_whitelisted_admins: true,
+        };
+
+        assert!(store_locally_materialized_ready(
+            &store,
+            &ctx,
+            &["admin".to_string()]
+        ));
+    }
+
+    #[test]
+    fn materialized_relay_cache_does_not_prove_missing_member_ready() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = crate::state::Store::open(&dir.path().join("state.db")).unwrap();
+        store.upsert_channel("room", "room", "", "", 100).unwrap();
+        store
+            .replace_channel_admins("room", &["admin".to_string()], 101)
+            .unwrap();
+        store
+            .replace_channel_members("room", &["member".to_string()], 102)
+            .unwrap();
+
+        let ctx = ChannelCtx {
+            channel: "room",
+            expect_member: "other",
+            parent_hint: None,
+            name: None,
+            repair_whitelisted_admins: true,
+        };
+
+        assert!(!store_locally_materialized_ready(
+            &store,
+            &ctx,
+            &["admin".to_string()]
+        ));
+    }
+
+    #[test]
+    fn materialized_relay_cache_does_not_prove_missing_admin_ready() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = crate::state::Store::open(&dir.path().join("state.db")).unwrap();
+        store.upsert_channel("room", "room", "", "", 100).unwrap();
+        store
+            .replace_channel_admins("room", &["other-admin".to_string()], 101)
+            .unwrap();
+        store
+            .replace_channel_members("room", &["member".to_string()], 102)
+            .unwrap();
+
+        let ctx = ChannelCtx {
+            channel: "room",
+            expect_member: "member",
+            parent_hint: None,
+            name: None,
+            repair_whitelisted_admins: true,
+        };
+
+        assert!(!store_locally_materialized_ready(
+            &store,
+            &ctx,
+            &["admin".to_string()]
+        ));
+    }
 }

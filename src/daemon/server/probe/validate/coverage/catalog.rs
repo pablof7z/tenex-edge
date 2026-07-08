@@ -13,6 +13,12 @@ pub(super) const DURABLE_TABLES: &[TableCoverage] = &[
         "provider readiness decisions",
     ),
     row(
+        "channel_resolution_intents",
+        "aggregate",
+        "table:channel_resolution_intents | channel:<h>",
+        "pending channel-name reservations",
+    ),
+    row(
         "identities",
         "direct",
         "identity:<pubkey> | agent:<slug> | backend:<label>",

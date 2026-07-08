@@ -24,7 +24,17 @@ pub(in crate::daemon::server) async fn spawn_session(
             keys: params.instance.signing_keys(&params.base_keys),
         },
     );
-    ensure_subscription(state, &project).await?;
+    let st = state.clone();
+    let project_for_sub = project.clone();
+    tokio::spawn(async move {
+        if let Err(e) = ensure_subscription(&st, &project_for_sub).await {
+            tracing::warn!(
+                channel = %project_for_sub,
+                error = %e,
+                "session subscription setup failed"
+            );
+        }
+    });
 
     let cancel = Arc::new(Notify::new());
     state.sessions.lock().unwrap().insert(

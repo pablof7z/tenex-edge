@@ -18,6 +18,8 @@ pub struct SessionStartRequestFact {
     pub channel_for_upsert: String,
     pub rel_cwd: String,
     pub room_parent: Option<String>,
+    #[serde(default)]
+    pub channel_provision_name: Option<String>,
     pub watch_pid: Option<i32>,
     pub pty_session: Option<String>,
     pub ring_doorbell: bool,

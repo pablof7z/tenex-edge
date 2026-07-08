@@ -6,8 +6,8 @@
 //!   2. local plumbing the relay can't carry — OS process handles (`sessions`),
 //!      joined-channel state (`session_channels`), external-id aliases
 //!      (`session_aliases`), derived signing keys (`identities`), the inbound
-//!      routing ledger (`inbox`), the outbound publish queue (`outbox`), and
-//!      on-disk project paths (`project_roots`).
+//!      routing ledger (`inbox`), the outbound publish queue (`outbox`), pending
+//!      channel-name reservations, and on-disk project paths (`project_roots`).
 //!
 //! A pubkey appears AT MOST ONCE per channel. Canonical session identity is
 //! daemon-minted and stable; harness-native ids are aliases that repoint to the

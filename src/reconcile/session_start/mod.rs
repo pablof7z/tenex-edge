@@ -37,6 +37,7 @@ pub struct ChannelReadyIntent {
     pub channel_h: String,
     pub work_root: String,
     pub room_parent: Option<String>,
+    pub name: Option<String>,
     pub signer_pubkey: String,
 }
 
@@ -278,6 +279,7 @@ pub(crate) fn plan_from_request(req: &SessionStartRequestFact) -> SessionStartPl
             channel_h: req.channel_h.clone(),
             work_root: req.work_root.clone(),
             room_parent: req.room_parent.clone(),
+            name: req.channel_provision_name.clone(),
             signer_pubkey: req.signer_pubkey.clone(),
         }),
         admit_pubkey: (active && req.signer_ordinal > 0).then(|| req.signer_pubkey.clone()),

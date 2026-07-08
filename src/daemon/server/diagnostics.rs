@@ -37,40 +37,35 @@ pub(in crate::daemon::server) async fn refresh_project_members_cache(
     state: &Arc<DaemonState>,
     project: &str,
 ) -> bool {
-    use crate::fabric::nip29::wire::{kind, KIND_GROUP_MEMBERS};
+    use crate::fabric::nip29::materializer::Nip29Materializer;
+    use crate::fabric::nip29::wire::{kind, KIND_GROUP_ADMINS, KIND_GROUP_MEMBERS};
     use nostr_sdk::prelude::Filter;
 
     let filter = Filter::new()
-        .kind(kind(KIND_GROUP_MEMBERS))
+        .kinds([kind(KIND_GROUP_ADMINS), kind(KIND_GROUP_MEMBERS)])
         .identifier(project)
-        .limit(5);
+        .limit(10);
     let Ok(events) = state.transport.fetch(filter, Duration::from_secs(5)).await else {
         return false;
     };
-    let Some(ev) = events.iter().max_by_key(|e| e.created_at.as_secs()) else {
+    let newest_admins = events
+        .iter()
+        .filter(|e| e.kind.as_u16() == KIND_GROUP_ADMINS)
+        .max_by_key(|e| e.created_at.as_secs());
+    let newest_members = events
+        .iter()
+        .filter(|e| e.kind.as_u16() == KIND_GROUP_MEMBERS)
+        .max_by_key(|e| e.created_at.as_secs());
+    if newest_admins.is_none() && newest_members.is_none() {
         return false;
-    };
-    let mut admins: Vec<String> = Vec::new();
-    let mut members: Vec<String> = Vec::new();
-    for t in ev.tags.iter() {
-        let s = t.as_slice();
-        if s.first().map(String::as_str) != Some("p") {
-            continue;
-        }
-        let Some(pubkey) = s.get(1).cloned() else {
-            continue;
-        };
-        let role = s.get(2).map(String::as_str).unwrap_or("member");
-        if role == "admin" {
-            admins.push(pubkey);
-        } else {
-            members.push(pubkey);
-        }
     }
-    let now = now_secs();
     state.with_store(|s| {
-        s.replace_channel_admins(project, &admins, now).ok();
-        s.replace_channel_members(project, &members, now).ok();
+        if let Some(ev) = newest_admins {
+            Nip29Materializer::materialize_admins(s, ev);
+        }
+        if let Some(ev) = newest_members {
+            Nip29Materializer::materialize_members(s, ev);
+        }
     });
     true
 }

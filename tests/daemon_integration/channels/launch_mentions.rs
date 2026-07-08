@@ -117,7 +117,11 @@ fn wait_for_group_member(home: &Home, project: &str, pubkey: &str) {
                 s.is_channel_member(project, pubkey).unwrap_or(false)
             })
             .unwrap_or(false)),
-        "{pubkey} was not visible as a member of {project}"
+        "{pubkey} was not visible as a member of {project}; daemon_log={}; group_log={}",
+        std::fs::read_to_string(home.dir.path().join("daemon.log"))
+            .unwrap_or_else(|e| format!("<{e}>")),
+        std::fs::read_to_string(home.dir.path().join("logs/group-mgmt.log"))
+            .unwrap_or_else(|e| format!("<{e}>"))
     );
 }
 
@@ -279,6 +283,12 @@ fn operator_kind9_to_offline_local_agent_spawns_and_injects() {
         )
         .await
         .expect("keeper session_start");
+    });
+    let keeper = wait_for_alive_session(&home, "keeper", &project);
+    wait_for_group_member(&home, &project, &keeper.agent_pubkey);
+
+    rt().block_on(async {
+        let mut c = DaemonClient::connect_or_spawn().await.expect("connect");
         let add = c
             .call(
                 "project_add",

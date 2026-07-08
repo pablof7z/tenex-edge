@@ -9,6 +9,47 @@ use tenex_edge::daemon::client::Client;
 use tenex_edge::fabric::nip29::wire::KIND_PROFILE;
 use tenex_edge::state::Store;
 
+fn test_log(home: &Home) -> String {
+    std::fs::read_to_string(home.dir.path().join("daemon.log")).unwrap_or_else(|e| format!("<{e}>"))
+}
+
+fn wait_for_channel_metadata(home: &Home, channel: &str) {
+    assert!(
+        wait_until(std::time::Duration::from_secs(25), || Store::open(
+            &home.store_path()
+        )
+        .map(|s| s.get_channel(channel).unwrap_or(None).is_some())
+        .unwrap_or(false)),
+        "channel {channel} metadata did not materialize; daemon_log={}",
+        test_log(home)
+    );
+}
+
+fn wait_for_channel_parent(home: &Home, channel: &str, parent: &str) {
+    assert!(
+        wait_until(std::time::Duration::from_secs(25), || Store::open(
+            &home.store_path()
+        )
+        .map(|s| s.channel_parent(channel).unwrap_or(None).as_deref() == Some(parent))
+        .unwrap_or(false)),
+        "channel {channel} parent {parent} did not materialize; daemon_log={}",
+        test_log(home)
+    );
+}
+
+fn wait_for_channel_member(home: &Home, channel: &str, pubkey: &str) {
+    assert!(
+        wait_until(std::time::Duration::from_secs(25), || {
+            refresh_project_members(channel);
+            Store::open(&home.store_path())
+                .map(|s| s.is_channel_member(channel, pubkey).unwrap_or(false))
+                .unwrap_or(false)
+        }),
+        "member {pubkey} did not materialize in {channel}; daemon_log={}",
+        test_log(home)
+    );
+}
+
 async fn publish_profile(keys: &Keys, name: &str) {
     let client = NostrClient::builder()
         .signer(keys.clone())
@@ -51,7 +92,7 @@ fn first_turn_injects_channel_context_block() {
     let home = Home::new();
     rewrite_config_with_user_nsec(&home);
 
-    let ctx = rt().block_on(async {
+    let (channel, agent_pubkey) = rt().block_on(async {
         let mut c = Client::connect_or_spawn().await.expect("connect");
         c.call(
             "session_start",
@@ -59,6 +100,18 @@ fn first_turn_injects_channel_context_block() {
         )
         .await
         .expect("session_start");
+        let store = Store::open(&home.store_path()).unwrap();
+        let rec = store
+            .get_session("sess-ctx-1")
+            .unwrap()
+            .expect("session row");
+        (rec.channel_h, rec.agent_pubkey)
+    });
+    wait_for_channel_parent(&home, &channel, "tmp");
+    wait_for_channel_member(&home, &channel, &agent_pubkey);
+
+    let ctx = rt().block_on(async {
+        let mut c = Client::connect_or_spawn().await.expect("connect");
         let v = c
             .call("turn_start", serde_json::json!({"session": "sess-ctx-1"}))
             .await
@@ -99,12 +152,14 @@ fn first_turn_resolves_member_profiles_from_kind0() {
         )
         .await
         .expect("session_start");
+        wait_for_channel_metadata(&home, "tmp");
         c.call(
             "project_add",
             serde_json::json!({"project": "tmp", "pubkey": remote_pk}),
         )
         .await
         .expect("project_add profiled member");
+        wait_for_channel_member(&home, "tmp", &remote_pk);
         let members = c
             .call("project_members", serde_json::json!({"project": "tmp"}))
             .await
@@ -164,11 +219,7 @@ fn session_start_with_user_nsec_owns_group_and_adds_member() {
     // The minted session room's parent is the work-root project channel. (Parent
     // now lives in `relay_channels`; `session_room_parent` was renamed to
     // `channel_parent`.)
-    assert_eq!(
-        store.channel_parent(&rec.channel_h).unwrap().as_deref(),
-        Some("tmp"),
-        "session start should record the room's parent project channel"
-    );
+    wait_for_channel_parent(&home, &rec.channel_h, "tmp");
 
     stop_daemon(&home);
 }
@@ -257,7 +308,11 @@ fn human_initiated_session_uses_project_when_per_session_rooms_disabled() {
     // is a root channel. (`is_session_room` was removed; the distinction is
     // `is_root_channel`.)
     assert!(
-        store.is_root_channel(&rec.channel_h).unwrap(),
+        wait_until(std::time::Duration::from_secs(25), || Store::open(
+            &home.store_path()
+        )
+        .map(|s| s.is_root_channel(&rec.channel_h).unwrap_or(false))
+        .unwrap_or(false)),
         "the work-root project is not a session room"
     );
 

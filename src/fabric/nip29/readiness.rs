@@ -46,8 +46,6 @@ pub enum ChannelGate {
 
 struct ChannelSlot {
     verified_at: Option<Instant>,
-    /// Per-channel single-flight: concurrent readiness checks coalesce on this.
-    inflight: Arc<AsyncMutex<()>>,
 }
 
 /// In-process TTL'd cache tracking which channels are known-ready.
@@ -58,12 +56,14 @@ struct ChannelSlot {
 /// provisioning for subsequent agents that may not yet be members.
 pub struct ChannelReadiness {
     inner: Mutex<HashMap<(String, String), ChannelSlot>>,
+    inflight_by_channel: Mutex<HashMap<String, Arc<AsyncMutex<()>>>>,
 }
 
 impl Default for ChannelReadiness {
     fn default() -> Self {
         Self {
             inner: Mutex::new(HashMap::new()),
+            inflight_by_channel: Mutex::new(HashMap::new()),
         }
     }
 }
@@ -74,26 +74,32 @@ impl ChannelReadiness {
     /// calls this again after acquiring to double-check (another task may have
     /// repaired it while we waited for the lock).
     pub(crate) fn check(&self, channel: &str, expect_member: &str) -> (bool, Arc<AsyncMutex<()>>) {
-        let mut map = self.inner.lock().expect("readiness map poisoned");
-        let key = (channel.to_string(), expect_member.to_string());
-        let slot = map.entry(key).or_insert_with(|| ChannelSlot {
-            verified_at: None,
-            inflight: Arc::new(AsyncMutex::new(())),
-        });
-        let ready = slot
-            .verified_at
-            .map(|t| t.elapsed().as_secs() < READY_TTL_SECS)
-            .unwrap_or(false);
-        (ready, slot.inflight.clone())
+        let ready = {
+            let mut map = self.inner.lock().expect("readiness map poisoned");
+            let key = (channel.to_string(), expect_member.to_string());
+            let slot = map
+                .entry(key)
+                .or_insert_with(|| ChannelSlot { verified_at: None });
+            slot.verified_at
+                .map(|t| t.elapsed().as_secs() < READY_TTL_SECS)
+                .unwrap_or(false)
+        };
+        let inflight = self
+            .inflight_by_channel
+            .lock()
+            .expect("readiness inflight map poisoned")
+            .entry(channel.to_string())
+            .or_insert_with(|| Arc::new(AsyncMutex::new(())))
+            .clone();
+        (ready, inflight)
     }
 
     pub(crate) fn mark_ready(&self, channel: &str, expect_member: &str) {
         let mut map = self.inner.lock().expect("readiness map poisoned");
         let key = (channel.to_string(), expect_member.to_string());
-        let slot = map.entry(key).or_insert_with(|| ChannelSlot {
-            verified_at: None,
-            inflight: Arc::new(AsyncMutex::new(())),
-        });
+        let slot = map
+            .entry(key)
+            .or_insert_with(|| ChannelSlot { verified_at: None });
         slot.verified_at = Some(Instant::now());
     }
 

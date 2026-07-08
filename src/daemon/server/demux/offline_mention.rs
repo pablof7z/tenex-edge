@@ -9,9 +9,9 @@ use headless::{mention_prompt, spawn_headless_mention};
 /// Spawn a local agent that was p-tagged in a kind:9 message but had no alive
 /// session. Idempotency: `first_sight` prevents duplicate spawns within a run;
 /// `has_alive` prevents re-spawn across restarts when the previous spawn registered.
-/// Delivery: `rpc_session_start` calls `ensure_subscription`, which triggers a
-/// relay replay of recent kind:9 events; those are re-materialized against the
-/// now-alive session and delivered via `ring_doorbells`.
+/// Delivery: session start schedules subscription/replay work in the daemon;
+/// recent kind:9 events are re-materialized against the now-alive session and
+/// delivered via `ring_doorbells`.
 pub(super) async fn handle(
     state: &Arc<DaemonState>,
     mentioned_pk: &str,

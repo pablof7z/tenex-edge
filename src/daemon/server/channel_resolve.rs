@@ -51,6 +51,32 @@ fn resolve_locally(
     Ok(None)
 }
 
+pub(in crate::daemon::server) struct SessionStartChannelResolution {
+    pub channel_h: String,
+    pub provision_name: Option<String>,
+}
+
+pub(in crate::daemon::server) fn resolve_channel_for_session_start(
+    state: &Arc<DaemonState>,
+    parent: &str,
+    name: &str,
+) -> Result<SessionStartChannelResolution> {
+    if let Some(h) = state.with_store(|s| resolve_locally(s, parent, name))? {
+        return Ok(SessionStartChannelResolution {
+            channel_h: h,
+            provision_name: None,
+        });
+    }
+
+    let proposed = crate::util::opaque_group_id();
+    let channel_h = state
+        .with_store(|s| s.reserve_channel_resolution_intent(parent, name, &proposed, now_secs()))?;
+    Ok(SessionStartChannelResolution {
+        channel_h,
+        provision_name: Some(name.to_string()),
+    })
+}
+
 /// Resolve a channel NAME to its opaque `channel_h` within `parent`.
 ///
 /// Local resolution (see [`resolve_locally`]) runs first: an existing
@@ -77,7 +103,9 @@ pub(in crate::daemon::server) async fn resolve_channel(
         anyhow::bail!("channel {name} not found");
     }
 
-    let child_h = crate::util::opaque_group_id();
+    let proposed = crate::util::opaque_group_id();
+    let child_h = state
+        .with_store(|s| s.reserve_channel_resolution_intent(parent, name, &proposed, now_secs()))?;
     let member = state.backend_pubkey().unwrap_or_default();
 
     let gate = state

@@ -188,6 +188,7 @@ fn session_start_request() -> SessionStartRequestFact {
         channel_for_upsert: "room".into(),
         rel_cwd: ".".into(),
         room_parent: None,
+        channel_provision_name: None,
         watch_pid: Some(42),
         pty_session: Some("%1".into()),
         ring_doorbell: true,

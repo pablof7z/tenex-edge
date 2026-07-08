@@ -19,15 +19,25 @@ fn orchestration_session_uses_existing_group_without_minting() {
         .expect("session_start");
     });
 
-    let store = Store::open(&home.store_path()).unwrap();
-    let rec = store
+    let rec = Store::open(&home.store_path())
+        .unwrap()
         .get_session("sess-orch-1")
         .unwrap()
         .expect("session row");
-    let channel = store
-        .get_channel(&rec.channel_h)
-        .unwrap()
-        .expect("channel row");
+    let mut channel = None;
+    assert!(
+        wait_until(std::time::Duration::from_secs(25), || {
+            channel = Store::open(&home.store_path())
+                .and_then(|store| store.get_channel(&rec.channel_h))
+                .unwrap_or(None);
+            channel.is_some()
+        }),
+        "channel row {} did not materialize; daemon_log={}",
+        rec.channel_h,
+        std::fs::read_to_string(home.dir.path().join("daemon.log"))
+            .unwrap_or_else(|e| format!("<{e}>"))
+    );
+    let channel = channel.unwrap();
     assert_eq!(channel.name, "issue-42");
     assert_eq!(
         channel.parent, "tmp",

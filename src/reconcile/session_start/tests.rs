@@ -18,6 +18,7 @@ fn request(already_running: bool, ordinal: u32) -> InputFact {
         },
         rel_cwd: ".".into(),
         room_parent: None,
+        channel_provision_name: None,
         watch_pid: Some(42),
         pty_session: Some("%1".into()),
         ring_doorbell: true,

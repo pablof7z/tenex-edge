@@ -49,6 +49,13 @@ pub(super) async fn ensure_invariants(
             degraded_reason: Some(attempt::reason(&failures)),
         };
     }
+    if ctx.expect_member.is_empty() {
+        return Outcome {
+            repaired,
+            degraded_reason: None,
+        };
+    }
+
     let expect_already_admin = mgmt_pubkey == ctx.expect_member
         || provider
             .whitelisted_pubkeys

@@ -1,7 +1,8 @@
 //! The stamped persistence schema.
 //! Six `relay_*` tables are materialized caches and may be dropped/rebuilt from
 //! relay state. The remaining local tables are non-rebuildable daemon state:
-//! session bindings, aliases, identities, inbox/outbox, and project roots.
+//! session bindings, aliases, identities, inbox/outbox, channel reservations,
+//! and project roots.
 use anyhow::{Context, Result};
 use rusqlite::Connection;
 use std::path::Path;
@@ -238,6 +239,14 @@ CREATE TABLE IF NOT EXISTS project_roots (
     channel_h   TEXT PRIMARY KEY,
     abs_path    TEXT NOT NULL,
     updated_at  INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS channel_resolution_intents (
+    parent      TEXT NOT NULL,
+    name        TEXT NOT NULL,
+    channel_h   TEXT NOT NULL,
+    created_at  INTEGER NOT NULL,
+    PRIMARY KEY (parent, name)
 );
 
 CREATE TABLE IF NOT EXISTS channel_readiness_attempts (id INTEGER PRIMARY KEY AUTOINCREMENT, channel_h TEXT NOT NULL, expect_member TEXT NOT NULL DEFAULT '', parent_hint TEXT, name TEXT, source TEXT NOT NULL DEFAULT '', outcome TEXT NOT NULL DEFAULT '', reason TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL);

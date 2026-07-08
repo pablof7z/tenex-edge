@@ -234,6 +234,7 @@ fn session_start_request(
         channel_for_upsert: channel_h.to_string(),
         rel_cwd: ".".into(),
         room_parent: None,
+        channel_provision_name: None,
         watch_pid: Some(42),
         pty_session: None,
         ring_doorbell: false,

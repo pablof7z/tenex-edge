@@ -1,5 +1,7 @@
 use super::super::*;
 
+const PROJECT_MEMBER_READY_TIMEOUT: Duration = Duration::from_secs(90);
+
 // ── project_list ─────────────────────────────────────────────────────────────
 
 /// List NIP-29 groups: refresh the local cache via the provider (which fetches
@@ -53,8 +55,8 @@ pub async fn rpc_project_edit(
 // ── project_members ──────────────────────────────────────────────────────────
 
 /// Return the cached NIP-29 membership roster for a project. Before reading the
-/// cache, try to refresh kind:39002 from the relay so interactive project edits
-/// start from the relay's current roster rather than only local optimistic state.
+/// cache, refresh admin/member snapshots from the relay so interactive project
+/// edits start from relay state rather than only local optimistic state.
 pub async fn rpc_project_members(
     state: &Arc<DaemonState>,
     params: &serde_json::Value,
@@ -136,22 +138,34 @@ pub async fn rpc_project_add(
         "rpc_project_add manual add via confirmed provider mutation",
     );
 
-    let outcome = state
+    let parent_hint = state
+        .with_store(|s| s.channel_parent(&p.project).unwrap_or(None))
+        .filter(|parent| !parent.is_empty());
+    let ready = state
         .provider
-        .grant_member_confirmed(&p.project, &pubkey_hex)
-        .await;
-    if outcome.is_rejected() {
+        .ensure_channel_ready(crate::fabric::nip29::readiness::ChannelCtx {
+            channel: &p.project,
+            expect_member: &pubkey_hex,
+            parent_hint: parent_hint.as_deref(),
+            name: None,
+            repair_whitelisted_admins: true,
+        });
+    let gate = match tokio::time::timeout(PROJECT_MEMBER_READY_TIMEOUT, ready).await {
+        Ok(gate) => gate,
+        Err(_) => crate::fabric::nip29::readiness::ChannelGate::Degraded,
+    };
+    if matches!(gate, crate::fabric::nip29::readiness::ChannelGate::Degraded) {
         anyhow::bail!(
-            "project_add rejected for {} in {}",
-            crate::util::pubkey_short(&pubkey_hex),
-            p.project
+            "project_add could not verify channel {} readiness within {}s",
+            p.project,
+            PROJECT_MEMBER_READY_TIMEOUT.as_secs()
         );
     }
 
     Ok(serde_json::json!({
         "project": p.project,
         "pubkey": pubkey_hex,
-        "confirmed": outcome.is_confirmed(),
+        "confirmed": true,
     }))
 }
 

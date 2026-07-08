@@ -176,3 +176,72 @@ fn late_session_start_hook_reasserts_pty_bootstrap_session() {
     let _ = tenex_edge::pty::kill(&pty_id);
     stop_daemon(&home);
 }
+
+#[test]
+fn codex_hook_reasserts_launch_session_from_pty_anchor_without_native_id() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let home = Home::new();
+    write_config(&home, false);
+
+    let project = unique_session("pty-codex-hook");
+    let work_dir = home.dir.path().join(&project);
+    add_project_mapping(&home, &project, &work_dir);
+    let agent = "codex";
+
+    let pty_id = rt().block_on(async {
+        let mut c = Client::connect_or_spawn().await.expect("connect");
+        let v = c
+            .call(
+                "pty_spawn",
+                serde_json::json!({
+                    "agent": agent,
+                    "project": &project,
+                    "channel": &project,
+                    "cwd": &work_dir,
+                    "base_command": no_hook_command(),
+                }),
+            )
+            .await
+            .expect("pty_spawn");
+        v["pty_id"].as_str().unwrap().to_string()
+    });
+    let first = wait_for_alive(&home, agent, &project);
+    let meta = pty_meta(&pty_id);
+
+    let out = run_cli_stdin_with_env_in_dir(
+        &home,
+        &["harness", "hook", "codex", "--type", "session-start"],
+        "",
+        &[
+            ("TENEX_EDGE_AGENT", agent),
+            ("TENEX_EDGE_PTY_SESSION", pty_id.as_str()),
+            ("TENEX_EDGE_PTY_SOCKET", meta.socket.as_str()),
+            ("TENEX_EDGE_INIT_PROGRESS", "0"),
+        ],
+        &work_dir,
+    );
+    assert!(
+        out.status.success(),
+        "codex session-start hook failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let store = Store::open(&home.store_path()).unwrap();
+    assert_eq!(
+        store
+            .resolve_session_by_alias("codex", "pty_session", &pty_id)
+            .unwrap()
+            .as_deref(),
+        Some(first.session_id.as_str())
+    );
+    let alive = store
+        .list_alive_sessions()
+        .unwrap()
+        .into_iter()
+        .filter(|rec| rec.agent_slug == agent && rec.channel_h == project)
+        .collect::<Vec<_>>();
+    assert_eq!(alive.len(), 1, "codex hook should not mint a duplicate");
+
+    let _ = tenex_edge::pty::kill(&pty_id);
+    stop_daemon(&home);
+}

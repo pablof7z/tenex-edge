@@ -82,6 +82,39 @@ impl Store {
             .optional()?)
     }
 
+    /// A local reservation for a channel name whose relay-authored kind:39000 has
+    /// not materialized yet. This is not channel truth; it prevents two immediate
+    /// session-start hooks for the same `(parent, name)` from minting two ids while
+    /// daemon-side readiness is still in flight.
+    pub fn channel_resolution_intent(&self, parent: &str, name: &str) -> Result<Option<String>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT channel_h FROM channel_resolution_intents
+                 WHERE parent=?1 AND name=?2",
+                params![parent, name],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()?)
+    }
+
+    pub fn reserve_channel_resolution_intent(
+        &self,
+        parent: &str,
+        name: &str,
+        proposed_channel_h: &str,
+        now: u64,
+    ) -> Result<String> {
+        self.conn.execute(
+            "INSERT OR IGNORE INTO channel_resolution_intents
+                 (parent, name, channel_h, created_at)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![parent, name, proposed_channel_h, now],
+        )?;
+        self.channel_resolution_intent(parent, name)?
+            .ok_or_else(|| anyhow::anyhow!("failed to reserve channel resolution intent"))
+    }
+
     /// Fetch one channel's metadata.
     pub fn get_channel(&self, channel_h: &str) -> Result<Option<Channel>> {
         Ok(self

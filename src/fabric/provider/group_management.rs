@@ -1,5 +1,7 @@
 use super::Nip29Provider;
-use crate::fabric::group_management::{classify_group_publish_error, GroupPublishOutcome};
+use crate::fabric::group_management::{
+    classify_group_publish_error, GroupMutationOutcome, GroupPublishOutcome,
+};
 use nostr_sdk::{prelude::Keys, EventBuilder};
 
 impl Nip29Provider {
@@ -7,35 +9,75 @@ impl Nip29Provider {
         &self,
         group: &str,
         mgmt_pubkey: &str,
-    ) -> bool {
+    ) -> GroupMutationOutcome {
         let nsec = match &self.user_nsec {
             Some(n) => n.clone(),
             None => {
                 eprintln!("[daemon] try_grant_mgmt_admin: no userNsec configured");
-                return false;
+                return GroupMutationOutcome::Rejected;
             }
         };
         let user_keys = match Keys::parse(&nsec) {
             Ok(k) => k,
             Err(e) => {
                 eprintln!("[daemon] try_grant_mgmt_admin: userNsec parse failed: {e}");
-                return false;
+                return GroupMutationOutcome::Rejected;
             }
         };
-        match crate::fabric::nip29::lifecycle::group_put_admin(group, mgmt_pubkey) {
-            Ok(b) => {
-                self.publish_group_management(
-                    b,
-                    &user_keys,
-                    "9000 put-admin (self-grant via userNsec)",
-                )
-                .await
+
+        for attempt in 0..6u32 {
+            let outcome = match crate::fabric::nip29::lifecycle::group_put_admin(group, mgmt_pubkey)
+            {
+                Ok(b) => {
+                    self.publish_group_management_outcome(
+                        b,
+                        &user_keys,
+                        "9000 put-admin (self-grant via userNsec)",
+                    )
+                    .await
+                }
+                Err(e) => {
+                    eprintln!("[daemon] try_grant_mgmt_admin: build event failed: {e}");
+                    return GroupMutationOutcome::Rejected;
+                }
+            };
+            match self.try_fetch_group_state(group).await {
+                Ok((_, roles, _)) => {
+                    if roles.get(mgmt_pubkey).map(String::as_str) == Some("admin") {
+                        self.with_store(|s| {
+                            if let Err(e) = s.upsert_channel_member(
+                                group,
+                                mgmt_pubkey,
+                                "admin",
+                                crate::util::now_secs(),
+                            ) {
+                                tracing::error!(
+                                    channel = group,
+                                    pubkey = mgmt_pubkey,
+                                    error = %e,
+                                    "try_grant_mgmt_admin: local mirror write failed after confirmed relay grant"
+                                );
+                            }
+                        });
+                        return GroupMutationOutcome::Confirmed;
+                    }
+                }
+                Err(e) => {
+                    tracing::error!(
+                        channel = group,
+                        pubkey = mgmt_pubkey,
+                        attempt,
+                        error = %e,
+                        "try_grant_mgmt_admin: relay read-back failed; cannot confirm self-grant"
+                    );
+                }
             }
-            Err(e) => {
-                eprintln!("[daemon] try_grant_mgmt_admin: build event failed: {e}");
-                false
+            if outcome.is_rejected() {
+                return GroupMutationOutcome::Rejected;
             }
+            tokio::time::sleep(std::time::Duration::from_millis(250 * (attempt as u64 + 1))).await;
         }
+        GroupMutationOutcome::Unconfirmed
     }
 
     pub(in crate::fabric::provider) async fn publish_group_management(

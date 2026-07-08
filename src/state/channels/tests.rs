@@ -59,3 +59,25 @@ fn archived_channel_predicate_uses_about_prefix() {
     assert!(store.is_archived_channel("archived").unwrap());
     assert!(!store.is_archived_channel("missing").unwrap());
 }
+
+#[test]
+fn channel_resolution_intent_reuses_reserved_id_for_name() {
+    let store = Store::open_memory().unwrap();
+
+    let first = store
+        .reserve_channel_resolution_intent("project", "planning", "a1b2c3d4", 10)
+        .unwrap();
+    let second = store
+        .reserve_channel_resolution_intent("project", "planning", "ffffeeee", 11)
+        .unwrap();
+
+    assert_eq!(first, "a1b2c3d4");
+    assert_eq!(second, first);
+    assert_eq!(
+        store
+            .channel_resolution_intent("project", "planning")
+            .unwrap()
+            .as_deref(),
+        Some("a1b2c3d4")
+    );
+}

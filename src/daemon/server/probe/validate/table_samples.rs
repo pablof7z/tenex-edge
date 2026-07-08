@@ -6,6 +6,7 @@ use serde_json::{json, Value};
 
 const SAMPLE_TABLES: &[&str] = &[
     "channel_readiness_attempts",
+    "channel_resolution_intents",
     "identities",
     "inbox",
     "llm_calls",
@@ -62,6 +63,7 @@ pub(super) fn lookup_targets(store: &Store, needle: &str, limit: usize) -> Resul
 fn columns_for_table(table: &str) -> &'static [&'static str] {
     match table {
         "channel_readiness_attempts" => &["id", "channel_h", "outcome"],
+        "channel_resolution_intents" => &["parent", "name", "channel_h"],
         "identities" => &["pubkey", "agent_slug", "session_id"],
         "inbox" => &["event_id", "target_session", "state"],
         "llm_calls" => &["id", "session_id", "provider", "model"],
@@ -94,6 +96,7 @@ fn columns_for_table(table: &str) -> &'static [&'static str] {
 fn sample_target(table: &str, row: &Value) -> Option<Value> {
     let target = match table {
         "channel_readiness_attempts" => format!("readiness_attempt:{}", int(row, "id")?),
+        "channel_resolution_intents" => format!("channel:{}", text(row, "channel_h")?),
         "identities" => format!("identity:{}", text(row, "pubkey")?),
         "inbox" => format!("inbox:{}", text(row, "event_id")?),
         "llm_calls" => format!("llm:{}", int(row, "id")?),
