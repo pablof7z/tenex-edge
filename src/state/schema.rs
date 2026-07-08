@@ -8,6 +8,7 @@ use rusqlite::Connection;
 use std::path::Path;
 
 mod identity_migration;
+mod outbox_backoff;
 mod session_claims;
 mod trellis_commits;
 mod trellis_replay_capsules;
@@ -230,10 +231,14 @@ CREATE TABLE IF NOT EXISTS outbox (
     state        TEXT NOT NULL DEFAULT 'pending',
     retries      INTEGER NOT NULL DEFAULT 0,
     last_error   TEXT,
-    enqueued_at  INTEGER NOT NULL
+    enqueued_at  INTEGER NOT NULL,
+    -- Earliest wall-clock second this row may be (re)attempted. 0 = due now.
+    -- Set to now+backoff on a failed publish so a wedged relay can't induce a
+    -- retry storm; the drainer's peek gates on it.
+    next_attempt_at INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_outbox_pending
-    ON outbox(state, local_id);
+    ON outbox(state, next_attempt_at, local_id);
 
 CREATE TABLE IF NOT EXISTS project_roots (
     channel_h   TEXT PRIMARY KEY,
@@ -286,6 +291,7 @@ pub(super) fn initialize_file(conn: &Connection, path: &Path) -> Result<()> {
     identity_migration::ensure_session_primary_key(conn)?;
     session_claims::ensure_columns(conn)?;
     trellis_commits::ensure_columns(conn)?;
+    outbox_backoff::ensure_columns(conn)?;
     trellis_replay_capsules::ensure_table(conn)?;
     version::stamp(conn)
 }
@@ -296,6 +302,7 @@ pub(super) fn initialize_memory(conn: &Connection) -> Result<()> {
     identity_migration::ensure_session_primary_key(conn)?;
     session_claims::ensure_columns(conn)?;
     trellis_commits::ensure_columns(conn)?;
+    outbox_backoff::ensure_columns(conn)?;
     trellis_replay_capsules::ensure_table(conn)?;
     version::stamp(conn)
 }

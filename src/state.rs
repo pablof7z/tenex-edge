@@ -242,6 +242,8 @@ pub struct OutboxRow {
     pub retries: i64,
     pub last_error: Option<String>,
     pub enqueued_at: u64,
+    /// Earliest wall-clock second this row may be (re)attempted; 0 = due now.
+    pub next_attempt_at: u64,
 }
 
 // Canonical ids use wall-clock nanos plus a monotonic counter: `te-<nanos_hex>-<counter_hex>`.
@@ -276,6 +278,7 @@ mod members;
 pub use members::ChannelMemberSet;
 mod messages;
 mod outbox;
+pub use outbox::outbox_retry_delay_secs;
 mod profiles;
 mod project_roots;
 pub use project_roots::ProjectRootBinding;

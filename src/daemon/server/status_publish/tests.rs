@@ -7,7 +7,7 @@ fn retryable_outbox_failed_publish_stays_pending() {
         .apply_outbox_projection(id, "pending", Some("relay timeout"), true)
         .unwrap();
 
-    let pending = store.peek_outbox(10).unwrap();
+    let pending = store.peek_outbox(10, u64::MAX).unwrap();
     assert_eq!(pending.len(), 1);
     assert_eq!(pending[0].local_id, id);
     assert_eq!(pending[0].retries, 1);
@@ -28,7 +28,7 @@ fn terminal_outbox_failed_publish_leaves_pending_queue() {
         )
         .unwrap();
 
-    assert!(store.peek_outbox(10).unwrap().is_empty());
+    assert!(store.peek_outbox(10, u64::MAX).unwrap().is_empty());
     let row = store.get_outbox(id).unwrap().unwrap();
     assert_eq!(row.state, "failed");
     assert_eq!(row.retries, 1);

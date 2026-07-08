@@ -99,7 +99,8 @@ pub(in crate::daemon::server) fn rpc_debug_outbox(
     });
     // The outbox is now a generic signed-event publish queue (raw event_json),
     // not status-specific snapshots — dump the pending queue rows verbatim.
-    let rows = state.with_store(|s| s.peek_outbox(p.limit as u32))?;
+    // Debug dump: show every pending row regardless of retry backoff window.
+    let rows = state.with_store(|s| s.peek_outbox(p.limit as u32, u64::MAX))?;
     let rows = rows
         .into_iter()
         .map(|r| {
