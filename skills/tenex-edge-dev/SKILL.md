@@ -1,6 +1,6 @@
 ---
 name: tenex-edge-dev
-description: Use for tenex-edge development live labs: run a local croissant relay, configure one or more container backends with real host AI auth, launch Claude/Codex/OpenCode agents, and inspect portable PTY sessions, hook logs, relay logs, and Nostr events with nak.
+description: "Use for tenex-edge development live labs: run a local croissant relay, configure one or more container backends with real host AI auth, launch Claude/Codex/OpenCode agents, and inspect portable PTY sessions, hook logs, relay logs, and Nostr events with nak."
 allowed-tools: Bash
 ---
 
