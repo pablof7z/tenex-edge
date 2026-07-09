@@ -148,6 +148,6 @@ pub(super) fn mention_prompt(body: &str) -> String {
         body
     };
     format!(
-        "{body}\n\n[reply via `tenex-edge chat write --message \"...\"` - replies do not auto-publish]"
+        "{body}\n\n[reply via `tenex-edge channel send --message \"...\"` - replies do not auto-publish]"
     )
 }

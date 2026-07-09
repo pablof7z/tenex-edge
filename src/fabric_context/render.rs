@@ -173,13 +173,13 @@ fn render_messages(out: &mut String, channel: &ChannelBlock) {
         if m.truncated {
             let _ = write!(
                 out,
-                "\n          [message truncated; run `tenex-edge chat read --id {}`]",
+                "\n          [message truncated; run `tenex-edge channel read --id {}`]",
                 esc_text(&short)
             );
         }
         if m.mention {
             out.push_str(
-                "\n          [reply via `tenex-edge chat write --message \"...\"` \
+                "\n          [reply via `tenex-edge channel send --message \"...\"` \
                  — replies do not auto-publish]",
             );
         }

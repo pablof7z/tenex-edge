@@ -8,8 +8,8 @@
 //!      arrived via the fabric: `[tenex-edge mention] <@agent1> hi @developer`.
 //!
 //! Publishing no longer happens automatically on the agent's behalf — the
-//! envelope carries an explicit reminder to respond via `tenex-edge chat
-//! write`, since nothing mirrors the reply for it.
+//! envelope carries an explicit reminder to respond via `tenex-edge channel
+//! send`, since nothing mirrors the reply for it.
 //!
 //! Hook-delivered mentions and ambient channel activity are rendered by the
 //! unified fabric context view, not by this envelope module.
@@ -42,17 +42,17 @@ fn is_whitelisted(whitelisted: &[String], pubkey: &str) -> bool {
 }
 
 /// Reminder appended to every mention envelope: since nothing auto-publishes a
-/// reply on the agent's behalf, the agent must explicitly run `chat write` to
+/// reply on the agent's behalf, the agent must explicitly run `channel send` to
 /// be heard.
 const REPLY_REMINDER: &str =
-    "[reply via `tenex-edge chat write --message \"...\"` — replies do not auto-publish]";
+    "[reply via `tenex-edge channel send --message \"...\"` — replies do not auto-publish]";
 
 /// Form ① / ② — direct mentions submitted into a live terminal as a real turn.
 /// Human senders render bare with a `<@name>` prefix (it reads as a near-natural
 /// turn that still carries provenance); agent senders are prefixed
 /// `[tenex-edge mention]` so the agent knows it is a fabric relay, not its
 /// operator typing. No message id — replies target `@name` — but every
-/// envelope carries an explicit reminder to reply via `chat write`, since
+/// envelope carries an explicit reminder to reply via `channel send`, since
 /// replies no longer auto-publish.
 pub(crate) fn render_terminal_mention(
     store: &Store,

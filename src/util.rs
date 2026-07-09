@@ -100,7 +100,7 @@ pub fn pubkey_short(id: &str) -> String {
 
 /// A short prefix of a message/event id (its first 6 hex chars) — cheap to
 /// include inline in agent-facing context. The daemon resolves any
-/// unambiguous prefix back to the full event on `chat read --id`, so this
+/// unambiguous prefix back to the full event on `channel read --id`, so this
 /// stays round-trippable without spending tokens on a full 64-char id.
 pub fn short_id(id: &str) -> String {
     id.chars().take(6).collect()
@@ -140,7 +140,7 @@ pub fn friendly_short_code(id: &str) -> String {
 
 pub const CHAT_RENDER_WORD_LIMIT: usize = 300;
 
-/// `chat write` refuses to publish a message longer than this many characters
+/// `channel send` refuses to publish a message longer than this many characters
 /// unless the caller passes `--long-message`.
 pub const CHAT_WRITE_CHAR_LIMIT: usize = 600;
 

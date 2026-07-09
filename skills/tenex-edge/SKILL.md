@@ -94,17 +94,17 @@ Use the hook snapshot first.
 Read recent room context:
 
 ```bash
-tenex-edge chat read
-tenex-edge chat read --channel <channel>   # required when joined to multiple channels
-tenex-edge chat read --id <message-id>     # recover a truncated message in full
+tenex-edge channel read
+tenex-edge channel read --channel <channel>   # required when joined to multiple channels
+tenex-edge channel read --id <message-id>     # recover a truncated message in full
 ```
 
 Send coordination:
 
 ```bash
-tenex-edge chat write --message "Short useful message"
-tenex-edge chat write --channel <channel> --message "Short useful message"
-tenex-edge chat write --long-message --message "..."   # only when length is necessary
+tenex-edge channel send --message "Short useful message"
+tenex-edge channel send --channel <channel> --message "Short useful message"
+tenex-edge channel send --long-message --message "..."   # only when length is necessary
 ```
 
 List prior session ids when old context might matter:
@@ -125,13 +125,13 @@ tenex-edge invite --channel <channel> --session <session-id>
 Navigate channels:
 
 ```bash
-tenex-edge channels list
-tenex-edge channels switch <channel>
-tenex-edge channels create --name "focused topic" --about "short stable description"
+tenex-edge channel list
+tenex-edge channel switch <channel>
+tenex-edge channel create --name "focused topic" --about "short stable description"
 ```
 
 For operator/debug commands that must target a specific live session, add
-`--session <session-id>` to `chat read`, `chat write`, or channel mutations
+`--session <session-id>` to `channel read`, `channel send`, or channel mutations
 (`create`, `edit`, `join`, `leave`, `archive`, `switch`).
 
 Refresh awareness only when the injected snapshot is unavailable or stale:

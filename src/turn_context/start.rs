@@ -181,7 +181,7 @@ pub(crate) fn assemble_turn_start(
                 let name = crate::injection::channel_display(&s, &scope);
                 Some(format!(
                     "{n} message(s) in #{name} before you joined this session. \
-                     Run `tenex-edge chat read` to see them."
+                     Run `tenex-edge channel read` to see them."
                 ))
             } else {
                 None

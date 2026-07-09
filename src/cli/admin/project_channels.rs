@@ -59,7 +59,7 @@ pub async fn project(action: ProjectAction) -> Result<()> {
 
 // ── channels (NIP-29 subgroup task rooms) ────────────────────────────────────
 
-pub async fn channels(action: ChannelsAction) -> Result<()> {
+pub async fn channels(action: ChannelAction) -> Result<()> {
     fn resolve_project(project: Option<String>) -> Result<String> {
         match project {
             Some(p) => Ok(p),
@@ -71,7 +71,7 @@ pub async fn channels(action: ChannelsAction) -> Result<()> {
         eprintln!("'{name}' is ambiguous — re-run with an exact path:");
         if let Some(refs) = v["ambiguous"].as_array() {
             for r in refs.iter().filter_map(|r| r.as_str()) {
-                eprintln!("  tenex-edge channels {verb} {r}");
+                eprintln!("  tenex-edge channel {verb} {r}");
             }
         }
         std::process::exit(2);
@@ -88,7 +88,40 @@ pub async fn channels(action: ChannelsAction) -> Result<()> {
         params
     }
     match action {
-        ChannelsAction::Create {
+        ChannelAction::Read {
+            id,
+            since,
+            limit,
+            offset,
+            tail,
+            live,
+            channel,
+            session,
+        } => {
+            crate::cli::messaging::chat_read(crate::cli::messaging::ChatReadRequest {
+                id,
+                since,
+                limit,
+                offset,
+                tail,
+                live,
+                channel,
+                session,
+            })
+            .await?;
+        }
+        ChannelAction::Send {
+            message,
+            message_flag,
+            channel,
+            session,
+            long_message,
+        } => {
+            let message =
+                crate::cli::messaging::resolve_send_message_body(message_flag.or(message))?;
+            crate::cli::messaging::chat_write(message, channel, session, long_message).await?;
+        }
+        ChannelAction::Create {
             name,
             about,
             agents,
@@ -130,7 +163,7 @@ pub async fn channels(action: ChannelsAction) -> Result<()> {
                 let name = v["reference"].as_str().unwrap_or("");
                 eprintln!("'{name}' is ambiguous — re-run with an exact --parent-channel:");
                 for r in refs.iter().filter_map(|r| r.as_str()) {
-                    eprintln!("  tenex-edge channels create --name {name} --parent-channel {r}");
+                    eprintln!("  tenex-edge channel create --name {name} --parent-channel {r}");
                 }
                 std::process::exit(2);
             }
@@ -145,7 +178,7 @@ pub async fn channels(action: ChannelsAction) -> Result<()> {
                 println!("  orchestration kind:9 {}", &oid[..oid.len().min(8)]);
             }
         }
-        ChannelsAction::Edit {
+        ChannelAction::Edit {
             channel,
             about,
             session,
@@ -166,7 +199,7 @@ pub async fn channels(action: ChannelsAction) -> Result<()> {
                 eprintln!("'{name}' is ambiguous — re-run with an exact path:");
                 for r in refs.iter().filter_map(|r| r.as_str()) {
                     eprintln!(
-                        "  tenex-edge channels edit {} --about {}",
+                        "  tenex-edge channel edit {} --about {}",
                         shell_quote(r),
                         shell_quote(&about)
                     );
@@ -184,7 +217,7 @@ pub async fn channels(action: ChannelsAction) -> Result<()> {
                 v["channel"].as_str().unwrap_or(&channel)
             );
         }
-        ChannelsAction::List { project } => {
+        ChannelAction::List { project } => {
             use owo_colors::Stream::Stdout;
             let parent = resolve_project(project)?;
             let v = daemon_call_async("channels_list", serde_json::json!({ "project": parent }))
@@ -228,7 +261,7 @@ pub async fn channels(action: ChannelsAction) -> Result<()> {
                 }
             }
         }
-        ChannelsAction::Join { channel, session } => {
+        ChannelAction::Join { channel, session } => {
             let v = daemon_call_async(
                 "channels_join",
                 crate::cli::rpc_params(with_session(
@@ -245,7 +278,7 @@ pub async fn channels(action: ChannelsAction) -> Result<()> {
                 v["channel"].as_str().unwrap_or(&channel)
             );
         }
-        ChannelsAction::Leave { channel, session } => {
+        ChannelAction::Leave { channel, session } => {
             let v = daemon_call_async(
                 "channels_leave",
                 crate::cli::rpc_params(with_session(
@@ -259,7 +292,7 @@ pub async fn channels(action: ChannelsAction) -> Result<()> {
             }
             println!("left channel {}", v["channel"].as_str().unwrap_or(&channel));
         }
-        ChannelsAction::Archive { channel, session } => {
+        ChannelAction::Archive { channel, session } => {
             let v = daemon_call_async(
                 "channels_archive",
                 crate::cli::rpc_params(with_session(
@@ -278,7 +311,7 @@ pub async fn channels(action: ChannelsAction) -> Result<()> {
                 removed
             );
         }
-        ChannelsAction::Switch { channel, session } => {
+        ChannelAction::Switch { channel, session } => {
             let v = daemon_call_async(
                 "channels_switch",
                 crate::cli::rpc_params(with_session(
@@ -295,50 +328,6 @@ pub async fn channels(action: ChannelsAction) -> Result<()> {
             }
             println!("switched to channel {}", channel);
         }
-    }
-    Ok(())
-}
-
-// ── invite (spawn/resume into an explicit channel) ───────────────────────────
-
-/// `tenex-edge invite --channel <channel> (--agent <slug[@backend]> | --session <id>)`
-/// spawns a fresh agent session or resumes a prior one into an existing channel.
-pub(super) async fn invite_target(
-    channel: String,
-    agent: Option<String>,
-    session: Option<String>,
-) -> Result<()> {
-    let selector = agent
-        .as_ref()
-        .map(|a| format!("--agent {a}"))
-        .or_else(|| session.as_ref().map(|s| format!("--session {s}")))
-        .unwrap_or_default();
-    let v = daemon_call_async(
-        "invite",
-        crate::cli::rpc_params(serde_json::json!({
-            "channel": channel,
-            "target_agent": agent,
-            "session": session,
-        })),
-    )
-    .await?;
-    if v["ambiguous"].is_array() {
-        let name = v["reference"].as_str().unwrap_or("");
-        eprintln!("'{name}' is ambiguous — re-run with an exact --channel:");
-        if let Some(refs) = v["ambiguous"].as_array() {
-            for r in refs.iter().filter_map(|r| r.as_str()) {
-                eprintln!("  tenex-edge invite --channel {r} {selector}");
-            }
-        }
-        std::process::exit(2);
-    }
-    let slug = v["agent"].as_str().unwrap_or("session");
-    let pty = v["pty_id"].as_str().unwrap_or("");
-    let online = v["online_agent"].as_str().unwrap_or(slug);
-    if pty.is_empty() {
-        println!("{} is now online", online.bold());
-    } else {
-        println!("{} is now online (pty {})", online.bold(), pty.dimmed());
     }
     Ok(())
 }

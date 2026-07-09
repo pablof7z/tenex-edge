@@ -240,8 +240,8 @@ mod who;
 use agent_roster::{publish_local_agent_roster, rpc_agent_roster_publish};
 use channel_membership_rpc::{rpc_channels_join, rpc_channels_leave, rpc_channels_switch};
 use channel_resolve::{
-    project_root, resolve_channel_for_session_start, resolve_channel_ref, rpc_channels_resolve,
-    ChannelResolution,
+    project_root, resolve_channel_for_session_start, resolve_channel_path, resolve_channel_ref,
+    rpc_channels_resolve, ChannelResolution,
 };
 use channels_rpc::{
     ensure_session_room, rpc_channels_archive, rpc_channels_create, rpc_channels_edit,

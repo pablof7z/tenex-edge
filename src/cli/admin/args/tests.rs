@@ -62,9 +62,9 @@ fn channels_archive_parses_channel_reference() {
         .expect("channels archive parses");
 
     match cli.cmd {
-        crate::cli::args::Cmd::Channels {
+        crate::cli::args::Cmd::Channel {
             action:
-                ChannelsAction::Archive {
+                ChannelAction::Archive {
                     channel,
                     session: None,
                 },
@@ -86,9 +86,9 @@ fn channels_switch_accepts_explicit_session_anchor() {
     .expect("channels switch parses with explicit session");
 
     match cli.cmd {
-        crate::cli::args::Cmd::Channels {
+        crate::cli::args::Cmd::Channel {
             action:
-                ChannelsAction::Switch {
+                ChannelAction::Switch {
                     channel,
                     session: Some(session),
                 },
@@ -153,9 +153,9 @@ fn channels_edit_about_parses() {
     .expect("channels edit parses");
 
     match cli.cmd {
-        crate::cli::args::Cmd::Channels {
+        crate::cli::args::Cmd::Channel {
             action:
-                ChannelsAction::Edit {
+                ChannelAction::Edit {
                     channel,
                     about,
                     session: None,
@@ -186,4 +186,90 @@ fn channels_edit_about_rejects_more_than_80_chars() {
             .contains("--about must be 80 characters or fewer (got 81)"),
         "{err}"
     );
+}
+
+#[test]
+fn channel_read_help_lists_channel_not_project_alias() {
+    let err = parse_err(&["tenex-edge", "channel", "read", "--help"]);
+    let help = err.to_string();
+
+    assert!(help.contains("--channel <CHANNEL>"));
+    assert!(!help.contains("--project <PROJECT>"));
+}
+
+#[test]
+fn channel_read_rejects_removed_project_alias() {
+    let err = parse_err(&["tenex-edge", "channel", "read", "--project", "tmp"]);
+
+    assert_eq!(err.kind(), ErrorKind::UnknownArgument);
+}
+
+#[test]
+fn channel_read_channel_still_parses() {
+    let cli = crate::cli::args::Cli::try_parse_from([
+        "tenex-edge",
+        "channel",
+        "read",
+        "--channel",
+        "ops",
+    ])
+    .unwrap();
+
+    match cli.cmd {
+        crate::cli::args::Cmd::Channel {
+            action: ChannelAction::Read { channel, .. },
+        } => assert_eq!(channel.as_deref(), Some("ops")),
+        _ => panic!("expected channel read command"),
+    }
+}
+
+#[test]
+fn channel_read_alias_via_channels_still_parses() {
+    let cli = crate::cli::args::Cli::try_parse_from([
+        "tenex-edge",
+        "channels",
+        "read",
+        "--channel",
+        "ops",
+    ])
+    .unwrap();
+
+    assert!(matches!(
+        cli.cmd,
+        crate::cli::args::Cmd::Channel {
+            action: ChannelAction::Read { .. }
+        }
+    ));
+}
+
+#[test]
+fn channel_send_accepts_explicit_session_anchor() {
+    let cli = crate::cli::args::Cli::try_parse_from([
+        "tenex-edge",
+        "channel",
+        "send",
+        "hello",
+        "--channel",
+        "ops",
+        "--session",
+        "session-1",
+    ])
+    .unwrap();
+
+    match cli.cmd {
+        crate::cli::args::Cmd::Channel {
+            action:
+                ChannelAction::Send {
+                    message,
+                    channel,
+                    session,
+                    ..
+                },
+        } => {
+            assert_eq!(message.as_deref(), Some("hello"));
+            assert_eq!(channel.as_deref(), Some("ops"));
+            assert_eq!(session.as_deref(), Some("session-1"));
+        }
+        _ => panic!("expected channel send command"),
+    }
 }

@@ -203,7 +203,7 @@ fn mention_rows_are_marked_important_and_truncated_with_recovery_id() {
     assert!(!text.contains("truncated=\"true\""));
     assert!(text.contains("<important>"));
     assert!(text.contains("message_id=\"mentio\""));
-    assert!(text.contains("tenex-edge chat read --id mentio"));
+    assert!(text.contains("tenex-edge channel read --id mentio"));
 }
 
 #[test]
