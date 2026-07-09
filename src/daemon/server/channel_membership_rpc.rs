@@ -1,5 +1,9 @@
 use super::*;
 
+mod active_channel;
+
+pub(in crate::daemon::server) use active_channel::set_active_session_channel;
+
 pub(in crate::daemon::server) enum TargetChannel {
     Unique(String),
     Ambiguous(serde_json::Value),
@@ -23,23 +27,55 @@ pub(in crate::daemon::server) fn resolve_caller(
     .with_context(|| format!("{verb} must be run from within a tenex-edge agent session"))
 }
 
+/// Resolve `reference` in the caller's project subtree, returning the project
+/// root alongside the resolution so callers can decide what to do with a miss.
+fn resolve_ref_in_project(
+    state: &Arc<DaemonState>,
+    rec: &crate::state::Session,
+    reference: &str,
+) -> Result<(String, super::ChannelResolution)> {
+    if reference.trim().is_empty() {
+        anyhow::bail!("channel h must not be empty");
+    }
+    let root = state.with_store(|s| super::project_root(s, &rec.channel_h));
+    let resolution = state.with_store(|s| super::resolve_channel_ref(s, &root, reference));
+    Ok((root, resolution))
+}
+
+fn ambiguous(refs: Vec<String>, reference: &str) -> TargetChannel {
+    TargetChannel::Ambiguous(serde_json::json!({ "ambiguous": refs, "reference": reference }))
+}
+
 pub(in crate::daemon::server) fn resolve_target_channel(
     state: &Arc<DaemonState>,
     rec: &crate::state::Session,
     reference: &str,
 ) -> Result<TargetChannel> {
-    if reference.trim().is_empty() {
-        anyhow::bail!("channel h must not be empty");
-    }
-    let root = state.with_store(|s| super::project_root(s, &rec.channel_h));
-    match state.with_store(|s| super::resolve_channel_ref(s, &root, reference)) {
-        super::ChannelResolution::Unique(h) => Ok(TargetChannel::Unique(h)),
-        super::ChannelResolution::Ambiguous(refs) => Ok(TargetChannel::Ambiguous(
-            serde_json::json!({ "ambiguous": refs, "reference": reference }),
-        )),
-        super::ChannelResolution::NotFound => {
+    match resolve_ref_in_project(state, rec, reference)? {
+        (_, super::ChannelResolution::Unique(h)) => Ok(TargetChannel::Unique(h)),
+        (_, super::ChannelResolution::Ambiguous(refs)) => Ok(ambiguous(refs, reference)),
+        (_, super::ChannelResolution::NotFound) => {
             anyhow::bail!("no channel matching {reference:?} in this project")
         }
+    }
+}
+
+/// Like [`resolve_target_channel`] but with `mkdir -p` semantics: when the
+/// reference names a project-relative path that does not exist yet, create the
+/// whole missing ancestor chain (not just the leaf) and target the leaf. Used by
+/// `join`/`switch`, which are intent-to-be-there gestures; `leave`/`archive` keep
+/// the non-creating [`resolve_target_channel`].
+pub(in crate::daemon::server) async fn resolve_or_create_target_channel(
+    state: &Arc<DaemonState>,
+    rec: &crate::state::Session,
+    reference: &str,
+) -> Result<TargetChannel> {
+    match resolve_ref_in_project(state, rec, reference)? {
+        (_, super::ChannelResolution::Unique(h)) => Ok(TargetChannel::Unique(h)),
+        (_, super::ChannelResolution::Ambiguous(refs)) => Ok(ambiguous(refs, reference)),
+        (root, super::ChannelResolution::NotFound) => Ok(TargetChannel::Unique(
+            super::resolve_channel_path(state, &root, reference, true).await?,
+        )),
     }
 }
 
@@ -103,7 +139,7 @@ async fn ensure_joinable(
     if occupied.is_some() {
         anyhow::bail!(
             "Another instance of you is already active in #{channel_h}, so you cannot join it. \
-Send it a message instead: tenex-edge chat write --channel {channel_h} --message \"...\" \
+Send it a message instead: tenex-edge channel send --channel {channel_h} --message \"...\" \
 — it will arrive in the context of the instance working there."
         );
     }
@@ -120,7 +156,7 @@ pub(in crate::daemon::server) async fn rpc_channels_join(
     }
     let p: P = serde_json::from_value(params.clone()).context("channels_join params")?;
     let rec = resolve_caller(state, params, "channels join")?;
-    let channel = match resolve_target_channel(state, &rec, &p.channel)? {
+    let channel = match resolve_or_create_target_channel(state, &rec, &p.channel).await? {
         TargetChannel::Unique(h) => h,
         TargetChannel::Ambiguous(v) => return Ok(v),
     };
@@ -198,7 +234,7 @@ pub(in crate::daemon::server) async fn rpc_channels_switch(
     }
     let p: P = serde_json::from_value(params.clone()).context("channels_switch params")?;
     let rec = resolve_caller(state, params, "channels switch")?;
-    let new_channel = match resolve_target_channel(state, &rec, &p.channel)? {
+    let new_channel = match resolve_or_create_target_channel(state, &rec, &p.channel).await? {
         TargetChannel::Unique(h) => h,
         TargetChannel::Ambiguous(v) => return Ok(v),
     };
@@ -232,63 +268,4 @@ pub(in crate::daemon::server) async fn rpc_channels_switch(
         "prev_channel": prev_channel,
         "channel": new_channel,
     }))
-}
-
-/// Set the active publishing channel. When `leave_previous` is true this is the
-/// user-facing `channels switch` semantics: leave the previous active channel
-/// and join the new one. `channels create` uses `false` so creating a room can
-/// move focus into it without dropping the parent from passive context.
-pub(in crate::daemon::server) fn set_active_session_channel(
-    state: &Arc<DaemonState>,
-    session_id: &str,
-    agent_pubkey: &str,
-    new_channel: &str,
-    leave_previous: bool,
-) -> Result<()> {
-    let moved_reservations = {
-        let reservations = state.session_signers.lock().unwrap();
-        let mut preflight = reservations.clone();
-        super::session_signer::move_channel(&mut preflight, session_id, new_channel)?;
-        preflight
-    };
-    state.with_store(|s| -> Result<()> {
-        // Preflight before mutating; session row and identity channel must move
-        // together or not at all.
-        let prev_to_leave = if leave_previous {
-            s.get_session(session_id)
-                .context("set_active_session_channel: reading current session")?
-                .map(|r| r.channel_h)
-                .filter(|h| h != new_channel)
-        } else {
-            None
-        };
-        let mut idn = s
-            .identity_for_session(session_id)
-            .context("set_active_session_channel: loading identity")?
-            .with_context(|| {
-                format!(
-                    "set_active_session_channel: no identity row for live session \
-                     {session_id} (agent {agent_pubkey}); refusing to silently skip the \
-                     identity active-channel move"
-                )
-            })?;
-        idn.channel_h = new_channel.to_string();
-        idn.session_id = session_id.to_string();
-        idn.alive = true;
-
-        if let Some(prev) = prev_to_leave {
-            s.leave_session_channel(session_id, &prev)
-                .context("set_active_session_channel: leaving previous channel")?;
-        }
-        s.join_session_channel(session_id, new_channel, now_secs())
-            .context("set_active_session_channel: joining new channel")?;
-        s.set_session_channel(session_id, new_channel)
-            .context("set_active_session_channel: repointing active channel")?;
-        s.upsert_identity(&idn)
-            .context("set_active_session_channel: persisting identity active-channel move")?;
-        Ok(())
-    })?;
-    *state.session_signers.lock().unwrap() = moved_reservations;
-    state.outbox_notify.notify_waiters();
-    Ok(())
 }

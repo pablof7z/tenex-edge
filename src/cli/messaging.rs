@@ -1,7 +1,7 @@
 use super::*;
 
 mod args;
-pub(super) use args::{chat, publish, ChatAction, PublishArgs};
+pub(super) use args::{publish, PublishArgs};
 
 pub(super) async fn chat_write(
     message: String,
@@ -93,7 +93,7 @@ fn render_chat_read_row(item: &serde_json::Value, use_color: bool) -> String {
     if item["truncated"].as_bool().unwrap_or(false) {
         if let Some(id) = item["event_id"].as_str().filter(|s| !s.is_empty()) {
             text.push_str(&format!(
-                "\n[message truncated; run `tenex-edge chat read --id {id}`]"
+                "\n[message truncated; run `tenex-edge channel read --id {id}`]"
             ));
         }
     }
@@ -294,6 +294,6 @@ mod tests {
         });
         let text = render_chat_read_row(&item, false);
         assert!(text.contains("<writer@laptop> word0 word1..."));
-        assert!(text.contains("tenex-edge chat read --id event-123"));
+        assert!(text.contains("tenex-edge channel read --id event-123"));
     }
 }

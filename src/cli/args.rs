@@ -1,12 +1,12 @@
 use clap::{Parser, Subcommand};
 
-use super::admin::{AgentAction, AgentsAction, ChannelsAction, InviteArgs, ProjectAction};
+use super::admin::{AgentAction, AgentsAction, ChannelAction, InviteArgs, ProjectAction};
 use super::config::ConfigArgs;
 use super::debug::DebugAction;
 use super::harness::HarnessAction;
 use super::install::InstallArgs;
 use super::launch_cli::LaunchArgs;
-use super::messaging::{ChatAction, PublishArgs};
+use super::messaging::PublishArgs;
 use super::probe::ProbeArgs;
 use super::pty::{PtyAction, PtySupervisorArgs};
 use super::session::SessionAction;
@@ -32,11 +32,6 @@ pub(super) enum Cmd {
     // themselves explicitly.
     /// List agents currently visible in the project/channel.
     Who(WhoArgs),
-    /// Write or read NIP-29 project chat.
-    Chat {
-        #[command(subcommand)]
-        action: ChatAction,
-    },
     /// Manage NIP-29 project groups (list, set description).
     Project {
         #[command(subcommand)]
@@ -44,10 +39,11 @@ pub(super) enum Cmd {
     },
     /// Interactively configure model providers and role-to-model assignments.
     Config(ConfigArgs),
-    /// Manage NIP-29 subgroup task channels under a project (create, join, leave, list, switch).
-    Channels {
+    /// Read/send chat and manage NIP-29 channels (read, send, create, edit, list, join, leave, archive, switch).
+    #[command(alias = "channels")]
+    Channel {
         #[command(subcommand)]
-        action: ChannelsAction,
+        action: ChannelAction,
     },
     /// Manage the local agent keystore: agents that have a private key on THIS
     /// machine under `<edge_home>/agents/<slug>.json`. These are the identities
@@ -123,6 +119,13 @@ mod tests {
     #[test]
     fn removed_tail_command_stays_unavailable() {
         let err = parse_err(&["tenex-edge", "tail", "--live"]);
+
+        assert_eq!(err.kind(), ErrorKind::InvalidSubcommand);
+    }
+
+    #[test]
+    fn removed_chat_command_stays_unavailable() {
+        let err = parse_err(&["tenex-edge", "chat", "read"]);
 
         assert_eq!(err.kind(), ErrorKind::InvalidSubcommand);
     }

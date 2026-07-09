@@ -80,7 +80,7 @@ pub(in crate::cli) struct InviteArgs {
 }
 
 pub(in crate::cli) async fn invite(args: InviteArgs) -> Result<()> {
-    super::project_channels::invite_target(args.channel, args.agent, args.session).await
+    super::invite_spawn::invite_target(args.channel, args.agent, args.session).await
 }
 
 #[derive(Subcommand)]
@@ -109,7 +109,58 @@ pub(in crate::cli) enum ProjectAction {
 
 /// Subgroup task channels under a project (NIP-29 child groups).
 #[derive(Subcommand)]
-pub(in crate::cli) enum ChannelsAction {
+pub(in crate::cli) enum ChannelAction {
+    /// Read channel chat history.
+    Read {
+        /// Read one exact message by event id; returns the full untruncated body.
+        #[arg(long = "id")]
+        id: Option<String>,
+        /// Only show messages after this time (unix timestamp or duration like "1h").
+        #[arg(long)]
+        since: Option<String>,
+        /// Maximum messages to print.
+        #[arg(long)]
+        limit: Option<u64>,
+        /// Skip this many messages after ordering/filtering.
+        #[arg(long)]
+        offset: Option<u64>,
+        /// Page from the newest messages; output remains chronological.
+        #[arg(long)]
+        tail: bool,
+        /// Keep the chat reader open and print new messages as they arrive.
+        #[arg(long)]
+        live: bool,
+        /// Project-relative channel name/path/id to read. Required when this
+        /// session is joined to more than one channel; inferred only when exactly
+        /// one joined channel exists.
+        #[arg(long)]
+        channel: Option<String>,
+        /// Explicit reader session id instead of resolving from the current
+        /// PTY/harness process or project scan.
+        #[arg(long)]
+        session: Option<String>,
+    },
+    /// Send a chat line to a channel. Reads body from arg, --message, or stdin.
+    /// Targets the current agent's active channel; use --channel to override.
+    Send {
+        /// Message body. Positional, or via --message, or piped on stdin.
+        #[arg(value_name = "MESSAGE")]
+        message: Option<String>,
+        #[arg(long = "message", value_name = "MESSAGE")]
+        message_flag: Option<String>,
+        /// Project-relative channel name/path/id to write to. Required when
+        /// this session is joined to more than one channel; inferred only when
+        /// exactly one joined channel exists.
+        #[arg(long)]
+        channel: Option<String>,
+        /// Explicit sender session id instead of resolving from the current
+        /// PTY/harness process or project scan.
+        #[arg(long)]
+        session: Option<String>,
+        /// Allow publishing a message longer than the default 600-character cap.
+        #[arg(long)]
+        long_message: bool,
+    },
     /// Create a subgroup task channel and focus it. When run as an agent
     /// the new channel nests under your CURRENT channel by default, and the
     /// running session auto-joins it. If `--agent slug@backend-label` targets

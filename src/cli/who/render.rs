@@ -94,7 +94,7 @@ pub(super) fn render_who_plain(snapshot: &WhoSnapshot) -> String {
     let _ = writeln!(out, "## Agents in this channel");
     let _ = writeln!(
         out,
-        "Use `tenex-edge chat write --message \"...\"` to write to this channel."
+        "Use `tenex-edge channel send --message \"...\"` to write to this channel."
     );
     let _ = writeln!(out);
     if snapshot.rows.is_empty() {
@@ -112,7 +112,7 @@ pub(super) fn render_who_plain(snapshot: &WhoSnapshot) -> String {
     let _ = writeln!(out, "## Available agents");
     let _ = writeln!(
         out,
-        "Start a new session with `tenex-edge chat write --message \"...\"`."
+        "Start a new session with `tenex-edge channel send --message \"...\"`."
     );
     let _ = writeln!(out);
     if snapshot.spawnable.is_empty() {

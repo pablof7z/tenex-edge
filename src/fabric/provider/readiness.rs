@@ -18,23 +18,19 @@ impl Nip29Provider {
             attempt::record(self, &ctx, "degraded", "empty channel id");
             return ChannelGate::Degraded;
         }
-        ensure_channel_ready_inner(self, ctx, 0).await
+        ensure_channel_ready_inner(self, ctx).await
     }
 }
 
 fn ensure_channel_ready_inner<'a>(
     provider: &'a Nip29Provider,
     ctx: ChannelCtx<'a>,
-    depth: u8,
 ) -> Pin<Box<dyn Future<Output = ChannelGate> + Send + 'a>> {
     Box::pin(async move {
-        if depth > 3 {
-            eprintln!(
-                "[daemon] ensure_channel_ready: recursion depth limit reached for {:?}",
-                ctx.channel
-            );
-            return attempt::degraded(provider, &ctx, "recursion depth limit reached");
-        }
+        // No depth cap: a channel path may nest arbitrarily deep (mkdir -p style),
+        // so provisioning walks the whole ancestor chain up to the project root.
+        // Parent links are a strict acyclic ancestry materialized from the relay,
+        // so this recursion terminates at the root (parent_hint == None).
 
         // Normalize: Some("") is the DB's sentinel for "known root channel" but
         // is meaningless as a provisioning parent. Treat it as None (no parent)
@@ -80,7 +76,7 @@ fn ensure_channel_ready_inner<'a>(
                 name: None,
                 repair_whitelisted_admins: ctx.repair_whitelisted_admins,
             };
-            let parent_gate = ensure_channel_ready_inner(provider, parent_ctx, depth + 1).await;
+            let parent_gate = ensure_channel_ready_inner(provider, parent_ctx).await;
             if matches!(parent_gate, ChannelGate::Degraded) {
                 eprintln!(
                     "[daemon] ensure_channel_ready: parent {:?} is degraded; aborting for {:?}",

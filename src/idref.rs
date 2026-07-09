@@ -150,7 +150,7 @@ fn is_pubkey(s: &str) -> bool {
 /// label token — a run of `[A-Za-z0-9._-]`, optionally backend-qualified as
 /// `label@backend-label` (so both `@haiku1` and `@haiku@laptop` are captured; the
 /// resolver understands `agent@backend-label`). Used so
-/// `chat write "hey @haiku1"` routes to that instance. Trailing punctuation (`,`,
+/// `channel send "hey @haiku1"` routes to that instance. Trailing punctuation (`,`,
 /// `.` at the end of a word, `!`, `?`, `:`) is ignored. Tokens that don't resolve
 /// are silently treated as no mention.
 pub fn extract_mentions(body: &str) -> Vec<String> {

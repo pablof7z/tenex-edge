@@ -174,7 +174,7 @@ fn render_messages(out: &mut String, channel: &ChannelBlock, color: bool) {
                 "      {}",
                 dim(
                     &format!(
-                        "truncated; run `tenex-edge chat read --id {}`",
+                        "truncated; run `tenex-edge channel read --id {}`",
                         crate::util::short_id(&m.id)
                     ),
                     color

@@ -264,7 +264,7 @@ fn pending_message_prompt_contains_the_actual_message_body() {
     assert_eq!(
         prompt,
         "[tenex-edge mention] <@pk-sende> please review the PTY delivery path\n\
-         [reply via `tenex-edge chat write --message \"...\"` — replies do not auto-publish]"
+         [reply via `tenex-edge channel send --message \"...\"` — replies do not auto-publish]"
     );
 }
 
@@ -289,6 +289,6 @@ fn whitelisted_human_mention_renders_bare_with_provenance() {
     assert_eq!(
         prompt,
         "<@human-pk> @developer hey there\n\
-         [reply via `tenex-edge chat write --message \"...\"` — replies do not auto-publish]"
+         [reply via `tenex-edge channel send --message \"...\"` — replies do not auto-publish]"
     );
 }

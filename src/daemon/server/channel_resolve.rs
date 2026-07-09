@@ -140,6 +140,34 @@ pub(in crate::daemon::server) async fn resolve_channel(
     Ok(child_h)
 }
 
+/// `mkdir -p` for channel paths: resolve a project-relative NAME path within
+/// `root`, provisioning EVERY missing ancestor (not just the leaf) when
+/// `create_if_absent`. Segments split on both `/` and `.`, so `a.b.c` and
+/// `a/b/c` create the same three-deep chain. Each segment resolves as a child of
+/// the previous via [`resolve_channel`]; a missing segment is minted and
+/// provisioned (upsert + ready + sub) and becomes the parent for the next. There
+/// is no depth cap — arbitrarily deep chains provision one level at a time.
+pub(in crate::daemon::server) async fn resolve_channel_path(
+    state: &Arc<DaemonState>,
+    root: &str,
+    reference: &str,
+    create_if_absent: bool,
+) -> Result<String> {
+    let segments: Vec<String> = reference
+        .split(['/', '.'])
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if segments.is_empty() {
+        anyhow::bail!("empty channel reference");
+    }
+    let mut parent = root.to_string();
+    for seg in &segments {
+        parent = resolve_channel(state, &parent, seg, None, create_if_absent).await?;
+    }
+    Ok(parent)
+}
+
 /// `channels_resolve` RPC: thin wrapper over [`resolve_channel`] so the CLI launch
 /// path can convert `--channel <name>` to its opaque id BEFORE spawning the PTY,
 /// minting at most one group. Returns `{ channel_h }`.
@@ -239,9 +267,10 @@ pub(in crate::daemon::server) fn resolve_channel_ref(
     }
 
     // Name path: suffix-match the requested segments against each descendant's
-    // relative NAME path (case-insensitive).
+    // relative NAME path (case-insensitive). Both `/` and `.` delimit path
+    // segments, so `a/b/c` and `a.b.c` resolve identically.
     let want: Vec<String> = reference
-        .split('/')
+        .split(['/', '.'])
         .map(|s| s.trim().to_lowercase())
         .filter(|s| !s.is_empty())
         .collect();
@@ -327,169 +356,4 @@ fn path_ends_with(segs: &[String], want: &[String]) -> bool {
 }
 
 #[cfg(test)]
-mod resolve_tests {
-    use super::{project_root, resolve_channel_ref, resolve_locally, ChannelResolution};
-    use crate::state::Store;
-
-    fn chan(store: &Store, id: &str, name: &str, parent: &str) {
-        store.upsert_channel(id, name, "", parent, 1).unwrap();
-    }
-
-    /// An 8-hex opaque id absent from the local cache (a freshly provisioned
-    /// channel whose kind:39000 hasn't materialized yet) resolves to ITSELF and
-    /// does NOT mint a literal-named channel — the launch-channel-scope fix.
-    #[test]
-    fn opaque_id_miss_passes_through_without_minting() {
-        let store = Store::open_memory().unwrap();
-        chan(&store, "h-root", "proj", "");
-        let id = "2f1cd36f";
-        assert!(
-            store.get_channel(id).unwrap().is_none(),
-            "precondition: opaque id must be absent from the cache"
-        );
-        assert_eq!(
-            resolve_locally(&store, "h-root", id).unwrap(),
-            Some(id.to_string()),
-            "an unknown opaque id must pass through unchanged, not be minted"
-        );
-        // Passthrough is pure: it must not have created a channel named after the id.
-        assert!(
-            store.get_channel(id).unwrap().is_none(),
-            "resolve_locally must never mint a channel"
-        );
-    }
-
-    /// A bare `launch` (no --channel) scopes to the project root by resolving
-    /// `name == parent == slug`. On a COLD cache (post-reset, root kind:39000 not yet
-    /// materialized) this must resolve to the root slug itself and mint NOTHING —
-    /// the name-vs-id double-create regression (a spurious opaque child under root).
-    #[test]
-    fn root_slug_resolves_to_itself_on_cold_cache_without_minting() {
-        let store = Store::open_memory().unwrap();
-        // Empty cache: the project root's kind:39000 has not materialized.
-        assert!(
-            store.get_channel("tenex-edge").unwrap().is_none(),
-            "precondition: root must be absent from the cold cache"
-        );
-        assert_eq!(
-            resolve_locally(&store, "tenex-edge", "tenex-edge").unwrap(),
-            Some("tenex-edge".to_string()),
-            "name==parent (the root asking for itself) must resolve to the slug, not mint a child"
-        );
-        assert!(
-            store.get_channel("tenex-edge").unwrap().is_none(),
-            "resolve_locally must never mint a channel"
-        );
-    }
-
-    /// Known names/ids resolve locally; a genuine human NAME with no row does NOT
-    /// (the caller mints/bails) — proving the opaque-id passthrough never
-    /// over-triggers on real handles.
-    #[test]
-    fn known_resolve_locally_but_unknown_human_name_does_not() {
-        let store = Store::open_memory().unwrap();
-        chan(&store, "h-root", "proj", "");
-        chan(&store, "h-plan", "planning", "h-root");
-        // 1. existing (parent, name) row wins.
-        assert_eq!(
-            resolve_locally(&store, "h-root", "planning").unwrap(),
-            Some("h-plan".to_string())
-        );
-        // 2. a literal known channel_h passes through.
-        assert_eq!(
-            resolve_locally(&store, "h-root", "h-plan").unwrap(),
-            Some("h-plan".to_string())
-        );
-        // 3. a genuine human NAME with no local row is unresolved here.
-        assert_eq!(
-            resolve_locally(&store, "h-root", "backlog-work").unwrap(),
-            None
-        );
-    }
-
-    #[test]
-    fn unique_relative_name_resolves() {
-        let store = Store::open_memory().unwrap();
-        chan(&store, "h-root", "proj", "");
-        chan(&store, "h-plan", "planning", "h-root");
-        match resolve_channel_ref(&store, "h-root", "planning") {
-            ChannelResolution::Unique(id) => assert_eq!(id, "h-plan"),
-            _ => panic!("expected unique match"),
-        }
-    }
-
-    #[test]
-    fn ambiguous_name_lists_relative_paths() {
-        let store = Store::open_memory().unwrap();
-        chan(&store, "h-root", "proj", "");
-        chan(&store, "h-plan", "planning", "h-root");
-        chan(&store, "h-epic", "epic999", "h-root");
-        chan(&store, "h-epic-plan", "planning", "h-epic");
-        match resolve_channel_ref(&store, "h-root", "planning") {
-            ChannelResolution::Ambiguous(refs) => {
-                assert_eq!(
-                    refs,
-                    vec!["epic999/planning".to_string(), "planning".to_string()]
-                );
-            }
-            _ => panic!("expected ambiguous"),
-        }
-        // A fuller path disambiguates.
-        assert!(matches!(
-            resolve_channel_ref(&store, "h-root", "epic999/planning"),
-            ChannelResolution::Unique(ref id) if id == "h-epic-plan"
-        ));
-    }
-
-    #[test]
-    fn same_level_name_collision_falls_back_to_id_escape_hatch() {
-        let store = Store::open_memory().unwrap();
-        chan(&store, "h-root", "proj", "");
-        // Two siblings share the name "planning" — a path cannot disambiguate.
-        chan(&store, "h-aaaa1111", "planning", "h-root");
-        chan(&store, "h-bbbb2222", "planning", "h-root");
-        match resolve_channel_ref(&store, "h-root", "planning") {
-            ChannelResolution::Ambiguous(refs) => {
-                assert_eq!(refs, vec!["@h-aaaa11".to_string(), "@h-bbbb22".to_string()]);
-            }
-            _ => panic!("expected ambiguous id-escape-hatch"),
-        }
-        // The @id escape hatch then resolves uniquely.
-        assert!(matches!(
-            resolve_channel_ref(&store, "h-root", "@h-aaaa1"),
-            ChannelResolution::Unique(ref id) if id == "h-aaaa1111"
-        ));
-    }
-
-    #[test]
-    fn literal_id_passthrough_and_not_found() {
-        let store = Store::open_memory().unwrap();
-        chan(&store, "h-root", "proj", "");
-        chan(&store, "h-plan", "planning", "h-root");
-        assert!(matches!(
-            resolve_channel_ref(&store, "h-root", "h-plan"),
-            ChannelResolution::Unique(ref id) if id == "h-plan"
-        ));
-        assert!(matches!(
-            resolve_channel_ref(&store, "h-root", "nonexistent"),
-            ChannelResolution::NotFound
-        ));
-    }
-
-    #[test]
-    fn nested_sender_explicit_channel_refs_resolve_from_project_root() {
-        let store = Store::open_memory().unwrap();
-        chan(&store, "h-root", "proj", "");
-        chan(&store, "h-epic", "epic", "h-root");
-        chan(&store, "h-plan", "planning", "h-epic");
-        chan(&store, "h-leaf", "leaf", "h-plan");
-        chan(&store, "h-review", "review", "h-epic");
-
-        let root = project_root(&store, "h-leaf");
-        assert_eq!(root, "h-root");
-        assert!(matches!(
-            resolve_channel_ref(&store, &root, "epic/review"),
-            ChannelResolution::Unique(ref id) if id == "h-review"
-        ));
-    }
-}
+mod tests;

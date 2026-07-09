@@ -52,6 +52,45 @@ Pass one explicitly:\n{}",
     }
 }
 
+/// Like [`resolve_chat_target`] but with `mkdir -p` semantics for an explicit
+/// `--channel` reference: when the project-relative path does not exist yet,
+/// create the whole missing ancestor chain (not just the leaf) and target the
+/// leaf. The non-explicit (joined-channel inference) path is unchanged.
+pub(in crate::daemon::server) async fn resolve_chat_target_provisioning(
+    state: &Arc<DaemonState>,
+    rec: &crate::state::Session,
+    explicit: Option<&str>,
+    command: &str,
+) -> Result<ChatTarget> {
+    if let Some(reference) = explicit.map(str::trim).filter(|s| !s.is_empty()) {
+        let root = state.with_store(|s| super::project_root(s, &rec.channel_h));
+        match state.with_store(|s| super::resolve_channel_ref(s, &root, reference)) {
+            super::ChannelResolution::Unique(channel_h) => {
+                return Ok(ChatTarget {
+                    channel_h,
+                    explicit: true,
+                })
+            }
+            super::ChannelResolution::Ambiguous(refs) => anyhow::bail!(
+                "channel reference {reference:?} is ambiguous; re-run with one of: {}",
+                refs.into_iter()
+                    .map(|r| format!("--channel {r}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            super::ChannelResolution::NotFound => {
+                // mkdir -p: provision the missing chain and target the leaf.
+                let channel_h = super::resolve_channel_path(state, &root, reference, true).await?;
+                return Ok(ChatTarget {
+                    channel_h,
+                    explicit: true,
+                });
+            }
+        }
+    }
+    resolve_chat_target(state, rec, None, command)
+}
+
 fn resolve_chat_channel_ref(
     store: &crate::state::Store,
     root: &str,
