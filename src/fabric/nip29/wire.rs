@@ -35,6 +35,10 @@ use nostr_sdk::prelude::*;
 
 pub const KIND_PROFILE: u16 = 0;
 pub const KIND_CHAT: u16 = 9;
+/// NIP-25 reaction. Used by the daemon to acknowledge a kind:9 routed to a local
+/// agent: a 👁 reaction with the channel `h` and `e` (routed event id) tags,
+/// signed by the backend management key.
+pub const KIND_REACTION: u16 = 7;
 pub const KIND_STATUS: u16 = 30315;
 pub const KIND_AGENT_ROSTER: u16 = 30555;
 
