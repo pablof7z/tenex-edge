@@ -242,12 +242,10 @@ pub struct OutboxRow {
     pub retries: i64,
     pub last_error: Option<String>,
     pub enqueued_at: u64,
-    /// Earliest wall-clock second this row may be (re)attempted; 0 = due now.
-    pub next_attempt_at: u64,
+    pub next_attempt_at: u64, // earliest wall-clock second this row may be (re)attempted; 0 = due now
 }
 
 // Canonical ids use wall-clock nanos plus a monotonic counter: `te-<nanos_hex>-<counter_hex>`.
-
 static ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Mint a fresh canonical session id (daemon-owned, opaque, stable across harness
@@ -296,7 +294,6 @@ mod session_native;
 mod sessions;
 mod status;
 #[cfg(test)]
-#[path = "state/tests.rs"]
 mod tests;
 pub mod trellis_commits;
 pub mod trellis_replay_capsules;
