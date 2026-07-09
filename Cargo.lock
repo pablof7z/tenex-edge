@@ -3201,6 +3201,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
+ "base64",
  "clap",
  "crossterm 0.28.1",
  "dialoguer",
@@ -3228,6 +3229,7 @@ dependencies = [
  "tracing-subscriber",
  "trellis-core",
  "trellis-testing",
+ "url",
 ]
 
 [[package]]

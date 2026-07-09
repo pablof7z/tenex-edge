@@ -19,6 +19,13 @@ pub(super) fn list() -> Vec<Value> {
     SPECS.iter().map(def).collect()
 }
 
+pub(super) fn requires_write(name: &str) -> bool {
+    SPECS
+        .iter()
+        .find(|spec| spec.name == name)
+        .is_some_and(|spec| !spec.read_only)
+}
+
 const SPECS: &[ToolSpec] = &[
     ToolSpec {
         name: "tenex_edge.who",
@@ -132,16 +139,30 @@ impl Prop {
 }
 
 fn def(spec: &ToolSpec) -> Value {
+    let schemes = security_schemes(spec);
     json!({
         "name": spec.name,
         "title": spec.name,
         "description": spec.description,
         "inputSchema": schema(spec.props, spec.required),
+        "securitySchemes": schemes,
+        "_meta": {
+            "securitySchemes": schemes,
+        },
         "annotations": {
             "readOnlyHint": spec.read_only,
             "destructiveHint": spec.destructive,
         },
     })
+}
+
+fn security_schemes(spec: &ToolSpec) -> Value {
+    let scopes = if spec.read_only {
+        json!(["tenex:read"])
+    } else {
+        json!(["tenex:read", "tenex:write"])
+    };
+    json!([{ "type": "oauth2", "scopes": scopes }])
 }
 
 fn schema(props: &[Prop], required: &[&str]) -> Value {

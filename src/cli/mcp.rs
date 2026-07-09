@@ -5,6 +5,11 @@ use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::Mutex;
 
+mod access_log;
+mod auth;
+mod auth_routes;
+mod auth_support;
+mod auth_types;
 mod catalog;
 mod http;
 mod protocol;
@@ -32,6 +37,12 @@ pub(super) struct McpArgs {
     /// HTTP MCP endpoint path.
     #[arg(long, default_value = "/mcp")]
     path: String,
+    /// Require OAuth for HTTP MCP requests.
+    #[arg(long)]
+    oauth: bool,
+    /// Public HTTPS origin for OAuth metadata, e.g. https://edge.f7z.io.
+    #[arg(long)]
+    public_url: Option<String>,
 }
 
 pub(super) async fn mcp(args: McpArgs) -> Result<()> {

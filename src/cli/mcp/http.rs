@@ -16,9 +16,12 @@ use tokio::task::JoinHandle;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
 
+use super::access_log::log_http_event;
+
 #[derive(Clone)]
 pub(super) struct HttpState {
     subscriptions: HttpSubscriptions,
+    pub(super) auth: Option<super::auth::AuthState>,
 }
 
 #[derive(Clone)]
@@ -40,11 +43,14 @@ impl Default for HttpSubscriptions {
 pub(super) async fn serve(args: super::McpArgs) -> Result<()> {
     let addr = SocketAddr::new(args.host.parse::<IpAddr>()?, args.port);
     let path = normalize_path(&args.path)?;
+    let auth = auth_state(&args)?;
     let state = HttpState {
         subscriptions: HttpSubscriptions::default(),
+        auth,
     };
     let app = Router::new()
         .route("/", get(root_health))
+        .merge(super::auth_routes::routes())
         .route(&path, post(post_mcp).get(get_mcp).options(options_mcp))
         .with_state(state);
     let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -86,6 +92,9 @@ async fn post_mcp(
     let Some(method) = message.method.as_deref() else {
         return StatusCode::ACCEPTED.into_response();
     };
+    if let Err(response) = state.require_auth(&headers, required_scope(method, &message.params)) {
+        return response;
+    }
     if message.is_notification() {
         return StatusCode::ACCEPTED.into_response();
     }
@@ -106,6 +115,9 @@ async fn root_health(headers: HeaderMap) -> impl IntoResponse {
 
 async fn get_mcp(State(state): State<HttpState>, headers: HeaderMap) -> impl IntoResponse {
     log_http_event("sse_get", &headers, None, &Value::Null);
+    if let Err(response) = state.require_auth(&headers, "tenex:read") {
+        return response;
+    }
     let rx = state.subscriptions.tx.subscribe();
     let stream = BroadcastStream::new(rx).filter_map(|value| match value {
         Ok(value) => Some(Ok::<_, Infallible>(
@@ -113,12 +125,47 @@ async fn get_mcp(State(state): State<HttpState>, headers: HeaderMap) -> impl Int
         )),
         Err(_) => None,
     });
-    Sse::new(stream).keep_alive(KeepAlive::default())
+    Sse::new(stream)
+        .keep_alive(KeepAlive::default())
+        .into_response()
 }
 
 async fn options_mcp(headers: HeaderMap) -> Response {
     log_http_event("options", &headers, None, &Value::Null);
     (StatusCode::NO_CONTENT, cors_headers()).into_response()
+}
+
+impl HttpState {
+    fn require_auth(&self, headers: &HeaderMap, scope: &str) -> std::result::Result<(), Response> {
+        match &self.auth {
+            Some(auth) => auth.verify(headers, scope).map(|_| ()),
+            None => Ok(()),
+        }
+    }
+}
+
+fn auth_state(args: &super::McpArgs) -> Result<Option<super::auth::AuthState>> {
+    if !args.oauth {
+        return Ok(None);
+    }
+    let public_url = args
+        .public_url
+        .clone()
+        .context("--public-url is required with --oauth")?;
+    super::auth::AuthState::new(public_url).map(Some)
+}
+
+fn required_scope(method: &str, params: &Value) -> &'static str {
+    if method == "tools/call" {
+        let tool = params
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if super::catalog::requires_write(tool) {
+            return "tenex:write";
+        }
+    }
+    "tenex:read"
 }
 
 async fn dispatch_http(state: &HttpState, method: &str, params: &Value, id: Value) -> Value {
@@ -209,67 +256,6 @@ fn normalize_path(path: &str) -> Result<String> {
 
 fn json_response(status: StatusCode, body: Value) -> Response {
     (status, cors_headers(), Json(body)).into_response()
-}
-
-fn log_http_event(kind: &str, headers: &HeaderMap, method: Option<&str>, params: &Value) {
-    let mut event = serde_json::Map::new();
-    event.insert("ts".into(), json!(crate::util::now_secs()));
-    event.insert("kind".into(), json!(kind));
-    if let Some(method) = method {
-        event.insert("mcp_method".into(), json!(method));
-    }
-    add_param_shape(&mut event, params);
-    event.insert("headers".into(), json!(selected_headers(headers)));
-    eprintln!("[tenex-edge mcp access] {}", Value::Object(event));
-}
-
-fn add_param_shape(event: &mut serde_json::Map<String, Value>, params: &Value) {
-    if let Some(tool) = params.get("name").and_then(Value::as_str) {
-        event.insert("tool".into(), json!(tool));
-    }
-    if let Some(uri) = params.get("uri").and_then(Value::as_str) {
-        event.insert("resource_uri".into(), json!(uri));
-    }
-    if let Some(protocol) = params.get("protocolVersion").and_then(Value::as_str) {
-        event.insert("protocol_version".into(), json!(protocol));
-    }
-    if let Some(client) = params.get("clientInfo") {
-        event.insert("client_info".into(), client.clone());
-    }
-    if let Some(arguments) = params.get("arguments").and_then(Value::as_object) {
-        let mut keys = arguments.keys().cloned().collect::<Vec<_>>();
-        keys.sort();
-        event.insert("argument_keys".into(), json!(keys));
-        if let Some(session) = arguments.get("session").and_then(Value::as_str) {
-            event.insert("argument_session".into(), json!(session));
-        }
-        if let Some(channel) = arguments.get("channel").and_then(Value::as_str) {
-            event.insert("argument_channel".into(), json!(channel));
-        }
-        if let Some(project) = arguments.get("project").and_then(Value::as_str) {
-            event.insert("argument_project".into(), json!(project));
-        }
-    }
-}
-
-fn selected_headers(headers: &HeaderMap) -> serde_json::Map<String, Value> {
-    let mut out = serde_json::Map::new();
-    for (name, value) in headers {
-        let key = name.as_str().to_ascii_lowercase();
-        if !should_log_header(&key) {
-            continue;
-        }
-        let value = value.to_str().unwrap_or("<non-utf8>");
-        out.insert(key, json!(value));
-    }
-    out
-}
-
-fn should_log_header(key: &str) -> bool {
-    !matches!(
-        key,
-        "authorization" | "cookie" | "set-cookie" | "proxy-authorization"
-    )
 }
 
 fn cors_headers() -> [(header::HeaderName, HeaderValue); 3] {
