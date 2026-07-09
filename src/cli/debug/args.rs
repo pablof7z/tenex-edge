@@ -1,3 +1,4 @@
+use crate::cli::admin::doctor;
 use crate::cli::explain::{explain, ExplainArgs};
 use crate::cli::validate::{validate, ValidateArgs};
 use anyhow::Result;
@@ -6,6 +7,8 @@ use std::time::Duration;
 
 #[derive(Subcommand)]
 pub(in crate::cli) enum DebugAction {
+    /// Diagnose daemon relay and storage-path configuration.
+    Doctor,
     /// Explain a published artifact: the reconciler receipt + the exact LLM
     /// inputs (system prompt, transcript slice, model, raw response) behind it.
     Explain(ExplainArgs),
@@ -44,6 +47,7 @@ pub(in crate::cli) enum DebugAction {
 
 pub(in crate::cli) async fn debug(action: DebugAction) -> Result<()> {
     match action {
+        DebugAction::Doctor => doctor().await,
         DebugAction::Explain(args) => explain(args),
         DebugAction::Validate(args) => validate(args).await,
         DebugAction::HookTail {

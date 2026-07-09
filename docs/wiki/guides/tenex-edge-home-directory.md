@@ -26,7 +26,7 @@ Processes spawned via `tenex-edge launch` inherit `TENEX_EDGE_HOME`, `TENEX_CONF
 
 ## Runtime Diagnostics
 
-`tenex-edge` no longer prints the configured home directory and relay URL on every invocation. Use `tenex-edge doctor` when you need to inspect the active edge home, config path, and relay configuration.
+`tenex-edge` no longer prints the configured home directory and relay URL on every invocation. Use `tenex-edge debug doctor` when you need to inspect the active edge home, config path, and relay configuration.
 
 ## Related Skills
 

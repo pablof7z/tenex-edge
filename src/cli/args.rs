@@ -42,8 +42,6 @@ pub(super) enum Cmd {
         #[command(subcommand)]
         action: ProjectAction,
     },
-    /// Diagnose daemon relay and storage-path configuration.
-    Doctor,
     /// Interactively configure model providers and role-to-model assignments.
     Config(ConfigArgs),
     /// Manage NIP-29 subgroup task channels under a project (create, join, leave, list, switch).

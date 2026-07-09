@@ -143,7 +143,7 @@ pub(super) async fn publish_proposal(
         let eid = v["event_id"].as_str().unwrap_or("?");
         eprintln!(
             "{} proposal {} accepted by the relay but NOT retrievable on read-back \
-             (event {}). It may not be stored — verify with `tenex-edge doctor`.",
+             (event {}). It may not be stored — verify with `tenex-edge debug doctor`.",
             "warning:".yellow(),
             d_tag,
             &eid[..eid.len().min(8)],

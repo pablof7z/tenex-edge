@@ -166,7 +166,7 @@ tenex-edge install --all   # wire hooks into every detected host
 
 Point `tenex-edge` at a relay and whitelist your human key in
 `~/.tenex-edge/config.json` (`relays`, `whitelistedPubkeys`). Override the whole home with
-`$TENEX_EDGE_HOME`. Then run your agents; run `tenex-edge doctor` if anything looks off.
+`$TENEX_EDGE_HOME`. Then run your agents; run `tenex-edge debug doctor` if anything looks off.
 
 ### The agent-facing surface
 
