@@ -10,8 +10,9 @@
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-/// The compiled-in protocol version, bumped on any breaking RPC change.
-const PROTOCOL_VERSION_BASE: u32 = 57;
+/// The compiled-in protocol version, bumped when client and daemon RPC
+/// contracts must agree.
+const PROTOCOL_VERSION_BASE: u32 = 60;
 
 /// Effective protocol version. A client refuses to talk to a daemon whose
 /// protocol differs (older daemon → ask it to exit & respawn; newer daemon →
@@ -183,16 +184,16 @@ mod tests {
 
     #[test]
     fn protocol_compare_covers_equal_older_and_newer_daemons() {
-        assert_eq!(compare_protocols(57, 57), HandshakeDecision::Ready);
+        assert_eq!(compare_protocols(60, 60), HandshakeDecision::Ready);
         assert_eq!(
-            compare_protocols(56, 57),
+            compare_protocols(59, 60),
             HandshakeDecision::AskOlderDaemonToExit
         );
         assert_eq!(
-            compare_protocols(58, 57),
+            compare_protocols(61, 60),
             HandshakeDecision::DaemonTooNew {
-                daemon_protocol: 58,
-                client_protocol: 57
+                daemon_protocol: 61,
+                client_protocol: 60
             }
         );
     }

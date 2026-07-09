@@ -5,7 +5,7 @@ mod launch;
 mod meta;
 mod supervisor;
 
-pub use client::{attach, inject, is_live, kill, list, resize};
+pub use client::{attach, attach_stream, inject, is_live, kill, list, resize, AttachStream};
 pub use launch::{spawn_session, SpawnSessionArgs};
 pub use meta::{read_all_metadata, session_dir, session_socket, write_metadata, LaunchMetadata};
 pub use supervisor::{run_supervisor, SupervisorArgs};

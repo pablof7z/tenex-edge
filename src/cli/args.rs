@@ -11,6 +11,7 @@ use super::messaging::PublishArgs;
 use super::probe::ProbeArgs;
 use super::pty::{PtyAction, PtySupervisorArgs};
 use super::session::SessionAction;
+use super::tui::TuiArgs;
 use super::who::WhoArgs;
 
 #[derive(Parser)]
@@ -78,6 +79,8 @@ pub(super) enum Cmd {
         #[command(subcommand)]
         action: SessionAction,
     },
+    /// Browse live sessions and attach to PTY-governed sessions.
+    Tui(TuiArgs),
     /// Stop the daemon and prevent hooks from restarting it.
     #[command(hide = true)]
     Stop,
@@ -157,5 +160,14 @@ mod tests {
     fn mcp_http_command_parses() {
         let cli = Cli::try_parse_from(["tenex-edge", "mcp", "--http", "--port", "9000"]).unwrap();
         assert!(matches!(cli.cmd, Cmd::Mcp(_)));
+    }
+
+    #[test]
+    fn tui_parses() {
+        let cli = Cli::try_parse_from(["tenex-edge", "tui", "--refresh-secs", "3"]).unwrap();
+        match cli.cmd {
+            Cmd::Tui(args) => assert_eq!(args.refresh_secs, 3),
+            _ => panic!("expected tui command"),
+        }
     }
 }

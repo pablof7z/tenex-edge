@@ -14,13 +14,21 @@ fn pty_session_for_session(state: &Arc<DaemonState>, session_id: &str) -> Option
 
 // ── pty_status ────────────────────────────────────────────────────────────────
 
-pub(super) async fn rpc_pty_status() -> Result<serde_json::Value> {
+pub(super) async fn rpc_pty_status(state: &Arc<DaemonState>) -> Result<serde_json::Value> {
+    let session_by_pty = state
+        .with_store(|s| s.list_aliases_of_kind("pty_session"))
+        .unwrap_or_default()
+        .into_iter()
+        .map(|a| (a.external_id, a.session_id))
+        .collect::<std::collections::HashMap<_, _>>();
     let arr: Vec<serde_json::Value> = crate::pty::read_all_metadata()
         .into_iter()
         .map(|meta| {
             let live = crate::pty::is_live(&meta.id);
+            let session_id = session_by_pty.get(&meta.id).cloned();
             serde_json::json!({
                 "pty_id": meta.id,
+                "session_id": session_id,
                 "socket": meta.socket,
                 "agent": meta.agent,
                 "project": meta.project,

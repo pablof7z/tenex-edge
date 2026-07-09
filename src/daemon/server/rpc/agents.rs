@@ -52,8 +52,11 @@ pub(in crate::daemon::server) fn rpc_agents_list_sessions(
                 "agent": agent,
                 "session_id": st.session_id,
                 "title": st.title,
+                "activity": st.activity,
+                "busy": st.busy,
                 "last_seen": st.last_seen,
                 "updated_at": st.updated_at,
+                "expiration": st.expiration,
                 "host": host,
                 "pubkey": st.pubkey,
             }));

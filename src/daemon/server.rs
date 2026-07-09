@@ -259,7 +259,7 @@ use lifecycle::{write_json, ClientGuard, InitProgress};
 use profile_rpc::{resolve_backend_pubkey, resolve_project_member_pubkey_hex, resolve_pubkey_hex};
 use proposal::rpc_propose;
 use resolution::{resolve_session, resolve_session_inner, CallerAnchor, ResolveScope};
-use session_end::rpc_session_end;
+use session_end::{rpc_session_end, rpc_session_kill};
 use session_signing::mint_session_identity;
 use session_start::rpc_session_start;
 use status_publish::spawn_outbox_drainer;
@@ -278,6 +278,7 @@ async fn dispatch(state: &Arc<DaemonState>, req: &Request) -> Response {
         "who" => rpc_who(state, &req.params),
         "session_start" => rpc_session_start(state, &req.params, None).await,
         "session_end" => rpc_session_end(state, &req.params).await,
+        "session_kill" => rpc_session_kill(state, &req.params).await,
         "chat_write" => rpc_chat_write(state, &req.params).await,
         "publish" => rpc_propose(state, &req.params).await,
         "turn_start" => rpc_turn_start(state, &req.params).await,
@@ -305,7 +306,7 @@ async fn dispatch(state: &Arc<DaemonState>, req: &Request) -> Response {
         "channels_leave" => rpc_channels_leave(state, &req.params).await,
         "channels_switch" => rpc_channels_switch(state, &req.params).await,
         "statusline" => rpc_statusline(state, &req.params),
-        "pty_status" => pty_rpc::rpc_pty_status().await,
+        "pty_status" => pty_rpc::rpc_pty_status(state).await,
         "pty_send" => pty_rpc::rpc_pty_send(state, &req.params).await,
         "pty_spawn" => pty_rpc::rpc_pty_spawn(state, &req.params).await,
         "invite" => invite_rpc::rpc_invite(state, &req.params).await,

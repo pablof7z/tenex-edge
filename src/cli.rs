@@ -32,6 +32,7 @@ mod probe;
 mod pty;
 mod session;
 mod statusline;
+mod tui;
 mod turn;
 mod validate;
 mod who;
@@ -124,6 +125,7 @@ pub async fn run(cli: Cli) -> Result<()> {
         Cmd::Launch(args) => launch_cli::launch(args).await,
         Cmd::Mcp(args) => mcp::mcp(args).await,
         Cmd::Session { action } => session::session(action),
+        Cmd::Tui(args) => tui::tui(args).await,
         Cmd::Stop => stop_daemon(),
         Cmd::Debug { action } => debug::debug(action).await,
         Cmd::Probe(args) => probe::probe(args).await,

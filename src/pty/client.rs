@@ -6,6 +6,65 @@ use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
 use std::time::Duration;
 
+pub struct AttachStream {
+    id_or_path: String,
+    stream: UnixStream,
+}
+
+pub fn attach_stream(id_or_path: &str, rows: u16, cols: u16) -> Result<AttachStream> {
+    AttachStream::connect(id_or_path, rows, cols)
+}
+
+impl AttachStream {
+    fn connect(id_or_path: &str, rows: u16, cols: u16) -> Result<Self> {
+        let mut stream = connect(id_or_path)?;
+        writeln!(stream, "ATTACH {rows} {cols}")?;
+        stream.flush()?;
+        stream
+            .set_nonblocking(true)
+            .context("setting pty attach stream nonblocking")?;
+        Ok(Self {
+            id_or_path: id_or_path.to_string(),
+            stream,
+        })
+    }
+
+    pub fn read_available(&mut self, out: &mut Vec<u8>) -> Result<bool> {
+        let mut buf = [0_u8; 8192];
+        loop {
+            match self.stream.read(&mut buf) {
+                Ok(0) => return Ok(false),
+                Ok(n) => out.extend_from_slice(&buf[..n]),
+                Err(e) if e.kind() == ErrorKind::Interrupted => {}
+                Err(e) if e.kind() == ErrorKind::WouldBlock => return Ok(true),
+                Err(e) if is_disconnect(e.kind()) => return Ok(false),
+                Err(e) => return Err(e).context("reading pty attach stream"),
+            }
+        }
+    }
+
+    pub fn write_input(&mut self, bytes: &[u8]) -> Result<bool> {
+        trace_bytes("client tui", bytes);
+        match self
+            .stream
+            .write_all(bytes)
+            .and_then(|_| self.stream.flush())
+        {
+            Ok(()) => Ok(true),
+            Err(e) if is_disconnect(e.kind()) => Ok(false),
+            Err(e) => Err(e).context("writing pty attach stream"),
+        }
+    }
+
+    pub fn resize(&self, rows: u16, cols: u16) -> Result<()> {
+        resize(&self.id_or_path, rows, cols)
+    }
+
+    pub fn shutdown(&mut self) {
+        let _ = self.stream.shutdown(std::net::Shutdown::Both);
+    }
+}
+
 pub fn list() -> Result<()> {
     let rows = meta::read_all_metadata();
     if rows.is_empty() {

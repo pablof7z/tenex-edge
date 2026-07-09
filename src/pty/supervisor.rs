@@ -60,6 +60,11 @@ pub fn run_supervisor(args: SupervisorArgs) -> Result<()> {
         .filter(|term| !term.is_empty() && term != "dumb")
         .unwrap_or_else(|| "xterm-256color".to_string());
     cmd.env("TERM", term);
+    cmd.env("COLORTERM", "truecolor");
+    cmd.env("CLICOLOR", "1");
+    cmd.env("CLICOLOR_FORCE", "1");
+    cmd.env("FORCE_COLOR", "1");
+    cmd.env_remove("NO_COLOR");
     if let Some(channel) = &args.channel {
         cmd.env("TENEX_EDGE_CHANNEL", channel);
     }

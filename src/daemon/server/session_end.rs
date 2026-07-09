@@ -50,6 +50,80 @@ pub(in crate::daemon::server) async fn rpc_session_end(
     Ok(serde_json::json!({ "ended": existed }))
 }
 
+#[derive(serde::Deserialize)]
+struct SessionKillParams {
+    session: String,
+}
+
+pub(in crate::daemon::server) async fn rpc_session_kill(
+    state: &Arc<DaemonState>,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value> {
+    let p: SessionKillParams =
+        serde_json::from_value(params.clone()).context("parsing session_kill params")?;
+    let Some(rec) = state.with_store(|s| s.get_session(&p.session).ok().flatten()) else {
+        return Ok(serde_json::json!({
+            "killed": false,
+            "ended": false,
+            "reason": "no local session matched"
+        }));
+    };
+
+    let stop = stop_local_process(state, &rec);
+    let ended = rpc_session_end(
+        state,
+        &serde_json::json!({
+            "session": rec.session_id,
+        }),
+    )
+    .await?
+    .get("ended")
+    .and_then(serde_json::Value::as_bool)
+    .unwrap_or(false);
+
+    match stop {
+        Ok(note) => Ok(serde_json::json!({
+            "killed": true,
+            "ended": ended,
+            "note": note,
+        })),
+        Err(e) => Ok(serde_json::json!({
+            "killed": false,
+            "ended": ended,
+            "reason": format!("{e:#}"),
+        })),
+    }
+}
+
+fn stop_local_process(state: &Arc<DaemonState>, rec: &crate::state::Session) -> Result<String> {
+    if let Some(pty_id) = pty_session_for_session(state, &rec.session_id) {
+        crate::pty::kill(&pty_id).with_context(|| format!("killing PTY session {pty_id}"))?;
+        state.with_store(|s| s.clear_pty_session(&rec.session_id).ok());
+        return Ok(format!("pty={pty_id}"));
+    }
+    if let Some(pid) = rec.child_pid {
+        nix::sys::signal::kill(
+            nix::unistd::Pid::from_raw(pid),
+            Some(nix::sys::signal::Signal::SIGTERM),
+        )
+        .with_context(|| format!("sending SIGTERM to pid {pid}"))?;
+        return Ok(format!("pid={pid}"));
+    }
+    Ok(String::new())
+}
+
+fn pty_session_for_session(state: &Arc<DaemonState>, session_id: &str) -> Option<String> {
+    state
+        .with_store(|s| s.aliases_for_session(session_id))
+        .ok()
+        .and_then(|aliases| {
+            aliases
+                .into_iter()
+                .find(|a| a.external_id_kind == "pty_session")
+                .map(|a| a.external_id)
+        })
+}
+
 fn record_ephemeral_claim(state: &Arc<DaemonState>, rec: &crate::state::Session) {
     if rec.channel_h.is_empty()
         || !crate::session_host::agent_supports_headless_exec(&rec.agent_slug)
