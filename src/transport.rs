@@ -129,12 +129,12 @@ impl Transport {
                     .with_context(|| format!("adding indexer relay {url}"))?;
             }
         }
-        // Kick off the connection in the BACKGROUND (non-blocking) and return
-        // immediately. Awaiting connectivity + NIP-42 auth is `warmup()`'s job,
-        // which the daemon runs OFF its startup critical path so store-only RPCs
-        // (`who`, hosted sessions, chat/inbox reads) serve instantly even when the relay
-        // is slow or unreachable.
-        client.connect().await;
+        // Initiate the connection in the BACKGROUND (not awaited here): the daemon
+        // builds its Transport before the accept loop is spawned, and awaiting
+        // `connect()` — which can block on the relay handshake under load — would
+        // stall even store-only RPCs. `warmup()` awaits real connectivity + AUTH.
+        let cc = client.clone();
+        tokio::spawn(async move { cc.connect().await });
         Ok(Self {
             client,
             pubkey,

@@ -190,29 +190,32 @@ fn chat_write_stdin_enqueues_live_channel_chat_for_receiver() {
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
-    let out = run_cli_with_env_in_dir(
-        &home,
-        &[
-            "channel",
-            "read",
-            "--channel",
-            &receiver_scope,
-            "--limit",
-            "1",
-        ],
-        &[("TENEX_EDGE_AGENT", "chat-sender")],
-        std::path::Path::new("/tmp"),
-    );
+    // `channel read` renders relay-materialized chat; the send above may not have
+    // propagated to the readable store yet, so poll the read until the body
+    // renders rather than asserting on a single racy read.
+    let mut read_stdout = String::new();
     assert!(
-        out.status.success(),
-        "chat read failed\nstdout: {}\nstderr: {}",
-        String::from_utf8_lossy(&out.stdout),
-        String::from_utf8_lossy(&out.stderr)
-    );
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(
-        stdout.contains(&format!("> {read_body} [")),
-        "chat read should render the body and a timestamp; got: {stdout}"
+        wait_until(Duration::from_secs(10), || {
+            let out = run_cli_with_env_in_dir(
+                &home,
+                &[
+                    "channel",
+                    "read",
+                    "--channel",
+                    &receiver_scope,
+                    "--limit",
+                    "1",
+                ],
+                &[("TENEX_EDGE_AGENT", "chat-sender")],
+                std::path::Path::new("/tmp"),
+            );
+            if !out.status.success() {
+                return false;
+            }
+            read_stdout = String::from_utf8_lossy(&out.stdout).to_string();
+            read_stdout.contains(&format!("> {read_body} ["))
+        }),
+        "chat read should render the body and a timestamp; got: {read_stdout}"
     );
 
     // The inbox records the sender's per-session pubkey as `from_pubkey`.

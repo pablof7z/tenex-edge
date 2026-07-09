@@ -79,7 +79,6 @@ fn pty_spawn_bootstraps_session_without_child_session_start_hook() {
     });
 
     let rec = wait_for_alive(&home, agent, &channel);
-    refresh_channel_members(&channel);
     let store = Store::open(&home.store_path()).unwrap();
     assert_eq!(
         store
@@ -90,9 +89,24 @@ fn pty_spawn_bootstraps_session_without_child_session_start_hook() {
             .map(|a| a.external_id),
         Some(pty_id.clone())
     );
-    assert!(store
-        .is_channel_member(&channel, &rec.agent_pubkey)
-        .unwrap_or(false));
+    // Membership is relay-materialized (the daemon publishes the 39002 snapshot
+    // and materializes it back from the relay), so poll for it rather than
+    // asserting on a single refresh — otherwise this races the propagation.
+    assert!(
+        wait_until(Duration::from_secs(25), || {
+            refresh_channel_members(&channel);
+            Store::open(&home.store_path())
+                .map(|s| {
+                    s.is_channel_member(&channel, &rec.agent_pubkey)
+                        .unwrap_or(false)
+                })
+                .unwrap_or(false)
+        }),
+        "agent {} did not materialize as a member of {channel}; daemon_log={}",
+        rec.agent_pubkey,
+        std::fs::read_to_string(home.dir.path().join("daemon.log"))
+            .unwrap_or_else(|e| format!("<unreadable: {e}>"))
+    );
 
     let _ = tenex_edge::pty::kill(&pty_id);
     stop_daemon(&home);
