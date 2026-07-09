@@ -7,6 +7,7 @@ use tokio::sync::Mutex;
 
 mod access_log;
 mod auth;
+mod auth_login_page;
 mod auth_nip07;
 mod auth_routes;
 mod auth_support;

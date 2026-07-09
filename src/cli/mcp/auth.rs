@@ -10,9 +10,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+use super::auth_login_page::login_html;
 use super::auth_support::{
-    bearer, login_html, normalize_pubkey, oauth_error, oauth_json_error, random_token,
-    redirect_with_code, scope_allowed, sign, stable_hash,
+    bearer, normalize_pubkey, oauth_error, oauth_json_error, random_token, redirect_with_code,
+    scope_allowed, sign, stable_hash,
 };
 use super::auth_types::{validate_token_request, AuthCode, LoginChallenge};
 pub(super) use super::auth_types::{AuthorizeForm, AuthorizeParams, TokenForm};
