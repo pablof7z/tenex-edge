@@ -26,6 +26,7 @@ mod harness;
 mod hooks;
 mod install;
 mod launch_cli;
+mod mcp;
 mod messaging;
 mod probe;
 mod pty;
@@ -121,6 +122,7 @@ pub async fn run(cli: Cli) -> Result<()> {
         Cmd::Invite(args) => admin::invite(args).await,
         Cmd::Harness { action } => harness::harness(action).await,
         Cmd::Launch(args) => launch_cli::launch(args).await,
+        Cmd::Mcp(args) => mcp::mcp(args).await,
         Cmd::Session { action } => session::session(action),
         Cmd::Stop => stop_daemon(),
         Cmd::Debug { action } => debug::debug(action).await,

@@ -6,6 +6,7 @@ use super::debug::DebugAction;
 use super::harness::HarnessAction;
 use super::install::InstallArgs;
 use super::launch_cli::LaunchArgs;
+use super::mcp::McpArgs;
 use super::messaging::PublishArgs;
 use super::probe::ProbeArgs;
 use super::pty::{PtyAction, PtySupervisorArgs};
@@ -70,6 +71,8 @@ pub(super) enum Cmd {
     Publish(PublishArgs),
     /// Launch an agent harness in a reattachable portable-pty session.
     Launch(LaunchArgs),
+    /// Start an MCP server over stdio or HTTP.
+    Mcp(McpArgs),
     /// Manage the current local session.
     Session {
         #[command(subcommand)]
@@ -142,5 +145,17 @@ mod tests {
             }
             _ => panic!("expected session end action"),
         }
+    }
+
+    #[test]
+    fn mcp_command_parses() {
+        let cli = Cli::try_parse_from(["tenex-edge", "mcp"]).unwrap();
+        assert!(matches!(cli.cmd, Cmd::Mcp(_)));
+    }
+
+    #[test]
+    fn mcp_http_command_parses() {
+        let cli = Cli::try_parse_from(["tenex-edge", "mcp", "--http", "--port", "9000"]).unwrap();
+        assert!(matches!(cli.cmd, Cmd::Mcp(_)));
     }
 }
