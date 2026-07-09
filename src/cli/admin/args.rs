@@ -1,4 +1,3 @@
-use anyhow::Result;
 use clap::{Args, Subcommand};
 
 #[derive(Subcommand)]
@@ -65,22 +64,35 @@ pub(in crate::cli) enum AgentsAction {
     },
 }
 
+/// `channel add` targets. Exactly one of three shapes: a human member by id
+/// (two positionals `<id> <channel>`), a freshly spawned session
+/// (`--new-session <role>[@machine] <channel>`), or an existing session pulled in
+/// (`--session @codename@host <channel>`). Flag modes take ONE positional (the
+/// channel); human mode takes TWO. `--admin` is human-only; `--message` posts a
+/// chat mentioning the brought-online session and is valid only in the session
+/// modes.
 #[derive(Args)]
-pub(in crate::cli) struct InviteArgs {
-    /// Project-relative channel name/path/id to invite into.
+pub(in crate::cli) struct AddArgs {
+    /// Human mode: the member id (hex pubkey, npub, or nip05). Flag modes: the
+    /// project-relative channel to add into.
+    #[arg(value_name = "ID_OR_CHANNEL")]
+    pub(in crate::cli::admin) first: Option<String>,
+    /// Human mode only: the project-relative channel (second positional).
+    #[arg(value_name = "CHANNEL")]
+    pub(in crate::cli::admin) second: Option<String>,
+    /// Spawn a fresh session of `ROLE[@machine]` and add it to the channel.
+    #[arg(long = "new-session", value_name = "ROLE", conflicts_with_all = ["session", "admin"])]
+    pub(in crate::cli::admin) new_session: Option<String>,
+    /// Pull an existing session, named `@codename@host`, into the channel.
+    #[arg(long, value_name = "CODENAME", conflicts_with_all = ["new_session", "admin"])]
+    pub(in crate::cli::admin) session: Option<String>,
+    /// Grant admin rather than member. Human target only.
     #[arg(long)]
-    channel: String,
-    /// `slug` of a local agent, or `slug@backend-label` where `backend-label`
-    /// is the remote backend's config.json `backendName`.
-    #[arg(long, conflicts_with = "session", required_unless_present = "session")]
-    agent: Option<String>,
-    /// Prior session id to resume into the channel.
-    #[arg(long, conflicts_with = "agent", required_unless_present = "agent")]
-    session: Option<String>,
-}
-
-pub(in crate::cli) async fn invite(args: InviteArgs) -> Result<()> {
-    super::invite_spawn::invite_target(args.channel, args.agent, args.session).await
+    pub(in crate::cli::admin) admin: bool,
+    /// Also post a chat line into the channel mentioning the brought-online
+    /// session. Valid only with `--new-session`/`--session`.
+    #[arg(long, value_name = "TEXT")]
+    pub(in crate::cli::admin) message: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -110,6 +122,9 @@ pub(in crate::cli) enum ProjectAction {
 /// Subgroup task channels under a project (NIP-29 child groups).
 #[derive(Subcommand)]
 pub(in crate::cli) enum ChannelAction {
+    /// Add a member to a channel: a human by id, a freshly spawned session
+    /// (`--new-session <role>`), or an existing one (`--session @codename@host`).
+    Add(AddArgs),
     /// Read channel chat history.
     Read {
         /// Read one exact message by event id; returns the full untruncated body.

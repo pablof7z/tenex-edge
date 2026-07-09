@@ -117,8 +117,11 @@ async fn wait_for_channel_about(
     false
 }
 
-/// Publish a NIP-29 kind:9000 (put-user) event to add a pubkey to the group.
-/// Accepts hex, npub (bech32), or a NIP-05 address (user@domain.com).
+/// `channel add <pubkey|npub|nip05> <channel> [--admin]` — add a human member to
+/// a channel. Resolves the project-relative channel reference to its opaque `h`,
+/// ensures the channel is ready (management is admin), then publishes an explicit
+/// NIP-29 kind:9000 put-user granting `member` (or `admin` when `admin`), read
+/// back for confirmation.
 pub async fn rpc_project_add(
     state: &Arc<DaemonState>,
     params: &serde_json::Value,
@@ -127,24 +130,37 @@ pub async fn rpc_project_add(
     struct P {
         project: String,
         pubkey: String,
+        #[serde(default)]
+        admin: bool,
     }
     let p: P = serde_json::from_value(params.clone()).context("project_add params")?;
 
+    let channel_h = match resolve_add_channel(state, params, &p.project)? {
+        ChannelResolution::Unique(h) => h,
+        ChannelResolution::Ambiguous(refs) => {
+            return Ok(serde_json::json!({ "ambiguous": refs, "reference": p.project }));
+        }
+        ChannelResolution::NotFound => {
+            anyhow::bail!("no channel matching {:?} in this project", p.project)
+        }
+    };
+
     let pubkey_hex = resolve_project_member_pubkey_hex(&p.pubkey).await?;
+    let role = if p.admin { "admin" } else { "member" };
     log_nip29_role_decision(
-        &p.project,
+        &channel_h,
         &pubkey_hex,
-        "member",
+        role,
         "rpc_project_add manual add via confirmed provider mutation",
     );
 
     let parent_hint = state
-        .with_store(|s| s.channel_parent(&p.project).unwrap_or(None))
+        .with_store(|s| s.channel_parent(&channel_h).unwrap_or(None))
         .filter(|parent| !parent.is_empty());
     let ready = state
         .provider
         .ensure_channel_ready(crate::fabric::nip29::readiness::ChannelCtx {
-            channel: &p.project,
+            channel: &channel_h,
             expect_member: &pubkey_hex,
             parent_hint: parent_hint.as_deref(),
             name: None,
@@ -157,16 +173,61 @@ pub async fn rpc_project_add(
     if matches!(gate, crate::fabric::nip29::readiness::ChannelGate::Degraded) {
         anyhow::bail!(
             "project_add could not verify channel {} readiness within {}s",
-            p.project,
+            channel_h,
             PROJECT_MEMBER_READY_TIMEOUT.as_secs()
         );
     }
 
+    // Explicit grant of the requested role. `ensure_channel_ready` above only
+    // guarantees the management key is admin; the member/admin put-user is
+    // published here and read back for confirmation.
+    let outcome = if p.admin {
+        state
+            .provider
+            .grant_admin_confirmed(&channel_h, &pubkey_hex)
+            .await
+    } else {
+        state
+            .provider
+            .grant_member_confirmed(&channel_h, &pubkey_hex)
+            .await
+    };
+    if !outcome.is_confirmed() {
+        anyhow::bail!(
+            "could not confirm {} as {role} of channel {channel_h}",
+            crate::util::pubkey_short(&pubkey_hex)
+        );
+    }
+
     Ok(serde_json::json!({
-        "project": p.project,
+        "project": channel_h,
         "pubkey": pubkey_hex,
+        "role": role,
         "confirmed": true,
     }))
+}
+
+/// Resolve a project-relative channel reference for `channel add`, from the
+/// caller's session anchor when present, else from the invoking directory (a
+/// human running the verb from a project checkout). An exact `h` passes through.
+fn resolve_add_channel(
+    state: &Arc<DaemonState>,
+    params: &serde_json::Value,
+    reference: &str,
+) -> Result<ChannelResolution> {
+    let anchor = CallerAnchor::from_params(params);
+    let root = match resolve_session_inner(state, &anchor, ResolveScope::Strict) {
+        Ok(rec) => state.with_store(|s| project_root(s, &rec.channel_h)),
+        Err(_) => {
+            let cwd = anchor
+                .cwd
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+            crate::project::resolve(&cwd)
+                .context("channel add must run inside an agent session or project directory")?
+        }
+    };
+    Ok(state.with_store(|s| resolve_channel_ref(s, &root, reference)))
 }
 
 // ── project_remove ───────────────────────────────────────────────────────────

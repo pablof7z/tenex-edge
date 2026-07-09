@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 
-use super::admin::{AgentAction, AgentsAction, ChannelAction, InviteArgs, ProjectAction};
+use super::admin::{AgentAction, AgentsAction, ChannelAction, ProjectAction};
 use super::config::ConfigArgs;
 use super::debug::DebugAction;
 use super::harness::HarnessAction;
@@ -59,9 +59,6 @@ pub(super) enum Cmd {
         #[command(subcommand)]
         action: Option<AgentsAction>,
     },
-    /// Invite an agent or prior session into a channel. Use --agent for a fresh
-    /// session, or --session to restore a prior context.
-    Invite(InviteArgs),
     /// Hook integration and statusline for any supported agent harness.
     Harness {
         #[command(subcommand)]

@@ -119,7 +119,6 @@ pub async fn run(cli: Cli) -> Result<()> {
         Cmd::Channel { action } => admin::channels(action).await,
         Cmd::Agent { action } => admin::agent(action).await,
         Cmd::Agents { action } => admin::agents(action).await,
-        Cmd::Invite(args) => admin::invite(args).await,
         Cmd::Harness { action } => harness::harness(action).await,
         Cmd::Launch(args) => launch_cli::launch(args).await,
         Cmd::Mcp(args) => mcp::mcp(args).await,
