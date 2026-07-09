@@ -30,8 +30,7 @@ pub(super) fn build_view(store: &Store, input: FabricContextInput<'_>) -> Fabric
     let mut view = FabricView {
         self_row: input.session.map(|s| SelfRow {
             agent: input.self_slug.to_string(),
-            backend: input.local_host.to_string(),
-            session_id: s.session_id.clone(),
+            agent_slug: s.agent_slug.clone(),
         }),
         project,
         agents: agents(store, &root, input.cursor, input.now, input.local_host),

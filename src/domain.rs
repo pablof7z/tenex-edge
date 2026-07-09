@@ -76,6 +76,9 @@ impl AgentRef {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Profile {
     pub agent: AgentRef,
+    /// Stable harness/role slug for the agent behind this session identity.
+    /// `agent.slug` remains the published display handle/codename.
+    pub agent_slug: String,
     pub host: String,
     /// Owner pubkeys this agent claims (the human's whitelisted pubkeys).
     pub owners: Vec<String>,
@@ -83,6 +86,42 @@ pub struct Profile {
     /// agent). Used to suppress backend identities from agent-facing context
     /// injections.
     pub is_backend: bool,
+}
+
+impl Profile {
+    pub fn agent(
+        agent: AgentRef,
+        agent_slug: impl Into<String>,
+        host: impl Into<String>,
+        owners: Vec<String>,
+    ) -> Self {
+        Self {
+            agent,
+            agent_slug: agent_slug.into(),
+            host: host.into(),
+            owners,
+            is_backend: false,
+        }
+    }
+
+    pub fn backend(agent: AgentRef, host: impl Into<String>, owners: Vec<String>) -> Self {
+        Self {
+            agent,
+            agent_slug: String::new(),
+            host: host.into(),
+            owners,
+            is_backend: true,
+        }
+    }
+
+    pub fn backend_named(
+        pubkey: impl Into<String>,
+        name: impl Into<String>,
+        host: impl Into<String>,
+        owners: Vec<String>,
+    ) -> Self {
+        Self::backend(AgentRef::new(pubkey, name), host, owners)
+    }
 }
 
 /// A durable, append-only line of narrative: what the agent is doing / did.

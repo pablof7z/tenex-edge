@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS relay_profiles (
     pubkey      TEXT PRIMARY KEY,
     name        TEXT NOT NULL DEFAULT '',
     slug        TEXT NOT NULL DEFAULT '',
+    agent_slug  TEXT NOT NULL DEFAULT '',
     host        TEXT NOT NULL DEFAULT '',
     is_backend  INTEGER NOT NULL DEFAULT 0,
     updated_at  INTEGER NOT NULL

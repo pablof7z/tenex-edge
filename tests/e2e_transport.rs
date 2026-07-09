@@ -49,6 +49,7 @@ async fn publishes_and_decodes_all_event_types() {
     let events = vec![
         DomainEvent::Profile(Profile {
             agent: aref.clone(),
+            agent_slug: "coder".into(),
             host: "test-host".into(),
             owners: vec![reader_pk.clone()],
             is_backend: false,

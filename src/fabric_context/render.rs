@@ -47,13 +47,17 @@ fn render_self(out: &mut String, row: Option<&SelfRow>) {
     let Some(row) = row else {
         return;
     };
-    let _ = write!(
-        out,
-        "\n  You are @{} on {} (session {}).",
-        esc_text(&row.agent),
-        esc_text(&row.backend),
-        crate::util::friendly_short_code(&row.session_id)
-    );
+    let agent_slug = row.agent_slug.trim();
+    if agent_slug.is_empty() {
+        let _ = write!(out, "\n  You are @{}.", esc_text(&row.agent));
+    } else {
+        let _ = write!(
+            out,
+            "\n  You are @{}, a {} agent.",
+            esc_text(&row.agent),
+            esc_text(agent_slug)
+        );
+    }
 }
 
 fn render_agents(out: &mut String, agents: &[AgentRow]) {
@@ -94,10 +98,14 @@ fn render_members(out: &mut String, members: &[MemberRow]) {
     }
     out.push_str("\n      <members>");
     for m in members {
+        let agent_slug = m.agent_slug.trim();
+        let _ = write!(out, "\n        <member ref=\"@{}\"", esc_attr(&m.reference));
+        if !agent_slug.is_empty() {
+            let _ = write!(out, " agentSlug=\"{}\"", esc_attr(agent_slug));
+        }
         let _ = write!(
             out,
-            "\n        <member ref=\"@{}\" role=\"{}\" status=\"{}\" seen=\"{}\" />",
-            esc_attr(&m.reference),
+            " role=\"{}\" status=\"{}\" seen=\"{}\" />",
             esc_attr(&m.role),
             esc_attr(&m.status),
             esc_attr(&m.seen)

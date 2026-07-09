@@ -38,8 +38,10 @@ pub(super) fn member_rows(
             } else {
                 member_reference(store, &pk, status, input.local_host)
             };
+            let agent_slug = member_agent_slug(store, &pk, input);
             MemberRow {
                 reference,
+                agent_slug,
                 role,
                 status: status_text,
                 seen,
@@ -56,6 +58,21 @@ fn member_reference(store: &Store, pk: &str, status: Option<&Status>, local_host
         return codename_ref(&s.session_id, &profile_host(store, pk), local_host);
     }
     pubkey_ref(store, pk, local_host)
+}
+
+fn member_agent_slug(store: &Store, pk: &str, input: &FabricContextInput<'_>) -> String {
+    if pk == input.self_pubkey {
+        return input
+            .session
+            .map(|s| s.agent_slug.clone())
+            .unwrap_or_default();
+    }
+    store
+        .get_profile(pk)
+        .ok()
+        .flatten()
+        .map(|p| p.agent_slug)
+        .unwrap_or_default()
 }
 
 pub(super) fn presence_rows(

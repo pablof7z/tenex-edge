@@ -10,6 +10,7 @@ use std::path::Path;
 mod ddl;
 mod identity_migration;
 mod outbox_backoff;
+mod profile_agent_slug;
 mod session_claims;
 mod trellis_commits;
 mod trellis_replay_capsules;
@@ -22,6 +23,7 @@ pub(super) fn initialize_file(conn: &Connection, path: &Path) -> Result<()> {
     conn.execute_batch(SCHEMA).context("creating schema")?;
     identity_migration::ensure_session_primary_key(conn)?;
     session_claims::ensure_columns(conn)?;
+    profile_agent_slug::ensure_column(conn)?;
     trellis_commits::ensure_columns(conn)?;
     outbox_backoff::ensure_columns(conn)?;
     trellis_replay_capsules::ensure_table(conn)?;
@@ -33,6 +35,7 @@ pub(super) fn initialize_memory(conn: &Connection) -> Result<()> {
         .context("creating in-memory schema")?;
     identity_migration::ensure_session_primary_key(conn)?;
     session_claims::ensure_columns(conn)?;
+    profile_agent_slug::ensure_column(conn)?;
     trellis_commits::ensure_columns(conn)?;
     outbox_backoff::ensure_columns(conn)?;
     trellis_replay_capsules::ensure_table(conn)?;

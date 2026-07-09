@@ -22,11 +22,20 @@ impl Nip29Provider {
         let display_name = display_name_from_metadata(&event.content)?;
         let host = host_tag(&event).unwrap_or_default();
         let is_backend = backend_tag(&event);
+        let agent_slug = agent_slug_tag(&event).unwrap_or_default();
         let (name, slug) = profile_cache_fields(&display_name, &host, is_backend);
 
         self.with_store(|s| {
-            s.upsert_profile(pubkey, &name, &slug, &host, is_backend, now)
-                .ok()
+            s.upsert_profile_with_agent_slug(
+                pubkey,
+                &name,
+                &slug,
+                &agent_slug,
+                &host,
+                is_backend,
+                now,
+            )
+            .ok()
         });
         Some(name)
     }
@@ -59,6 +68,19 @@ fn backend_tag(event: &nostr_sdk::Event) -> bool {
         .tags
         .iter()
         .any(|t| t.as_slice().first().map(String::as_str) == Some("backend"))
+}
+
+fn agent_slug_tag(event: &nostr_sdk::Event) -> Option<String> {
+    tag_value(event, "agent-slug").or_else(|| tag_value(event, "agentSlug"))
+}
+
+fn tag_value(event: &nostr_sdk::Event, name: &str) -> Option<String> {
+    event.tags.iter().find_map(|t| {
+        let s = t.as_slice();
+        (s.first().map(String::as_str) == Some(name))
+            .then(|| s.get(1).cloned())
+            .flatten()
+    })
 }
 
 fn profile_cache_fields(display_name: &str, host: &str, is_backend: bool) -> (String, String) {

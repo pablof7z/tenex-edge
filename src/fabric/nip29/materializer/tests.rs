@@ -99,7 +99,10 @@ fn profile_materializes_to_relay_profiles() {
         &agent,
         0,
         r#"{"name":"smith"}"#,
-        vec![make_tag(&["host", "laptop"])],
+        vec![
+            make_tag(&["host", "laptop"]),
+            make_tag(&["agent-slug", "developer"]),
+        ],
     );
     let de = crate::fabric::nip29::wire::Nip29WireCodec.decode_event(&event);
     if let Some(crate::domain::DomainEvent::Profile(pf)) = de {
@@ -111,6 +114,7 @@ fn profile_materializes_to_relay_profiles() {
     );
     let profile = store.get_profile(&pk).unwrap().unwrap();
     assert_eq!(profile.name, "smith@laptop");
+    assert_eq!(profile.agent_slug, "developer");
     assert_eq!(
         store
             .resolve_agent_pubkey("smith", "laptop")

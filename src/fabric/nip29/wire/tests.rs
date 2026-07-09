@@ -1,17 +1,19 @@
 use super::*;
 
-fn roundtrip(ev: DomainEvent, keys: &Keys) -> DomainEvent {
+mod profile;
+
+pub(super) fn roundtrip(ev: DomainEvent, keys: &Keys) -> DomainEvent {
     let codec = Nip29WireCodec;
     let builder = codec.encode_event(&ev).expect("encode");
     let signed = builder.sign_with_keys(keys).expect("sign");
     codec.decode_event(&signed).expect("decode")
 }
 
-fn agent(keys: &Keys, slug: &str) -> AgentRef {
+pub(super) fn agent(keys: &Keys, slug: &str) -> AgentRef {
     AgentRef::new(keys.public_key().to_hex(), slug)
 }
 
-fn has_tag(event: &Event, name: &str, value: &str) -> bool {
+pub(super) fn has_tag(event: &Event, name: &str, value: &str) -> bool {
     event.tags.iter().any(|t| {
         let s = t.as_slice();
         s.first().map(String::as_str) == Some(name) && s.get(1).map(String::as_str) == Some(value)
@@ -23,45 +25,6 @@ fn has_tag_name(event: &Event, name: &str) -> bool {
         .tags
         .iter()
         .any(|t| t.as_slice().first().map(String::as_str) == Some(name))
-}
-
-#[test]
-fn profile_roundtrip() {
-    let keys = Keys::generate();
-    let ev = DomainEvent::Profile(Profile {
-        agent: agent(&keys, "coder"),
-        host: "pablos' laptop".into(),
-        owners: vec!["09d4".repeat(16)],
-        is_backend: false,
-    });
-    assert_eq!(roundtrip(ev.clone(), &keys), ev);
-
-    let signed = Nip29WireCodec
-        .encode_event(&ev)
-        .unwrap()
-        .sign_with_keys(&keys)
-        .unwrap();
-    assert_eq!(signed.content, r#"{"name":"coder@pablos' laptop"}"#);
-}
-
-#[test]
-fn profile_decode_strips_backend_suffix_for_routing_slug() {
-    let keys = Keys::generate();
-    let event = EventBuilder::new(
-        Kind::from(KIND_PROFILE),
-        r#"{"name":"developer1@remoteBackend"}"#,
-    )
-    .tags([tag(&["host", "remoteBackend"]).unwrap()])
-    .sign_with_keys(&keys)
-    .unwrap();
-
-    match Nip29WireCodec.decode_event(&event) {
-        Some(DomainEvent::Profile(p)) => {
-            assert_eq!(p.agent.slug, "developer1");
-            assert_eq!(p.host, "remoteBackend");
-        }
-        other => panic!("expected profile, got {other:?}"),
-    }
 }
 
 fn status(keys: &Keys, busy: bool, rel_cwd: &str) -> DomainEvent {

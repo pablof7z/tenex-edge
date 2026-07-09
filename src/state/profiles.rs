@@ -7,13 +7,14 @@ fn row_to_profile(row: &rusqlite::Row) -> rusqlite::Result<Profile> {
         pubkey: row.get(0)?,
         name: row.get(1)?,
         slug: row.get(2)?,
-        host: row.get(3)?,
-        is_backend: row.get::<_, i64>(4)? != 0,
-        updated_at: row.get(5)?,
+        agent_slug: row.get(3)?,
+        host: row.get(4)?,
+        is_backend: row.get::<_, i64>(5)? != 0,
+        updated_at: row.get(6)?,
     })
 }
 
-const COLS: &str = "pubkey, name, slug, host, is_backend, updated_at";
+const COLS: &str = "pubkey, name, slug, agent_slug, host, is_backend, updated_at";
 
 impl Store {
     /// Materialize a kind:0 profile. Newer `updated_at` wins.
@@ -26,14 +27,38 @@ impl Store {
         is_backend: bool,
         updated_at: u64,
     ) -> Result<()> {
+        self.upsert_profile_with_agent_slug(pubkey, name, slug, "", host, is_backend, updated_at)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn upsert_profile_with_agent_slug(
+        &self,
+        pubkey: &str,
+        name: &str,
+        slug: &str,
+        agent_slug: &str,
+        host: &str,
+        is_backend: bool,
+        updated_at: u64,
+    ) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO relay_profiles (pubkey, name, slug, host, is_backend, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            "INSERT INTO relay_profiles
+                 (pubkey, name, slug, agent_slug, host, is_backend, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
              ON CONFLICT(pubkey) DO UPDATE SET
-                 name=excluded.name, slug=excluded.slug, host=excluded.host,
+                 name=excluded.name, slug=excluded.slug,
+                 agent_slug=excluded.agent_slug, host=excluded.host,
                  is_backend=excluded.is_backend, updated_at=excluded.updated_at
              WHERE excluded.updated_at >= relay_profiles.updated_at",
-            params![pubkey, name, slug, host, is_backend as i64, updated_at],
+            params![
+                pubkey,
+                name,
+                slug,
+                agent_slug,
+                host,
+                is_backend as i64,
+                updated_at
+            ],
         )?;
         Ok(())
     }

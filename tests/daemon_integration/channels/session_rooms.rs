@@ -2,12 +2,13 @@ use super::{
     materialize_member_snapshot, refresh_project_members, rewrite_config_with_user_nsec,
     unique_session, write_config,
 };
-use crate::daemon_harness::{rt, shared_nip29_relay_url, stop_daemon, wait_until, Home, ENV_LOCK};
-use nostr_sdk::prelude::{Client as NostrClient, ClientOptions, EventBuilder, Filter, Keys, Kind};
-use nostr_sdk::NostrSigner;
+use crate::daemon_harness::{rt, stop_daemon, wait_until, Home, ENV_LOCK};
+use nostr_sdk::prelude::Keys;
 use tenex_edge::daemon::client::Client;
-use tenex_edge::fabric::nip29::wire::KIND_PROFILE;
 use tenex_edge::state::Store;
+
+#[path = "session_rooms/profile.rs"]
+mod profile;
 
 fn test_log(home: &Home) -> String {
     std::fs::read_to_string(home.dir.path().join("daemon.log")).unwrap_or_else(|e| format!("<{e}>"))
@@ -47,40 +48,6 @@ fn wait_for_channel_member(home: &Home, channel: &str, pubkey: &str) {
         }),
         "member {pubkey} did not materialize in {channel}; daemon_log={}",
         test_log(home)
-    );
-}
-
-async fn publish_profile(keys: &Keys, name: &str) {
-    let client = NostrClient::builder()
-        .signer(keys.clone())
-        .opts(ClientOptions::default().automatic_authentication(true))
-        .build();
-    client
-        .add_relay(shared_nip29_relay_url())
-        .await
-        .expect("add relay");
-    client.connect().await;
-    client
-        .wait_for_connection(std::time::Duration::from_secs(8))
-        .await;
-    let _ = client
-        .fetch_events(
-            Filter::new().kind(Kind::from(0u16)).limit(1),
-            std::time::Duration::from_secs(5),
-        )
-        .await;
-    let builder = EventBuilder::new(
-        Kind::from(KIND_PROFILE),
-        serde_json::json!({ "name": name }).to_string(),
-    );
-    let unsigned = builder.build(keys.public_key());
-    let signed = keys.sign_event(unsigned).await.expect("sign profile");
-    let out = client.send_event(&signed).await.expect("publish profile");
-    assert!(
-        !out.success.is_empty(),
-        "profile publish rejected: success={:?} failed={:?}",
-        out.success,
-        out.failed
     );
 }
 
@@ -127,9 +94,13 @@ fn first_turn_injects_channel_context_block() {
         !ctx.contains("[session"),
         "must not expose a session code; context was: {ctx}"
     );
+    assert!(
+        !ctx.contains("(session "),
+        "must not repeat the raw session id; context was: {ctx}"
+    );
     assert!(ctx.contains("<channel "), "context was: {ctx}");
     // Self identity is the per-session codename (no ordinals).
-    let self_line = " on test-host (session ";
+    let self_line = ", a coder agent.";
     assert!(ctx.contains(self_line), "no self line: {ctx}");
 
     stop_daemon(&home);
@@ -144,9 +115,10 @@ fn first_turn_resolves_member_profiles_from_kind0() {
     let remote = Keys::generate();
     let remote_pk = remote.public_key().to_hex();
     let remote_name = "profiled-member";
+    let remote_agent_slug = "reviewer";
 
     let ctx = rt().block_on(async {
-        publish_profile(&remote, remote_name).await;
+        profile::publish_profile(&remote, remote_name, remote_agent_slug).await;
         let mut c = Client::connect_or_spawn().await.expect("connect");
         c.call(
             "session_start",
@@ -184,7 +156,9 @@ fn first_turn_resolves_member_profiles_from_kind0() {
             .to_string()
     });
 
-    let want = format!("ref=\"@{remote_name}\" role=\"member\" status=\"offline\"");
+    let want = format!(
+        "ref=\"@{remote_name}\" agentSlug=\"{remote_agent_slug}\" role=\"member\" status=\"offline\""
+    );
     assert!(ctx.contains(&want), "kind:0 profile should resolve: {ctx}");
     assert!(
         !ctx.contains(&format!("@{}", &remote_pk[..8])),

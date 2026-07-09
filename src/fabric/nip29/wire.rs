@@ -27,7 +27,7 @@
 //! uses only event.pubkey (signer); self-asserted `agent` tags have no authority
 //! and are never written or read.
 
-use crate::domain::{Activity, AgentRef, ChatMessage, DomainEvent, Profile, Proposal, Status};
+use crate::domain::{Activity, AgentRef, ChatMessage, DomainEvent, Proposal, Status};
 use crate::fabric::{NostrEventCodec, RawEnvelope};
 use crate::util::SessionId;
 use anyhow::Result;
@@ -53,6 +53,8 @@ pub const KIND_GROUP_MEMBERS: u16 = 39002;
 
 // NIP-23 long-form article — used for agent-authored proposals.
 pub const KIND_LONGFORM: u16 = 30023;
+
+mod profile;
 
 pub struct Nip29WireCodec;
 
@@ -112,39 +114,10 @@ fn project_from_tags(event: &Event) -> Option<String> {
     first_tag(event, "h").map(String::from)
 }
 
-fn name_from_metadata(content: &str) -> String {
-    serde_json::from_str::<serde_json::Value>(content)
-        .ok()
-        .and_then(|v| v.get("name").and_then(|n| n.as_str()).map(String::from))
-        .unwrap_or_default()
-}
-
 impl Nip29WireCodec {
     pub fn encode_event(&self, ev: &DomainEvent) -> Result<EventBuilder> {
         let b = match ev {
-            DomainEvent::Profile(Profile {
-                agent,
-                host,
-                owners,
-                is_backend,
-            }) => {
-                let name = if *is_backend {
-                    agent.slug.clone()
-                } else {
-                    crate::idref::agent_label(&agent.slug, host)
-                };
-                let content = serde_json::json!({ "name": name }).to_string();
-                let mut tags = vec![tag(&["host", host])?];
-                for o in owners {
-                    tags.push(tag(&["p", o])?); // declare the human owner(s)
-                }
-                if *is_backend {
-                    tags.push(tag(&["backend"])?);
-                }
-                EventBuilder::new(kind(KIND_PROFILE), content)
-                    .tags(tags)
-                    .allow_self_tagging()
-            }
+            DomainEvent::Profile(pf) => profile::encode(pf)?,
             DomainEvent::Activity(Activity {
                 agent: _agent,
                 project,
@@ -235,22 +208,7 @@ impl Nip29WireCodec {
     pub fn decode_event(&self, event: &Event) -> Option<DomainEvent> {
         let pubkey = event.pubkey.to_hex();
         match event.kind.as_u16() {
-            KIND_PROFILE => {
-                let host = first_tag(event, "host").unwrap_or_default().to_string();
-                let is_backend = has_bare_tag(event, "backend");
-                let name = name_from_metadata(&event.content);
-                let slug = if is_backend {
-                    name
-                } else {
-                    crate::idref::slug_from_profile_name(&name, &host)
-                };
-                Some(DomainEvent::Profile(Profile {
-                    agent: AgentRef::new(pubkey, slug),
-                    host,
-                    owners: all_tag_values(event, "p"),
-                    is_backend,
-                }))
-            }
+            KIND_PROFILE => profile::decode(event, pubkey),
             KIND_STATUS => {
                 let d = first_tag(event, "d")?;
                 let channels = all_tag_values(event, "h");

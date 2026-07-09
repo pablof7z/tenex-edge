@@ -13,6 +13,11 @@ fn member_row_shows_role_and_codename_for_peer_session() {
     let store = seed_store();
     let rec = session(&store);
     store
+        .upsert_profile_with_agent_slug(
+            OTHER_PK, "reviewer", "reviewer", "reviewer", "laptop", false, 2,
+        )
+        .unwrap();
+    store
         .upsert_status(&Status {
             pubkey: OTHER_PK.into(),
             session_id: "peer-sess".into(),
@@ -33,11 +38,13 @@ fn member_row_shows_role_and_codename_for_peer_session() {
     // Self keeps its slug ref; the peer session renders under its codename, both
     // carrying their relay role.
     assert!(
-        text.contains("<member ref=\"@coder\" role=\"member\""),
+        text.contains("<member ref=\"@coder\" agentSlug=\"coder\" role=\"member\""),
         "got: {text}"
     );
     assert!(
-        text.contains(&format!("<member ref=\"@{codename}\" role=\"member\"")),
+        text.contains(&format!(
+            "<member ref=\"@{codename}\" agentSlug=\"reviewer\" role=\"member\""
+        )),
         "got: {text}"
     );
 
