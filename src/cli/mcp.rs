@@ -113,11 +113,11 @@ async fn handle_request(
             Ok(value) => result(id, value),
             Err(err) => error(id, INVALID_PARAMS, format!("{err:#}")),
         },
-        "resources/subscribe" => match subscriptions.subscribe(&message.params, writer).await {
+        "resources/subscribe" => match subscriptions.add(&message.params, writer).await {
             Ok(()) => result(id, json!({})),
             Err(err) => error(id, INVALID_PARAMS, format!("{err:#}")),
         },
-        "resources/unsubscribe" => match subscriptions.unsubscribe(&message.params).await {
+        "resources/unsubscribe" => match subscriptions.remove(&message.params).await {
             Ok(()) => result(id, json!({})),
             Err(err) => error(id, INVALID_PARAMS, format!("{err:#}")),
         },

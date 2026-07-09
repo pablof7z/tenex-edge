@@ -187,11 +187,11 @@ async fn dispatch_http(state: &HttpState, method: &str, params: &Value, id: Valu
             Ok(value) => result(id, value),
             Err(err) => error(id, super::protocol::INVALID_PARAMS, format!("{err:#}")),
         },
-        "resources/subscribe" => match state.subscriptions.subscribe(params).await {
+        "resources/subscribe" => match state.subscriptions.add(params).await {
             Ok(()) => result(id, json!({})),
             Err(err) => error(id, super::protocol::INVALID_PARAMS, format!("{err:#}")),
         },
-        "resources/unsubscribe" => match state.subscriptions.unsubscribe(params).await {
+        "resources/unsubscribe" => match state.subscriptions.remove(params).await {
             Ok(()) => result(id, json!({})),
             Err(err) => error(id, super::protocol::INVALID_PARAMS, format!("{err:#}")),
         },
@@ -200,7 +200,7 @@ async fn dispatch_http(state: &HttpState, method: &str, params: &Value, id: Valu
 }
 
 impl HttpSubscriptions {
-    async fn subscribe(&self, params: &Value) -> Result<()> {
+    async fn add(&self, params: &Value) -> Result<()> {
         let uri = super::protocol::required_string(params, "uri")?;
         let project = super::resources::subscription_project(&uri)?;
         let mut tasks = self.tasks.lock().await;
@@ -214,7 +214,7 @@ impl HttpSubscriptions {
         Ok(())
     }
 
-    async fn unsubscribe(&self, params: &Value) -> Result<()> {
+    async fn remove(&self, params: &Value) -> Result<()> {
         let uri = super::protocol::required_string(params, "uri")?;
         if let Some(task) = self.tasks.lock().await.remove(&uri) {
             task.abort();

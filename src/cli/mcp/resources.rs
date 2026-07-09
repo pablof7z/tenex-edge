@@ -81,7 +81,7 @@ pub(super) async fn read(params: &Value) -> Result<Value> {
 }
 
 impl Subscriptions {
-    pub(super) async fn subscribe(&self, params: &Value, writer: SharedWriter) -> Result<()> {
+    pub(super) async fn add(&self, params: &Value, writer: SharedWriter) -> Result<()> {
         let uri = required_string(params, "uri")?;
         let project = match parse_uri(&uri)? {
             ResourceUri::Who => None,
@@ -98,7 +98,7 @@ impl Subscriptions {
         Ok(())
     }
 
-    pub(super) async fn unsubscribe(&self, params: &Value) -> Result<()> {
+    pub(super) async fn remove(&self, params: &Value) -> Result<()> {
         let uri = required_string(params, "uri")?;
         if let Some(task) = self.tasks.lock().await.remove(&uri) {
             task.abort();
