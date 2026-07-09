@@ -144,13 +144,13 @@ async fn agents_roster() -> Result<()> {
         };
         match criteria.is_empty() {
             true => println!(
-                "  @{}  #{}  invite: {}",
+                "  @{}  #{}  add: {}",
                 agent.bold(),
                 channel.dimmed(),
                 invite_spec.dimmed()
             ),
             false => println!(
-                "  @{} — {}  #{}  invite: {}",
+                "  @{} — {}  #{}  add: {}",
                 agent.bold(),
                 criteria,
                 channel.dimmed(),
@@ -158,7 +158,7 @@ async fn agents_roster() -> Result<()> {
             ),
         }
     }
-    println!("\nInvite one with: tenex-edge invite --channel <channel> --agent <slug>");
+    println!("\nAdd one with: tenex-edge channel add --new-session <slug> <channel>");
     Ok(())
 }
 

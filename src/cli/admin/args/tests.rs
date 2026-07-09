@@ -101,43 +101,9 @@ fn channels_switch_accepts_explicit_session_anchor() {
 }
 
 #[test]
-fn invite_requires_agent_or_session_and_preserves_xor() {
-    let missing = parse_err(&["tenex-edge", "invite", "--channel", "ops"]);
-    assert_eq!(
-        missing.kind(),
-        clap::error::ErrorKind::MissingRequiredArgument
-    );
-
-    let both = parse_err(&[
-        "tenex-edge",
-        "invite",
-        "--channel",
-        "ops",
-        "--agent",
-        "claude",
-        "--session",
-        "s1",
-    ]);
-    assert_eq!(both.kind(), clap::error::ErrorKind::ArgumentConflict);
-
-    let cli = crate::cli::args::Cli::try_parse_from([
-        "tenex-edge",
-        "invite",
-        "--channel",
-        "ops",
-        "--agent",
-        "claude@laptop",
-    ])
-    .expect("invite with agent parses");
-
-    match cli.cmd {
-        crate::cli::args::Cmd::Invite(args) => {
-            assert_eq!(args.channel, "ops");
-            assert_eq!(args.agent.as_deref(), Some("claude@laptop"));
-            assert_eq!(args.session, None);
-        }
-        _ => panic!("expected invite command"),
-    }
+fn removed_invite_command_stays_unavailable() {
+    let err = parse_err(&["tenex-edge", "invite", "--channel", "ops", "--agent", "x"]);
+    assert_eq!(err.kind(), ErrorKind::InvalidSubcommand);
 }
 
 #[test]

@@ -1,6 +1,7 @@
 use super::*;
 
 mod args;
+mod send_guard;
 pub(super) use args::{publish, PublishArgs};
 
 pub(super) async fn chat_write(
@@ -9,6 +10,7 @@ pub(super) async fn chat_write(
     session: Option<String>,
     long_message: bool,
 ) -> Result<()> {
+    send_guard::check(&message)?;
     let params = crate::cli::rpc_params(serde_json::json!({
         "message": message,
         "long_message": long_message,
@@ -278,22 +280,4 @@ pub(super) fn format_envelope(e: &EnvelopeView) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn chat_read_row_prints_truncation_recovery_command() {
-        let item = serde_json::json!({
-            "event_id": "event-123",
-            "from_pubkey": "pubkey-1",
-            "from_slug": "writer",
-            "host": "laptop",
-            "body": "word0 word1...",
-            "truncated": true,
-            "created_at": 1_000,
-        });
-        let text = render_chat_read_row(&item, false);
-        assert!(text.contains("<writer@laptop> word0 word1..."));
-        assert!(text.contains("tenex-edge channel read --id event-123"));
-    }
-}
+mod tests;

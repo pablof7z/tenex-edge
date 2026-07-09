@@ -1,7 +1,10 @@
 use super::resolution::work_root_for;
 use super::*;
 
+mod message;
+mod resolve;
 mod wait;
+use resolve::{local_session, remote_session_from_status, RemoteSession};
 use wait::{
     channel_member_pubkeys, live_session_ids, wait_local_agent_online, wait_local_session_online,
     wait_remote_agent_online, wait_remote_session_online,
@@ -30,6 +33,10 @@ struct InviteParams {
     watch_pid: Option<i32>,
     #[serde(default)]
     cwd: Option<String>,
+    /// `channel add --message`: an optional chat line to post into the channel,
+    /// mentioning the brought-online session, once it is confirmed online.
+    #[serde(default)]
+    add_message: Option<String>,
 }
 
 impl InviteParams {
@@ -73,17 +80,55 @@ pub(super) async fn rpc_invite(
         TargetChannel::Ambiguous(v) => return Ok(v),
     };
     let work_root = state.with_store(|s| work_root_for(s, &channel_h));
-    if let Some(session_id) = session {
-        return invite_session(state, &channel_h, &work_root, session_id).await;
+    let mut result = if let Some(session_id) = session {
+        invite_session(state, &channel_h, &work_root, session_id).await?
+    } else {
+        invite_agent(
+            state,
+            &channel_h,
+            &work_root,
+            agent.unwrap(),
+            p.cwd.as_deref(),
+        )
+        .await?
+    };
+    maybe_post_add_message(state, params, &channel_h, &p, &mut result).await;
+    Ok(result)
+}
+
+/// `channel add --message`: after the target is online, post the courtesy chat
+/// line mentioning it. The membership add already succeeded, so a publish failure
+/// is surfaced as a non-fatal `message_error` on the result rather than an error.
+async fn maybe_post_add_message(
+    state: &Arc<DaemonState>,
+    params: &serde_json::Value,
+    channel_h: &str,
+    p: &InviteParams,
+    result: &mut serde_json::Value,
+) {
+    let Some(message) = p.add_message.as_deref().filter(|m| !m.trim().is_empty()) else {
+        return;
+    };
+    let label = result["online_agent"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    let host = result["host"]
+        .as_str()
+        .unwrap_or(state.host.as_str())
+        .to_string();
+    let label_with_host = if label.contains('@') {
+        label
+    } else {
+        format!("{label}@{host}")
+    };
+    if let Some(err) =
+        message::post_add_message(state, params, channel_h, &label_with_host, message).await
+    {
+        if let Some(obj) = result.as_object_mut() {
+            obj.insert("message_error".into(), serde_json::json!(err));
+        }
     }
-    invite_agent(
-        state,
-        &channel_h,
-        &work_root,
-        agent.unwrap(),
-        p.cwd.as_deref(),
-    )
-    .await
 }
 
 enum TargetChannel {
@@ -181,6 +226,7 @@ pub(super) async fn invite_agent(
         "agent": target.slug,
         "online_agent": online,
         "channel": channel_h,
+        "host": state.host,
     }))
 }
 
@@ -214,6 +260,7 @@ async fn invite_session(
             "agent": rec.agent_slug,
             "online_agent": online,
             "channel": channel_h,
+            "host": state.host,
         }));
     }
 
@@ -247,67 +294,11 @@ async fn invite_session(
     }))
 }
 
-fn local_session(state: &Arc<DaemonState>, session: &str) -> Option<crate::state::Session> {
-    state
-        .with_store(|s| s.get_session(session))
-        .ok()
-        .flatten()
-        .or_else(|| {
-            state
-                .with_store(|s| s.find_session_by_prefix(session))
-                .ok()
-                .flatten()
-        })
-}
-
-struct RemoteSession {
-    session_id: String,
-    pubkey: String,
-    slug: String,
-    backend: String,
-}
-
-fn remote_session_from_status(state: &Arc<DaemonState>, session: &str) -> Result<RemoteSession> {
-    let matches = state.with_store(|s| -> Result<Vec<RemoteSession>> {
-        let mut out = Vec::new();
-        for st in s.list_status_sessions(None, None)? {
-            if st.session_id != session && !st.session_id.starts_with(session) {
-                continue;
-            }
-            let Some(profile) = s.get_profile(&st.pubkey)? else {
-                continue;
-            };
-            let slug = if profile.slug.is_empty() {
-                st.slug.clone()
-            } else {
-                profile.slug.clone()
-            };
-            out.push(RemoteSession {
-                session_id: st.session_id,
-                pubkey: st.pubkey,
-                slug,
-                backend: profile.host,
-            });
-        }
-        out.sort_by(|a, b| {
-            a.session_id
-                .cmp(&b.session_id)
-                .then(a.pubkey.cmp(&b.pubkey))
-        });
-        out.dedup_by(|a, b| a.session_id == b.session_id && a.pubkey == b.pubkey);
-        Ok(out)
-    })?;
-    match matches.as_slice() {
-        [one] => Ok(RemoteSession {
-            session_id: one.session_id.clone(),
-            pubkey: one.pubkey.clone(),
-            slug: one.slug.clone(),
-            backend: one.backend.clone(),
-        }),
-        [] => anyhow::bail!("no session matching {session:?}"),
-        _ => anyhow::bail!("session id {session:?} is ambiguous; use the full session id"),
-    }
-}
+/// Cap on the (otherwise unbounded) channel-readiness probe run on the invite
+/// RPC's synchronous path. Without it, an unreachable relay wedges the whole
+/// invite call — and the client connection with it — indefinitely. Modeled on
+/// `rpc/project.rs`'s `PROJECT_MEMBER_READY_TIMEOUT`.
+const BACKEND_ADMIN_READY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);
 
 async fn ensure_backend_admin(
     state: &Arc<DaemonState>,
@@ -315,19 +306,23 @@ async fn ensure_backend_admin(
     backend_pubkey: &str,
 ) -> Result<()> {
     let mgmt = state.management_keys()?;
+    let mgmt_hex = mgmt.public_key().to_hex();
     let parent = state
         .with_store(|s| s.channel_parent(channel_h).unwrap_or(None))
         .filter(|p| !p.is_empty());
-    let gate = state
+    let ready = state
         .provider
         .ensure_channel_ready(crate::fabric::nip29::readiness::ChannelCtx {
             channel: channel_h,
-            expect_member: &mgmt.public_key().to_hex(),
+            expect_member: &mgmt_hex,
             parent_hint: parent.as_deref(),
             name: None,
             repair_whitelisted_admins: true,
-        })
-        .await;
+        });
+    let gate = match tokio::time::timeout(BACKEND_ADMIN_READY_TIMEOUT, ready).await {
+        Ok(gate) => gate,
+        Err(_) => crate::fabric::nip29::readiness::ChannelGate::Degraded,
+    };
     if matches!(gate, crate::fabric::nip29::readiness::ChannelGate::Degraded) {
         anyhow::bail!("channel {channel_h} is not ready for remote invite");
     }
