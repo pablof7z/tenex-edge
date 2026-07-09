@@ -14,6 +14,7 @@
 use super::*;
 
 mod offline_mention;
+mod route_reaction;
 
 /// Proactively fetch + cache the `kind:0` for any of `pubkeys` we do not already
 /// have a name for. Called on every inbound event (a peer newly seen in a
@@ -164,6 +165,7 @@ fn handle_incoming(state: &Arc<DaemonState>, event: &Event) {
             if event.kind.as_u16() == crate::fabric::nip29::wire::KIND_CHAT {
                 if let DomainEvent::ChatMessage(ref chat) = de {
                     if let Some(ref mentioned_pk) = chat.mentioned_pubkey {
+                        let routed_to_local = hosted.contains(mentioned_pk);
                         let st = state.clone();
                         let mentioned_pk = mentioned_pk.clone();
                         let project = chat.project.clone();
@@ -176,6 +178,14 @@ fn handle_incoming(state: &Arc<DaemonState>, event: &Event) {
                         tokio::spawn(async move {
                             offline_mention::handle(&st, &mentioned_pk, &project, &body).await;
                         });
+
+                        if routed_to_local {
+                            let st = state.clone();
+                            let ev = event.clone();
+                            tokio::spawn(async move {
+                                route_reaction::publish_eye_reaction(&st, &ev).await;
+                            });
+                        }
                     }
                 }
             }
