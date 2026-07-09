@@ -20,6 +20,9 @@ use rusqlite::{params, Connection, OptionalExtension};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+mod profile;
+pub use profile::Profile;
+
 pub struct Store {
     conn: Connection,
 }
@@ -63,17 +66,6 @@ pub struct ChannelMember {
     pub channel_h: String,
     pub pubkey: String,
     pub role: String,
-    pub updated_at: u64,
-}
-
-/// kind:0 metadata for any pubkey.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Profile {
-    pub pubkey: String,
-    pub name: String,
-    pub slug: String,
-    pub host: String,
-    pub is_backend: bool,
     pub updated_at: u64,
 }
 

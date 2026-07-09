@@ -10,11 +10,13 @@
 //! every time-relative string keys on `now`. Equivalence with the legacy
 //! `build_view` is asserted in the reconciler's regression test.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::HashSet;
 
-use super::capture::{EvCap, MembersInput, MsgBundle, StatusCap, ViewInputs};
+use super::capture::{EvCap, MsgBundle, StatusCap, ViewInputs};
 use super::model::*;
 use crate::util::relative_time;
+
+mod members;
 
 /// Chat lookback window used on the full (first-turn) render.
 const WINDOW_SECS: u64 = 4 * 60 * 60;
@@ -27,8 +29,7 @@ pub(crate) fn assemble_view(inputs: &ViewInputs, cursor: u64, now: u64) -> Fabri
     let mut view = FabricView {
         self_row: meta.self_row.as_ref().map(|s| SelfRow {
             agent: s.agent.clone(),
-            backend: s.backend.clone(),
-            session_id: s.session_id.clone(),
+            agent_slug: s.agent_slug.clone(),
         }),
         project: ProjectRow {
             name: meta.project.name.clone(),
@@ -71,7 +72,7 @@ pub(crate) fn assemble_view(inputs: &ViewInputs, cursor: u64, now: u64) -> Fabri
             name: chan.name.clone(),
             about: chan.about.clone(),
             members: if full {
-                member_rows(inputs, &chan.h, now)
+                members::member_rows(inputs, &chan.h, now)
             } else {
                 Vec::new()
             },
@@ -118,69 +119,6 @@ fn unjoined_rows(inputs: &ViewInputs, now: u64) -> Vec<UnjoinedChannelRow> {
             last_active: relative_time(u.updated_at, now),
         })
         .collect()
-}
-
-/// Live (NIP-40 unexpired) statuses keyed by pubkey, preserving the updated_at
-/// DESC order so the last insert wins exactly as `people::status_map` does.
-fn live_status_map(statuses: &[StatusCap], now: u64) -> BTreeMap<String, &StatusCap> {
-    statuses
-        .iter()
-        .filter(|s| s.expiration >= now)
-        .map(|s| (s.pubkey.clone(), s))
-        .collect()
-}
-
-fn member_rows(inputs: &ViewInputs, channel: &str, now: u64) -> Vec<MemberRow> {
-    let members = &inputs.members;
-    let self_pubkey = &inputs.meta.self_pubkey;
-    let statuses = inputs
-        .presence
-        .statuses
-        .get(channel)
-        .map(Vec::as_slice)
-        .unwrap_or_default();
-    let status_map = live_status_map(statuses, now);
-
-    let roster = members.roster.get(channel).cloned().unwrap_or_default();
-    roster
-        .into_iter()
-        .filter(|(pk, _)| !members.backend.contains(pk))
-        .map(|(pk, role)| {
-            let status = status_map.get(&pk);
-            let status_text = status
-                .map(|s| status_text(s))
-                .unwrap_or_else(|| "offline".to_string());
-            let seen = status
-                .map(|s| relative_time(s.last_seen, now))
-                .unwrap_or_else(|| "unknown".to_string());
-            let reference = if pk == *self_pubkey {
-                inputs.meta.self_ref.clone()
-            } else {
-                member_reference(members, &inputs.meta.local_host, &pk, status)
-            };
-            MemberRow {
-                reference,
-                role,
-                status: status_text,
-                seen,
-            }
-        })
-        .collect()
-}
-
-/// A non-self member's reference: `@codename@host` when its owning session is
-/// known (a live status carrying a session id joins the codename), else the
-/// slug/npub `pubkey_ref` fallback (human operators, offline sessions).
-fn member_reference(
-    members: &MembersInput,
-    meta_local_host: &str,
-    pk: &str,
-    status: Option<&&StatusCap>,
-) -> String {
-    if let Some(s) = status.filter(|s| !s.session_id.is_empty()) {
-        return super::refs::codename_ref(&s.session_id, &s.host, meta_local_host);
-    }
-    members.refs.get(pk).cloned().unwrap_or_default()
 }
 
 fn presence_rows(inputs: &ViewInputs, channel: &str, cursor: u64, now: u64) -> Vec<PresenceRow> {

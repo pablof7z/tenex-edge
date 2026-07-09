@@ -26,8 +26,7 @@ enum ChannelReadiness {
 pub(super) fn self_cap(s: &Session, input: &FabricContextInput<'_>) -> SelfCap {
     SelfCap {
         agent: input.self_slug.to_string(),
-        backend: input.local_host.to_string(),
-        session_id: s.session_id.clone(),
+        agent_slug: s.agent_slug.clone(),
     }
 }
 
@@ -230,14 +229,20 @@ pub(super) fn resolve_pubkey(
     pubkey: &str,
     local_host: &str,
     refs: &mut BTreeMap<String, String>,
+    agent_slugs: &mut BTreeMap<String, String>,
     backend: &mut BTreeSet<String>,
 ) {
     if refs.contains_key(pubkey) {
         return;
     }
     refs.insert(pubkey.to_string(), pubkey_ref(store, pubkey, local_host));
-    if is_backend(store, pubkey) {
-        backend.insert(pubkey.to_string());
+    if let Some(profile) = store.get_profile(pubkey).ok().flatten() {
+        if !profile.agent_slug.is_empty() {
+            agent_slugs.insert(pubkey.to_string(), profile.agent_slug);
+        }
+        if profile.is_backend {
+            backend.insert(pubkey.to_string());
+        }
     }
 }
 
@@ -247,15 +252,6 @@ pub(super) fn project_root(store: &Store, channel: &str) -> String {
         .ok()
         .flatten()
         .unwrap_or_else(|| channel.to_string())
-}
-
-fn is_backend(store: &Store, pubkey: &str) -> bool {
-    store
-        .get_profile(pubkey)
-        .ok()
-        .flatten()
-        .map(|p| p.is_backend)
-        .unwrap_or(false)
 }
 
 pub(super) fn channel_summary(store: &Store, channel: &str) -> SummaryCap {

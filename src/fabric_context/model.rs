@@ -53,8 +53,7 @@ pub(in crate::fabric_context) struct ProjectRow {
 #[derive(Clone, PartialEq)]
 pub(in crate::fabric_context) struct SelfRow {
     pub(in crate::fabric_context) agent: String,
-    pub(in crate::fabric_context) backend: String,
-    pub(in crate::fabric_context) session_id: String,
+    pub(in crate::fabric_context) agent_slug: String,
 }
 
 #[derive(Clone, PartialEq)]
@@ -79,6 +78,8 @@ pub(in crate::fabric_context) struct MemberRow {
     /// `@codename@host` for a member whose session identity is known, else the
     /// slug/npub `pubkey_ref` fallback (human operators, offline sessions).
     pub(in crate::fabric_context) reference: String,
+    /// Stable underlying agent kind from the session row or kind:0 profile tag.
+    pub(in crate::fabric_context) agent_slug: String,
     /// Channel role: `admin` or `member` (from the relay roster).
     pub(in crate::fabric_context) role: String,
     pub(in crate::fabric_context) status: String,

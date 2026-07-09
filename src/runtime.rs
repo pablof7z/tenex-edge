@@ -163,13 +163,13 @@ pub async fn run_session_in_daemon(
     };
 
     // Publish identity card signed with this session's own ordinal key.
-    publish_de(DomainEvent::Profile(Profile {
-        agent: aref.clone(),
-        host: p.host.clone(),
-        owners: owners.clone(),
-        is_backend: false,
-    }))
-    .await;
+    let profile = Profile::agent(
+        aref.clone(),
+        p.identity.slug.clone(),
+        p.host.clone(),
+        owners.clone(),
+    );
+    publish_de(DomainEvent::Profile(profile)).await;
 
     let turn_first = p.turn_first.as_secs();
     let turn_repeat = p.turn_repeat.as_secs();

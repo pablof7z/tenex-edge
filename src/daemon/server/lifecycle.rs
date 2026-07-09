@@ -148,13 +148,13 @@ pub async fn run() -> Result<()> {
         // Intentionally NOT stored in the hosted set — the echo must NOT appear in
         // `who` or be injected into agent turn-context.
         if let Some(backend_keys) = relay_state.provider.management_keys() {
-            let name = format!("{} (tenex-edge)", relay_state.host);
-            let ev = crate::domain::DomainEvent::Profile(crate::domain::Profile {
-                agent: crate::domain::AgentRef::new(backend_keys.public_key().to_hex(), name),
-                host: relay_state.host.clone(),
-                owners: relay_state.owners.clone(),
-                is_backend: true,
-            });
+            let profile = crate::domain::Profile::backend_named(
+                backend_keys.public_key().to_hex(),
+                format!("{} (tenex-edge)", relay_state.host),
+                relay_state.host.clone(),
+                relay_state.owners.clone(),
+            );
+            let ev = crate::domain::DomainEvent::Profile(profile);
             let _ = relay_state.provider.publish(&ev, &backend_keys).await;
         }
 

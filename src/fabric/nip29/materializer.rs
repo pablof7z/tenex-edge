@@ -92,10 +92,11 @@ impl Nip29Materializer {
         } else {
             crate::idref::agent_label(slug, &pf.host)
         };
-        if let Err(e) = store.upsert_profile(
+        if let Err(e) = store.upsert_profile_with_agent_slug(
             &pf.agent.pubkey,
             &name,
             slug,
+            &pf.agent_slug,
             &pf.host,
             pf.is_backend,
             updated_at,

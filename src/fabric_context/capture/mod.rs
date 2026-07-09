@@ -79,6 +79,8 @@ pub(crate) struct MembersInput {
     /// role so `<members>` can label each member; ordering is by pubkey.
     pub(super) roster: BTreeMap<String, BTreeMap<String, String>>,
     pub(super) refs: BTreeMap<String, String>,
+    #[serde(default)]
+    pub(super) agent_slugs: BTreeMap<String, String>,
     pub(super) backend: BTreeSet<String>,
 }
 
@@ -98,8 +100,8 @@ pub(crate) struct MessagesInput {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(super) struct SelfCap {
     pub(super) agent: String,
-    pub(super) backend: String,
-    pub(super) session_id: String,
+    #[serde(default)]
+    pub(super) agent_slug: String,
 }
 
 #[derive(Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -184,6 +186,7 @@ pub(crate) fn capture_inputs(store: &Store, input: &FabricContextInput<'_>) -> V
     );
 
     let mut refs: BTreeMap<String, String> = BTreeMap::new();
+    let mut agent_slugs: BTreeMap<String, String> = BTreeMap::new();
     let mut backend: BTreeSet<String> = BTreeSet::new();
     let mut roster: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
     let mut statuses: BTreeMap<String, Vec<StatusCap>> = BTreeMap::new();
@@ -229,7 +232,14 @@ pub(crate) fn capture_inputs(store: &Store, input: &FabricContextInput<'_>) -> V
             .keys()
             .chain(chan_statuses.iter().map(|s| &s.pubkey))
         {
-            read::resolve_pubkey(store, pk, input.local_host, &mut refs, &mut backend);
+            read::resolve_pubkey(
+                store,
+                pk,
+                input.local_host,
+                &mut refs,
+                &mut agent_slugs,
+                &mut backend,
+            );
         }
         roster.insert(h.clone(), members);
         statuses.insert(h.clone(), chan_statuses);
@@ -243,8 +253,12 @@ pub(crate) fn capture_inputs(store: &Store, input: &FabricContextInput<'_>) -> V
             input.self_pubkey,
             input.local_host,
             &mut refs,
+            &mut agent_slugs,
             &mut backend,
         );
+        if let Some(session) = input.session {
+            agent_slugs.insert(input.self_pubkey.to_string(), session.agent_slug.clone());
+        }
     }
     // Exclude this daemon's own management key by identity, independent of whether
     // its kind:0 has been fetched into the local cache — on a cold cache (post-reset)
@@ -274,6 +288,7 @@ pub(crate) fn capture_inputs(store: &Store, input: &FabricContextInput<'_>) -> V
         members: MembersInput {
             roster,
             refs,
+            agent_slugs,
             backend,
         },
         presence: PresenceInput { statuses },
