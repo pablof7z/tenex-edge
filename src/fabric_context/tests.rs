@@ -1,8 +1,8 @@
 use super::*;
 use crate::state::{RegisterSession, RelayEvent, Session, Status, Store};
 
-#[path = "tests/backend_traffic.rs"]
 mod backend_traffic;
+mod member_render;
 
 const SELF_PK: &str = "self-pubkey";
 const OTHER_PK: &str = "other-pubkey";

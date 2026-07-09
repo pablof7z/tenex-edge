@@ -24,6 +24,23 @@ fn who_value_via_daemon(project: &Option<String>, all_projects: bool) -> Result<
     crate::daemon::blocking::call("who", who_params(project, all_projects))
 }
 
+/// `who --expired`: fetch this machine's dead/old sessions from the daemon and
+/// render them (codename + channel + last_seen + resumable) for resume.
+fn who_expired() -> Result<()> {
+    let v = crate::daemon::blocking::call(
+        "who",
+        crate::cli::rpc_params(serde_json::json!({ "expired": true })),
+    )?;
+    let rows: Vec<crate::expired_sessions::ExpiredSessionRow> = v
+        .get("expired")
+        .cloned()
+        .map(serde_json::from_value)
+        .transpose()?
+        .unwrap_or_default();
+    print!("{}", render::render_expired(&rows));
+    Ok(())
+}
+
 fn who_once(project: Option<String>, all_projects: bool) -> Result<()> {
     let v = who_value_via_daemon(&project, all_projects)?;
     if let Some(human) = v.get("fabric_human").and_then(|x| x.as_str()) {

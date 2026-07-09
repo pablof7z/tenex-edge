@@ -96,8 +96,9 @@ fn render_members(out: &mut String, members: &[MemberRow]) {
     for m in members {
         let _ = write!(
             out,
-            "\n        <member ref=\"@{}\" status=\"{}\" seen=\"{}\" />",
+            "\n        <member ref=\"@{}\" role=\"{}\" status=\"{}\" seen=\"{}\" />",
             esc_attr(&m.reference),
+            esc_attr(&m.role),
             esc_attr(&m.status),
             esc_attr(&m.seen)
         );

@@ -1,8 +1,10 @@
 use super::*;
 use crate::who_snapshot::WhoRow;
 
+mod expired;
 mod labels;
 
+pub(super) use expired::render_expired;
 use labels::{rel_cwd_bracket, row_host_label, row_state_label, row_title_label, status_colored};
 
 pub(super) fn render_who_once(snapshot: &WhoSnapshot) -> String {

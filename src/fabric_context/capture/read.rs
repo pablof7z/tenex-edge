@@ -7,6 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::{AgentCap, EvCap, MsgBundle, SelfCap, SummaryCap, UnjoinedCap};
 use crate::fabric_context::messages::{is_backend_traffic, mentions_pubkey, p_tag_pubkeys};
+pub(super) use crate::fabric_context::refs::profile_host;
 use crate::fabric_context::refs::{display_name, pubkey_ref};
 use crate::fabric_context::{FabricContextInput, FabricMessageSeed};
 use crate::state::{Session, Store};

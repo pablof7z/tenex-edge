@@ -65,6 +65,9 @@ pub(crate) struct MetaInput {
     pub(super) warnings: Vec<String>,
     pub(super) self_pubkey: String,
     pub(super) self_ref: String,
+    /// This daemon's host label — the bare-vs-`@host` pivot for member codenames.
+    #[serde(default)]
+    pub(super) local_host: String,
     pub(super) force: bool,
 }
 
@@ -72,7 +75,9 @@ pub(crate) struct MetaInput {
 /// display ref for every pubkey that can appear, and the backend-pubkey set.
 #[derive(Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct MembersInput {
-    pub(super) roster: BTreeMap<String, BTreeSet<String>>,
+    /// Per-channel roster as `pubkey -> role` (`admin`/`member`). Carries the
+    /// role so `<members>` can label each member; ordering is by pubkey.
+    pub(super) roster: BTreeMap<String, BTreeMap<String, String>>,
     pub(super) refs: BTreeMap<String, String>,
     pub(super) backend: BTreeSet<String>,
 }
@@ -128,6 +133,13 @@ pub(super) struct UnjoinedCap {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(super) struct StatusCap {
     pub(super) pubkey: String,
+    /// The owning session's canonical id — `friendly_short_code(session_id)` is
+    /// this member's codename, joined onto the roster by `member_rows`.
+    #[serde(default)]
+    pub(super) session_id: String,
+    /// The owning member's raw profile host (empty ⇒ local), for `codename@host`.
+    #[serde(default)]
+    pub(super) host: String,
     pub(super) busy: bool,
     pub(super) activity: String,
     pub(super) title: String,
@@ -173,7 +185,7 @@ pub(crate) fn capture_inputs(store: &Store, input: &FabricContextInput<'_>) -> V
 
     let mut refs: BTreeMap<String, String> = BTreeMap::new();
     let mut backend: BTreeSet<String> = BTreeSet::new();
-    let mut roster: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let mut roster: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
     let mut statuses: BTreeMap<String, Vec<StatusCap>> = BTreeMap::new();
     let mut messages: BTreeMap<String, MsgBundle> = BTreeMap::new();
     let forced_by_channel = read::group_forced(input.forced_messages, input.scope);
@@ -188,18 +200,22 @@ pub(crate) fn capture_inputs(store: &Store, input: &FabricContextInput<'_>) -> V
             subchannels: read::subchannel_caps(store, h),
         });
 
-        // Roster + status pubkeys → resolve refs and backend flags once.
-        let members: BTreeSet<String> = store
+        // Roster + status pubkeys → resolve refs and backend flags once. The
+        // roster carries each member's role (admin/member); keyed by pubkey so
+        // iteration order matches the legacy `BTreeSet<pubkey>` path.
+        let members: BTreeMap<String, String> = store
             .list_channel_members(h)
             .unwrap_or_default()
             .into_iter()
-            .map(|m| m.pubkey)
+            .map(|m| (m.pubkey, m.role))
             .collect();
         let chan_statuses: Vec<StatusCap> = store
             .live_status_for_channel(h, 0)
             .unwrap_or_default()
             .into_iter()
             .map(|s| StatusCap {
+                host: read::profile_host(store, &s.pubkey),
+                session_id: s.session_id,
                 pubkey: s.pubkey,
                 busy: s.busy,
                 activity: s.activity,
@@ -210,7 +226,7 @@ pub(crate) fn capture_inputs(store: &Store, input: &FabricContextInput<'_>) -> V
             })
             .collect();
         for pk in members
-            .iter()
+            .keys()
             .chain(chan_statuses.iter().map(|s| &s.pubkey))
         {
             read::resolve_pubkey(store, pk, input.local_host, &mut refs, &mut backend);
@@ -249,6 +265,7 @@ pub(crate) fn capture_inputs(store: &Store, input: &FabricContextInput<'_>) -> V
         warnings,
         self_pubkey: input.self_pubkey.to_string(),
         self_ref,
+        local_host: input.local_host.to_string(),
         force: input.force,
     };
 

@@ -24,7 +24,14 @@ pub(in crate::daemon::server) struct WhoParams {
     group: Option<String>,
     #[serde(default)]
     human_color: bool,
+    /// `who --expired`: list this machine's dead/old sessions (by codename) so a
+    /// user can pick one to resume, instead of the live fabric snapshot.
+    #[serde(default)]
+    expired: bool,
 }
+
+/// Cap on the expired-session listing — the resume-candidate window.
+const EXPIRED_SESSION_LIMIT: u32 = 100;
 
 /// `who`: build the snapshot with the SAME function the CLI used. The client
 /// renders it with the existing renderers, so output is byte-identical. The
@@ -34,6 +41,13 @@ pub(in crate::daemon::server) fn rpc_who(
     params: &serde_json::Value,
 ) -> Result<serde_json::Value> {
     let p: WhoParams = serde_json::from_value(params.clone()).unwrap_or_default();
+    if p.expired {
+        let host = state.host.clone();
+        let rows = state.with_store(|s| {
+            crate::expired_sessions::load_expired_sessions(s, &host, EXPIRED_SESSION_LIMIT)
+        });
+        return Ok(serde_json::json!({ "expired": rows }));
+    }
     let anchor = CallerAnchor::from_params(params);
     let caller_rec = if p.all_projects {
         None
