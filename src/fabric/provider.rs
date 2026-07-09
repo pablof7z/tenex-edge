@@ -101,19 +101,21 @@ impl Nip29Provider {
         ev: &DomainEvent,
         keys: &nostr_sdk::prelude::Keys,
     ) -> Result<nostr_sdk::prelude::EventId> {
-        // kind:0 profiles route to the indexer relay only (purplepag.es). The
-        // main NIP-29 relay rejects kind:0 (it's not a NIP-29 kind), and the
-        // indexer rejects NIP-29 kinds — so the two must never share a publish.
-        // `publish_event_to` targets the indexer URL explicitly when configured,
-        // and falls back to the WRITE pool when no indexer is set.
+        // kind:0 profiles route to BOTH the indexer relay (purplepag.es) AND
+        // the main NIP-29 relay(s) — the group relay accepts kind:0 fine, so
+        // relying on the indexer alone leaves backend/agent name resolution
+        // broken whenever a reader only queries the group relay. The indexer
+        // still rejects NIP-29 kinds, so this union only ever widens where
+        // profiles land, never where other kinds are published.
         if matches!(ev, DomainEvent::Profile(_)) {
             let builder = self.wire.encode(ev)?;
             let signed = self.transport.sign(builder, keys).await?;
-            let urls: Vec<String> = self
-                .transport
-                .indexer_url()
-                .map(|u| vec![u.to_string()])
-                .unwrap_or_default();
+            let mut urls: Vec<String> = self.transport.write_relay_urls().to_vec();
+            if let Some(u) = self.transport.indexer_url() {
+                if !urls.iter().any(|w| w == u) {
+                    urls.push(u.to_string());
+                }
+            }
             return self.transport.publish_event_to(&signed, &urls).await;
         }
         if let Some(ch) = ev.channel() {

@@ -134,11 +134,11 @@ async fn agents_roster() -> Result<()> {
     for row in rows {
         let agent = row["agent"].as_str().unwrap_or("?");
         let slug = row["slug"].as_str().unwrap_or(agent);
-        let backend_pubkey = row["backend_pubkey"].as_str().unwrap_or("");
+        let host = row["host"].as_str().unwrap_or("");
         let criteria = row["use_criteria"].as_str().unwrap_or("").trim();
         let channel = row["channel"].as_str().unwrap_or("");
-        let invite_spec = if agent.contains('@') && !backend_pubkey.is_empty() {
-            format!("{slug}@{backend_pubkey}")
+        let invite_spec = if agent.contains('@') && !host.is_empty() {
+            format!("{slug}@{host}")
         } else {
             slug.to_string()
         };

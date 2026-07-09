@@ -281,11 +281,12 @@ impl Transport {
     }
 
     /// Publish an already-signed event to a specific relay subset (by URL).
-    /// Used by the indexer publish path: kind:0 profiles go to the indexer
-    /// relay, which is deliberately NOT in `write_relay_urls` (see the
-    /// [`Transport`] field doc). Falls back to the main relays when no
-    /// explicit targets are given (preserves behavior for single-relay dev
-    /// setups with no indexer configured).
+    /// Used by the indexer publish path: kind:0 profiles go to BOTH the
+    /// indexer relay AND the main NIP-29 relay(s) — the main relay accepts
+    /// kind:0 fine, so profiles must land there too (agent/backend name
+    /// resolution shouldn't depend on the indexer alone). Falls back to the
+    /// main relays when no explicit targets are given (preserves behavior
+    /// for single-relay dev setups with no indexer configured).
     pub async fn publish_event_to(&self, signed: &Event, urls: &[String]) -> Result<EventId> {
         crate::relay_log::log_outgoing_event(signed);
         self.client.wait_for_connection(PUBLISH_CONNECT_WAIT).await;
@@ -309,6 +310,11 @@ impl Transport {
     /// The configured indexer relay URL, if any. kind:0 profiles route here.
     pub fn indexer_url(&self) -> Option<&str> {
         self.indexer_url.as_deref()
+    }
+
+    /// The main NIP-29 relay URL(s) (see the [`Transport`] field doc).
+    pub fn write_relay_urls(&self) -> &[String] {
+        &self.write_relay_urls
     }
 
     /// One-shot query (used for resolution — e.g. fetch a `kind:0` profile).
