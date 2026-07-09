@@ -52,7 +52,7 @@ const SPECS: &[ToolSpec] = &[
     },
     ToolSpec {
         name: "tenex_edge.chat_read",
-        description: "Read recent channel chat.",
+        description: "Read recent messages from a channel.",
         props: &[
             Prop::new("channel", "string", "Optional channel destination."),
             Prop::new("session", "string", "Explicit tenex-edge session id."),
@@ -66,7 +66,7 @@ const SPECS: &[ToolSpec] = &[
     },
     ToolSpec {
         name: "tenex_edge.chat_write",
-        description: "Write a message to channel chat.",
+        description: "Send a message to a channel.",
         props: &[
             Prop::new("message", "string", "Message body."),
             Prop::new("channel", "string", "Optional destination channel."),
