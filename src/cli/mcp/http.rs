@@ -93,7 +93,7 @@ async fn post_mcp(
         return StatusCode::ACCEPTED.into_response();
     };
     if let Err(response) = state.require_auth(&headers, required_scope(method, &message.params)) {
-        return response;
+        return *response;
     }
     if message.is_notification() {
         return StatusCode::ACCEPTED.into_response();
@@ -116,7 +116,7 @@ async fn root_health(headers: HeaderMap) -> impl IntoResponse {
 async fn get_mcp(State(state): State<HttpState>, headers: HeaderMap) -> impl IntoResponse {
     log_http_event("sse_get", &headers, None, &Value::Null);
     if let Err(response) = state.require_auth(&headers, "tenex:read") {
-        return response;
+        return *response;
     }
     let rx = state.subscriptions.tx.subscribe();
     let stream = BroadcastStream::new(rx).filter_map(|value| match value {
@@ -136,7 +136,11 @@ async fn options_mcp(headers: HeaderMap) -> Response {
 }
 
 impl HttpState {
-    fn require_auth(&self, headers: &HeaderMap, scope: &str) -> std::result::Result<(), Response> {
+    fn require_auth(
+        &self,
+        headers: &HeaderMap,
+        scope: &str,
+    ) -> std::result::Result<(), Box<Response>> {
         match &self.auth {
             Some(auth) => auth.verify(headers, scope).map(|_| ()),
             None => Ok(()),

@@ -153,11 +153,13 @@ impl AuthState {
         .into_response()
     }
 
-    pub(super) fn verify(&self, headers: &HeaderMap, scope: &str) -> Result<(), Response> {
-        let token = bearer(headers).ok_or_else(|| self.challenge())?;
-        let claims = self.verify_token(token).map_err(|_| self.challenge())?;
+    pub(super) fn verify(&self, headers: &HeaderMap, scope: &str) -> Result<(), Box<Response>> {
+        let token = bearer(headers).ok_or_else(|| Box::new(self.challenge()))?;
+        let claims = self
+            .verify_token(token)
+            .map_err(|_| Box::new(self.challenge()))?;
         if !scope_allowed(&claims.scope, scope) {
-            return Err(self.challenge());
+            return Err(Box::new(self.challenge()));
         }
         Ok(())
     }
