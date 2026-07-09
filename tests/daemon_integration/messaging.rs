@@ -159,13 +159,10 @@ fn chat_write_stdin_enqueues_live_project_chat_for_receiver() {
         .unwrap()
         .expect("receiver session row");
     let receiver_scope = receiver_row.channel_h.clone();
-
-    // Mention is now inline in the body as `@<agent-instance-label>`. The label
-    // resolves to the receiver instance: first via its live local session, and as
-    // a fallback via the relay-cached `relay_profiles`. In this nak env kind:0
-    // isn't materialized back, so also seed the receiver's profile (keyed on its
-    // own session pubkey, on the daemon's host = `test-host`) so the profile path
-    // resolves to exactly the pubkey delivery rings on.
+    // A live session is addressed by @codename@host (a bare @role mention is
+    // intercepted by the send-guard). kind:0 isn't materialized back in this nak
+    // env, so seed the receiver profile under its codename so the mention resolves.
+    let receiver_codename = tenex_edge::util::friendly_short_code(&receiver_canon);
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -174,17 +171,17 @@ fn chat_write_stdin_enqueues_live_project_chat_for_receiver() {
         .unwrap()
         .upsert_profile(
             &receiver_row.agent_pubkey,
-            "chat-receiver",
-            "chat-receiver",
+            &receiver_codename,
+            &receiver_codename,
             "test-host",
             false,
             now,
         )
         .unwrap();
-    let body = "hello @chat-receiver from redirected stdin".to_string();
+    let body = format!("hello @{receiver_codename}@test-host from redirected stdin");
     let out = run_cli_stdin_with_env_in_dir(
         &home,
-        &["chat", "write"],
+        &["channel", "send"],
         &format!("{body}\n"),
         &[("TENEX_EDGE_AGENT", "chat-sender")],
         std::path::Path::new("/tmp"),
@@ -197,7 +194,14 @@ fn chat_write_stdin_enqueues_live_project_chat_for_receiver() {
     );
     let out = run_cli_with_env_in_dir(
         &home,
-        &["chat", "read", "--channel", &receiver_scope, "--limit", "1"],
+        &[
+            "channel",
+            "read",
+            "--channel",
+            &receiver_scope,
+            "--limit",
+            "1",
+        ],
         &[("TENEX_EDGE_AGENT", "chat-sender")],
         std::path::Path::new("/tmp"),
     );
@@ -208,18 +212,14 @@ fn chat_write_stdin_enqueues_live_project_chat_for_receiver() {
         String::from_utf8_lossy(&out.stderr)
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
-    // The author slug/host now resolves from the relay-cached `relay_profiles`
-    // (materialized from kind:0). A local agent whose kind:0 isn't materialized in
-    // this nak-relay env renders the short-pubkey fallback, so assert the body and
-    // timestamp render (the sender identity is checked deterministically below via
-    // the inbox `from_pubkey`).
+    // kind:0 isn't materialized back in this nak env, so assert the body+timestamp
+    // render; the sender identity is checked deterministically below via from_pubkey.
     assert!(
         stdout.contains(&format!("> {body} [")),
         "chat read should render the body and a timestamp; got: {stdout}"
     );
 
-    // The sender's selected ordinal pubkey is what the inbox records as
-    // `from_pubkey`; the inbox no longer stores a `from_session`.
+    // The inbox records the sender's per-session pubkey as `from_pubkey`.
     let sender_pubkey = Store::open(&home.store_path())
         .unwrap()
         .get_session(&sender_canon)
@@ -336,8 +336,8 @@ fn chat_commands_require_channel_when_session_joined_to_multiple_channels() {
         .to_string()
     });
     assert!(
-        write_err.contains("chat write is ambiguous")
-            && write_err.contains("tenex-edge chat write --channel"),
+        write_err.contains("channel send is ambiguous")
+            && write_err.contains("tenex-edge channel send --channel"),
         "unexpected chat write error: {write_err}"
     );
 
@@ -356,8 +356,8 @@ fn chat_commands_require_channel_when_session_joined_to_multiple_channels() {
         .to_string()
     });
     assert!(
-        read_err.contains("chat read is ambiguous")
-            && read_err.contains("tenex-edge chat read --channel"),
+        read_err.contains("channel read is ambiguous")
+            && read_err.contains("tenex-edge channel read --channel"),
         "unexpected chat read error: {read_err}"
     );
 
@@ -407,7 +407,7 @@ fn non_mention_chat_does_not_route_to_inbox() {
     let body = "no-mention ambient message for routing test";
     let out = run_cli_stdin_with_env_in_dir(
         &home,
-        &["chat", "write"],
+        &["channel", "send"],
         &format!("{body}\n"),
         &[("TENEX_EDGE_AGENT", "ambient-sender")],
         std::path::Path::new("/tmp"),
