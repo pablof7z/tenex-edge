@@ -376,7 +376,7 @@ killed by an idle-exit mid-stream.
 > add` dirs, `--git-common-dir` returns the SHARED main repo path, so two
 > worktrees both resolve to `.` and render bracket-less. To make
 > `worktree1`/`worktree2` render distinctly, register their common parent in
-> `projects.json` (via `tenex-edge project init`) so `project_root` resolves
+> `projects.json` (via `tenex-edge channel init`) so `project_root` resolves
 > there.
 
 Agents may run in different working dirs / git worktrees on the same backend

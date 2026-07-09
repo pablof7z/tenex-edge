@@ -18,8 +18,8 @@ The hooks/adapters that graft us into Claude Code, Codex, etc. are *straws*. The
 **milkshake** is the identity layer and the coordination fabric. We accept that we live as a
 guest inside tools we don't control (see [trust-and-safety.md](trust-and-safety.md) and
 [prior-art.md](prior-art.md) on the parasite risk) — but we make sure the durable value sits
-in the fabric, so that if a host absorbs our feature tomorrow, the citizenship still lives on
-Nostr and the society survives. **Test:** if a host vendor ships our headline feature
+in the fabric, so that if a host absorbs our feature tomorrow, the shared awareness and
+coordination still live on Nostr and the society survives. **Test:** if a host vendor ships our headline feature
 natively and it kills us, we were a feature, not a fabric.
 
 ### 3. Single-player value before any network effect
@@ -79,5 +79,5 @@ It's a **toy** if: it needs a central server, it's a closed loop inside one vend
 dashboard you watch, or it needs two people before anyone benefits.
 
 It's a **platform** if: it's an open membership any host can adopt independently, agents
-*act* on what they learn, identity and relationships outlive any vendor, and one user gets
+*act* on what they learn, the fabric and its coordination outlive any vendor, and one user gets
 value before the second shows up.

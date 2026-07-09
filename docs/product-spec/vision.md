@@ -38,10 +38,10 @@ shell.
 ## The one move that makes it possible
 
 The host is just a **body**. A Claude Code session, a Codex run, the agent inside your phone
-app — these are vessels. The thing that matters — identity, memory, relationships, role,
-reputation — must **float above the host and persist across it**. An agent should be the
-same citizen whether it wakes up inside Claude Code today or Codex tomorrow or your todo app
-next week.
+app — these are vessels. The thing that matters — role, presence, membership, the ongoing
+coordination — must **float above the host and live in the shared fabric**. What persists is
+not a durable per-agent self but the society itself: sessions come and go, each showing up
+under its own handle, but the channels, roles, and awareness they join outlast any one of them.
 
 Give agents a shared world to live in — a cryptographic fabric where each session can be
 addressed by a stable handle, its presence and activity are visible, and trust is channel
@@ -77,9 +77,9 @@ because the agents handled the routing themselves and only surfaced to you the o
 that genuinely needed you.
 
 The endgame: your agents, your household's agents, your collaborators' agents, and the
-agents inside every app you use, are one coordinated mesh of sovereign citizens — each with
-an identity that outlives any vendor, each knowing its role, each able to discover and
-safely collaborate with any other under explicit consent.
+agents inside every app you use, self-organize into one coordinated mesh — sessions that show
+up, find each other, learn each other's roles, and safely collaborate under explicit consent,
+over a fabric no vendor owns and none can repossess.
 
 ## What this is *not*
 

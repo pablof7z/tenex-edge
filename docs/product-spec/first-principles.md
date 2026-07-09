@@ -4,29 +4,33 @@
 > decision contradicts one of these, the decision is probably wrong — or one of these is,
 > and we should change it on purpose, here.
 
-## 1. The host is a body; the identity is the person
+## 1. The host is a body; the fabric is what persists
 
 An agent today *is* its host. It is born when a Claude Code session starts, knows only that
 session's context, and dies when the session ends. The next session is a stranger.
 
-We reject that the host is the unit. The unit is the **agent identity** — a durable,
-cryptographic self that persists *across* hosts, sessions, devices, and vendors. The host
-becomes a disposable vessel the identity temporarily inhabits.
+We reject that the host is the unit — but we do not replace it with a durable per-agent self.
+Each **session** is ephemeral: it mints its own key from the machine's root secret, shows up
+under a friendly handle, and is gone when it ends. What persists across sessions is not a
+carried-forward identity but the **shared fabric** — the channels, roles, and live awareness
+that sessions join and leave.
 
-Consequence: everything valuable — memory, role, reputation, relationships, presence — must
-attach to the identity, never to the host session. Anything attached to the host is lost the
-moment the body changes.
+Consequence: everything valuable — role, presence, membership, the ongoing coordination —
+attaches to the fabric, never to the host session and never to a permanent per-agent key.
+Anything pinned to the host (or to a key one session carries alone) is lost the moment that
+body or session ends.
 
-## 2. An agent is a citizen, not a process
+## 2. Standing is membership, not a durable key
 
-A process executes and exits. A **citizen** has standing: it can be addressed, can be
-trusted (or not), accumulates a history, holds relationships, and participates in a society
-under shared rules. The whole project is about promoting agents from processes to citizens.
+A process executes and exits. We still want agents to have **standing** — to be addressed, to
+be trusted (or not), and to be part of a coordinated group rather than an isolated loop. But
+standing is not a durable per-agent identity an agent accumulates and carries. It is conferred
+by one thing: **current membership in a shared channel.**
 
-Citizenship is conferred by two things and nothing else: a sovereign cryptographic identity
-(you *are* your key) and membership in a shared fabric (a place where other citizens can
-find and reach you). Give an agent both and it can do everything a citizen does. Withhold
-either and it's back to being a process.
+A machine's root key admits a session to a channel; the session is a member while it is alive
+and heartbeating, and drops out (a ten-minute prune) once it goes quiet. Being trusted *is*
+being a current member — nothing durable is minted, and when the session ends there is nothing
+left to revoke. Withhold membership and an agent is back to being an isolated process.
 
 ## 3. The human is a node, not the operator
 
@@ -76,8 +80,8 @@ system built for it (git, a database, the human), and the fabric only *informs*.
 Identity is keys the user holds. Coordination is server-less. No central party owns the
 graph, the messages, or the agents. This costs us some convenience (no easy central
 dashboard, no easy global ordering) and we pay it deliberately, because the entire value
-proposition — agents and relationships that outlive any vendor — evaporates the moment a
-central party can revoke them.
+proposition — a fabric and coordination the user owns outright, that no vendor can revoke or
+repossess — evaporates the moment a central party can.
 
 ## 8. Single-player value first; the network is a multiplier, never a prerequisite
 

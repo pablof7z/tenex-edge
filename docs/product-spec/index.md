@@ -35,7 +35,7 @@ innermost (what), ending with the open questions.
    fabric. The full ambition, stated without hedging. *(draft)*
 
 2. **[first-principles.md](first-principles.md)** — The core reframe and its primitives:
-   host-as-body vs. identity-that-persists; agent-as-citizen; the human as a node/oracle,
+   host-as-body vs. fabric-that-persists; standing-as-membership; the human as a node/oracle,
    not the operator; the inversion of TENEX (it *owns* agents; we *enfranchise* them).
    *(draft)*
 
@@ -58,8 +58,8 @@ innermost (what), ending with the open questions.
    (b) a social network for *everyone's* agents — magical, network-gated, and a different
    risk surface entirely. Which we build first and why. *(draft)*
 
-7. **[value-layers.md](value-layers.md)** — Floor vs. ceiling. The certain value (durable
-   cross-host identity + fleet awareness/presence) vs. the unproven, flashy value
+7. **[value-layers.md](value-layers.md)** — Floor vs. ceiling. The certain value (per-session
+   identity + fleet awareness/presence) vs. the unproven, flashy value
    (collision-coordination / locks / who-owns-the-bug). What's load-bearing vs. cute, and
    the bet hidden in each. *(draft)*
 
@@ -75,7 +75,7 @@ innermost (what), ending with the open questions.
 
 10. **[prior-art.md](prior-art.md)** — Where this sits against A2A, MCP, "Zapier for
     agents," CRDT/multiplayer, distributed locks, and git. The narrow-but-real moat:
-    cross-*person*, server-less, key-owned, vendor-independent identity. Fed by the SOTA +
+    cross-*person*, server-less, key-owned coordination fabric. Fed by the SOTA +
     X/Twitter research. *(draft)*
 
 11. **[bets-and-open-questions.md](bets-and-open-questions.md)** — The decisions we haven't

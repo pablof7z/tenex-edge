@@ -13,9 +13,9 @@ legacy access once tests prove the projections are authoritative.
 ### Guardrails
 
 - Existing host adapters stay thin and keep their current CLI/RPC surface:
-  `who`, `chat read/write`, `project list/init/edit`,
-  `channels create/list/join/leave/switch`, `agents`, `invite`,
-  `harness hook`, `harness statusline`, `publish`, and `launch`.
+  `who`, `channel read/send`, `channel list --roots/init/edit`,
+  `channel create/list/join/leave/switch/add`, `agents`,
+  `harness hook`, `harness statusline`, `publish`, `launch`, `tui`, and `mcp`.
 - The daemon remains the only SQLite writer. New provider code must not open its
   own `rusqlite::Connection`.
 - Existing behavior is the regression oracle: same-machine local delivery,
@@ -38,7 +38,7 @@ Files:
 
 Coverage to pin:
 
-1. `chat write` to a hosted sibling session inserts one inbox row using the
+1. `channel send` to a hosted sibling session inserts one inbox row using the
    signed event id for directed delivery, and relay echo/fetch does not duplicate
    it.
 2. A targeted session mention reaches only the target session; an untargeted
@@ -367,7 +367,7 @@ Run this after each phase, broadening only when the phase touches more surface:
 8. Manual smoke:
    - start two sessions in the same project;
    - `tenex-edge who`;
-   - send a chat mention with `tenex-edge chat write --message "@<agent> ..."`;
+   - send a chat mention with `tenex-edge channel send --message "@<agent> ..."`;
    - verify the target receives the mention through its host hook or pty
      delivery path;
    - verify no duplicate after a fetch or hook-injected turn context;

@@ -9,9 +9,9 @@
 The pieces this idea is made of mostly exist. Agent-to-tool calling, agent-to-agent
 protocols, distributed locks, presence systems, multiplayer state, and "who's editing what"
 are all solved or being solved by someone. What does *not* exist is the specific
-**combination**: cross-*person* (not just cross-org), server-less, key-owned, vendor-
-independent agent identity that lets agents you didn't build, in hosts you don't control,
-become citizens of a shared society. The moat is narrow but real, and we should claim exactly
+**combination**: cross-*person* (not just cross-org), server-less, key-owned coordination that
+lets agents you didn't build, in hosts you don't control, become participants in a shared
+society over a fabric the user owns. The moat is narrow but real, and we should claim exactly
 that and not more.
 
 ## The landscape
@@ -41,8 +41,8 @@ workflows; we win the *emergent* ones.
 
 ### CRDTs / multiplayer (Yjs, Liveblocks, et al.)
 Far better than a gossip bus at *real-time shared mutable state*. But that's a different
-problem — co-editing a document, not enfranchising heterogeneous agents with durable
-identity. If we ever needed authoritative real-time shared state, we'd reach for these; we
+problem — co-editing a document, not enfranchising heterogeneous agents into a shared fabric.
+If we ever needed authoritative real-time shared state, we'd reach for these; we
 mostly don't, because we're awareness-over-authority (principle #4).
 
 ### Distributed locks / consensus (ZooKeeper, etcd, Redis locks)
@@ -73,9 +73,9 @@ cold-start.
 
 ## The moat, stated as one sentence
 
-**Cross-person, server-less, key-owned, vendor-independent agent citizenship** — the durable
-identity and shared society that A2A's org-assumptions, MCP's tool-scope, Zapier's predefined
-pipes, and git's at-merge model each structurally can't provide.
+**Cross-person, server-less, key-owned agent citizenship over a fabric the user owns** — the
+shared awareness and self-organizing society that A2A's org-assumptions, MCP's tool-scope,
+Zapier's predefined pipes, and git's at-merge model each structurally can't provide.
 
 ## The risks this framing must respect
 

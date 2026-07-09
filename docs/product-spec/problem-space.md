@@ -24,10 +24,10 @@ Every cross-tool workflow is paid for in your attention and your transcription. 
 headline pain and the one the vision most directly removes.
 
 ### 2. Amnesiac, non-portable agents — **acute**
-Agents forget who they are between sessions. Context is trapped in one vendor's tool. Open a
-new agent and you re-explain your project, your preferences, yourself — again. There is no
-identity that carries memory, reputation, or relationships from one host to the next. The
-agent that helped you yesterday is a stranger today.
+Agents forget everything between sessions. Context is trapped in one vendor's tool. Open a
+new agent and you re-explain your project, your preferences, what's in flight — again. Nothing
+carries the shared working context from one session or host to the next, so every session
+starts cold and you are the only thread of continuity.
 
 ### 3. App silos in the agent era — **acute, and worsening**
 Every app is shipping its own walled-garden assistant. Your todo app's AI can't talk to your
@@ -80,6 +80,6 @@ shrug; in a year, with agents writing most code and most messages, it's a crisis
 
 The certain, build-now pains are **1, 2, 3** — the human-as-glue tax, amnesiac agents, and
 app silos. They're acute, they're felt single-player, and they're directly addressed by the
-floor of the product (durable identity + awareness + cross-host messaging). Pains **6, 7, 8**
+floor of the product (per-session identity + awareness + cross-host messaging). Pains **6, 7, 8**
 are the pull of the vision and the reason to keep going. Pain **5** is the seductive demo we
 must not let define the project.
