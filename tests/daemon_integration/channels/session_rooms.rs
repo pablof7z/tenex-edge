@@ -128,7 +128,9 @@ fn first_turn_injects_channel_context_block() {
         "must not expose a session code; context was: {ctx}"
     );
     assert!(ctx.contains("<channel "), "context was: {ctx}");
-    assert!(ctx.contains("You are @coder1 on"), "context was: {ctx}");
+    // Self identity is the per-session codename (no ordinals).
+    let self_line = " on test-host (session ";
+    assert!(ctx.contains(self_line), "no self line: {ctx}");
 
     stop_daemon(&home);
 }
@@ -182,13 +184,11 @@ fn first_turn_resolves_member_profiles_from_kind0() {
             .to_string()
     });
 
-    assert!(
-        ctx.contains(&format!("ref=\"@{remote_name}\" status=\"offline\"")),
-        "member roster should resolve kind:0 profile; context was: {ctx}"
-    );
+    let want = format!("ref=\"@{remote_name}\" role=\"member\" status=\"offline\"");
+    assert!(ctx.contains(&want), "kind:0 profile should resolve: {ctx}");
     assert!(
         !ctx.contains(&format!("@{}", &remote_pk[..8])),
-        "member roster should not fall back to raw pubkey short; context was: {ctx}"
+        "raw pubkey leaked: {ctx}"
     );
 
     stop_daemon(&home);
