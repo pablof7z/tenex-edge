@@ -53,22 +53,11 @@ fn session_start_without_tenex_private_key_generates_key_and_provisions_channel(
         }),
         "background readiness should grant generated management and user admin keys"
     );
-    let members = Store::open(&home.store_path())
-        .unwrap()
-        .list_channel_members("tmp")
-        .unwrap();
-    assert!(
-        members
-            .iter()
-            .any(|m| m.pubkey == backend_pk && m.role == "admin"),
-        "generated management key should be an admin of the channel group"
-    );
-    assert!(
-        members
-            .iter()
-            .any(|m| m.pubkey == user_pk && m.role == "admin"),
-        "whitelisted user key should be repaired as channel admin"
-    );
+    // NOTE: the `wait_until` above IS the assertion — it polls until both admin
+    // grants are present. Do NOT re-read a fresh instantaneous snapshot and
+    // assert on it: the relay's member set converges (and can transiently flap)
+    // during initial provisioning, so a bare re-read races that convergence
+    // (TOCTOU) even after the wait just observed the grant.
 
     let store = Store::open(&home.store_path()).unwrap();
     assert!(
@@ -144,16 +133,10 @@ fn generated_management_key_self_grants_on_existing_user_owned_channel() {
             test_log(&home, "logs/group-mgmt.log")
         );
     }
-    let members = Store::open(&home.store_path())
-        .unwrap()
-        .list_channel_members(&channel)
-        .unwrap();
-    assert!(
-        members
-            .iter()
-            .any(|m| m.pubkey == backend_pk && m.role == "admin"),
-        "generated management key should be self-granted admin on the existing group"
-    );
+    // The `wait_until` above IS the assertion (it polls until the self-grant
+    // materializes). A bare re-read here would race the relay's converging member
+    // snapshot (TOCTOU): the wait can observe the admin grant and a fresh read a
+    // moment later miss it while the set is still flapping toward convergence.
 
     stop_daemon(&home);
 }

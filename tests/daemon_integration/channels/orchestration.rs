@@ -30,10 +30,18 @@ fn orchestration_session_uses_existing_group_without_minting() {
             channel = Store::open(&home.store_path())
                 .and_then(|store| store.get_channel(&rec.channel_h))
                 .unwrap_or(None);
-            channel.is_some()
+            // The channel row can materialize (from the 39002 members snapshot)
+            // BEFORE its 39000 metadata (name/parent) arrives, so wait for the
+            // full metadata rather than mere row existence — otherwise the
+            // name/parent asserts below race the relay.
+            channel
+                .as_ref()
+                .map(|c| c.name == "issue-42" && c.parent == "tmp")
+                .unwrap_or(false)
         }),
-        "channel row {} did not materialize; daemon_log={}",
+        "channel row {} did not materialize with name+parent; got={:?}; daemon_log={}",
         rec.channel_h,
+        channel,
         std::fs::read_to_string(home.dir.path().join("daemon.log"))
             .unwrap_or_else(|e| format!("<{e}>"))
     );
