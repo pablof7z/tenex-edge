@@ -8,6 +8,12 @@ use std::time::{Duration, Instant};
 pub struct TestRelay {
     child: Child,
     pub url: String,
+    /// Data dir to remove on drop (NIP-29 relay only). `nak serve` is in-memory
+    /// and leaves nothing behind, so it stays `None`. Without this, every
+    /// `start_nip29_relay` leaked its `nip29-relay-test-<port>` dir — thousands
+    /// accumulated across runs and, combined with the relay's 100 GB LMDB map
+    /// reservation, eventually starved the temp filesystem.
+    data_dir: Option<PathBuf>,
 }
 
 fn nak_bin() -> PathBuf {
@@ -115,31 +121,34 @@ impl TestRelay {
             if TcpStream::connect(("127.0.0.1", port)).is_ok() {
                 break;
             }
+            // On the startup-failure paths the `TestRelay` is never constructed,
+            // so `Drop` can't reclaim the data dir. Build the message (it reads
+            // the log files under `data`) BEFORE removing the dir, then panic.
             if let Some(status) = child.try_wait().expect("poll NIP-29 relay") {
-                panic!(
-                    "{}",
-                    nip29_failure_message(
-                        &bin,
-                        port,
-                        &data,
-                        &status.to_string(),
-                        &stdout_path,
-                        &stderr_path
-                    )
+                let msg = nip29_failure_message(
+                    &bin,
+                    port,
+                    &data,
+                    &status.to_string(),
+                    &stdout_path,
+                    &stderr_path,
                 );
+                let _ = std::fs::remove_dir_all(&data);
+                panic!("{msg}");
             }
             if Instant::now() > deadline {
-                panic!(
-                    "{}",
-                    nip29_failure_message(
-                        &bin,
-                        port,
-                        &data,
-                        "still running after startup deadline",
-                        &stdout_path,
-                        &stderr_path
-                    )
+                let msg = nip29_failure_message(
+                    &bin,
+                    port,
+                    &data,
+                    "still running after startup deadline",
+                    &stdout_path,
+                    &stderr_path,
                 );
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = std::fs::remove_dir_all(&data);
+                panic!("{msg}");
             }
             std::thread::sleep(Duration::from_millis(50));
         }
@@ -147,6 +156,7 @@ impl TestRelay {
         TestRelay {
             child,
             url: format!("ws://127.0.0.1:{port}"),
+            data_dir: Some(data),
         }
     }
 }
@@ -179,6 +189,7 @@ impl TestRelay {
         TestRelay {
             child,
             url: format!("ws://localhost:{port}"),
+            data_dir: None,
         }
     }
 }
@@ -187,5 +198,10 @@ impl Drop for TestRelay {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+        // Reclaim the relay's data dir so repeated runs don't leak thousands of
+        // `nip29-relay-test-<port>` trees (each with a large sparse LMDB map).
+        if let Some(dir) = &self.data_dir {
+            let _ = std::fs::remove_dir_all(dir);
+        }
     }
 }
