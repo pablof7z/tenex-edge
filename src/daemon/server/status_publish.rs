@@ -23,7 +23,7 @@ pub(in crate::daemon::server) fn spawn_outbox_drainer(state: Arc<DaemonState>) {
             // Publish the backlog while we keep making progress (so a startup
             // burst clears fast); stop if a whole batch failed to avoid a tight spin.
             loop {
-                let items = state.with_store(|s| s.peek_outbox(32).unwrap_or_default());
+                let items = state.with_store(|s| s.peek_outbox(32, now_secs()).unwrap_or_default());
                 if items.is_empty() {
                     break;
                 }
@@ -50,7 +50,13 @@ pub(in crate::daemon::server) fn spawn_outbox_drainer(state: Arc<DaemonState>) {
                                 progressed = true;
                             }
                             Err(e) => {
-                                apply_publish_failure(&state, item.local_id, &ev.id.to_hex(), e);
+                                apply_publish_failure(
+                                    &state,
+                                    item.local_id,
+                                    item.retries,
+                                    &ev.id.to_hex(),
+                                    e,
+                                );
                             }
                         },
                         Err(e) => {
@@ -59,6 +65,7 @@ pub(in crate::daemon::server) fn spawn_outbox_drainer(state: Arc<DaemonState>) {
                             apply_publish_failure(
                                 &state,
                                 item.local_id,
+                                item.retries,
                                 "",
                                 anyhow::anyhow!("bad event json: {e}"),
                             );
@@ -80,19 +87,29 @@ pub(in crate::daemon::server) fn spawn_outbox_drainer(state: Arc<DaemonState>) {
 fn apply_publish_failure(
     state: &Arc<DaemonState>,
     local_id: i64,
+    retries: i64,
     event_id: &str,
     error: anyhow::Error,
 ) {
+    let now = now_secs();
     let message = format!("{error:#}");
     let fact = crate::reconcile::InputFact::RelayPublishAccepted {
         local_id,
         event_id: event_id.to_string(),
         accepted: false,
         error: Some(message),
-        at: now_secs(),
+        at: now,
     };
+    // Records the failure + bumps `retries` (row stays 'pending').
     if let Err(e) = crate::outbox_seam::drive(&state.outbox, &state.store, "relay_publish", fact) {
         tracing::error!(error = %e, "outbox publish failure was not applied");
+    }
+    // Back the row off before it can be re-peeked, so a wedged/unreachable relay
+    // can't induce a per-notify retry storm (issue #295). `retries` here is the
+    // pre-bump attempt count, which is the right exponent for the first delay.
+    let next_attempt_at = now + crate::state::outbox_retry_delay_secs(retries, local_id);
+    if let Err(e) = state.with_store(|s| s.schedule_outbox_retry(local_id, next_attempt_at)) {
+        tracing::error!(error = %e, local_id, "failed to schedule outbox retry backoff");
     }
 }
 
