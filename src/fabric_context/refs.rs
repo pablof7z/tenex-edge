@@ -9,6 +9,30 @@ pub(super) fn display_name(store: &Store, channel: &str) -> String {
         .unwrap_or_else(|| channel.to_string())
 }
 
+/// The codename-bearing member reference: `codename` (local) / `codename@host`
+/// (remote), where `codename = friendly_short_code(session_id)`. Shared by the
+/// legacy (`people`) and pure (`assemble`) member-row paths so they can never
+/// drift. `host` is the member's raw profile host (empty ⇒ treated as local).
+pub(super) fn codename_ref(session_id: &str, host: &str, local_host: &str) -> String {
+    crate::idref::agent_ref_from(
+        &crate::util::friendly_short_code(session_id),
+        host,
+        local_host,
+    )
+}
+
+/// The raw profile host for a pubkey (empty when unknown). Kept separate from
+/// [`pubkey_ref`] so the codename-ref path can reconstruct `codename@host`
+/// identically in both the legacy and pure derivations.
+pub(super) fn profile_host(store: &Store, pubkey: &str) -> String {
+    store
+        .get_profile(pubkey)
+        .ok()
+        .flatten()
+        .map(|p| p.host)
+        .unwrap_or_default()
+}
+
 pub(super) fn pubkey_ref(store: &Store, pubkey: &str, local_host: &str) -> String {
     let profile = store.get_profile(pubkey).ok().flatten();
     let slug = profile

@@ -1,9 +1,9 @@
 use super::model::{MemberRow, PresenceRow};
-use super::refs::pubkey_ref;
+use super::refs::{codename_ref, profile_host, pubkey_ref};
 use super::FabricContextInput;
 use crate::state::{Status, Store};
 use crate::util::relative_time;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 pub(super) fn member_rows(
     store: &Store,
@@ -11,42 +11,51 @@ pub(super) fn member_rows(
     input: &FabricContextInput<'_>,
 ) -> Vec<MemberRow> {
     let statuses = status_map(store, channel, input.now);
-    let pubkeys = store
+    // Keyed by pubkey so iteration order matches the pure `assemble` path (which
+    // reads the same relay roster into a `BTreeMap<pubkey, role>`).
+    let roster = store
         .list_channel_members(channel)
         .unwrap_or_default()
         .into_iter()
-        .map(|m| m.pubkey)
-        .collect::<BTreeSet<_>>();
-    pubkeys
+        .map(|m| (m.pubkey, m.role))
+        .collect::<BTreeMap<_, _>>();
+    roster
         .into_iter()
         // Exclude this daemon's own management key by identity (reliable on a cold
         // cache), plus any pubkey whose cached kind:0 declares itself a backend
         // (covers remote backends). Human operators and admins are kept.
-        .filter(|pk| pk.as_str() != input.backend_pubkey && !is_backend(store, pk))
-        .map(|pk| {
-            let status = statuses
-                .get(&pk)
+        .filter(|(pk, _)| pk.as_str() != input.backend_pubkey && !is_backend(store, pk))
+        .map(|(pk, role)| {
+            let status = statuses.get(&pk);
+            let status_text = status
                 .map(status_text)
                 .unwrap_or_else(|| "offline".to_string());
-            let seen = statuses
-                .get(&pk)
+            let seen = status
                 .map(|s| relative_time(s.last_seen, input.now))
                 .unwrap_or_else(|| "unknown".to_string());
+            let reference = if pk == input.self_pubkey {
+                crate::idref::agent_ref_from(input.self_slug, input.local_host, input.local_host)
+            } else {
+                member_reference(store, &pk, status, input.local_host)
+            };
             MemberRow {
-                reference: if pk == input.self_pubkey {
-                    crate::idref::agent_ref_from(
-                        input.self_slug,
-                        input.local_host,
-                        input.local_host,
-                    )
-                } else {
-                    pubkey_ref(store, &pk, input.local_host)
-                },
-                status,
+                reference,
+                role,
+                status: status_text,
                 seen,
             }
         })
         .collect()
+}
+
+/// A non-self member's reference: `@codename@host` when its owning session is
+/// known (a live status carrying a session id), else the slug/npub fallback.
+/// Mirrors `assemble::member_reference` exactly so both paths agree.
+fn member_reference(store: &Store, pk: &str, status: Option<&Status>, local_host: &str) -> String {
+    if let Some(s) = status.filter(|s| !s.session_id.is_empty()) {
+        return codename_ref(&s.session_id, &profile_host(store, pk), local_host);
+    }
+    pubkey_ref(store, pk, local_host)
 }
 
 pub(super) fn presence_rows(

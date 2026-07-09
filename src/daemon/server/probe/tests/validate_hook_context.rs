@@ -221,7 +221,7 @@ fn local_agents_and_members_inputs() -> ViewInputs {
             "force": true
         },
         "members": {
-            "roster": { "room": ["pk1", "pk2"] },
+            "roster": { "room": { "pk1": "member", "pk2": "member" } },
             "refs": { "pk1": "coder", "pk2": "reviewer" },
             "backend": []
         },

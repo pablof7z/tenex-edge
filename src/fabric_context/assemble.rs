@@ -12,7 +12,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 
-use super::capture::{EvCap, MsgBundle, StatusCap, ViewInputs};
+use super::capture::{EvCap, MembersInput, MsgBundle, StatusCap, ViewInputs};
 use super::model::*;
 use crate::util::relative_time;
 
@@ -141,31 +141,46 @@ fn member_rows(inputs: &ViewInputs, channel: &str, now: u64) -> Vec<MemberRow> {
         .unwrap_or_default();
     let status_map = live_status_map(statuses, now);
 
-    let pubkeys = members.roster.get(channel).cloned().unwrap_or_default();
-    pubkeys
+    let roster = members.roster.get(channel).cloned().unwrap_or_default();
+    roster
         .into_iter()
-        .filter(|pk| !members.backend.contains(pk))
-        .map(|pk| {
-            let status = status_map
-                .get(&pk)
+        .filter(|(pk, _)| !members.backend.contains(pk))
+        .map(|(pk, role)| {
+            let status = status_map.get(&pk);
+            let status_text = status
                 .map(|s| status_text(s))
                 .unwrap_or_else(|| "offline".to_string());
-            let seen = status_map
-                .get(&pk)
+            let seen = status
                 .map(|s| relative_time(s.last_seen, now))
                 .unwrap_or_else(|| "unknown".to_string());
             let reference = if pk == *self_pubkey {
                 inputs.meta.self_ref.clone()
             } else {
-                members.refs.get(&pk).cloned().unwrap_or_default()
+                member_reference(members, &inputs.meta.local_host, &pk, status)
             };
             MemberRow {
                 reference,
-                status,
+                role,
+                status: status_text,
                 seen,
             }
         })
         .collect()
+}
+
+/// A non-self member's reference: `@codename@host` when its owning session is
+/// known (a live status carrying a session id joins the codename), else the
+/// slug/npub `pubkey_ref` fallback (human operators, offline sessions).
+fn member_reference(
+    members: &MembersInput,
+    meta_local_host: &str,
+    pk: &str,
+    status: Option<&&StatusCap>,
+) -> String {
+    if let Some(s) = status.filter(|s| !s.session_id.is_empty()) {
+        return super::refs::codename_ref(&s.session_id, &s.host, meta_local_host);
+    }
+    members.refs.get(pk).cloned().unwrap_or_default()
 }
 
 fn presence_rows(inputs: &ViewInputs, channel: &str, cursor: u64, now: u64) -> Vec<PresenceRow> {
