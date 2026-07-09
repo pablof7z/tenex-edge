@@ -11,13 +11,11 @@ pub(super) fn parse_command(body: &str) -> Result<ManagementCommand> {
     let words = shlex::split(&body).context("could not parse command quoting")?;
     match words.as_slice() {
         [verb, spec] if eq(verb, "add") => {
-            let target = crate::idref::parse_agent_backend_ref(spec)
+            crate::idref::parse_agent_backend_ref(spec)
                 .with_context(|| format!("malformed agent spec {spec:?}"))?;
-            if target.backend.is_none() {
-                anyhow::bail!("add requires agent@backend");
-            }
             Ok(ManagementCommand::Add { spec: spec.clone() })
         }
+        [a, b] if eq(a, "list") && eq(b, "agents") => Ok(ManagementCommand::ListAgents),
         [a, b] if eq(a, "list") && eq(b, "sessions") => {
             Ok(ManagementCommand::ListSessions {
                 all_channels: false,
@@ -50,7 +48,7 @@ pub(super) fn parse_command(body: &str) -> Result<ManagementCommand> {
         }
         [] => anyhow::bail!("empty management command"),
         _ => anyhow::bail!(
-            "unsupported management command; supported: add agent@backend, list sessions, list all sessions, kill <session-id>, archive #channel"
+            "unsupported management command; supported: add agent[@backend], list agents, list sessions, list all sessions, kill <session-id>, archive #channel"
         ),
     }
 }
@@ -126,7 +124,17 @@ mod tests {
                 spec: "coder@laptop".to_string()
             }
         );
-        assert!(parse_command("add coder").is_err());
+        assert_eq!(
+            parse_command("add coder").unwrap(),
+            ManagementCommand::Add {
+                spec: "coder".to_string()
+            }
+        );
+        assert!(parse_command("add coder@").is_err());
+        assert_eq!(
+            parse_command("list agents").unwrap(),
+            ManagementCommand::ListAgents
+        );
         assert_eq!(
             parse_command("list sessions").unwrap(),
             ManagementCommand::ListSessions {

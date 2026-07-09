@@ -6,6 +6,7 @@ use crate::fabric::provider::chat::OutboundChatRecord;
 use anyhow::{Context, Result};
 use nostr_sdk::prelude::Event;
 
+mod list_agents;
 mod parse;
 mod sessions;
 
@@ -14,6 +15,7 @@ use parse::parse_command;
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ManagementCommand {
     Add { spec: String },
+    ListAgents,
     ListSessions { all_channels: bool },
     Kill { session_id: String },
     Archive { channel_ref: String },
@@ -96,6 +98,7 @@ async fn execute_claimed(
     }
     match command {
         ManagementCommand::Add { spec } => add_agent(state, channel_h, &spec).await,
+        ManagementCommand::ListAgents => list_agents::list_agents(state),
         ManagementCommand::ListSessions { all_channels } => {
             sessions::list_sessions(state, (!all_channels).then_some(channel_h))
         }
