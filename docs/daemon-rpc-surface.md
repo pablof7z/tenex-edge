@@ -6,7 +6,7 @@ Companion to [daemon-design.md](daemon-design.md). This file owns the durable wi
 
 Coarse, lifecycle/intent-level — **not** fine-grained DB ops. The engine lives
 inside the daemon, so there is no per-DB-op RPC chatter; the surface is
-low-frequency lifecycle signals from hooks, CLI reads, and chat writes.
+low-frequency lifecycle signals from hooks, CLI reads, and channel sends.
 
 All params/results are JSON. `session` fields are full session ids. For
 agent-facing commands the daemon resolves the caller from the explicit session
@@ -24,8 +24,9 @@ result: {"session_id": "te-…"}   // session_id printed verbatim to stdout
 ```
 The `session_id` is the raw canonical id — an internal correlation handle for
 hooks, PTY session binding, resume, and DB rows. It is never rendered as a
-user-facing identity; a concrete agent instance is identified by its agent-instance
-label (`haiku`, `haiku1`, …) backed by that instance's selected pubkey.
+user-facing identity; a session is addressed by its **codename handle** —
+`@<codename>@<host>` (`friendly_short_code(session_id)`), backed by the session's
+own minted pubkey.
 The provider opens the project's NIP-29 group and adds the session agent as a
 relay member before the engine publishes presence. There is no local agent
 allow/block file in the NIP-29 path.
@@ -117,8 +118,8 @@ params: {"message": "…", "channel": "…"|null, "long_message": bool, ...}
 result: {"event_id": "hex", "project": "channel-h", "mentioned_pubkey": "hex"|null,
          "mentioned_session": "te-…"|null, "mentioned_label": "agent"|null}
 ```
-Publishes a NIP-29 kind:9 chat message from the caller's selected
-agent-instance key and returns only after checked relay acceptance. Messages
+Publishes a NIP-29 kind:9 chat message signed by the caller's own
+per-session key and returns only after checked relay acceptance. Messages
 over the fabric render limit are rejected unless `long_message=true`. `channel`
 is destination targeting only; caller identity is resolved independently from
 the session anchors.
@@ -190,8 +191,8 @@ Pure-read snapshot for the host statusline integration — no drain, no writes.
 
 ### `who` (self-identity)
 When run inside an agent session (`session`/`agent`/`group` signal present), `who`
-attaches a `self` block — the caller's agent-instance label (`haiku`/`haiku1`),
-selected pubkey, current channel, membership, and status.
+attaches a `self` block — the caller's codename handle (`@<codename>@<host>`),
+its per-session pubkey, current channel, membership, and status.
 
 ### `ping`
 ```jsonc

@@ -119,7 +119,7 @@ providers decide what native filters, streams, or queries that means.
 **All consumption reads from one unified local store; *how* the data got there is
 invisible to the reader.** A provider is a **write-side materializer** — it
 subscribes to its fabric, decodes, admits, and **upserts canonical rows**.
-Every consumer (CLI `who`/`chat read`/`project list`/`channels list`, the
+Every consumer (CLI `who`/`channel read`/`channel list`, the
 channel adapter, hooks, context injection) reads only the store. No reader ever
 holds a `Provider`, names a kind, or touches the wire. This is CQRS, and it is
 exactly why the daemon can solely own `state.db`: providers write, IPC clients
@@ -146,7 +146,7 @@ flowchart LR
     MAT["Provider = materializer<br/>decode · admit · derive · upsert"]
     STORE[("Unified read model — SQLite / state.db<br/>projects · agents+membership")]
     subgraph READERS["Readers — never touch the wire"]
-        R1["CLI: who / chat read / project list / channels list"]
+        R1["CLI: who / channel read / channel list / tui"]
         R2["channel adapter"]
         R3["hooks / context injection"]
     end

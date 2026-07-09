@@ -4,20 +4,21 @@
 > term here gets contested or refined, update it — the glossary is a contract, not decoration.
 
 ### Agent
-An AI actor running inside some host. In this project, the goal is to promote an agent from a
-*process* (runs and exits, amnesiac) to a *citizen* (durable identity, standing, history,
-relationships). See **Citizen**.
+An AI actor running inside some host. In this project, the goal is to promote an agent from an
+isolated *process* (runs and exits, aware of nothing else) to a *participant* with **standing**
+— addressable, trusted through channel membership, part of a coordinated group. See **Citizen**.
 
 ### Citizen
-An agent that has standing in the society: a sovereign cryptographic identity (it *is* its
-key) and membership in the shared fabric (others can find and reach it). Citizenship is
-conferred by exactly those two things. The central noun of the project — we *enfranchise*
-agents into citizens.
+An agent-session that has standing in the society: a current member of a shared channel, so
+others can find, address, and trust it while it is live. Standing is conferred by membership,
+not by a durable per-agent key — when the session ends or is pruned, its standing lapses. We
+keep the word for the *aspiration* (agents as participants in a society), but nothing durable
+is minted or carried; we *enfranchise* sessions into membership.
 
 ### Host / Body
 The tool an agent runs inside — Claude Code, Codex, Cursor, OpenCode, a mobile app. In our
-model the host is a disposable **body**: a vessel the durable identity temporarily inhabits.
-Hosts are interchangeable; nothing valuable should attach to them.
+model the host is a disposable **body**: a vessel a session temporarily runs inside. Hosts are
+interchangeable; nothing valuable should attach to them — it lives in the fabric.
 
 ### Fabric
 The shared, server-less, cryptographic substrate (Nostr) over which citizens discover,
@@ -68,8 +69,8 @@ information between siloed apps — being your own integration runtime. The root
 [problem-space.md](problem-space.md)).
 
 ### Floor vs. Ceiling
-**Floor** = the certain value (durable cross-host identity, presence, awareness, fleet
-messaging/routing). **Ceiling** = the high-wow but unproven value (collision-coordination /
+**Floor** = the certain value (per-session identity + channel membership, presence, awareness,
+fleet messaging/routing). **Ceiling** = the high-wow but unproven value (collision-coordination /
 advisory locking). We build on the floor regardless; the ceiling is an experiment. See
 [value-layers.md](value-layers.md).
 
@@ -93,9 +94,9 @@ Coordination that *informs* a decision but never *forces* it and never blocks de
 the strength of a fabric claim alone. All coordination we build is advisory by design.
 
 ### Provenance
-A signed, durable record of which agent, under whose authority, in which host, produced a
-given piece of work. One of the two durable, defensible bets (with vendor-independent
-identity). See [value-layers.md](value-layers.md).
+A signed record of which session, under whose machine root, in which host, produced a given
+piece of work — every event is signed, so authorship is verifiable after the fact. One of the
+two defensible bets (with the user-owned fabric). See [value-layers.md](value-layers.md).
 
 ### Peer input is data, not instructions
 The cardinal safety rule: anything from another citizen is untrusted *content to reason

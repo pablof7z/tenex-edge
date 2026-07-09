@@ -20,13 +20,13 @@ betting the project on the unproven parts.
 
 ## Rung 0 — Prove the floor, single-player, locally
 
-The thinnest thing that demonstrates the core loop with **zero network risk**: durable agent
-identity + awareness of your own agents on *one device*. This is essentially lifting what
-`proactive-context` already does (a local cross-agent awareness board) and giving the agents
-a durable identity. No relay required, no trust model, no consensus.
+The thinnest thing that demonstrates the core loop with **zero network risk**: per-session
+agent identity + awareness of your own agents on *one device*. This is essentially lifting what
+`proactive-context` already does (a local cross-agent awareness board) and giving each session
+a signed identity. No relay required, no trust model, no consensus.
 
-- **Delivers:** an agent that is a stable citizen across sessions on one machine, and agents
-  that can see what the others are doing.
+- **Delivers:** agents that can see what the others are doing on one machine, each session
+  addressable under its own handle.
 - **Proves:** the identity + awareness primitives are right before any distributed complexity.
 - **Gate to next:** the local loop feels valuable on its own.
 
@@ -38,8 +38,8 @@ worth building. See [bets-and-open-questions.md](bets-and-open-questions.md).)*
 
 Lift the same state onto the shared fabric (Nostr) so it spans *your* devices. Work and
 context follow *you*, not the machine. Your phone can see what your laptop's agents are doing.
-This is where "the host is just a body" becomes tangible — same citizen, different vessel,
-different device.
+This is where "the host is just a body" becomes tangible — the awareness follows the shared
+fabric, not the vessel or the device.
 
 - **Delivers:** cross-device presence and identity; the end of re-explaining yourself to each
   new session/machine; work that follows you.

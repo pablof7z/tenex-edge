@@ -69,10 +69,13 @@ best case); others are thinner and more volatile; some hosts aren't deeply hooka
 What's the real maintenance tax, and which hosts are worth supporting at which depth? (Tenet
 #7: advertise the tier honestly; never bet the product on one host.)
 
-### Q8 — Identity granularity: one identity per person? per agent? per role? per session?
-Sessions are too churny to deserve durable identity; the person is too coarse to be the unit
-of reputation. The likely answer is "durable per *agent*, ephemeral per *session*, anchored
-to a person" — but the exact model (and how a person attests their agents) is unsettled.
+### Q8 — Identity granularity: one identity per person? per agent? per role? per session? — *resolved*
+Settled toward **per session**: each session mints its own key from the machine's root secret
+and shows up under a friendly `@codename@host` handle; there is no durable per-agent keypair
+and no ordinal slots. Standing isn't carried by a key at all — it's *current channel
+membership*, pruned when a session goes quiet. What stays open is reputation: with identity
+deliberately ephemeral, any durable reputation must attach to the person or the channel, not
+the agent-session — and how that accrues is unsettled.
 
 ## Strategy
 

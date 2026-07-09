@@ -12,8 +12,8 @@ them to work.
 
 ### Product A — A nervous system for *my own* fleet
 My keys, my machines, my agents, and (by easy extension) my household and team under one
-trust umbrella. Durable cross-host identity; presence and awareness of what my agents are
-doing across devices; my agents routing work to each other and to me; work that follows me
+trust umbrella. Per-session identity and channel membership; presence and awareness of what my
+agents are doing across devices; my agents routing work to each other and to me; work that follows me
 from one host/device to the next.
 
 - **Adoption:** single-player. One person, one set of keys. Value on day one with zero
@@ -62,7 +62,7 @@ Two clarifications keep us honest:
 ## What we build first, concretely
 
 **Product A, single-player, no cross-person — not even read-only.** The "I'd use this daily"
-claim is strongest when it's true for someone with zero collaborators. Durable identity +
+claim is strongest when it's true for someone with zero collaborators. Identity +
 fleet awareness + my-agents-route-to-each-other-and-to-me is a complete, valuable product on
 its own. Cross-person is the wedge for *growth*, not seasoning for the MVP.
 

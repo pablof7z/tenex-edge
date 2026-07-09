@@ -10,7 +10,7 @@ Three things are already on the fabric (Nostr, `relay.tenex.chat`) today, built 
 
 ### TENEX (proper)
 The full multi-agent coordination system this project inverts. It hosts its own agents in
-Rust over Nostr — every agent has a sovereign keypair, agents delegate via signed events,
+Rust over Nostr — every actor signs with its own keypair, agents delegate via signed events,
 projects are addressable coordinates, state is crash-first on disk. It establishes the
 *vocabulary* and proves the substrate at scale. tenex-edge generalizes TENEX's "agents are
 Nostr citizens" from "agents TENEX hosts" to "any agent, any host, anyone's."
@@ -60,8 +60,8 @@ exists; we're issuing passports and opening a port of entry.
 
 ## The strategic implication
 
-Because the fabric is ours and already populated, the durable asset (tenet #2 in
-[principles-and-tenets.md](principles-and-tenets.md)) isn't hypothetical — the identity layer
-and the fabric have *real citizens on them today*. If a host vendor copies our plugin
+Because the fabric is ours and already populated, the defensible asset (tenet #2 in
+[principles-and-tenets.md](principles-and-tenets.md)) isn't hypothetical — the fabric and its
+shared awareness have *real citizens on them today*. If a host vendor copies our plugin
 tomorrow, the society — TENEX, the podcast agent, everything enfranchised since — keeps
 living where it already lives. The straw is replaceable; the milkshake is already poured.
