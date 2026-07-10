@@ -3,11 +3,12 @@ use super::*;
 
 mod message;
 mod resolve;
+mod session;
 mod wait;
-use resolve::{local_session, remote_session_from_status, RemoteSession};
+use resolve::RemoteSession;
+use session::invite_session;
 use wait::{
-    channel_member_pubkeys, live_session_ids, wait_local_agent_online, wait_local_session_online,
-    wait_remote_agent_online, wait_remote_session_online,
+    channel_member_pubkeys, live_session_ids, wait_local_agent_online, wait_remote_agent_online,
 };
 
 #[derive(serde::Deserialize)]
@@ -226,70 +227,6 @@ pub(super) async fn invite_agent(
         "online_agent": online,
         "channel": channel_h,
         "host": state.host,
-    }))
-}
-
-async fn invite_session(
-    state: &Arc<DaemonState>,
-    channel_h: &str,
-    work_root: &str,
-    session_id: &str,
-) -> Result<serde_json::Value> {
-    if let Some(rec) = local_session(state, session_id) {
-        let resume_id = super::pty_rpc::resume_token_for(&rec).with_context(|| {
-            format!(
-                "session {} has no resume token (not resumable)",
-                rec.session_id
-            )
-        })?;
-        super::pty_rpc::provision_before_spawn(state, &rec.agent_slug, work_root, Some(channel_h))
-            .await?;
-        let pty_id = crate::session_host::resume_agent_in_channel(
-            state,
-            &rec.agent_slug,
-            work_root,
-            channel_h,
-            &resume_id,
-        )
-        .await?;
-        let online = wait_local_session_online(state, channel_h, &rec.session_id).await?;
-        return Ok(serde_json::json!({
-            "pty_id": pty_id,
-            "session_id": rec.session_id,
-            "agent": rec.agent_slug,
-            "online_agent": online,
-            "channel": channel_h,
-            "host": state.host,
-        }));
-    }
-
-    let remote = remote_session_from_status(state, session_id)?;
-    if remote.backend == state.host {
-        anyhow::bail!(
-            "session {} appears to belong to this backend, but no local session row exists",
-            remote.session_id
-        );
-    }
-    let backend_pubkey = resolve_backend_pubkey(state, &remote.backend).await?;
-    ensure_backend_admin(state, channel_h, &backend_pubkey).await?;
-    let event_id = publish_invite_orchestration(
-        state,
-        channel_h,
-        crate::fabric::nip29::orchestration::AddTarget {
-            backend_pubkey,
-            slug: remote.slug.clone(),
-            session_id: Some(remote.session_id.clone()),
-        },
-    )
-    .await?;
-    let online = wait_remote_session_online(state, channel_h, &remote).await?;
-    Ok(serde_json::json!({
-        "pty_id": "",
-        "session_id": remote.session_id,
-        "agent": remote.slug,
-        "online_agent": online,
-        "channel": channel_h,
-        "orchestration_event_id": event_id,
     }))
 }
 
