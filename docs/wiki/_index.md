@@ -84,7 +84,7 @@ Last updated: 2026-07-10
 | [2026-07-10-b70718e17221-cb4e41ba-2-residual-per-test-flake-investigation-found](research/2026-07-10-b70718e17221-cb4e41ba-2-residual-per-test-flake-investigation-found.md) | 2026-07-10 | Residual per-test flake investigation: found and fixed 6 propagation races + 1 production bug across ~85 runs; verdict = 20/20 consecutive green, all flakes eliminated. | a067926378f0c4ada (residual de-flake agent) |
 | [AGENTS](research/AGENTS.md) |  |  |  |
 
-## Episode Cards (67 cards)
+## Episode Cards (68 cards)
 
 | Card | Date | Title | Salience | Status |
 |------|------|-------|----------|--------|
@@ -144,7 +144,8 @@ Last updated: 2026-07-10
 | [2026-07-10-4d78f854d5e5-873fdd2e-1-chief-of-staff-home-directory-must](episodes/2026-07-10-4d78f854d5e5-873fdd2e-1-chief-of-staff-home-directory-must.md) | 2026-07-10 | Chief-of-staff home directory must be symlinked into a git repo, not a local dir | architecture | active |
 | [2026-07-10-4d78f854d5e5-873fdd2e-1-workflows-must-live-in-a-git](episodes/2026-07-10-4d78f854d5e5-873fdd2e-1-workflows-must-live-in-a-git.md) | 2026-07-10 | Workflows must live in a git repo, not a local home directory | architecture | superseded |
 | [2026-07-10-4d78f854d5e5-873fdd2e-2-replace-static-list-workflows-instruction-with](episodes/2026-07-10-4d78f854d5e5-873fdd2e-2-replace-static-list-workflows-instruction-with.md) | 2026-07-10 | Replace static 'list workflows' instruction with scripted session-start entrypoint | architecture | active |
-| [2026-07-10-697ef986f14b-af134d53-1-mcp-caller-identity-bespoke-who-rs](episodes/2026-07-10-697ef986f14b-af134d53-1-mcp-caller-identity-bespoke-who-rs.md) | 2026-07-10 | MCP caller identity: bespoke who.rs deriver replaced by real session registration via shared anchor path | reversal | active |
+| [2026-07-10-697ef986f14b-af134d53-1-mcp-caller-identity-bespoke-deriver-replaced](episodes/2026-07-10-697ef986f14b-af134d53-1-mcp-caller-identity-bespoke-deriver-replaced.md) | 2026-07-10 | MCP caller identity: bespoke deriver replaced by real session registration | reversal | active |
+| [2026-07-10-697ef986f14b-af134d53-1-mcp-caller-identity-bespoke-who-rs](episodes/2026-07-10-697ef986f14b-af134d53-1-mcp-caller-identity-bespoke-who-rs.md) | 2026-07-10 | MCP caller identity: bespoke who.rs deriver replaced by real session registration via shared anchor path | reversal | superseded |
 | [2026-07-10-697ef986f14b-af134d53-1-mcp-transport-correlation-key-mcp-session](episodes/2026-07-10-697ef986f14b-af134d53-1-mcp-transport-correlation-key-mcp-session.md) | 2026-07-10 | MCP transport correlation key: Mcp-Session-Id replaced by X-Openai-Session | product | active |
 | [2026-07-10-697ef986f14b-af134d53-2-mcp-caller-identity-must-flow-through](episodes/2026-07-10-697ef986f14b-af134d53-2-mcp-caller-identity-must-flow-through.md) | 2026-07-10 | MCP caller identity must flow through CallerAnchor, not a bolted-on deriver | architecture | superseded |
 | [2026-07-10-a62822c5d09c-fbf565a0-1-channel-read-rendering-mention-resolution-backend](episodes/2026-07-10-a62822c5d09c-fbf565a0-1-channel-read-rendering-mention-resolution-backend.md) | 2026-07-10 | Channel read rendering: mention resolution, backend-traffic filtering, whitelisted-operator label | product | active |
