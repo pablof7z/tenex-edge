@@ -4,7 +4,7 @@ date: 2026-07-10
 session: 4d65680c-ded1-47cd-a59a-4966eebe8eda
 transcript: /Users/pablofernandez/.claude/projects/-Users-pablofernandez-src-tenex-edge/4d65680c-ded1-47cd-a59a-4966eebe8eda.jsonl
 salience: architecture
-status: active
+status: superseded
 subjects:
   - mcp-caller-identity
   - client-info-name

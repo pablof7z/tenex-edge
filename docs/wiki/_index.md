@@ -84,7 +84,7 @@ Last updated: 2026-07-10
 | [2026-07-10-b70718e17221-cb4e41ba-2-residual-per-test-flake-investigation-found](research/2026-07-10-b70718e17221-cb4e41ba-2-residual-per-test-flake-investigation-found.md) | 2026-07-10 | Residual per-test flake investigation: found and fixed 6 propagation races + 1 production bug across ~85 runs; verdict = 20/20 consecutive green, all flakes eliminated. | a067926378f0c4ada (residual de-flake agent) |
 | [AGENTS](research/AGENTS.md) |  |  |  |
 
-## Episode Cards (64 cards)
+## Episode Cards (66 cards)
 
 | Card | Date | Title | Salience | Status |
 |------|------|-------|----------|--------|
@@ -139,11 +139,13 @@ Last updated: 2026-07-10
 | [2026-07-09-b70718e17221-cb4e41ba-3-per-session-key-model-inverts-shared](episodes/2026-07-09-b70718e17221-cb4e41ba-3-per-session-key-model-inverts-shared.md) | 2026-07-09 | Per-session key model inverts shared-pubkey reply-envelope rationale | root-cause | superseded |
 | [2026-07-10-45545de9b1cd-ec1a82f3-1-chatgpt-mandates-oauth-discovery-metadata-for](episodes/2026-07-10-45545de9b1cd-ec1a82f3-1-chatgpt-mandates-oauth-discovery-metadata-for.md) | 2026-07-10 | ChatGPT mandates OAuth discovery metadata for MCP server connections | root-cause | active |
 | [2026-07-10-4d65680cded1-c78c1b5f-1-mcp-caller-identity-auto-provisioning-from](episodes/2026-07-10-4d65680cded1-c78c1b5f-1-mcp-caller-identity-auto-provisioning-from.md) | 2026-07-10 | MCP caller identity auto-provisioning from clientInfo.name | architecture | superseded |
-| [2026-07-10-4d65680cded1-c78c1b5f-1-mcp-caller-identity-clientinfo-name-threading](episodes/2026-07-10-4d65680cded1-c78c1b5f-1-mcp-caller-identity-clientinfo-name-threading.md) | 2026-07-10 | MCP caller identity: clientInfo.name threading toward auto-provisioning | architecture | active |
+| [2026-07-10-4d65680cded1-c78c1b5f-1-mcp-caller-identity-clientinfo-name-threading](episodes/2026-07-10-4d65680cded1-c78c1b5f-1-mcp-caller-identity-clientinfo-name-threading.md) | 2026-07-10 | MCP caller identity: clientInfo.name threading toward auto-provisioning | architecture | superseded |
 | [2026-07-10-4d78f854d5e5-873fdd2e-1-chief-of-staff-home-dir-must](episodes/2026-07-10-4d78f854d5e5-873fdd2e-1-chief-of-staff-home-dir-must.md) | 2026-07-10 | Chief-of-staff home dir must be symlinked into a git repo, not loose local files | architecture | superseded |
 | [2026-07-10-4d78f854d5e5-873fdd2e-1-chief-of-staff-home-directory-must](episodes/2026-07-10-4d78f854d5e5-873fdd2e-1-chief-of-staff-home-directory-must.md) | 2026-07-10 | Chief-of-staff home directory must be symlinked into a git repo, not a local dir | architecture | active |
 | [2026-07-10-4d78f854d5e5-873fdd2e-1-workflows-must-live-in-a-git](episodes/2026-07-10-4d78f854d5e5-873fdd2e-1-workflows-must-live-in-a-git.md) | 2026-07-10 | Workflows must live in a git repo, not a local home directory | architecture | superseded |
 | [2026-07-10-4d78f854d5e5-873fdd2e-2-replace-static-list-workflows-instruction-with](episodes/2026-07-10-4d78f854d5e5-873fdd2e-2-replace-static-list-workflows-instruction-with.md) | 2026-07-10 | Replace static 'list workflows' instruction with scripted session-start entrypoint | architecture | active |
+| [2026-07-10-697ef986f14b-af134d53-1-mcp-transport-correlation-key-mcp-session](episodes/2026-07-10-697ef986f14b-af134d53-1-mcp-transport-correlation-key-mcp-session.md) | 2026-07-10 | MCP transport correlation key: Mcp-Session-Id replaced by X-Openai-Session | product | active |
+| [2026-07-10-697ef986f14b-af134d53-2-mcp-caller-identity-must-flow-through](episodes/2026-07-10-697ef986f14b-af134d53-2-mcp-caller-identity-must-flow-through.md) | 2026-07-10 | MCP caller identity must flow through CallerAnchor, not a bolted-on deriver | architecture | active |
 | [2026-07-10-a62822c5d09c-fbf565a0-1-channel-read-rendering-mention-resolution-backend](episodes/2026-07-10-a62822c5d09c-fbf565a0-1-channel-read-rendering-mention-resolution-backend.md) | 2026-07-10 | Channel read rendering: mention resolution, backend-traffic filtering, whitelisted-operator label | product | active |
 | [2026-07-10-a62822c5d09c-fbf565a0-2-distillation-failures-surfaced-as-throttled-agent](episodes/2026-07-10-a62822c5d09c-fbf565a0-2-distillation-failures-surfaced-as-throttled-agent.md) | 2026-07-10 | Distillation failures surfaced as throttled agent-facing warnings | product | active |
 | [2026-07-10-af454e467c4f-d0adc8b8-1-session-handle-display-reverted-from-raw](episodes/2026-07-10-af454e467c4f-d0adc8b8-1-session-handle-display-reverted-from-raw.md) | 2026-07-10 | Session handle display reverted from raw session_id to friendly codename | reversal | active |
@@ -153,7 +155,7 @@ Last updated: 2026-07-10
 | [2026-07-10-b70718e17221-cb4e41ba-2-daemon-startup-relay-connect-moved-off](episodes/2026-07-10-b70718e17221-cb4e41ba-2-daemon-startup-relay-connect-moved-off.md) | 2026-07-10 | Daemon startup: relay connect moved off critical path to background spawn | root-cause | active |
 | [2026-07-10-b70718e17221-cb4e41ba-3-integration-test-flakiness-root-cause-croissant](episodes/2026-07-10-b70718e17221-cb4e41ba-3-integration-test-flakiness-root-cause-croissant.md) | 2026-07-10 | Integration test flakiness root cause: croissant relay leaks POSIX named semaphores on SIGKILL | root-cause | active |
 
-## Nouns (219 entities)
+## Nouns (221 entities)
 
 | Noun | Name | Origin | Definition |
 |------|------|--------|------------|
@@ -282,6 +284,7 @@ Last updated: 2026-07-10
 | [orchestration-spawned-session](nouns/orchestration-spawned-session.md) | orchestration-spawned session | extracted | A session the backend launched or resumed with `TENEX_EDGE_CHANNEL` set to a |
 | [ordinal-label](nouns/ordinal-label.md) | ordinal label | extracted | An ordinal-qualified agent-instance label: agent_ordinal_label(slug, ordinal) = format!("{slug}{ordinal}"), e.g. @developer3. Ordinals are recycled per room occupancy, not durable — the label is a leasing artifact, not a permanent identity. This model was deleted in the redesign. |
 | [ordinalslot](nouns/ordinalslot.md) | OrdinalSlot | extracted | Superseded by per-session identity. Ordinals are gone: sessions are no longer |
+| [peertracked](nouns/peertracked.md) | PeerTracked | extracted | Metadata tracked per live peer session for join/leave derivation: first_seen timestamp, channel, slug, and host. |
 | [pendingattach](nouns/pendingattach.md) | PendingAttach | extracted | A struct holding a pane to attach to once the event loop yields, plus a fallback session id to resume if attaching fails because the pane is stale/gone; attaching is best-effort so a pane-not-found error never surfaces to the user. |
 | [per-session-key](nouns/per-session-key.md) | per-session key | extracted | There is no base agent key. Every session mints its own pubkey; nsec = derive(mgmt_secret, session_id). Mgmt_secret is per-machine so the same session_id on two machines produces different keys. Nothing stored as a secret except the mgmt key; any session is recoverable by re-derivation. |
 | [per-session-key-model](nouns/per-session-key-model.md) | per-session key model | extracted | There is no base agent key; all keys are created at session start. nsec = derive(mgmt_secret, session_id), where mgmt_secret is per-machine, so the same session_id on two machines yields different keys automatically. Nothing is stored as a secret except the mgmt key plus an append-only pubkey→session_id map. |
@@ -316,6 +319,7 @@ Last updated: 2026-07-10
 | [quality-gate](nouns/quality-gate.md) | quality-gate | extracted | A CI/lint/fmt/LOC ratchet gate in the project. |
 | [rawconfig](nouns/rawconfig.md) | RawConfig | extracted | Mirror of the relevant fields in ~/.tenex-edge/config.json; unknown fields are ignored so tenex-edge coexists with TENEX's larger camelCase config. |
 | [relay-profiles](nouns/relay-profiles.md) | relay_profiles | extracted | kind:0 metadata cache, keyed by pubkey. Columns include pubkey, name, slug, host, is_backend, updated_at. |
+| [resolvescope](nouns/resolvescope.md) | ResolveScope | extracted | An enum controlling how far session resolution may reach past exact anchors. `Strict` = exact anchors only (PTY session, harness id, explicit override), fails loud rather than binding a sibling — used for per-session mutations. `Channel` = exact anchors then cwd+agent scan (latest-alive in channel) — used for reads and host-facing commands. |
 | [role](nouns/role.md) | role | extracted | A name your code resolves to a model, e.g. "edge-distillation". Only roles actually read by tenex-edge's own code (via resolve_role) are meaningful; a role name the code never resolves does nothing. |
 | [role-available-agents](nouns/role-available-agents.md) | role (available-agents) | extracted | A type of agent you can spawn — sourced from role configs (<slug>.json = harness/provider/model). Roles are the types that can be added to a channel, not identities. A slug is no longer an identity, just a role label. |
 | [role-tenex](nouns/role-tenex.md) | role (TENEX) | extracted | A named key in llms.json that code resolves to a concrete model + credentials; the canonical example is edge-distillation. Resolution path: role → llms.json[role] (config name) → configurations[name] → {provider, model} → apiKey from providers.json. |
