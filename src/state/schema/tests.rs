@@ -49,9 +49,19 @@ fn fresh_file_db_uses_only_canonical_schema() {
     assert!(columns(&conn, "outbox")
         .iter()
         .any(|c| c == "next_attempt_at"));
-    assert!(columns(&conn, "sessions")
-        .iter()
-        .any(|c| c == "distill_fail_streak"));
+    let sess_cols = columns(&conn, "sessions");
+    assert!(
+        sess_cols.iter().any(|c| c == "distill_notice_at"),
+        "sessions.distill_notice_at"
+    );
+    assert!(
+        sess_cols.iter().any(|c| c == "distill_fail_streak"),
+        "sessions.distill_fail_streak"
+    );
+    assert!(
+        sess_cols.iter().any(|c| c == "explicit_chat_published_at"),
+        "sessions.explicit_chat_published_at"
+    );
 }
 
 #[test]

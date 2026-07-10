@@ -151,7 +151,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     activity          TEXT NOT NULL DEFAULT '',
     resume_id         TEXT NOT NULL DEFAULT '',
     distill_fail_streak INTEGER NOT NULL DEFAULT 0,
-    distill_notice_at   INTEGER NOT NULL DEFAULT 0
+    distill_notice_at   INTEGER NOT NULL DEFAULT 0,
+    explicit_chat_published_at INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_alive
     ON sessions(alive, channel_h);

@@ -27,4 +27,7 @@ pub struct Session {
     /// was last injected, so it repeats at most a few times per hour rather
     /// than every turn.
     pub distill_notice_at: u64,
+    /// First successful explicit channel publish by this session. Once set,
+    /// PTY mention delivery no longer arms turn-end auto-publish for it.
+    pub explicit_chat_published_at: u64,
 }

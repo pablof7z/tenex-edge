@@ -71,3 +71,28 @@ fn mark_dead_resolves_external_id() {
     assert!(!s.get_session("o1").unwrap().unwrap().alive);
     assert!(s.list_alive_sessions().unwrap().is_empty());
 }
+
+#[test]
+fn explicit_chat_marker_resolves_external_id_and_stays_first_publish() {
+    let s = Store::open_memory().unwrap();
+    let sid = s.register_session(&reg("codex", "x1", "h1")).unwrap();
+
+    assert_eq!(
+        s.get_session(&sid)
+            .unwrap()
+            .unwrap()
+            .explicit_chat_published_at,
+        0
+    );
+
+    s.mark_session_explicit_chat_published("x1", 1200).unwrap();
+    s.mark_session_explicit_chat_published(&sid, 1300).unwrap();
+
+    assert_eq!(
+        s.get_session(&sid)
+            .unwrap()
+            .unwrap()
+            .explicit_chat_published_at,
+        1200
+    );
+}

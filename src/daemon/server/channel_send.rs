@@ -154,9 +154,9 @@ pub(in crate::daemon::server) async fn rpc_channel_send(
             },
         )
         .await?;
-    auto_reply::note_published(&rec.session_id); // published; cancel turn-end auto-reply
     let event_id = published.event_id;
     let created_at = published.created_at;
+    note_explicit_chat_published(state, &rec.session_id, created_at);
 
     // Local live delivery: relays often don't echo an event back to the same
     // connection that published it. Seed the verbatim log and park inbox rows for
@@ -265,6 +265,17 @@ pub(in crate::daemon::server) async fn rpc_channel_send(
         "mentioned_session": mentioned_session,
         "mentioned_label": mentioned_label,
     }))
+}
+
+pub(super) fn note_explicit_chat_published(state: &Arc<DaemonState>, session_id: &str, at: u64) {
+    if let Err(e) = state.with_store(|s| s.mark_session_explicit_chat_published(session_id, at)) {
+        tracing::warn!(
+            session_id,
+            error = %e,
+            "channel_send: failed to persist explicit-publish marker; using in-memory auto-reply guard"
+        );
+    }
+    auto_reply::note_explicit_publish(session_id);
 }
 
 fn long_message_requires_override(p: &ChannelSendParams) -> bool {

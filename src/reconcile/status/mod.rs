@@ -59,7 +59,8 @@ pub enum StatusEffect {
         status: Status,
         reason: PublishReason,
     },
-    /// Final, immediately-expiring status so peers drop the session at once.
+    /// Explicit relay retraction for callers that need immediate disappearance.
+    /// Normal session end does not use this; it publishes idle with a full TTL.
     Expire { status: Status },
 }
 
@@ -204,18 +205,29 @@ impl StatusReconciler {
         self.mutate(id, now, |_tx, _n| Ok(()))
     }
 
-    /// The session ended (clean exit / pid death): close its scope, which emits a
-    /// deterministic closing command translated into a final expiring publish.
+    /// The session ended (clean exit / pid death): publish one final idle status
+    /// with the normal TTL. Membership cleanup later closes the local graph row
+    /// after the same stale window removes the session from channel rosters.
     pub fn on_session_ended(&mut self, id: &str, now: u64) -> GraphResult<StatusOutcome> {
+        let refresh_secs = self.refresh_secs;
+        let final_arm = end_arm(now, refresh_secs);
+        self.mutate(id, now, |tx, n| {
+            tx.set_input(n.working, false)?;
+            tx.set_input(n.arm, final_arm)
+        })
+    }
+
+    /// Drop a stale ended session from the local status graph without publishing a
+    /// relay retraction. Its last idle status naturally expires by NIP-40.
+    pub fn forget_session(&mut self, id: &str) -> GraphResult<()> {
         let Some(nodes) = self.sessions.remove(id) else {
-            return self.empty_commit();
+            return Ok(());
         };
         let mut tx = self.graph.begin_transaction_with_options(opts())?;
         tx.close_scope(nodes.scope)?;
-        let result = tx.commit()?;
-        drop(tx);
-        let effects = self.translate(&result, now);
-        Ok(StatusOutcome { effects, result })
+        tx.commit()?;
+        self.last.remove(id);
+        Ok(())
     }
 
     pub fn why_command(&self, id: &str) -> Option<&ResourceCommandExplanation> {
@@ -242,8 +254,8 @@ impl StatusReconciler {
             return self.empty_commit();
         };
         let mut tx = self.graph.begin_transaction_with_options(opts())?;
-        stage(&mut tx, &nodes)?;
         tx.set_input(nodes.arm, now / self.refresh_secs)?;
+        stage(&mut tx, &nodes)?;
         let result = tx.commit()?;
         drop(tx);
         let effects = self.translate(&result, now);
@@ -297,4 +309,8 @@ impl StatusReconciler {
     fn to_status(&self, cmd: &StatusCommand, now: u64, expiring: bool) -> Status {
         status_build::to_status(cmd, self.ttl_secs, now, expiring)
     }
+}
+
+fn end_arm(now: u64, refresh_secs: u64) -> u64 {
+    now / refresh_secs.max(1) + 1
 }

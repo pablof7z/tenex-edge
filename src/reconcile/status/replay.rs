@@ -10,7 +10,7 @@ use crate::reconcile::replay::ReplayReport;
 
 use super::model::{stage_session, SessionNodes, StaticInfo};
 use super::preview::status_drive_from_fact;
-use super::{StatusCommand, StatusReconciler};
+use super::{end_arm, StatusCommand, StatusReconciler};
 
 const STATUS_REFRESH_SECS: u64 = crate::domain::HEARTBEAT_SECS;
 
@@ -128,9 +128,10 @@ impl ReplayState {
             StatusDrive::Tick { session_id, at } => {
                 self.mutate(session_id, tx, *at, |_tx, _n| Ok(()))?;
             }
-            StatusDrive::SessionEnded { session_id, .. } => {
-                if let Some(nodes) = self.sessions.remove(session_id) {
-                    tx.close_scope(nodes.scope)?;
+            StatusDrive::SessionEnded { session_id, at } => {
+                if let Some(nodes) = self.sessions.get(session_id) {
+                    tx.set_input(nodes.working, false)?;
+                    tx.set_input(nodes.arm, end_arm(*at, self.refresh_secs))?;
                 }
             }
         }

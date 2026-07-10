@@ -38,16 +38,6 @@ fn publishes(effects: &[StatusEffect]) -> Vec<(&Status, PublishReason)> {
         .collect()
 }
 
-fn expires(effects: &[StatusEffect]) -> Vec<&Status> {
-    effects
-        .iter()
-        .filter_map(|e| match e {
-            StatusEffect::Expire { status } => Some(status),
-            _ => None,
-        })
-        .collect()
-}
-
 /// HEADLINE: the same session state committed twice — the SECOND commit emits no
 /// publish command. This is the dedup the old five-trigger path never had.
 #[test]
@@ -116,31 +106,55 @@ fn turn_end_flips_to_idle_one_publish() {
     assert_eq!(pubs[0].1, PublishReason::Changed);
 }
 
-/// Ending a session closes its scope and emits a deterministic closing command,
-/// translated into a final, immediately-expiring publish (status teardown).
+/// Ending a session publishes a final idle status that keeps the session visible
+/// for the normal NIP-40 TTL window.
 #[test]
-fn session_end_emits_expire() {
+fn session_end_emits_idle_status_with_full_ttl() {
     let (mut r, mut ledger) = seeded(true, "T", "busy", chans(["room"]), 100);
 
     let out = r.on_session_ended("s1", 200).unwrap();
     ledger.apply_result(&out.result);
     r.assert_oracle().unwrap();
 
-    let exp = expires(&out.effects);
+    let pubs = publishes(&out.effects);
+    assert_eq!(pubs.len(), 1, "session-end emits one final status");
+    assert_eq!(pubs[0].0.expires_at, Some(290), "normal TTL is retained");
+    assert!(!pubs[0].0.busy);
+    assert_eq!(pubs[0].0.activity, "", "activity cleared on teardown");
     assert_eq!(
-        exp.len(),
-        1,
-        "session-end emits exactly one expiring status"
-    );
-    assert_eq!(exp[0].expires_at, Some(200), "immediate NIP-40 expiration");
-    assert!(!exp[0].busy);
-    assert_eq!(exp[0].activity, "", "activity cleared on teardown");
-    assert_eq!(
-        exp[0].channels,
+        pubs[0].0.channels,
         vec!["room".to_string()],
-        "retraction keeps the last-known h tags"
+        "final idle status keeps the last-known h tags"
     );
+    assert_eq!(pubs[0].1, PublishReason::Changed);
 
+    ledger.assert_all_resources_have_owner().unwrap();
+    ledger.assert_no_duplicate_close().unwrap();
+}
+
+#[test]
+fn session_end_rearms_ttl_even_when_already_idle() {
+    let (mut r, mut ledger) = seeded(false, "T", "", chans(["room"]), 100);
+
+    let out = r.on_session_ended("s1", 100).unwrap();
+    ledger.apply_result(&out.result);
+    r.assert_oracle().unwrap();
+
+    let pubs = publishes(&out.effects);
+    assert_eq!(pubs.len(), 1);
+    assert_eq!(pubs[0].0.expires_at, Some(190));
+    assert!(!pubs[0].0.busy);
+    assert_eq!(pubs[0].1, PublishReason::Refreshed);
+}
+
+#[test]
+fn forgetting_stale_session_closes_local_graph_without_publish() {
+    let (mut r, ledger) = seeded(false, "T", "", chans(["room"]), 100);
+
+    r.forget_session("s1").unwrap();
+    r.assert_oracle().unwrap();
+
+    assert!(r.state_rows().is_empty());
     let why = r.why_command("s1").expect("a close was emitted for s1");
     assert_eq!(why.kind, ResourceCommandKind::Close);
     assert!(
@@ -148,7 +162,6 @@ fn session_end_emits_expire() {
         "close cause names the session scope teardown: {:?}",
         why.cause
     );
-    ledger.assert_resource_not_open(&status_key("s1")).unwrap();
     ledger.assert_all_resources_have_owner().unwrap();
     ledger.assert_no_duplicate_close().unwrap();
 }

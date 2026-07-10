@@ -4,7 +4,7 @@ use crate::reconcile::journal::{InputFact, StatusDrive};
 use crate::reconcile::labels::NodeLabels;
 
 use super::model::{opts, stage_session, SessionNodes, StaticInfo};
-use super::{StatusCommand, StatusReconciler};
+use super::{end_arm, StatusCommand, StatusReconciler};
 
 pub struct StatusPreview {
     pub result: TransactionResult<StatusCommand>,
@@ -130,9 +130,10 @@ fn stage_drive(
                 |_tx, _n| Ok(()),
             )?;
         }
-        StatusDrive::SessionEnded { session_id, .. } => {
+        StatusDrive::SessionEnded { session_id, at } => {
             if let Some(nodes) = sessions.get(session_id) {
-                tx.close_scope(nodes.scope)?;
+                tx.set_input(nodes.working, false)?;
+                tx.set_input(nodes.arm, end_arm(*at, refresh_secs))?;
             }
         }
     }

@@ -1,4 +1,5 @@
 use super::super::*;
+use super::note_explicit_chat_published;
 use crate::fabric::provider::chat::OutboundChatRecord;
 use crate::state::{Message, Session};
 use crate::util::CHANNEL_MESSAGE_CHAR_LIMIT;
@@ -67,7 +68,7 @@ pub(in crate::daemon::server) async fn rpc_channel_reply(
             },
         )
         .await?;
-    auto_reply::note_published(&rec.session_id);
+    note_explicit_chat_published(state, &rec.session_id, published.created_at);
     enqueue_local_reply(
         state,
         &rec,

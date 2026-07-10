@@ -4,7 +4,8 @@
 //! When a new logical session arrives on the SAME watched pid OR PTY endpoint
 //! (same agent, same work root), the harness restarted without emitting a
 //! session-end. The previous session's engine task is cancelled, its signer
-//! reservation released, and its row marked dead so `who` doesn't show ghosts.
+//! reservation released, and its row marked dead. Channel membership remains
+//! until the stale-membership grace window expires.
 //! (All sessions in this DB are this machine's.)
 
 use super::super::*;
@@ -49,18 +50,21 @@ pub(super) fn cancel_stale_sessions_on_restart(
                 reason,
                 "cancelling stale session on harness restart"
             );
-            membership_cleanup::remove_session_memberships(
-                state,
-                &rec.session_id,
-                "harness-restart",
-            );
             state.release_session_signer(&rec.session_id);
             stale_ids.push(rec.session_id.clone());
         }
     }
     for old_id in stale_ids {
+        let ended_at = now_secs();
         cancel_session(state, &old_id);
         state.with_store(|s| {
+            if let Err(e) = s.touch_session(&old_id, ended_at) {
+                tracing::error!(
+                    stale_session = %old_id,
+                    error = %e,
+                    "harness-restart reap: failed to refresh stale session end timestamp"
+                );
+            }
             if let Err(e) = s.mark_dead(&old_id) {
                 tracing::error!(
                     stale_session = %old_id,

@@ -67,7 +67,6 @@ pub(in crate::daemon::server) async fn spawn_session(
         if let Err(e) = res {
             tracing::warn!(session = %sid, error = %e, "session task exited with error");
         }
-        membership_cleanup::remove_session_memberships(&st, &sid, "engine-exit");
         st.release_session_signer(&sid);
         session_watch::exited(&st, &sid, watch_pid, "engine-exit");
         // Mark the bound identity dead but keep the row for resume (issue #47).
@@ -132,7 +131,7 @@ pub(in crate::daemon::server) async fn reconcile_sessions(state: &Arc<DaemonStat
                 agent = %snap.agent_slug,
                 channel = %snap.channel_h,
                 pid = ?snap.child_pid,
-                "session process dead; marking dead and GC-ing ordinal membership"
+                "session process dead; marking dead and leaving membership for stale cleanup"
             );
             state.with_store(|s| {
                 if let Err(e) = s.mark_dead(&session_id) {
@@ -147,11 +146,6 @@ pub(in crate::daemon::server) async fn reconcile_sessions(state: &Arc<DaemonStat
                 &session_id,
                 snap.child_pid,
                 now,
-                "reconcile-dead-pid",
-            );
-            membership_cleanup::remove_session_memberships(
-                state,
-                &session_id,
                 "reconcile-dead-pid",
             );
             continue;

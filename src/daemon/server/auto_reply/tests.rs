@@ -19,7 +19,7 @@ fn armed_turn_with_no_publish_yields_pending() {
 fn explicit_publish_cancels_auto_reply() {
     let mut t = AutoReplyTracker::default();
     t.arm("s1", "chan", "evt1", "requester-pk");
-    t.note_published("s1");
+    t.note_explicit_publish("s1");
     assert_eq!(t.take("s1"), None);
 }
 
@@ -38,6 +38,18 @@ fn newest_mention_supersedes_earlier_unanswered() {
         t.take("s1"),
         Some(pending("chan2", "evt2", "new-requester"))
     );
+}
+
+#[test]
+fn explicit_publish_disables_future_auto_reply_for_session() {
+    let mut t = AutoReplyTracker::default();
+    t.note_explicit_publish("s1");
+
+    assert!(!t.arm("s1", "chan", "evt1", "requester-pk"));
+    assert_eq!(t.take("s1"), None);
+
+    assert!(t.arm("s2", "chan", "evt2", "requester-pk"));
+    assert_eq!(t.take("s2"), Some(pending("chan", "evt2", "requester-pk")));
 }
 
 #[test]

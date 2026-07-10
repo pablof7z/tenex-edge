@@ -54,7 +54,11 @@ fn validate_canonical(conn: &Connection, path: Option<&Path>) -> Result<()> {
     ensure_columns(
         conn,
         "sessions",
-        &["distill_fail_streak", "distill_notice_at"],
+        &[
+            "distill_fail_streak",
+            "distill_notice_at",
+            "explicit_chat_published_at",
+        ],
         &[],
         path,
     )?;

@@ -85,7 +85,7 @@ Last updated: 2026-07-10
 | [2026-07-10-b70718e17221-cb4e41ba-2-residual-per-test-flake-investigation-found](research/2026-07-10-b70718e17221-cb4e41ba-2-residual-per-test-flake-investigation-found.md) | 2026-07-10 | Residual per-test flake investigation: found and fixed 6 propagation races + 1 production bug across ~85 runs; verdict = 20/20 consecutive green, all flakes eliminated. | a067926378f0c4ada (residual de-flake agent) |
 | [AGENTS](research/AGENTS.md) |  |  |  |
 
-## Episode Cards (70 cards)
+## Episode Cards (71 cards)
 
 | Card | Date | Title | Salience | Status |
 |------|------|-------|----------|--------|
@@ -151,6 +151,7 @@ Last updated: 2026-07-10
 | [2026-07-10-697ef986f14b-af134d53-1-mcp-caller-identity-unified-with-hosted](episodes/2026-07-10-697ef986f14b-af134d53-1-mcp-caller-identity-unified-with-hosted.md) | 2026-07-10 | MCP caller identity unified with hosted session machinery | architecture | active |
 | [2026-07-10-697ef986f14b-af134d53-1-mcp-transport-correlation-key-mcp-session](episodes/2026-07-10-697ef986f14b-af134d53-1-mcp-transport-correlation-key-mcp-session.md) | 2026-07-10 | MCP transport correlation key: Mcp-Session-Id replaced by X-Openai-Session | product | active |
 | [2026-07-10-697ef986f14b-af134d53-2-mcp-caller-identity-must-flow-through](episodes/2026-07-10-697ef986f14b-af134d53-2-mcp-caller-identity-must-flow-through.md) | 2026-07-10 | MCP caller identity must flow through CallerAnchor, not a bolted-on deriver | architecture | superseded |
+| [2026-07-10-a358c40d687f-638bf354-1-proactive-context-auto-commit-hook-is](episodes/2026-07-10-a358c40d687f-638bf354-1-proactive-context-auto-commit-hook-is.md) | 2026-07-10 | proactive-context auto-commit hook is structurally blind to capture-time regenerations | root-cause | active |
 | [2026-07-10-a62822c5d09c-fbf565a0-1-channel-read-rendering-mention-resolution-backend](episodes/2026-07-10-a62822c5d09c-fbf565a0-1-channel-read-rendering-mention-resolution-backend.md) | 2026-07-10 | Channel read rendering: mention resolution, backend-traffic filtering, whitelisted-operator label | product | active |
 | [2026-07-10-a62822c5d09c-fbf565a0-2-distillation-failures-surfaced-as-throttled-agent](episodes/2026-07-10-a62822c5d09c-fbf565a0-2-distillation-failures-surfaced-as-throttled-agent.md) | 2026-07-10 | Distillation failures surfaced as throttled agent-facing warnings | product | active |
 | [2026-07-10-af454e467c4f-d0adc8b8-1-session-handle-display-reverted-from-raw](episodes/2026-07-10-af454e467c4f-d0adc8b8-1-session-handle-display-reverted-from-raw.md) | 2026-07-10 | Session handle display reverted from raw session_id to friendly codename | reversal | active |
@@ -160,7 +161,7 @@ Last updated: 2026-07-10
 | [2026-07-10-b70718e17221-cb4e41ba-2-daemon-startup-relay-connect-moved-off](episodes/2026-07-10-b70718e17221-cb4e41ba-2-daemon-startup-relay-connect-moved-off.md) | 2026-07-10 | Daemon startup: relay connect moved off critical path to background spawn | root-cause | active |
 | [2026-07-10-b70718e17221-cb4e41ba-3-integration-test-flakiness-root-cause-croissant](episodes/2026-07-10-b70718e17221-cb4e41ba-3-integration-test-flakiness-root-cause-croissant.md) | 2026-07-10 | Integration test flakiness root cause: croissant relay leaks POSIX named semaphores on SIGKILL | root-cause | active |
 
-## Nouns (226 entities)
+## Nouns (228 entities)
 
 | Noun | Name | Origin | Definition |
 |------|------|--------|------------|
@@ -175,6 +176,7 @@ Last updated: 2026-07-10
 | [agent-identity-prior-model-now-retired](nouns/agent-identity-prior-model-now-retired.md) | agent identity (prior model, now retired) | extracted | Identity was (agent, machine): the same slug on another machine is a different key. An agent slug resolved to a durable Nostr keypair generated on first use and persisted under <edge_home>/agents/<slug>.json. This model was retired in favor of per-session pubkeys. |
 | [agent-instance-identity](nouns/agent-instance-identity.md) | agent-instance identity | extracted | The durable AGENT-INSTANCE = (slug, backend-label) rendered as agent@backend-label (e.g. codex@laptop). @ always means backend label, never project. A session is only a correlation handle (raw session_id), never a separate display name or chat target. |
 | [agent-keystore](nouns/agent-keystore.md) | agent role config | extracted | The set of role configs on this machine, stored under |
+| [agent-online-presence](nouns/agent-online-presence.md) | agent online presence | extracted | Agent online presence is active channel membership |
 | [agent-ordinal-label](nouns/agent-ordinal-label.md) | agent_ordinal_label | extracted | Superseded by the session handle. Concurrent sessions of the same role are no |
 | [agent-session](nouns/agent-session.md) | @agent/session | extracted | A live session you can summon — the p-taggable handle. The agent segment is the role slug and the session segment is the session id or a resolving prefix, as in @codex/echo123. This is the kind:0 name and the preferred mention target in channel send. |
 | [agent-session-handle](nouns/agent-session-handle.md) | @agent/session | extracted | A live session you can summon — the p-taggable handle. The agent segment is the |
@@ -247,6 +249,7 @@ Last updated: 2026-07-10
 | [human-in-the-system](nouns/human-in-the-system.md) | human (in the system) | extracted | A node, not the operator — a privileged node; a high-authority, high-latency oracle. |
 | [identities-table](nouns/identities-table.md) | identities (table) | extracted | Maps each session's derived pubkey to its owning session and a resume binding. |
 | [identity](nouns/identity.md) | Identity | extracted | A session's keypair, derived from the machine's management key as |
+| [identity-model](nouns/identity-model.md) | identity model | extracted | The product's identity model is a per-(agent, machine) tuple backed by a durable Nostr keypair stored at ~/.tenex-edge/agents/<slug>.json |
 | [identity-old-model](nouns/identity-old-model.md) | identity (old model) | extracted | Identity is (agent, machine): the durable AGENT-INSTANCE = (slug, backend-label) → agent@backend-label. A single run (SESSION) is only a correlation handle, never a separate display name. The same slug on another machine is a different key. |
 | [idle-exit-watcher](nouns/idle-exit-watcher.md) | idle-exit watcher | extracted | Background task that shuts the daemon down after it has had no open clients and no live sessions for a configurable grace period (default 120s, overridable via TENEX_EDGE_DAEMON_GRACE_S). |
 | [inbox](nouns/inbox.md) | inbox | extracted | The inbound routing ledger and local idempotency record. Direct-message rows are keyed by inbound event and target local session; they start `pending` and become `delivered` once injected into a live PTY session. Orchestration uses the same ledger with synthetic per-target keys so each add target can complete or retry independently. |

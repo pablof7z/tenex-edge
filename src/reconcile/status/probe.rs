@@ -158,8 +158,8 @@ impl StatusReconciler {
     }
 }
 
-/// Does this preview's plan carry any status effect? A `Close` becomes the
-/// final expiring status publish at the host seam, so any command means publish.
+/// Does this preview's plan carry any status effect? Session end is modeled as a
+/// final idle publish with normal TTL, so any status command means publish.
 pub fn would_publish(result: &TransactionResult<StatusCommand>) -> bool {
     !result.resource_plan.commands().is_empty()
 }

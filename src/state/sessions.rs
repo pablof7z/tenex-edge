@@ -6,12 +6,11 @@
 //! writing — a known prior bug mutated by raw id and silently no-op'd.
 
 use super::*;
-
-const COLS: &str = "session_id, agent_pubkey, agent_slug, channel_h, harness, child_pid, \
+pub(super) const COLS: &str = "session_id, agent_pubkey, agent_slug, channel_h, harness, child_pid, \
      transcript_path, alive, created_at, last_seen, working, turn_started_at, last_distill_at, \
-     seen_cursor, title, activity, resume_id, distill_fail_streak, distill_notice_at";
+     seen_cursor, title, activity, resume_id, distill_fail_streak, distill_notice_at, explicit_chat_published_at";
 
-fn row_to_session(row: &rusqlite::Row) -> rusqlite::Result<Session> {
+pub(super) fn row_to_session(row: &rusqlite::Row) -> rusqlite::Result<Session> {
     Ok(Session {
         session_id: row.get(0)?,
         agent_pubkey: row.get(1)?,
@@ -32,6 +31,7 @@ fn row_to_session(row: &rusqlite::Row) -> rusqlite::Result<Session> {
         resume_id: row.get(16)?,
         distill_fail_streak: row.get(17)?,
         distill_notice_at: row.get(18)?,
+        explicit_chat_published_at: row.get(19)?,
     })
 }
 

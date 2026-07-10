@@ -258,8 +258,10 @@ mod retention;
 pub use retention::{
     RetentionPruneReport, COMPLETED_LEDGER_RETENTION_SECS, RELAY_EVENT_RETENTION_SECS,
 };
+mod session_chat;
 pub(crate) mod session_claims;
 mod session_distill;
+mod session_membership_cleanup;
 mod session_native;
 mod session_ty;
 pub use session_ty::Session;

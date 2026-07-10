@@ -46,7 +46,6 @@ fn seed_channel(store: &Store) {
         .unwrap();
 }
 
-/// A minimal alive [`Session`] for context assembly (the viewer).
 fn test_session(id: &str) -> Session {
     Session {
         session_id: id.to_string(),
@@ -68,6 +67,7 @@ fn test_session(id: &str) -> Session {
         resume_id: String::new(),
         distill_fail_streak: 0,
         distill_notice_at: 0,
+        explicit_chat_published_at: 0,
     }
 }
 

@@ -2,11 +2,9 @@ use super::engine_lifecycle::pid_alive;
 use super::*;
 use std::collections::BTreeSet;
 
-/// A locally-managed session that has neither a live child process nor a
-/// heartbeat within this many seconds is treated as crashed/abandoned: its
-/// channel memberships are torn down and the row is marked dead. 10 minutes —
-/// long enough to ride out a transient stall, short enough that a crashed
-/// session's public handle stops occupying a channel roster promptly.
+/// Grace window after a locally managed session stops. During this window its
+/// channel membership remains and its final idle status stays visible; after the
+/// window, channel memberships are torn down.
 pub(in crate::daemon::server) const STALE_MEMBERSHIP_SECS: u64 = 600;
 
 fn joined_channels_for_session(
@@ -28,6 +26,10 @@ fn joined_channels_for_session(
         }
         channels
             .into_iter()
+            .filter(|channel| {
+                s.is_channel_member(channel, &rec.agent_pubkey)
+                    .unwrap_or(false)
+            })
             .map(|channel| (channel, rec.agent_pubkey.clone()))
             .collect()
     })
@@ -71,28 +73,43 @@ pub(in crate::daemon::server) fn remove_session_memberships(
 pub(in crate::daemon::server) fn cleanup_dead_local_sessions(state: &Arc<DaemonState>) {
     let now = now_secs();
     let stale_before = now.saturating_sub(STALE_MEMBERSHIP_SECS);
-    let stale: Vec<String> = state.with_store(|s| {
-        s.list_alive_sessions()
+    let candidates: Vec<(String, bool, bool, bool)> = state.with_store(|s| {
+        s.list_membership_cleanup_candidates(stale_before)
             .unwrap_or_default()
             .into_iter()
-            .filter(|rec| {
-                rec.child_pid.is_some_and(|pid| !pid_alive(pid))
-                    || (!rec.working && rec.last_seen > 0 && rec.last_seen < stale_before)
+            .filter_map(|rec| {
+                let stale = rec.last_seen > 0 && rec.last_seen < stale_before;
+                let process_dead = rec.alive && rec.child_pid.is_some_and(|pid| !pid_alive(pid));
+                (stale || process_dead).then_some((rec.session_id, rec.alive, stale, process_dead))
             })
-            .map(|rec| rec.session_id)
             .collect()
     });
-    for session_id in stale {
-        remove_session_memberships(state, &session_id, "startup-stale-pid");
-        state.release_session_signer(&session_id);
-        state.with_store(|s| {
-            if let Err(e) = s.mark_dead(&session_id) {
-                tracing::error!(session = %session_id, error = %e, "stale cleanup: failed to mark session dead");
+    for (session_id, alive, stale, process_dead) in candidates {
+        if stale {
+            remove_session_memberships(state, &session_id, "stale-membership");
+            if let Err(e) = state
+                .status
+                .lock()
+                .expect("status mutex poisoned")
+                .forget_session(&session_id)
+            {
+                tracing::error!(session = %session_id, error = %e, "stale cleanup: failed to forget status graph row");
             }
-            if let Err(e) = s.mark_identity_dead_for_session(&session_id) {
-                tracing::error!(session = %session_id, error = %e, "stale cleanup: failed to mark identity dead");
-            }
-        });
+            state.release_session_signer(&session_id);
+        } else if process_dead {
+            state.release_session_signer(&session_id);
+        }
+
+        if alive && (stale || process_dead) {
+            state.with_store(|s| {
+                if let Err(e) = s.mark_dead(&session_id) {
+                    tracing::error!(session = %session_id, error = %e, "stale cleanup: failed to mark session dead");
+                }
+                if let Err(e) = s.mark_identity_dead_for_session(&session_id) {
+                    tracing::error!(session = %session_id, error = %e, "stale cleanup: failed to mark identity dead");
+                }
+            });
+        }
     }
 }
 
@@ -171,5 +188,28 @@ mod tests {
         cleanup_dead_local_sessions(&state);
 
         assert!(alive_ids(&state).contains(&recent));
+    }
+
+    /// A cleanly ended session remains a channel member during the 10-minute grace
+    /// window so its final idle status can stay visible.
+    #[tokio::test]
+    async fn dead_session_within_ttl_keeps_membership() {
+        let state = DaemonState::new_for_test().await;
+        let now = now_secs();
+        let recent = register(&state, "recent-dead", "reviewer", now);
+
+        state
+            .with_store(|s| {
+                s.set_session_channel(&recent, "room")?;
+                s.upsert_channel_member("room", "pk-recent-dead", "member", now)?;
+                s.mark_dead(&recent)
+            })
+            .unwrap();
+
+        cleanup_dead_local_sessions(&state);
+
+        assert!(state
+            .with_store(|s| s.is_channel_member("room", "pk-recent-dead"))
+            .unwrap());
     }
 }

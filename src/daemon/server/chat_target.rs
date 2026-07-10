@@ -68,7 +68,7 @@ pub(in crate::daemon::server) async fn resolve_chat_target_provisioning(
                 return Ok(ChatTarget {
                     channel_h,
                     explicit: true,
-                })
+                });
             }
             super::ChannelResolution::Ambiguous(refs) => anyhow::bail!(
                 "channel reference {reference:?} is ambiguous; re-run with one of: {}",
@@ -137,6 +137,7 @@ mod tests {
             resume_id: String::new(),
             distill_fail_streak: 0,
             distill_notice_at: 0,
+            explicit_chat_published_at: 0,
         }
     }
 

@@ -240,14 +240,14 @@ fn sample_session() -> crate::state::Session {
         resume_id: String::new(),
         distill_fail_streak: 0,
         distill_notice_at: 0,
+        explicit_chat_published_at: 0,
     }
 }
 
 #[test]
 fn pending_message_prompt_contains_the_actual_message_body() {
     let rec = sample_session();
-    // Slug is intentionally no longer carried on the inbox row; the renderer
-    // shows the short sender pubkey instead.
+    // Renderer shows the short sender pubkey.
     let row = crate::state::InboxRow {
         event_id: "abcdef123456".into(),
         target_session: rec.session_id.clone(),
@@ -267,7 +267,7 @@ fn pending_message_prompt_contains_the_actual_message_body() {
 
     assert_eq!(
         prompt,
-         "<tenex-edge>\n\
+        "<tenex-edge>\n\
          \u{20}\u{20}<channel ref=\"proj\">\n\
          \u{20}\u{20}\u{20}\u{20}<message from=\"@pk-sende\" id=\"abcdef\">please review the PTY delivery path</message>\n\
          \u{20}\u{20}</channel>\n\
@@ -303,7 +303,7 @@ fn whitelisted_human_mention_renders_bare_with_provenance() {
             .unwrap();
     assert_eq!(
         prompt,
-         "<tenex-edge>\n\
+        "<tenex-edge>\n\
          \u{20}\u{20}<channel ref=\"tenex-edge.writer-test\">\n\
          \u{20}\u{20}\u{20}\u{20}<message from=\"@human-pk\" id=\"ev-hum\">@developer hey there</message>\n\
          \u{20}\u{20}</channel>\n\

@@ -9,7 +9,8 @@
 //! This module closes that gap:
 //!   1. [`arm`] records the un-answered mention when it is injected into the PTY
 //!      (channel, triggering event id, and requester pubkey).
-//!   2. [`note_published`] cancels it the moment the agent publishes itself.
+//!   2. [`note_explicit_publish`] cancels it the moment the agent publishes
+//!      itself and blocks future arming for that live daemon process.
 //!   3. On turn end, [`take`] returns any still-pending entry and
 //!      [`publish_last_response`] posts the transcript's last assistant text as
 //!      the reply, threaded to the triggering event via an `e` tag and
@@ -21,6 +22,7 @@
 
 use super::*;
 use crate::fabric::provider::chat::OutboundChatRecord;
+use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
 #[cfg(test)]
@@ -37,6 +39,7 @@ pub(in crate::daemon::server) struct PendingAutoReply {
 #[derive(Default)]
 struct AutoReplyTracker {
     pending: HashMap<String, PendingAutoReply>,
+    explicit_publishers: HashSet<String>,
 }
 
 impl AutoReplyTracker {
@@ -46,7 +49,10 @@ impl AutoReplyTracker {
         channel_h: &str,
         trigger_event_id: &str,
         requester_pubkey: &str,
-    ) {
+    ) -> bool {
+        if self.explicit_publishers.contains(session_id) {
+            return false;
+        }
         self.pending.insert(
             session_id.to_string(),
             PendingAutoReply {
@@ -55,10 +61,16 @@ impl AutoReplyTracker {
                 requester_pubkey: requester_pubkey.to_string(),
             },
         );
+        true
     }
 
-    fn note_published(&mut self, session_id: &str) {
+    fn note_explicit_publish(&mut self, session_id: &str) {
+        self.explicit_publishers.insert(session_id.to_string());
         self.pending.remove(session_id);
+    }
+
+    fn has_explicit_publish(&self, session_id: &str) -> bool {
+        self.explicit_publishers.contains(session_id)
     }
 
     fn take(&mut self, session_id: &str) -> Option<PendingAutoReply> {
@@ -84,14 +96,21 @@ pub(crate) fn arm(
     channel_h: &str,
     trigger_event_id: &str,
     requester_pubkey: &str,
-) {
-    lock().arm(session_id, channel_h, trigger_event_id, requester_pubkey);
+) -> bool {
+    lock().arm(session_id, channel_h, trigger_event_id, requester_pubkey)
 }
 
-/// The agent published a reply itself this turn — drop any pending auto-reply so
-/// the turn end does not double-post.
-pub(in crate::daemon::server) fn note_published(session_id: &str) {
-    lock().note_published(session_id);
+/// True when auto-reply may be armed for this session. The durable session marker
+/// survives daemon restarts; the in-memory marker covers the gap if the store
+/// update failed after a successful explicit publish.
+pub(crate) fn should_arm_for_session(rec: &crate::state::Session) -> bool {
+    rec.explicit_chat_published_at == 0 && !lock().has_explicit_publish(&rec.session_id)
+}
+
+/// The agent published through an explicit channel command. Drop any pending
+/// auto-reply so this turn does not double-post, and block future arming.
+pub(in crate::daemon::server) fn note_explicit_publish(session_id: &str) {
+    lock().note_explicit_publish(session_id);
 }
 
 /// Take the pending auto-reply for a finished turn, if the agent never

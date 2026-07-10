@@ -19,9 +19,9 @@ pub(in crate::daemon::server) async fn rpc_session_end(
     let rec = state.with_store(|s| s.get_session(&p.session).ok().flatten());
     let existed = rec.is_some();
     if let Some(ref rec) = rec {
+        let ended_at = now_secs();
         cancel_session(state, &rec.session_id);
 
-        membership_cleanup::remove_session_memberships(state, &rec.session_id, "session-end");
         // Release the ordinal reservation + any derived signing key before marking
         // the session dead.
         let _session_key = state.release_session_signer(&rec.session_id);
@@ -32,10 +32,13 @@ pub(in crate::daemon::server) async fn rpc_session_end(
 
         // Mark the canonical session dead (alive=0, working=0). Its final published
         // kind:30315 ages off via NIP-40 expiration.
-        state.with_store(|s| s.mark_dead(&rec.session_id).ok());
+        state.with_store(|s| {
+            s.touch_session(&rec.session_id, ended_at).ok();
+            s.mark_dead(&rec.session_id).ok()
+        });
         state.outbox_notify.notify_waiters();
         state.emit_tail(TailEvent::Sess {
-            ts: now_secs(),
+            ts: ended_at,
             channel: rec.channel_h.clone(),
             agent: rec.agent_slug.clone(),
             session: rec.session_id.clone(),

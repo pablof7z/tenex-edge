@@ -370,7 +370,10 @@ pub async fn run_session_in_daemon(
         |r| r.on_session_ended(&p.session_id, end_now)
     );
 
-    if let Err(e) = st!(|s: &Store| s.mark_dead(&p.session_id)) {
+    if let Err(e) = st!(|s: &Store| {
+        s.touch_session(&p.session_id, end_now)?;
+        s.mark_dead(&p.session_id)
+    }) {
         tracing::error!(session = %p.session_id, error = %e, "mark_dead failed — session row left alive after clean exit");
     }
     Ok(())
