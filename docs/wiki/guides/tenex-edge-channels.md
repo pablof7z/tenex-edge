@@ -8,7 +8,7 @@ tags:
 volatility: warm
 confidence: medium
 created: 2026-06-29
-updated: 2026-07-03
+updated: 2026-07-10
 verified: 2026-06-29
 compiled-from: conversation
 sources:
@@ -39,19 +39,19 @@ The channel-send bail requiring a concrete session id is removed; delivery route
 <!-- citations: [^3c769-6616d] [^bd868-93a15] [^019f1-6da12] -->
 ## Channel Add
 
-`tenex-edge channel add` is the single verb for putting someone or something into
-a channel. It takes one of three mutually-exclusive targets:
+`tenex-edge channel add` puts an existing participant into a channel. It takes
+one of two mutually-exclusive targets:
 
 - `channel add <pubkey|npub|nip05> <path> [--admin]` — add a human. `--admin`
   grants NIP-29 admin in that channel.
-- `channel add --new-session <role>[@machine] <path>` — spawn a fresh session of a
-  role (optionally on a named machine) into the channel, synchronously.
 - `channel add --session @agent/session <path>` — pull an existing session into the
   channel.
 
-On the two session modes, an optional `--message "..."` adds the session, waits
-for it to come online, and p-tags a kind:9 to it. Adding a member is an explicit
-command, not an auto-add side-effect of an @-mention. <!-- [^661eb-712ca] -->
+On the existing-session mode, an optional `--message "..."` adds the session,
+waits for it to come online, and p-tags a kind:9 to it. Adding a member is an
+explicit command, not an auto-add side-effect of an @-mention. Start fresh
+delegated agent sessions with `tenex-edge dispatch <agent[@backend]>
+--workspace <workspace> --message "..."`. <!-- [^661eb-712ca] -->
 
 ## Channel Switch
 

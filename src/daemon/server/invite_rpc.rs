@@ -15,10 +15,6 @@ use wait::{
 struct InviteParams {
     channel: String,
     #[serde(default)]
-    target_agent: Option<String>,
-    #[serde(default)]
-    invite_agent: Option<String>,
-    #[serde(default)]
     agent: Option<String>,
     #[serde(default)]
     session: Option<String>,
@@ -41,24 +37,10 @@ struct InviteParams {
 }
 
 impl InviteParams {
-    fn invitee(&self) -> Option<&str> {
-        self.target_agent
-            .as_deref()
-            .or(self.invite_agent.as_deref())
-            .or_else(|| self.agent_slug.as_ref().and(self.agent.as_deref()))
-            .filter(|s| !s.trim().is_empty())
-    }
-
     fn caller_agent(&self) -> Option<&str> {
-        self.agent_slug
+        self.agent
             .as_deref()
-            .or_else(|| {
-                (self.target_agent.is_some()
-                    || self.invite_agent.is_some()
-                    || self.session.is_some())
-                .then_some(())
-                .and(self.agent.as_deref())
-            })
+            .or(self.agent_slug.as_deref())
             .filter(|s| !s.trim().is_empty())
     }
 }
@@ -68,31 +50,17 @@ pub(super) async fn rpc_invite(
     params: &serde_json::Value,
 ) -> Result<serde_json::Value> {
     let p: InviteParams = serde_json::from_value(params.clone()).context("invite params")?;
-    let agent = p.invitee();
     let session = p.session.as_deref().filter(|s| !s.trim().is_empty());
-    match (agent.is_some(), session.is_some()) {
-        (true, true) => anyhow::bail!("invite requires exactly one of agent or session"),
-        (false, false) => anyhow::bail!("invite requires exactly one of agent or session"),
-        _ => {}
-    }
+    let Some(session_id) = session else {
+        anyhow::bail!("invite requires a session; use dispatch to start a new agent session");
+    };
 
     let channel_h = match resolve_target_channel(state, &p)? {
         TargetChannel::Unique(h) => h,
         TargetChannel::Ambiguous(v) => return Ok(v),
     };
     let work_root = state.with_store(|s| work_root_for(s, &channel_h));
-    let mut result = if let Some(session_id) = session {
-        invite_session(state, &channel_h, &work_root, session_id).await?
-    } else {
-        invite_agent(
-            state,
-            &channel_h,
-            &work_root,
-            agent.unwrap(),
-            p.cwd.as_deref(),
-        )
-        .await?
-    };
+    let mut result = invite_session(state, &channel_h, &work_root, session_id).await?;
     maybe_post_add_message(state, params, &channel_h, &p, &mut result).await;
     Ok(result)
 }

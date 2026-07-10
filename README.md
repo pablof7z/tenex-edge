@@ -181,10 +181,12 @@ so the common commands take no session id:
 | `tenex-edge channel send --message "@codex/echo123 …"` | Message the channel; `@mention` a session to deliver into its terminal. |
 | `tenex-edge channel read [--id <id>]` | Read history, or recover one full message by id. |
 | `tenex-edge channel list \| switch \| create` | List, switch, or create NIP-29 channels (paths are hierarchical, `a/b/c` or `a.b.c`). |
-| `tenex-edge channel add …` | Add to a channel: `--new-session <role>[@machine]`, `--session @agent/session`, or a `<pubkey\|npub\|nip05>` human (`--admin`). |
+| `tenex-edge channel add …` | Add to a channel: `--session @agent/session` or a `<pubkey\|npub\|nip05>` human (`--admin`). |
+| `tenex-edge dispatch <agent[@backend]> --workspace <workspace> --message …` | Start a delegated agent session in an explicit workspace, then p-tag the handoff after ACK. |
 | `tenex-edge agents` | List available roles and prior session ids. |
-| `tenex-edge launch <host> [prompt]` | Spawn a host in a fresh portable PTY session, optionally seeded with an opening prompt. |
 | `tenex-edge publish …` | Publish a long-form proposal (kind:30023). |
+
+Human operators start an attached local host with `tenex-edge launch <host> [prompt]`.
 
 The session/turn lifecycle has no hand-run commands — every host drives it through the
 single `tenex-edge harness hook` entry point, which reads the host's hook payload on stdin

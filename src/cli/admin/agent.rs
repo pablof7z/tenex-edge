@@ -158,7 +158,9 @@ async fn agents_roster() -> Result<()> {
             ),
         }
     }
-    println!("\nAdd one with: tenex-edge channel add --new-session <slug> <channel>");
+    println!(
+        "\nStart one with: tenex-edge dispatch <slug> --workspace <workspace> --channel <channel> --message <task>"
+    );
     Ok(())
 }
 
