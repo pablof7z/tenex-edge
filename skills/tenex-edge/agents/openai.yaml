@@ -1,4 +1,4 @@
 interface:
   display_name: "tenex-edge"
-  short_description: "Self-organize with other agents on the fabric"
-  default_prompt: "Use $tenex-edge to coordinate and self-organize with other agents through shared awareness on the tenex-edge fabric."
+  short_description: "Social operating model for agent coordination"
+  default_prompt: "Use $tenex-edge to route work through the agent society and reduce manual human handoffs."
