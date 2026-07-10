@@ -8,11 +8,12 @@
 //!
 //! This module closes that gap:
 //!   1. [`arm`] records the un-answered mention when it is injected into the PTY
-//!      (channel + triggering event id, for reply threading).
+//!      (channel, triggering event id, and requester pubkey).
 //!   2. [`note_published`] cancels it the moment the agent publishes itself.
 //!   3. On turn end, [`take`] returns any still-pending entry and
 //!      [`publish_last_response`] posts the transcript's last assistant text as
-//!      the reply, threaded to the triggering event via an `e` tag.
+//!      the reply, threaded to the triggering event via an `e` tag and
+//!      addressed back to the requester via a `p` tag.
 //!
 //! State is process-global and in-memory (mirroring the delivery debounce): the
 //! daemon is a single process, and a restart at worst drops one pending
@@ -30,6 +31,7 @@ mod tests;
 pub(in crate::daemon::server) struct PendingAutoReply {
     channel_h: String,
     trigger_event_id: String,
+    requester_pubkey: String,
 }
 
 #[derive(Default)]
@@ -38,12 +40,19 @@ struct AutoReplyTracker {
 }
 
 impl AutoReplyTracker {
-    fn arm(&mut self, session_id: &str, channel_h: &str, trigger_event_id: &str) {
+    fn arm(
+        &mut self,
+        session_id: &str,
+        channel_h: &str,
+        trigger_event_id: &str,
+        requester_pubkey: &str,
+    ) {
         self.pending.insert(
             session_id.to_string(),
             PendingAutoReply {
                 channel_h: channel_h.to_string(),
                 trigger_event_id: trigger_event_id.to_string(),
+                requester_pubkey: requester_pubkey.to_string(),
             },
         );
     }
@@ -69,9 +78,14 @@ fn lock() -> std::sync::MutexGuard<'static, AutoReplyTracker> {
 
 /// Record that a kind:9 was injected into `session_id`'s PTY and owes a reply.
 /// A later arm supersedes an earlier un-answered one: the newest mention is what
-/// an auto-reply should thread to. Called from the pty delivery path.
-pub(crate) fn arm(session_id: &str, channel_h: &str, trigger_event_id: &str) {
-    lock().arm(session_id, channel_h, trigger_event_id);
+/// an auto-reply should thread to and p-tag back. Called from the pty delivery path.
+pub(crate) fn arm(
+    session_id: &str,
+    channel_h: &str,
+    trigger_event_id: &str,
+    requester_pubkey: &str,
+) {
+    lock().arm(session_id, channel_h, trigger_event_id, requester_pubkey);
 }
 
 /// The agent published a reply itself this turn — drop any pending auto-reply so
@@ -88,8 +102,8 @@ pub(in crate::daemon::server) fn take(session_id: &str) -> Option<PendingAutoRep
 }
 
 /// Publish the session's last assistant transcript text as its reply, threaded
-/// to the triggering event. No-op (with a warning on failure) when there is no
-/// transcript or no assistant text to publish.
+/// to the triggering event and p-tagged back to the requester. No-op (with a
+/// warning on failure) when there is no transcript or no assistant text to publish.
 pub(in crate::daemon::server) async fn publish_last_response(
     state: &Arc<DaemonState>,
     rec: &crate::state::Session,
@@ -123,11 +137,16 @@ async fn do_publish(
 ) -> Result<()> {
     let instance = state.session_instance(rec);
     let keys = state.session_signing_keys(&rec.session_id)?;
+    let mentioned_pubkey = if pending.requester_pubkey.trim().is_empty() {
+        None
+    } else {
+        Some(pending.requester_pubkey.clone())
+    };
     let chat = ChatMessage {
         from: instance.agent_ref(),
         channel: pending.channel_h.clone(),
         body: body.to_string(),
-        mentioned_pubkey: None,
+        mentioned_pubkey: mentioned_pubkey.clone(),
     };
     let published = state
         .provider
@@ -139,7 +158,7 @@ async fn do_publish(
                 from_session: Some(rec.session_id.clone()),
                 channel_h: pending.channel_h.clone(),
                 body: body.to_string(),
-                mentioned_pubkey: None,
+                mentioned_pubkey,
                 mentioned_session: None,
                 created_at: Some(now_secs()),
                 direction: "outbound",

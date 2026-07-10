@@ -8,9 +8,10 @@ struct PendingPrompt {
     text: String,
     chat_ids: Vec<String>,
     /// The most recent injected mention — the event an auto-reply threads to,
-    /// and the channel it publishes into.
+    /// the channel it publishes into, and the requester it p-tags.
     trigger_event_id: String,
     trigger_channel: String,
+    trigger_from_pubkey: String,
 }
 
 async fn collect_pending_prompt(
@@ -53,11 +54,13 @@ async fn collect_pending_prompt(
     let trigger_channel = trigger
         .map(|r| r.channel_h.clone())
         .unwrap_or_else(|| rec.channel_h.clone());
+    let trigger_from_pubkey = trigger.map(|r| r.from_pubkey.clone()).unwrap_or_default();
     Ok(Some(PendingPrompt {
         text,
         chat_ids,
         trigger_event_id,
         trigger_channel,
+        trigger_from_pubkey,
     }))
 }
 
@@ -116,6 +119,7 @@ pub(super) async fn inject_planned_messages_pty(
             &rec.session_id,
             &prompt.trigger_channel,
             &prompt.trigger_event_id,
+            &prompt.trigger_from_pubkey,
         );
     }
     tokio::time::sleep(Duration::from_millis(200)).await;
