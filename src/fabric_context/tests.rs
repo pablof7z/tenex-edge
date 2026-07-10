@@ -322,7 +322,7 @@ fn recent_presence_uses_status_source() {
         .expect("presence delta should render");
     let other_codename = crate::util::friendly_short_code("other-session");
     assert!(text.contains("<recent-presence>"));
-    assert!(text.contains(&format!("ref=\"@reviewer/{other_codename}\"")));
+    assert!(text.contains(&format!("ref=\"@reviewer-{other_codename}\"")));
     assert!(text.contains("text=\"checking tests\""));
 }
 

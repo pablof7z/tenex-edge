@@ -145,7 +145,7 @@ fn concurrent_same_agent_sessions_publish_consistent_identities() {
         "the two concurrent instances must select distinct pubkeys"
     );
 
-    // Each session reports its OWN (pubkey, agent/codename) pair through the
+    // Each session reports its OWN (pubkey, agent-codename) pair through the
     // identity that backs `who`.
     let first_code = tenex_edge::util::friendly_short_code(&first_id);
     let second_code = tenex_edge::util::friendly_short_code(&second_id);

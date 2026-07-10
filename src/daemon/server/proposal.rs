@@ -30,7 +30,7 @@ pub(in crate::daemon::server) struct ProposeParams {
 ///   ["title", <title>]          — human-readable title
 ///   ["h", <channel>]            — NIP-29 group
 ///   ["p", <owner>]              — per owner in cfg.owners, surfaces to the human
-///   (no agent/session tag — author identity is the event signer pubkey; kind:0 carries slug)
+///   (no agent-session tag — author identity is the event signer pubkey; kind:0 carries slug)
 pub(in crate::daemon::server) async fn rpc_propose(
     state: &Arc<DaemonState>,
     params: &serde_json::Value,

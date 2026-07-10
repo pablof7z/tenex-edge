@@ -38,10 +38,8 @@ pub(super) fn member_rows(
             } else {
                 member_reference(store, &pk, status, input.local_host)
             };
-            let agent_slug = member_agent_slug(store, &pk, input);
             MemberRow {
                 reference,
-                agent_slug,
                 status: status_text,
                 seen,
             }
@@ -49,7 +47,7 @@ pub(super) fn member_rows(
         .collect()
 }
 
-/// A non-self member's reference: `@agent/session` when its owning session is
+/// A non-self member's reference: `@agent-sessionCode` when its owning session is
 /// known (a live status carrying a session id), else the slug/npub fallback.
 /// Mirrors `assemble::member_reference` exactly so both paths agree.
 fn member_reference(store: &Store, pk: &str, status: Option<&Status>, local_host: &str) -> String {
@@ -63,21 +61,6 @@ fn member_reference(store: &Store, pk: &str, status: Option<&Status>, local_host
         return session_ref(&s.session_id, &s.slug, &profile_agent_slug);
     }
     pubkey_ref(store, pk, local_host)
-}
-
-fn member_agent_slug(store: &Store, pk: &str, input: &FabricContextInput<'_>) -> String {
-    if pk == input.self_pubkey {
-        return input
-            .session
-            .map(|s| s.agent_slug.clone())
-            .unwrap_or_default();
-    }
-    store
-        .get_profile(pk)
-        .ok()
-        .flatten()
-        .map(|p| p.agent_slug)
-        .unwrap_or_default()
 }
 
 pub(super) fn presence_rows(

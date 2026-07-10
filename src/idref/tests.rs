@@ -7,32 +7,40 @@ fn agent_label_preserves_backend_label() {
 }
 
 #[test]
-fn session_handle_is_agent_slash_session() {
-    assert_eq!(session_handle("codex", "echo123"), "codex/echo123");
-    assert_eq!(session_handle("codex", "codex/echo123"), "codex/echo123");
-    assert_eq!(session_handle("", "echo123"), "echo123");
+fn session_handle_is_agent_dash_session_code() {
+    assert_eq!(
+        session_handle("codex", "willow-echo-042"),
+        "codex-willow-echo-042"
+    );
+    assert_eq!(
+        session_handle("codex", "codex-willow-echo-042"),
+        "codex-willow-echo-042"
+    );
+    assert_eq!(session_handle("", "willow-echo-042"), "willow-echo-042");
 }
 
 #[test]
 fn parses_session_handle() {
     assert_eq!(
-        parse_session_handle("codex/echo123"),
-        Some(("codex", "echo123"))
+        parse_session_handle("codex-willow-echo-042"),
+        Some(("codex", "willow-echo-042"))
     );
+    assert_eq!(
+        parse_session_handle("chief-of-staff-willow-echo-042"),
+        Some(("chief-of-staff", "willow-echo-042"))
+    );
+    assert_eq!(parse_session_handle("codex/echo123"), None);
     assert_eq!(parse_session_handle("codex"), None);
     assert_eq!(parse_session_handle("codex/"), None);
     assert_eq!(parse_session_handle("codex/echo/extra"), None);
+    assert_eq!(parse_session_handle("chief-of-staff-smith"), None);
 }
 
 #[test]
-fn profile_name_normalizes_legacy_backend_suffix() {
+fn profile_name_normalizes_backend_suffix() {
     assert_eq!(
-        session_handle_from_profile_name("echo123@remoteBackend", "remoteBackend", "codex"),
-        "codex/echo123"
-    );
-    assert_eq!(
-        session_handle_from_profile_name("codex/echo123", "remoteBackend", "codex"),
-        "codex/echo123"
+        session_handle_from_profile_name("willow-echo-042@remoteBackend", "remoteBackend", "codex"),
+        "codex-willow-echo-042"
     );
     assert_eq!(
         session_handle_from_profile_name("echo123@remoteBackend", "remoteBackend", ""),
@@ -73,8 +81,8 @@ fn agent_ref_from_is_bare_local_and_qualified_remote() {
 #[test]
 fn session_label_preserves_session_handle() {
     assert_eq!(
-        session_label("te-abc-0", "codex/echo123", "laptop"),
-        "codex/echo123"
+        session_label("te-abc-0", "codex-willow-echo-042", "laptop"),
+        "codex-willow-echo-042"
     );
     assert_eq!(session_label("te-abc-0", "codex", "laptop"), "codex@laptop");
     assert_eq!(session_label("te-abc-0", "", "laptop"), "te-abc-0");
@@ -124,15 +132,15 @@ fn parse_pubkey_and_token() {
 fn extract_inline_mentions() {
     assert_eq!(
         extract_mentions("hey @haiku/x1 and @codex, look"),
-        vec!["haiku/x1".to_string(), "codex".to_string()]
+        vec!["haiku".to_string(), "codex".to_string()]
     );
     assert_eq!(
         extract_mentions("ping @claude@tower please"),
         vec!["claude@tower".to_string()]
     );
     assert_eq!(
-        extract_mentions("hey @codex/echo123 how are you?"),
-        vec!["codex/echo123".to_string()]
+        extract_mentions("hey @codex-willow-echo-042 how are you?"),
+        vec!["codex-willow-echo-042".to_string()]
     );
     assert_eq!(extract_mentions("ping @codex."), vec!["codex".to_string()]);
     assert!(extract_mentions("email dev@example.com please").is_empty());

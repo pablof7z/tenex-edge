@@ -2,11 +2,11 @@
 //!
 //! A session row that is no longer `alive` (its process exited) is an expired
 //! session — the resume-candidate set. Each is surfaced by its public
-//! `agent/session_id` handle.
+//! `agent-session_id` handle.
 
 use crate::state::Store;
 
-/// One expired (not-currently-live) local session, named by `agent/session_id`.
+/// One expired (not-currently-live) local session, named by `agent-session_id`.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct ExpiredSessionRow {
     /// Stable agent slug from the session row.

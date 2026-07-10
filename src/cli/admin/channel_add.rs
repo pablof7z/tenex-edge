@@ -1,6 +1,6 @@
 //! `channel add` — add a member to a channel in one of two shapes:
 //!   * human by id:        `channel add <pubkey|npub|nip05> <channel> [--admin]`
-//!   * pull an existing one:`channel add --session @agent/session <channel>`
+//!   * pull an existing one:`channel add --session @agent-sessionCode <channel>`
 //!
 //! Human adds route to the daemon's `channel_add_member`; existing-session adds
 //! route to `invite`. `--message` posts a chat mentioning the brought-online
@@ -64,9 +64,9 @@ async fn session_add(
     message: Option<String>,
 ) -> Result<()> {
     let Some(channel) = channel else {
-        anyhow::bail!("channel add --session @agent/session <channel>");
+        anyhow::bail!("channel add --session @agent-sessionCode <channel>");
     };
-    // Strip a leading `@` so both `@agent/session` and `agent/session` are accepted.
+    // Strip a leading `@` so both `@agent-sessionCode` and `agent-sessionCode` are accepted.
     let selector = codehost.strip_prefix('@').unwrap_or(codehost);
     let v = invite_call(
         &channel,
@@ -99,7 +99,7 @@ async fn invite_call(
 }
 
 /// The brought-online session's public handle from an invite response. Remote
-/// legacy responses may still carry `codename@backend`; local slash handles are
+/// legacy responses may still carry `codename@backend`; local session handles are
 /// already complete.
 fn online_label(v: &serde_json::Value) -> String {
     let label = v["online_agent"].as_str().unwrap_or("session");

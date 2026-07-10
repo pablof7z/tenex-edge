@@ -1,7 +1,7 @@
 //! `channel send` bare-`@role` guard.
 //!
 //! In the per-session identity model there is no durable, addressable role
-//! identity — a live participant is `@agent/session`, never `@role`. So a
+//! identity — a live participant is `@agent-sessionCode`, never `@role`. So a
 //! message mentioning a bare `@<role>` that names a KNOWN local agent role (but
 //! no session handle) is almost always a mistake: the author wanted a fresh
 //! session of that role. Fail fast and point at `dispatch`
@@ -63,7 +63,7 @@ mod tests {
 
     #[test]
     fn session_handle_member_is_allowed() {
-        assert!(roles_from("thanks @reviewer/bright-otter-042", &["reviewer"]).is_ok());
+        assert!(roles_from("thanks @reviewer-bright-otter-042", &["reviewer"]).is_ok());
     }
 
     #[test]

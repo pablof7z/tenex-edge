@@ -78,11 +78,9 @@ pub(in crate::fabric_context) struct ChannelBlock {
 
 #[derive(Clone, PartialEq)]
 pub(in crate::fabric_context) struct MemberRow {
-    /// `@agent/session` for a member whose session identity is known, else the
+    /// `@agent-sessionCode` for a member whose session identity is known, else the
     /// slug/npub `pubkey_ref` fallback (human operators, offline sessions).
     pub(in crate::fabric_context) reference: String,
-    /// Stable underlying agent kind from the session row or kind:0 profile tag.
-    pub(in crate::fabric_context) agent_slug: String,
     pub(in crate::fabric_context) status: String,
     pub(in crate::fabric_context) seen: String,
 }

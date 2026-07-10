@@ -117,6 +117,8 @@ fn first_turn_resolves_member_profiles_from_kind0() {
     let remote_pk = remote.public_key().to_hex();
     let remote_name = "profiled-member";
     let remote_agent_slug = "reviewer";
+    let remote_handle =
+        tenex_edge::idref::session_handle_from_profile_name(remote_name, "", remote_agent_slug);
 
     let ctx = rt().block_on(async {
         profile::publish_profile(&remote, remote_name, remote_agent_slug).await;
@@ -144,7 +146,7 @@ fn first_turn_resolves_member_profiles_from_kind0() {
                 .as_array()
                 .unwrap()
                 .iter()
-                .any(|m| m["pubkey"] == remote_pk && m["slug"] == remote_name),
+                .any(|m| m["pubkey"] == remote_pk && m["slug"] == remote_handle),
             "channel_members should resolve kind:0 slugs: {members}"
         );
         let v = c
@@ -157,8 +159,7 @@ fn first_turn_resolves_member_profiles_from_kind0() {
             .to_string()
     });
 
-    let want =
-        format!("ref=\"@{remote_name}\" agentSlug=\"{remote_agent_slug}\" status=\"offline\"");
+    let want = format!("ref=\"@{remote_handle}\" status=\"offline\"");
     assert!(ctx.contains(&want), "kind:0 profile should resolve: {ctx}");
     assert!(
         !ctx.contains(&format!("@{}", &remote_pk[..8])),

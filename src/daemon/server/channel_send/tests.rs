@@ -144,31 +144,34 @@ fn host_qualified_mention_tolerates_stale_qualified_slug_cache() {
 }
 
 #[test]
-fn slash_session_handle_resolves_live_session_and_validates_agent() {
+fn dashed_session_handle_resolves_live_session_and_validates_agent() {
     let store = Store::open_memory().unwrap();
     register_session(&store, "echo123", "codex", "channel");
+    let code = crate::util::friendly_short_code("echo123");
+    let handle = crate::idref::session_handle("codex", &code);
 
-    let resolved = resolve_recipient(&store, "channel", "localBackend", "codex/echo123").unwrap();
+    let resolved = resolve_recipient(&store, "channel", "localBackend", &handle).unwrap();
 
     assert_eq!(resolved.pubkey, "codex-pubkey");
     assert_eq!(resolved.target_session.as_deref(), Some("echo123"));
     assert_eq!(resolved.channel, "channel");
 
-    let err = match resolve_recipient(&store, "channel", "localBackend", "haiku/echo123") {
-        Ok(_) => panic!("mismatched agent/session handle should not resolve"),
+    let wrong = crate::idref::session_handle("haiku", &code);
+    let err = match resolve_recipient(&store, "channel", "localBackend", &wrong) {
+        Ok(_) => panic!("mismatched agent-session handle should not resolve"),
         Err(e) => e,
     };
     assert!(err.to_string().contains("can't resolve recipient"));
 }
 
 #[test]
-fn slash_session_handle_resolves_profile_cache() {
+fn dashed_session_handle_resolves_profile_cache() {
     let store = Store::open_memory().unwrap();
     store
         .upsert_profile_with_agent_slug(
             "remote-pk",
-            "codex/echo123",
-            "codex/echo123",
+            "codex-willow-echo-042",
+            "codex-willow-echo-042",
             "codex",
             "remoteBackend",
             false,
@@ -176,7 +179,8 @@ fn slash_session_handle_resolves_profile_cache() {
         )
         .unwrap();
 
-    let resolved = resolve_recipient(&store, "channel", "localBackend", "codex/echo123").unwrap();
+    let resolved =
+        resolve_recipient(&store, "channel", "localBackend", "codex-willow-echo-042").unwrap();
 
     assert_eq!(resolved.pubkey, "remote-pk");
     assert_eq!(resolved.target_session, None);

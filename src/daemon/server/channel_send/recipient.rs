@@ -72,7 +72,7 @@ pub(in crate::daemon::server) fn resolve_recipient(
             })
         }
         Ref::Token(tok) => {
-            // 1. Public `agent/session` handle. Do this before raw session
+            // 1. Public `agent-sessionCode` handle. Do this before raw session
             // matching so a bad slash handle never falls through to a bare role.
             if crate::idref::parse_session_handle(&tok).is_some() {
                 if let Some(found) = find_session_by_public_handle(store, my_channel, &tok)? {

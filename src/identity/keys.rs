@@ -89,7 +89,7 @@ impl SessionIdentity {
         }
     }
 
-    /// The per-session display name: `agentSlug/codename` (e.g. `codex/willow-echo-042`),
+    /// The per-session display name: `agentSlug-codename` (e.g. `codex-willow-echo-042`),
     /// never the raw internal `session_id`.
     pub fn display_slug(&self) -> String {
         crate::idref::session_handle(&self.slug, &self.codename)

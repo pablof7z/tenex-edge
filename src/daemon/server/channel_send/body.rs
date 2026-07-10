@@ -77,13 +77,16 @@ mod tests {
 
     #[test]
     fn rewrites_full_agent_session_handle() {
-        let out =
-            rewrite_first_resolved_mention("hey @codex/echo123 now", "codex/echo123", TARGET_PK);
+        let out = rewrite_first_resolved_mention(
+            "hey @codex-willow-echo-042 now",
+            "codex-willow-echo-042",
+            TARGET_PK,
+        );
 
         assert!(out.starts_with("hey nostr:npub1"));
         assert!(out.ends_with(" now"));
         assert!(!out.contains("@codex"));
-        assert!(!out.contains("/echo123"));
+        assert!(!out.contains("willow-echo-042"));
     }
 
     #[test]

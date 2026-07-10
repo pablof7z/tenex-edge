@@ -84,7 +84,7 @@ impl Nip29Materializer {
 
     /// Materialise a decoded kind:0 profile into `relay_profiles`. Newer
     /// `updated_at` wins. Agent profile `name`/`slug` are the canonical
-    /// `agent/session` handle; backend profiles keep their backend name.
+    /// `agent-sessionCode` handle; backend profiles keep their backend name.
     pub fn materialize_profile(store: &Store, pf: &Profile, updated_at: u64) {
         let slug = pf.agent.slug.as_str();
         let name = if pf.is_backend {

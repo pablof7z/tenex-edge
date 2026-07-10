@@ -95,7 +95,7 @@ impl Store {
         Ok(None)
     }
 
-    /// Reverse lookup for the public per-session handle (`agent/session`).
+    /// Reverse lookup for the public per-session handle (`agent-sessionCode`).
     pub fn resolve_profile_handle_pubkey(&self, handle: &str) -> Result<Option<String>> {
         let handle = handle.trim();
         if crate::idref::parse_session_handle(handle).is_none() {

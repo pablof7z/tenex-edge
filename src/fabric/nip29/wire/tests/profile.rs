@@ -4,7 +4,7 @@ use super::*;
 fn profile_roundtrip() {
     let keys = Keys::generate();
     let ev = DomainEvent::Profile(crate::domain::Profile {
-        agent: agent(&keys, "developer/coder"),
+        agent: agent(&keys, "developer-willow-echo-042"),
         agent_slug: "developer".into(),
         host: "pablos' laptop".into(),
         owners: vec!["09d4".repeat(16)],
@@ -17,7 +17,7 @@ fn profile_roundtrip() {
         .unwrap()
         .sign_with_keys(&keys)
         .unwrap();
-    assert_eq!(signed.content, r#"{"name":"developer/coder"}"#);
+    assert_eq!(signed.content, r#"{"name":"developer-willow-echo-042"}"#);
     assert!(has_tag(&signed, "agent-slug", "developer"));
 }
 
@@ -26,7 +26,7 @@ fn profile_decode_strips_backend_suffix_for_routing_slug() {
     let keys = Keys::generate();
     let event = EventBuilder::new(
         Kind::from(KIND_PROFILE),
-        r#"{"name":"developer1@remoteBackend"}"#,
+        r#"{"name":"willow-echo-042@remoteBackend"}"#,
     )
     .tags([
         tag(&["host", "remoteBackend"]).unwrap(),
@@ -37,7 +37,7 @@ fn profile_decode_strips_backend_suffix_for_routing_slug() {
 
     match Nip29WireCodec.decode_event(&event) {
         Some(DomainEvent::Profile(p)) => {
-            assert_eq!(p.agent.slug, "developer/developer1");
+            assert_eq!(p.agent.slug, "developer-willow-echo-042");
             assert_eq!(p.agent_slug, "developer");
             assert_eq!(p.host, "remoteBackend");
         }

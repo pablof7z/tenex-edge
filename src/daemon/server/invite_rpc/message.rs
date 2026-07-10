@@ -4,13 +4,13 @@
 //! Rather than re-implement chat publishing (mention resolution, p-tag, local
 //! doorbell delivery), this synthesizes a `channel_send` call from the SAME caller
 //! anchors the invite ran under, prefixing the body with the brought-online
-//! session's `@agent/session` handle so `channel_send` p-tags it.
+//! session's `@agent-sessionCode` handle so `channel_send` p-tags it.
 
 use crate::daemon::server::DaemonState;
 use std::sync::Arc;
 
 /// Publish the add-message. `label_with_host` is the online session's public
-/// `agent/session` handle. Returns an error STRING on failure
+/// `agent-sessionCode` handle. Returns an error STRING on failure
 /// rather than propagating: the membership add already succeeded, so a failed
 /// courtesy message must degrade to a warning, never fail the whole `channel add`.
 pub(super) async fn post_add_message(

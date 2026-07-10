@@ -98,7 +98,7 @@ fn profile_materializes_to_relay_profiles() {
     let event = build(
         &agent,
         0,
-        r#"{"name":"smith"}"#,
+        r#"{"name":"willow-echo-042"}"#,
         vec![
             make_tag(&["host", "laptop"]),
             make_tag(&["agent-slug", "developer"]),
@@ -110,15 +110,15 @@ fn profile_materializes_to_relay_profiles() {
     }
     assert_eq!(
         store.resolve_slug_for_pubkey(&pk).unwrap().as_deref(),
-        Some("developer/smith")
+        Some("developer-willow-echo-042")
     );
     let profile = store.get_profile(&pk).unwrap().unwrap();
-    assert_eq!(profile.name, "developer/smith");
-    assert_eq!(profile.slug, "developer/smith");
+    assert_eq!(profile.name, "developer-willow-echo-042");
+    assert_eq!(profile.slug, "developer-willow-echo-042");
     assert_eq!(profile.agent_slug, "developer");
     assert_eq!(
         store
-            .resolve_profile_handle_pubkey("developer/smith")
+            .resolve_profile_handle_pubkey("developer-willow-echo-042")
             .unwrap()
             .as_deref(),
         Some(pk.as_str())

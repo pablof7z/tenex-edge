@@ -1,4 +1,4 @@
-//! `<members>` rendering: `@agent/codename` per member, with the legacy (`people`)
+//! `<members>` rendering: `@agent-codename` per member, with the legacy (`people`)
 //! and pure (`assemble`) paths proven byte-identical.
 
 use crate::fabric_context::{
@@ -9,7 +9,7 @@ use crate::state::{Status, Store};
 use super::{input, seed_store, session, session_record, OTHER_PK, SELF_PK};
 
 /// A member whose session is known (a live status carries its session id) renders
-/// as `@agent/codename`; the pure and legacy paths agree.
+/// as `@agent-codename`; the pure and legacy paths agree.
 #[test]
 fn member_row_shows_session_handle_without_role_for_peer_session() {
     let store = seed_store();
@@ -38,15 +38,19 @@ fn member_row_shows_session_handle_without_role_for_peer_session() {
         .expect("context should render");
     // Self keeps its fallback slug ref; the peer session renders under its public handle.
     assert!(
-        text.contains("<member ref=\"@coder\" agentSlug=\"coder\" status=\""),
+        text.contains("<member ref=\"@coder\" status=\""),
         "got: {text}"
     );
     let peer_codename = crate::util::friendly_short_code("peer-sess");
     assert!(
         text.contains(&format!(
-            "<member ref=\"@reviewer/{peer_codename}\" agentSlug=\"reviewer\" status=\""
+            "<member ref=\"@reviewer-{peer_codename}\" status=\""
         )),
         "got: {text}"
+    );
+    assert!(
+        !text.contains(" agentSlug=\""),
+        "member rows must not render agentSlug attributes: {text}"
     );
     assert!(
         !text.contains(" role=\""),
@@ -166,8 +170,8 @@ fn same_named_channels_under_different_workspaces_show_workspace_context() {
         text.contains("<channel name=\"#xxx\" ref=\"test2.xxx\" workspace=\"test2\""),
         "got: {text}"
     );
-    assert!(text.contains("ref=\"@reviewer/"), "got: {text}");
-    assert!(text.contains("ref=\"@tester/"), "got: {text}");
+    assert!(text.contains("ref=\"@reviewer-"), "got: {text}");
+    assert!(text.contains("ref=\"@tester-"), "got: {text}");
 
     let captured = capture_inputs(&store, &input(Some(&rec), "test1-xxx", 200, 300, true));
     let trellis = render_view_text(&assemble::assemble_view(&captured, 200, 300));

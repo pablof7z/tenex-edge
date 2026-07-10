@@ -139,14 +139,14 @@ mod tests {
         );
         assert_eq!(
             profile_cache_fields_with_agent_slug(
-                "developer1@remoteBackend",
+                "willow-echo-042@remoteBackend",
                 "remoteBackend",
                 "developer",
                 false
             ),
             (
-                "developer/developer1".to_string(),
-                "developer/developer1".to_string()
+                "developer-willow-echo-042".to_string(),
+                "developer-willow-echo-042".to_string()
             )
         );
     }

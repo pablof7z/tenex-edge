@@ -1,8 +1,8 @@
 //! The canonical reference helpers for tenex-edge identities.
 //!
-//! User-facing session identity is **`agent/session`** (for example
-//! `codex/echo123`). Backend-qualified agent references (`agent@backend-label`)
-//! remain an operator/backend selection syntax for invite and legacy lookup
+//! User-facing session identity is **`agent-sessionCode`** (for example
+//! `codex-willow-echo-042`). Backend-qualified agent references (`agent@backend-label`)
+//! remain an operator/backend selection syntax for invite and lookup
 //! paths, not the public session handle.
 //!
 //! Rules that hold everywhere:
@@ -10,12 +10,12 @@
 //!   - Backend labels are config.json `backendName` values and are preserved
 //!     exactly after trimming. They are not DNS hostnames and are not slugified.
 //!   - Raw session ids are internal correlation handles. A friendly session
-//!     codename may appear as the right side of `agent/session`.
+//!     codename appears after the agent slug in `agent-sessionCode`.
 //!
 //! Every renderer formats through this module; every input is classified via
 //! [`parse_ref`] or normalized through the session-handle helpers.
 
-/// Canonical user-facing session handle: `agentSlug/session`.
+/// Canonical user-facing session handle: `agentSlug-sessionCode`.
 pub fn session_handle(agent_slug: &str, session: &str) -> String {
     let agent_slug = agent_slug.trim();
     let session = session.trim();
@@ -25,39 +25,43 @@ pub fn session_handle(agent_slug: &str, session: &str) -> String {
     if agent_slug.is_empty() {
         return session.to_string();
     }
-    let prefix = format!("{agent_slug}/");
-    if session.starts_with(&prefix) {
-        session.to_string()
-    } else {
-        format!("{agent_slug}/{session}")
+    if let Some((agent, session_ref)) = parse_session_handle(session) {
+        if agent == agent_slug {
+            return format!("{agent}-{session_ref}");
+        }
+        return session.to_string();
     }
+    let prefix = format!("{agent_slug}-");
+    if session.starts_with(&prefix) {
+        return session.to_string();
+    }
+    format!("{agent_slug}-{session}")
 }
 
-/// Parse `agentSlug/session` into its two routing-visible parts.
+/// Parse a public session handle into its two routing-visible parts.
 pub fn parse_session_handle(handle: &str) -> Option<(&str, &str)> {
-    let handle = handle.trim();
-    let (agent_slug, session) = handle.split_once('/')?;
-    let agent_slug = agent_slug.trim();
-    let session = session.trim();
-    if agent_slug.is_empty() || session.is_empty() || session.contains('/') {
-        return None;
-    }
-    Some((agent_slug, session))
+    parse_dashed_session_handle(handle.trim())
 }
 
 /// Convert a kind:0 `name` plus tags into the canonical session handle.
-///
-/// New profiles already publish `agent/session`. Legacy profiles published
-/// `session@backend`; when an `agent-slug` tag is present, normalize that cache
-/// row to `agent/session` while still accepting the old event.
 pub fn session_handle_from_profile_name(name: &str, host: &str, agent_slug: &str) -> String {
     let name = name.trim();
-    if parse_session_handle(name).is_some() {
-        return name.to_string();
+    if let Some((agent, session)) = parse_session_handle(name) {
+        let agent = if agent_slug.trim().is_empty() {
+            agent
+        } else {
+            agent_slug.trim()
+        };
+        return session_handle(agent, session);
     }
     let session = slug_from_profile_name(name, host);
-    if parse_session_handle(&session).is_some() {
-        return session;
+    if let Some((agent, session_ref)) = parse_session_handle(&session) {
+        let agent = if agent_slug.trim().is_empty() {
+            agent
+        } else {
+            agent_slug.trim()
+        };
+        return session_handle(agent, session_ref);
     }
     if agent_slug.trim().is_empty() {
         session
@@ -78,7 +82,7 @@ pub fn agent_label(slug: &str, host: &str) -> String {
 }
 
 /// Strip this backend suffix from a kind:0 profile name to recover the routing
-/// slug. Legacy profiles that publish a bare slug pass through unchanged.
+/// slug. Profiles that publish a bare slug pass through unchanged.
 pub fn slug_from_profile_name(name: &str, host: &str) -> String {
     let name = name.trim();
     let host = host.trim();
@@ -110,16 +114,38 @@ pub fn agent_ref_from(slug: &str, host: &str, local_host: &str) -> String {
 }
 
 /// Display for a sender on an envelope "From" line. `slug` is expected to be an
-/// already-normalized session handle; legacy callers that still provide a bare
-/// slug plus host degrade through the backend-qualified form.
+/// already-normalized session handle; callers that provide a bare slug plus
+/// host degrade through the backend-qualified form.
 pub fn session_label(session_id: &str, slug: &str, host: &str) -> String {
     if slug.is_empty() {
         session_id.to_string()
-    } else if parse_session_handle(slug).is_some() {
-        slug.to_string()
+    } else if let Some((agent, session)) = parse_session_handle(slug) {
+        session_handle(agent, session)
     } else {
         agent_label(slug, host)
     }
+}
+
+fn parse_dashed_session_handle(handle: &str) -> Option<(&str, &str)> {
+    let mut parts = handle.rsplitn(4, '-');
+    let n = parts.next()?;
+    let b = parts.next()?;
+    let a = parts.next()?;
+    let agent_slug = parts.next()?.trim();
+    if agent_slug.is_empty() || !friendly_code_parts(a, b, n) {
+        return None;
+    }
+    let session_start = agent_slug.len() + 1;
+    Some((agent_slug, &handle[session_start..]))
+}
+
+fn friendly_code_parts(a: &str, b: &str, n: &str) -> bool {
+    !a.is_empty()
+        && !b.is_empty()
+        && a.chars().all(|c| c.is_ascii_alphanumeric())
+        && b.chars().all(|c| c.is_ascii_alphanumeric())
+        && n.len() == 3
+        && n.chars().all(|c| c.is_ascii_digit())
 }
 
 /// A short prefix of a message/event id for envelope IDs and send confirmations.
@@ -197,7 +223,7 @@ fn is_pubkey(s: &str) -> bool {
 
 /// Extract inline `@<agent-session-handle>` mentions from free chat text, in
 /// order of appearance, deduped. A mention is `@` followed by a run of
-/// `[A-Za-z0-9._-/]`, with a single legacy `@` still accepted for
+/// `[A-Za-z0-9._-]`, with a single internal `@` still accepted for
 /// `agent@backend-label`. Trailing punctuation is ignored. Tokens that don't
 /// resolve are silently treated as no mention.
 pub fn extract_mentions(body: &str) -> Vec<String> {
@@ -213,15 +239,13 @@ pub fn extract_mentions(body: &str) -> Vec<String> {
             continue;
         }
         // Take the run of handle characters immediately after the '@' sigil,
-        // allowing a single internal '@' for legacy host-qualified labels.
+        // allowing a single internal '@' for host-qualified labels.
         let after = &raw[at + 1..];
         let end = after
-            .find(|c: char| {
-                !(c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '/' | '@'))
-            })
+            .find(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '@')))
             .unwrap_or(after.len());
-        // Drop trailing separators so `@codex/echo.` and `@haiku@` degrade cleanly.
-        let candidate = after[..end].trim_end_matches(['.', '@', '/']);
+        // Drop trailing separators so `@codex.` and `@haiku@` degrade cleanly.
+        let candidate = after[..end].trim_end_matches(['.', '@']);
         if !candidate.is_empty() && !out.iter().any(|m| m == candidate) {
             out.push(candidate.to_string());
         }

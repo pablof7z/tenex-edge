@@ -9,7 +9,7 @@ pub(super) fn display_name(store: &Store, channel: &str) -> String {
         .unwrap_or_else(|| channel.to_string())
 }
 
-/// The session-bearing member reference: `agent/codename` (never the raw
+/// The session-bearing member reference: `agent-codename` (never the raw
 /// internal `session_id`). Shared by the legacy (`people`) and pure
 /// (`assemble`) member-row paths so they can never drift.
 pub(super) fn session_ref(session_id: &str, status_slug: &str, profile_agent_slug: &str) -> String {

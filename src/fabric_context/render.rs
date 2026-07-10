@@ -99,11 +99,7 @@ fn render_members(out: &mut String, members: &[MemberRow]) {
     }
     out.push_str("\n      <members>");
     for m in members {
-        let agent_slug = m.agent_slug.trim();
         let _ = write!(out, "\n        <member ref=\"@{}\"", esc_attr(&m.reference));
-        if !agent_slug.is_empty() {
-            let _ = write!(out, " agentSlug=\"{}\"", esc_attr(agent_slug));
-        }
         let _ = write!(
             out,
             " status=\"{}\" seen=\"{}\" />",

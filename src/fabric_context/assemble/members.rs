@@ -27,7 +27,6 @@ pub(super) fn member_rows(inputs: &ViewInputs, channel: &str, now: u64) -> Vec<M
             let status = status_map.get(&pk);
             MemberRow {
                 reference: reference(inputs, &pk, status),
-                agent_slug: agent_slug(inputs, &pk),
                 status: status
                     .map(|s| status_text(s))
                     .unwrap_or_else(|| "offline".to_string()),
@@ -53,23 +52,6 @@ fn reference(inputs: &ViewInputs, pk: &str, status: Option<&&StatusCap>) -> Stri
         return inputs.meta.self_ref.clone();
     }
     member_reference(&inputs.members, &inputs.meta.local_host, pk, status)
-}
-
-fn agent_slug(inputs: &ViewInputs, pk: &str) -> String {
-    if pk == inputs.meta.self_pubkey {
-        return inputs
-            .meta
-            .self_row
-            .as_ref()
-            .map(|s| s.agent_slug.clone())
-            .unwrap_or_default();
-    }
-    inputs
-        .members
-        .agent_slugs
-        .get(pk)
-        .cloned()
-        .unwrap_or_default()
 }
 
 fn member_reference(

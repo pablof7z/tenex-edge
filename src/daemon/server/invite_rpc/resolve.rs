@@ -1,6 +1,6 @@
 //! Resolve a `channel add --session` selector to a concrete session. Selectors
 //! arrive as a raw opaque session id, or — the recruiting-facing form — an
-//! `@agent/session` handle. Legacy `codename@host` selectors are still accepted
+//! `@agent-sessionCode` handle. Legacy `codename@host` selectors are still accepted
 //! by scanning live/known sessions for the old friendly code; they are not the
 //! current public handle model.
 
@@ -27,7 +27,7 @@ fn split_legacy_code_host(selector: &str) -> (String, Option<String>) {
     }
 }
 
-/// A LOCAL session for the selector: public `agent/session`, then raw id/prefix,
+/// A LOCAL session for the selector: public `agent-sessionCode`, then raw id/prefix,
 /// then the legacy friendly-code scan. A selector that names a non-local host is
 /// never matched here.
 pub(super) fn local_session(state: &Arc<DaemonState>, selector: &str) -> Option<Session> {
@@ -82,7 +82,7 @@ fn local_session_by_public_handle(state: &Arc<DaemonState>, selector: &str) -> O
 }
 
 /// A REMOTE session for the selector, from the materialized status cache. Matches
-/// `@agent/session`, raw id (exact/prefix), or a legacy code@host handle.
+/// `@agent-sessionCode`, raw id (exact/prefix), or a legacy code@host handle.
 pub(super) fn remote_session_from_status(
     state: &Arc<DaemonState>,
     selector: &str,
@@ -142,7 +142,7 @@ pub(super) fn remote_session_from_status(
         }),
         [] => anyhow::bail!("no session matching {selector:?}"),
         _ => anyhow::bail!(
-            "session {selector:?} is ambiguous; use the full session id or @agent/session"
+            "session {selector:?} is ambiguous; use the full session id or @agent-sessionCode"
         ),
     }
 }
@@ -199,6 +199,8 @@ fn remote_session_from_public_handle(
             backend: one.backend.clone(),
         }),
         [] => anyhow::bail!("no session matching {selector:?}"),
-        _ => anyhow::bail!("session {selector:?} is ambiguous; use the full agent/session handle"),
+        _ => anyhow::bail!(
+            "session {selector:?} is ambiguous; use the full agent-sessionCode handle"
+        ),
     }
 }
