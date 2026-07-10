@@ -10,6 +10,8 @@ mod edit;
 mod human_who;
 #[path = "channels/launch_mentions.rs"]
 mod launch_mentions;
+#[path = "channels/list.rs"]
+mod list;
 #[path = "channels/native_context.rs"]
 mod native_context;
 #[path = "channels/orchestration.rs"]
