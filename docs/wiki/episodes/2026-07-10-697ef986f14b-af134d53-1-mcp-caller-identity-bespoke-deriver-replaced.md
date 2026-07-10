@@ -4,7 +4,7 @@ date: 2026-07-10
 session: 697ef986-f14b-4fcc-ba7d-b9f0d1b065ad
 transcript: /Users/pablofernandez/.claude/projects/-Users-pablofernandez-src-tenex-edge/697ef986-f14b-4fcc-ba7d-b9f0d1b065ad.jsonl
 salience: reversal
-status: active
+status: superseded
 subjects:
   - mcp-caller-identity
   - caller-anchor
