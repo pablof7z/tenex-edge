@@ -124,6 +124,8 @@ fn human_who_renderer_is_non_xml_and_terminal_friendly() {
     assert!(human.contains("Members"), "got: {human}");
     assert!(human.contains("@coder"), "got: {human}");
     assert!(human.contains("offline"), "got: {human}");
+    assert!(!human.contains(" member "), "got: {human}");
+    assert!(!human.contains(" admin "), "got: {human}");
     assert!(!human.contains("<tenex-edge>"), "got: {human}");
     assert!(!human.contains("<member"), "got: {human}");
 }

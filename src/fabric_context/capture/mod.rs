@@ -75,8 +75,9 @@ pub(crate) struct MetaInput {
 /// display ref for every pubkey that can appear, and the backend-pubkey set.
 #[derive(Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct MembersInput {
-    /// Per-channel roster as `pubkey -> role` (`admin`/`member`). Carries the
-    /// role so `<members>` can label each member; ordering is by pubkey.
+    /// Per-channel roster as `pubkey -> role` (`admin`/`member`). The role is
+    /// retained as relay state; rendered awareness exposes the member identity,
+    /// status, and liveness only.
     pub(super) roster: BTreeMap<String, BTreeMap<String, String>>,
     pub(super) refs: BTreeMap<String, String>,
     #[serde(default)]
@@ -204,8 +205,8 @@ pub(crate) fn capture_inputs(store: &Store, input: &FabricContextInput<'_>) -> V
         });
 
         // Roster + status pubkeys → resolve refs and backend flags once. The
-        // roster carries each member's role (admin/member); keyed by pubkey so
-        // iteration order matches the legacy `BTreeSet<pubkey>` path.
+        // Keep relay roles in the frozen input for parity with the store snapshot;
+        // rendered member rows intentionally do not expose them.
         let members: BTreeMap<String, String> = store
             .list_channel_members(h)
             .unwrap_or_default()

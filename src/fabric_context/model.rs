@@ -80,8 +80,6 @@ pub(in crate::fabric_context) struct MemberRow {
     pub(in crate::fabric_context) reference: String,
     /// Stable underlying agent kind from the session row or kind:0 profile tag.
     pub(in crate::fabric_context) agent_slug: String,
-    /// Channel role: `admin` or `member` (from the relay roster).
-    pub(in crate::fabric_context) role: String,
     pub(in crate::fabric_context) status: String,
     pub(in crate::fabric_context) seen: String,
 }

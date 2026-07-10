@@ -158,9 +158,8 @@ fn first_turn_resolves_member_profiles_from_kind0() {
             .to_string()
     });
 
-    let want = format!(
-        "ref=\"@{remote_name}\" agentSlug=\"{remote_agent_slug}\" role=\"member\" status=\"offline\""
-    );
+    let want =
+        format!("ref=\"@{remote_name}\" agentSlug=\"{remote_agent_slug}\" status=\"offline\"");
     assert!(ctx.contains(&want), "kind:0 profile should resolve: {ctx}");
     assert!(
         !ctx.contains(&format!("@{}", &remote_pk[..8])),

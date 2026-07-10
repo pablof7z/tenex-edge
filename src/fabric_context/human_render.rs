@@ -80,12 +80,10 @@ fn render_members(out: &mut String, members: &[MemberRow], color: bool) {
     let _ = writeln!(out, "  {}", dim("Members", color));
     for m in members {
         let reference = pad_ref(&m.reference, width);
-        let role = dim(&format!("{:<6}", m.role), color);
         let _ = writeln!(
             out,
-            "    {} {} {:<12} {} {}",
+            "    {}  {:<12} {} {}",
             style(&reference, color, Style::Agent),
-            role,
             status_text(&m.status, color),
             dim("seen", color),
             dim(&m.seen, color)
