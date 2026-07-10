@@ -4,7 +4,7 @@ date: 2026-07-10
 session: 4d78f854-d5e5-4a11-b0d4-358f33111d15
 transcript: /Users/pablofernandez/.claude/projects/-Users-pablofernandez-src-tenex-edge/4d78f854-d5e5-4a11-b0d4-358f33111d15.jsonl
 salience: architecture
-status: active
+status: superseded
 subjects:
   - workflow-storage
   - chief-of-staff

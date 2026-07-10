@@ -81,7 +81,7 @@ Last updated: 2026-07-10
 | [2026-07-10-b70718e17221-cb4e41ba-2-residual-per-test-flake-investigation-found](research/2026-07-10-b70718e17221-cb4e41ba-2-residual-per-test-flake-investigation-found.md) | 2026-07-10 | Residual per-test flake investigation: found and fixed 6 propagation races + 1 production bug across ~85 runs; verdict = 20/20 consecutive green, all flakes eliminated. | a067926378f0c4ada (residual de-flake agent) |
 | [AGENTS](research/AGENTS.md) |  |  |  |
 
-## Episode Cards (53 cards)
+## Episode Cards (54 cards)
 
 | Card | Date | Title | Salience | Status |
 |------|------|-------|----------|--------|
@@ -134,7 +134,8 @@ Last updated: 2026-07-10
 | [2026-07-09-b70718e17221-cb4e41ba-3-full-project-wording-purge-project-workspace](episodes/2026-07-09-b70718e17221-cb4e41ba-3-full-project-wording-purge-project-workspace.md) | 2026-07-09 | Full project-wording purge: project → workspace / root channel across entire codebase | reversal | superseded |
 | [2026-07-09-b70718e17221-cb4e41ba-3-non-mention-test-cold-relay-readiness](episodes/2026-07-09-b70718e17221-cb4e41ba-3-non-mention-test-cold-relay-readiness.md) | 2026-07-09 | non_mention test cold-relay readiness race: wait for channel materialization before send | root-cause | active |
 | [2026-07-09-b70718e17221-cb4e41ba-3-per-session-key-model-inverts-shared](episodes/2026-07-09-b70718e17221-cb4e41ba-3-per-session-key-model-inverts-shared.md) | 2026-07-09 | Per-session key model inverts shared-pubkey reply-envelope rationale | root-cause | superseded |
-| [2026-07-10-4d78f854d5e5-873fdd2e-1-workflows-must-live-in-a-git](episodes/2026-07-10-4d78f854d5e5-873fdd2e-1-workflows-must-live-in-a-git.md) | 2026-07-10 | Workflows must live in a git repo, not a local home directory | architecture | active |
+| [2026-07-10-4d78f854d5e5-873fdd2e-1-chief-of-staff-home-dir-must](episodes/2026-07-10-4d78f854d5e5-873fdd2e-1-chief-of-staff-home-dir-must.md) | 2026-07-10 | Chief-of-staff home dir must be symlinked into a git repo, not loose local files | architecture | active |
+| [2026-07-10-4d78f854d5e5-873fdd2e-1-workflows-must-live-in-a-git](episodes/2026-07-10-4d78f854d5e5-873fdd2e-1-workflows-must-live-in-a-git.md) | 2026-07-10 | Workflows must live in a git repo, not a local home directory | architecture | superseded |
 | [2026-07-10-b70718e17221-cb4e41ba-1-channel-hierarchy-notation-dotted-paths-replace](episodes/2026-07-10-b70718e17221-cb4e41ba-1-channel-hierarchy-notation-dotted-paths-replace.md) | 2026-07-10 | Channel hierarchy notation: dotted paths replace slash-separated paths; 'project' concept fully collapsed | reversal | active |
 | [2026-07-10-b70718e17221-cb4e41ba-2-daemon-startup-relay-connect-moved-off](episodes/2026-07-10-b70718e17221-cb4e41ba-2-daemon-startup-relay-connect-moved-off.md) | 2026-07-10 | Daemon startup: relay connect moved off critical path to background spawn | root-cause | active |
 | [2026-07-10-b70718e17221-cb4e41ba-3-integration-test-flakiness-root-cause-croissant](episodes/2026-07-10-b70718e17221-cb4e41ba-3-integration-test-flakiness-root-cause-croissant.md) | 2026-07-10 | Integration test flakiness root cause: croissant relay leaks POSIX named semaphores on SIGKILL | root-cause | active |
