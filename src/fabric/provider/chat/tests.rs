@@ -20,6 +20,13 @@ fn chat() -> ChatMessage {
     }
 }
 
+fn addressed_chat(recipient: &str) -> ChatMessage {
+    ChatMessage {
+        mentioned_pubkey: Some(recipient.to_string()),
+        ..chat()
+    }
+}
+
 fn has_tag(event: &Event, name: &str, value: &str) -> bool {
     event.tags.iter().any(|t| {
         let s = t.as_slice();
@@ -44,6 +51,32 @@ async fn reply_threading_appends_e_tag_and_keeps_channel() {
     assert!(
         has_tag(&signed, "h", "chan"),
         "wire channel h tag must survive reply threading: {:?}",
+        signed.tags
+    );
+}
+
+#[tokio::test]
+async fn reply_threading_keeps_addressing_p_tag() {
+    let provider = offline_provider().await;
+    let reply_to = "c".repeat(64);
+    let requester = "a".repeat(64);
+    let signed = provider
+        .sign_chat_message(
+            &addressed_chat(&requester),
+            Some(&reply_to),
+            &Keys::generate(),
+        )
+        .await
+        .unwrap();
+
+    assert!(
+        has_tag(&signed, "e", &reply_to),
+        "reply must thread via an e tag: {:?}",
+        signed.tags
+    );
+    assert!(
+        has_tag(&signed, "p", &requester),
+        "reply must p-tag the requester: {:?}",
         signed.tags
     );
 }
