@@ -6,7 +6,8 @@
 {"canonical":"container state","name":"container-state","signed":1,"status":"provisional"}
 {"canonical":"hacker new","name":"Hacker News","signed":0,"status":"provisional"}
 {"canonical":"haiku 1","name":"haiku1","signed":1,"status":"provisional"}
-{"canonical":"kind 0","name":"kind:0","signed":7,"status":"real"}
+{"canonical":"kind 0","name":"kind:0","signed":9,"status":"real"}
+{"canonical":"kind 9","name":"kind:9","signed":5,"status":"real"}
 {"canonical":"member pablo","name":"Members Pablo","signed":0,"status":"provisional"}
 {"canonical":"mtok ollama","name":"Mtok Ollama","signed":0,"status":"provisional"}
 {"canonical":"nak req k 39000","name":"nak req -k 39000","signed":1,"status":"provisional"}
@@ -15,7 +16,7 @@
 {"canonical":"separately fyi","name":"Separately FYI","signed":0,"status":"provisional"}
 {"canonical":"sk or 4 f 2","name":"sk-or-…4f2a","signed":0,"status":"provisional"}
 {"canonical":"tenex edge channel invite agent slug","name":"tenex-edge channel invite agentSlug","signed":8,"status":"real"}
-{"canonical":"tenex edge channel read","name":"tenex-edge channel read","signed":3,"status":"real"}
+{"canonical":"tenex edge channel read","name":"tenex-edge channel read","signed":4,"status":"real"}
 {"canonical":"tenex edge chat","name":"tenex-edge chat","signed":-16,"status":"suppressed"}
 {"canonical":"tenex edge config","name":"tenex-edge config","signed":3,"status":"real"}
 {"canonical":"tenex edge daemon","name":"tenex-edge daemon","signed":3,"status":"real"}

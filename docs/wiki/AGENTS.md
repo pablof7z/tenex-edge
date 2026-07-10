@@ -3,11 +3,9 @@
 This directory is proactive-context generated project memory. It is useful repo
 state, not scratch output.
 
-- Be proactive about committing generated `docs/wiki` changes with the code or
-  docs change they explain. If wiki changes accumulated during your work, include
-  them intentionally or call them out before handing off. Or run
-  `pc install --git-hooks` once to have this happen automatically via a git
-  post-commit hook.
+- Be explicit about generated `docs/wiki` changes. If they matter, include them
+  intentionally with the code or docs change they explain; otherwise call them
+  out before handing off.
 - Do not hand-edit `_index.md` or `_citations.log`; they are derived caches.
 - `_citations/` is the merge-friendly citation source of truth. Treat existing
   citation records as immutable evidence receipts.

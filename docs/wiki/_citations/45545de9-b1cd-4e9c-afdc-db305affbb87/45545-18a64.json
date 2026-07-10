@@ -1,0 +1,6 @@
+{
+  "id": "45545-18a64",
+  "ts": "2026-07-10T13:22:18Z",
+  "session": "45545de9-b1cd-4e9c-afdc-db305affbb87",
+  "text": "- `mcp-debug.sh log [n]` — the app's own access log (method, tool name, resource URI, `clientInfo`, sanitized headers) at `.../scratchpad/mcp-debug/mcp-server.log`\n- `http://127.0.0.1:4040` — ngrok's inspector, **everything** on the wire including `Authorization` headers and full bodies. I can also pull it programmatically: `mcp-debug.sh requests`\n\nOther commands: `mcp-debug.sh status` (health + URL), `mcp-debug.sh stop`."
+}

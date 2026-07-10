@@ -2,13 +2,13 @@
 title: Tenex-Edge Agent Identity
 slug: tenex-edge-agent-identity
 topic: tenex-edge
-summary: Identity is per session — each session derives its own Nostr keypair from the machine's management key; trust is NIP-29 channel membership.
+summary: Identity is per session, not per agent
 tags:
   - capture
 volatility: warm
 confidence: medium
 created: 2026-06-29
-updated: 2026-07-09
+updated: 2026-07-10
 verified: 2026-07-09
 compiled-from: conversation
 sources:
@@ -16,6 +16,7 @@ sources:
   - session:bd8689c8-4a5f-45b3-9dbe-758baec2a2f4
   - session:019f12f9-8a0b-7012-ad2f-f4d0cb035d2b
   - session:75f62bb9-f564-4633-8741-997dfea1d0e7
+  - session:4d65680c-ded1-47cd-a59a-4966eebe8eda
 ---
 
 # Tenex-Edge Agent Identity
@@ -58,12 +59,11 @@ new session; that session is what becomes a member.
 
 ## Session Identification and Routing
 
-The raw `session_id` is the internal correlation id, and the derived pubkey is
-what signs and is routed to. Peers reference a session by its `@agent/session`
-handle, never by raw pubkey. A mention that cannot be resolved to a
-current member is silently treated as no-mention rather than erroring, so mention
-resolution never blocks chat delivery.
+The raw `session_id` is the internal correlation id, and the derived pubkey is what signs and is routed to. Peers reference a session by its `@agent/session` handle, never by raw pubkey. A mention that cannot be resolved to a current member is silently treated as no-mention rather than erroring, so mention resolution never blocks chat delivery.
 
+`resolve_session_inner` is the central session-resolution function in the daemon where every RPC handler resolves caller identity. It has 11 call sites: `who`, `chat_write`, `chat_read`, `propose`, `channels_create`, `channels_edit`, `channels_join`, `channels_leave`, `channels_switch`, `pty_send`, `pty_attach`, `turn_start`, `turn_check`, `turn_end`, `invite`, and `channel_add_member`. Agent identity auto-provisioning happens at this identity-resolution choke point rather than in `rpc_who` alone, so all RPC handlers obtain just-in-time identity without per-handler duplication.
+
+<!-- citations: [^4d656-e8fdc] -->
 ## Session Resume
 
 Resume resolves sessions by exact raw `session_id`, then by `session_id` prefix.

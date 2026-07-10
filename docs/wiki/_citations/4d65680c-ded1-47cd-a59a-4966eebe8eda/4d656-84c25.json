@@ -1,0 +1,6 @@
+{
+  "id": "4d656-84c25",
+  "ts": "2026-07-10T13:33:59Z",
+  "session": "4d65680c-ded1-47cd-a59a-4966eebe8eda",
+  "text": "- **HTTP** (`src/cli/mcp/http.rs`) — this is the one ChatGPT actually uses (the code even has a comment \"ChatGPT requires HTTPS; tunnel this endpoint,\" line 65). Each POST is currently handled statelessly with **no session correlation at all** — no `Mcp-Session-Id` header is issued or read anywhere in `http.rs`. Per the MCP spec, `clientInfo` only arrives once, on `initialize`; without a session id to key a lookup by, a later `tools/call` from the same ChatGPT connection has no way to recover which `initialize` it belongs to. Threading `clientInfo.name` through for HTTP means first adding `Mcp-Session-Id` issuance/tracking (a small in-memory map + response header), which is a materially bigger change than \"thread a field through.\" [...] - **`src/cli/mcp/http.rs`**: added `Mcp-Session-Id` tracking. On `initialize`, mints a session id (`mcp-<nanos>-<counter>`, matching the existing `mint_session_id()` convention), captures `clientInfo.name` from the request, stores it in a new `HttpState.mcp_sessions` map, and returns the id via the `Mcp-Session-Id` response header (also exposed/allowed via CORS). On every later request, reads the incoming `Mcp-Session-Id` header and looks up the stored name."
+}
