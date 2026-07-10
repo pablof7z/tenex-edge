@@ -72,8 +72,9 @@ pub(super) async fn rpc_dispatch(
     }
 
     let ack = wait_dispatch_ack(&mut notifications, &dispatch_event_id).await?;
+    let body = dispatch_message_body(&p.message, &ack.pubkey)?;
     let message_event_id =
-        send_dispatch_message(state, &caller, &route_channel, &p.message, &ack).await?;
+        send_dispatch_message(state, &caller, &route_channel, &body, &ack).await?;
     Ok(serde_json::json!({
         "dispatch_event_id": dispatch_event_id,
         "message_event_id": message_event_id,
@@ -165,6 +166,15 @@ fn dispatch_prose(
         prose.push_str(&format!(" on {label} {}", channels.join(", ")));
     }
     Ok(prose)
+}
+
+fn dispatch_message_body(message: &str, target_pubkey: &str) -> Result<String> {
+    let npub = PublicKey::from_hex(target_pubkey)?.to_bech32()?;
+    let prefix = format!("nostr:{npub}:");
+    if message.trim_start().starts_with(&prefix) {
+        return Ok(message.to_string());
+    }
+    Ok(format!("{prefix} {message}"))
 }
 
 struct DispatchAck {

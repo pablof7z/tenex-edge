@@ -1,5 +1,8 @@
 use super::*;
 use crate::state::RegisterSession;
+use nostr_sdk::prelude::ToBech32;
+
+const WRITER_PUBKEY: &str = "31d4c4950a12b978cee21f84f4f5703e700b2d77a18648773239096675a7ab2d";
 
 fn caller_session(state: &Arc<DaemonState>, channels: &[&str]) -> crate::state::Session {
     state.with_store(|s| {
@@ -54,4 +57,33 @@ async fn route_channel_failure_lists_channels_the_caller_is_active_on() {
     assert!(err.contains("you need to specify a channel you're active on:"));
     assert!(err.contains("project1"));
     assert!(err.contains("project1.dev") || err.contains("@project1"));
+}
+
+#[test]
+fn dispatch_message_body_prefixes_ack_pubkey_as_nostr_entity() {
+    let body =
+        dispatch_message_body("Hello! This is a quick connectivity test.", WRITER_PUBKEY).unwrap();
+    let npub = PublicKey::from_hex(WRITER_PUBKEY)
+        .unwrap()
+        .to_bech32()
+        .unwrap();
+
+    assert_eq!(
+        body,
+        format!("nostr:{npub}: Hello! This is a quick connectivity test.")
+    );
+}
+
+#[test]
+fn dispatch_message_body_does_not_duplicate_existing_target_prefix() {
+    let npub = PublicKey::from_hex(WRITER_PUBKEY)
+        .unwrap()
+        .to_bech32()
+        .unwrap();
+    let existing = format!("nostr:{npub}: already addressed");
+
+    assert_eq!(
+        dispatch_message_body(&existing, WRITER_PUBKEY).unwrap(),
+        existing
+    );
 }
