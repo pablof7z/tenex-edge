@@ -82,7 +82,7 @@ fn validate_render_lists_message_evidence() {
         "checks": [
             {"name":"message","status":"passed","summary":"message `event-123` is accepted in channel `room`"}
         ],
-        "limitations": ["message validation proves the local canonical chat read model"],
+        "limitations": ["message validation proves the local canonical channel read model"],
         "message_evidence": {
             "requested_id": "event-123",
             "message_id": "event-123",
@@ -98,7 +98,7 @@ fn validate_render_lists_message_evidence() {
             "pending_recipient_count": 1,
             "body_len": 23,
             "body_preview": "hello from the fabric",
-            "reason": "message validation proves the local canonical chat read model"
+            "reason": "message validation proves the local canonical channel read model"
         }
     });
 

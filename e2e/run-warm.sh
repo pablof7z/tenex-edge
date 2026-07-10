@@ -119,7 +119,7 @@ cat >"${A_CFG}" <<JSON
   "tenexPrivateKey": "${A_SK}"
 }
 JSON
-( cd "${A_PROJ}" && edge edge-a project init --force >/dev/null ) || die "project init failed"
+( cd "${A_PROJ}" && edge edge-a channel init --force >/dev/null ) || die "channel init failed"
 ok "edge-a pubkey ${A_PK}"
 dim "  config=${A_CFG}"
 dim "  project_dir=${A_PROJ}  project_slug=${E2E_PROJECT}"
@@ -180,15 +180,15 @@ else
 fi
 
 # ── 5. CHECK 1: the daemon warmed the peer's kind:0 → who renders its NAME ─────
-# `who --all-projects` reads the profile CACHE (it never fetches); the name only
+# `who --all-workspaces` reads the profile CACHE (it never fetches); the name only
 # appears if the daemon proactively fetched the peer's kind:0 off the inbound
 # 39002 and cached it. Poll to allow the async warm + relay echo to complete.
 log "check 1: warming — peer resolves by name in the roster (not raw hex)"
 if wait_for_soft "who to render @${PEER_NAME}" 25 \
-     "edge edge-a who --all-projects 2>/dev/null | grep -q '@${PEER_NAME}'"; then
+     "edge edge-a who --all-workspaces 2>/dev/null | grep -q '@${PEER_NAME}'"; then
   check_pass "warming — peer's kind:0 fetched from the indexer; roster shows @${PEER_NAME}"
 else
-  WHO_OUT="$(edge edge-a who --all-projects 2>/dev/null || true)"
+  WHO_OUT="$(edge edge-a who --all-workspaces 2>/dev/null || true)"
   echo "${WHO_OUT}" | sed 's/^/    /'
   if echo "${WHO_OUT}" | grep -q "@${P_SHORT}"; then
     check_fail "warming — peer still renders as hex @${P_SHORT}; kind:0 was not fetched/cached"
@@ -199,7 +199,7 @@ fi
 
 # ── 6. CHECK 2: the backend's own management pubkey is excluded from the roster ─
 log "check 2: backend exclusion — mgmt key '${A_PK:0:8}' not shown as a member"
-WHO_OUT="$(edge edge-a who --all-projects 2>/dev/null || true)"
+WHO_OUT="$(edge edge-a who --all-workspaces 2>/dev/null || true)"
 if echo "${WHO_OUT}" | grep -Eq "<member[^>]*@${A_PK:0:8}|@${A_PK:0:8}[^A-Za-z0-9]"; then
   echo "${WHO_OUT}" | sed 's/^/    /'
   check_fail "backend exclusion — mgmt key @${A_PK:0:8} leaked into the roster"

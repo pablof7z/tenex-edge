@@ -2,6 +2,18 @@
 
 This is the authoritative contributor guide for the repository — for agents and humans equally. Everything here is enforced, not suggested. `CLAUDE.md` defers to this file.
 
+## No Backwards Compatibility
+
+This repository does **not** preserve backwards compatibility. Removed surfaces
+must be removed completely: no hidden aliases, parser aliases, legacy flags,
+old subcommands, fallback JSON keys, duplicate MCP/tool names, stale e2e
+commands, compatibility wrappers, or docs that continue teaching the old form.
+
+If you find backwards-compatibility behavior, kill it immediately in the same
+change. If a requested change would require adding a compatibility shim, do not
+add it; change the caller, script, doc, or owning layer to the current contract
+instead. Compatibility is drift, and drift is a bug.
+
 ## File Size
 
 - Keep hand-authored source and documentation files under **300 lines of code** where practical (soft limit).

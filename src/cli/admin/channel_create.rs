@@ -9,7 +9,7 @@ pub(super) async fn channel_create(
     let target = create_target(&path)?;
     let parsed = parse_agents(&agents)?;
     let v = daemon_call_async(
-        "channels_create",
+        "channel_create",
         crate::cli::rpc_params(with_session(
             serde_json::json!({
                 "parent_channel": target.parent_channel,

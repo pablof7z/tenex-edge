@@ -24,7 +24,7 @@ impl ChatCursor {
     }
 }
 
-pub(in crate::daemon::server) fn chat_read_scopes_for_store(
+pub(in crate::daemon::server) fn channel_read_scopes_for_store(
     store: &Store,
     scope: &str,
 ) -> Vec<String> {

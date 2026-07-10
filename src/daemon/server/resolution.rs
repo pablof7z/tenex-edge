@@ -38,10 +38,9 @@ pub(in crate::daemon::server) struct CallerAnchor<'a> {
 
 impl<'a> CallerAnchor<'a> {
     /// Build the anchor from raw RPC params — the SINGLE place wire field names
-    /// map to anchor fields, so every handler resolves identically (SSOT). The
-    /// `env_session` key is still read as a `harness_session` alias for
-    /// back-compat with older hook senders. Borrows from `p`, so `p` must outlive
-    /// the anchor. NOTE: the caller's agent slug is the `agent` key; `invite`
+    /// map to anchor fields, so every handler resolves identically (SSOT).
+    /// Borrows from `p`, so `p` must outlive the anchor. NOTE: the caller's
+    /// agent slug is the `agent` key; `invite`
     /// carries two agents and builds its anchor by hand.
     pub(in crate::daemon::server) fn from_params(p: &'a serde_json::Value) -> Self {
         let s = |k: &str| p.get(k).and_then(|v| v.as_str()).filter(|x| !x.is_empty());
@@ -55,7 +54,7 @@ impl<'a> CallerAnchor<'a> {
         CallerAnchor {
             explicit: s("session"),
             pty_session: s("pty_session"),
-            harness_session: s("harness_session").or_else(|| s("env_session")),
+            harness_session: s("harness_session"),
             watch_pid: pid("watch_pid"),
             harness: s("harness"),
             cwd: s("cwd"),
@@ -70,7 +69,7 @@ impl<'a> CallerAnchor<'a> {
 pub(in crate::daemon::server) enum ResolveScope {
     /// Exact anchors only (explicit / PTY session / harness id). No cwd+agent scan.
     /// Fails loud rather than binding a sibling. For per-session MUTATIONS
-    /// (channels switch/join/leave, invite, create) where guessing the wrong
+    /// (channel switch/join/leave, invite, create) where guessing the wrong
     /// session is harmful.
     Strict,
     /// Exact anchors, then the cwd+agent scan (latest-alive in the channel). For

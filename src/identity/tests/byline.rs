@@ -3,7 +3,7 @@ use crate::identity::{
 };
 
 #[test]
-fn byline_reads_field_alias_and_falls_back_to_agent_description() {
+fn byline_reads_canonical_field_and_falls_back_to_agent_description() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join("agents")).unwrap();
     std::fs::write(
@@ -35,7 +35,7 @@ fn byline_reads_field_alias_and_falls_back_to_agent_description() {
             .and_then(|a| a.3.clone())
     };
     assert_eq!(byline("a").as_deref(), Some("front-line triage"));
-    assert_eq!(byline("b").as_deref(), Some("use for deep research"));
+    assert_eq!(byline("b"), None);
     assert_eq!(byline("c").as_deref(), Some("writes social posts"));
     assert_eq!(byline("d"), None);
 }

@@ -2,9 +2,9 @@
 //! kind:9 chat into the channel mentioning it — add + mention in one shot.
 //!
 //! Rather than re-implement chat publishing (mention resolution, p-tag, local
-//! doorbell delivery), this synthesizes a `chat_write` call from the SAME caller
+//! doorbell delivery), this synthesizes a `channel_send` call from the SAME caller
 //! anchors the invite ran under, prefixing the body with the brought-online
-//! session's `@agent/session` handle so `chat_write` p-tags it.
+//! session's `@agent/session` handle so `channel_send` p-tags it.
 
 use crate::daemon::server::DaemonState;
 use std::sync::Arc;
@@ -32,7 +32,7 @@ pub(super) async fn post_add_message(
     // The mention prefix can push a short message over the soft cap; the operator
     // already opted into posting it, so never reject on length here.
     obj.insert("long_message".into(), serde_json::json!(true));
-    match crate::daemon::server::chat_write::rpc_chat_write(state, &chat).await {
+    match crate::daemon::server::channel_send::rpc_channel_send(state, &chat).await {
         Ok(_) => None,
         Err(e) => Some(format!("{e:#}")),
     }

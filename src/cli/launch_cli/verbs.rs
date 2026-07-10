@@ -51,7 +51,7 @@ pub(crate) async fn launch(
         None => Some(root.clone()),
         Some(name) if !name.is_empty() => {
             let v = super::super::daemon_call_async(
-                "channels_resolve",
+                "channel_resolve",
                 serde_json::json!({
                     "root": root.clone(),
                     "name": name,
@@ -63,7 +63,7 @@ pub(crate) async fn launch(
             Some(
                 v["channel_h"]
                     .as_str()
-                    .context("channels_resolve did not return channel_h")?
+                    .context("channel_resolve did not return channel_h")?
                     .to_string(),
             )
         }
@@ -110,9 +110,8 @@ pub(crate) async fn launch(
 /// for a name, creates the channel via the daemon, and returns the new id.
 /// `agent_slug` is used as the default agent spec when creating.
 async fn pick_channel(root: &str, agent_slug: &str) -> Result<String> {
-    let v =
-        super::super::daemon_call_async("channels_list", serde_json::json!({ "channel": root }))
-            .await?;
+    let v = super::super::daemon_call_async("channel_list", serde_json::json!({ "channel": root }))
+        .await?;
 
     let rooms = v["rooms"].as_array().map(|a| a.as_slice()).unwrap_or(&[]);
 
@@ -160,14 +159,14 @@ async fn create_channel_interactive(
         .interact_text()?;
 
     // Resolve the local backend config label from the daemon so the picker uses
-    // the same backend identifier as `tenex-edge channels create --agent`.
+    // the same backend identifier as `tenex-edge channel create --agent`.
     let backend_v = super::super::daemon_call_async("local_backend", serde_json::json!({})).await?;
     let backend_label = backend_v["backend_label"]
         .as_str()
         .context("local_backend did not return backend_label")?;
 
     let v = super::super::daemon_call_async(
-        "channels_create",
+        "channel_create",
         crate::cli::rpc_params(serde_json::json!({
             "parent": root,
             "name": &name,
@@ -179,7 +178,7 @@ async fn create_channel_interactive(
 
     let child_h = v["child_h"]
         .as_str()
-        .context("channels_create did not return child_h")?
+        .context("channel_create did not return child_h")?
         .to_string();
     eprintln!("created channel {child_h}");
     Ok(child_h)

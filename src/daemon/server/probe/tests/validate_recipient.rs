@@ -108,7 +108,7 @@ async fn rpc_probe_validate_recipient_reports_missing_message_as_not_proven() {
     assert!(v["recipient_evidence"]["summary"]
         .as_str()
         .unwrap()
-        .contains("not in the canonical chat read model"));
+        .contains("not in the canonical channel read model"));
 }
 
 fn seed_message(state: &DaemonState, id: &str, sync_state: &str, error: Option<&str>) {

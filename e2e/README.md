@@ -113,8 +113,8 @@ publishes **9007 create-group → 9002 lock (closed/public) → 9000 put-user** 
 the backend's admins and the session agent (`src/fabric/provider.rs`).
 
 1. **edge-a** drives a `claude-code` `session-start` hook in a project dir
-   registered in `~/.tenex/edge/projects.json` with the slug `e2e-demo` (via
-   `tenex-edge project init`):
+   registered in `~/.tenex/edge/workspaces.json` with the slug `e2e-demo` (via
+   `tenex-edge channel init`):
    ```bash
    echo '{"session_id":"…","cwd":"…/work/e2e-demo"}' \
      | TENEX_EDGE_AGENT=claude tenex-edge harness hook claude-code --type session-start
@@ -122,9 +122,9 @@ the backend's admins and the session agent (`src/fabric/provider.rs`).
    → daemon-a creates the NIP-29 group `e2e-demo` on the relay.
 2. **Direct relay check:** `nak req -k 39000 -d e2e-demo ws://127.0.0.1:10547`
    returns the relay-signed metadata event → the group really landed on the relay.
-3. **edge-b** (a separate install, separate daemon + db) runs `project list`:
+3. **edge-b** (a separate install, separate daemon + db) runs `channel list --all-workspaces`:
    ```bash
-   tenex-edge project list      # → e2e-demo
+   tenex-edge channel list --all-workspaces      # → e2e-demo
    ```
    Backend-b learning the group exists is only possible via the shared relay;
    the backends share no filesystem state. That is the proof of cross-backend
@@ -139,7 +139,7 @@ nip29: create-group accepted or already existed
 nip29: group lock accepted or already existed
 nip29: admin grant accepted for <edge-b>
 nip29: agent membership accepted for <session>
-ok  backend-a project list shows 'e2e-demo'
+ok  backend-a channel list --all-workspaces shows 'e2e-demo'
 ok  relay holds kind:39000 metadata for 'e2e-demo'
 ok  PASS — backend-b observed backend-a's group 'e2e-demo' through ws://127.0.0.1:10547
 ```
@@ -171,9 +171,9 @@ Reuse the `edge()` helper from `lib.sh` for any backend command:
 
 ```bash
 source e2e/lib.sh
-edge edge-b project list
-edge edge-b who --all-projects
-edge edge-a chat write --message 'hello from a' --project e2e-demo
+edge edge-b channel list --all-workspaces
+edge edge-b who --all-workspaces
+edge edge-a channel send --message 'hello from a' --channel e2e-demo
 nak req -k 39000 "$RELAY_WS"          # all group metadata on the relay
 nak req -k 9      -h e2e-demo "$RELAY_WS"   # chat messages in the group
 ```
@@ -201,8 +201,8 @@ current binary under test.
 | BDD-04 | a relayed add-agents orchestration event names a role on backend-b | backend-b receives the kind:9 | backend-b mints the role and adds it as a child member | `e2e/run-subgroup.sh` |
 | BDD-05 | two live sessions of the same agent in the same room | both session-start hooks run concurrently | the sessions get distinct ordinal labels and pubkeys | `e2e/run-ordinal.sh` |
 | BDD-06 | the same ordinal is free in a different room | that agent starts in an alternate channel | the ordinal label and pubkey are reused across rooms | `e2e/run-ordinal.sh` |
-| BDD-07 | two same-agent sessions are live in one room | one session mentions the other using `chat write --session` | the mention resolves to the recipient and the kind:9 carries both `#p` and `#h` | `e2e/run-ordinal.sh` |
-| BDD-08 | a session already holds an ordinal in the destination room | `channels switch --session` would collide that ordinal | the daemon rejects the switch with `already active` | `e2e/run-ordinal.sh` |
+| BDD-07 | two same-agent sessions are live in one room | one session mentions the other using `channel send --session` | the mention resolves to the recipient and the kind:9 carries both `#p` and `#h` | `e2e/run-ordinal.sh` |
+| BDD-08 | a session already holds an ordinal in the destination room | `channel switch --session` would collide that ordinal | the daemon rejects the switch with `already active` | `e2e/run-ordinal.sh` |
 | BDD-09 | a portable PTY supervisor is live | `pty list` resolves its metadata | the session is reported live | `e2e/run-pty.sh` |
 | BDD-10 | an attach client connects to a live PTY socket | the supervisor has backlog output | the attach client receives the backlog and later fanout | `e2e/run-pty.sh` |
 | BDD-11 | multiline text is piped to `pty inject --bracketed --no-submit` | a separate submit is sent | the PTY receives one bracketed multiline paste and submit | `e2e/run-pty.sh` |
@@ -213,11 +213,11 @@ current binary under test.
 | BDD-16 | a launched PTY-backed session has a `pty_session` alias | a user-authored kind:9 mentions that session | the daemon injects the message into the running PTY | `cargo test --test daemon_integration operator_kind9_injects_into_running_launch_session -- --test-threads=1` |
 | BDD-17 | a user-authored kind:9 mentions an offline local agent identity | the agent is available locally | the daemon spawns a PTY-backed session and injects the triggering message | `cargo test --test daemon_integration operator_kind9_to_offline_local_agent_spawns_and_injects -- --test-threads=1` |
 | BDD-18 | validation targets reference PTY aliases and session surfaces | `tenex-edge debug validate` renders the target | evidence uses `pty_session:<id>` and reports exact proof boundaries | `cargo test --lib probe validate_render` |
-| BDD-19 | exact session targeting is needed for chat/channel operations | `--session <session-id>` is supplied | the requested session anchor wins over ambient environment hints | `cargo test chat_write_accepts_explicit_session_anchor channels_switch_accepts_explicit_session_anchor` |
+| BDD-19 | exact session targeting is needed for chat/channel operations | `--session <session-id>` is supplied | the requested session anchor wins over ambient environment hints | `cargo test channel_send_accepts_explicit_session_anchor channel_switch_accepts_explicit_session_anchor` |
 | BDD-20 | backend-addressed management commands arrive as p-tagged kind:9 events | add/list/kill/archive commands are parsed | the daemon routes them through the management-command handler | `cargo test daemon::server::management_command` |
 | BDD-21 | hosted-session transport has moved to portable PTY | the tree is searched for replaced transport vocabulary | no current source, docs, tests, or filenames retain the replaced host path | `git grep -n -i <old-term> HEAD` plus filename search |
 | BDD-22 | a peer's kind:0 lives only on the relay and it is added to the project as a member | the daemon receives the relay-signed kind:39002 | it proactively fetches the peer's kind:0 and `who` renders the peer by NAME, not hex, with no explicit warm | `e2e/run-warm.sh` |
-| BDD-23 | the daemon's management key is a channel admin | `who --all-projects` renders the roster | the management pubkey is excluded from the member list | `e2e/run-warm.sh` |
+| BDD-23 | the daemon's management key is a channel admin | `who --all-workspaces` renders the roster | the management pubkey is excluded from the member list | `e2e/run-warm.sh` |
 
 ## Files
 

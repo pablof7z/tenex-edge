@@ -71,7 +71,7 @@ pub(super) fn recipient_evidence(
             "message_found": false,
             "found": false,
             "summary": format!(
-                "message `{}` is not in the canonical chat read model",
+                "message `{}` is not in the canonical channel read model",
                 parsed.message_prefix
             ),
             "reason": "no messages row matched this local message id or native event id prefix",

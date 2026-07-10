@@ -33,7 +33,7 @@ async fn rpc_probe_validate_workspace_inherits_from_parent() {
 
     let v = rpc_probe(
         &state,
-        &json!({ "verb": "validate", "target": "work_root:task" }),
+        &json!({ "verb": "validate", "target": "workspace:task" }),
     )
     .unwrap();
 

@@ -68,7 +68,7 @@ fn non_mention_chat_does_not_route_to_inbox() {
     );
     assert!(
         out.status.success(),
-        "chat write failed: {}",
+        "channel send failed: {}",
         String::from_utf8_lossy(&out.stderr)
     );
 

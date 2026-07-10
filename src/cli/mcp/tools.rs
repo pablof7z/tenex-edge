@@ -14,13 +14,13 @@ pub(super) async fn call(params: &Value) -> Result<Value> {
         .unwrap_or_else(|| json!({}));
     let result = match name.as_str() {
         "tenex_edge.who" => who(&args).await,
-        "tenex_edge.channels_list" => channels_list(&args).await,
-        "tenex_edge.chat_read" => chat_read(&args).await,
-        "tenex_edge.chat_write" => chat_write(&args).await,
-        "tenex_edge.channels_create" => channels_create(&args).await,
-        "tenex_edge.channels_join" => channel_mutation("channels_join", &args).await,
-        "tenex_edge.channels_leave" => channel_mutation("channels_leave", &args).await,
-        "tenex_edge.channels_switch" => channel_mutation("channels_switch", &args).await,
+        "tenex_edge.channel_list" => channel_list(&args).await,
+        "tenex_edge.channel_read" => channel_read(&args).await,
+        "tenex_edge.channel_send" => channel_send(&args).await,
+        "tenex_edge.channel_create" => channel_create(&args).await,
+        "tenex_edge.channel_join" => channel_mutation("channel_join", &args).await,
+        "tenex_edge.channel_leave" => channel_mutation("channel_leave", &args).await,
+        "tenex_edge.channel_switch" => channel_mutation("channel_switch", &args).await,
         other => anyhow::bail!("unknown tool: {other}"),
     };
     Ok(match result {
@@ -33,7 +33,6 @@ async fn who(args: &Value) -> Result<Value> {
     let channel = opt_string(args, "channel");
     let all_workspaces = args
         .get("all_workspaces")
-        .or_else(|| args.get("all_roots"))
         .and_then(Value::as_bool)
         .unwrap_or(false);
     let extra = json!({
@@ -48,15 +47,15 @@ async fn who(args: &Value) -> Result<Value> {
     daemon_raw("who", params).await
 }
 
-async fn channels_list(args: &Value) -> Result<Value> {
+async fn channel_list(args: &Value) -> Result<Value> {
     let channel = match opt_string(args, "channel") {
         Some(channel) => channel,
         None => crate::workspace::resolve_or_bail(&std::env::current_dir().unwrap_or_default())?,
     };
-    daemon_raw("channels_list", json!({ "channel": channel })).await
+    daemon_raw("channel_list", json!({ "channel": channel })).await
 }
 
-async fn chat_read(args: &Value) -> Result<Value> {
+async fn channel_read(args: &Value) -> Result<Value> {
     let params = crate::cli::rpc_params(json!({
         "id": opt_string(args, "id"),
         "channel": opt_string(args, "channel"),
@@ -70,21 +69,21 @@ async fn chat_read(args: &Value) -> Result<Value> {
     let mut client = crate::daemon::client::Client::connect_or_spawn().await?;
     let mut messages = Vec::new();
     client
-        .stream("chat_read", params, |item| messages.push(item))
+        .stream("channel_read", params, |item| messages.push(item))
         .await?;
     Ok(json!({ "messages": messages }))
 }
 
-async fn chat_write(args: &Value) -> Result<Value> {
-    daemon_identity("chat_write", chat_write_params(args)?).await
+async fn channel_send(args: &Value) -> Result<Value> {
+    daemon_identity("channel_send", channel_send_params(args)?).await
 }
 
-async fn channels_create(args: &Value) -> Result<Value> {
+async fn channel_create(args: &Value) -> Result<Value> {
     let name = required_string(args, "name")?;
     let about = required_string(args, "about")?;
     let agents = agent_specs(args)?;
     daemon_identity(
-        "channels_create",
+        "channel_create",
         with_session(
             json!({
                 "name": name,
@@ -109,7 +108,7 @@ async fn channel_mutation(method: &str, args: &Value) -> Result<Value> {
     .await
 }
 
-fn chat_write_params(args: &Value) -> Result<Value> {
+fn channel_send_params(args: &Value) -> Result<Value> {
     Ok(with_session(
         json!({
             "message": required_string(args, "message")?,

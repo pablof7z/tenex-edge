@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn channels_create_uses_watch_pid_as_exact_session_anchor() {
+fn channel_create_uses_watch_pid_as_exact_session_anchor() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let home = Home::new();
     rewrite_config_with_user_nsec(&home);
@@ -37,7 +37,7 @@ fn channels_create_uses_watch_pid_as_exact_session_anchor() {
         let mut c = Client::connect_or_spawn().await.expect("connect");
         let v = c
             .call(
-                "channels_create",
+                "channel_create",
                 serde_json::json!({
                     "name": "native-subtask",
                     "agents": [],
@@ -48,7 +48,7 @@ fn channels_create_uses_watch_pid_as_exact_session_anchor() {
                 }),
             )
             .await
-            .expect("channels_create should resolve the exact watched process");
+            .expect("channel_create should resolve the exact watched process");
 
         assert!(
             v["switched"].as_bool().unwrap_or(false),
@@ -176,7 +176,7 @@ fn channel_membership_commands_use_watch_pid_as_exact_session_anchor() {
         let mut c = Client::connect_or_spawn().await.expect("connect");
         let created = c
             .call(
-                "channels_create",
+                "channel_create",
                 serde_json::json!({
                     "name": "membership-child",
                     "agents": [],
@@ -196,7 +196,7 @@ fn channel_membership_commands_use_watch_pid_as_exact_session_anchor() {
 
         let switched = c
             .call(
-                "channels_switch",
+                "channel_switch",
                 serde_json::json!({
                     "channel": &parent_h,
                     "harness": "claude-code",
@@ -212,7 +212,7 @@ fn channel_membership_commands_use_watch_pid_as_exact_session_anchor() {
 
         let joined = c
             .call(
-                "channels_join",
+                "channel_join",
                 serde_json::json!({
                     "channel": &child_h,
                     "harness": "claude-code",
@@ -228,7 +228,7 @@ fn channel_membership_commands_use_watch_pid_as_exact_session_anchor() {
 
         let left = c
             .call(
-                "channels_leave",
+                "channel_leave",
                 serde_json::json!({
                     "channel": &child_h,
                     "harness": "claude-code",

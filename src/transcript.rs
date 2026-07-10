@@ -76,7 +76,7 @@ pub fn read_recent(path: &Path, max_msgs: usize, max_chars: usize) -> Option<Str
 
 /// The text of the LAST assistant message in the transcript, capped at
 /// `max_chars`. Used to auto-publish an agent's final response when its turn
-/// ended without an explicit `chat write`. `None` when the transcript holds no
+/// ended without an explicit `channel send`. `None` when the transcript holds no
 /// non-empty assistant text.
 pub fn read_last_assistant_text(path: &Path, max_chars: usize) -> Option<String> {
     let lines = tail_lines(path)?;

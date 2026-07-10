@@ -12,7 +12,7 @@ pub(in crate::cli) struct LaunchArgs {
     #[arg(index = 2, value_name = "PROMPT")]
     prompt: Option<String>,
     /// Workspace slug; defaults to the workspace resolved from current directory.
-    #[arg(long = "workspace", alias = "root", value_name = "WORKSPACE")]
+    #[arg(long = "workspace", value_name = "WORKSPACE")]
     workspace: Option<String>,
     /// Channel name to scope this agent into; resolved to its opaque id and
     /// created if absent. Omit the value (`--channel` with no argument) to

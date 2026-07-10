@@ -1,33 +1,33 @@
 use super::super::*;
 use crate::fabric::provider::chat::OutboundChatRecord;
 use crate::state::{Message, Session};
-use crate::util::CHAT_WRITE_CHAR_LIMIT;
+use crate::util::CHANNEL_MESSAGE_CHAR_LIMIT;
 use anyhow::{bail, Context, Result};
 use nostr_sdk::prelude::{PublicKey, ToBech32};
 
 #[derive(serde::Deserialize, Default)]
-struct ChatReplyParams {
+struct ChannelReplyParams {
     id: String,
     message: String,
     #[serde(default)]
     long_message: bool,
 }
 
-pub(in crate::daemon::server) async fn rpc_chat_reply(
+pub(in crate::daemon::server) async fn rpc_channel_reply(
     state: &Arc<DaemonState>,
     params: &serde_json::Value,
 ) -> Result<serde_json::Value> {
-    let p: ChatReplyParams =
-        serde_json::from_value(params.clone()).context("parsing chat_reply params")?;
+    let p: ChannelReplyParams =
+        serde_json::from_value(params.clone()).context("parsing channel_reply params")?;
     if p.id.trim().is_empty() {
         bail!("reply id must not be empty");
     }
     if p.message.trim().is_empty() {
         bail!("reply message must not be empty");
     }
-    if !p.long_message && p.message.chars().count() > CHAT_WRITE_CHAR_LIMIT {
+    if !p.long_message && p.message.chars().count() > CHANNEL_MESSAGE_CHAR_LIMIT {
         bail!(
-            "your message is too long; keep it under {CHAT_WRITE_CHAR_LIMIT} characters or pass --long-message"
+            "your message is too long; keep it under {CHANNEL_MESSAGE_CHAR_LIMIT} characters or pass --long-message"
         );
     }
 

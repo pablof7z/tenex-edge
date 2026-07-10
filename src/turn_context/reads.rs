@@ -80,7 +80,7 @@ pub(super) fn ambient_by_joined_channel(
                 tracing::error!(
                     channel = %scope,
                     error = ?e,
-                    "turn: ambient chat read failed; channel may falsely appear quiet"
+                    "turn: ambient channel read failed; channel may falsely appear quiet"
                 );
                 read_failed = true;
             }

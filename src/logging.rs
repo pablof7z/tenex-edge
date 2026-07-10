@@ -2,7 +2,7 @@
 //!
 //! When stdout is a terminal (`tenex-edge daemon` run directly) two layers are
 //! installed: ANSI-coloured stdout and a plain-text file appended to daemon.log.
-//! When stdout is not a terminal (`__daemon` spawned detached with stdout
+//! When stdout is not a terminal (`daemon` spawned detached with stdout
 //! redirected to daemon.log) a single plain-text stdout layer suffices.
 //!
 //! Filter default: `tenex_edge=info`. Override with `RUST_LOG`.

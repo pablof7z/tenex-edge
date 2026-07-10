@@ -20,7 +20,7 @@ struct InviteParams {
     session: Option<String>,
     #[serde(default)]
     agent_slug: Option<String>,
-    #[serde(default, alias = "env_session")]
+    #[serde(default)]
     harness_session: Option<String>,
     #[serde(default)]
     harness: Option<String>,

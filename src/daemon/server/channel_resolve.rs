@@ -17,7 +17,7 @@ use paths::{channel_reference_from_paths, path_ends_with, subtree_paths};
 ///   1. An existing `(parent, name)` row wins (the durable key for that handle).
 ///   2. A value that is ALREADY a known `channel_h` is returned unchanged —
 ///      backward-compat for callers passing a literal id (resume re-scope,
-///      `channels switch`, a launch whose picker already returned an id).
+///      `channel switch`, a launch whose picker already returned an id).
 ///   3. A value SHAPED like an opaque id (`[0-9a-f]{8}`) that missed 1–2 is an
 ///      already-resolved id whose kind:39000 has not yet materialized into the
 ///      local cache (a race vs the channel's own provisioning) — hand it back
@@ -86,7 +86,7 @@ pub(in crate::daemon::server) fn resolve_channel_for_session_start(
 /// Local resolution (see [`resolve_locally`]) runs first: an existing
 /// `(parent, name)` row, a known `channel_h`, or an opaque-id passthrough.
 /// Otherwise, when `create_if_absent`, mint exactly ONE opaque id and provision
-/// it exactly like `channels_create` does (upsert + ready + sub); else bail — no
+/// it exactly like `channel_create` does (upsert + ready + sub); else bail — no
 /// silent literal-`h` mint.
 ///
 /// Channel resolution provisions with the management key only. The eventual
@@ -172,10 +172,10 @@ pub(in crate::daemon::server) async fn resolve_channel_path(
     Ok(parent)
 }
 
-/// `channels_resolve` RPC: thin wrapper over [`resolve_channel`] so the CLI launch
+/// `channel_resolve` RPC: thin wrapper over [`resolve_channel`] so the CLI launch
 /// path can convert `--channel <name>` to its opaque id BEFORE spawning the PTY,
 /// minting at most one group. Returns `{ channel_h }`.
-pub(in crate::daemon::server) async fn rpc_channels_resolve(
+pub(in crate::daemon::server) async fn rpc_channel_resolve(
     state: &Arc<DaemonState>,
     params: &serde_json::Value,
 ) -> Result<serde_json::Value> {
@@ -188,7 +188,7 @@ pub(in crate::daemon::server) async fn rpc_channels_resolve(
         #[serde(default)]
         create_if_absent: bool,
     }
-    let p: P = serde_json::from_value(params.clone()).context("channels_resolve params")?;
+    let p: P = serde_json::from_value(params.clone()).context("channel_resolve params")?;
     let channel_h = resolve_channel(
         state,
         &p.channel,
@@ -200,9 +200,9 @@ pub(in crate::daemon::server) async fn rpc_channels_resolve(
     Ok(serde_json::json!({ "channel_h": channel_h }))
 }
 
-// ── channel-relative `channels switch` resolution ─────────────────────────────
+// ── channel-relative `channel switch` resolution ─────────────────────────────
 //
-// `channels switch` (an AGENT-only gesture) resolves a channel-RELATIVE reference
+// `channel switch` (an AGENT-only gesture) resolves a channel-RELATIVE reference
 // to one opaque `channel_h`. There is no cross-channel switch — references are
 // scoped to the current channel's subtree. On ambiguity the daemon returns the
 // candidate paths so the agent re-runs with an exact one (a structured error,

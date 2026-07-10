@@ -52,7 +52,7 @@ pub(crate) fn assemble_turn_start(
 ) -> TurnContext {
     let first_turn = rec.seen_cursor == 0;
     // Routing scope is the session's `channel_h` — a root channel, or the
-    // session/task channel a `channels switch` moved it into. All fabric
+    // session/task channel a `channel switch` moved it into. All fabric
     // presence/deltas key on this so a switched session's turn context reflects
     // the channel it actually publishes into.
     let scope = rec.channel_h.clone();

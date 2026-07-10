@@ -26,8 +26,8 @@ The `session_id` is the raw canonical id — an internal correlation handle for
 hooks, PTY session binding, resume, and DB rows. It is never rendered as a
 user-facing identity; a session is addressed by its **agent/session handle** —
 `@<agent-slug>/<session-id-or-prefix>`, backed by the session's own minted pubkey.
-The provider opens the project's NIP-29 group and adds the session agent as a
-relay member before the engine publishes presence. There is no local agent
+The provider opens the workspace root NIP-29 group and adds the session agent
+as a relay member before the engine publishes presence. There is no local agent
 allow/block file in the NIP-29 path.
 
 ### `session_end`
@@ -42,15 +42,14 @@ produced client-side to match today's output.
 
 ### `who`
 ```jsonc
-params: {"project": "…"|null, "all": bool, "cwd": "/path"}
+params: {"workspace": "…"|null, "all_workspaces": bool, "cwd": "/path"}
 result: {"now": u64, "fabric": "<tenex-edge>…</tenex-edge>"|null,
-         "rows": [ {source, fresh, slug, project, status, host,
+         "rows": [ {source, fresh, slug, channel, status, host,
                     session_id, age_secs}, … ]}
 ```
-Returns the unified fabric context when a single current channel resolves. The
-legacy `WhoSnapshot` rows remain the fallback for `--all-projects` and other
-views without one channel scope. Agent-scoped `who` advances that session's
-fabric cursor after rendering.
+Returns the unified fabric context for the resolved channel or, with
+`all_workspaces`, one rendered block per workspace root. Agent-scoped `who`
+advances that session's fabric cursor after rendering.
 
 ### `turn_start`
 ```jsonc
@@ -65,7 +64,7 @@ advances after rendering. Empty session id ⇒ no-op (`context: null`).
 
 ### `turn_check`
 ```jsonc
-params: {"session": "te-…"|null, "json": bool, "cwd": "/path", "env_session": "…"|null}
+params: {"session": "te-…"|null, "json": bool, "cwd": "/path"}
 result: {"context": "…"|null}
 ```
 Claims pending directed mentions once and uses a compare-and-swap cursor advance
@@ -89,21 +88,19 @@ existing multi-line report.
 
 ### `tail` (streaming)
 ```jsonc
-params: {"project": "…"|null}
+params: {"channel": "…"|null}
 stream: {"item": {"line": "<rendered fabric line>"}}   // repeated
         … until client disconnects (Ctrl-C)
 ```
 Daemon registers a forwarder on its shared relay subscription, decodes each
 event with the codec, renders with the existing `render()` and streams the line.
-The client just prints each `item.line`. (The daemon may need a project-scoped
-ephemeral subscription distinct from its trusted-author subscription; it can add
-a tail-scoped REQ for the duration of the connection.)
+The client just prints each `item.line`.
 
-### `chat_read` (streaming)
+### `channel_read` (streaming)
 ```jsonc
 params: {"id": "event-id"|null, "channel": "…"|null, "since": u64|null,
          "limit": u64|null, "offset": u64, "tail": bool, "live": bool, ...}
-stream: {"item": {event_id, from_pubkey, from_slug, project, body,
+stream: {"item": {event_id, from_pubkey, from_slug, channel, body,
                   truncated, created_at, ...}}
 ```
 Streams channel chat from the relay-event cache. Normal history reads truncate
@@ -111,10 +108,10 @@ bodies past the fabric render limit and include `truncated=true`; exact
 `--id`/`id` reads fetch one event by id and return the full body without channel
 inference.
 
-### `chat_write`
+### `channel_send`
 ```jsonc
 params: {"message": "…", "channel": "…"|null, "long_message": bool, ...}
-result: {"event_id": "hex", "project": "channel-h", "mentioned_pubkey": "hex"|null,
+result: {"event_id": "hex", "channel": "channel-h", "mentioned_pubkey": "hex"|null,
          "mentioned_session": "te-…"|null, "mentioned_label": "agent"|null}
 ```
 Publishes a NIP-29 kind:9 chat message signed by the caller's own
@@ -123,62 +120,82 @@ over the fabric render limit are rejected unless `long_message=true`. `channel`
 is destination targeting only; caller identity is resolved independently from
 the session anchors.
 
+### `channel_reply`
+```jsonc
+params: {"id": "event-id-or-prefix", "message": "…", "long_message": bool, ...}
+result: {"event_id": "hex", "reply_to": "hex", "channel": "channel-h",
+         "mentioned_pubkey": "hex", "mentioned_session": "te-…"|null}
+```
+Publishes a threaded NIP-10 reply to an existing channel message. The daemon
+resolves `id` against the channel read model, targets the original author's
+pubkey, and signs the reply with the caller's per-session key.
+
 ### `propose`
 ```jsonc
 params: {"title": "…", "body": "…", "session": "te-…"|null, "cwd": "/path", ...}
 result: {"event_id": "hex"}
 ```
-Publishes a NIP-29 proposal (structured suggestion) to the project group.
+Publishes a NIP-29 proposal (structured suggestion) to the caller's current
+channel.
 
-
-### `project_list`
+### `root_channels`
 ```jsonc
 params: {}
-result: {"projects": [ {slug, name, about, relay}, … ]}
+result: {"channels": [ {slug, name, about}, … ]}
 ```
-Returns all known NIP-29 projects (group metadata) from the daemon's cache.
+Returns all known workspace root channels from the daemon's cache.
 
-### `project_edit`
+### `channel_edit`
 ```jsonc
-params: {"project": "…", "name": "…"|null, "about": "…"|null}
-result: {"ok": true}
+params: {"channel": "…", "about": "…"}
+result: {"event_id": "hex", "channel": "channel-h", "about": "…", "confirmed": true}
 ```
-Publishes an updated NIP-29 kind:39000 group metadata event for the project.
+Publishes an updated NIP-29 kind:39000 group metadata event for a channel.
 
-### `project_members`
+### `channel_members`
 ```jsonc
-params: {"project": "…"}
+params: {"channel": "…"}
 result: {"members": [ {pubkey, slug, role}, … ]}
 ```
 Returns the current membership list for the given NIP-29 group.
 
-### `project_add`
+### `channel_add_member`
 ```jsonc
-params: {"project": "…", "pubkey": "hex"|null, "agent": "slug"|null}
+params: {"channel": "…", "pubkey": "hex"|null, "agent": "slug"|null}
 result: {"ok": true}
 ```
-Adds a pubkey or agent to the project's NIP-29 group (admin-signed kind:9000 add event).
+Adds a pubkey or agent to a NIP-29 group.
 
-### `project_remove`
+### `channel_remove_member`
 ```jsonc
-params: {"project": "…", "pubkey": "hex"}
+params: {"channel": "…", "pubkey": "hex"}
 result: {"ok": true}
 ```
-Removes a pubkey from the project's NIP-29 group (admin-signed kind:9001 remove event).
+Removes a pubkey from a NIP-29 group.
 
-### `groups_create`
+### `channel_create`
 ```jsonc
-params: {"slug": "…", "name": "…"|null, "about": "…"|null, "parent": "…"|null, "cwd": "/path", ...}
-result: {"group_id": "…", "relay": "wss://…"}
+params: {"name": "…", "about": "…", "parent": "…"|null,
+         "parent_channel": "…"|null, "agents": [...], ...}
+result: {"child_h": "…", "display_path": "…", "switched": bool,
+         "orchestration_event_id": "hex"|""}
 ```
-Creates a new NIP-29 group (subgroup or top-level); publishes kind:9007 create event.
+Creates a child channel under the caller's current channel, an explicit parent,
+or the workspace root resolved from cwd.
 
-### `groups_list`
+### `channel_list`
 ```jsonc
-params: {"project": "…"|null, "cwd": "/path"}
-result: {"groups": [ {group_id, name, about, parent, relay}, … ]}
+params: {"channel": "…"}
+result: {"channel": "…", "rooms": [ {child_h, name, about, depth}, … ]}
 ```
-Lists NIP-29 groups visible to the daemon, optionally scoped to a project.
+Lists the materialized child-channel tree under a channel.
+
+### `channel_join` / `channel_leave` / `channel_switch` / `channel_archive`
+```jsonc
+params: {"channel": "…", "session": "te-…"|null, ...}
+result: {"channel": "channel-h", ...}
+```
+Mutates the caller session's channel membership or archives a channel.
 
 ### `statusline`
 ```jsonc

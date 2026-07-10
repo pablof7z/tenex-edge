@@ -51,7 +51,7 @@ async fn rpc_probe_validate_message_reports_missing_as_not_proven() {
     assert!(v["message_evidence"]["summary"]
         .as_str()
         .unwrap()
-        .contains("not in the canonical chat read model"));
+        .contains("not in the canonical channel read model"));
 }
 
 #[tokio::test]

@@ -42,7 +42,7 @@ pub async fn channels(action: ChannelAction) -> Result<()> {
             channel,
             session,
         } => {
-            crate::cli::messaging::chat_read(crate::cli::messaging::ChatReadRequest {
+            crate::cli::messaging::channel_read(crate::cli::messaging::ChannelReadRequest {
                 id,
                 since,
                 limit,
@@ -63,7 +63,7 @@ pub async fn channels(action: ChannelAction) -> Result<()> {
         } => {
             let message =
                 crate::cli::messaging::resolve_send_message_body(message_flag.or(message))?;
-            crate::cli::messaging::chat_write(message, channel, session, long_message).await?;
+            crate::cli::messaging::channel_send(message, channel, session, long_message).await?;
         }
         ChannelAction::Reply {
             id,
@@ -74,7 +74,7 @@ pub async fn channels(action: ChannelAction) -> Result<()> {
         } => {
             let message =
                 crate::cli::messaging::resolve_send_message_body(message_flag.or(message))?;
-            crate::cli::messaging::chat_reply(id, message, session, long_message).await?;
+            crate::cli::messaging::channel_reply(id, message, session, long_message).await?;
         }
         ChannelAction::Create {
             path,
@@ -90,7 +90,7 @@ pub async fn channels(action: ChannelAction) -> Result<()> {
             session,
         } => {
             let v = daemon_call_async(
-                "channels_edit",
+                "channel_edit",
                 crate::cli::rpc_params(with_session(
                     serde_json::json!({
                         "channel": channel.clone(),
@@ -160,8 +160,8 @@ pub async fn channels(action: ChannelAction) -> Result<()> {
         ChannelAction::List { workspace, .. } => {
             use owo_colors::Stream::Stdout;
             let parent = resolve_workspace(workspace)?;
-            let v = daemon_call_async("channels_list", serde_json::json!({ "channel": parent }))
-                .await?;
+            let v =
+                daemon_call_async("channel_list", serde_json::json!({ "channel": parent })).await?;
             let rooms = v["rooms"].as_array().map(|a| a.as_slice()).unwrap_or(&[]);
             // Root of the tree is the root itself. Colorize ONLY on a real
             // terminal so piped output stays literal-`^slug$`-matchable.
@@ -198,7 +198,7 @@ pub async fn channels(action: ChannelAction) -> Result<()> {
         }
         ChannelAction::Join { channel, session } => {
             let v = daemon_call_async(
-                "channels_join",
+                "channel_join",
                 crate::cli::rpc_params(with_session(
                     serde_json::json!({ "channel": channel.clone() }),
                     session.as_deref(),
@@ -215,7 +215,7 @@ pub async fn channels(action: ChannelAction) -> Result<()> {
         }
         ChannelAction::Leave { channel, session } => {
             let v = daemon_call_async(
-                "channels_leave",
+                "channel_leave",
                 crate::cli::rpc_params(with_session(
                     serde_json::json!({ "channel": channel.clone() }),
                     session.as_deref(),
@@ -229,7 +229,7 @@ pub async fn channels(action: ChannelAction) -> Result<()> {
         }
         ChannelAction::Archive { channel, session } => {
             let v = daemon_call_async(
-                "channels_archive",
+                "channel_archive",
                 crate::cli::rpc_params(with_session(
                     serde_json::json!({ "channel": channel.clone() }),
                     session.as_deref(),
@@ -248,7 +248,7 @@ pub async fn channels(action: ChannelAction) -> Result<()> {
         }
         ChannelAction::Switch { channel, session } => {
             let v = daemon_call_async(
-                "channels_switch",
+                "channel_switch",
                 crate::cli::rpc_params(with_session(
                     serde_json::json!({ "channel": channel.clone() }),
                     session.as_deref(),

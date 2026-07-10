@@ -6,10 +6,9 @@ pub(super) struct SessionStartParams {
     /// spawn command; ignored when the agent already exists.
     #[serde(default)]
     pub(super) provision_command: Option<Vec<String>>,
-    /// Harness-native external session id. Hooks send `harness_session_id`; the
-    /// legacy/CLI path sends `session_id`. This is only a `session_aliases`
+    /// Harness-native external session id. This is only a `session_aliases`
     /// locator, never the identity.
-    #[serde(default, alias = "harness_session_id")]
+    #[serde(default)]
     pub(super) session_id: Option<String>,
     #[serde(default)]
     pub(super) cwd: Option<String>,
@@ -30,8 +29,8 @@ pub(super) struct SessionStartParams {
     /// NIP-29 channel (`h`) this hosted process was spawned into.
     #[serde(default)]
     pub(super) channel: Option<String>,
-    /// Full channel set this hosted process should join. `channel` remains the
-    /// compatibility active channel; this list drives status h-tags/inbox scope.
+    /// Full channel set this hosted process should join. `channel` is the active
+    /// channel; this list drives status h-tags/inbox scope.
     #[serde(default)]
     pub(super) channels: Vec<String>,
     /// Dispatch kind:9 event id that caused this hosted process to start.

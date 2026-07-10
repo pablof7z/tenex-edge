@@ -107,7 +107,7 @@ fn render_readiness(out: &mut String, channel: &Value) {
 pub(super) fn render_awareness(out: &mut String, awareness: &Value) {
     let _ = writeln!(out);
     let _ = writeln!(out, "awareness evidence");
-    if bool_at(awareness, "all_workspaces") || bool_at(awareness, "all_roots") {
+    if bool_at(awareness, "all_workspaces") {
         let _ = writeln!(
             out,
             "  - all workspaces: {} known channel(s)",

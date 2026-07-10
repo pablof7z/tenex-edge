@@ -10,8 +10,6 @@ pub(super) fn workspace_target(target: &str) -> Option<&str> {
     target
         .strip_prefix("workspace:")
         .or_else(|| target.strip_prefix("workspace/"))
-        .or_else(|| target.strip_prefix("work_root:"))
-        .or_else(|| target.strip_prefix("work_root/"))
         .and_then(|rest| rest.split('/').next())
         .filter(|id| !id.trim().is_empty())
 }

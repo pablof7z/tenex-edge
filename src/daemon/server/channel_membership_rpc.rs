@@ -146,7 +146,7 @@ Send it a message instead: tenex-edge channel send --channel {channel_h} --messa
     Ok(())
 }
 
-pub(in crate::daemon::server) async fn rpc_channels_join(
+pub(in crate::daemon::server) async fn rpc_channel_join(
     state: &Arc<DaemonState>,
     params: &serde_json::Value,
 ) -> Result<serde_json::Value> {
@@ -154,8 +154,8 @@ pub(in crate::daemon::server) async fn rpc_channels_join(
     struct P {
         channel: String,
     }
-    let p: P = serde_json::from_value(params.clone()).context("channels_join params")?;
-    let rec = resolve_caller(state, params, "channels join")?;
+    let p: P = serde_json::from_value(params.clone()).context("channel_join params")?;
+    let rec = resolve_caller(state, params, "channel join")?;
     let channel = match resolve_or_create_target_channel(state, &rec, &p.channel).await? {
         TargetChannel::Unique(h) => h,
         TargetChannel::Ambiguous(v) => return Ok(v),
@@ -173,7 +173,7 @@ pub(in crate::daemon::server) async fn rpc_channels_join(
     }))
 }
 
-pub(in crate::daemon::server) async fn rpc_channels_leave(
+pub(in crate::daemon::server) async fn rpc_channel_leave(
     state: &Arc<DaemonState>,
     params: &serde_json::Value,
 ) -> Result<serde_json::Value> {
@@ -181,8 +181,8 @@ pub(in crate::daemon::server) async fn rpc_channels_leave(
     struct P {
         channel: String,
     }
-    let p: P = serde_json::from_value(params.clone()).context("channels_leave params")?;
-    let rec = resolve_caller(state, params, "channels leave")?;
+    let p: P = serde_json::from_value(params.clone()).context("channel_leave params")?;
+    let rec = resolve_caller(state, params, "channel leave")?;
     let channel = match resolve_target_channel(state, &rec, &p.channel)? {
         TargetChannel::Unique(h) => h,
         TargetChannel::Ambiguous(v) => return Ok(v),
@@ -215,7 +215,7 @@ pub(in crate::daemon::server) async fn rpc_channels_leave(
     };
     // Teardown: with no other owner, dropping the channel emits a REAL NIP-01 CLOSE.
     if left {
-        subscriptions::reconcile_subs_logged(state, "channels_leave").await;
+        subscriptions::reconcile_subs_logged(state, "channel_leave").await;
     }
     Ok(serde_json::json!({
         "session_id": rec.session_id,
@@ -224,7 +224,7 @@ pub(in crate::daemon::server) async fn rpc_channels_leave(
     }))
 }
 
-pub(in crate::daemon::server) async fn rpc_channels_switch(
+pub(in crate::daemon::server) async fn rpc_channel_switch(
     state: &Arc<DaemonState>,
     params: &serde_json::Value,
 ) -> Result<serde_json::Value> {
@@ -232,8 +232,8 @@ pub(in crate::daemon::server) async fn rpc_channels_switch(
     struct P {
         channel: String,
     }
-    let p: P = serde_json::from_value(params.clone()).context("channels_switch params")?;
-    let rec = resolve_caller(state, params, "channels switch")?;
+    let p: P = serde_json::from_value(params.clone()).context("channel_switch params")?;
+    let rec = resolve_caller(state, params, "channel switch")?;
     let new_channel = match resolve_or_create_target_channel(state, &rec, &p.channel).await? {
         TargetChannel::Unique(h) => h,
         TargetChannel::Ambiguous(v) => return Ok(v),
@@ -257,11 +257,11 @@ pub(in crate::daemon::server) async fn rpc_channels_switch(
             tracing::warn!(
                 agent = %rec.agent_slug,
                 prev_channel,
-                "channels_switch: previous membership removal was not confirmed"
+                "channel_switch: previous membership removal was not confirmed"
             );
         }
         // Reconcile so the left channel's REQ tears down when no owner remains.
-        subscriptions::reconcile_subs_logged(state, "channels_switch").await;
+        subscriptions::reconcile_subs_logged(state, "channel_switch").await;
     }
     Ok(serde_json::json!({
         "session_id": rec.session_id,

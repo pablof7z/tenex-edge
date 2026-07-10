@@ -51,7 +51,7 @@ fn chat_log_json_keeps_exact_id_reads_full() {
 }
 
 #[test]
-fn root_chat_read_backfill_and_live_scopes_include_nested_descendants() {
+fn root_channel_read_backfill_and_live_scopes_include_nested_descendants() {
     let store = crate::state::Store::open_memory().unwrap();
     store.upsert_channel("root", "channel", "", "", 1).unwrap();
     store.upsert_channel("task", "Task", "", "root", 2).unwrap();
@@ -60,7 +60,7 @@ fn root_chat_read_backfill_and_live_scopes_include_nested_descendants() {
     store.upsert_channel("other", "Other", "", "", 5).unwrap();
 
     assert_eq!(
-        chat_read_scopes_for_store(&store, "root"),
+        channel_read_scopes_for_store(&store, "root"),
         vec![
             "deep".to_string(),
             "leaf".to_string(),
@@ -69,24 +69,24 @@ fn root_chat_read_backfill_and_live_scopes_include_nested_descendants() {
         ]
     );
     assert_eq!(
-        chat_read_scopes_for_store(&store, "task"),
+        channel_read_scopes_for_store(&store, "task"),
         vec!["task".to_string()]
     );
     assert_eq!(
-        chat_read_scopes_for_store(&store, "unknown"),
+        channel_read_scopes_for_store(&store, "unknown"),
         vec!["unknown".to_string()]
     );
 }
 
 #[test]
-fn chat_read_live_lag_is_terminal_stream_error() {
-    let resp = stream_lag_error(42, "chat read --live", 3);
+fn channel_read_live_lag_is_terminal_stream_error() {
+    let resp = stream_lag_error(42, "channel read --live", 3);
 
     let err = resp.error.expect("lag response is an error");
     assert_eq!(err.code, "stream_lagged");
     assert!(err
         .message
-        .contains("chat read --live dropped 3 live event"));
+        .contains("channel read --live dropped 3 live event"));
     assert!(err.message.contains("reconnect"));
 }
 

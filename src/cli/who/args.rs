@@ -4,10 +4,10 @@ use clap::Args;
 #[derive(Args)]
 pub(in crate::cli) struct WhoArgs {
     /// Workspace slug; defaults to the workspace resolved from current directory.
-    #[arg(long = "workspace", alias = "root", value_name = "WORKSPACE")]
+    #[arg(long = "workspace", value_name = "WORKSPACE")]
     workspace: Option<String>,
     /// Show agents across all workspaces (overrides --workspace / cwd resolution).
-    #[arg(long = "all-workspaces", alias = "all-roots")]
+    #[arg(long = "all-workspaces")]
     all_workspaces: bool,
     /// Keep a full-screen live view open, refreshing automatically.
     #[arg(long)]
@@ -54,14 +54,14 @@ mod tests {
     }
 
     #[test]
-    fn legacy_who_all_roots_alias_still_parses() {
-        let cli = crate::cli::args::Cli::try_parse_from(["tenex-edge", "who", "--all-roots"])
-            .expect("legacy who alias parses");
+    fn removed_who_all_roots_alias_stays_unavailable() {
+        let err = match crate::cli::args::Cli::try_parse_from(["tenex-edge", "who", "--all-roots"])
+        {
+            Ok(_) => panic!("legacy who alias must stay removed"),
+            Err(err) => err,
+        };
 
-        match cli.cmd {
-            crate::cli::args::Cmd::Who(args) => assert!(args.all_workspaces),
-            _ => panic!("expected who command"),
-        }
+        assert_eq!(err.kind(), clap::error::ErrorKind::UnknownArgument);
     }
 
     #[test]

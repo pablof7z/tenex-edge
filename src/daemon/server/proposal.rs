@@ -7,7 +7,7 @@ pub(in crate::daemon::server) struct ProposeParams {
     body: String,
     #[serde(default)]
     session: Option<String>,
-    #[serde(default, alias = "env_session")]
+    #[serde(default)]
     harness_session: Option<String>,
     #[serde(default)]
     pty_session: Option<String>,
@@ -50,7 +50,7 @@ pub(in crate::daemon::server) async fn rpc_propose(
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
     // Publish into the session's CURRENT routing scope — channel when set
-    // (a `channels switch` moved it to a subgroup), else the per-session room.
+    // (a `channel switch` moved it to a subgroup), else the per-session room.
     // Falls back to the cwd-derived channel when no session is live (a bare
     // `tenex-edge publish` from the repo root).
     let channel = session_rec

@@ -2,7 +2,7 @@ use super::chat_target::resolve_chat_target_provisioning;
 use super::resolution::work_root_for;
 use super::*;
 use crate::fabric::provider::chat::OutboundChatRecord;
-use crate::util::CHAT_WRITE_CHAR_LIMIT;
+use crate::util::CHANNEL_MESSAGE_CHAR_LIMIT;
 use anyhow::bail;
 
 mod body;
@@ -12,13 +12,13 @@ mod reply;
 mod tests;
 
 pub(in crate::daemon::server) use recipient::resolve_recipient;
-pub(in crate::daemon::server) use reply::rpc_chat_reply;
+pub(in crate::daemon::server) use reply::rpc_channel_reply;
 
 #[derive(serde::Deserialize, Default)]
 #[allow(dead_code)]
-pub(in crate::daemon::server) struct ChatWriteParams {
+pub(in crate::daemon::server) struct ChannelSendParams {
     message: String,
-    #[serde(default, alias = "env_session")]
+    #[serde(default)]
     harness_session: Option<String>,
     #[serde(default)]
     pty_session: Option<String>,
@@ -43,15 +43,15 @@ fn chat_publish_scope(
         .to_string()
 }
 
-pub(in crate::daemon::server) async fn rpc_chat_write(
+pub(in crate::daemon::server) async fn rpc_channel_send(
     state: &Arc<DaemonState>,
     params: &serde_json::Value,
 ) -> Result<serde_json::Value> {
-    let p: ChatWriteParams =
-        serde_json::from_value(params.clone()).context("parsing chat_write params")?;
+    let p: ChannelSendParams =
+        serde_json::from_value(params.clone()).context("parsing channel_send params")?;
     if long_message_requires_override(&p) {
         bail!(
-            "your message is too long; keep it under {CHAT_WRITE_CHAR_LIMIT} characters or pass --long-message"
+            "your message is too long; keep it under {CHANNEL_MESSAGE_CHAR_LIMIT} characters or pass --long-message"
         );
     }
     let mut anchor = CallerAnchor::from_params(params);
@@ -173,7 +173,7 @@ pub(in crate::daemon::server) async fn rpc_chat_write(
                     event_id = %event_id,
                     channel = %deliver_scope,
                     error = %e,
-                    "chat_write: listing live sessions for local delivery failed — direct mention may not reach a local inbox/doorbell"
+                    "channel_send: listing live sessions for local delivery failed — direct mention may not reach a local inbox/doorbell"
                 );
                 Vec::new()
             }
@@ -215,7 +215,7 @@ pub(in crate::daemon::server) async fn rpc_chat_write(
                         session = %target.session_id,
                         channel = %deliver_scope,
                         error = %e,
-                        "chat_write: enqueue_inbox failed — this direct mention may never reach the target's inbox/doorbell"
+                        "channel_send: enqueue_inbox failed — this direct mention may never reach the target's inbox/doorbell"
                     );
                     false
                 }
@@ -234,7 +234,7 @@ pub(in crate::daemon::server) async fn rpc_chat_write(
                     session = %target.session_id,
                     channel = %deliver_scope,
                     error = %e,
-                    "chat_write: recipient session edge upsert failed"
+                    "channel_send: recipient session edge upsert failed"
                 );
             }
         }
@@ -267,8 +267,8 @@ pub(in crate::daemon::server) async fn rpc_chat_write(
     }))
 }
 
-fn long_message_requires_override(p: &ChatWriteParams) -> bool {
-    !p.long_message && p.message.chars().count() > CHAT_WRITE_CHAR_LIMIT
+fn long_message_requires_override(p: &ChannelSendParams) -> bool {
+    !p.long_message && p.message.chars().count() > CHANNEL_MESSAGE_CHAR_LIMIT
 }
 
 fn handle_mention_resolution_error(raw: &str, e: anyhow::Error) -> Result<()> {

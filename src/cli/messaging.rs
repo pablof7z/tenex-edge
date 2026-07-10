@@ -3,7 +3,7 @@ use super::*;
 mod args;
 pub(super) use args::{publish, PublishArgs};
 
-pub(super) async fn chat_write(
+pub(super) async fn channel_send(
     message: String,
     channel: Option<String>,
     session: Option<String>,
@@ -17,7 +17,7 @@ pub(super) async fn chat_write(
         // still comes from the session anchors added by `rpc_params`.
         "channel": channel,
     }));
-    let v = daemon_call_async("chat_write", params).await?;
+    let v = daemon_call_async("channel_send", params).await?;
     let event_id = v["event_id"].as_str().unwrap_or("?");
     if let Some(label) = v["mentioned_label"].as_str().filter(|s| !s.is_empty()) {
         println!(
@@ -31,7 +31,7 @@ pub(super) async fn chat_write(
     Ok(())
 }
 
-pub(super) async fn chat_reply(
+pub(super) async fn channel_reply(
     id: String,
     message: String,
     session: Option<String>,
@@ -43,7 +43,7 @@ pub(super) async fn chat_reply(
         "long_message": long_message,
         "session": session,
     }));
-    let v = daemon_call_async("chat_reply", params).await?;
+    let v = daemon_call_async("channel_reply", params).await?;
     let event_id = v["event_id"].as_str().unwrap_or("?");
     let reply_to = v["reply_to"].as_str().unwrap_or("?");
     println!(
@@ -54,7 +54,7 @@ pub(super) async fn chat_reply(
     Ok(())
 }
 
-pub(super) struct ChatReadRequest {
+pub(super) struct ChannelReadRequest {
     pub id: Option<String>,
     pub since: Option<String>,
     pub limit: Option<u64>,
@@ -65,7 +65,7 @@ pub(super) struct ChatReadRequest {
     pub session: Option<String>,
 }
 
-pub(super) async fn chat_read(req: ChatReadRequest) -> Result<()> {
+pub(super) async fn channel_read(req: ChannelReadRequest) -> Result<()> {
     use std::io::IsTerminal as _;
 
     let since_ts = req.since.as_deref().map(super::admin::parse_since);
@@ -91,13 +91,13 @@ pub(super) async fn chat_read(req: ChatReadRequest) -> Result<()> {
     }));
     let mut client = crate::daemon::client::Client::connect_or_spawn().await?;
     client
-        .stream("chat_read", params, move |item| {
-            println!("{}", render_chat_read_row(&item, use_color));
+        .stream("channel_read", params, move |item| {
+            println!("{}", render_channel_read_row(&item, use_color));
         })
         .await
 }
 
-fn render_chat_read_row(item: &serde_json::Value, use_color: bool) -> String {
+fn render_channel_read_row(item: &serde_json::Value, use_color: bool) -> String {
     let pubkey = item["from_pubkey"].as_str().unwrap_or_default();
     let slug = item["from_slug"]
         .as_str()

@@ -134,7 +134,7 @@ fn session_start_replaces_prior_session_for_same_host_pid() {
 }
 
 #[test]
-fn chat_write_stdin_enqueues_live_channel_chat_for_receiver() {
+fn channel_send_stdin_enqueues_live_channel_chat_for_receiver() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let home = Home::new().with_backend_key();
 
@@ -192,7 +192,7 @@ fn chat_write_stdin_enqueues_live_channel_chat_for_receiver() {
     );
     assert!(
         out.status.success(),
-        "chat write failed\nstdout: {}\nstderr: {}",
+        "channel send failed\nstdout: {}\nstderr: {}",
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
@@ -221,7 +221,7 @@ fn chat_write_stdin_enqueues_live_channel_chat_for_receiver() {
             read_stdout = String::from_utf8_lossy(&out.stdout).to_string();
             read_stdout.contains(&format!("> {read_body} ["))
         }),
-        "chat read should render the body and a timestamp; got: {read_stdout}"
+        "channel read should render the body and a timestamp; got: {read_stdout}"
     );
 
     // The inbox records the sender's per-session pubkey as `from_pubkey`.
@@ -301,7 +301,7 @@ fn chat_write_stdin_enqueues_live_channel_chat_for_receiver() {
 }
 
 #[test]
-fn chat_commands_require_channel_when_session_joined_to_multiple_channels() {
+fn channel_commands_require_channel_when_session_joined_to_multiple_channels() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let home = Home::new().with_backend_key();
 
@@ -330,26 +330,26 @@ fn chat_commands_require_channel_when_session_joined_to_multiple_channels() {
     let write_err = rt().block_on(async {
         let mut c = Client::connect_or_spawn().await.expect("connect");
         c.call(
-            "chat_write",
+            "channel_send",
             serde_json::json!({
                 "message": "ambiguous write",
                 "session": &canonical
             }),
         )
         .await
-        .expect_err("chat write without --channel should fail")
+        .expect_err("channel send without --channel should fail")
         .to_string()
     });
     assert!(
         write_err.contains("channel send is ambiguous")
             && write_err.contains("tenex-edge channel send --channel"),
-        "unexpected chat write error: {write_err}"
+        "unexpected channel send error: {write_err}"
     );
 
     let read_err = rt().block_on(async {
         let mut c = Client::connect_or_spawn().await.expect("connect");
         c.stream(
-            "chat_read",
+            "channel_read",
             serde_json::json!({
                 "session": &canonical,
                 "tail": true
@@ -357,13 +357,13 @@ fn chat_commands_require_channel_when_session_joined_to_multiple_channels() {
             |_| {},
         )
         .await
-        .expect_err("chat read without --channel should fail")
+        .expect_err("channel read without --channel should fail")
         .to_string()
     });
     assert!(
         read_err.contains("channel read is ambiguous")
             && read_err.contains("tenex-edge channel read --channel"),
-        "unexpected chat read error: {read_err}"
+        "unexpected channel read error: {read_err}"
     );
 
     stop_daemon(&home);

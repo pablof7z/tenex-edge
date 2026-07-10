@@ -1,8 +1,8 @@
 //! Auto-publish an agent's final response when a pty-injected turn ends without
-//! an explicit `chat write`.
+//! an explicit `channel send`.
 //!
 //! A hosted agent receives a kind:9 mention typed into its PTY, runs its turn,
-//! and is expected to reply by invoking `tenex-edge chat write`. Some agents
+//! and is expected to reply by invoking `tenex-edge channel send`. Some agents
 //! finish the turn by printing a final answer to their own transcript and stop,
 //! publishing nothing — so from the channel's perspective they never responded.
 //!
@@ -114,7 +114,7 @@ pub(in crate::daemon::server) async fn publish_last_response(
     };
     let body = crate::transcript::read_last_assistant_text(
         std::path::Path::new(&path),
-        crate::util::CHAT_WRITE_CHAR_LIMIT,
+        crate::util::CHANNEL_MESSAGE_CHAR_LIMIT,
     );
     let Some(body) = body.filter(|b| !b.trim().is_empty()) else {
         return;

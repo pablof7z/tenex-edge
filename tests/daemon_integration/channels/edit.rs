@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn channels_edit_updates_about_from_relay_truth() {
+fn channel_edit_updates_about_from_relay_truth() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let home = Home::new();
     rewrite_config_with_user_nsec(&home);
@@ -27,7 +27,7 @@ fn channels_edit_updates_about_from_relay_truth() {
 
         let created = c
             .call(
-                "channels_create",
+                "channel_create",
                 serde_json::json!({
                     "name": "editable",
                     "about": "old about",
@@ -39,14 +39,14 @@ fn channels_edit_updates_about_from_relay_truth() {
                 }),
             )
             .await
-            .expect("channels_create");
+            .expect("channel_create");
         created["child_h"].as_str().unwrap().to_string()
     });
 
     let edited = rt().block_on(async {
         let mut c = Client::connect_or_spawn().await.expect("connect");
         c.call(
-            "channels_edit",
+            "channel_edit",
             serde_json::json!({
                 "channel": "editable",
                 "about": "new about",
@@ -57,7 +57,7 @@ fn channels_edit_updates_about_from_relay_truth() {
             }),
         )
         .await
-        .expect("channels_edit")
+        .expect("channel_edit")
     });
 
     assert_eq!(edited["channel"].as_str(), Some(child_h.as_str()));
@@ -72,7 +72,7 @@ fn channels_edit_updates_about_from_relay_truth() {
 }
 
 #[test]
-fn channels_edit_ambiguous_reference_returns_exact_reruns() {
+fn channel_edit_ambiguous_reference_returns_exact_reruns() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let home = Home::new();
     rewrite_config_with_user_nsec(&home);
@@ -124,7 +124,7 @@ fn channels_edit_ambiguous_reference_returns_exact_reruns() {
     let v = rt().block_on(async {
         let mut c = Client::connect_or_spawn().await.expect("connect");
         c.call(
-            "channels_edit",
+            "channel_edit",
             serde_json::json!({
                 "channel": "planning",
                 "about": "new about",

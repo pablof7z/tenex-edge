@@ -1,6 +1,6 @@
 use super::*;
 use crate::state::{RegisterSession, Store};
-use crate::util::CHAT_WRITE_CHAR_LIMIT;
+use crate::util::CHANNEL_MESSAGE_CHAR_LIMIT;
 
 fn message(chars: usize) -> String {
     "a".repeat(chars)
@@ -8,21 +8,21 @@ fn message(chars: usize) -> String {
 
 #[test]
 fn long_message_guard_requires_explicit_override() {
-    let long = ChatWriteParams {
-        message: message(CHAT_WRITE_CHAR_LIMIT + 1),
+    let long = ChannelSendParams {
+        message: message(CHANNEL_MESSAGE_CHAR_LIMIT + 1),
         long_message: false,
         ..Default::default()
     };
     assert!(long_message_requires_override(&long));
 
-    let allowed = ChatWriteParams {
+    let allowed = ChannelSendParams {
         long_message: true,
         ..long
     };
     assert!(!long_message_requires_override(&allowed));
 
-    let short = ChatWriteParams {
-        message: message(CHAT_WRITE_CHAR_LIMIT),
+    let short = ChannelSendParams {
+        message: message(CHANNEL_MESSAGE_CHAR_LIMIT),
         long_message: false,
         ..Default::default()
     };

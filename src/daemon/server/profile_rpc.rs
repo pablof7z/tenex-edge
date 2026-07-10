@@ -66,4 +66,4 @@ pub(in crate::daemon::server) async fn resolve_pubkey_hex(input: &str) -> Result
     anyhow::bail!("cannot parse {input:?} as pubkey (hex/npub) or NIP-05 (user@domain)")
 }
 
-// ── chat read (backfill + optional live stream) ───────────────────────────────
+// ── channel read (backfill + optional live stream) ────────────────────────────
