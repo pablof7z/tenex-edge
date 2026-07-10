@@ -34,10 +34,11 @@ Last updated: 2026-07-10
 | [tenex-edge-landing-page-copy](guides/tenex-edge-landing-page-copy.md) | Tenex-Edge Landing Page Copy | The canonical positioning is spontaneous self-organization for the agents you already run — shared awareness and addressability, not durable per-agent identity. | capture | warm | 2026-07-03 | marketing |
 | [tenex-edge-landing-page-design](guides/tenex-edge-landing-page-design.md) | Tenex-Edge Landing Page Design | The landing page supports both light and dark themes via token-level custom properties with `prefers-color-scheme` and a `data-theme` override. | capture | warm | 2026-07-03 | marketing |
 
-## repo-discipline (4 guides)
+## repo-discipline (5 guides)
 
 | Slug | Title | Summary | Tags | Volatility | Verified | Topic |
 |------|-------|---------|------|------------|----------|-------|
+| [ci-test-exclusions](guides/ci-test-exclusions.md) | CI Test Exclusions | Daemon integration tests are excluded from CI. | capture | warm | 2026-07-10 | repo-discipline |
 | [container-state-cleanup](guides/container-state-cleanup.md) | Container State Cleanup | Stale `.container-state` profiles from prior lab sessions accumulate Rust build caches (~2.4GB each) and are gitignored disposable state that can block new cont | capture | warm | 2026-07-03 | repo-discipline |
 | [git-merge-worktree-cleanup](guides/git-merge-worktree-cleanup.md) | Git Merge Worktree Cleanup | After a merge succeeds, attempting to delete the local branch may fail if a git worktree still references that branch | capture | warm | 2026-07-03 | repo-discipline |
 | [github-issue-queue](guides/github-issue-queue.md) | GitHub Issue Queue | The repository has exactly one canonical tactical queue: GitHub Issues (`gh issue list`) | capture | warm | 2026-06-29 | repo-discipline |
