@@ -82,7 +82,7 @@ Last updated: 2026-07-10
 | [2026-07-10-b70718e17221-cb4e41ba-2-residual-per-test-flake-investigation-found](research/2026-07-10-b70718e17221-cb4e41ba-2-residual-per-test-flake-investigation-found.md) | 2026-07-10 | Residual per-test flake investigation: found and fixed 6 propagation races + 1 production bug across ~85 runs; verdict = 20/20 consecutive green, all flakes eliminated. | a067926378f0c4ada (residual de-flake agent) |
 | [AGENTS](research/AGENTS.md) |  |  |  |
 
-## Episode Cards (56 cards)
+## Episode Cards (57 cards)
 
 | Card | Date | Title | Salience | Status |
 |------|------|-------|----------|--------|
@@ -139,11 +139,12 @@ Last updated: 2026-07-10
 | [2026-07-10-4d78f854d5e5-873fdd2e-1-chief-of-staff-home-directory-must](episodes/2026-07-10-4d78f854d5e5-873fdd2e-1-chief-of-staff-home-directory-must.md) | 2026-07-10 | Chief-of-staff home directory must be symlinked into a git repo, not a local dir | architecture | active |
 | [2026-07-10-4d78f854d5e5-873fdd2e-1-workflows-must-live-in-a-git](episodes/2026-07-10-4d78f854d5e5-873fdd2e-1-workflows-must-live-in-a-git.md) | 2026-07-10 | Workflows must live in a git repo, not a local home directory | architecture | superseded |
 | [2026-07-10-4d78f854d5e5-873fdd2e-2-replace-static-list-workflows-instruction-with](episodes/2026-07-10-4d78f854d5e5-873fdd2e-2-replace-static-list-workflows-instruction-with.md) | 2026-07-10 | Replace static 'list workflows' instruction with scripted session-start entrypoint | architecture | active |
+| [2026-07-10-af454e467c4f-d0adc8b8-1-session-handle-display-reverted-from-raw](episodes/2026-07-10-af454e467c4f-d0adc8b8-1-session-handle-display-reverted-from-raw.md) | 2026-07-10 | Session handle display reverted from raw session_id to friendly codename | product | active |
 | [2026-07-10-b70718e17221-cb4e41ba-1-channel-hierarchy-notation-dotted-paths-replace](episodes/2026-07-10-b70718e17221-cb4e41ba-1-channel-hierarchy-notation-dotted-paths-replace.md) | 2026-07-10 | Channel hierarchy notation: dotted paths replace slash-separated paths; 'project' concept fully collapsed | reversal | active |
 | [2026-07-10-b70718e17221-cb4e41ba-2-daemon-startup-relay-connect-moved-off](episodes/2026-07-10-b70718e17221-cb4e41ba-2-daemon-startup-relay-connect-moved-off.md) | 2026-07-10 | Daemon startup: relay connect moved off critical path to background spawn | root-cause | active |
 | [2026-07-10-b70718e17221-cb4e41ba-3-integration-test-flakiness-root-cause-croissant](episodes/2026-07-10-b70718e17221-cb4e41ba-3-integration-test-flakiness-root-cause-croissant.md) | 2026-07-10 | Integration test flakiness root cause: croissant relay leaks POSIX named semaphores on SIGKILL | root-cause | active |
 
-## Nouns (193 entities)
+## Nouns (197 entities)
 
 | Noun | Name | Origin | Definition |
 |------|------|--------|------------|
@@ -158,6 +159,7 @@ Last updated: 2026-07-10
 | [agent-instance-identity](nouns/agent-instance-identity.md) | agent-instance identity | extracted | The durable AGENT-INSTANCE = (slug, backend-label) rendered as agent@backend-label (e.g. codex@laptop). @ always means backend label, never project. A session is only a correlation handle (raw session_id), never a separate display name or chat target. |
 | [agent-keystore](nouns/agent-keystore.md) | agent role config | extracted | The set of role configs on this machine, stored under |
 | [agent-ordinal-label](nouns/agent-ordinal-label.md) | agent_ordinal_label | extracted | Superseded by the session handle. Concurrent sessions of the same role are no |
+| [agent-session-agent-session-handle](nouns/agent-session-agent-session-handle.md) | @agent/session (agent session handle) | extracted | A live session you can summon — the p-taggable handle. The agent segment is the role slug and the session segment is the session id or a resolving prefix, as in `@codex/echo123`. This is the kind:0 name and the preferred mention target in `channel send`. |
 | [agent-session-handle](nouns/agent-session-handle.md) | @agent/session | extracted | A live session you can summon — the p-taggable handle. The agent segment is the |
 | [agent1](nouns/agent1.md) | agent1 | extracted | The claude1 profile launched in direct mode — a raw Claude session, host-pty-observed but not daemon-anchored, into which the user types the initial mention instruction. |
 | [agent2](nouns/agent2.md) | agent2 | extracted | The claude2 profile launched via tenex-edge launch — expected to receive a live daemon-pushed, attributed mention from agent1 and reply back. |
@@ -205,6 +207,7 @@ Last updated: 2026-07-10
 | [envelope-hook-mention](nouns/envelope-hook-mention.md) | envelope (hook mention) | extracted | hooks-only format: wrapped in `<tenex-edge>` tags with a reply CLI hint and no message-id |
 | [epic](nouns/epic.md) | epic | extracted | A parent issue tracking a body of work in the project. |
 | [error-writedisabled](nouns/error-writedisabled.md) | Error::WriteDisabled | extracted | A client-side error from nostr-relay-pool 0.44.1 whose Display text is 'write actions are disabled'. It fires when the daemon's in-memory Relay object has RelayServiceFlags missing WRITE, causing the SDK to refuse to put EVENT messages on the wire — the relay never sees or rejects the publish. |
+| [expiredsessionrow-expired-session](nouns/expiredsessionrow-expired-session.md) | ExpiredSessionRow (expired session) | extracted | A session row that is no longer `alive` (its process exited) — the resume-candidate set. Each is surfaced by its public `agent/session_id` handle. |
 | [fabric](nouns/fabric.md) | fabric | extracted | The shared awareness substrate built on Nostr — server-less, with relays as dumb replaceable infrastructure rather than authorities. The fabric and the identity are the asset; the plugin/hooks are just distribution (straws, not the milkshake). |
 | [god-object](nouns/god-object.md) | god-object | extracted | A file that exceeds the project's 500-LOC ceiling with multiple concerns, used as a GitHub issue label. |
 | [harness-session-id](nouns/harness-session-id.md) | harness_session_id | extracted | The harness-owned external session id, present only for harnesses that own an id of their own (claude-code, codex); None for programmatic hosts (opencode). It is ONLY a locator for session_aliases, never the identity — the daemon resolves the canonical id. |
@@ -240,6 +243,7 @@ Last updated: 2026-07-10
 | [message-read-model-row](nouns/message-read-model-row.md) | Message (read-model row) | extracted | Canonical chat/message read-model row; author_session is the return envelope so replies can target the exact session that authored the row instead of degrading to pubkey/agent-level addressing. |
 | [messagerecipient](nouns/messagerecipient.md) | MessageRecipient | extracted | One recipient edge for a canonical message; target_session is optional because fabric-level messages may only know the recipient pubkey. |
 | [mgmt-commands](nouns/mgmt-commands.md) | mgmt commands | extracted | Ordinary kind:9 NIP-29 chat messages that p-tag the daemon's backend key; the reply is published as a real broadcast chat event into the same shared channel group, not a private/ephemeral path. |
+| [mintedsession](nouns/mintedsession.md) | MintedSession | extracted | A freshly minted per-session identity: the session's own signing keys plus its read-side projection (pubkey, agent slug, session id). |
 | [nip-29-membership](nouns/nip-29-membership.md) | NIP-29 membership | extracted | Active channel presence and routing membership. Local daemons remove their |
 | [nip29provider](nouns/nip29provider.md) | Nip29Provider | extracted | The concrete fabric provider wrapping delivery, wire codec, materializer, and lifecycle in one place. Its fabric identifier (used in all canonical origin rows) is `"nip29"`. |
 | [north-star](nouns/north-star.md) | north-star | extracted | Part of the codebase quality north star portfolio, tracked as a GitHub issue label. |
@@ -303,6 +307,7 @@ Last updated: 2026-07-10
 | [session-struct](nouns/session-struct.md) | Session (struct) | extracted | The OS/process-level record: session_id, agent_pubkey, agent_slug, channel_h, harness, child_pid, transcript_path, alive. agent_pubkey is the per-session minted pubkey the session currently signs as. |
 | [sessionid](nouns/sessionid.md) | SessionId | extracted | A newtype wrapping the canonical raw session id (serde-transparent). as_str() returns the raw id, and its Display impl renders the raw id directly. |
 | [sessionidentity](nouns/sessionidentity.md) | SessionIdentity | extracted | A lean read-side struct (pubkey, agent slug, session id, legacy code) replacing |
+| [short-id](nouns/short-id.md) | short_id | extracted | A short prefix of a message/event id (its first 6 hex chars) — cheap to include inline in agent-facing context. The daemon resolves any unambiguous prefix back to the full event, so it stays round-trippable without spending tokens on a full 64-char id. |
 | [signerreservations](nouns/signerreservations.md) | SignerReservations | extracted | Superseded by per-session identity. There are no ordinal slots to reserve: every |
 | [single-writer](nouns/single-writer.md) | single-writer | extracted | The daemon's architectural property of collapsing N per-session SQLite writers and N relay connections into 1, fixing a real multi-writer corruption class (a genuine incident in the project's git history). |
 | [slice](nouns/slice.md) | slice | extracted | A PR-sized refactoring issue in the project's issue tracker. |

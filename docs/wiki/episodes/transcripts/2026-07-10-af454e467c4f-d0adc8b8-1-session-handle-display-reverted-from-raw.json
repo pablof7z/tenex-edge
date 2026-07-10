@@ -1,0 +1,34 @@
+[
+  [
+    "user",
+    "we recently changed the kind:0 of agents, right?"
+  ],
+  [
+    "assistant",
+    "Yes — all engines now sign events (including kind:0) with their own key, giving each ordinal agent a truly independent, persistent identity profile."
+  ],
+  [
+    "user",
+    "ok, we are using the wrong session id in the name -- it should be the otan-like codename, not `/te-123123122`"
+  ],
+  [
+    "assistant",
+    "Confirmed the regression and fixed display_slug() and related rendering paths to always use the codename instead of the raw session_id; tests updated but not committed."
+  ],
+  [
+    "user",
+    "PR your work"
+  ],
+  [
+    "assistant",
+    "PR #344 opened against origin/master with just the codename fix (13 files changed)."
+  ],
+  [
+    "user",
+    "merge it"
+  ],
+  [
+    "assistant",
+    "PR #344 merged into master; the codename fix is now live upstream."
+  ]
+]

@@ -1,0 +1,14 @@
+---
+type: noun-entry
+slug: agent-session-agent-session-handle
+name: "@agent/session (agent session handle)"
+origin: extracted
+source_refs:
+  - transcript:400-417
+  - transcript:157-162
+  - transcript:174-174
+---
+
+# @agent/session (agent session handle)
+
+A live session you can summon — the p-taggable handle. The agent segment is the role slug and the session segment is the session id or a resolving prefix, as in `@codex/echo123`. This is the kind:0 name and the preferred mention target in `channel send`.
