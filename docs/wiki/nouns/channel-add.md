@@ -10,7 +10,7 @@ source_refs:
 
 # channel add
 
-The single 'put someone/something in this channel' verb with three
-mutually-exclusive targets: a human (pubkey|npub|nip05, with optional --admin),
-a fresh session (--new-session <role>[@machine]), or an existing live session
-(--session @agent/session). Replaces the old 'invite' verb.
+The verb for putting an existing participant into a channel, with two
+mutually-exclusive targets: a human (pubkey|npub|nip05, with optional --admin)
+or an existing live session (--session @agent/session). Fresh delegated agent
+sessions start through dispatch, not channel add.

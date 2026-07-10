@@ -36,12 +36,12 @@ Renders `agent` slug + title/activity + channels + PTY + cwd + command; keybind 
 
 ### Feature 3 — mgmt chat commands (`src/daemon/server/management_command*`)
 **Verdict: coherent. No changes.**
-- **`add` (`parse.rs:13`, `management_command.rs:112`):** parses `slug[@backend]` and spawns via `invite_rpc::invite_agent` (RPC name intentionally unchanged). This is the `channel add --new-session <role>[@machine]` path — spawning a fresh session by role, consistent with the new model (spawn ≠ addressing a live session by role). User-facing reply says "added … to <channel>" (not "invited"). Coherent.
+- **`add` (`parse.rs:13`, `management_command.rs:112`):** parses `slug[@backend]` and spawns via the internal `invite_rpc::invite_agent` helper. This is now distinct from public `channel add`: fresh delegated sessions start through `dispatch`, while `channel add` only adds humans or existing sessions. User-facing reply says "added … to <channel>" (not "invited"). Coherent as a backend-admin chat command.
 - **`list agents` vs `list sessions`:** `list_agents.rs` reads `list_agent_roster()` keyed by role slug + use-criteria = the advertised **role-type roster**; `sessions.rs` lists live **sessions** (members). The roster=role-types / members=sessions distinction is correct.
 
 ## What I flagged for human review (implemented conservative option: left as-is)
 1. **MCP tool rename `chat_read→channel_read`, `chat_write→channel_send`:** technically safe (tool name maps to RPC method in `tools.rs`, so RPC dispatch wouldn't break), and more aligned with shipped `channel read`/`channel send`. Not done because it's a client-facing breaking change to already-published MCP tool names; per instructions I kept names and fixed descriptions only.
-2. **No MCP `channel add` / recruit tool exists.** The existing catalog is coherent, but there's no MCP equivalent of the shipped `channel add` (human / `--new-session` / `--session`) despite `channels_create` accepting an `agents` array. Adding one is net-new surface + RPC wiring, so I did not add it — flagging as a possible follow-up.
-3. **mgmt `add` covers only the new-session path** (`slug[@backend]`), not `channel add`'s human-add or `--session @agent/session` existing-session modes. This is a coherent subset for a chat command, not an incoherence; noted in case parity is desired.
+2. **No MCP `channel add` tool exists.** The existing catalog is coherent, but there's no MCP equivalent of the shipped `channel add` (human / `--session`) despite `channels_create` accepting an `agents` array. Adding one is net-new surface + RPC wiring, so I did not add it — flagging as a possible follow-up.
+3. **mgmt `add` covers only fresh-session spawn** (`slug[@backend]`), not `channel add`'s human-add or `--session @agent/session` existing-session modes. This is a coherent backend-admin subset, not an incoherence; noted in case parity is desired.
 
 Diff: 2 lines in `src/cli/mcp/catalog.rs`. Gates: `cargo build` OK, `just fmt-check` OK, `just lint` OK, `just loc-check` OK, `just test-unit` 877 passed / 0 failed. Uncommitted.

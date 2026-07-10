@@ -8,7 +8,7 @@ tags:
 volatility: warm
 confidence: medium
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-07-10
 verified: 2026-06-29
 compiled-from: conversation
 sources:
@@ -65,7 +65,7 @@ When you need mechanics:
 - `tenex-edge who` — fabric snapshot and presence (only when the hook snapshot is missing or stale)
 - `tenex-edge channel send` — post a message; pass `--channel` when joined to multiple channels
 - `tenex-edge agents list-sessions` — find prior session ids when old context may be useful
-- `tenex-edge channel add --new-session <role>[@machine] <path>` — recruit a fresh session of a role
+- `tenex-edge dispatch <agent[@backend]> --workspace <workspace> --message "..."` — start a delegated session in an explicit workspace
 - `tenex-edge channel add --session @agent/session <path>` — pull an existing session into a channel
 - `tenex-edge channel add <pubkey|npub|nip05> <path> [--admin]` — add a human (optionally as admin)
 - `tenex-edge channel list` — list available channels

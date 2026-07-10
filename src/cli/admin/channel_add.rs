@@ -1,22 +1,18 @@
-//! `channel add` — add a member to a channel in one of three shapes:
+//! `channel add` — add a member to a channel in one of two shapes:
 //!   * human by id:        `channel add <pubkey|npub|nip05> <channel> [--admin]`
-//!   * spawn a new session: `channel add --new-session <role>[@machine] <channel>`
 //!   * pull an existing one:`channel add --session @agent/session <channel>`
 //!
-//! Human adds route to the daemon's `channel_add_member`; both session modes route to
-//! `invite` (fresh spawn vs. resume/pull). `--message` posts a chat mentioning
-//! the brought-online session and is valid only in the session modes.
+//! Human adds route to the daemon's `channel_add_member`; existing-session adds
+//! route to `invite`. `--message` posts a chat mentioning the brought-online
+//! session and is valid only with `--session`.
 
 use super::args::AddArgs;
 use super::*;
 
 pub(super) async fn channel_add(a: AddArgs) -> Result<()> {
-    match (a.new_session.clone(), a.session.clone()) {
-        (Some(role), None) => new_session_add(a.first, &role, a.message).await,
-        (None, Some(codehost)) => session_add(a.first, &codehost, a.message).await,
-        (None, None) => human_add(a.first, a.second, a.admin, a.message).await,
-        // clap `conflicts_with_all` makes both flags together unreachable.
-        (Some(_), Some(_)) => anyhow::bail!("--new-session and --session are mutually exclusive"),
+    match a.session.clone() {
+        Some(codehost) => session_add(a.first, &codehost, a.message).await,
+        None => human_add(a.first, a.second, a.admin, a.message).await,
     }
 }
 
@@ -38,7 +34,7 @@ async fn human_add(
     message: Option<String>,
 ) -> Result<()> {
     if message.is_some() {
-        anyhow::bail!("--message is only valid with --new-session or --session");
+        anyhow::bail!("--message is only valid with --session");
     }
     let (Some(id), Some(channel)) = (id, channel) else {
         anyhow::bail!("channel add <pubkey|npub|nip05> <channel> [--admin]");
@@ -59,33 +55,6 @@ async fn human_add(
         .as_str()
         .unwrap_or(if admin { "admin" } else { "member" });
     println!("added {} to #{channel} as {role}", id.bold());
-    Ok(())
-}
-
-async fn new_session_add(
-    channel: Option<String>,
-    role: &str,
-    message: Option<String>,
-) -> Result<()> {
-    let Some(channel) = channel else {
-        anyhow::bail!("channel add --new-session <role>[@machine] <channel>");
-    };
-    let v = invite_call(
-        &channel,
-        serde_json::json!({ "target_agent": role }),
-        message,
-    )
-    .await?;
-    if v["ambiguous"].is_array() {
-        print_ambiguous(&format!("--new-session {role}"), &channel, &v);
-    }
-    // Synchronous success line: the fresh session is confirmed online, named by
-    // its own public handle.
-    println!(
-        "a {role} is now on #{channel}: @{}",
-        online_label(&v).bold()
-    );
-    warn_message_error(&v);
     Ok(())
 }
 
@@ -182,13 +151,10 @@ mod tests {
         }
     }
 
-    // Flag modes take ONE positional (the channel); the human mode takes TWO.
     #[test]
-    fn new_session_takes_one_positional_channel() {
-        let a = parse_add("tenex-edge channel add --new-session reviewer ops");
-        assert_eq!(a.new_session.as_deref(), Some("reviewer"));
-        assert_eq!(a.first.as_deref(), Some("ops"));
-        assert!(a.second.is_none() && a.session.is_none() && !a.admin);
+    fn new_session_flag_stays_removed() {
+        let kind = parse_err("tenex-edge channel add --new-session reviewer ops");
+        assert_eq!(kind, ErrorKind::UnknownArgument);
     }
 
     #[test]
@@ -204,23 +170,16 @@ mod tests {
         let a = parse_add("tenex-edge channel add npub1xyz ops --admin");
         assert_eq!(a.first.as_deref(), Some("npub1xyz"));
         assert_eq!(a.second.as_deref(), Some("ops"));
-        assert!(a.admin && a.new_session.is_none() && a.session.is_none());
+        assert!(a.admin && a.session.is_none());
     }
 
     #[test]
-    fn admin_conflicts_with_flag_modes() {
-        let kind = parse_err("tenex-edge channel add --new-session reviewer ops --admin");
+    fn admin_conflicts_with_session_mode() {
+        let kind = parse_err("tenex-edge channel add --session @coder/sess ops --admin");
         assert_eq!(kind, ErrorKind::ArgumentConflict);
     }
 
-    #[test]
-    fn new_session_conflicts_with_session() {
-        let kind =
-            parse_err("tenex-edge channel add --new-session reviewer --session @coder/sess ops");
-        assert_eq!(kind, ErrorKind::ArgumentConflict);
-    }
-
-    // `--message` is only meaningful in the session modes (it mentions the
+    // `--message` is only meaningful in session mode (it mentions the
     // brought-online session). In human mode it has no target, so dispatch must
     // reject it BEFORE any daemon round-trip. Guarded here because the check is a
     // runtime dispatch guard, not a clap-level conflict.
@@ -236,7 +195,7 @@ mod tests {
         .expect_err("--message with a human target must be rejected");
         assert!(
             err.to_string()
-                .contains("--message is only valid with --new-session or --session"),
+                .contains("--message is only valid with --session"),
             "unexpected error: {err}"
         );
     }

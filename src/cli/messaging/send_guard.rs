@@ -4,7 +4,7 @@
 //! identity — a live participant is `@agent/session`, never `@role`. So a
 //! message mentioning a bare `@<role>` that names a KNOWN local agent role (but
 //! no session handle) is almost always a mistake: the author wanted a fresh
-//! session of that role. Fail fast and point at `channel add --new-session`
+//! session of that role. Fail fast and point at `dispatch`
 //! rather than silently publishing a mention that resolves to nobody.
 
 use anyhow::{bail, Result};
@@ -28,7 +28,8 @@ pub(super) fn check(message: &str) -> Result<()> {
         if roles.iter().any(|role| role == label) {
             bail!(
                 "did you mean to launch a new session of {label}? \
-                 use tenex-edge channel add --new-session {label} <channel>"
+                 use tenex-edge dispatch {label} --workspace <workspace> \
+                 --channel <channel> --message <task>"
             );
         }
     }
