@@ -1,4 +1,4 @@
-//! `messages` / `message_recipients` — canonical chat read model.
+//! `messages` / `message_recipients` — canonical channel read model.
 //!
 //! `relay_events` remains the verbatim wire cache. These rows are the stable
 //! reader-facing shape: message body, author return envelope, sync state, and

@@ -6,13 +6,13 @@ use std::fmt::Write as _;
 
 #[derive(serde::Deserialize, Default)]
 pub(in crate::daemon::server) struct WhoParams {
-    #[serde(default, alias = "root")]
+    #[serde(default)]
     workspace: Option<String>,
-    #[serde(default, alias = "all_roots")]
+    #[serde(default)]
     all_workspaces: bool,
     #[serde(default)]
     cwd: Option<String>,
-    #[serde(default, alias = "env_session")]
+    #[serde(default)]
     harness_session: Option<String>,
     #[serde(default)]
     pty_session: Option<String>,

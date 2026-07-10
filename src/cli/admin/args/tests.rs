@@ -99,8 +99,8 @@ fn channel_list_workspace_flags_parse() {
 }
 
 #[test]
-fn channels_create_help_shows_about_limit() {
-    let err = parse_err(&["tenex-edge", "channels", "create", "--help"]);
+fn channel_create_help_shows_about_limit() {
+    let err = parse_err(&["tenex-edge", "channel", "create", "--help"]);
     let help = err.to_string();
 
     assert!(help.contains("<PATH>"));
@@ -108,11 +108,11 @@ fn channels_create_help_shows_about_limit() {
 }
 
 #[test]
-fn channels_create_about_rejects_more_than_80_chars() {
+fn channel_create_about_rejects_more_than_80_chars() {
     let too_long = "a".repeat(crate::channel_about::CHANNEL_ABOUT_MAX_CHARS + 1);
     let err = parse_err(&[
         "tenex-edge",
-        "channels",
+        "channel",
         "create",
         "ops",
         "--about",
@@ -128,10 +128,10 @@ fn channels_create_about_rejects_more_than_80_chars() {
 }
 
 #[test]
-fn channels_create_parses_hierarchical_path() {
+fn channel_create_parses_hierarchical_path() {
     let cli = crate::cli::args::Cli::try_parse_from([
         "tenex-edge",
-        "channels",
+        "channel",
         "create",
         "epic/planning",
         "--about",
@@ -141,7 +141,7 @@ fn channels_create_parses_hierarchical_path() {
         "--session",
         "session-1",
     ])
-    .expect("channels create parses with positional path");
+    .expect("channel create parses with positional path");
 
     match cli.cmd {
         crate::cli::args::Cmd::Channel {
@@ -158,14 +158,14 @@ fn channels_create_parses_hierarchical_path() {
             assert_eq!(agents, vec!["codex@laptop".to_string()]);
             assert_eq!(session.as_deref(), Some("session-1"));
         }
-        _ => panic!("expected channels create command"),
+        _ => panic!("expected channel create command"),
     }
 }
 
 #[test]
-fn channels_archive_parses_channel_reference() {
-    let cli = crate::cli::args::Cli::try_parse_from(["tenex-edge", "channels", "archive", "ops"])
-        .expect("channels archive parses");
+fn channel_archive_parses_channel_reference() {
+    let cli = crate::cli::args::Cli::try_parse_from(["tenex-edge", "channel", "archive", "ops"])
+        .expect("channel archive parses");
 
     match cli.cmd {
         crate::cli::args::Cmd::Channel {
@@ -175,21 +175,21 @@ fn channels_archive_parses_channel_reference() {
                     session: None,
                 },
         } => assert_eq!(channel, "ops"),
-        _ => panic!("expected channels archive command"),
+        _ => panic!("expected channel archive command"),
     }
 }
 
 #[test]
-fn channels_switch_accepts_explicit_session_anchor() {
+fn channel_switch_accepts_explicit_session_anchor() {
     let cli = crate::cli::args::Cli::try_parse_from([
         "tenex-edge",
-        "channels",
+        "channel",
         "switch",
         "ops",
         "--session",
         "session-1",
     ])
-    .expect("channels switch parses with explicit session");
+    .expect("channel switch parses with explicit session");
 
     match cli.cmd {
         crate::cli::args::Cmd::Channel {
@@ -202,7 +202,7 @@ fn channels_switch_accepts_explicit_session_anchor() {
             assert_eq!(channel, "ops");
             assert_eq!(session, "session-1");
         }
-        _ => panic!("expected channels switch command"),
+        _ => panic!("expected channel switch command"),
     }
 }
 
@@ -213,16 +213,16 @@ fn removed_invite_command_stays_unavailable() {
 }
 
 #[test]
-fn channels_edit_about_parses() {
+fn channel_edit_about_parses() {
     let cli = crate::cli::args::Cli::try_parse_from([
         "tenex-edge",
-        "channels",
+        "channel",
         "edit",
         "epic/planning",
         "--about",
         "new description",
     ])
-    .expect("channels edit parses");
+    .expect("channel edit parses");
 
     match cli.cmd {
         crate::cli::args::Cmd::Channel {
@@ -236,21 +236,14 @@ fn channels_edit_about_parses() {
             assert_eq!(channel, "epic/planning");
             assert_eq!(about, "new description");
         }
-        _ => panic!("expected channels edit command"),
+        _ => panic!("expected channel edit command"),
     }
 }
 
 #[test]
-fn channels_edit_about_rejects_more_than_80_chars() {
+fn channel_edit_about_rejects_more_than_80_chars() {
     let too_long = "a".repeat(crate::channel_about::CHANNEL_ABOUT_MAX_CHARS + 1);
-    let err = parse_err(&[
-        "tenex-edge",
-        "channels",
-        "edit",
-        "ops",
-        "--about",
-        &too_long,
-    ]);
+    let err = parse_err(&["tenex-edge", "channel", "edit", "ops", "--about", &too_long]);
 
     assert_eq!(err.kind(), ErrorKind::ValueValidation);
     assert!(
@@ -295,22 +288,10 @@ fn channel_read_channel_still_parses() {
 }
 
 #[test]
-fn channel_read_alias_via_channels_still_parses() {
-    let cli = crate::cli::args::Cli::try_parse_from([
-        "tenex-edge",
-        "channels",
-        "read",
-        "--channel",
-        "ops",
-    ])
-    .unwrap();
+fn channel_read_alias_via_channels_is_removed() {
+    let err = parse_err(&["tenex-edge", "channels", "read", "--channel", "ops"]);
 
-    assert!(matches!(
-        cli.cmd,
-        crate::cli::args::Cmd::Channel {
-            action: ChannelAction::Read { .. }
-        }
-    ));
+    assert_eq!(err.kind(), ErrorKind::InvalidSubcommand);
 }
 
 #[test]

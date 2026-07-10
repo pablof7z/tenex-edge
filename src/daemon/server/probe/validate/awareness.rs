@@ -51,7 +51,7 @@ pub(super) fn push_awareness_check(
     let passed = bool_at(evidence, "found") && bool_at(evidence, "channel_confirmed");
     let status = if failed {
         "failed"
-    } else if passed || bool_at(evidence, "all_workspaces") || bool_at(evidence, "all_roots") {
+    } else if passed || bool_at(evidence, "all_workspaces") {
         "passed"
     } else {
         "not_proven"
@@ -180,7 +180,6 @@ fn requested_scope(params: &Value, requested: &str) -> Scope {
     }
     if params
         .get("all_workspaces")
-        .or_else(|| params.get("all_roots"))
         .and_then(Value::as_bool)
         .unwrap_or(false)
     {

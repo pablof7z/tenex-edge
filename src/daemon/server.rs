@@ -196,11 +196,11 @@ impl DaemonState {
 
 // ── entry point ──────────────────────────────────────────────────────────────
 mod channel_membership_rpc;
+mod channel_read_tail;
 mod channel_resolve;
+mod channel_send;
 mod channels_rpc;
-mod chat_read_tail;
 mod chat_target;
-mod chat_write;
 mod cursor;
 mod diagnostics;
 mod engine_lifecycle;
@@ -222,17 +222,17 @@ mod turns;
 mod who;
 
 use agent_roster::{publish_local_agent_roster, rpc_agent_roster_publish};
-use channel_membership_rpc::{rpc_channels_join, rpc_channels_leave, rpc_channels_switch};
+use channel_membership_rpc::{rpc_channel_join, rpc_channel_leave, rpc_channel_switch};
+use channel_read_tail::{handle_channel_read, handle_tail};
 use channel_resolve::{
     resolve_channel_for_session_start, resolve_channel_path, resolve_channel_ref, root_channel,
-    rpc_channels_resolve, ChannelResolution,
+    rpc_channel_resolve, ChannelResolution,
 };
+use channel_send::rpc_channel_send;
 use channels_rpc::{
-    ensure_session_room, rpc_channels_archive, rpc_channels_create, rpc_channels_edit,
-    rpc_channels_list,
+    ensure_session_room, rpc_channel_archive, rpc_channel_create, rpc_channel_edit,
+    rpc_channel_list,
 };
-use chat_read_tail::{handle_chat_read, handle_tail};
-use chat_write::{rpc_chat_reply, rpc_chat_write};
 use diagnostics::{
     log_nip29_role_decision, refresh_channel_members_cache, rpc_debug_outbox, rpc_doctor,
     rpc_explain, rpc_local_backend,
@@ -263,8 +263,8 @@ async fn dispatch(state: &Arc<DaemonState>, req: &Request) -> Response {
         "session_start" => rpc_session_start(state, &req.params, None).await,
         "session_end" => rpc_session_end(state, &req.params).await,
         "session_kill" => rpc_session_kill(state, &req.params).await,
-        "chat_write" => rpc_chat_write(state, &req.params).await,
-        "chat_reply" => rpc_chat_reply(state, &req.params).await,
+        "channel_send" => rpc_channel_send(state, &req.params).await,
+        "channel_reply" => channel_send::rpc_channel_reply(state, &req.params).await,
         "publish" => rpc_propose(state, &req.params).await,
         "turn_start" => rpc_turn_start(state, &req.params).await,
         "turn_check" => rpc_turn_check(state, &req.params).await,
@@ -281,14 +281,14 @@ async fn dispatch(state: &Arc<DaemonState>, req: &Request) -> Response {
         "agents_roster" => rpc::rpc_agents_roster(state, &req.params),
         "agent_roster_publish" => rpc_agent_roster_publish(state, &req.params).await,
         "debug_outbox" => rpc_debug_outbox(state, &req.params),
-        "channels_create" => rpc_channels_create(state, &req.params).await,
-        "channels_edit" => rpc_channels_edit(state, &req.params).await,
-        "channels_resolve" => rpc_channels_resolve(state, &req.params).await,
-        "channels_list" => rpc_channels_list(state, &req.params),
-        "channels_archive" => rpc_channels_archive(state, &req.params).await,
-        "channels_join" => rpc_channels_join(state, &req.params).await,
-        "channels_leave" => rpc_channels_leave(state, &req.params).await,
-        "channels_switch" => rpc_channels_switch(state, &req.params).await,
+        "channel_create" => rpc_channel_create(state, &req.params).await,
+        "channel_edit" => rpc_channel_edit(state, &req.params).await,
+        "channel_resolve" => rpc_channel_resolve(state, &req.params).await,
+        "channel_list" => rpc_channel_list(state, &req.params),
+        "channel_archive" => rpc_channel_archive(state, &req.params).await,
+        "channel_join" => rpc_channel_join(state, &req.params).await,
+        "channel_leave" => rpc_channel_leave(state, &req.params).await,
+        "channel_switch" => rpc_channel_switch(state, &req.params).await,
         "dispatch" => session_dispatch::rpc_dispatch(state, &req.params).await,
         "statusline" => rpc_statusline(state, &req.params),
         "pty_status" => pty_rpc::rpc_pty_status(state).await,

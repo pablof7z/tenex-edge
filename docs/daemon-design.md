@@ -62,7 +62,7 @@ Claude channel adapter shell out to these verbs and parse their stdout).
               └───────────────────────────────────────────────────────────────────┘
 ```
 
-- The daemon is a normal `tenex-edge` invocation: `tenex-edge __daemon` (hidden
+- The daemon is a normal `tenex-edge` invocation: `tenex-edge daemon` (hidden
   subcommand, like today's `__run-session`).
 - The daemon runs the **tokio multi-thread runtime** (already how `main` builds
   it). It holds exactly one `Store` (single SQLite connection → one writer by
@@ -207,8 +207,8 @@ Walking each verb's true I/O shape:
 | `turn_start`       | one-shot (may be big)| daemon drains chat + builds context, returns text    |
 | `turn_check`       | one-shot, read-only  | peek chat; no writes                                 |
 | `turn_end`         | one-shot             | flip turn state                                      |
-| `chat_write`       | one-shot             | daemon publishes kind:9 chat event on the relay      |
-| `chat_read`        | one-shot             | daemon returns chat history for the session/project  |
+| `channel_send`       | one-shot             | daemon publishes kind:9 chat event on the relay      |
+| `channel_read`        | one-shot             | daemon returns chat history for the session/project  |
 | `who`              | one-shot             | snapshot rows                                        |
 | `who --live`       | client-side poll     | client calls `who` each refresh; renders terminal    |
 | `doctor`           | one-shot             | daemon does the relay round-trip, returns result     |
@@ -372,11 +372,11 @@ killed by an idle-exit mid-stream.
 >
 > **Worktree caveat:** `rel_cwd` is computed relative to `project::project_root`
 > (the git repo root via `git rev-parse --git-common-dir`, else the nearest
-> ancestor registered in `~/.tenex-edge/projects.json`). For real `git worktree
+> ancestor registered in `~/.tenex-edge/workspaces.json`). For real `git worktree
 > add` dirs, `--git-common-dir` returns the SHARED main repo path, so two
 > worktrees both resolve to `.` and render bracket-less. To make
 > `worktree1`/`worktree2` render distinctly, register their common parent in
-> `projects.json` (via `tenex-edge channel init`) so `project_root` resolves
+> `workspaces.json` (via `tenex-edge channel init`) so `project_root` resolves
 > there.
 
 Agents may run in different working dirs / git worktrees on the same backend
@@ -423,7 +423,7 @@ client-side.
 
 - **rustls ring CryptoProvider** install in `main()` stays — the daemon is now
   the process that touches the relay, so the install must run on its path too
-  (it already runs in `main` before dispatch; `__daemon` goes through `main`).
+  (it already runs in `main` before dispatch; `daemon` goes through `main`).
 - **Identical standard-Nostr wire output** — the codec seam
   (`fabric::nip29::wire`) is untouched; the daemon publishes the same builders.
 - **Relay NIP-42 AUTH warm-up fetch** before any subscribe — `Transport::connect`
@@ -439,8 +439,8 @@ client-side.
   assert exactly one daemon binds and all clients connect.
 - **Stale-socket reclaim**: create a `daemon.sock` file with no listener; assert
   `connect_or_spawn()` unlinks + reclaims and connects.
-- **RPC round-trip**: start a daemon (test home), issue `who` / `chat_write` /
-  `chat_read` RPCs, assert results.
+- **RPC round-trip**: start a daemon (test home), issue `who` / `channel_send` /
+  `channel_read` RPCs, assert results.
 - **Version-skew handshake**: client with `protocol = N+1` against a daemon
   pinned to `N` → daemon exits, client respawns and succeeds; assert the old
   daemon process is gone.

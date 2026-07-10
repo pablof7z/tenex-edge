@@ -1,7 +1,7 @@
 //! Daemon integration: state-mutating RPCs end-to-end, multi-agent mention
 //! routing, and the ~16-concurrent-writer corruption repro through the RPC path.
 //!
-//! All tests run against a real spawned `__daemon` (one relay → a local
+//! All tests run against a real spawned `daemon` (one relay → a local
 //! `nak serve`, never the production fabric) over a UDS in an isolated
 //! `TENEX_EDGE_HOME`. Env mutation is serialized; the file is run single-threaded
 //! by the runner invocation in the SUMMARY (each test sets process-global env).

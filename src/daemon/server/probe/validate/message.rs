@@ -5,7 +5,7 @@ use super::DaemonState;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-const MESSAGE_LIMITATION: &str = "message validation proves the local canonical chat read model; relay acceptance is proven only when the row carries accepted sync state and a native event id";
+const MESSAGE_LIMITATION: &str = "message validation proves the local canonical channel read model; relay acceptance is proven only when the row carries accepted sync state and a native event id";
 
 pub(super) fn message_target(target: &str) -> Option<&str> {
     target
@@ -30,7 +30,7 @@ pub(super) fn message_evidence(
                 "kind": "message",
                 "supported": true,
                 "found": false,
-                "summary": format!("message `{requested_id}` is not in the canonical chat read model"),
+                "summary": format!("message `{requested_id}` is not in the canonical channel read model"),
                 "reason": "no messages row matched this local message id or native event id prefix",
             }));
         };

@@ -19,7 +19,7 @@ pub(in crate::cli) enum AgentAction {
         slug: String,
         /// Intended workspace assignment (repeatable). Currently triggers a
         /// roster republish; per-workspace scoping is not implemented yet.
-        #[arg(long = "workspace", alias = "root", value_name = "WORKSPACE")]
+        #[arg(long = "workspace", value_name = "WORKSPACE")]
         workspaces: Vec<String>,
         /// Set the harness command as a string (shell-word split). Takes priority
         /// over `--` args. Example: `-c 'ollama launch claude -- --dangerously-skip-permissions'`
@@ -36,12 +36,7 @@ pub(in crate::cli) enum AgentAction {
         /// Agent slug (must already exist in the local keystore).
         slug: String,
         /// Workspace to assign to (repeatable; at least one required).
-        #[arg(
-            long = "workspace",
-            alias = "root",
-            value_name = "WORKSPACE",
-            required = true
-        )]
+        #[arg(long = "workspace", value_name = "WORKSPACE", required = true)]
         workspaces: Vec<String>,
     },
     /// Remove a local agent. Its key file is parked at `<slug>.json.removed`
@@ -119,7 +114,7 @@ pub(in crate::cli) enum ChannelAction {
         /// Page from the newest messages; output remains chronological.
         #[arg(long)]
         tail: bool,
-        /// Keep the chat reader open and print new messages as they arrive.
+        /// Keep the channel reader open and print new messages as they arrive.
         #[arg(long)]
         live: bool,
         /// Channel-relative channel name/path/id to read. Required when this
@@ -210,14 +205,10 @@ pub(in crate::cli) enum ChannelAction {
     List {
         /// Workspace slug. Defaults to the workspace resolved from the current
         /// directory. Ignored with `--all-workspaces`.
-        #[arg(long = "workspace", alias = "root", value_name = "WORKSPACE")]
+        #[arg(long = "workspace", value_name = "WORKSPACE")]
         workspace: Option<String>,
         /// List every workspace on the relay instead of one workspace's subgroup tree.
-        #[arg(
-            long = "all-workspaces",
-            aliases = ["roots", "all-roots"],
-            conflicts_with = "workspace"
-        )]
+        #[arg(long = "all-workspaces", conflicts_with = "workspace")]
         workspaces: bool,
     },
     /// Register the current directory as a tenex-edge workspace. Maps

@@ -1,6 +1,5 @@
 use super::*;
 use crate::reconcile::StatusReconciler;
-
 mod roster_bootstrap;
 
 pub async fn run() -> Result<()> {
@@ -284,15 +283,16 @@ pub(in crate::daemon::server) async fn serve_connection(
                 handle_tail(&state, req.id, &req.params, &mut writer).await?;
                 break; // tail owns the connection until the client disconnects
             }
-            "chat_read" => {
-                if let Err(e) = handle_chat_read(&state, req.id, &req.params, &mut writer).await {
+            "channel_read" => {
+                if let Err(e) = handle_channel_read(&state, req.id, &req.params, &mut writer).await
+                {
                     write_json(
                         &mut writer,
-                        &Response::err(req.id, "chat_read_failed", format!("{e:#}")),
+                        &Response::err(req.id, "channel_read_failed", format!("{e:#}")),
                     )
                     .await?;
                 }
-                break; // chat_read may own the connection for --live
+                break;
             }
             "session_start" => {
                 handle_session_start(&state, req.id, &req.params, &mut writer).await?;

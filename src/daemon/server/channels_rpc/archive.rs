@@ -1,6 +1,6 @@
 use super::*;
 
-pub(in crate::daemon::server) async fn rpc_channels_archive(
+pub(in crate::daemon::server) async fn rpc_channel_archive(
     state: &Arc<DaemonState>,
     params: &serde_json::Value,
 ) -> Result<serde_json::Value> {
@@ -8,8 +8,8 @@ pub(in crate::daemon::server) async fn rpc_channels_archive(
     struct P {
         channel: String,
     }
-    let p: P = serde_json::from_value(params.clone()).context("channels_archive params")?;
-    let rec = resolve_caller(state, params, "channels archive")?;
+    let p: P = serde_json::from_value(params.clone()).context("channel_archive params")?;
+    let rec = resolve_caller(state, params, "channel archive")?;
     let channel = match resolve_target_channel(state, &rec, &p.channel)? {
         TargetChannel::Unique(h) => h,
         TargetChannel::Ambiguous(v) => return Ok(v),

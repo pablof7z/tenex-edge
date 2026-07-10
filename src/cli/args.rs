@@ -38,7 +38,6 @@ pub(super) enum Cmd {
     /// Interactively configure model providers and role-to-model assignments.
     Config(ConfigArgs),
     /// Read/send chat and manage NIP-29 channels (read, send, create, edit, list, init, join, leave, archive, switch).
-    #[command(alias = "channels")]
     Channel {
         #[command(subcommand)]
         action: ChannelAction,
@@ -101,7 +100,7 @@ pub(super) enum Cmd {
     #[command(hide = true)]
     Install(InstallArgs),
     /// Start the per-machine daemon in the foreground.
-    #[command(name = "daemon", alias = "__daemon", hide = true)]
+    #[command(name = "daemon", hide = true)]
     Daemon,
 }
 
@@ -134,6 +133,20 @@ mod tests {
     #[test]
     fn removed_project_command_stays_unavailable() {
         let err = parse_err(&["tenex-edge", "project", "list"]);
+
+        assert_eq!(err.kind(), ErrorKind::InvalidSubcommand);
+    }
+
+    #[test]
+    fn removed_channels_alias_stays_unavailable() {
+        let err = parse_err(&["tenex-edge", "channels", "list"]);
+
+        assert_eq!(err.kind(), ErrorKind::InvalidSubcommand);
+    }
+
+    #[test]
+    fn removed_daemon_alias_stays_unavailable() {
+        let err = parse_err(&["tenex-edge", "__daemon"]);
 
         assert_eq!(err.kind(), ErrorKind::InvalidSubcommand);
     }

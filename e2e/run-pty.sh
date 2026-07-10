@@ -171,7 +171,7 @@ log "step 6: tenex-edge launch <agent> uses portable PTY mode"
   edge edge-a agent add launch-probe -- \
     env "LAUNCH_CAPTURE=${LAUNCH_CAPTURE}" /bin/sh -lc \
     'printf "launch-ready\n"; cat > "$LAUNCH_CAPTURE"' >/dev/null
-  edge edge-a launch launch-probe --project pty-probe >"${LAUNCH_OUT}" 2>&1
+  edge edge-a launch launch-probe --workspace pty-probe >"${LAUNCH_OUT}" 2>&1
 ) || check_fail "8 launch — tenex-edge launch command failed"
 LAUNCH_ID="$(sed -n 's/.*session: //p' "${LAUNCH_OUT}" | tail -1 | tr -d '\r')"
 if [[ -n "${LAUNCH_ID}" ]] && wait_for_soft "launched PTY session to be live" 10 \

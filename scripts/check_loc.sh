@@ -65,6 +65,7 @@ fi
 
 while IFS= read -r f; do
     [ -n "$f" ] || continue
+    [ -f "$f" ] || continue
     lc=$(line_count "$f")
     if [ "$lc" -gt "$HARD_LIMIT" ]; then
         echo "$lc $f" >> "$HARD"

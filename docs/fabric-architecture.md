@@ -128,7 +128,7 @@ read.
 This store already exists — `~/.tenex-edge/state.db`. Its `relay_*` tables are
 materialized projections that can be rebuilt from the fabric; its local tables
 (`sessions`, `session_channels`, `session_aliases`, `identities`, `inbox`,
-`outbox`, and `project_roots`) are non-rebuildable daemon state. The schema is
+`outbox`, and `workspace_roots`) are non-rebuildable daemon state. The schema is
 stamped at open, so an incompatible or unstamped existing DB fails loudly instead
 of being partially interpreted. The **single-writer materializer is the direct
 fix for the multi-writer `state.db` corruption** already hit when ~16
@@ -314,7 +314,7 @@ flowchart TD
 | # | Capability | Responsibility | Must **not** |
 |---|------------|----------------|--------------|
 | ① | **Lifecycle** | Turn a domain lifecycle event into provider-native setup (create group, invite, or no-op). | Decide *when* a project opens (that's the host/daemon). |
-| ② | **Materializer** | **Composes ③ and ④:** consume ④'s inbound stream, decode via ③, then own *only* admission, and upsert of canonical rows — membership, project list & metadata, agents. The store is the read contract; this fills it. | Subscribe or decode *itself* (that's ④ and ③), or answer reads (readers query the store directly; the materializer never sits in a read path). |
+| ② | **Materializer** | **Composes ③ and ④:** consume ④'s inbound stream, decode via ③, then own *only* admission, and upsert of canonical rows — membership, channel list --all-workspaces & metadata, agents. The store is the read contract; this fills it. | Subscribe or decode *itself* (that's ④ and ③), or answer reads (readers query the store directly; the materializer never sits in a read path). |
 | ③ | **Provider codec** | Pure, symmetric ser/de of the five+ `DomainEvent` nouns to the provider's native envelope. The current NIP-29 provider uses a Nostr-event codec. | Open subscriptions or manage groups. |
 | ④ | **Delivery** | Connect/auth, publish raw envelopes, and stream raw inbound envelopes for a `Scope`. Owns whatever fetch model the fabric uses. | Decode, derive, apply admission, or know domain meaning. |
 

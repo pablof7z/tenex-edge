@@ -52,7 +52,7 @@ pub(super) const DURABLE_TABLES: &[TableCoverage] = &[
     row(
         "workspace_roots",
         "direct",
-        "workspace:<channel> | work_root:<channel>",
+        "workspace:<channel>",
         "channel workspace bindings",
     ),
     row(

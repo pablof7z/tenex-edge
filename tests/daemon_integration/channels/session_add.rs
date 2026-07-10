@@ -76,7 +76,7 @@ fn channel_add_session_pulls_live_pty_without_resuming() {
         let mut c = Client::connect_or_spawn().await.expect("connect");
         let v = c
             .call(
-                "channels_create",
+                "channel_create",
                 serde_json::json!({
                     "parent": &root,
                     "name": "side",
@@ -85,7 +85,7 @@ fn channel_add_session_pulls_live_pty_without_resuming() {
                 }),
             )
             .await
-            .expect("channels_create");
+            .expect("channel_create");
         v["child_h"].as_str().unwrap().to_string()
     });
     let pty_count = tenex_edge::pty::read_all_metadata().len();

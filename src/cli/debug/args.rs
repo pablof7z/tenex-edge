@@ -19,7 +19,7 @@ pub(in crate::cli) enum DebugAction {
     /// Live TUI for hook injections and tenex-edge command invocations.
     HookTail {
         /// Filter panes/events to one or more workspaces (repeatable).
-        #[arg(long = "workspace", alias = "root", value_name = "WORKSPACE")]
+        #[arg(long = "workspace", value_name = "WORKSPACE")]
         workspaces: Vec<String>,
         /// Filter panes/events to a session id (or a unique prefix of it).
         #[arg(long)]

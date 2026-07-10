@@ -8,7 +8,7 @@
 //!
 //! Pure function movement — behavior is byte-identical to the pre-split file.
 //! `spawn_demux` and `handle_orchestration` are `pub(super)` because the parent
-//! module calls them (the accept-loop bootstrap and the channels_create local
+//! module calls them (the accept-loop bootstrap and the channel_create local
 //! fast-path); everything else is private to this module.
 
 use super::*;
@@ -307,7 +307,7 @@ fn derive_and_emit_tail_events(
             }
         }
         DomainEvent::ChatMessage(chat) => {
-            // Local publishes emit their own outbound tail line in rpc_chat_write.
+            // Local publishes emit their own outbound tail line in rpc_channel_send.
             if hosted.contains(&chat.from.pubkey) {
                 return;
             }

@@ -40,18 +40,13 @@ struct StoredKey {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     agent: Option<serde_json::Value>,
     /// One-line "when to use this agent" note, surfaced in `who`'s agent table.
-    /// Read from `byline` or its alias `useCriteria`.
-    #[serde(
-        default,
-        alias = "useCriteria",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     byline: Option<String>,
 }
 
 impl StoredKey {
-    /// The byline to display for this agent: the explicit `byline`/`useCriteria`
-    /// field, falling back to the inline agent definition's `description`.
+    /// The byline to display for this agent: the explicit `byline` field,
+    /// falling back to the inline agent definition's `description`.
     fn effective_byline(&self) -> Option<String> {
         self.byline
             .as_ref()

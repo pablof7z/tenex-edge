@@ -113,7 +113,7 @@ pub(super) async fn inject_planned_messages_pty(
     }
     // The mention is now in the agent's PTY. Arm a turn-end auto-reply so the
     // channel still hears back if the agent finishes the turn without publishing
-    // its own `chat write`.
+    // its own `channel send`.
     if !prompt.trigger_event_id.is_empty() {
         crate::daemon::server::auto_reply::arm(
             &rec.session_id,

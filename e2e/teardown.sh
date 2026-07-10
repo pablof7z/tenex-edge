@@ -31,7 +31,7 @@ stop_backend() {
   kill_pidfile "$(backend_pidfile "$name")" "backend ${name} daemon"
   local sock; sock="$(backend_edge_home "$name")/daemon.sock"
   # pkill matches the daemon by the socket dir it serves (each home is unique).
-  pkill -f "${TENEX_EDGE_BIN} __daemon" 2>/dev/null && true
+  pkill -f "${TENEX_EDGE_BIN} daemon" 2>/dev/null && true
   rm -f "$sock"
 }
 
@@ -74,10 +74,10 @@ if [[ -n "${port_pids}" ]]; then
   for pid in ${port_pids}; do kill -9 "${pid}" 2>/dev/null || true; done
 fi
 
-# Final sweep: any __daemon launched from THIS binary that survived.
-if pgrep -f "${TENEX_EDGE_BIN} __daemon" >/dev/null 2>&1; then
-  warn "sweeping stray __daemon processes"
-  pkill -9 -f "${TENEX_EDGE_BIN} __daemon" 2>/dev/null || true
+# Final sweep: any daemon launched from THIS binary that survived.
+if pgrep -f "${TENEX_EDGE_BIN} daemon" >/dev/null 2>&1; then
+  warn "sweeping stray daemon processes"
+  pkill -9 -f "${TENEX_EDGE_BIN} daemon" 2>/dev/null || true
 fi
 
 stop_pty_supervisors

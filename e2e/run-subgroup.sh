@@ -100,16 +100,16 @@ B_BOOT_SID="subgroup-b-root-$$"
 ok "backend-b project root recorded"
 
 # ── 1. backend-a creates the subgroup ────────────────────────────────────────
-log "1: backend-a channels create (research-lead@edge-a, testing-lead@edge-b)"
+log "1: backend-a channel create (research-lead@edge-a, testing-lead@edge-b)"
 A_PROJ="$(backend_project_dir edge-a)"
 CG_OUT="$(
   cd "${A_PROJ}"
-  edge edge-a channels create \
-    --name "subgroup support" \
+  edge edge-a channel create \
+    "subgroup support" \
     --about "subgroup support" \
     --agent "research-lead@${A_PK}" \
     --agent "testing-lead@${B_PK}" 2>&1
-)" || { echo "${CG_OUT}" | sed 's/^/    /'; die "channels create failed"; }
+)" || { echo "${CG_OUT}" | sed 's/^/    /'; die "channel create failed"; }
 echo "${CG_OUT}" | sed 's/^/    /'
 wait_for "backend-a local channel cache to include subgroup support" 15 \
   "sqlite3 '$(backend_edge_home edge-a)/state.db' \"SELECT 1 FROM relay_channels WHERE parent='${E2E_PROJECT}' AND name='subgroup support' LIMIT 1;\" | grep -q 1"
@@ -188,16 +188,16 @@ wait_for "child 39002 to include research-lead" 25 \
   "nak_req_contains '${A_ROLE_PK}' -k 39002 -d '${CHILD_H}' '${RELAY_WS}'"
 ok "research-lead is a child member (base ${A_ROLE_BASE_PK:0:8}, session ${A_ROLE_PK:0:8})"
 
-# ── 9. channels list renders the hierarchy FROM LOCAL DAEMON STATE ────────────
-log "9: backend-a 'channels list' shows the room under the project (from local state)"
-wait_for "channels list to include ${CHILD_H} under ${E2E_PROJECT}" 15 \
-  "edge edge-a channels list --project '${E2E_PROJECT}' 2>/dev/null | grep -q '${CHILD_H}'"
-GL_OUT="$(edge edge-a channels list --project "${E2E_PROJECT}" 2>/dev/null)"
+# ── 9. channel list renders the hierarchy FROM LOCAL DAEMON STATE ────────────
+log "9: backend-a 'channel list' shows the room under the project (from local state)"
+wait_for "channel list to include ${CHILD_H} under ${E2E_PROJECT}" 15 \
+  "edge edge-a channel list --workspace '${E2E_PROJECT}' 2>/dev/null | grep -q '${CHILD_H}'"
+GL_OUT="$(edge edge-a channel list --workspace "${E2E_PROJECT}" 2>/dev/null)"
 echo "${GL_OUT}" | sed 's/^/    /'
 # The tree prints the project as the root with the child indented beneath it.
-echo "${GL_OUT}" | grep -qE "^${E2E_PROJECT}$" || die "channels list missing project root"
+echo "${GL_OUT}" | grep -qE "^${E2E_PROJECT}$" || die "channel list missing project root"
 echo "${GL_OUT}" | grep -qE "^  .*${CHILD_H}" || die "child not indented under the project"
-ok "channels list renders the hierarchy from local daemon state"
+ok "channel list renders the hierarchy from local daemon state"
 
 cat <<SUMMARY
 

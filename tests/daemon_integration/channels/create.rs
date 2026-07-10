@@ -1,13 +1,13 @@
 use super::*;
 
-/// `channels_create` (the launch channel picker's "create new channel" path)
+/// `channel_create` (the launch channel picker's "create new channel" path)
 /// must auto-create the parent channel group when it doesn't exist on the relay
 /// yet. With per-session rooms off (the default), the picker can be the FIRST
 /// thing to touch a channel, so the parent isn't guaranteed to exist; without
 /// the parent-ensure the relay rejects the 9007 with "parent group doesn't
 /// exist". Regression for that path.
 #[test]
-fn channels_create_auto_creates_missing_parent_channel() {
+fn channel_create_auto_creates_missing_parent_channel() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let home = Home::new();
     rewrite_config_with_user_nsec(&home);
@@ -19,7 +19,7 @@ fn channels_create_auto_creates_missing_parent_channel() {
         let mut c = Client::connect_or_spawn().await.expect("connect");
         let v = c
             .call(
-                "channels_create",
+                "channel_create",
                 serde_json::json!({
                     "parent": parent,
                     "name": "tester",
@@ -28,11 +28,11 @@ fn channels_create_auto_creates_missing_parent_channel() {
                 }),
             )
             .await
-            .expect("channels_create should succeed even when the parent is new");
+            .expect("channel_create should succeed even when the parent is new");
         v["child_h"].as_str().expect("child_h returned").to_string()
     });
 
-    assert!(!child_h.is_empty(), "channels_create returned a child id");
+    assert!(!child_h.is_empty(), "channel_create returned a child id");
 
     // The parent channel group was created + locked, so the backend management
     // key is now an admin of it. (Manageability = `is_channel_admin`; the old
@@ -40,18 +40,18 @@ fn channels_create_auto_creates_missing_parent_channel() {
     let store = Store::open(&home.store_path()).unwrap();
     assert!(
         store.is_channel_admin(&parent, &backend_pk).unwrap(),
-        "parent channel {parent} should be managed (backend admin) after channels_create created it"
+        "parent channel {parent} should be managed (backend admin) after channel_create created it"
     );
 
     stop_daemon(&home);
 }
 
-/// `channels create` run as an agent (env_session set) with NO `--agent` targets
+/// `channel create` run as an agent (harness_session set) with NO `--agent` targets
 /// nests the new channel under the creator's CURRENT channel and auto-switches the
 /// running session into it. One test covers three behaviors: `--agent` is optional,
 /// the parent defaults to the current channel, and the creator auto-switches.
 #[test]
-fn channels_create_no_agents_nests_under_current_and_auto_switches() {
+fn channel_create_no_agents_nests_under_current_and_auto_switches() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let home = Home::new();
     rewrite_config_with_user_nsec(&home);
@@ -81,17 +81,17 @@ fn channels_create_no_agents_nests_under_current_and_auto_switches() {
     let v = rt().block_on(async {
         let mut c = Client::connect_or_spawn().await.expect("connect");
         c.call(
-            "channels_create",
+            "channel_create",
             serde_json::json!({
                 "name": "subtask",
                 "agents": [],
-                "env_session": sid,
+                "harness_session": sid,
                 "agent": "coder",
                 "cwd": "/tmp",
             }),
         )
         .await
-        .expect("channels_create with no agents should succeed")
+        .expect("channel_create with no agents should succeed")
     });
 
     let child_h = v["child_h"].as_str().expect("child_h returned").to_string();
@@ -122,11 +122,11 @@ fn channels_create_no_agents_nests_under_current_and_auto_switches() {
     stop_daemon(&home);
 }
 
-/// Channel names are unique per parent: re-running `channels create` with a name
+/// Channel names are unique per parent: re-running `channel create` with a name
 /// that already exists under the same parent is a hard ERROR (not a silent dedup),
 /// so the agent learns the channel is already there and switches in instead.
 #[test]
-fn channels_create_errors_when_name_already_exists() {
+fn channel_create_errors_when_name_already_exists() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let home = Home::new();
     rewrite_config_with_user_nsec(&home);
@@ -140,11 +140,11 @@ fn channels_create_errors_when_name_already_exists() {
                 "agents": [{ "slug": "coder", "backend": "test-host" }],
             })
         };
-        c.call("channels_create", mk())
+        c.call("channel_create", mk())
             .await
             .expect("first create of a fresh name succeeds");
         let err = c
-            .call("channels_create", mk())
+            .call("channel_create", mk())
             .await
             .expect_err("re-creating the same name under the same parent must error");
         assert!(

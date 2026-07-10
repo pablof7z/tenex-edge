@@ -10,7 +10,7 @@
 #   4. SMOKE TEST:
 #        a. backend-a drives a session-start in the project dir
 #           → daemon-a publishes kind:9007 create-group + 9000 put-user to relay
-#        b. backend-b runs `project list`
+#        b. backend-b runs `channel list --all-workspaces`
 #           → daemon-b fetches kind:39000 from the relay and sees the group
 #      Backend B learning about A's group is only possible via the shared relay:
 #      the two backends share NO filesystem state.
@@ -103,7 +103,7 @@ JSON
 
   # Register each isolated checkout in its backend-local project map so both
   # backends resolve the same slug independent of any git root.
-  ( cd "${proj}" && edge "${name}" project init --force >/dev/null )
+  ( cd "${proj}" && edge "${name}" channel init --force >/dev/null )
   dim "  ${name}: config=${cfg}"
   dim "          edge_home=${edge}  project_dir=${proj}"
 }
@@ -113,10 +113,10 @@ ok "configs written (both whitelist both pubkeys; relays=[${RELAY_WS}])"
 
 # Record daemon pids the first time each backend's daemon is auto-spawned, so
 # teardown can stop them. We can't know the pid before the spawn, so we snapshot
-# the newest __daemon after the first call below.
+# the newest daemon after the first call below.
 snapshot_daemon_pid() {
   local name="$1"
-  local pid; pid="$(pgrep -n -f "${TENEX_EDGE_BIN} __daemon" || true)"
+  local pid; pid="$(pgrep -n -f "${TENEX_EDGE_BIN} daemon" || true)"
   [[ -n "$pid" ]] && echo "$pid" >"$(backend_pidfile "$name")"
 }
 
@@ -140,13 +140,13 @@ ok "backend-a session-start completed"
 
 # Confirm A's own daemon created the group (sanity: the publisher sees it).
 log "4a-check: backend-a sees its own project"
-wait_for_soft "backend-a project_list to include ${E2E_PROJECT}" 20 \
-  "edge edge-a project list 2>/dev/null | grep -q '${E2E_PROJECT}'" || true
-if edge edge-a project list 2>/dev/null | grep -q "${E2E_PROJECT}"; then
-  ok "backend-a project list shows '${E2E_PROJECT}'"
+wait_for_soft "backend-a channel_list --all-workspaces to include ${E2E_PROJECT}" 20 \
+  "edge edge-a channel list --all-workspaces 2>/dev/null | grep -q '${E2E_PROJECT}'" || true
+if edge edge-a channel list --all-workspaces 2>/dev/null | grep -q "${E2E_PROJECT}"; then
+  ok "backend-a channel list --all-workspaces shows '${E2E_PROJECT}'"
 else
   warn "backend-a does not yet list the project; dumping its view:"
-  edge edge-a project list 2>&1 | sed 's/^/    /' || true
+  edge edge-a channel list --all-workspaces 2>&1 | sed 's/^/    /' || true
 fi
 
 # Independent confirmation the group really landed on the relay: query the relay
@@ -162,17 +162,17 @@ fi
 
 # 4b. backend-b: a SEPARATE install with its own daemon + db. If it can list the
 #     project, the only path the knowledge took was A → relay → B.
-log "4b: backend-b project list (must observe A's group via the relay)"
+log "4b: backend-b channel list --all-workspaces (must observe A's group via the relay)"
 B_OK=0
-if wait_for_soft "backend-b project_list to include ${E2E_PROJECT}" 25 \
-     "edge edge-b project list 2>/dev/null | grep -q '${E2E_PROJECT}'"; then
+if wait_for_soft "backend-b channel_list --all-workspaces to include ${E2E_PROJECT}" 25 \
+     "edge edge-b channel list --all-workspaces 2>/dev/null | grep -q '${E2E_PROJECT}'"; then
   B_OK=1
 fi
 snapshot_daemon_pid edge-b
 
 echo
-log "backend-b project list:"
-edge edge-b project list 2>&1 | sed 's/^/    /' || true
+log "backend-b channel list --all-workspaces:"
+edge edge-b channel list --all-workspaces 2>&1 | sed 's/^/    /' || true
 echo
 
 if [[ "${B_OK}" == "1" ]]; then
@@ -191,7 +191,7 @@ ${_c_green}=== smoke test PASSED ===${_c_reset}
 
 Inspect:
   edge() helper is in lib.sh; e.g.
-    TENEX_CONFIG=$(backend_config edge-b) TENEX_EDGE_HOME=$(backend_edge_home edge-b) ${TENEX_EDGE_BIN} project list
+    TENEX_CONFIG=$(backend_config edge-b) TENEX_EDGE_HOME=$(backend_edge_home edge-b) ${TENEX_EDGE_BIN} channel list --all-workspaces
   relay events:
     nak req -k 39000 ${RELAY_WS}
 Tear down:

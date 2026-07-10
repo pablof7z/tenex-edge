@@ -43,7 +43,7 @@ const SPECS: &[ToolSpec] = &[
         destructive: false,
     },
     ToolSpec {
-        name: "tenex_edge.channels_list",
+        name: "tenex_edge.channel_list",
         description: "List channels under a channel.",
         props: &[Prop::new(
             "channel",
@@ -55,7 +55,7 @@ const SPECS: &[ToolSpec] = &[
         destructive: false,
     },
     ToolSpec {
-        name: "tenex_edge.chat_read",
+        name: "tenex_edge.channel_read",
         description: "Read recent messages from a channel.",
         props: &[
             Prop::new("channel", "string", "Optional channel destination."),
@@ -69,7 +69,7 @@ const SPECS: &[ToolSpec] = &[
         destructive: false,
     },
     ToolSpec {
-        name: "tenex_edge.chat_write",
+        name: "tenex_edge.channel_send",
         description: "Send a message to a channel.",
         props: &[
             Prop::new("message", "string", "Message body."),
@@ -82,7 +82,7 @@ const SPECS: &[ToolSpec] = &[
         destructive: false,
     },
     ToolSpec {
-        name: "tenex_edge.channels_create",
+        name: "tenex_edge.channel_create",
         description: "Create and join a task channel.",
         props: &[
             Prop::new("name", "string", "Human channel name."),
@@ -96,17 +96,17 @@ const SPECS: &[ToolSpec] = &[
         destructive: false,
     },
     channel_tool(
-        "tenex_edge.channels_join",
+        "tenex_edge.channel_join",
         "Join a channel for passive context.",
         false,
     ),
     channel_tool(
-        "tenex_edge.channels_leave",
+        "tenex_edge.channel_leave",
         "Leave a passively joined channel.",
         true,
     ),
     channel_tool(
-        "tenex_edge.channels_switch",
+        "tenex_edge.channel_switch",
         "Switch the active session channel.",
         true,
     ),
@@ -202,7 +202,9 @@ mod tests {
             .filter_map(|tool| tool["name"].as_str().map(str::to_string))
             .collect::<Vec<_>>();
 
-        assert!(names.contains(&"tenex_edge.channels_join".to_string()));
-        assert!(names.contains(&"tenex_edge.chat_write".to_string()));
+        assert!(names.contains(&"tenex_edge.channel_join".to_string()));
+        assert!(names.contains(&"tenex_edge.channel_send".to_string()));
+        assert!(!names.contains(&"tenex_edge.channels_join".to_string()));
+        assert!(!names.contains(&"tenex_edge.chat_write".to_string()));
     }
 }

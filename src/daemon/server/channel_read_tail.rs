@@ -10,12 +10,12 @@ mod tail_stream;
 mod tests;
 
 use backend_filter::is_backend_row;
-use read_scope::{chat_read_scopes_for_store, ChatCursor};
+use read_scope::{channel_read_scopes_for_store, ChatCursor};
 pub(in crate::daemon::server) use tail_stream::handle_tail;
 
 /// Upper bound on chat-log rows pulled per channel for a read (the slicing below
 /// narrows to the requested window).
-const CHAT_READ_CAP: u32 = 10_000;
+const CHANNEL_READ_CAP: u32 = 10_000;
 
 #[derive(serde::Deserialize, Default)]
 pub(in crate::daemon::server) struct ChatReadParams {
@@ -35,7 +35,7 @@ pub(in crate::daemon::server) struct ChatReadParams {
     live: bool,
 }
 
-pub(in crate::daemon::server) async fn handle_chat_read<W: AsyncWriteExt + Unpin>(
+pub(in crate::daemon::server) async fn handle_channel_read<W: AsyncWriteExt + Unpin>(
     state: &Arc<DaemonState>,
     id: u64,
     params: &serde_json::Value,
@@ -66,7 +66,7 @@ pub(in crate::daemon::server) async fn handle_chat_read<W: AsyncWriteExt + Unpin
     let offset = p.offset.unwrap_or(0);
 
     let _ = ensure_subscription(state, &scope).await;
-    let read_scopes = chat_read_scopes(state, &scope);
+    let read_scopes = channel_read_scopes(state, &scope);
     let mut rx = if p.live {
         Some(state.tail_subscribe())
     } else {
@@ -80,7 +80,7 @@ pub(in crate::daemon::server) async fn handle_chat_read<W: AsyncWriteExt + Unpin
         let mut rows: Vec<Message> = read_scopes
             .iter()
             .flat_map(|sc| {
-                s.chat_messages_for_channel(sc, since, CHAT_READ_CAP)
+                s.chat_messages_for_channel(sc, since, CHANNEL_READ_CAP)
                     .unwrap_or_default()
             })
             .filter(|row| !is_backend_row(s, &backend_pubkey, row))
@@ -149,7 +149,7 @@ pub(in crate::daemon::server) async fn handle_chat_read<W: AsyncWriteExt + Unpin
                         &ev_channel,
                         cursor.created_at,
                         &cursor.id,
-                        CHAT_READ_CAP,
+                        CHANNEL_READ_CAP,
                     )
                     .unwrap_or_default()
                 });
@@ -187,8 +187,8 @@ pub(in crate::daemon::server) async fn handle_chat_read<W: AsyncWriteExt + Unpin
     Ok(())
 }
 
-fn chat_read_scopes(state: &Arc<DaemonState>, scope: &str) -> Vec<String> {
-    state.with_store(|s| chat_read_scopes_for_store(s, scope))
+fn channel_read_scopes(state: &Arc<DaemonState>, scope: &str) -> Vec<String> {
+    state.with_store(|s| channel_read_scopes_for_store(s, scope))
 }
 
 /// Render a canonical chat message into the CLI's chat-line JSON, resolving the

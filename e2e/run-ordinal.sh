@@ -24,7 +24,7 @@
 #      `(#p, #h)` pair IS the ordinal routing key.
 #      → assertable when the mention resolves + the relay accepts the write;
 #        SKIP-guarded if the mention does not resolve or the relay drops it.
-#   4. Switch-reject — `channels switch` of a session into a channel
+#   4. Switch-reject — `channel switch` of a session into a channel
 #      where the same ordinal is already live must be rejected with an error
 #      containing "already active".
 #
@@ -127,7 +127,7 @@ cat >"${A_CFG}" <<JSON
   "tenexPrivateKey": "${A_SK}"
 }
 JSON
-( cd "${A_PROJ}" && edge edge-a project init --force >/dev/null ) || die "project init failed"
+( cd "${A_PROJ}" && edge edge-a channel init --force >/dev/null ) || die "channel init failed"
 ok "edge-a pubkey ${A_PK}"
 dim "  config=${A_CFG}"
 dim "  project_dir=${A_PROJ}  project_slug=${E2E_PROJECT}"
@@ -141,7 +141,7 @@ sleep 1
 
 snapshot_daemon_pid() {
   local pid
-  pid="$(pgrep -n -f "${TENEX_EDGE_BIN} __daemon" || true)"
+  pid="$(pgrep -n -f "${TENEX_EDGE_BIN} daemon" || true)"
   [[ -n "$pid" ]] && echo "$pid" >"$(backend_pidfile edge-a)"
 }
 
@@ -310,7 +310,7 @@ PK2=""
 AG2=""
 if (
   cd "${A_PROJ}"
-  run_limited 60 edge edge-a channels create --name "${ALT_NAME}" --about "ordinal alternate room" >/dev/null
+  run_limited 60 edge edge-a channel create "${ALT_NAME}" --about "ordinal alternate room" >/dev/null
 ); then
   ALT_H="$(sqlite3 "$(backend_edge_home edge-a)/state.db" \
     "SELECT channel_h FROM relay_channels WHERE parent='${E2E_PROJECT}' AND name='${ALT_NAME}' ORDER BY updated_at DESC LIMIT 1;" \
@@ -349,9 +349,9 @@ else
   CHAT_OUT="$(
     cd "${A_PROJ}"
     TENEX_EDGE_AGENT="${AGENT_SLUG}" TENEX_EDGE_CHANNEL="${E2E_PROJECT}" \
-      run_limited 45 edge edge-a chat write "${CHAT_BODY}" --channel "${E2E_PROJECT}" --session "${SID0}" 2>&1
+      run_limited 45 edge edge-a channel send "${CHAT_BODY}" --channel "${E2E_PROJECT}" --session "${SID0}" 2>&1
   )" || true
-  dim "  chat write: ${CHAT_OUT}"
+  dim "  channel send: ${CHAT_OUT}"
 
   MENTION_OK=0
   if echo "${CHAT_OUT}" | grep -qi "mentioning @${AG1}"; then
@@ -366,12 +366,12 @@ else
     WIRE_OK=1
   fi
 
-  # Local delivery: recipient session sees the mention via chat read.
+  # Local delivery: recipient session sees the mention via channel read.
   READ_OK=0
   READ_OUT="$(
     cd "${A_PROJ}"
     TENEX_EDGE_AGENT="${AGENT_SLUG}" TENEX_EDGE_CHANNEL="${E2E_PROJECT}" \
-      run_limited 20 edge edge-a chat read --channel "${E2E_PROJECT}" --session "${SID1}" --limit 20 2>/dev/null
+      run_limited 20 edge edge-a channel read --channel "${E2E_PROJECT}" --session "${SID1}" --limit 20 2>/dev/null
   )" || true
   if echo "${READ_OUT}" | grep -q "ordinal-routing-probe"; then
     READ_OK=1
@@ -388,7 +388,7 @@ else
 fi
 
 # ── 7. CHECK 4: switch-reject (Phase 5) ──────────────────────────────────────
-log "check 4: channels switch rejects a live-ordinal collision (Phase 5)"
+log "check 4: channel switch rejects a live-ordinal collision (Phase 5)"
 # Real collision scenario: the bootstrap session holds ${AG_BOOT} in
 # '${E2E_PROJECT}', and session2 holds that same ordinal in ${ALT_H}. Switching
 # session2 into '${E2E_PROJECT}' would create two live sessions with the same
@@ -399,9 +399,9 @@ else
   SWITCH_OUT="$(
     cd "${A_PROJ}"
     TENEX_EDGE_AGENT="${AGENT_SLUG}" \
-      run_limited 30 edge edge-a channels switch --session "${SID2}" "${E2E_PROJECT}" 2>&1
+      run_limited 30 edge edge-a channel switch --session "${SID2}" "${E2E_PROJECT}" 2>&1
   )" || true
-  dim "  channels switch (${AG2} ${ALT_H} -> ${E2E_PROJECT}): ${SWITCH_OUT}"
+  dim "  channel switch (${AG2} ${ALT_H} -> ${E2E_PROJECT}): ${SWITCH_OUT}"
   if echo "${SWITCH_OUT}" | grep -qi "already active"; then
     check_pass "4 switch-reject — daemon rejected the live-ordinal collision with 'already active'"
   else

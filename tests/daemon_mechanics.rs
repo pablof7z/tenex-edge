@@ -1,6 +1,6 @@
 //! Daemon mechanics: spawn-if-absent, spawn race, stale-socket reclaim,
 //! version-skew handshake, and a basic RPC round-trip. These drive the thin
-//! client against a real spawned `__daemon` over a UDS in an isolated
+//! client against a real spawned `daemon` over a UDS in an isolated
 //! `TENEX_EDGE_HOME`.
 //!
 //! The daemon connects ONE relay at startup, so each test points its config's
@@ -52,7 +52,7 @@ impl Home {
         std::fs::write(&cfg, serde_json::to_string(&body).unwrap()).unwrap();
         std::env::set_var("TENEX_CONFIG", &cfg);
         std::env::set_var("TENEX_EDGE_DAEMON_GRACE_S", "30");
-        // The thin client spawns `current_exe() __daemon`; in a test binary that
+        // The thin client spawns `current_exe() daemon`; in a test binary that
         // is the harness, so point it at the real built binary.
         std::env::set_var("TENEX_EDGE_BIN", bin());
         // Register /tmp as a channel so hook-driven session_start finds a
@@ -74,7 +74,7 @@ impl Home {
     }
 }
 
-/// The thin client spawns `current_exe() __daemon`. In a test binary that is the
+/// The thin client spawns `current_exe() daemon`. In a test binary that is the
 /// test harness, not tenex-edge — so point it at the built binary via the env
 /// the client reads. We override by building the real binary path and exporting
 /// it... but the client uses current_exe() directly. Instead, tests that need a
@@ -87,7 +87,7 @@ fn bin() -> PathBuf {
 fn spawn_real_daemon(home: &Home) -> std::process::Child {
     let log = std::fs::File::create(home.dir.path().join("daemon.log")).unwrap();
     std::process::Command::new(bin())
-        .arg("__daemon")
+        .arg("daemon")
         .env("TENEX_EDGE_HOME", home.dir.path())
         .env("TENEX_CONFIG", home.dir.path().join("config.json"))
         .env("TENEX_EDGE_DAEMON_GRACE_S", "30")

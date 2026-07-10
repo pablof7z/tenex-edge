@@ -265,7 +265,7 @@ impl Transport {
     /// `blocked` / `rate-limited`); a caller that reports success on a bare `Ok`
     /// would mask a silently-dropped event. Use this whenever a reported event id
     /// must mean the event is actually on the relay — the canonical case is
-    /// `channels_create`, which returns `orchestration_event_id` to the operator
+    /// `channel_create`, which returns `orchestration_event_id` to the operator
     /// and drives a local fast-path handler off the same event. The caller owns
     /// any retry policy; this function reports the relay verdict once.
     pub async fn publish_event_checked(&self, signed: &Event) -> Result<EventId> {

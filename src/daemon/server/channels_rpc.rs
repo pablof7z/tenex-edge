@@ -38,7 +38,7 @@ pub(in crate::daemon::server) async fn ensure_session_room(
     !matches!(gate, crate::fabric::nip29::readiness::ChannelGate::Degraded)
 }
 
-pub(in crate::daemon::server) async fn rpc_channels_create(
+pub(in crate::daemon::server) async fn rpc_channel_create(
     state: &Arc<DaemonState>,
     params: &serde_json::Value,
 ) -> Result<serde_json::Value> {
@@ -55,7 +55,7 @@ pub(in crate::daemon::server) async fn rpc_channels_create(
         /// creating agent's CURRENT channel (see `parent` resolution below).
         #[serde(default)]
         parent: Option<String>,
-        /// Channel-relative parent override from `channels create
+        /// Channel-relative parent override from `channel create
         /// --parent-channel`. Resolved within the creator's channel subtree; takes
         /// precedence over both the literal `parent` and the current-channel
         /// default.
@@ -69,7 +69,7 @@ pub(in crate::daemon::server) async fn rpc_channels_create(
         #[serde(default)]
         about: String,
     }
-    let p: P = serde_json::from_value(params.clone()).context("channels_create params")?;
+    let p: P = serde_json::from_value(params.clone()).context("channel_create params")?;
     crate::channel_about::validate_channel_about(&p.about)?;
 
     // Resolve the creator agent (when invoked from a session) FIRST — both the
@@ -127,7 +127,7 @@ pub(in crate::daemon::server) async fn rpc_channels_create(
         proj
     } else {
         anyhow::bail!(
-            "channels create needs a parent: run it inside an agent session, pass --parent-channel, or run from a channel directory"
+            "channel create needs a parent: run it inside an agent session, pass --parent-channel, or run from a channel directory"
         );
     };
 
@@ -138,7 +138,7 @@ pub(in crate::daemon::server) async fn rpc_channels_create(
     if let Some(existing) = state.with_store(|s| s.channel_id_for_name(&parent, &p.name))? {
         anyhow::bail!(
             "channel {:?} already exists under this parent (id {existing}). \
-Switch into it instead: tenex-edge channels switch {}",
+Switch into it instead: tenex-edge channel switch {}",
             p.name,
             p.name
         );
@@ -163,7 +163,7 @@ Switch into it instead: tenex-edge channels switch {}",
             .await
             .with_context(|| format!("resolving backend {:?}", a.backend))?;
         eprintln!(
-            "[daemon] nip29-role-decision channel={} requested_agent={} backend={} backend_pubkey={} role=member reason=channels_create orchestration target; backend may be admin but spawned agent must be member",
+            "[daemon] nip29-role-decision channel={} requested_agent={} backend={} backend_pubkey={} role=member reason=channel_create orchestration target; backend may be admin but spawned agent must be member",
             child_h,
             a.slug,
             a.backend,
@@ -208,7 +208,7 @@ Switch into it instead: tenex-edge channels switch {}",
                 channel = %child_h,
                 parent = %parent,
                 timeout_secs = CHANNEL_CREATE_READY_TIMEOUT.as_secs(),
-                "channels_create readiness timed out"
+                "channel_create readiness timed out"
             );
             crate::fabric::nip29::readiness::ChannelGate::Degraded
         }
@@ -224,7 +224,7 @@ Switch into it instead: tenex-edge channels switch {}",
 
     // Publish the durable `about` as kind:9002 edit-metadata so it reaches the
     // relay's kind:39000 (not just the local cache), signed by the management key
-    // exactly like the channels edit RPC does. Best-effort: the channel exists either
+    // exactly like the channel edit RPC does. Best-effort: the channel exists either
     // way; an unset `about` skips the publish.
     if !p.about.trim().is_empty() {
         let builder = crate::fabric::nip29::lifecycle::group_edit_metadata(&child_h, &p.about)?;
@@ -262,7 +262,7 @@ Switch into it instead: tenex-edge channels switch {}",
         // `orchestration_event_id` off it would advertise a channel whose
         // orchestration event was silently dropped — backends would never receive
         // the add-agents directive. `publish_event_checked` turns a relay rejection
-        // into a hard error so `channels_create` fails loudly instead of lying
+        // into a hard error so `channel_create` fails loudly instead of lying
         // about success.
         state.transport.publish_event_checked(&signed).await?;
 
@@ -276,7 +276,7 @@ Switch into it instead: tenex-edge channels switch {}",
     };
 
     // Auto-focus: join the new room and make it the active publishing channel.
-    // Unlike `channels switch`, this preserves the parent as a passive joined
+    // Unlike `channel switch`, this preserves the parent as a passive joined
     // channel so the creator can still see and receive mentions from it.
     let switched = if let Some(rec) = &creator_rec {
         set_active_session_channel(state, &rec.session_id, &rec.agent_pubkey, &child_h, false)?;
@@ -295,7 +295,7 @@ Switch into it instead: tenex-edge channels switch {}",
     }))
 }
 
-pub(in crate::daemon::server) async fn rpc_channels_edit(
+pub(in crate::daemon::server) async fn rpc_channel_edit(
     state: &Arc<DaemonState>,
     params: &serde_json::Value,
 ) -> Result<serde_json::Value> {
@@ -304,7 +304,7 @@ pub(in crate::daemon::server) async fn rpc_channels_edit(
         channel: String,
         about: String,
     }
-    let p: P = serde_json::from_value(params.clone()).context("channels_edit params")?;
+    let p: P = serde_json::from_value(params.clone()).context("channel_edit params")?;
     crate::channel_about::validate_channel_about(&p.about)?;
 
     let rec = resolve_session_inner(
@@ -312,7 +312,7 @@ pub(in crate::daemon::server) async fn rpc_channels_edit(
         &CallerAnchor::from_params(params),
         ResolveScope::Strict,
     )
-    .context("channels edit must be run from within a tenex-edge agent session")?;
+    .context("channel edit must be run from within a tenex-edge agent session")?;
     let channel_h = match resolve_target_channel(state, &rec, &p.channel)? {
         TargetChannel::Unique(h) => h,
         TargetChannel::Ambiguous(v) => return Ok(v),
@@ -360,10 +360,10 @@ async fn wait_for_channel_about(state: &Arc<DaemonState>, channel_h: &str, about
 }
 
 mod archive;
-pub(in crate::daemon::server) use archive::{archive_channel, rpc_channels_archive};
+pub(in crate::daemon::server) use archive::{archive_channel, rpc_channel_archive};
 
 mod list;
-pub(in crate::daemon::server) use list::rpc_channels_list;
+pub(in crate::daemon::server) use list::rpc_channel_list;
 
 /// Human-readable summary of the add-agents request, grouped per backend, e.g.
 /// "@<edge1>: add research-lead. @<edge2>: add implementation-lead and test1."

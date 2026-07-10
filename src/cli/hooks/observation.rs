@@ -39,7 +39,7 @@ pub(super) async fn report_observation(
     let params = serde_json::json!({
         "agent": agent_slug,
         "harness": host.name,
-        "harness_session_id": harness_session_id,
+        "session_id": harness_session_id,
         "resume_id": resume_id,
         "cwd": cwd.to_string_lossy(),
         "watch_pid": watch_pid,

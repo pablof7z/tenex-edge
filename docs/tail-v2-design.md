@@ -71,7 +71,7 @@ Line grammar: `<TS>  <cat>  <agent@project[sess]>  <verb/glyph> <detail>`
 Default (bare `tail`): follow live, all projects/hosts, wall-clock, color on TTY,
 tiers action+signal+ambient (hide profile/heartbeats), backfill last ~20 events.
 
-Flags: `--project`, `--agent`, `--host`, `--since <dur|ts>`, `--backfill N`
+Flags: `--workspace`, `--agent`, `--host`, `--since <dur|ts>`, `--backfill N`
 (default 20; 0 = pure live), `--only <cats>`, `--exclude <cats>`,
 `--include profile`, `--all`/`-v`, `--compact`/`-q`, `--no-follow` (history dump
 + exit), `--relative`, `--no-emoji`/`--no-color`, `--json` (NDJSON of raw

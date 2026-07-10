@@ -309,7 +309,7 @@ impl Store {
     }
 
     /// Leave a passively joined channel. Callers must not use this to orphan the
-    /// active publishing channel; `channels switch` handles active-channel moves.
+    /// active publishing channel; `channel switch` handles active-channel moves.
     pub fn leave_session_channel(&self, id: &str, channel_h: &str) -> Result<bool> {
         let Some(canonical) = self.resolve_canonical_id(id)? else {
             return Ok(false);

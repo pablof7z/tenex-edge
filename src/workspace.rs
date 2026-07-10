@@ -14,7 +14,7 @@
 //!      init` or `git init`" message and exit non-zero.
 //!
 //! The map at `~/.tenex-edge/workspaces.json` is the single source of truth for
-//! non-git workspaces. A legacy `projects.json` is read once for migration.
+//! non-git workspaces.
 
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
@@ -131,37 +131,22 @@ fn map_path() -> PathBuf {
     crate::config::edge_home().join("workspaces.json")
 }
 
-/// The legacy on-disk map path, read once for migration if the current map is
-/// absent. Existing installs registered non-git workspaces here.
-fn legacy_map_path() -> PathBuf {
-    crate::config::edge_home().join("projects.json")
-}
-
 /// Read the slug→path map. A MISSING file is "no workspaces registered yet" (an
-/// empty map) — unless a legacy map exists, in which case it is read for
-/// migration. A PRESENT-but-unparseable file is a hard error: defaulting to
+/// empty map). A PRESENT-but-unparseable file is a hard error: defaulting to
 /// empty would silently drop every non-git workspace the user registered, so we
 /// surface the parse failure instead of guessing.
 fn read_map() -> Result<std::collections::BTreeMap<String, String>> {
     let p = map_path();
-    let (path, s) = match std::fs::read_to_string(&p) {
-        Ok(s) => (p, s),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            // Fall back to the legacy map for one-time migration.
-            let legacy = legacy_map_path();
-            match std::fs::read_to_string(&legacy) {
-                Ok(s) => (legacy, s),
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Default::default()),
-                Err(e) => return Err(e).with_context(|| format!("reading {}", legacy.display())),
-            }
-        }
+    let s = match std::fs::read_to_string(&p) {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Default::default()),
         Err(e) => {
             return Err(e).with_context(|| format!("reading {}", p.display()));
         }
     };
     // Tolerate either a bare object or any whitespace; serde_json handles both.
     serde_json::from_str::<std::collections::BTreeMap<String, String>>(&s)
-        .with_context(|| format!("parsing {} (corrupt workspace map)", path.display()))
+        .with_context(|| format!("parsing {} (corrupt workspace map)", p.display()))
 }
 
 /// Write the slug→path map, creating the parent dir if necessary.
