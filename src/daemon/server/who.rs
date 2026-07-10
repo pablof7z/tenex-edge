@@ -111,13 +111,16 @@ pub(in crate::daemon::server) fn rpc_who(
             .as_ref()
             .map(|i| (i.display_slug(), i.pubkey.clone()))
             .unwrap_or_default();
+        // `who` is an explicit orientation command. Even from inside an agent
+        // session, render the full view rather than that session's delta cursor.
+        let render_cursor = 0;
         let fabric = state.with_store(|s| {
             crate::fabric_context::render_fabric_context(
                 s,
                 crate::fabric_context::FabricContextInput {
                     session: rec,
                     scope,
-                    cursor: rec.map(|r| r.seen_cursor).unwrap_or(0),
+                    cursor: render_cursor,
                     now,
                     self_slug: &self_slug,
                     self_pubkey: &self_pubkey,
@@ -284,3 +287,6 @@ fn human_dim(text: &str, color: bool) -> String {
         text.to_string()
     }
 }
+
+#[cfg(test)]
+mod tests;
