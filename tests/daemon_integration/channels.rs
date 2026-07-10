@@ -16,6 +16,8 @@ mod native_context;
 mod orchestration;
 #[path = "channels/pty_bootstrap.rs"]
 mod pty_bootstrap;
+#[path = "channels/session_add.rs"]
+mod session_add;
 #[path = "channels/session_kill.rs"]
 mod session_kill;
 #[path = "channels/session_lifecycle.rs"]
