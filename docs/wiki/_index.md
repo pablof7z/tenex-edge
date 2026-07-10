@@ -151,7 +151,7 @@ Last updated: 2026-07-10
 | [2026-07-10-b70718e17221-cb4e41ba-2-daemon-startup-relay-connect-moved-off](episodes/2026-07-10-b70718e17221-cb4e41ba-2-daemon-startup-relay-connect-moved-off.md) | 2026-07-10 | Daemon startup: relay connect moved off critical path to background spawn | root-cause | active |
 | [2026-07-10-b70718e17221-cb4e41ba-3-integration-test-flakiness-root-cause-croissant](episodes/2026-07-10-b70718e17221-cb4e41ba-3-integration-test-flakiness-root-cause-croissant.md) | 2026-07-10 | Integration test flakiness root cause: croissant relay leaks POSIX named semaphores on SIGKILL | root-cause | active |
 
-## Nouns (215 entities)
+## Nouns (218 entities)
 
 | Noun | Name | Origin | Definition |
 |------|------|--------|------------|
@@ -211,6 +211,7 @@ Last updated: 2026-07-10
 | [daemon-inhibit](nouns/daemon-inhibit.md) | daemon.inhibit | extracted | A sentinel file ($TENEX_EDGE_HOME/daemon.inhibit) whose presence tells hook-path daemon calls to fail open (return Ok(Null)) rather than spawning or contacting the daemon; created by `tenex-edge stop`, cleared by non-hook commands. |
 | [daemon-tenex-edge](nouns/daemon-tenex-edge.md) | daemon (tenex-edge) | extracted | A separate, long-running per-machine process that holds all session, channel, and roster state, and auto-spawns when an MCP process connects. |
 | [daemon-tenex-edge-daemon](nouns/daemon-tenex-edge-daemon.md) | daemon (tenex-edge __daemon) | extracted | A separate, long-running per-machine process that holds all session, channel, and roster state; auto-spawns when an MCP process connects. Spawned detached via setsid/process_group(0), stdio to daemon.log, survives parent exiting. |
+| [derive-session-keys-v2](nouns/derive-session-keys-v2.md) | derive_session_keys_v2 | extracted | The deterministic key-derivation function that produces a session's nsec from the per-machine management secret and a session_id; a resumed session with the same session_id re-derives the identical pubkey. |
 | [doc-drift](nouns/doc-drift.md) | doc-drift | extracted | Docs that reference removed or renamed code in the project. |
 | [duplicated-policy](nouns/duplicated-policy.md) | duplicated-policy | extracted | The same logic present in multiple places in the codebase. |
 | [edge-distillation](nouns/edge-distillation.md) | edge-distillation | extracted | The only role name tenex-edge's distillation code actually looks up; it maps (via llms.json) to a configuration name, which resolves to a {provider, model} pair used for distillation. |
@@ -258,6 +259,7 @@ Last updated: 2026-07-10
 | [mcp-server-mcp-process](nouns/mcp-server-mcp-process.md) | MCP server / MCP process | extracted | A thin RPC translator — stateless itself; every tool call is forwarded over a Unix domain socket to a separate long-running per-machine daemon where sessions/channels/roster live. |
 | [mcp-server-tenex-edge-mcp](nouns/mcp-server-tenex-edge-mcp.md) | MCP server (tenex-edge mcp) | extracted | A stateless stdio JSON-RPC loop spawned as a per-session subprocess by the harness; forwards all tool calls over a Unix domain socket to a long-running daemon. Can also serve over HTTP instead of stdio. |
 | [mcp-session-id](nouns/mcp-session-id.md) | Mcp-Session-Id | extracted | An HTTP-transport session-tracking id minted at MCP `initialize` time (`mcp-<nanos>-<counter>`, matching the existing mint_session_id convention), used to key clientInfo.name in an in-memory map so later requests from the same connection can recover it; issued and returned via the `Mcp-Session-Id` response header. |
+| [mcpsessions](nouns/mcpsessions.md) | McpSessions | extracted | An in-memory map of `clientInfo.name` values self-reported at `initialize`, keyed by the session-correlation header the transport mints; unbounded — entries are never evicted, so a long-lived tunnel accumulates one row per distinct MCP client session. |
 | [members](nouns/members.md) | members | extracted | Concrete *sessions*, not role types. The members of a channel are live sessions |
 | [members-new-definition](nouns/members-new-definition.md) | members (new definition) | extracted | The members of a channel are the *sessions* (concrete live sessions identified by |
 | [members-of-a-channel](nouns/members-of-a-channel.md) | members (of a channel) | extracted | Concrete sessions identified by `@agent/session`, not roles. available-agents = |
@@ -370,4 +372,5 @@ Last updated: 2026-07-10
 | [workspace-replaces-project-concept](nouns/workspace-replaces-project-concept.md) | workspace (replaces project concept) | extracted | The machine+path binding a root channel may carry — formerly called 'project_roots', now 'workspace_roots'. Each daemon has its own local state.db, so workspace is inherently per-machine. The human-facing hook wrapper renders <workspace name="X"> instead of <project>. |
 | [writer](nouns/writer.md) | writer | extracted | A social media writer and community engagement agent in tenex-edge. Drafts tweets, posts to Hacker News and similar communities, tracks outreach history, and builds ongoing engagement. Spawnable via claude --dangerously-skip-permissions. |
 | [writer-agent](nouns/writer-agent.md) | writer (agent) | extracted | Social media writer and community engagement agent. Drafts tweets, posts to Hacker News and similar communities, tracks outreach history, and builds ongoing engagement. |
+| [x-openai-session](nouns/x-openai-session.md) | X-Openai-Session | extracted | A stable per-conversation header ChatGPT sends unprompted on every request (including `initialize` and every `tools/call`), different per conversation, that can serve as ChatGPT's own session identifier for identity correlation without requiring the client to echo a server-minted header. |
 
