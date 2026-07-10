@@ -109,8 +109,9 @@ pub(crate) async fn launch(
 /// for a name, creates the channel via the daemon, and returns the new id.
 /// `agent_slug` is used as the default agent spec when creating.
 async fn pick_channel(root: &str, agent_slug: &str) -> Result<String> {
-    let v = super::super::daemon_call_async("channels_list", serde_json::json!({ "root": root }))
-        .await?;
+    let v =
+        super::super::daemon_call_async("channels_list", serde_json::json!({ "channel": root }))
+            .await?;
 
     let rooms = v["rooms"].as_array().map(|a| a.as_slice()).unwrap_or(&[]);
 

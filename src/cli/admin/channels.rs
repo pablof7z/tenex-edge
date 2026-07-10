@@ -147,8 +147,8 @@ pub async fn channels(action: ChannelAction) -> Result<()> {
         ChannelAction::List { root, .. } => {
             use owo_colors::Stream::Stdout;
             let parent = resolve_root(root)?;
-            let v =
-                daemon_call_async("channels_list", serde_json::json!({ "root": parent })).await?;
+            let v = daemon_call_async("channels_list", serde_json::json!({ "channel": parent }))
+                .await?;
             let rooms = v["rooms"].as_array().map(|a| a.as_slice()).unwrap_or(&[]);
             // Root of the tree is the root itself. Colorize ONLY on a real
             // terminal so piped output stays literal-`^slug$`-matchable.
