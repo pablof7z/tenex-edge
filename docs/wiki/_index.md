@@ -84,7 +84,7 @@ Last updated: 2026-07-10
 | [2026-07-10-b70718e17221-cb4e41ba-2-residual-per-test-flake-investigation-found](research/2026-07-10-b70718e17221-cb4e41ba-2-residual-per-test-flake-investigation-found.md) | 2026-07-10 | Residual per-test flake investigation: found and fixed 6 propagation races + 1 production bug across ~85 runs; verdict = 20/20 consecutive green, all flakes eliminated. | a067926378f0c4ada (residual de-flake agent) |
 | [AGENTS](research/AGENTS.md) |  |  |  |
 
-## Episode Cards (63 cards)
+## Episode Cards (64 cards)
 
 | Card | Date | Title | Salience | Status |
 |------|------|-------|----------|--------|
@@ -146,13 +146,14 @@ Last updated: 2026-07-10
 | [2026-07-10-4d78f854d5e5-873fdd2e-2-replace-static-list-workflows-instruction-with](episodes/2026-07-10-4d78f854d5e5-873fdd2e-2-replace-static-list-workflows-instruction-with.md) | 2026-07-10 | Replace static 'list workflows' instruction with scripted session-start entrypoint | architecture | active |
 | [2026-07-10-a62822c5d09c-fbf565a0-1-channel-read-rendering-mention-resolution-backend](episodes/2026-07-10-a62822c5d09c-fbf565a0-1-channel-read-rendering-mention-resolution-backend.md) | 2026-07-10 | Channel read rendering: mention resolution, backend-traffic filtering, whitelisted-operator label | product | active |
 | [2026-07-10-a62822c5d09c-fbf565a0-2-distillation-failures-surfaced-as-throttled-agent](episodes/2026-07-10-a62822c5d09c-fbf565a0-2-distillation-failures-surfaced-as-throttled-agent.md) | 2026-07-10 | Distillation failures surfaced as throttled agent-facing warnings | product | active |
-| [2026-07-10-af454e467c4f-d0adc8b8-1-session-handle-display-reverts-from-raw](episodes/2026-07-10-af454e467c4f-d0adc8b8-1-session-handle-display-reverts-from-raw.md) | 2026-07-10 | Session handle display reverts from raw session_id to friendly codename | reversal | active |
+| [2026-07-10-af454e467c4f-d0adc8b8-1-session-handle-display-reverted-from-raw](episodes/2026-07-10-af454e467c4f-d0adc8b8-1-session-handle-display-reverted-from-raw.md) | 2026-07-10 | Session handle display reverted from raw session_id to friendly codename | reversal | active |
+| [2026-07-10-af454e467c4f-d0adc8b8-1-session-handle-display-reverts-from-raw](episodes/2026-07-10-af454e467c4f-d0adc8b8-1-session-handle-display-reverts-from-raw.md) | 2026-07-10 | Session handle display reverts from raw session_id to friendly codename | reversal | superseded |
 | [2026-07-10-af454e467c4f-d0adc8b8-1-session-handle-display-switched-from-raw](episodes/2026-07-10-af454e467c4f-d0adc8b8-1-session-handle-display-switched-from-raw.md) | 2026-07-10 | Session handle display switched from raw session id to codename | product | superseded |
 | [2026-07-10-b70718e17221-cb4e41ba-1-channel-hierarchy-notation-dotted-paths-replace](episodes/2026-07-10-b70718e17221-cb4e41ba-1-channel-hierarchy-notation-dotted-paths-replace.md) | 2026-07-10 | Channel hierarchy notation: dotted paths replace slash-separated paths; 'project' concept fully collapsed | reversal | active |
 | [2026-07-10-b70718e17221-cb4e41ba-2-daemon-startup-relay-connect-moved-off](episodes/2026-07-10-b70718e17221-cb4e41ba-2-daemon-startup-relay-connect-moved-off.md) | 2026-07-10 | Daemon startup: relay connect moved off critical path to background spawn | root-cause | active |
 | [2026-07-10-b70718e17221-cb4e41ba-3-integration-test-flakiness-root-cause-croissant](episodes/2026-07-10-b70718e17221-cb4e41ba-3-integration-test-flakiness-root-cause-croissant.md) | 2026-07-10 | Integration test flakiness root cause: croissant relay leaks POSIX named semaphores on SIGKILL | root-cause | active |
 
-## Nouns (218 entities)
+## Nouns (219 entities)
 
 | Noun | Name | Origin | Definition |
 |------|------|--------|------------|
@@ -225,6 +226,7 @@ Last updated: 2026-07-10
 | [envelope-hook-mention](nouns/envelope-hook-mention.md) | envelope (hook mention) | extracted | hooks-only format: wrapped in `<tenex-edge>` tags with a reply CLI hint and no message-id |
 | [epic](nouns/epic.md) | epic | extracted | A parent issue tracking a body of work in the project. |
 | [error-writedisabled](nouns/error-writedisabled.md) | Error::WriteDisabled | extracted | A client-side error from nostr-relay-pool 0.44.1 whose Display text is 'write actions are disabled'. It fires when the daemon's in-memory Relay object has RelayServiceFlags missing WRITE, causing the SDK to refuse to put EVENT messages on the wire — the relay never sees or rejects the publish. |
+| [expired-session](nouns/expired-session.md) | expired session | extracted | A session row that is no longer `alive` (its process exited) — the resume-candidate set, each surfaced by its public `agent/session_id` handle. |
 | [expiredsessionrow](nouns/expiredsessionrow.md) | ExpiredSessionRow | extracted | One expired (not-currently-live) local session, named by agent/session_id. Represents the resume-candidate set — sessions whose process has exited but which a user can still resume. |
 | [fabric](nouns/fabric.md) | fabric | extracted | The shared awareness substrate built on Nostr — server-less, with relays as dumb replaceable infrastructure rather than authorities. The fabric and the identity are the asset; the plugin/hooks are just distribution (straws, not the milkshake). |
 | [god-object](nouns/god-object.md) | god-object | extracted | A file that exceeds the project's 500-LOC ceiling with multiple concerns, used as a GitHub issue label. |

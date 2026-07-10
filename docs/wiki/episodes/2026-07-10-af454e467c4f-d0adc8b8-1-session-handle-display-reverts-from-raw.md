@@ -4,7 +4,7 @@ date: 2026-07-10
 session: af454e46-7c4f-4182-ab2b-ebc50b1eb9ad
 transcript: /Users/pablofernandez/.claude/projects/-Users-pablofernandez-src-tenex-edge/af454e46-7c4f-4182-ab2b-ebc50b1eb9ad.jsonl
 salience: reversal
-status: active
+status: superseded
 subjects:
   - agent-session-handle
   - display-slug
