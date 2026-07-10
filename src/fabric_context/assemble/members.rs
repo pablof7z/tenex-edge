@@ -23,12 +23,11 @@ pub(super) fn member_rows(inputs: &ViewInputs, channel: &str, now: u64) -> Vec<M
         .unwrap_or_default()
         .into_iter()
         .filter(|(pk, _)| !members.backend.contains(pk))
-        .map(|(pk, role)| {
+        .map(|(pk, _role)| {
             let status = status_map.get(&pk);
             MemberRow {
                 reference: reference(inputs, &pk, status),
                 agent_slug: agent_slug(inputs, &pk),
-                role,
                 status: status
                     .map(|s| status_text(s))
                     .unwrap_or_else(|| "offline".to_string()),

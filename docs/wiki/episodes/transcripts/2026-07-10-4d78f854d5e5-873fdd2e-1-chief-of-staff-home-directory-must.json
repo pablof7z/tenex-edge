@@ -1,0 +1,42 @@
+[
+  [
+    "user",
+    "what workflows do you have available rn?"
+  ],
+  [
+    "assistant",
+    "Listed six available workflows: bug report triage, feature request triage, decisions kanban, ops board, inbox monitor, and knowledge capture — plus an `unknown-task` fallback for anything that doesn't fit."
+  ],
+  [
+    "user",
+    "ok, here's a note to modify your own base prompt in ~/Work/touch-grass repo via a PR 1. since you always need to work with a git repo for your stuff, you should move your workflows into the repo the moment you can and link ~/.agents/homes/chief-of-staff/workflows so it points to the one in your own repo -- that way when you run in different computers you'll share the same workflow I *think* you have a script to interact with the workflows? perhaps we could simply make the script detect when ~/.agents/homes/chief-of-staff/workflows is NOT a symlink and give you a fat warning saying \"yo, maybe move your workflows to the repo?\" thoughts?"
+  ],
+  [
+    "assistant",
+    "Agreed with both points and opened PR #2 on touch-grass: added guidance to agent.yaml about moving workflows into a tracking repo, and added a symlink check to `scripts/workflows.py` that warns on stderr whenever the workflows directory isn't a symlink."
+  ],
+  [
+    "user",
+    "let's make it use the same structure in the repo: <repo>/.agents/homes/..../ and don't put it on the instruction of agents.yaml -- otherwise we carry this forever in the agent's context. and instead let's link the whole chief-of-staff home to the repo -- not just the workflows"
+  ],
+  [
+    "assistant",
+    "Updated PR #2: the warning now targets `<tracking-repo>/.agents/homes/chief-of-staff/`, reverted agent.yaml so the nudge lives only in `scripts/workflows.py`, and widened the check to the entire chief-of-staff home directory rather than just workflows."
+  ],
+  [
+    "user",
+    "we are telling the agent to list workflows at the beginning of each session, right? what if we tell it to run a script instead; the script would programatically give it context like upserting an ~/.agents/homes/chief-of-staff -- if there's nothing yet injecting a references/SETUP.md which guides the agent through setting up a github repo, if things are already setup it injects the list of workflows directly into the context; it'll give us a lot of flexibility ot guide the self-evolution of the agent, control cronjobs, track things proactively, etc"
+  ],
+  [
+    "assistant",
+    "Implemented `scripts/session_start.py` as the single entrypoint: if the home dir isn't symlinked yet it injects a SETUP.md runbook, otherwise it injects a session brief with the tracked git location, workflow list, and an optional BRIEF.md. Updated agent.yaml to simply run this script at session start instead of listing workflows statically."
+  ],
+  [
+    "user",
+    "run it and show me the output"
+  ],
+  [
+    "assistant",
+    "Ran the script against the real home directory; since it's still a plain directory (not yet symlinked), it correctly took the setup path and injected SETUP.md with the actual directory contents listed. Asked for confirmation on the tracking repo to proceed with the migration."
+  ]
+]

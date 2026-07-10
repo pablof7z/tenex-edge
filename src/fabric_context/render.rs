@@ -105,8 +105,7 @@ fn render_members(out: &mut String, members: &[MemberRow]) {
         }
         let _ = write!(
             out,
-            " role=\"{}\" status=\"{}\" seen=\"{}\" />",
-            esc_attr(&m.role),
+            " status=\"{}\" seen=\"{}\" />",
             esc_attr(&m.status),
             esc_attr(&m.seen)
         );

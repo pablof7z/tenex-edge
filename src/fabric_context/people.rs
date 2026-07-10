@@ -25,7 +25,7 @@ pub(super) fn member_rows(
         // cache), plus any pubkey whose cached kind:0 declares itself a backend
         // (covers remote backends). Human operators and admins are kept.
         .filter(|(pk, _)| pk.as_str() != input.backend_pubkey && !is_backend(store, pk))
-        .map(|(pk, role)| {
+        .map(|(pk, _role)| {
             let status = statuses.get(&pk);
             let status_text = status
                 .map(status_text)
@@ -42,7 +42,6 @@ pub(super) fn member_rows(
             MemberRow {
                 reference,
                 agent_slug,
-                role,
                 status: status_text,
                 seen,
             }
