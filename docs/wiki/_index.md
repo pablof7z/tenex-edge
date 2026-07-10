@@ -11,6 +11,12 @@ Last updated: 2026-07-10
 | [tenex-edge-citizen-skill](guides/tenex-edge-citizen-skill.md) | Tenex-Edge Agent Skill | This skill teaches the mental model for self-organizing on a tenex-edge fabric through shared awareness | capture | warm | 2026-06-29 | agent-skills |
 | [tenex-edge-skills](guides/tenex-edge-skills.md) | Tenex-Edge Skills | This guide governs the family of `tenex-edge` agent skills written to `./skills/tenex-edge/` with symlinks from `~/.agents/skills/tenex-edge` and `~/.claude/ski | capture | warm | 2026-06-29 | agent-skills |
 
+## agent-workflows (1 guide)
+
+| Slug | Title | Summary | Tags | Volatility | Verified | Topic |
+|------|-------|---------|------|------------|----------|-------|
+| [chief-of-staff-workflows](guides/chief-of-staff-workflows.md) | Chief-of-Staff Workflows | The chief-of-staff agent manages workflows through the `scripts/workflows.py` script, which is the existing mechanism used to interact with and manage chief-of- | capture | warm | 2026-07-10 | agent-workflows |
+
 ## code-organization (3 guides)
 
 | Slug | Title | Summary | Tags | Volatility | Verified | Topic |
@@ -75,7 +81,7 @@ Last updated: 2026-07-10
 | [2026-07-10-b70718e17221-cb4e41ba-2-residual-per-test-flake-investigation-found](research/2026-07-10-b70718e17221-cb4e41ba-2-residual-per-test-flake-investigation-found.md) | 2026-07-10 | Residual per-test flake investigation: found and fixed 6 propagation races + 1 production bug across ~85 runs; verdict = 20/20 consecutive green, all flakes eliminated. | a067926378f0c4ada (residual de-flake agent) |
 | [AGENTS](research/AGENTS.md) |  |  |  |
 
-## Episode Cards (52 cards)
+## Episode Cards (53 cards)
 
 | Card | Date | Title | Salience | Status |
 |------|------|-------|----------|--------|
@@ -128,11 +134,12 @@ Last updated: 2026-07-10
 | [2026-07-09-b70718e17221-cb4e41ba-3-full-project-wording-purge-project-workspace](episodes/2026-07-09-b70718e17221-cb4e41ba-3-full-project-wording-purge-project-workspace.md) | 2026-07-09 | Full project-wording purge: project → workspace / root channel across entire codebase | reversal | superseded |
 | [2026-07-09-b70718e17221-cb4e41ba-3-non-mention-test-cold-relay-readiness](episodes/2026-07-09-b70718e17221-cb4e41ba-3-non-mention-test-cold-relay-readiness.md) | 2026-07-09 | non_mention test cold-relay readiness race: wait for channel materialization before send | root-cause | active |
 | [2026-07-09-b70718e17221-cb4e41ba-3-per-session-key-model-inverts-shared](episodes/2026-07-09-b70718e17221-cb4e41ba-3-per-session-key-model-inverts-shared.md) | 2026-07-09 | Per-session key model inverts shared-pubkey reply-envelope rationale | root-cause | superseded |
+| [2026-07-10-4d78f854d5e5-873fdd2e-1-workflows-must-live-in-a-git](episodes/2026-07-10-4d78f854d5e5-873fdd2e-1-workflows-must-live-in-a-git.md) | 2026-07-10 | Workflows must live in a git repo, not a local home directory | architecture | active |
 | [2026-07-10-b70718e17221-cb4e41ba-1-channel-hierarchy-notation-dotted-paths-replace](episodes/2026-07-10-b70718e17221-cb4e41ba-1-channel-hierarchy-notation-dotted-paths-replace.md) | 2026-07-10 | Channel hierarchy notation: dotted paths replace slash-separated paths; 'project' concept fully collapsed | reversal | active |
 | [2026-07-10-b70718e17221-cb4e41ba-2-daemon-startup-relay-connect-moved-off](episodes/2026-07-10-b70718e17221-cb4e41ba-2-daemon-startup-relay-connect-moved-off.md) | 2026-07-10 | Daemon startup: relay connect moved off critical path to background spawn | root-cause | active |
 | [2026-07-10-b70718e17221-cb4e41ba-3-integration-test-flakiness-root-cause-croissant](episodes/2026-07-10-b70718e17221-cb4e41ba-3-integration-test-flakiness-root-cause-croissant.md) | 2026-07-10 | Integration test flakiness root cause: croissant relay leaks POSIX named semaphores on SIGKILL | root-cause | active |
 
-## Nouns (186 entities)
+## Nouns (189 entities)
 
 | Noun | Name | Origin | Definition |
 |------|------|--------|------------|
@@ -234,6 +241,7 @@ Last updated: 2026-07-10
 | [north-star](nouns/north-star.md) | north-star | extracted | Part of the codebase quality north star portfolio, tracked as a GitHub issue label. |
 | [nsec-per-session-key](nouns/nsec-per-session-key.md) | nsec (per-session key) | extracted | Derived per session as nsec = derive(mgmt_secret, session_id), where mgmt_secret is the per-machine management key. There is no base agent key; nothing is stored as a secret except the mgmt key plus an append-only pubkey→session_id map. |
 | [opaque-group-id](nouns/opaque-group-id.md) | opaque_group_id | extracted | First 8 hex chars of a freshly generated keypair's pubkey ([0-9a-f]{8}), never derived from any name. Used as the durable channel_h for non-root channels. |
+| [operational-agent-profile](nouns/operational-agent-profile.md) | operational agent profile | extracted | A reusable artifact that defines a reusable agent identity and operating model, distinct from skills (which produce structured output). Agent profiles are not skills; they define who the agent is and how it operates. |
 | [orchestration-spawned-session](nouns/orchestration-spawned-session.md) | orchestration-spawned session | extracted | A session the backend launched or resumed with `TENEX_EDGE_CHANNEL` set to a |
 | [ordinal-label](nouns/ordinal-label.md) | ordinal label | extracted | An ordinal-qualified agent-instance label: agent_ordinal_label(slug, ordinal) = format!("{slug}{ordinal}"), e.g. @developer3. Ordinals are recycled per room occupancy, not durable — the label is a leasing artifact, not a permanent identity. This model was deleted in the redesign. |
 | [ordinalslot](nouns/ordinalslot.md) | OrdinalSlot | extracted | Superseded by per-session identity. Ordinals are gone: sessions are no longer |
@@ -307,6 +315,7 @@ Last updated: 2026-07-10
 | [tenex-role](nouns/tenex-role.md) | TENEX role | extracted | A named key in llms.json (e.g. edge-distillation) that maps to a configuration name, which in turn resolves to {provider, model} and credentials from providers.json. |
 | [tenexprivatekey](nouns/tenexprivatekey.md) | tenexPrivateKey | extracted | The machine's management key (hex seckey) — the only secret stored on the machine. |
 | [title](nouns/title.md) | [title] | extracted | The channel's title on the relay — the kind:39000 `name` tag for a task channel, or the distilled session title for a per-session room. |
+| [touch-grass](nouns/touch-grass.md) | touch-grass | extracted | A public collection of interoperable skills and operational agent profiles for increasing agent autonomy, agency, and human collaboration, designed to make agents better at doing real work end-to-end while keeping humans in the loop at the right moments. |
 | [transport](nouns/transport.md) | Transport | extracted | A thin adapter over `nostr-sdk` that speaks wire events only — connects to relays (with NIP-42 auto-AUTH), publishes signed events, subscribes with filters, does one-shot fetch. Knows nothing of domain meaning; the codec owns that. |
 | [trust](nouns/trust.md) | trust | extracted | Pubkey trust is determined EXCLUSIVELY AND ALWAYS by NIP-29 channel membership — the mgmt backend key adds a session pubkey as a member to the channel and removes it when the session expires. No other trust mechanism. |
 | [trust-new-model](nouns/trust-new-model.md) | trust (new model) | extracted | Pubkey trust is determined EXCLUSIVELY AND ALWAYS by NIP-29 channel membership. The mgmt backend key adds a new session pubkey as a member to the channel and removes it when the session expires. No other trust mechanism exists. |
@@ -317,6 +326,7 @@ Last updated: 2026-07-10
 | [whitelisted-pubkeys](nouns/whitelisted-pubkeys.md) | whitelisted_pubkeys | extracted | A human operator's Nostr public keys, read from ~/.tenex-edge/config.json (JSON key `whitelistedPubkeys`). The source of truth for who is an admin in every project group via NIP-29 membership; distinct from the backend key, not derived from `user_nsec` or `tenex_private_key`. |
 | [whitelistedpubkey](nouns/whitelistedpubkey.md) | whitelistedPubkey | extracted | a human user (as distinguished from an agent) |
 | [work-root](nouns/work-root.md) | work_root | extracted | The project channel a routing scope belongs under: a top-level channel is its own work root; a sub-channel (task/session room) maps to its parent. Concretely, a channel's non-empty parent, else the scope itself. |
+| [workflows](nouns/workflows.md) | workflows | extracted | Durable operating knowledge (not local scratch state) that must live in a git repo so they carry over between machines, rather than as loose files only in the home directory. |
 | [workspace](nouns/workspace.md) | workspace | extracted | The machine+path binding concept that replaces 'project' in the full wording purge. The <project name> hook wrapper becomes <workspace name>; the project_roots table becomes workspace_roots; crate::project becomes crate::workspace. A workspace binding is an attribute a channel may carry. |
 | [workspace-binding](nouns/workspace-binding.md) | workspace binding | extracted | An optional field on a channel node consisting of `machine + path` — a git checkout / working directory on a specific machine. Its presence is what makes a node a project. |
 | [workspace-replaces-project-concept](nouns/workspace-replaces-project-concept.md) | workspace (replaces project concept) | extracted | The machine+path binding a root channel may carry — formerly called 'project_roots', now 'workspace_roots'. Each daemon has its own local state.db, so workspace is inherently per-machine. The human-facing hook wrapper renders <workspace name="X"> instead of <project>. |

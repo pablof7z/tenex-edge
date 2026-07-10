@@ -1,0 +1,6 @@
+{
+  "id": "4d78f-c5ff9",
+  "ts": "2026-07-10T07:33:49Z",
+  "session": "4d78f854-d5e5-4a11-b0d4-358f33111d15",
+  "text": "**6. Knowledge capture** — when you hand over material (launch docs, positioning, domain knowledge, \"here's how X works\"), I file it as `projects/<slug>/kb/<category>/<entry>.md` in `everything`, additive, same-session — not left to live only in chat."
+}

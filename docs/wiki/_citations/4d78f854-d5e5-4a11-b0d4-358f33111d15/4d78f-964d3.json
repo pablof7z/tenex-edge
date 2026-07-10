@@ -1,0 +1,6 @@
+{
+  "id": "4d78f-964d3",
+  "ts": "2026-07-10T07:33:49Z",
+  "session": "4d78f854-d5e5-4a11-b0d4-358f33111d15",
+  "text": "**2. Feature request triage** — you describe a feature loosely (example commands/JSON, not a literal spec). I ground it in the *actual* repo code first (not just docs/commits), then file a precise issue on the repo that owns it, plus a note in `projects/<slug>/`. I don't implement unless asked."
+}

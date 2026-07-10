@@ -1,0 +1,6 @@
+{
+  "id": "4d78f-35497",
+  "ts": "2026-07-10T07:33:49Z",
+  "session": "4d78f854-d5e5-4a11-b0d4-358f33111d15",
+  "text": "**1. Bug report triage** — you flag a bug informally (symptom/project, not a repo/file). I identify the right repo, check tenex-edge for prior context, search existing issues to avoid dupes, then file an evidence-backed GitHub issue + a durable record in `everything/investigations/` (and a decision entry if judgment is needed)."
+}

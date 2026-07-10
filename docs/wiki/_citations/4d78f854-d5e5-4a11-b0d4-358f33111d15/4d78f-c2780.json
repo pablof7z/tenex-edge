@@ -1,0 +1,6 @@
+{
+  "id": "4d78f-c2780",
+  "ts": "2026-07-10T07:33:49Z",
+  "session": "4d78f854-d5e5-4a11-b0d4-358f33111d15",
+  "text": "I *think* you have a script to interact with the workflows? perhaps we could simply make the script detect when ~/.agents/homes/chief-of-staff/workflows is NOT a symlink and give you a fat warning saying \"yo, maybe move your workflows to the repo?\" [...] 2. **The nudge is exactly right, and yes — there's already a script (`scripts/workflows.py`)**, so I put the check there rather than inventing a new mechanism. It now runs on every invocation and fires a loud stderr warning (\"⚠️ workflows/ is a plain directory, not a symlink into a git repo...\") whenever `workflows/` exists but isn't a symlink, and stays silent once it is one."
+}
