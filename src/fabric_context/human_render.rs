@@ -40,27 +40,44 @@ pub(super) fn render_human_workspace(
     }
 
     render_agents(out, agents, agents_label, color);
-    if let Some(root) = &view.root {
+    render_workspace_tree(out, view.root.as_ref(), &view.channels, color);
+    for activity in &view.other_workspaces {
+        out.push('\n');
+        let _ = writeln!(
+            out,
+            "{}",
+            style(&activity.workspace.name, color, Style::Title)
+        );
+        if !activity.workspace.about.is_empty() {
+            let _ = writeln!(out, "{}", dim(&activity.workspace.about, color));
+        }
+        out.push('\n');
+        render_workspace_tree(out, activity.root.as_ref(), &activity.channels, color);
+    }
+    render_important(out, &view.important, color);
+    render_warnings(out, &view.warnings, color);
+}
+
+fn render_workspace_tree(
+    out: &mut String,
+    root: Option<&ChannelBlock>,
+    channels: &[ChannelBlock],
+    color: bool,
+) {
+    if let Some(root) = root {
         render_channel_body(out, root, color);
     }
-    if view
-        .root
-        .as_ref()
-        .is_some_and(|root| !root.children.is_empty())
-        || !view.channels.is_empty()
-    {
+    if root.is_some_and(|root| !root.children.is_empty()) || !channels.is_empty() {
         let _ = writeln!(out, "{}", style("Channels", color, Style::Header));
-        if let Some(root) = &view.root {
+        if let Some(root) = root {
             for channel in &root.children {
                 render_channel(out, channel, color, 2);
             }
         }
     }
-    for channel in &view.channels {
+    for channel in channels {
         render_channel(out, channel, color, 2);
     }
-    render_important(out, &view.important, color);
-    render_warnings(out, &view.warnings, color);
 }
 
 pub(super) fn render_agents(out: &mut String, agents: &[AgentRow], label: &str, color: bool) {

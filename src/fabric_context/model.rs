@@ -12,6 +12,9 @@ pub(crate) struct FabricView {
     /// workspace so the root is not repeated as a child channel.
     pub(in crate::fabric_context) root: Option<ChannelBlock>,
     pub(in crate::fabric_context) channels: Vec<ChannelBlock>,
+    /// Presence deltas from workspace roots other than the current session's.
+    /// Chat remains scoped to the session's joined channels.
+    pub(in crate::fabric_context) other_workspaces: Vec<WorkspaceActivity>,
     pub(in crate::fabric_context) important: Vec<ImportantRow>,
     pub(in crate::fabric_context) warnings: Vec<WarningRow>,
     /// True when this view was built in delta mode (cursor > 0): it carries only
@@ -27,6 +30,7 @@ impl FabricView {
     pub(crate) fn is_empty(&self) -> bool {
         self.root.is_none()
             && self.channels.is_empty()
+            && self.other_workspaces.is_empty()
             && self.agents.is_empty()
             && self.important.is_empty()
             && self.warnings.is_empty()
@@ -39,10 +43,18 @@ impl FabricView {
         self.incremental
             && self.root.is_none()
             && self.channels.is_empty()
+            && self.other_workspaces.is_empty()
             && self.agents.is_empty()
             && self.important.is_empty()
             && self.warnings.is_empty()
     }
+}
+
+#[derive(Clone, Default, PartialEq)]
+pub(in crate::fabric_context) struct WorkspaceActivity {
+    pub(in crate::fabric_context) workspace: WorkspaceRow,
+    pub(in crate::fabric_context) root: Option<ChannelBlock>,
+    pub(in crate::fabric_context) channels: Vec<ChannelBlock>,
 }
 
 #[derive(Clone, Default, PartialEq)]

@@ -11,7 +11,10 @@
 //! window and the `created_at > since` chat window remain pure functions of the
 //! `now`/`cursor` inputs at assemble time rather than ambient reads.
 
+mod activity;
 mod read;
+
+pub(super) use activity::{StatusCap, WorkspaceCap};
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -60,6 +63,7 @@ pub(crate) struct MetaInput {
     pub(super) workspace: SummaryCap,
     pub(super) agents: Vec<AgentCap>,
     pub(super) channels: Vec<ChannelCap>,
+    pub(super) other_workspaces: Vec<WorkspaceCap>,
     pub(super) warnings: Vec<String>,
     pub(super) self_pubkey: String,
     pub(super) self_ref: String,
@@ -140,23 +144,6 @@ pub(super) struct ChannelSummaryCap {
     pub(super) updated_at: u64,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub(super) struct StatusCap {
-    pub(super) pubkey: String,
-    #[serde(default)]
-    pub(super) session_id: String,
-    #[serde(default)]
-    pub(super) host: String,
-    #[serde(default)]
-    pub(super) slug: String,
-    pub(super) busy: bool,
-    pub(super) activity: String,
-    pub(super) title: String,
-    pub(super) last_seen: u64,
-    pub(super) updated_at: u64,
-    pub(super) expiration: u64,
-}
-
 #[derive(Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(super) struct MsgBundle {
     pub(super) events: Vec<EvCap>,
@@ -185,6 +172,7 @@ pub(super) struct EvCap {
 pub(crate) fn capture_inputs(store: &Store, input: &FabricContextInput<'_>) -> ViewInputs {
     let root = read::root_channel(store, input.scope);
     let channel_hs = read::selected_channels(store, input);
+    let other_workspaces = activity::workspace_caps(store, &root);
     let mut warnings = input.warnings.to_vec();
     warnings.extend(
         read::missing_channels(store, input)
@@ -218,27 +206,15 @@ pub(crate) fn capture_inputs(store: &Store, input: &FabricContextInput<'_>) -> V
             .into_iter()
             .map(|m| (m.pubkey, m.role))
             .collect();
-        let chan_statuses: Vec<StatusCap> = store
-            .live_status_for_channel(h, 0)
-            .unwrap_or_default()
-            .into_iter()
-            .map(|s| StatusCap {
-                host: read::profile_host(store, &s.pubkey),
-                slug: s.slug,
-                session_id: s.session_id,
-                pubkey: s.pubkey,
-                busy: s.busy,
-                activity: s.activity,
-                title: s.title,
-                last_seen: s.last_seen,
-                updated_at: s.updated_at,
-                expiration: s.expiration,
-            })
-            .collect();
-        for pk in members
-            .keys()
-            .chain(chan_statuses.iter().map(|s| &s.pubkey))
-        {
+        let chan_statuses = activity::status_caps(
+            store,
+            h,
+            input.local_host,
+            &mut refs,
+            &mut agent_slugs,
+            &mut backend,
+        );
+        for pk in members.keys() {
             read::resolve_pubkey(
                 store,
                 pk,
@@ -254,6 +230,15 @@ pub(crate) fn capture_inputs(store: &Store, input: &FabricContextInput<'_>) -> V
         let forced = forced_by_channel.get(h).cloned().unwrap_or_default();
         messages.insert(h.clone(), read::capture_messages(store, input, h, &forced));
     }
+    activity::capture_statuses(
+        store,
+        input.local_host,
+        &other_workspaces,
+        &mut statuses,
+        &mut refs,
+        &mut agent_slugs,
+        &mut backend,
+    );
     if !input.self_pubkey.is_empty() {
         read::resolve_pubkey(
             store,
@@ -282,6 +267,7 @@ pub(crate) fn capture_inputs(store: &Store, input: &FabricContextInput<'_>) -> V
         workspace: read::workspace_summary(store, &root),
         agents: read::agent_caps(store, &root, input),
         channels,
+        other_workspaces,
         warnings,
         self_pubkey: input.self_pubkey.to_string(),
         self_ref,
