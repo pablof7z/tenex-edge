@@ -32,6 +32,7 @@ pub struct SessionPane {
     pub root: String,
     pub agent: String,
     pub host: String,
+    pub channels: Vec<String>,
     pub lines: Vec<DebugLine>,
 }
 

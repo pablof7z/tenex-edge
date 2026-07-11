@@ -45,6 +45,7 @@ pub(super) fn load_hook_tail_snapshot(
     if let Some(path) = crate::command_forensics::configured_log_path() {
         unscoped.extend(read_command_log(&path, &mut panes));
     }
+    enrich_panes_from_store(&mut panes);
 
     let mut roots = BTreeSet::new();
     let mut sessions = BTreeSet::new();
@@ -106,9 +107,74 @@ fn seed_live_sessions(panes: &mut BTreeMap<String, SessionPane>) {
         let pane = panes
             .entry(session.clone())
             .or_insert_with(|| new_pane(&session));
-        pane.root = row["root"].as_str().unwrap_or("").to_string();
+        pane.root = non_empty_str(&row["work_root_display"])
+            .or_else(|| non_empty_str(&row["work_root"]))
+            .or_else(|| non_empty_str(&row["root"]))
+            .unwrap_or_default();
         pane.agent = row["slug"].as_str().unwrap_or("").to_string();
         pane.host = row["host"].as_str().unwrap_or("").to_string();
+        if let Some(channel) = non_empty_str(&row["channel"]) {
+            push_unique(&mut pane.channels, channel);
+        }
+    }
+}
+
+fn enrich_panes_from_store(panes: &mut BTreeMap<String, SessionPane>) {
+    enrich_panes_from_store_path(panes, &crate::daemon::store_path());
+}
+
+fn enrich_panes_from_store_path(panes: &mut BTreeMap<String, SessionPane>, path: &std::path::Path) {
+    let Ok(store) = crate::state::Store::open(path) else {
+        return;
+    };
+    for pane in panes.values_mut() {
+        if let Ok(Some(identity)) = store.session_identity_for_session(&pane.session) {
+            pane.agent = identity.display_slug();
+        }
+        enrich_pane_scope_from_store(pane, &store);
+    }
+}
+
+fn enrich_pane_scope_from_store(pane: &mut SessionPane, store: &crate::state::Store) {
+    let Ok(channels) = store.list_session_joined_channels(&pane.session) else {
+        return;
+    };
+    if channels.is_empty() {
+        return;
+    }
+    pane.channels = channels
+        .iter()
+        .map(|(channel, _)| channel_display_label(store, channel))
+        .collect();
+    if let Some((channel, _)) = channels.first() {
+        let workspace = store
+            .root_channel_of(channel)
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| channel.to_string());
+        pane.root = channel_display_label(store, &workspace);
+    }
+}
+
+fn channel_display_label(store: &crate::state::Store, channel_h: &str) -> String {
+    store
+        .get_channel(channel_h)
+        .ok()
+        .flatten()
+        .and_then(|channel| channel.human_name().map(str::to_string))
+        .unwrap_or_else(|| channel_h.to_string())
+}
+
+fn non_empty_str(v: &Value) -> Option<String> {
+    v.as_str()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
+fn push_unique(values: &mut Vec<String>, value: String) {
+    if !values.iter().any(|existing| existing == &value) {
+        values.push(value);
     }
 }
 
@@ -366,4 +432,64 @@ fn parse_command_log(
         }
     }
     unscoped
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::{Identity, RegisterSession};
+
+    #[test]
+    fn enriches_pane_agent_with_persisted_session_codename() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.db");
+        let store = crate::state::Store::open(&path).unwrap();
+        store
+            .upsert_session_row(
+                "sess-1",
+                &RegisterSession {
+                    harness: "claude-code".into(),
+                    external_id_kind: "session_id".into(),
+                    external_id: "sess-1".into(),
+                    agent_pubkey: "pk".into(),
+                    agent_slug: "haiku".into(),
+                    channel_h: "aaa".into(),
+                    child_pid: None,
+                    transcript_path: None,
+                    resume_id: "native-1".into(),
+                    now: 1,
+                },
+            )
+            .unwrap();
+        store.upsert_channel("aaa", "aaa", "", "", 1).unwrap();
+        store.upsert_channel("dev-h", "dev", "", "aaa", 1).unwrap();
+        store.join_session_channel("sess-1", "dev-h", 2).unwrap();
+        store
+            .upsert_identity(&Identity {
+                pubkey: "pk".into(),
+                agent_slug: "haiku".into(),
+                codename: "pearl-cliff-395".into(),
+                session_id: "sess-1".into(),
+                channel_h: "aaa".into(),
+                native_id: "native-1".into(),
+                alive: false,
+                created_at: 1,
+            })
+            .unwrap();
+
+        let mut panes = BTreeMap::from([(
+            "sess-1".into(),
+            SessionPane {
+                session: "sess-1".into(),
+                agent: "haiku".into(),
+                ..SessionPane::default()
+            },
+        )]);
+
+        enrich_panes_from_store_path(&mut panes, &path);
+
+        assert_eq!(panes["sess-1"].agent, "haiku-pearl-cliff-395");
+        assert_eq!(panes["sess-1"].root, "aaa");
+        assert_eq!(panes["sess-1"].channels, vec!["aaa", "dev"]);
+    }
 }

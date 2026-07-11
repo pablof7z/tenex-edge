@@ -294,12 +294,18 @@ fn render_empty(f: &mut ratatui::Frame, area: Rect, snapshot: &HookTailSnapshot)
 }
 
 fn pane_title(pane: &SessionPane) -> String {
-    match (pane.agent.as_str(), pane.root.as_str()) {
-        ("", "") => pane.short.clone(),
-        (agent, "") => format!("{} [{}]", agent, pane.short),
-        ("", root) => format!("{} [{}]", root, pane.short),
-        (agent, root) => format!("{}@{} [{}]", agent, root, pane.short),
-    }
+    let session_slug = if pane.agent.is_empty() {
+        pane.short.as_str()
+    } else {
+        pane.agent.as_str()
+    };
+    let workspace = pane.root.as_str();
+    let channels = if pane.channels.is_empty() {
+        pane.root.clone()
+    } else {
+        pane.channels.join(", ")
+    };
+    format!("{session_slug} / {workspace} / {channels}")
 }
 
 fn render_pane_grid(f: &mut ratatui::Frame, area: Rect, pane: &SessionPane, focused: bool) {
@@ -446,6 +452,24 @@ fn grid_rects(area: Rect, count: usize) -> Vec<Rect> {
         }
     }
     rects
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pane_title_uses_session_workspace_and_active_channels() {
+        let pane = SessionPane {
+            short: "6a4ddbe6".into(),
+            root: "aaa".into(),
+            agent: "haiku-pearl-cliff-395".into(),
+            channels: vec!["aaa".into(), "dev".into()],
+            ..SessionPane::default()
+        };
+
+        assert_eq!(pane_title(&pane), "haiku-pearl-cliff-395 / aaa / aaa, dev");
+    }
 }
 
 fn even_constraints(n: usize) -> Vec<Constraint> {
