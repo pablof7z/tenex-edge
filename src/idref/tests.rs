@@ -7,64 +7,55 @@ fn agent_label_preserves_backend_label() {
 }
 
 #[test]
-fn session_handle_is_agent_dash_session_code() {
+fn session_handle_is_session_code_dash_agent() {
     assert_eq!(
         session_handle("codex", "willow-echo-042"),
-        "codex-willow-echo-042"
+        "willow-echo-042-codex"
     );
     assert_eq!(
-        session_handle("codex", "codex-willow-echo-042"),
-        "codex-willow-echo-042"
+        session_handle("codex", "willow-echo-042-codex"),
+        "willow-echo-042-codex"
     );
     assert_eq!(session_handle("", "willow-echo-042"), "willow-echo-042");
+    assert_eq!(
+        session_handle("codex", "profiled-member"),
+        "profiled-member"
+    );
 }
 
 #[test]
 fn parses_session_handle() {
     assert_eq!(
-        parse_session_handle("codex-willow-echo-042"),
+        parse_session_handle("willow-echo-042-codex"),
         Some(("codex", "willow-echo-042"))
     );
     assert_eq!(
-        parse_session_handle("chief-of-staff-willow-echo-042"),
+        parse_session_handle("willow-echo-042-chief-of-staff"),
         Some(("chief-of-staff", "willow-echo-042"))
     );
+    assert_eq!(parse_session_handle("codex-willow-echo-042"), None);
     assert_eq!(parse_session_handle("codex/echo123"), None);
     assert_eq!(parse_session_handle("codex"), None);
     assert_eq!(parse_session_handle("codex/"), None);
     assert_eq!(parse_session_handle("codex/echo/extra"), None);
     assert_eq!(parse_session_handle("chief-of-staff-smith"), None);
-}
-
-#[test]
-fn profile_name_normalizes_backend_suffix() {
-    assert_eq!(
-        session_handle_from_profile_name("willow-echo-042@remoteBackend", "remoteBackend", "codex"),
+    assert!(looks_like_agent_first_session_handle(
         "codex-willow-echo-042"
-    );
-    assert_eq!(
-        session_handle_from_profile_name("echo123@remoteBackend", "remoteBackend", ""),
-        "echo123"
-    );
+    ));
+    assert!(!looks_like_agent_first_session_handle(
+        "willow-echo-042-codex"
+    ));
 }
 
 #[test]
-fn slug_from_profile_name_strips_matching_backend_suffix() {
+fn profile_name_combines_session_code_and_agent_slug() {
     assert_eq!(
-        slug_from_profile_name("developer1@remoteBackend", "remoteBackend"),
-        "developer1"
+        session_handle_from_profile_name("willow-echo-042", "codex"),
+        "willow-echo-042-codex"
     );
     assert_eq!(
-        slug_from_profile_name("developer1", "remoteBackend"),
-        "developer1"
-    );
-    assert_eq!(
-        slug_from_profile_name("developer1@otherBackend", "remoteBackend"),
-        "developer1@otherBackend"
-    );
-    assert_eq!(
-        slug_from_profile_name("developer1@remoteBackend", ""),
-        "developer1@remoteBackend"
+        session_handle_from_profile_name("profiled-member", ""),
+        "profiled-member"
     );
 }
 
@@ -81,8 +72,8 @@ fn agent_ref_from_is_bare_local_and_qualified_remote() {
 #[test]
 fn session_label_preserves_session_handle() {
     assert_eq!(
-        session_label("te-abc-0", "codex-willow-echo-042", "laptop"),
-        "codex-willow-echo-042"
+        session_label("te-abc-0", "willow-echo-042-codex", "laptop"),
+        "willow-echo-042-codex"
     );
     assert_eq!(session_label("te-abc-0", "codex", "laptop"), "codex@laptop");
     assert_eq!(session_label("te-abc-0", "", "laptop"), "te-abc-0");
@@ -131,16 +122,16 @@ fn parse_pubkey_and_token() {
 #[test]
 fn extract_inline_mentions() {
     assert_eq!(
-        extract_mentions("hey @haiku-sable-grove-179 and @codex, look"),
-        vec!["haiku-sable-grove-179".to_string(), "codex".to_string()]
+        extract_mentions("hey @sable-grove-179-haiku and @codex, look"),
+        vec!["sable-grove-179-haiku".to_string(), "codex".to_string()]
     );
     assert_eq!(
         extract_mentions("ping @claude@tower please"),
         vec!["claude@tower".to_string()]
     );
     assert_eq!(
-        extract_mentions("hey @codex-willow-echo-042 how are you?"),
-        vec!["codex-willow-echo-042".to_string()]
+        extract_mentions("hey @willow-echo-042-codex how are you?"),
+        vec!["willow-echo-042-codex".to_string()]
     );
     assert_eq!(extract_mentions("ping @codex."), vec!["codex".to_string()]);
     assert!(extract_mentions("email dev@example.com please").is_empty());

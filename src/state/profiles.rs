@@ -95,7 +95,7 @@ impl Store {
         Ok(None)
     }
 
-    /// Reverse lookup for the public per-session handle (`agent-sessionCode`).
+    /// Reverse lookup for the public per-session handle (`sessionCode-agent`).
     pub fn resolve_profile_handle_pubkey(&self, handle: &str) -> Result<Option<String>> {
         let handle = handle.trim();
         if crate::idref::parse_session_handle(handle).is_none() {
@@ -135,19 +135,13 @@ impl Store {
         Ok(self
             .conn
             .query_row(
-                "SELECT slug, host, agent_slug FROM relay_profiles WHERE pubkey=?1",
+                "SELECT slug, agent_slug FROM relay_profiles WHERE pubkey=?1",
                 params![pubkey],
-                |r| {
-                    Ok((
-                        r.get::<_, String>(0)?,
-                        r.get::<_, String>(1)?,
-                        r.get::<_, String>(2)?,
-                    ))
-                },
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
             )
             .optional()?
-            .map(|(slug, host, agent_slug)| {
-                crate::idref::session_handle_from_profile_name(&slug, &host, &agent_slug)
+            .map(|(slug, agent_slug)| {
+                crate::idref::session_handle_from_profile_name(&slug, &agent_slug)
             })
             .filter(|s| !s.is_empty()))
     }

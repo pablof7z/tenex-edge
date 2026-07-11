@@ -178,7 +178,7 @@ pub struct SessionAlias {
 pub struct Identity {
     pub pubkey: String,
     pub agent_slug: String,
-    /// Legacy per-session friendly code kept for migration and older selectors.
+    /// Friendly code used as the leading component of the public handle.
     pub codename: String,
     pub session_id: String,
     pub channel_h: String,

@@ -25,7 +25,7 @@ result: {"session_id": "te-…"}   // session_id printed verbatim to stdout
 The `session_id` is the raw canonical id — an internal correlation handle for
 hooks, PTY session binding, resume, and DB rows. It is never rendered as a
 user-facing identity; a session is addressed by its dashed public handle, such
-as `@codex-quill-peak-369`, backed by the session's own minted pubkey.
+as `@quill-peak-369-codex`, backed by the session's own minted pubkey.
 The provider opens the workspace root NIP-29 group, named by the workspace slug,
 and adds the session agent as a relay member before the engine publishes presence.
 The workspace and root channel are one entity with the public address `<workspace>`.

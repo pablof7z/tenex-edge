@@ -1,7 +1,7 @@
 //! The canonical reference helpers for tenex-edge identities.
 //!
-//! User-facing session identity is **`agent-sessionCode`** (for example
-//! `codex-willow-echo-042`). Backend-qualified agent references (`agent@backend-label`)
+//! User-facing session identity is **`sessionCode-agent`** (for example
+//! `willow-echo-042-codex`). Backend-qualified agent references (`agent@backend-label`)
 //! remain an operator/backend selection syntax for invite and lookup
 //! paths, not the public session handle.
 //!
@@ -10,12 +10,12 @@
 //!   - Backend labels are config.json `backendName` values and are preserved
 //!     exactly after trimming. They are not DNS hostnames and are not slugified.
 //!   - Raw session ids are internal correlation handles. A friendly session
-//!     codename appears after the agent slug in `agent-sessionCode`.
+//!     codename appears before the agent slug in `sessionCode-agent`.
 //!
 //! Every renderer formats through this module; every input is classified via
 //! [`parse_ref`] or normalized through the session-handle helpers.
 
-/// Canonical user-facing session handle: `agentSlug-sessionCode`.
+/// Canonical user-facing session handle: `sessionCode-agentSlug`.
 pub fn session_handle(agent_slug: &str, session: &str) -> String {
     let agent_slug = agent_slug.trim();
     let session = session.trim();
@@ -27,15 +27,14 @@ pub fn session_handle(agent_slug: &str, session: &str) -> String {
     }
     if let Some((agent, session_ref)) = parse_session_handle(session) {
         if agent == agent_slug {
-            return format!("{agent}-{session_ref}");
+            return format!("{session_ref}-{agent}");
         }
         return session.to_string();
     }
-    let prefix = format!("{agent_slug}-");
-    if session.starts_with(&prefix) {
+    if !friendly_session_code(session) {
         return session.to_string();
     }
-    format!("{agent_slug}-{session}")
+    format!("{session}-{agent_slug}")
 }
 
 /// Parse a public session handle into its two routing-visible parts.
@@ -44,7 +43,7 @@ pub fn parse_session_handle(handle: &str) -> Option<(&str, &str)> {
 }
 
 /// Convert a kind:0 `name` plus tags into the canonical session handle.
-pub fn session_handle_from_profile_name(name: &str, host: &str, agent_slug: &str) -> String {
+pub fn session_handle_from_profile_name(name: &str, agent_slug: &str) -> String {
     let name = name.trim();
     if let Some((agent, session)) = parse_session_handle(name) {
         let agent = if agent_slug.trim().is_empty() {
@@ -54,19 +53,10 @@ pub fn session_handle_from_profile_name(name: &str, host: &str, agent_slug: &str
         };
         return session_handle(agent, session);
     }
-    let session = slug_from_profile_name(name, host);
-    if let Some((agent, session_ref)) = parse_session_handle(&session) {
-        let agent = if agent_slug.trim().is_empty() {
-            agent
-        } else {
-            agent_slug.trim()
-        };
-        return session_handle(agent, session_ref);
-    }
     if agent_slug.trim().is_empty() {
-        session
+        name.to_string()
     } else {
-        session_handle(agent_slug, &session)
+        session_handle(agent_slug, name)
     }
 }
 
@@ -78,21 +68,6 @@ pub fn agent_label(slug: &str, host: &str) -> String {
         slug.to_string()
     } else {
         format!("{slug}@{host}")
-    }
-}
-
-/// Strip this backend suffix from a kind:0 profile name to recover the routing
-/// slug. Profiles that publish a bare slug pass through unchanged.
-pub fn slug_from_profile_name(name: &str, host: &str) -> String {
-    let name = name.trim();
-    let host = host.trim();
-    if host.is_empty() {
-        return name.to_string();
-    }
-    let suffix = format!("@{host}");
-    match name.strip_suffix(&suffix) {
-        Some(slug) if !slug.trim().is_empty() => slug.trim().to_string(),
-        _ => name.to_string(),
     }
 }
 
@@ -127,16 +102,35 @@ pub fn session_label(session_id: &str, slug: &str, host: &str) -> String {
 }
 
 fn parse_dashed_session_handle(handle: &str) -> Option<(&str, &str)> {
-    let mut parts = handle.rsplitn(4, '-');
-    let n = parts.next()?;
-    let b = parts.next()?;
+    let mut parts = handle.splitn(4, '-');
     let a = parts.next()?;
+    let b = parts.next()?;
+    let n = parts.next()?;
     let agent_slug = parts.next()?.trim();
     if agent_slug.is_empty() || !friendly_code_parts(a, b, n) {
         return None;
     }
-    let session_start = agent_slug.len() + 1;
-    Some((agent_slug, &handle[session_start..]))
+    let session_end = a.len() + b.len() + n.len() + 2;
+    Some((agent_slug, &handle[..session_end]))
+}
+
+pub(crate) fn looks_like_agent_first_session_handle(handle: &str) -> bool {
+    let mut parts = handle.trim().rsplitn(4, '-');
+    let Some(n) = parts.next() else { return false };
+    let Some(b) = parts.next() else { return false };
+    let Some(a) = parts.next() else { return false };
+    let Some(agent_slug) = parts.next() else {
+        return false;
+    };
+    !agent_slug.trim().is_empty() && friendly_code_parts(a, b, n)
+}
+
+fn friendly_session_code(code: &str) -> bool {
+    let mut parts = code.split('-');
+    let Some(a) = parts.next() else { return false };
+    let Some(b) = parts.next() else { return false };
+    let Some(n) = parts.next() else { return false };
+    parts.next().is_none() && friendly_code_parts(a, b, n)
 }
 
 fn friendly_code_parts(a: &str, b: &str, n: &str) -> bool {

@@ -1,8 +1,6 @@
 //! Resolve a `channel add --session` selector to a concrete session. Selectors
 //! arrive as a raw opaque session id, or — the recruiting-facing form — an
-//! `@agent-sessionCode` handle. Legacy `codename@host` selectors are still accepted
-//! by scanning live/known sessions for the old friendly code; they are not the
-//! current public handle model.
+//! `@sessionCode-agent` handle.
 
 use crate::daemon::server::DaemonState;
 use crate::state::Session;
@@ -16,25 +14,13 @@ pub(super) struct RemoteSession {
     pub(super) backend: String,
 }
 
-/// Split a legacy selector into `(code_or_id, host?)`. A leading `@` sigil is
-/// optional; `code@host` splits on the last `@`. A bare token carries no host.
-fn split_legacy_code_host(selector: &str) -> (String, Option<String>) {
-    let s = selector.trim();
-    let s = s.strip_prefix('@').unwrap_or(s);
-    match s.rsplit_once('@') {
-        Some((code, host)) => (code.to_string(), Some(host.to_string())),
-        None => (s.to_string(), None),
-    }
-}
-
-/// A LOCAL session for the selector: public `agent-sessionCode`, then raw id/prefix,
-/// then the legacy friendly-code scan. A selector that names a non-local host is
-/// never matched here.
+/// A LOCAL session for the selector: public `sessionCode-agent`, then raw id/prefix.
 pub(super) fn local_session(state: &Arc<DaemonState>, selector: &str) -> Option<Session> {
+    let selector = selector.trim().strip_prefix('@').unwrap_or(selector.trim());
     if let Some(rec) = local_session_by_public_handle(state, selector) {
         return Some(rec);
     }
-    if let Some(rec) = state
+    state
         .with_store(|s| s.get_session(selector))
         .ok()
         .flatten()
@@ -44,23 +30,6 @@ pub(super) fn local_session(state: &Arc<DaemonState>, selector: &str) -> Option<
                 .ok()
                 .flatten()
         })
-    {
-        return Some(rec);
-    }
-    let (legacy_code, host) = split_legacy_code_host(selector);
-    // A host that names another backend means the caller wants a remote session.
-    if host
-        .as_deref()
-        .is_some_and(|h| !h.is_empty() && h != state.host)
-    {
-        return None;
-    }
-    state.with_store(|s| {
-        s.list_alive_sessions()
-            .unwrap_or_default()
-            .into_iter()
-            .find(|rec| crate::util::friendly_short_code(&rec.session_id) == legacy_code)
-    })
 }
 
 fn local_session_by_public_handle(state: &Arc<DaemonState>, selector: &str) -> Option<Session> {
@@ -82,37 +51,25 @@ fn local_session_by_public_handle(state: &Arc<DaemonState>, selector: &str) -> O
 }
 
 /// A REMOTE session for the selector, from the materialized status cache. Matches
-/// `@agent-sessionCode`, raw id (exact/prefix), or a legacy code@host handle.
+/// `@sessionCode-agent` or a raw id (exact/prefix).
 pub(super) fn remote_session_from_status(
     state: &Arc<DaemonState>,
     selector: &str,
 ) -> Result<RemoteSession> {
-    if let Some((agent, session_ref)) = crate::idref::parse_session_handle(
-        selector.trim().strip_prefix('@').unwrap_or(selector.trim()),
-    ) {
+    let selector = selector.trim().strip_prefix('@').unwrap_or(selector.trim());
+    if let Some((agent, session_ref)) = crate::idref::parse_session_handle(selector) {
         return remote_session_from_public_handle(state, selector, agent, session_ref);
     }
-    let (legacy_code, want_host) = split_legacy_code_host(selector);
     let matches = state.with_store(|s| -> Result<Vec<RemoteSession>> {
         let mut out = Vec::new();
         for st in s.list_status_sessions(None, None)? {
             let by_id = st.session_id == selector || st.session_id.starts_with(selector);
-            let by_code = crate::util::friendly_short_code(&st.session_id) == legacy_code;
-            if !by_id && !by_code {
+            if !by_id {
                 continue;
             }
             let Some(profile) = s.get_profile(&st.pubkey)? else {
                 continue;
             };
-            // When resolving a legacy code with an explicit host, only that backend's
-            // session qualifies.
-            if by_code && !by_id {
-                if let Some(h) = want_host.as_deref().filter(|h| !h.is_empty()) {
-                    if profile.host != h {
-                        continue;
-                    }
-                }
-            }
             let slug = if profile.slug.is_empty() {
                 st.slug.clone()
             } else {
@@ -142,7 +99,7 @@ pub(super) fn remote_session_from_status(
         }),
         [] => anyhow::bail!("no session matching {selector:?}"),
         _ => anyhow::bail!(
-            "session {selector:?} is ambiguous; use the full session id or @agent-sessionCode"
+            "session {selector:?} is ambiguous; use the full session id or @sessionCode-agent"
         ),
     }
 }
@@ -200,7 +157,7 @@ fn remote_session_from_public_handle(
         }),
         [] => anyhow::bail!("no session matching {selector:?}"),
         _ => anyhow::bail!(
-            "session {selector:?} is ambiguous; use the full agent-sessionCode handle"
+            "session {selector:?} is ambiguous; use the full sessionCode-agent handle"
         ),
     }
 }

@@ -111,9 +111,9 @@ fn first_turn_renders_awareness_snapshot_not_session_code() {
     let expected_code = crate::util::friendly_short_code("sess-intro");
     assert!(
         text.contains(&format!(
-            "You are @coder-{expected_code}, running on laptop."
+            "You are @{expected_code}-coder, running on laptop."
         )),
-        "awareness should identify this agent by agent-codename handle; got: {text:?}"
+        "awareness should identify this agent by codename-agent handle; got: {text:?}"
     );
     assert!(
         !text.contains("[session"),
@@ -146,7 +146,7 @@ fn first_turn_snapshot_uses_bound_instance_identity() {
         .upsert_identity(&Identity {
             pubkey: "pk-coder1".to_string(),
             agent_slug: "coder".to_string(),
-            codename: "coder-vale-071".to_string(),
+            codename: "willow-vale-071".to_string(),
             session_id: sid.clone(),
             channel_h: "proj".to_string(),
             native_id: "sess-ordinal-native".to_string(),
@@ -158,7 +158,7 @@ fn first_turn_snapshot_uses_bound_instance_identity() {
     pub_status(
         &store,
         "pk-coder1",
-        "coder-vale-071",
+        "willow-vale-071-coder",
         "Session instance",
         "checking hook context",
         true,
@@ -171,7 +171,7 @@ fn first_turn_snapshot_uses_bound_instance_identity() {
     let text = assemble_turn_start_context(&m, &rec, BACKEND, "laptop", 0)
         .expect("first-turn intro expected");
     assert!(
-        text.contains("You are @coder-vale-071, running on laptop."),
+        text.contains("You are @willow-vale-071-coder, running on laptop."),
         "snapshot must render the bound session codename; got: {text:?}"
     );
     assert!(

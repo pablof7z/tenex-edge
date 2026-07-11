@@ -58,7 +58,7 @@ fn derive_keys_with_counter(ikm: &[u8], salt: &[u8], mut info: Vec<u8>, label: &
 
 /// The read-side identity of one running session: its per-session pubkey, the
 /// underlying agent slug (for the roster / local keystore), the canonical
-/// session id, and the legacy memorable codename.
+/// session id, and the memorable session code.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionIdentity {
     pub pubkey: String,
@@ -89,7 +89,7 @@ impl SessionIdentity {
         }
     }
 
-    /// The per-session display name: `agentSlug-codename` (e.g. `codex-willow-echo-042`),
+    /// The per-session display name: `codename-agentSlug` (e.g. `willow-echo-042-codex`),
     /// never the raw internal `session_id`.
     pub fn display_slug(&self) -> String {
         crate::idref::session_handle(&self.slug, &self.codename)

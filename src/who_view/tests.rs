@@ -19,8 +19,8 @@ fn seed() -> Store {
     store
         .upsert_profile_with_agent_slug(
             "self-pk",
-            "codex-quill-peak-369",
-            "codex-quill-peak-369",
+            "quill-peak-369-codex",
+            "quill-peak-369-codex",
             "codex",
             "laptop",
             false,
@@ -52,7 +52,7 @@ fn seed() -> Store {
             pubkey: "self-pk".into(),
             session_id: "session".into(),
             channel_h: "alpha".into(),
-            slug: "codex-quill-peak-369".into(),
+            slug: "quill-peak-369-codex".into(),
             title: "Implement awareness".into(),
             activity: String::new(),
             busy: false,
@@ -85,7 +85,7 @@ fn render(all_workspaces: bool) -> String {
         AgentWhoInput {
             roots: &roots,
             current_root: "alpha",
-            self_name: "codex-quill-peak-369",
+            self_name: "quill-peak-369-codex",
             self_pubkey: "self-pk",
             local_host: "laptop",
             backend_pubkey: "backend-pk",
@@ -126,7 +126,7 @@ fn workspace_carries_root_members_and_membership_gated_children() {
     );
     assert!(xml.contains("<human name=\"@Pablo\" state=\"offline\""));
     assert!(xml.contains(
-        "<agent name=\"@codex-quill-peak-369\" state=\"idle\" status=\"Implement awareness\""
+        "<agent name=\"@quill-peak-369-codex\" state=\"idle\" status=\"Implement awareness\""
     ));
     assert!(xml.contains("members=\"2\">\n      <members>"), "{xml}");
     assert!(xml.contains(

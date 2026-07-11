@@ -1,4 +1,4 @@
-//! `<members>` rendering: `@agent-codename` per member, with the legacy (`people`)
+//! `<members>` rendering: `@codename-agent` per member, with the legacy (`people`)
 //! and pure (`assemble`) paths proven byte-identical.
 
 use crate::fabric_context::{
@@ -9,7 +9,7 @@ use crate::state::{Status, Store};
 use super::{input, seed_store, session, session_record, OTHER_PK, SELF_PK};
 
 /// A member whose session is known (a live status carries its session id) renders
-/// as `@agent-codename`; the pure and legacy paths agree.
+/// as `@codename-agent`; the pure and legacy paths agree.
 #[test]
 fn member_row_shows_session_handle_without_role_for_peer_session() {
     let store = seed_store();
@@ -44,7 +44,7 @@ fn member_row_shows_session_handle_without_role_for_peer_session() {
     let peer_codename = crate::util::friendly_short_code("peer-sess");
     assert!(
         text.contains(&format!(
-            "<member ref=\"@reviewer-{peer_codename}\" status=\""
+            "<member ref=\"@{peer_codename}-reviewer\" status=\""
         )),
         "got: {text}"
     );
@@ -170,8 +170,19 @@ fn same_named_channels_under_different_workspaces_show_workspace_context() {
         text.contains("<channel name=\"#xxx\" ref=\"test2.xxx\" workspace=\"test2\""),
         "got: {text}"
     );
-    assert!(text.contains("ref=\"@reviewer-"), "got: {text}");
-    assert!(text.contains("ref=\"@tester-"), "got: {text}");
+    let reviewer = crate::idref::session_handle(
+        "reviewer",
+        &crate::util::friendly_short_code("peer-test1-session"),
+    );
+    let tester = crate::idref::session_handle(
+        "tester",
+        &crate::util::friendly_short_code("peer-test2-session"),
+    );
+    assert!(
+        text.contains(&format!("ref=\"@{reviewer}\"")),
+        "got: {text}"
+    );
+    assert!(text.contains(&format!("ref=\"@{tester}\"")), "got: {text}");
 
     let captured = capture_inputs(&store, &input(Some(&rec), "test1-xxx", 200, 300, true));
     let trellis = render_view_text(&assemble::assemble_view(&captured, 200, 300));

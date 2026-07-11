@@ -143,10 +143,10 @@ fn session_identity_agent_ref_names_pubkey_by_codename() {
         "sess-123".into(),
         "willow-echo-042".into(),
     );
-    assert_eq!(inst.display_slug(), "claude-willow-echo-042");
+    assert_eq!(inst.display_slug(), "willow-echo-042-claude");
     let aref = inst.agent_ref();
     assert_eq!(aref.pubkey, "deadbeef");
-    assert_eq!(aref.slug, "claude-willow-echo-042");
+    assert_eq!(aref.slug, "willow-echo-042-claude");
 }
 
 #[test]
@@ -158,6 +158,6 @@ fn session_identity_fallback_codename_is_short_code_of_session() {
     assert_eq!(inst.codename, crate::util::friendly_short_code("sess-xyz"));
     assert_eq!(
         inst.display_slug(),
-        format!("claude-{}", crate::util::friendly_short_code("sess-xyz"))
+        format!("{}-claude", crate::util::friendly_short_code("sess-xyz"))
     );
 }

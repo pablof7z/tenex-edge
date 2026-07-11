@@ -4,7 +4,7 @@ use crate::expired_sessions::ExpiredSessionRow;
 use owo_colors::OwoColorize as _;
 use std::fmt::Write as _;
 
-/// Render the expired-session listing: each session as `@agent-codename` with
+/// Render the expired-session listing: each session as `@codename-agent` with
 /// its channel, last-seen age, and whether it can be resumed. Newest first (as
 /// returned by the daemon).
 pub(in crate::cli::who) fn render_expired(rows: &[ExpiredSessionRow]) -> String {
@@ -58,8 +58,8 @@ mod tests {
     #[test]
     fn renders_agent_session_handle_and_resumability() {
         let out = render_expired(&[row("amber-echo-001", true), row("cedar-mesa-002", false)]);
-        assert!(out.contains("@coder-amber-echo-001"), "got: {out}");
-        assert!(out.contains("@coder-cedar-mesa-002"), "got: {out}");
+        assert!(out.contains("@amber-echo-001-coder"), "got: {out}");
+        assert!(out.contains("@cedar-mesa-002-coder"), "got: {out}");
         assert!(out.contains("#main"), "got: {out}");
         assert!(out.contains("resumable"), "got: {out}");
         assert!(out.contains("not resumable"), "got: {out}");
