@@ -77,15 +77,14 @@ impl SessionIdentity {
         }
     }
 
-    /// Projection when no bound `identities` row exists yet: the codename is the
-    /// deterministic `friendly_short_code` of the session id, the same value the
-    /// mint path would have persisted.
+    /// Projection when no bound identity exists yet. There is intentionally no
+    /// session-id-derived alias: only the lease store may mint public handles.
     pub fn fallback(session_id: &str, slug: String, pubkey: String) -> Self {
         Self {
             pubkey,
             slug,
             session_id: session_id.to_string(),
-            codename: crate::util::friendly_short_code(session_id),
+            codename: String::new(),
         }
     }
 

@@ -150,14 +150,11 @@ fn session_identity_agent_ref_names_pubkey_by_codename() {
 }
 
 #[test]
-fn session_identity_fallback_codename_is_short_code_of_session() {
+fn session_identity_fallback_does_not_invent_a_handle() {
     let inst = SessionIdentity::fallback("sess-xyz", "claude".into(), "deadbeef".into());
     assert_eq!(inst.pubkey, "deadbeef");
     assert_eq!(inst.slug, "claude");
     assert_eq!(inst.session_id, "sess-xyz");
-    assert_eq!(inst.codename, crate::util::friendly_short_code("sess-xyz"));
-    assert_eq!(
-        inst.display_slug(),
-        format!("{}-claude", crate::util::friendly_short_code("sess-xyz"))
-    );
+    assert!(inst.codename.is_empty());
+    assert_eq!(inst.display_slug(), "claude");
 }

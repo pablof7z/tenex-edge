@@ -81,7 +81,7 @@ impl Store {
         let name = crate::idref::agent_label(slug, host);
         let mut stmt = self.conn.prepare(
             "SELECT pubkey, host FROM relay_profiles
-                 WHERE is_backend=0 AND (slug=?1 OR name=?2)",
+                 WHERE is_backend=0 AND agent_slug='' AND (slug=?1 OR name=?2)",
         )?;
         let rows = stmt.query_map(params![slug, name], |r| {
             Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
@@ -95,22 +95,27 @@ impl Store {
         Ok(None)
     }
 
-    /// Reverse lookup for the public per-session handle (`sessionCode-agent`).
-    pub fn resolve_profile_handle_pubkey(&self, handle: &str) -> Result<Option<String>> {
+    /// Resolve a remote handle only when the named pubkey has a live status.
+    /// Historical kind:0 names are presentation cache, never lease authority.
+    pub fn resolve_live_profile_handle_pubkey(
+        &self,
+        handle: &str,
+        now: u64,
+    ) -> Result<Option<String>> {
         let handle = handle.trim();
-        if crate::idref::parse_session_handle(handle).is_none() {
-            return Ok(None);
+        let mut stmt = self.conn.prepare(
+            "SELECT DISTINCT p.pubkey FROM relay_profiles p
+             JOIN relay_status st ON st.pubkey=p.pubkey
+             WHERE p.is_backend=0 AND (p.name=?1 OR p.slug=?1) AND st.expiration>=?2",
+        )?;
+        let rows = stmt
+            .query_map(params![handle, now], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        match rows.as_slice() {
+            [] => Ok(None),
+            [one] => Ok(Some(one.clone())),
+            _ => anyhow::bail!("live handle {handle:?} is ambiguous"),
         }
-        Ok(self
-            .conn
-            .query_row(
-                "SELECT pubkey FROM relay_profiles
-                 WHERE is_backend=0 AND (name=?1 OR slug=?1)
-                 ORDER BY updated_at DESC LIMIT 1",
-                params![handle],
-                |r| r.get::<_, String>(0),
-            )
-            .optional()?)
     }
 
     /// Reverse lookup: the pubkey of a backend with exactly this config

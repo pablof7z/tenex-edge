@@ -116,12 +116,12 @@ fn profile_materializes_to_relay_profiles() {
     assert_eq!(profile.name, "willow-echo-042-developer");
     assert_eq!(profile.slug, "willow-echo-042-developer");
     assert_eq!(profile.agent_slug, "developer");
-    assert_eq!(
+    assert!(
         store
-            .resolve_profile_handle_pubkey("willow-echo-042-developer")
+            .resolve_live_profile_handle_pubkey("willow-echo-042-developer", 1)
             .unwrap()
-            .as_deref(),
-        Some(pk.as_str())
+            .is_none(),
+        "profile names alone are not lease authority"
     );
 }
 

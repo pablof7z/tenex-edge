@@ -239,6 +239,7 @@ impl Store {
             "UPDATE sessions SET last_seen=?2 WHERE session_id=?1",
             params![canonical, last_seen],
         )?;
+        self.touch_handle_for_session(&canonical, last_seen)?;
         Ok(())
     }
 
@@ -380,6 +381,11 @@ impl Store {
             "UPDATE sessions SET alive=0, working=0 WHERE session_id=?1",
             params![canonical],
         )?;
+        self.conn.execute(
+            "UPDATE identities SET alive=0 WHERE session_id=?1",
+            [&canonical],
+        )?;
+        self.mark_handle_offline_for_session(&canonical)?;
         Ok(())
     }
 }
