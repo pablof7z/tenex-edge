@@ -132,6 +132,7 @@ fn seed_hook_graph_and_receipt(
             "workspace": { "name": "", "channel": "", "about": "" },
             "agents": [],
             "channels": [],
+            "other_workspaces": [],
             "warnings": ["hook validation"],
             "self_pubkey": "",
             "self_ref": "",
@@ -181,6 +182,7 @@ fn unconfirmed_channel_inputs() -> ViewInputs {
                 "about": "",
                 "subchannels": []
             }],
+            "other_workspaces": [],
             "warnings": [],
             "self_pubkey": "",
             "self_ref": "",
@@ -214,6 +216,7 @@ fn local_agents_and_members_inputs() -> ViewInputs {
                 "about": "",
                 "subchannels": []
             }],
+            "other_workspaces": [],
             "warnings": [],
             "self_pubkey": "pk1",
             "self_ref": "coder",

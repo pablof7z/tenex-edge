@@ -2,8 +2,10 @@ use crate::fabric_context::model::*;
 use std::fmt::Write as _;
 
 mod all_workspaces;
+mod workspace;
 
 pub(in crate::fabric_context) use all_workspaces::render_views;
+use workspace::render_workspace_block;
 
 pub(in crate::fabric_context) fn render_view(view: &FabricView) -> String {
     let mut out = String::from("<tenex-edge>");
@@ -23,40 +25,24 @@ pub(super) fn render_workspace(
         render_no_new_activity(out, &view.workspace.name);
         return;
     }
-    let _ = write!(
+    render_workspace_block(
         out,
-        "\n\n  <workspace name=\"{}\"",
-        esc_attr(&view.workspace.name)
+        &view.workspace,
+        view.root.as_ref(),
+        &view.channels,
+        agents,
+        agents_tag,
     );
-    if !view.workspace.channel.is_empty() {
-        let _ = write!(out, " channel=\"{}\"", esc_attr(&view.workspace.channel));
+    for activity in &view.other_workspaces {
+        render_workspace_block(
+            out,
+            &activity.workspace,
+            activity.root.as_ref(),
+            &activity.channels,
+            &[],
+            agents_tag,
+        );
     }
-    if !view.workspace.about.is_empty() {
-        let _ = write!(out, " about=\"{}\"", esc_attr(&view.workspace.about));
-    }
-    out.push('>');
-    render_agents(out, agents, agents_tag);
-    if let Some(root) = &view.root {
-        render_channel_body(out, root, 4);
-    }
-    if view
-        .root
-        .as_ref()
-        .is_some_and(|root| !root.children.is_empty())
-        || !view.channels.is_empty()
-    {
-        out.push_str("\n    <channels>");
-        if let Some(root) = &view.root {
-            for channel in &root.children {
-                render_channel(out, channel, 6);
-            }
-        }
-        for channel in &view.channels {
-            render_channel(out, channel, 6);
-        }
-        out.push_str("\n    </channels>");
-    }
-    out.push_str("\n  </workspace>");
     render_important(out, &view.important);
     render_warnings(out, &view.warnings);
 }
@@ -110,7 +96,7 @@ pub(super) fn render_agents(out: &mut String, agents: &[AgentRow], tag: &str) {
     let _ = write!(out, "\n    </{tag}>");
 }
 
-fn render_channel(out: &mut String, channel: &ChannelBlock, indent: usize) {
+pub(super) fn render_channel(out: &mut String, channel: &ChannelBlock, indent: usize) {
     let pad = " ".repeat(indent);
     let _ = write!(
         out,
@@ -133,7 +119,7 @@ fn render_channel(out: &mut String, channel: &ChannelBlock, indent: usize) {
     let _ = write!(out, "\n{pad}</channel>");
 }
 
-fn render_channel_body(out: &mut String, channel: &ChannelBlock, indent: usize) {
+pub(super) fn render_channel_body(out: &mut String, channel: &ChannelBlock, indent: usize) {
     render_members(out, &channel.members, indent);
     render_presence(out, &channel.presence, indent);
     render_messages(out, channel, indent);
@@ -269,7 +255,7 @@ fn render_warnings(out: &mut String, rows: &[WarningRow]) {
     out.push_str("\n  </warnings>");
 }
 
-fn esc_attr(input: &str) -> String {
+pub(super) fn esc_attr(input: &str) -> String {
     esc_text(input).replace('"', "&quot;")
 }
 

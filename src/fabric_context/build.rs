@@ -40,6 +40,7 @@ pub(super) fn build_view(store: &Store, input: FabricContextInput<'_>) -> Fabric
         agents: agents(store, &root, input.cursor, input.now, input.local_host),
         root: None,
         channels: Vec::new(),
+        other_workspaces: Vec::new(),
         important: Vec::new(),
         warnings,
         incremental: input.cursor != 0,
@@ -84,7 +85,59 @@ pub(super) fn build_view(store: &Store, input: FabricContextInput<'_>) -> Fabric
         });
     }
     (view.root, view.channels) = super::tree::arrange(&view.workspace.name, channel_rows);
+    view.other_workspaces = other_workspace_activity(store, &root, &input);
     view
+}
+
+fn other_workspace_activity(
+    store: &Store,
+    current_root: &str,
+    input: &FabricContextInput<'_>,
+) -> Vec<WorkspaceActivity> {
+    if input.cursor == 0 {
+        return Vec::new();
+    }
+    let mut by_root: BTreeMap<String, Vec<ChannelBlock>> = BTreeMap::new();
+    for channel in store
+        .list_channels()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|channel| !channel.is_archived())
+    {
+        let Some(root) = store.root_channel_of(&channel.channel_h).ok().flatten() else {
+            continue;
+        };
+        if root == current_root {
+            continue;
+        }
+        let presence = presence_rows(store, &channel.channel_h, input);
+        if presence.is_empty() {
+            continue;
+        }
+        let summary = channel_summary(store, &channel.channel_h);
+        by_root.entry(root).or_default().push(ChannelBlock {
+            name: summary.name,
+            reference: summary.channel,
+            about: summary.about,
+            members: Vec::new(),
+            presence,
+            children: Vec::new(),
+            messages: Vec::new(),
+            omitted: 0,
+        });
+    }
+    by_root
+        .into_iter()
+        .map(|(root_name, rows)| {
+            let workspace = workspace_summary(store, &root_name);
+            let (root, channels) = super::tree::arrange(&workspace.name, rows);
+            WorkspaceActivity {
+                workspace,
+                root,
+                channels,
+            }
+        })
+        .collect()
 }
 
 fn channels_for(store: &Store, session: Option<&Session>, scope: &str) -> Vec<String> {

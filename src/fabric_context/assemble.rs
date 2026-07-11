@@ -45,6 +45,7 @@ pub(crate) fn assemble_view(inputs: &ViewInputs, cursor: u64, now: u64) -> Fabri
         agents: agent_rows(inputs, cursor, now),
         root: None,
         channels: Vec::new(),
+        other_workspaces: Vec::new(),
         important: Vec::new(),
         warnings: meta
             .warnings
@@ -104,7 +105,48 @@ pub(crate) fn assemble_view(inputs: &ViewInputs, cursor: u64, now: u64) -> Fabri
         });
     }
     (view.root, view.channels) = super::tree::arrange(&view.workspace.name, channel_rows);
+    view.other_workspaces = other_workspace_rows(inputs, cursor, now);
     view
+}
+
+fn other_workspace_rows(inputs: &ViewInputs, cursor: u64, now: u64) -> Vec<WorkspaceActivity> {
+    if cursor == 0 {
+        return Vec::new();
+    }
+    inputs
+        .meta
+        .other_workspaces
+        .iter()
+        .filter_map(|workspace| {
+            let rows = workspace
+                .channels
+                .iter()
+                .filter_map(|channel| {
+                    let presence = presence_rows(inputs, &channel.h, cursor, now);
+                    (!presence.is_empty()).then(|| ChannelBlock {
+                        name: channel.name.clone(),
+                        reference: channel.reference.clone(),
+                        about: channel.about.clone(),
+                        members: Vec::new(),
+                        presence,
+                        children: Vec::new(),
+                        messages: Vec::new(),
+                        omitted: 0,
+                    })
+                })
+                .collect();
+            let (root, channels) = super::tree::arrange(&workspace.summary.name, rows);
+            (root.is_some() || !channels.is_empty()).then(|| WorkspaceActivity {
+                workspace: WorkspaceRow {
+                    name: workspace.summary.name.clone(),
+                    channel: workspace.summary.channel.clone(),
+                    about: workspace.summary.about.clone(),
+                },
+                root,
+                channels,
+            })
+        })
+        .collect()
 }
 
 fn agent_rows(inputs: &ViewInputs, cursor: u64, now: u64) -> Vec<AgentRow> {

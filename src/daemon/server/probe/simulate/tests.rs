@@ -164,6 +164,7 @@ fn hook_inputs_json(warnings: &[&str]) -> serde_json::Value {
             "workspace": { "name": "", "channel": "", "about": "" },
             "agents": [],
             "channels": [],
+            "other_workspaces": [],
             "warnings": warnings,
             "self_pubkey": "",
             "self_ref": "",
