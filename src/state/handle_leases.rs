@@ -66,7 +66,7 @@ impl Store {
             let reclaimed_pubkey = match occupied {
                 None => None,
                 Some((_owner, true, _)) => continue,
-                Some((owner, false, last_active))
+                Some((_owner, false, last_active))
                     if now.saturating_sub(last_active) < HANDLE_LEASE_GRACE_SECS =>
                 {
                     continue;
