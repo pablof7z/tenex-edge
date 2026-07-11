@@ -2,14 +2,14 @@
 title: Tenex-Edge Who Rendering
 slug: tenex-edge-who-rendering
 topic: tenex-edge
-summary: `tenex-edge who --all-projects` renders through the unified fabric-context pipeline (`build_view` â `render_view`/`render_human_view`), producing the same for
+summary: `tenex-edge who` renders terminal text for operators and structured workspace awareness XML for exact agent sessions.
 tags:
   - capture
 volatility: warm
 confidence: medium
 created: 2026-07-03
-updated: 2026-07-03
-verified: 2026-07-03
+updated: 2026-07-11
+verified: 2026-07-11
 compiled-from: conversation
 sources:
   - session:7d6bf2fe-8dc9-4bd0-aeeb-de1827bf68d1
@@ -17,15 +17,15 @@ sources:
 
 # Tenex-Edge Who Rendering
 
-## Unified Rendering Pipeline
+## Audience-Aware Rendering
 
-`tenex-edge who --all-projects` renders through the unified fabric-context pipeline (`build_view` → `render_view`/`render_human_view`), producing the same format as single-project `who`. Hook injection (turn-start and PostToolUse), single-project `who`, and `who --all-projects` all share this single rendering pipeline via `render_fabric_context`. The regression test `who_all_projects_uses_unified_fabric_render_not_old_table` asserts that the old table format is gone from `--all-projects` output.
+An exact live agent session receives XML with `<self>`, a global `<agents>` capability inventory, and `<workspaces>`. A bare operator receives terminal-oriented text. Both are read projections over the daemon-owned store; neither renderer queries the relay directly.
 
-The old `src/cli/who/render.rs` + `src/who_snapshot.rs` markdown-table renderer (`WhoSnapshot`/`render_who_*`) is a fallback-only path used when the daemon emits no `fabric`/`fabric_human` string at all (e.g. version skew), on both single-project and `--all-projects` branches.
+Every known workspace appears in agent XML. By default only the caller's workspace is expanded; `--all-workspaces` expands every workspace. Channel contents recurse only while the caller is a member of each parent channel. Compact channels expose `id`, `about`, and a member count that excludes backend keys.
 
 <!-- citations: [^7d6bf-cad7a] [^7d6bf-5aab0] -->
-## `who --all-projects` Block Layout
+## Capability Availability
 
-`render_fabric_all_projects`/`_human` in `fabric_context.rs` renders one project block per root channel. Within each block, per-member entries are listed as `role @agent/session - status` (for example, `developer @developer/peer-sess - working`), followed by the available-agent roster materialized from kind:30555 events for that root channel. Availability rows show the advertised role slug, host, and use criteria; they are the role types that can be added to the channel, not concrete members.
+The global `<agents>` inventory groups kind:30555 advertisements by backend and role. Remote roles render as `slug@backend`, retain their `about` criteria, and list every advertised workspace in `workspace-availability`. These are spawnable capabilities, not channel members.
 
 <!-- citations: [^7d6bf-bafea] [^7d6bf-db5d3] -->

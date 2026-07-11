@@ -10,5 +10,5 @@ source_refs:
 
 # kind:0 name
 
-The per-session kind:0 profile name is `@agent/session` — the p-taggable handle
+The per-session kind:0 profile name is `@agent-session-code` — the p-taggable handle
 an agent uses to mention a specific session in `channel send`.

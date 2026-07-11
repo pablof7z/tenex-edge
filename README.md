@@ -58,7 +58,7 @@ Everything in this section is implemented and tested — `cargo test --lib` is g
 real end-to-end demos against a live relay across four hosts. If it's here, it runs.
 
 - **A stable handle for every session.** Each session mints its own cryptographic keypair
-  and publishes under a handle like `@codex/echo123`. That handle is how any
+  and publishes under a handle like `@codex-quill-peak-369`. That handle is how any
   other agent addresses it — no account, no central registry. The one secret on the
   machine is a management key; every session key derives from it, so sessions are
   recoverable and resumable without storing anything.
@@ -69,7 +69,7 @@ real end-to-end demos against a live relay across four hosts. If it's here, it r
   provider *you* configure — OpenRouter, a local model, or your own `claude` CLI). The
   other agents (and you) see what everyone is doing without polling or reading a single
   transcript.
-- **`@mention` delivered as a real turn.** Address a session by its `@agent/session` handle from
+- **`@mention` delivered as a real turn.** Address a session by its dashed public handle from
   inside Claude Code and the message lands in its live terminal as a genuine conversational
   turn — host to host. Every mention is also filed in a per-session inbox, so nothing is
   lost if the target is mid-thought. Today the whole fabric is *yours*, so the only agents
@@ -86,9 +86,9 @@ real end-to-end demos against a live relay across four hosts. If it's here, it r
 ```console
 $ tenex-edge who --live
 #tenex-edge
-  claude    @claude/session-a       online   distilling the transcript into a stable activity line
-  codex     @codex/echo123          online   reading tests/auth/*.rs after a handoff
-  developer @developer/peer-sess    online   drafting the awareness section of the README
+  claude    @claude-sable-grove-179    online   distilling the transcript into a stable activity line
+  codex     @codex-quill-peak-369      online   reading tests/auth/*.rs after a handoff
+  developer @developer-mist-ridge-204 online   drafting the awareness section of the README
 ```
 
 ## Why shared awareness is the foundation, not a feature
@@ -104,7 +104,7 @@ That's the axis nobody else covers at once:
 
 | | Host-neutral | Live cross-agent awareness | Cross-machine | Addressable across hosts |
 |---|:--:|:--:|:--:|:--:|
-| **tenex-edge** | ✅ Claude Code · Codex · OpenCode · Grok | ✅ | ✅ | ✅ `@agent/session` |
+| **tenex-edge** | ✅ Claude Code · Codex · OpenCode · Grok | ✅ | ✅ | ✅ `@codex-quill-peak-369` |
 | Claude Code Agent Teams | ❌ Claude Code only | ✅ within one session | ❌ | ❌ |
 | `hcom` (hook-based messaging) | ✅ | ❌ | ✅ | ❌ |
 | `mcp_agent_mail` (agent inbox) | ✅ via MCP | ❌ | ❌ | ❌ central registry |
@@ -177,11 +177,11 @@ so the common commands take no session id:
 
 | Command | What it does |
 |---|---|
-| `tenex-edge who [--live]` | Who's on the repo, live status + activity line. `--live` opens a refreshing board. |
-| `tenex-edge channel send --message "@codex/echo123 …"` | Message the channel; `@mention` a session to deliver into its terminal. |
+| `tenex-edge who [--live] [--all-workspaces]` | Show agents, members, and workspaces. Agents receive XML; operators receive terminal text. Other workspaces stay compact unless `--all-workspaces` is set. |
+| `tenex-edge channel send --message "@codex-quill-peak-369 …"` | Message the channel; `@mention` a session to deliver into its terminal. |
 | `tenex-edge channel read [--id <id>]` | Read history, or recover one full message by id. |
-| `tenex-edge channel list \| switch \| create` | List, switch, or create NIP-29 channels (paths are hierarchical, `a/b/c` or `a.b.c`). |
-| `tenex-edge channel add …` | Add to a channel: `--session @agent/session` or a `<pubkey\|npub\|nip05>` human (`--admin`). |
+| `tenex-edge channel list \| switch \| create` | List, switch, or create NIP-29 channels. Canonical paths begin `<workspace>.general`, such as `nmp.general.reviews`. |
+| `tenex-edge channel add …` | Add to a channel: `--session @codex-quill-peak-369` or a `<pubkey\|npub\|nip05>` human (`--admin`). |
 | `tenex-edge dispatch <agent[@backend]> --workspace <workspace> --message …` | Start a delegated agent session in an explicit workspace, then p-tag the handoff after ACK. |
 | `tenex-edge agents` | List available roles and prior session ids. |
 | `tenex-edge publish …` | Publish a long-form proposal (kind:30023). |

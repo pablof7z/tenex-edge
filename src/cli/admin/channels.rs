@@ -165,7 +165,8 @@ pub async fn channels(action: ChannelAction) -> Result<()> {
             let rooms = v["rooms"].as_array().map(|a| a.as_slice()).unwrap_or(&[]);
             // Root of the tree is the root itself. Colorize ONLY on a real
             // terminal so piped output stays literal-`^slug$`-matchable.
-            println!("{}", parent.if_supports_color(Stdout, |s| s.bold()));
+            let general = format!("{parent}.general");
+            println!("{}", general.if_supports_color(Stdout, |s| s.bold()));
             if rooms.is_empty() {
                 println!("  (no channels)");
                 return Ok(());

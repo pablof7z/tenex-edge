@@ -1,7 +1,7 @@
 ---
 type: noun-entry
 slug: agent-session-handle
-name: "@agent/session"
+name: "@agent-session-code"
 origin: extracted
 source_refs:
   - transcript:1071-1071
@@ -9,9 +9,8 @@ source_refs:
   - transcript:1280-1281
 ---
 
-# @agent/session
+# @agent-session-code
 
-A live session you can summon — the p-taggable handle. The agent segment is the
-role slug and the session segment is the session id or a resolving prefix, as in
-`@codex/echo123`. This is the kind:0 name and the preferred mention target in
-`channel send`.
+A live session you can summon by its p-taggable kind:0 name. The handle combines
+the role slug with a deterministic friendly code, as in `@codex-quill-peak-369`.
+It is the preferred mention target in `channel send`.

@@ -11,6 +11,6 @@ source_refs:
 # roles vs members
 
 available-agents = role configs (<slug>.json = harness/provider/model — the
-types you can invite); members = concrete sessions addressed by `@agent/session`.
+types you can invite); members = concrete sessions addressed by `@agent-session-code`.
 Slug stops being an identity — it is only a role type for spawning, not a durable
 agent handle.

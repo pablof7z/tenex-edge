@@ -44,7 +44,14 @@ async fn agent_who_renders_full_snapshot_after_cursor_advanced() {
         .expect("who should include fabric context");
 
     assert!(fabric.contains("<members>"), "got:\n{fabric}");
-    assert!(fabric.contains("<subchannels>"), "got:\n{fabric}");
+    assert!(
+        fabric.contains("id=\"root.general.task\""),
+        "got:\n{fabric}"
+    );
+    assert!(
+        fabric.contains("<agent name=\"@coder-"),
+        "caller must stay typed as an agent on a cold status cache:\n{fabric}"
+    );
     assert!(
         !fabric.contains("<no-new-activity"),
         "explicit who must not render as a quiet delta:\n{fabric}"

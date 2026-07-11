@@ -1,8 +1,10 @@
 use super::*;
-use crate::who_snapshot::OtherRootSummary;
-use owo_colors::OwoColorize as _;
 use std::collections::BTreeSet;
-use std::fmt::Write as _;
+
+#[path = "who/agent.rs"]
+mod agent_view;
+#[path = "who/human.rs"]
+mod human_view;
 
 #[derive(serde::Deserialize, Default)]
 pub(in crate::daemon::server) struct WhoParams {
@@ -49,18 +51,21 @@ pub(in crate::daemon::server) fn rpc_who(
         return Ok(serde_json::json!({ "expired": rows }));
     }
     let anchor = CallerAnchor::from_params(params);
-    let caller_rec = if p.all_workspaces {
-        None
-    } else if p.pty_session.as_deref().filter(|s| !s.is_empty()).is_some()
+    let has_exact_anchor = p.pty_session.as_deref().filter(|s| !s.is_empty()).is_some()
         || p.harness_session
             .as_deref()
             .filter(|s| !s.is_empty())
             .is_some()
-        || p.watch_pid.is_some()
-    {
-        Some(resolve_session_inner(state, &anchor, ResolveScope::Strict)?)
-    } else if p.agent.as_deref().filter(|s| !s.is_empty()).is_some()
-        || p.group.as_deref().filter(|s| !s.is_empty()).is_some()
+        || p.watch_pid.is_some();
+    let caller_rec = if has_exact_anchor {
+        match resolve_session_inner(state, &anchor, ResolveScope::Strict) {
+            Ok(rec) => Some(rec),
+            Err(_) if p.all_workspaces => None,
+            Err(error) => return Err(error),
+        }
+    } else if !p.all_workspaces
+        && (p.agent.as_deref().filter(|s| !s.is_empty()).is_some()
+            || p.group.as_deref().filter(|s| !s.is_empty()).is_some())
     {
         anyhow::bail!(
             "who needs an exact live session anchor; agent/channel env alone is not session context"
@@ -93,10 +98,8 @@ pub(in crate::daemon::server) fn rpc_who(
     })?;
     let mut out = serde_json::to_value(&snapshot)?;
 
-    // Attach the UNIFIED fabric view (same format as the hook injection — decision
-    // A) whenever a single current channel resolves. `--all-workspaces` has no single
-    // scope, so it keeps the cross-workspace snapshot table. The caller (this session,
-    // when run inside an agent) is marked `(you)` and excluded from peer echoes.
+    // Exact agent sessions get the structured agent awareness projection. Bare
+    // operator invocations keep the terminal-oriented fabric renderer.
     if let Some(scope) = current_root.as_deref() {
         // Reuse the exact caller session, when present, for both the fabric
         // `(you)` match and the folded-in `<self />` row (issue #99).
@@ -114,24 +117,37 @@ pub(in crate::daemon::server) fn rpc_who(
         // `who` is an explicit orientation command. Even from inside an agent
         // session, render the full view rather than that session's delta cursor.
         let render_cursor = 0;
-        let fabric = state.with_store(|s| {
-            crate::fabric_context::render_fabric_context(
-                s,
-                crate::fabric_context::FabricContextInput {
-                    session: rec,
-                    scope,
-                    cursor: render_cursor,
-                    now,
-                    self_slug: &self_slug,
-                    self_pubkey: &self_pubkey,
-                    backend_pubkey: &backend_pk,
-                    local_host: &host,
-                    forced_messages: &[],
-                    warnings: &[],
-                    force: true,
-                },
-            )
-        });
+        let fabric = if let Some(agent_session) = rec {
+            let roots = state.with_store(root_channels)?;
+            Some(agent_view::render(
+                state,
+                &roots,
+                agent_session,
+                now,
+                &host,
+                &backend_pk,
+                false,
+            ))
+        } else {
+            state.with_store(|s| {
+                crate::fabric_context::render_fabric_context(
+                    s,
+                    crate::fabric_context::FabricContextInput {
+                        session: None,
+                        scope,
+                        cursor: render_cursor,
+                        now,
+                        self_slug: &self_slug,
+                        self_pubkey: &self_pubkey,
+                        backend_pubkey: &backend_pk,
+                        local_host: &host,
+                        forced_messages: &[],
+                        warnings: &[],
+                        force: true,
+                    },
+                )
+            })
+        };
         if let Some(fabric) = fabric {
             out["fabric"] = serde_json::Value::String(fabric);
             if rec.is_none() {
@@ -155,7 +171,11 @@ pub(in crate::daemon::server) fn rpc_who(
                     )
                 });
                 if let Some(mut human) = human {
-                    append_other_roots_human(&mut human, &snapshot.other_roots, p.human_color);
+                    human_view::append_other_roots(
+                        &mut human,
+                        &snapshot.other_roots,
+                        p.human_color,
+                    );
                     out["fabric_human"] = serde_json::Value::String(human);
                 }
             }
@@ -175,26 +195,33 @@ pub(in crate::daemon::server) fn rpc_who(
             }
         }
     } else if p.all_workspaces {
-        // No single scope exists across all workspaces, so `--all-workspaces` gets
-        // the same fabric renderer applied once per root channel instead of
-        // falling back to the old snapshot table (issue: `who` and
-        // `who --all-workspaces` must not diverge in output format).
         let roots = state.with_store(root_channels)?;
-        let fabric = state.with_store(|s| {
-            crate::fabric_context::render_fabric_all_workspaces(s, &roots, now, &host, &backend_pk)
-        });
-        out["fabric"] = serde_json::Value::String(fabric);
-        let human = state.with_store(|s| {
-            crate::fabric_context::render_fabric_all_workspaces_human(
-                s,
-                &roots,
-                now,
-                &host,
-                &backend_pk,
-                p.human_color,
-            )
-        });
-        out["fabric_human"] = serde_json::Value::String(human);
+        if let Some(rec) = caller_rec.as_ref() {
+            let fabric = agent_view::render(state, &roots, rec, now, &host, &backend_pk, true);
+            out["fabric"] = serde_json::Value::String(fabric);
+        } else {
+            let fabric = state.with_store(|s| {
+                crate::fabric_context::render_fabric_all_workspaces(
+                    s,
+                    &roots,
+                    now,
+                    &host,
+                    &backend_pk,
+                )
+            });
+            out["fabric"] = serde_json::Value::String(fabric);
+            let human = state.with_store(|s| {
+                crate::fabric_context::render_fabric_all_workspaces_human(
+                    s,
+                    &roots,
+                    now,
+                    &host,
+                    &backend_pk,
+                    p.human_color,
+                )
+            });
+            out["fabric_human"] = serde_json::Value::String(human);
+        }
     }
     Ok(out)
 }
@@ -216,76 +243,6 @@ fn root_channels(store: &crate::state::Store) -> Result<Vec<String>> {
             .map(|binding| binding.channel_h),
     );
     Ok(roots.into_iter().collect())
-}
-
-fn append_other_roots_human(out: &mut String, other_roots: &[OtherRootSummary], color: bool) {
-    if other_roots.is_empty() {
-        return;
-    }
-    let _ = writeln!(
-        out,
-        "{}",
-        human_style("Other workspaces", color, HumanStyle::Header)
-    );
-    for root in other_roots {
-        let name = human_style(&root.root, color, HumanStyle::Root);
-        let agents = root
-            .agents
-            .iter()
-            .map(|agent| human_style(&format!("@{agent}"), color, HumanStyle::Agent))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let count = format!(
-            "{} agent{}",
-            root.agent_count,
-            if root.agent_count == 1 { "" } else { "s" }
-        );
-        let about = root
-            .about
-            .as_deref()
-            .filter(|about| !about.trim().is_empty())
-            .map(|about| format!(" - {about}"))
-            .unwrap_or_default();
-        if agents.is_empty() {
-            let _ = writeln!(out, "  {}  {}{}", name, human_dim(&count, color), about);
-        } else {
-            let _ = writeln!(
-                out,
-                "  {}  {}  {}{}",
-                name,
-                human_dim(&count, color),
-                agents,
-                about
-            );
-        }
-    }
-    out.push('\n');
-}
-
-#[derive(Clone, Copy)]
-enum HumanStyle {
-    Agent,
-    Header,
-    Root,
-}
-
-fn human_style(text: &str, color: bool, style: HumanStyle) -> String {
-    if !color {
-        return text.to_string();
-    }
-    match style {
-        HumanStyle::Agent => text.cyan().to_string(),
-        HumanStyle::Header => text.bold().to_string(),
-        HumanStyle::Root => text.blue().bold().to_string(),
-    }
-}
-
-fn human_dim(text: &str, color: bool) -> String {
-    if color {
-        text.dimmed().to_string()
-    } else {
-        text.to_string()
-    }
 }
 
 #[cfg(test)]

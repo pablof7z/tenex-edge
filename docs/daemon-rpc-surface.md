@@ -24,10 +24,12 @@ result: {"session_id": "te-…"}   // session_id printed verbatim to stdout
 ```
 The `session_id` is the raw canonical id — an internal correlation handle for
 hooks, PTY session binding, resume, and DB rows. It is never rendered as a
-user-facing identity; a session is addressed by its **agent/session handle** —
-`@<agent-slug>/<session-id-or-prefix>`, backed by the session's own minted pubkey.
-The provider opens the workspace root NIP-29 group and adds the session agent
-as a relay member before the engine publishes presence. There is no local agent
+user-facing identity; a session is addressed by its dashed public handle, such
+as `@codex-quill-peak-369`, backed by the session's own minted pubkey.
+The provider opens the workspace root NIP-29 group, canonically named `general`,
+and adds the session agent as a relay member before the engine publishes presence.
+The root group's durable `h` remains the workspace slug, so its public address is
+`<workspace>.general`. There is no local agent
 allow/block file in the NIP-29 path.
 
 ### `session_end`
@@ -44,12 +46,19 @@ produced client-side to match today's output.
 ```jsonc
 params: {"workspace": "…"|null, "all_workspaces": bool, "cwd": "/path"}
 result: {"now": u64, "fabric": "<tenex-edge>…</tenex-edge>"|null,
+         "fabric_human": "…"|null,
          "rows": [ {source, fresh, slug, channel, status, host,
                     session_id, age_secs}, … ]}
 ```
-Returns the unified fabric context for the resolved channel or, with
-`all_workspaces`, one rendered block per workspace root. Agent-scoped `who`
-advances that session's fabric cursor after rendering.
+An exact live agent caller receives XML with one global `<agents>` capability
+inventory and a `<workspaces>` inventory. Every known workspace is listed;
+normally only the caller's workspace is expanded, while `all_workspaces` expands
+all workspace blocks. Channel contents recurse only through channels containing
+the caller. Members are typed as `<agent>` or `<human>` and backend management
+keys are excluded. Capability rows carry `workspace-availability` from
+materialized kind:30555 advertisements. A bare operator caller receives
+terminal-oriented `fabric_human` text. Agent-scoped `who` advances that
+session's fabric cursor after rendering.
 
 ### `turn_start`
 ```jsonc
@@ -141,7 +150,7 @@ channel.
 ### `root_channels`
 ```jsonc
 params: {}
-result: {"channels": [ {slug, name, about}, … ]}
+result: {"channels": [ {slug, about}, … ]}
 ```
 Returns all known workspace root channels from the daemon's cache.
 
@@ -181,7 +190,7 @@ result: {"child_h": "…", "display_path": "…", "switched": bool,
          "orchestration_event_id": "hex"|""}
 ```
 Creates a child channel under the caller's current channel, an explicit parent,
-or the workspace root resolved from cwd.
+or the workspace's `<workspace>.general` root resolved from cwd.
 
 ### `channel_list`
 ```jsonc
@@ -206,9 +215,9 @@ result: {"working": bool, "status": "…", "session_count": N, "member_count": N
 Pure-read snapshot for the host statusline integration — no drain, no writes.
 
 ### `who` (self-identity)
-When run inside an agent session (`session`/`agent`/`group` signal present), `who`
-attaches a `self` block — the caller's public handle (`@<agent-slug>/<session-id>`),
-its per-session pubkey, current channel, membership, and status.
+When an exact live session anchor resolves, `who` emits the agent XML projection
+with a structured `<self>` row. Loose `agent`/`group` hints are insufficient and
+never bind an arbitrary sibling session.
 
 ### `ping`
 ```jsonc

@@ -7,7 +7,7 @@ mod human_render;
 mod messages;
 mod model;
 mod people;
-mod refs;
+pub(crate) mod refs;
 mod render;
 #[cfg(test)]
 mod tests;

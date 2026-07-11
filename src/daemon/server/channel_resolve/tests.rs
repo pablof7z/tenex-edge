@@ -101,7 +101,10 @@ fn ambiguous_name_lists_relative_paths() {
         ChannelResolution::Ambiguous(refs) => {
             assert_eq!(
                 refs,
-                vec!["epic999/planning".to_string(), "planning".to_string()]
+                vec![
+                    "h-root.general.epic999.planning".to_string(),
+                    "h-root.general.planning".to_string()
+                ]
             );
         }
         _ => panic!("expected ambiguous"),
@@ -127,6 +130,26 @@ fn dotted_path_resolves_same_as_slashed() {
     ));
     assert!(matches!(
         resolve_channel_ref(&store, "h-root", "epic/planning"),
+        ChannelResolution::Unique(ref id) if id == "h-plan"
+    ));
+}
+
+#[test]
+fn canonical_general_references_resolve_from_workspace_root() {
+    let store = Store::open_memory().unwrap();
+    chan(&store, "workspace", "general", "");
+    chan(&store, "h-plan", "planning", "workspace");
+
+    assert!(matches!(
+        resolve_channel_ref(&store, "workspace", "workspace.general"),
+        ChannelResolution::Unique(ref id) if id == "workspace"
+    ));
+    assert!(matches!(
+        resolve_channel_ref(&store, "workspace", "workspace.general.planning"),
+        ChannelResolution::Unique(ref id) if id == "h-plan"
+    ));
+    assert!(matches!(
+        resolve_channel_ref(&store, "workspace", "general.planning"),
         ChannelResolution::Unique(ref id) if id == "h-plan"
     ));
 }
@@ -158,7 +181,10 @@ fn channel_reference_prefers_unique_relative_path() {
     chan(&store, "h-epic", "epic", "h-root");
     chan(&store, "h-plan", "planning", "h-epic");
 
-    assert_eq!(channel_reference_for(&store, "h-plan"), "epic/planning");
+    assert_eq!(
+        channel_reference_for(&store, "h-plan"),
+        "h-root.general.epic.planning"
+    );
 }
 
 #[test]

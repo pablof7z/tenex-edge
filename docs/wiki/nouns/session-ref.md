@@ -9,5 +9,5 @@ source_refs:
 
 # session_ref
 
-The session-bearing member reference: `agent/session`, shared by the legacy
-(`people`) and pure (`assemble`) member-row paths so they never drift.
+The session-bearing member reference: `agent-session-code`, shared by member-row
+paths so they render and resolve the same public handle.

@@ -36,11 +36,10 @@ the role file contributes behavior, not a signing identity.
 
 ## Agent/Session Handle
 
-Each session publishes a kind:0 profile whose `name` is `@<agent-slug>/<session-id>`.
-For example, a Codex session can be mentioned as `@codex/echo123`. That
-`@agent/session` handle is the p-taggable mention target peers use to address the
-session. Since the handle contains the canonical session id, a resumed session
-keeps its handle.
+Each session publishes a kind:0 profile with a dashed public name. For example,
+a Codex session can be mentioned as `@codex-quill-peak-369`. That handle is the
+p-taggable mention target peers use to address the session. Its friendly code is
+derived from the canonical session id, so a resumed session keeps its handle.
 
 ## Trust Is Channel Membership
 
@@ -54,12 +53,12 @@ membership is presence, not the definition of the session's identity.
 
 The roster (`available-agents`) is the set of role configs on the machine — the
 *types* you can add to a channel. Channel *members* are concrete sessions,
-rendered as their role plus `@agent/session`. Adding a role to a channel spawns a
+rendered by their dashed public handles. Adding a role to a channel spawns a
 new session; that session is what becomes a member.
 
 ## Session Identification and Routing
 
-The raw `session_id` is the internal correlation id, and the derived pubkey is what signs and is routed to. Peers reference a session by its `@agent/session` handle, never by raw pubkey. A mention that cannot be resolved to a current member is silently treated as no-mention rather than erroring, so mention resolution never blocks chat delivery.
+The raw `session_id` is the internal correlation id, and the derived pubkey is what signs and is routed to. Peers reference a session by its dashed public handle, never by raw pubkey. A mention that cannot be resolved to a current member is silently treated as no-mention rather than erroring, so mention resolution never blocks chat delivery.
 
 `resolve_session_inner` is the central session-resolution function in the daemon where every RPC handler resolves caller identity. It has 11 call sites: `who`, `chat_write`, `chat_read`, `propose`, `channels_create`, `channels_edit`, `channels_join`, `channels_leave`, `channels_switch`, `pty_send`, `pty_attach`, `turn_start`, `turn_check`, `turn_end`, `invite`, and `channel_add_member`. Agent identity auto-provisioning happens at this identity-resolution choke point rather than in `rpc_who` alone, so all RPC handlers obtain just-in-time identity without per-handler duplication.
 
@@ -75,7 +74,6 @@ secret beyond the machine's management key.
 
 `tenex-edge who`, run inside an agent session, shows the caller who they are and
 which channel they are on: a self header of the form
-"You are **@agent/session** on **{channel}**." followed by pubkey, status,
-membership, and pending counts. The self header is prepended to both `who` and the
-`who --live` fabric view. The `(you)` member match keys on the session's derived
+an XML `<self>` row followed by global agent capabilities and workspace/channel
+membership. The same projection drives `who --live`. The caller member match keys on the session's derived
 pubkey.

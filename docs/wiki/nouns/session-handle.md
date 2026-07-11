@@ -10,7 +10,7 @@ source_refs:
 
 # session handle
 
-The primary human-friendly handle for a session: `@<agent-slug>/<session-id>`.
+The primary human-friendly handle for a session: `@<agent-slug>-<session-code>`.
 Peers use it as the session's kind:0 profile name and p-taggable mention target.
-Because the handle contains the canonical session id, a resumed session keeps the
-same address.
+Because the friendly code is derived from the canonical session id, a resumed
+session keeps the same address.

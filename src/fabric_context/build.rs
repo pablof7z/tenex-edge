@@ -216,10 +216,13 @@ fn channel_summary(store: &Store, channel: &str) -> WorkspaceRow {
         .flatten()
         .expect("renderable channels are filtered through get_channel first");
     WorkspaceRow {
-        name: ch
-            .human_name()
-            .map(str::to_string)
-            .unwrap_or_else(|| display_name(store, channel)),
+        name: if ch.parent.is_empty() {
+            "general".to_string()
+        } else {
+            ch.human_name()
+                .map(str::to_string)
+                .unwrap_or_else(|| display_name(store, channel))
+        },
         about: ch.about,
     }
 }
@@ -227,11 +230,7 @@ fn channel_summary(store: &Store, channel: &str) -> WorkspaceRow {
 fn workspace_summary(store: &Store, channel: &str) -> WorkspaceRow {
     let ch = store.get_channel(channel).ok().flatten();
     WorkspaceRow {
-        name: ch
-            .as_ref()
-            .and_then(|c| c.human_name())
-            .map(str::to_string)
-            .unwrap_or_else(|| display_name(store, channel)),
+        name: channel.to_string(),
         about: ch.map(|c| c.about).unwrap_or_default(),
     }
 }

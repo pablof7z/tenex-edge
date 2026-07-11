@@ -34,9 +34,8 @@ pub(crate) struct WhoSnapshot {
     /// (distinct from its *root channel*). `None` when the scope is a root channel.
     #[serde(default)]
     pub(crate) channel_parent: Option<String>,
-    /// The human DISPLAY label for `root`: its kind:39000 `name` when set, else
-    /// the raw scope id. Rendered in the `Channel:`/`Workspace:` headers so the
-    /// opaque channel id never surfaces when a name exists. `*` for all workspaces.
+    /// Human label for the scope: workspace id for roots, channel name for
+    /// descendants, and `*` for all workspaces.
     #[serde(default)]
     pub(crate) root_display: String,
 }
@@ -222,11 +221,9 @@ pub(crate) fn load_who_snapshot(
                     None
                 }
             };
-            // Show the root channel's human name; the raw id is only a fallback.
-            let display = display_name(store, &root);
             let agents: Vec<String> = agents.into_iter().collect();
             OtherRootSummary {
-                root: display,
+                root,
                 agent_count: agents.len(),
                 agents,
                 about,
@@ -292,9 +289,11 @@ pub(crate) fn load_who_snapshot(
         .filter(|parent| !parent.is_empty())
     });
 
-    let root_display = current_root
-        .map(|p| display_name(store, p))
-        .unwrap_or_else(|| "*".to_string());
+    let root_display = match (current_root, channel_parent.is_some()) {
+        (Some(scope), true) => display_name(store, scope),
+        (Some(scope), false) => scope.to_string(),
+        (None, _) => "*".to_string(),
+    };
 
     Ok(WhoSnapshot {
         root: current_root.unwrap_or("*").to_string(),

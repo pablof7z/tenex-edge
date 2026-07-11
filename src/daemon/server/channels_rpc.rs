@@ -72,11 +72,8 @@ pub(in crate::daemon::server) async fn rpc_channel_create(
     let p: P = serde_json::from_value(params.clone()).context("channel_create params")?;
     crate::channel_about::validate_channel_about(&p.about)?;
 
-    // Resolve the creator agent (when invoked from a session) FIRST — both the
-    // child-of-current-channel default and the auto-switch below need it. Strict
-    // resolution (no channel fallback): child-of-current and auto-switch must only
-    // fire when actually run as an agent, never bind to an arbitrary sibling
-    // session of a bare operator invocation.
+    // Resolve the creator first for child-of-current and auto-switch. Strict
+    // resolution prevents a bare operator invocation from binding a sibling.
     let creator_rec = resolve_session_inner(
         state,
         &CallerAnchor::from_params(params),
@@ -91,11 +88,7 @@ pub(in crate::daemon::server) async fn rpc_channel_create(
         .filter(|s| !s.is_empty())
         .and_then(|cwd| crate::workspace::resolve(std::path::Path::new(cwd)).ok());
 
-    // Resolve the parent the new channel hangs under:
-    //   1. `--parent-channel <ref>` — channel-relative override.
-    //   2. the creating agent's CURRENT channel — the child-of-current default.
-    //   3. an explicit literal `parent` — the picker / operator / test path.
-    //   4. cwd-resolved channel root — bare operator invocation from a channel dir.
+    // Parent priority: override, current session, explicit parent, then cwd root.
     let parent: String = if let Some(r) = p
         .parent_channel
         .as_deref()
@@ -131,10 +124,16 @@ pub(in crate::daemon::server) async fn rpc_channel_create(
         );
     };
 
-    // Names are unique per parent: a `create --name X` where X already exists is
-    // an ERROR, not a silent no-op — the agent needs to KNOW the channel is already
-    // there (so it switches in rather than assuming it minted a fresh one). Point
-    // it at the existing channel with a copy-paste switch command.
+    let parent_is_workspace_root = state.with_store(|store| {
+        store
+            .get_channel(&parent)
+            .ok()
+            .flatten()
+            .is_none_or(|channel| channel.parent.is_empty())
+    });
+    crate::channel_name::validate_child(&p.name, parent_is_workspace_root)?;
+
+    // Names are unique per parent. A duplicate is an error, not a silent no-op.
     if let Some(existing) = state.with_store(|s| s.channel_id_for_name(&parent, &p.name))? {
         anyhow::bail!(
             "channel {:?} already exists under this parent (id {existing}). \

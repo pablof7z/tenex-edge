@@ -9,4 +9,5 @@ source_refs:
 
 # expired session
 
-A session row that is no longer `alive` (its process exited) — the resume-candidate set, each surfaced by its public `agent/session_id` handle.
+A session row that is no longer `alive` (its process exited). Resume candidates
+are surfaced by their public `agent-session-code` handles.

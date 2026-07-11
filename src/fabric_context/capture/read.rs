@@ -264,10 +264,13 @@ pub(super) fn channel_summary(store: &Store, channel: &str) -> SummaryCap {
         .flatten()
         .expect("renderable channels are filtered through get_channel first");
     SummaryCap {
-        name: ch
-            .human_name()
-            .map(str::to_string)
-            .unwrap_or_else(|| display_name(store, channel)),
+        name: if ch.parent.is_empty() {
+            "general".to_string()
+        } else {
+            ch.human_name()
+                .map(str::to_string)
+                .unwrap_or_else(|| display_name(store, channel))
+        },
         about: ch.about,
     }
 }
@@ -275,11 +278,7 @@ pub(super) fn channel_summary(store: &Store, channel: &str) -> SummaryCap {
 pub(super) fn workspace_summary(store: &Store, channel: &str) -> SummaryCap {
     let ch = store.get_channel(channel).ok().flatten();
     SummaryCap {
-        name: ch
-            .as_ref()
-            .and_then(|c| c.human_name())
-            .map(str::to_string)
-            .unwrap_or_else(|| display_name(store, channel)),
+        name: channel.to_string(),
         about: ch.map(|c| c.about).unwrap_or_default(),
     }
 }
