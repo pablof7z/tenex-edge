@@ -20,10 +20,11 @@ pub(super) fn evidence(
     };
     let text = graph.current_text();
     let channel_h = str_at(session_channel, "channel_h");
+    let channel_ref = str_at(session_channel, "channel_ref");
     let channel_confirmed = bool_at(session_channel, "confirmed");
     let rendered_unconfirmed_channel = text
         .as_ref()
-        .is_some_and(|text| !channel_confirmed && renders_channel_block(text, channel_h));
+        .is_some_and(|text| !channel_confirmed && renders_channel_block(text, channel_ref));
     let missing_channel_warning_rendered = text
         .as_ref()
         .is_some_and(|text| renders_missing_channel_warning(text, channel_h));
@@ -54,8 +55,10 @@ pub(super) fn evidence(
     })
 }
 
-fn renders_channel_block(text: &str, channel_h: &str) -> bool {
-    !channel_h.is_empty() && text.contains(&format!("<channel name=\"#{channel_h}\""))
+fn renders_channel_block(text: &str, channel_ref: &str) -> bool {
+    !channel_ref.is_empty()
+        && (text.contains(&format!(" channel=\"{channel_ref}\""))
+            || text.contains(&format!(" ref=\"{channel_ref}\"")))
 }
 
 fn renders_missing_channel_warning(text: &str, channel_h: &str) -> bool {

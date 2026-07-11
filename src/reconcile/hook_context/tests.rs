@@ -130,9 +130,9 @@ fn determinism_and_replay() {
     assert_eq!(out_a.receipt.frame, FrameKind::Baseline);
 }
 
-/// `cursor == 0` → full `<members>`; `cursor > 0` → delta `<recent-presence>`
-/// only. The shape flip is attributable to the `cursor` input via the frame's
-/// own dependency trace — not a re-derivation.
+/// `cursor == 0` → full members/tree; `cursor > 0` → changed tree rows and
+/// `<recent-presence>` only. The shape flip is attributable to the cursor via
+/// the frame's own dependency trace — not a re-derivation.
 #[test]
 fn cursor_drives_shape_and_is_attributed() {
     let store = seed_store();

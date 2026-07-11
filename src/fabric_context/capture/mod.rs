@@ -60,7 +60,6 @@ pub(crate) struct MetaInput {
     pub(super) workspace: SummaryCap,
     pub(super) agents: Vec<AgentCap>,
     pub(super) channels: Vec<ChannelCap>,
-    pub(super) unjoined: Vec<UnjoinedCap>,
     pub(super) warnings: Vec<String>,
     pub(super) self_pubkey: String,
     pub(super) self_ref: String,
@@ -113,6 +112,7 @@ pub(super) struct SelfCap {
 #[derive(Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(super) struct SummaryCap {
     pub(super) name: String,
+    pub(super) channel: String,
     pub(super) about: String,
 }
 
@@ -128,15 +128,14 @@ pub(super) struct ChannelCap {
     pub(super) name: String,
     #[serde(default)]
     pub(super) reference: String,
-    #[serde(default)]
-    pub(super) workspace: String,
     pub(super) about: String,
-    pub(super) subchannels: Vec<SummaryCap>,
+    pub(super) subchannels: Vec<ChannelSummaryCap>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub(super) struct UnjoinedCap {
+pub(super) struct ChannelSummaryCap {
     pub(super) name: String,
+    pub(super) reference: String,
     pub(super) about: String,
     pub(super) updated_at: u64,
 }
@@ -167,7 +166,7 @@ pub(super) struct MsgBundle {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(super) struct EvCap {
     pub(super) id: String,
-    pub(super) channel_display: String,
+    pub(super) channel_ref: String,
     pub(super) from_ref: String,
     pub(super) recipient_refs: Vec<String>,
     pub(super) created_at: u64,
@@ -208,7 +207,6 @@ pub(crate) fn capture_inputs(store: &Store, input: &FabricContextInput<'_>) -> V
             h: h.clone(),
             name: summary.name,
             reference: crate::channel_ref::full_channel_ref(store, h),
-            workspace: read::channel_workspace(store, h),
             about: summary.about,
             subchannels: read::subchannel_caps(store, h),
         });
@@ -284,7 +282,6 @@ pub(crate) fn capture_inputs(store: &Store, input: &FabricContextInput<'_>) -> V
         workspace: read::workspace_summary(store, &root),
         agents: read::agent_caps(store, &root, input),
         channels,
-        unjoined: read::unjoined_caps(store, &root, &channel_hs),
         warnings,
         self_pubkey: input.self_pubkey.to_string(),
         self_ref,

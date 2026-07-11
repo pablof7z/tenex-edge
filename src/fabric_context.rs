@@ -11,7 +11,7 @@ pub(crate) mod refs;
 mod render;
 #[cfg(test)]
 mod tests;
-mod workspace_labels;
+mod tree;
 
 pub(crate) use capture::{
     capture_inputs, MembersInput, MessagesInput, MetaInput, PresenceInput, ViewInputs,
@@ -74,12 +74,7 @@ pub(crate) fn render_fabric_context(
 ) -> Option<String> {
     let force = input.force;
     let view = build_view(store, input);
-    if !force
-        && view.channels.is_empty()
-        && view.agents.is_empty()
-        && view.important.is_empty()
-        && view.warnings.is_empty()
-    {
+    if !force && view.is_empty() {
         return None;
     }
     Some(render_view(&view))
@@ -92,12 +87,7 @@ pub(crate) fn render_fabric_context_human(
 ) -> Option<String> {
     let force = input.force;
     let view = build_view(store, input);
-    if !force
-        && view.channels.is_empty()
-        && view.agents.is_empty()
-        && view.important.is_empty()
-        && view.warnings.is_empty()
-    {
+    if !force && view.is_empty() {
         return None;
     }
     Some(render_human_view(&view, color))

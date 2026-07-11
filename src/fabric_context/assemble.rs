@@ -6,7 +6,7 @@
 //! inputs and it replays byte-for-byte from the same inputs.
 //!
 //! The full-vs-delta SHAPE decision keys on `cursor` (`cursor == 0` → full
-//! `<members>`/`<subchannels>`; `cursor > 0` → delta `<recent-presence>` only);
+//! members/descendant tree; `cursor > 0` → changed descendants and presence);
 //! every time-relative string keys on `now`. Equivalence with the legacy
 //! `build_view` is asserted in the reconciler's regression test.
 
@@ -39,11 +39,12 @@ pub(crate) fn assemble_view(inputs: &ViewInputs, cursor: u64, now: u64) -> Fabri
         }),
         workspace: WorkspaceRow {
             name: meta.workspace.name.clone(),
+            channel: meta.workspace.channel.clone(),
             about: meta.workspace.about.clone(),
         },
         agents: agent_rows(inputs, cursor, now),
+        root: None,
         channels: Vec::new(),
-        unjoined: unjoined_rows(inputs, now),
         important: Vec::new(),
         warnings: meta
             .warnings
@@ -55,6 +56,7 @@ pub(crate) fn assemble_view(inputs: &ViewInputs, cursor: u64, now: u64) -> Fabri
     };
 
     let full = cursor == 0;
+    let mut channel_rows = Vec::new();
     for chan in &meta.channels {
         let (messages, omitted) = inputs
             .messages
@@ -63,21 +65,32 @@ pub(crate) fn assemble_view(inputs: &ViewInputs, cursor: u64, now: u64) -> Fabri
             .map(|bundle| message_rows(bundle, cursor, now))
             .unwrap_or_default();
         let presence = presence_rows(inputs, &chan.h, cursor, now);
-        if !full && messages.is_empty() && presence.is_empty() {
+        let children = chan
+            .subchannels
+            .iter()
+            .filter(|child| full || (child.updated_at > cursor && child.updated_at <= now))
+            .map(|child| {
+                ChannelBlock::compact(
+                    child.name.clone(),
+                    child.reference.clone(),
+                    child.about.clone(),
+                )
+            })
+            .collect::<Vec<_>>();
+        if !full && messages.is_empty() && presence.is_empty() && children.is_empty() {
             continue;
         }
         for msg in &messages {
             if msg.mention {
                 view.important.push(ImportantRow {
-                    channel: msg.channel.clone(),
+                    channel_ref: msg.channel_ref.clone(),
                     message_id: msg.id.clone(),
                 });
             }
         }
-        view.channels.push(ChannelBlock {
+        channel_rows.push(ChannelBlock {
             name: chan.name.clone(),
             reference: chan.reference.clone(),
-            workspace: chan.workspace.clone(),
             about: chan.about.clone(),
             members: if full {
                 members::member_rows(inputs, &chan.h, now)
@@ -85,21 +98,12 @@ pub(crate) fn assemble_view(inputs: &ViewInputs, cursor: u64, now: u64) -> Fabri
                 Vec::new()
             },
             presence,
-            subchannels: if full {
-                chan.subchannels
-                    .iter()
-                    .map(|s| ChannelSummaryRow {
-                        name: s.name.clone(),
-                        about: s.about.clone(),
-                    })
-                    .collect()
-            } else {
-                Vec::new()
-            },
+            children,
             messages,
             omitted,
         });
     }
+    (view.root, view.channels) = super::tree::arrange(&view.workspace.name, channel_rows);
     view
 }
 
@@ -112,19 +116,6 @@ fn agent_rows(inputs: &ViewInputs, cursor: u64, now: u64) -> Vec<AgentRow> {
         .map(|a| AgentRow {
             reference: a.reference.clone(),
             about: a.about.clone(),
-        })
-        .collect()
-}
-
-fn unjoined_rows(inputs: &ViewInputs, now: u64) -> Vec<UnjoinedChannelRow> {
-    inputs
-        .meta
-        .unjoined
-        .iter()
-        .map(|u| UnjoinedChannelRow {
-            name: u.name.clone(),
-            about: u.about.clone(),
-            last_active: relative_time(u.updated_at, now),
         })
         .collect()
 }
@@ -226,7 +217,7 @@ fn message_rows(bundle: &MsgBundle, cursor: u64, now: u64) -> (Vec<MessageRow>, 
             mention: e.mentions_self || forced_mentions.contains(e.id.as_str()),
             age: relative_time(e.created_at, now),
             id: e.id,
-            channel: e.channel_display,
+            channel_ref: e.channel_ref,
             from: e.from_ref,
             recipients: e.recipient_refs,
             body: e.body,

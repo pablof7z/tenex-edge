@@ -1,5 +1,4 @@
 use crate::fabric_context::model::*;
-use crate::fabric_context::workspace_labels::{channel_workspace, channels_need_workspace};
 use std::fmt::Write as _;
 
 mod all_workspaces;
@@ -29,23 +28,39 @@ pub(super) fn render_workspace(
         "\n\n  <workspace name=\"{}\"",
         esc_attr(&view.workspace.name)
     );
+    if !view.workspace.channel.is_empty() {
+        let _ = write!(out, " channel=\"{}\"", esc_attr(&view.workspace.channel));
+    }
     if !view.workspace.about.is_empty() {
         let _ = write!(out, " about=\"{}\"", esc_attr(&view.workspace.about));
     }
     out.push('>');
     render_agents(out, agents, agents_tag);
-    let show_workspace = channels_need_workspace(&view.channels, &view.workspace.name);
-    for channel in &view.channels {
-        render_channel(out, channel, show_workspace);
+    if let Some(root) = &view.root {
+        render_channel_body(out, root, 4);
     }
-    render_unjoined(out, &view.unjoined);
+    if view
+        .root
+        .as_ref()
+        .is_some_and(|root| !root.children.is_empty())
+        || !view.channels.is_empty()
+    {
+        out.push_str("\n    <channels>");
+        if let Some(root) = &view.root {
+            for channel in &root.children {
+                render_channel(out, channel, 6);
+            }
+        }
+        for channel in &view.channels {
+            render_channel(out, channel, 6);
+        }
+        out.push_str("\n    </channels>");
+    }
     out.push_str("\n  </workspace>");
     render_important(out, &view.important);
     render_warnings(out, &view.warnings);
 }
 
-/// A quiet delta: explain that the fabric reports only changes, rather than
-/// emitting an empty `<workspace>` block that reads as "channels disappeared".
 fn render_no_new_activity(out: &mut String, workspace: &str) {
     let _ = write!(
         out,
@@ -81,166 +96,150 @@ pub(super) fn render_agents(out: &mut String, agents: &[AgentRow], tag: &str) {
         return;
     }
     let _ = write!(out, "\n    <{tag}>");
-    for a in agents {
-        let _ = write!(out, "\n      <agent ref=\"@{}\"", esc_attr(&a.reference));
-        if !a.about.is_empty() {
-            let _ = write!(out, " about=\"{}\"", esc_attr(&a.about));
+    for agent in agents {
+        let _ = write!(
+            out,
+            "\n      <agent ref=\"@{}\"",
+            esc_attr(&agent.reference)
+        );
+        if !agent.about.is_empty() {
+            let _ = write!(out, " about=\"{}\"", esc_attr(&agent.about));
         }
         out.push_str(" />");
     }
     let _ = write!(out, "\n    </{tag}>");
 }
 
-fn render_channel(out: &mut String, channel: &ChannelBlock, show_workspace: bool) {
+fn render_channel(out: &mut String, channel: &ChannelBlock, indent: usize) {
+    let pad = " ".repeat(indent);
     let _ = write!(
         out,
-        "\n\n    <channel name=\"#{}\" ref=\"{}\"",
+        "\n{pad}<channel name=\"#{}\" ref=\"{}\"",
         esc_attr(&channel.name),
         esc_attr(&channel.reference)
     );
-    if let Some(workspace) = channel_workspace(channel, show_workspace) {
-        let _ = write!(out, " workspace=\"{}\"", esc_attr(workspace));
-    }
     if !channel.about.is_empty() {
         let _ = write!(out, " about=\"{}\"", esc_attr(&channel.about));
     }
+    if channel.is_compact() {
+        out.push_str(" />");
+        return;
+    }
     out.push('>');
-    render_members(out, &channel.members);
-    render_presence(out, &channel.presence);
-    render_subchannels(out, &channel.subchannels);
-    render_messages(out, channel);
-    out.push_str("\n    </channel>");
+    render_channel_body(out, channel, indent + 2);
+    for child in &channel.children {
+        render_channel(out, child, indent + 2);
+    }
+    let _ = write!(out, "\n{pad}</channel>");
 }
 
-fn render_members(out: &mut String, members: &[MemberRow]) {
+fn render_channel_body(out: &mut String, channel: &ChannelBlock, indent: usize) {
+    render_members(out, &channel.members, indent);
+    render_presence(out, &channel.presence, indent);
+    render_messages(out, channel, indent);
+}
+
+fn render_members(out: &mut String, members: &[MemberRow], indent: usize) {
     if members.is_empty() {
         return;
     }
-    out.push_str("\n      <members>");
-    for m in members {
-        let _ = write!(out, "\n        <member ref=\"@{}\"", esc_attr(&m.reference));
+    let pad = " ".repeat(indent);
+    let child_pad = " ".repeat(indent + 2);
+    let _ = write!(out, "\n{pad}<members>");
+    for member in members {
         let _ = write!(
             out,
-            " status=\"{}\" seen=\"{}\" />",
-            esc_attr(&m.status),
-            esc_attr(&m.seen)
+            "\n{child_pad}<member ref=\"@{}\" status=\"{}\" seen=\"{}\" />",
+            esc_attr(&member.reference),
+            esc_attr(&member.status),
+            esc_attr(&member.seen)
         );
     }
-    out.push_str("\n      </members>");
+    let _ = write!(out, "\n{pad}</members>");
 }
 
-fn render_presence(out: &mut String, presence: &[PresenceRow]) {
+fn render_presence(out: &mut String, presence: &[PresenceRow], indent: usize) {
     if presence.is_empty() {
         return;
     }
-    out.push_str("\n      <recent-presence>");
-    for p in presence {
+    let pad = " ".repeat(indent);
+    let child_pad = " ".repeat(indent + 2);
+    let _ = write!(out, "\n{pad}<recent-presence>");
+    for status in presence {
         let _ = write!(
             out,
-            "\n        <status ref=\"@{}\" text=\"{}\" seen=\"{}\" />",
-            esc_attr(&p.reference),
-            esc_attr(&p.status),
-            esc_attr(&p.seen)
+            "\n{child_pad}<status ref=\"@{}\" text=\"{}\" seen=\"{}\" />",
+            esc_attr(&status.reference),
+            esc_attr(&status.status),
+            esc_attr(&status.seen)
         );
     }
-    out.push_str("\n      </recent-presence>");
+    let _ = write!(out, "\n{pad}</recent-presence>");
 }
 
-fn render_subchannels(out: &mut String, subs: &[ChannelSummaryRow]) {
-    if subs.is_empty() {
-        return;
-    }
-    out.push_str("\n      <subchannels>");
-    for ch in subs {
-        let _ = write!(out, "\n        <channel name=\"#{}\"", esc_attr(&ch.name));
-        if !ch.about.is_empty() {
-            let _ = write!(out, " about=\"{}\"", esc_attr(&ch.about));
-        }
-        out.push_str(" />");
-    }
-    out.push_str("\n      </subchannels>");
-}
-
-fn render_messages(out: &mut String, channel: &ChannelBlock) {
+fn render_messages(out: &mut String, channel: &ChannelBlock, indent: usize) {
     if channel.messages.is_empty() && channel.omitted == 0 {
         return;
     }
-    out.push_str("\n      <chatter>");
+    let pad = " ".repeat(indent);
+    let child_pad = " ".repeat(indent + 2);
+    let detail_pad = " ".repeat(indent + 4);
+    let _ = write!(out, "\n{pad}<chatter>");
     if channel.omitted > 0 {
         let _ = write!(
             out,
-            "\n        <omitted count=\"{}\" window=\"last 4h\" />",
+            "\n{child_pad}<omitted count=\"{}\" window=\"last 4h\" />",
             channel.omitted
         );
     }
-    for m in &channel.messages {
-        if m.mention {
-            render_mention_message(out, m);
+    for message in &channel.messages {
+        if message.mention {
+            render_mention_message(out, message, &child_pad);
             continue;
         }
-        out.push_str("\n        <message");
-        let short = crate::util::short_id(&m.id);
-        if m.truncated {
+        let _ = write!(out, "\n{child_pad}<message");
+        let short = crate::util::short_id(&message.id);
+        if message.truncated {
             let _ = write!(out, " id=\"{}\"", esc_attr(&short));
         }
-        let _ = write!(out, " from=\"@{}\"", esc_attr(&m.from));
-        if !m.recipients.is_empty() {
-            let recipients = m
+        let _ = write!(out, " from=\"@{}\"", esc_attr(&message.from));
+        if !message.recipients.is_empty() {
+            let recipients = message
                 .recipients
                 .iter()
-                .map(|r| format!("@{r}"))
+                .map(|recipient| format!("@{recipient}"))
                 .collect::<Vec<_>>()
                 .join(" ");
             let _ = write!(out, " for=\"{}\"", esc_attr(&recipients));
         }
-        let _ = write!(out, " age=\"{}\">", esc_attr(&m.age));
-        out.push_str(&esc_text(&m.body));
-        if m.truncated {
+        let _ = write!(out, " age=\"{}\">", esc_attr(&message.age));
+        out.push_str(&esc_text(&message.body));
+        if message.truncated {
             let _ = write!(
                 out,
-                "\n          [message truncated; run `tenex-edge channel read --id {}`]",
+                "\n{detail_pad}[message truncated; run `tenex-edge channel read --id {}`]",
                 esc_text(&short)
             );
         }
         out.push_str("</message>");
     }
-    out.push_str("\n      </chatter>");
+    let _ = write!(out, "\n{pad}</chatter>");
 }
 
-fn render_mention_message(out: &mut String, m: &MessageRow) {
-    let short = crate::util::short_id(&m.id);
+fn render_mention_message(out: &mut String, message: &MessageRow, pad: &str) {
+    let short = crate::util::short_id(&message.id);
     let _ = write!(
         out,
-        "\n        <message from=\"@{}\" id=\"{}\">{}</message>",
-        esc_attr(&m.from),
+        "\n{pad}<message from=\"@{}\" id=\"{}\">{}</message>",
+        esc_attr(&message.from),
         esc_attr(&short),
-        esc_text(&m.body)
+        esc_text(&message.body)
     );
     let _ = write!(
         out,
-        "\n        Reply via: `tenex-edge channel reply {} --message \"hello world\"`",
+        "\n{pad}Reply via: `tenex-edge channel reply {} --message \"hello world\"`",
         esc_text(&short)
     );
-}
-
-fn render_unjoined(out: &mut String, unjoined: &[UnjoinedChannelRow]) {
-    if unjoined.is_empty() {
-        return;
-    }
-    out.push_str("\n\n    <channels-not-joined>");
-    for ch in unjoined {
-        let _ = write!(
-            out,
-            "\n      <channel name=\"#{}\" last_active=\"{}\"",
-            esc_attr(&ch.name),
-            esc_attr(&ch.last_active)
-        );
-        if !ch.about.is_empty() {
-            let _ = write!(out, " about=\"{}\"", esc_attr(&ch.about));
-        }
-        out.push_str(" />");
-    }
-    out.push_str("\n    </channels-not-joined>");
 }
 
 fn render_important(out: &mut String, rows: &[ImportantRow]) {
@@ -251,8 +250,8 @@ fn render_important(out: &mut String, rows: &[ImportantRow]) {
     for row in rows {
         let _ = write!(
             out,
-            "\n    <mention channel=\"#{}\" message_id=\"{}\" />",
-            esc_attr(&row.channel),
+            "\n    <mention channel=\"{}\" message_id=\"{}\" />",
+            esc_attr(&row.channel_ref),
             esc_attr(&crate::util::short_id(&row.message_id))
         );
     }

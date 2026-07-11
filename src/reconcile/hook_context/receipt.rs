@@ -8,9 +8,9 @@ use trellis_core::OutputFrameKind;
 /// The full-vs-delta shape, decided purely by the `cursor` input.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Shape {
-    /// `cursor == 0`: full `<members>` / `<subchannels>` roster.
+    /// `cursor == 0`: full members and visible descendant tree.
     Full,
-    /// `cursor > 0`: delta `<recent-presence>` only.
+    /// `cursor > 0`: changed descendants and recent presence only.
     Delta,
 }
 
@@ -70,7 +70,8 @@ impl FrameKind {
 
 /// Graph-sourced receipt for one hook-context render. Everything here is derived
 /// from the SAME dependency trace that produced the bytes, so it answers "why is
-/// @X shown as working / why is #Y not-joined / why this shape" without any
+/// @X shown as working / why did workspace.channel appear / why this shape"
+/// without any
 /// re-derivation that could diverge from the render.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HookContextReceipt {

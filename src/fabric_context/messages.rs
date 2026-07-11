@@ -1,5 +1,5 @@
 use super::model::MessageRow;
-use super::refs::{display_name, pubkey_ref};
+use super::refs::pubkey_ref;
 use super::{FabricContextInput, FabricMessageSeed};
 use crate::state::{RelayEvent, Store};
 use crate::util::{relative_time, truncate_words, CHAT_RENDER_WORD_LIMIT};
@@ -106,7 +106,7 @@ fn message_row(
     let (body, truncated) = truncate_words(&resolved_body, CHAT_RENDER_WORD_LIMIT);
     MessageRow {
         id: ev.id.clone(),
-        channel: display_name(store, &ev.channel_h),
+        channel_ref: crate::channel_ref::full_channel_ref(store, &ev.channel_h),
         from: pubkey_ref(store, &ev.pubkey, local_host),
         recipients: p_tag_refs(store, &ev.tags_json, local_host),
         age: relative_time(ev.created_at, now),

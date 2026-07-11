@@ -4,8 +4,7 @@ use super::people::{member_rows, presence_rows};
 use super::refs::display_name;
 use super::{missing_channel_warning, FabricContextInput, FabricMessageSeed};
 use crate::state::{Session, Store};
-use crate::util::relative_time;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 pub(super) fn build_view(store: &Store, input: FabricContextInput<'_>) -> FabricView {
     let root = root_channel(store, input.scope);
@@ -39,13 +38,14 @@ pub(super) fn build_view(store: &Store, input: FabricContextInput<'_>) -> Fabric
         }),
         workspace,
         agents: agents(store, &root, input.cursor, input.now, input.local_host),
+        root: None,
         channels: Vec::new(),
-        unjoined: unjoined_channels(store, &root, &channels, input.now),
         important: Vec::new(),
         warnings,
         incremental: input.cursor != 0,
     };
 
+    let mut channel_rows = Vec::new();
     for channel in channels {
         let forced = forced_by_channel.get(&channel).cloned().unwrap_or_default();
         let messages = if input.session.is_some() {
@@ -55,22 +55,22 @@ pub(super) fn build_view(store: &Store, input: FabricContextInput<'_>) -> Fabric
         };
         let presence = presence_rows(store, &channel, &input);
         let full = input.cursor == 0;
-        if !full && messages.0.is_empty() && presence.is_empty() {
+        let children = subchannel_rows(store, &channel, input.cursor, input.now);
+        if !full && messages.0.is_empty() && presence.is_empty() && children.is_empty() {
             continue;
         }
         for msg in &messages.0 {
             if msg.mention {
                 view.important.push(ImportantRow {
-                    channel: msg.channel.clone(),
+                    channel_ref: msg.channel_ref.clone(),
                     message_id: msg.id.clone(),
                 });
             }
         }
         let summary = channel_summary(store, &channel);
-        view.channels.push(ChannelBlock {
+        channel_rows.push(ChannelBlock {
             name: summary.name,
             reference: crate::channel_ref::full_channel_ref(store, &channel),
-            workspace: channel_workspace(store, &channel),
             about: summary.about,
             members: if full {
                 member_rows(store, &channel, &input)
@@ -78,15 +78,12 @@ pub(super) fn build_view(store: &Store, input: FabricContextInput<'_>) -> Fabric
                 Vec::new()
             },
             presence,
-            subchannels: if full {
-                subchannel_rows(store, &channel)
-            } else {
-                Vec::new()
-            },
+            children,
             messages: messages.0,
             omitted: messages.1,
         });
     }
+    (view.root, view.channels) = super::tree::arrange(&view.workspace.name, channel_rows);
     view
 }
 
@@ -124,44 +121,23 @@ fn group_forced(
     out
 }
 
-fn subchannel_rows(store: &Store, channel: &str) -> Vec<ChannelSummaryRow> {
+fn subchannel_rows(store: &Store, channel: &str, cursor: u64, now: u64) -> Vec<ChannelBlock> {
     store
         .list_channels()
         .unwrap_or_default()
         .into_iter()
         .filter(|c| c.parent == channel && !c.is_archived())
-        .map(|c| {
-            let name = c.human_name().unwrap_or(&c.channel_h).to_string();
-            ChannelSummaryRow {
-                name,
-                about: c.about,
-            }
-        })
-        .filter(|c| !c.name.is_empty())
-        .collect()
-}
-
-fn unjoined_channels(
-    store: &Store,
-    root: &str,
-    joined_channels: &[String],
-    now: u64,
-) -> Vec<UnjoinedChannelRow> {
-    let joined = joined_channels.iter().cloned().collect::<BTreeSet<_>>();
-    store
-        .list_channels()
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|c| c.parent == root && !joined.contains(&c.channel_h) && !c.is_archived())
+        .filter(|c| cursor == 0 || (c.updated_at > cursor && c.updated_at <= now))
         .filter_map(|c| {
             let name = c.human_name().unwrap_or(&c.channel_h).to_string();
-            (!name.is_empty()).then(|| UnjoinedChannelRow {
-                name,
-                about: c.about,
-                last_active: relative_time(c.updated_at, now),
+            (!name.is_empty()).then(|| {
+                ChannelBlock::compact(
+                    name,
+                    crate::channel_ref::full_channel_ref(store, &c.channel_h),
+                    c.about,
+                )
             })
         })
-        .take(12)
         .collect()
 }
 
@@ -223,6 +199,7 @@ fn channel_summary(store: &Store, channel: &str) -> WorkspaceRow {
                 .map(str::to_string)
                 .unwrap_or_else(|| display_name(store, channel))
         },
+        channel: crate::channel_ref::full_channel_ref(store, channel),
         about: ch.about,
     }
 }
@@ -231,11 +208,10 @@ fn workspace_summary(store: &Store, channel: &str) -> WorkspaceRow {
     let ch = store.get_channel(channel).ok().flatten();
     WorkspaceRow {
         name: channel.to_string(),
-        about: ch.map(|c| c.about).unwrap_or_default(),
+        channel: ch
+            .as_ref()
+            .map(|_| crate::channel_ref::full_channel_ref(store, channel))
+            .unwrap_or_default(),
+        about: ch.map(|channel| channel.about).unwrap_or_default(),
     }
-}
-
-fn channel_workspace(store: &Store, channel: &str) -> String {
-    let root = root_channel(store, channel);
-    workspace_summary(store, &root).name
 }

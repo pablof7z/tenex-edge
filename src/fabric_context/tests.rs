@@ -2,6 +2,7 @@ use super::*;
 use crate::state::{RegisterSession, RelayEvent, Session, Status, Store};
 
 mod backend_traffic;
+mod channel_tree;
 mod member_render;
 mod work_topic;
 
@@ -94,26 +95,6 @@ fn input<'a>(
 }
 
 #[test]
-fn session_view_has_self_and_chatter_human_view_does_not() {
-    let store = seed_store();
-    let rec = session(&store);
-    chat(&store, "m1", "root", 900, "post join context", "[]");
-
-    let agent = render_fabric_context(&store, input(Some(&rec), "root", 0, 1_000, false))
-        .expect("session view should render");
-    assert!(agent.contains("You are @coder, running on laptop."));
-    assert!(agent.contains("<chatter>"));
-    assert!(agent.contains("post join context"));
-    assert!(agent.contains("<subchannels>"));
-
-    let human = render_fabric_context(&store, input(None, "root", 0, 1_000, true))
-        .expect("human who should render");
-    assert!(human.contains("<tenex-edge>"));
-    assert!(!human.contains("You are @"));
-    assert!(!human.contains("<chatter>"));
-}
-
-#[test]
 fn human_who_renderer_is_non_xml_and_terminal_friendly() {
     let store = seed_store();
 
@@ -121,7 +102,7 @@ fn human_who_renderer_is_non_xml_and_terminal_friendly() {
         .expect("human who should render");
 
     assert!(human.starts_with("root\nRoot room\n\n"), "got: {human}");
-    assert!(human.contains("#root"), "got: {human}");
+    assert!(human.contains("#root.task"), "got: {human}");
     assert!(human.contains("Members"), "got: {human}");
     assert!(human.contains("@coder"), "got: {human}");
     assert!(human.contains("offline"), "got: {human}");
@@ -143,21 +124,6 @@ fn human_who_renderer_colorizes_when_requested() {
         "expected ansi styling: {human:?}"
     );
     assert!(human.contains("@coder"), "got: {human}");
-}
-
-#[test]
-fn cursor_delta_only_renders_changed_joined_channel() {
-    let store = seed_store();
-    let rec = session(&store);
-    chat(&store, "old-root", "root", 100, "old root message", "[]");
-    chat(&store, "new-task", "task", 220, "new task message", "[]");
-
-    let text = render_fabric_context(&store, input(Some(&rec), "root", 200, 300, false))
-        .expect("changed task channel should render");
-    assert!(text.contains("name=\"#task\""));
-    assert!(text.contains("new task message"));
-    assert!(!text.contains("name=\"#main\""));
-    assert!(!text.contains("old root message"));
 }
 
 #[test]
@@ -199,12 +165,14 @@ fn mention_rows_are_marked_important_and_truncated_with_recovery_id() {
 
     let text = render_fabric_context(&store, input(Some(&rec), "root", 200, 300, false))
         .expect("mention should render");
-    assert!(text.contains("<channel name=\"#root\" ref=\"root\""));
+    assert!(text.contains("<workspace name=\"root\" channel=\"root\""));
+    assert!(!text.contains("<channel name=\"#root\""));
     assert!(text.contains("<message from=\"@reviewer\" id=\"mentio\">"));
     assert!(text.contains("Reply via: `tenex-edge channel reply mentio --message \"hello world\"`"));
     assert!(!text.contains("mention=\"true\""));
     assert!(!text.contains("truncated=\"true\""));
     assert!(text.contains("<important>"));
+    assert!(text.contains("<mention channel=\"root\""));
     assert!(text.contains("message_id=\"mentio\""));
 }
 
@@ -301,33 +269,6 @@ fn empty_delta_is_silent_unless_forced() {
 }
 
 #[test]
-fn recent_presence_uses_status_source() {
-    let store = seed_store();
-    let rec = session(&store);
-    store
-        .upsert_status(&Status {
-            pubkey: OTHER_PK.into(),
-            session_id: "other-session".into(),
-            channel_h: "root".into(),
-            slug: "reviewer".into(),
-            title: "Reviewing".into(),
-            activity: "checking tests".into(),
-            busy: true,
-            last_seen: 250,
-            updated_at: 250,
-            expiration: 500,
-        })
-        .unwrap();
-
-    let text = render_fabric_context(&store, input(Some(&rec), "root", 200, 300, false))
-        .expect("presence delta should render");
-    let other_codename = crate::util::friendly_short_code("other-session");
-    assert!(text.contains("<recent-presence>"));
-    assert!(text.contains(&format!("ref=\"@{other_codename}-reviewer\"")));
-    assert!(text.contains("text=\"checking tests\""));
-}
-
-#[test]
 fn missing_channels_are_warned_not_rendered() {
     let store = Store::open_memory().unwrap();
     store
@@ -375,7 +316,8 @@ fn members_are_relay_roster_backed_and_local_agents_are_labeled() {
         .unwrap();
     let solo = session_record(&empty, "solo", "solo");
     let text = render_fabric_context(&empty, input(Some(&solo), "solo", 0, 100, true)).unwrap();
-    assert!(text.contains("<channel name=\"#solo\" ref=\"solo\""));
+    assert!(text.contains("<workspace name=\"solo\" channel=\"solo\""));
+    assert!(!text.contains("<channel name=\"#solo\""));
     assert!(!text.contains("<members>"), "got: {text}");
 }
 
