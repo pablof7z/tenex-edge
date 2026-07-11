@@ -5,7 +5,6 @@ fn fact(at: u64) -> DeliveryScanFact {
     DeliveryScanFact {
         session_id: "s1".into(),
         pending_event_ids: vec!["evt-1".into()],
-        working: false,
         pty_id: Some("pty-1".into()),
         pty_live: true,
         last_injected_at: None,
@@ -16,7 +15,7 @@ fn fact(at: u64) -> DeliveryScanFact {
 }
 
 #[test]
-fn idle_live_pty_with_pending_injects() {
+fn live_pty_with_pending_injects() {
     let mut r = DeliveryReconciler::new();
     let out = r.scan(fact(100)).unwrap();
 
@@ -72,23 +71,9 @@ fn debounced_pending_becomes_injectable_after_retry_window() {
 }
 
 #[test]
-fn working_session_defers_without_retry_timer() {
-    let mut r = DeliveryReconciler::new();
-    let mut f = fact(100);
-    f.working = true;
-
-    let out = r.scan(f).unwrap();
-
-    assert!(out.effects.is_empty());
-    assert_eq!(r.state_rows()[0].action, "defer_working");
-    r.assert_oracle().unwrap();
-}
-
-#[test]
-fn manual_force_bypasses_working_and_debounce() {
+fn manual_force_bypasses_debounce() {
     let mut r = DeliveryReconciler::new();
     let mut f = fact(101);
-    f.working = true;
     f.last_injected_at = Some(100);
     f.force = true;
 
