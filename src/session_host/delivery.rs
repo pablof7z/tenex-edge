@@ -94,7 +94,6 @@ fn delivery_scan_fact(
     crate::reconcile::DeliveryScanFact {
         session_id: rec.session_id.clone(),
         pending_event_ids,
-        working: rec.working,
         pty_id,
         pty_live,
         last_injected_at: last_message_injection(&rec.session_id),

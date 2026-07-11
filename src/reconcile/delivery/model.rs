@@ -12,7 +12,6 @@ use super::{DeliveryAction, DeliveryCommand, DeliveryScanFact};
 #[derive(Clone, Copy)]
 pub(crate) struct SessionNodes {
     pending: InputNode<Vec<String>>,
-    working: InputNode<bool>,
     pty_id: InputNode<Option<String>>,
     pty_live: InputNode<bool>,
     last_injected_at: InputNode<u64>,
@@ -57,7 +56,6 @@ pub(crate) fn stage_scan(
     seq: u64,
 ) -> GraphResult<()> {
     tx.set_input(nodes.pending, fact.pending_event_ids.clone())?;
-    tx.set_input(nodes.working, fact.working)?;
     tx.set_input(nodes.pty_id, fact.pty_id.clone())?;
     tx.set_input(nodes.pty_live, fact.pty_live)?;
     tx.set_input(nodes.last_injected_at, fact.last_injected_at.unwrap_or(0))?;
@@ -80,7 +78,6 @@ fn stage_session(
         "pending_event_ids",
         Vec::<String>::new(),
     )?;
-    let working = input(tx, labels, session_id, "working", false)?;
     let pty_id = input(tx, labels, session_id, "pty_id", None::<String>)?;
     let pty_live = input(tx, labels, session_id, "pty_live", false)?;
     let last = input(tx, labels, session_id, "last_injected_at", 0u64)?;
@@ -90,7 +87,6 @@ fn stage_session(
     let seq = input(tx, labels, session_id, "request_seq", 0u64)?;
     let nodes = SessionNodes {
         pending,
-        working,
         pty_id,
         pty_live,
         last_injected_at: last,
@@ -142,7 +138,6 @@ fn decision_node(
         format!("delivery-{id}-decision"),
         DependencyList::new([
             nodes.pending.id(),
-            nodes.working.id(),
             nodes.pty_id.id(),
             nodes.pty_live.id(),
             nodes.last_injected_at.id(),
@@ -155,7 +150,6 @@ fn decision_node(
             let command = decide(
                 &session_id,
                 ctx.input(nodes.pending)?.clone(),
-                *ctx.input(nodes.working)?,
                 ctx.input(nodes.pty_id)?.clone(),
                 *ctx.input(nodes.pty_live)?,
                 *ctx.input(nodes.last_injected_at)?,
@@ -177,7 +171,6 @@ fn decision_node(
 fn decide(
     session_id: &str,
     event_ids: Vec<String>,
-    working: bool,
     pty_id: Option<String>,
     pty_live: bool,
     last_injected_at: u64,
@@ -187,15 +180,6 @@ fn decide(
 ) -> Option<DeliveryCommand> {
     if event_ids.is_empty() {
         return None;
-    }
-    if working && !force {
-        return Some(command(
-            session_id,
-            DeliveryAction::DeferWorking,
-            event_ids,
-            None,
-            None,
-        ));
     }
     let Some(pty_id) = pty_id else {
         return Some(command(

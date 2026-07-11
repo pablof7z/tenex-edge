@@ -20,7 +20,6 @@ use model::{delivery_key, ensure_session, opts, stage_scan, SessionNodes};
 pub struct DeliveryScanFact {
     pub session_id: String,
     pub pending_event_ids: Vec<String>,
-    pub working: bool,
     pub pty_id: Option<String>,
     pub pty_live: bool,
     pub last_injected_at: Option<Timestamp>,
@@ -32,7 +31,6 @@ pub struct DeliveryScanFact {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DeliveryAction {
     Inject,
-    DeferWorking,
     DeferDebounced,
     DeferNoEndpoint,
     ClearDeadEndpoint,
@@ -42,7 +40,6 @@ impl DeliveryAction {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Inject => "inject",
-            Self::DeferWorking => "defer_working",
             Self::DeferDebounced => "defer_debounced",
             Self::DeferNoEndpoint => "defer_no_endpoint",
             Self::ClearDeadEndpoint => "clear_dead_endpoint",
@@ -238,7 +235,7 @@ impl DeliveryReconciler {
                         session_id: command.session_id.clone(),
                     });
                 }
-                DeliveryAction::DeferWorking | DeliveryAction::DeferNoEndpoint => {}
+                DeliveryAction::DeferNoEndpoint => {}
             }
         }
         effects
