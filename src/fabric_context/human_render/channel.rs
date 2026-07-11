@@ -1,30 +1,20 @@
 use super::*;
-use crate::fabric_context::workspace_labels::channel_workspace_label;
 
-pub(super) fn render_channel(
-    out: &mut String,
-    channel: &ChannelBlock,
-    color: bool,
-    show_workspace: bool,
-) {
-    let name = format!("#{}", channel.name);
-    let workspace = channel_workspace_label(channel, show_workspace)
-        .map(|label| format!("  {}", dim(&label, color)))
-        .unwrap_or_default();
+pub(super) fn render_channel(out: &mut String, channel: &ChannelBlock, color: bool, indent: usize) {
+    let pad = " ".repeat(indent);
+    let name = format!("#{}", channel.reference);
     if channel.about.is_empty() {
-        let _ = writeln!(out, "{}{}", style(&name, color, Style::Channel), workspace);
+        let _ = writeln!(out, "{pad}{}", style(&name, color, Style::Channel));
     } else {
         let _ = writeln!(
             out,
-            "{}{}  {}",
+            "{pad}{}  {}",
             style(&name, color, Style::Channel),
-            workspace,
             channel.about
         );
     }
-    render_members(out, &channel.members, color);
-    render_presence(out, &channel.presence, color);
-    render_subchannels(out, &channel.subchannels, color);
-    render_messages(out, channel, color);
-    out.push('\n');
+    render_channel_body(out, channel, color);
+    for child in &channel.children {
+        render_channel(out, child, color, indent + 2);
+    }
 }

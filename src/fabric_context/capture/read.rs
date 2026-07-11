@@ -5,7 +5,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::{AgentCap, EvCap, MsgBundle, SelfCap, SummaryCap, UnjoinedCap};
+use super::{AgentCap, ChannelSummaryCap, EvCap, MsgBundle, SelfCap, SummaryCap};
 use crate::fabric_context::messages::{is_backend_traffic, mentions_pubkey, p_tag_pubkeys};
 pub(super) use crate::fabric_context::refs::profile_host;
 use crate::fabric_context::refs::{display_name, pubkey_ref};
@@ -99,40 +99,21 @@ pub(super) fn group_forced(
     out
 }
 
-pub(super) fn subchannel_caps(store: &Store, channel: &str) -> Vec<SummaryCap> {
+pub(super) fn subchannel_caps(store: &Store, channel: &str) -> Vec<ChannelSummaryCap> {
     store
         .list_channels()
         .unwrap_or_default()
         .into_iter()
         .filter(|c| c.parent == channel && !c.is_archived())
-        .map(|c| SummaryCap {
-            name: c.human_name().unwrap_or(&c.channel_h).to_string(),
-            about: c.about,
-        })
-        .filter(|c| !c.name.is_empty())
-        .collect()
-}
-
-pub(super) fn unjoined_caps(
-    store: &Store,
-    root: &str,
-    joined_channels: &[String],
-) -> Vec<UnjoinedCap> {
-    let joined = joined_channels.iter().cloned().collect::<BTreeSet<_>>();
-    store
-        .list_channels()
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|c| c.parent == root && !joined.contains(&c.channel_h) && !c.is_archived())
         .filter_map(|c| {
             let name = c.human_name().unwrap_or(&c.channel_h).to_string();
-            (!name.is_empty()).then_some(UnjoinedCap {
+            (!name.is_empty()).then(|| ChannelSummaryCap {
                 name,
+                reference: crate::channel_ref::full_channel_ref(store, &c.channel_h),
                 about: c.about,
                 updated_at: c.updated_at,
             })
         })
-        .take(12)
         .collect()
 }
 
@@ -178,7 +159,7 @@ pub(super) fn capture_messages(
             let (body, truncated) = truncate_words(&resolved_body, CHAT_RENDER_WORD_LIMIT);
             EvCap {
                 id: ev.id.clone(),
-                channel_display: display_name(store, &ev.channel_h),
+                channel_ref: crate::channel_ref::full_channel_ref(store, &ev.channel_h),
                 from_ref: pubkey_ref(store, &ev.pubkey, input.local_host),
                 recipient_refs: p_tag_refs(store, &ev.tags_json, input.local_host),
                 created_at: ev.created_at,
@@ -195,7 +176,7 @@ pub(super) fn capture_messages(
             let (body, truncated) = truncate_words(&row.body, CHAT_RENDER_WORD_LIMIT);
             EvCap {
                 id: row.id.clone(),
-                channel_display: display_name(store, channel),
+                channel_ref: crate::channel_ref::full_channel_ref(store, channel),
                 from_ref: pubkey_ref(store, &row.from_pubkey, input.local_host),
                 recipient_refs: forced_recipient_refs(store, input, row.mention),
                 created_at: row.created_at,
@@ -271,6 +252,7 @@ pub(super) fn channel_summary(store: &Store, channel: &str) -> SummaryCap {
                 .map(str::to_string)
                 .unwrap_or_else(|| display_name(store, channel))
         },
+        channel: crate::channel_ref::full_channel_ref(store, channel),
         about: ch.about,
     }
 }
@@ -279,13 +261,12 @@ pub(super) fn workspace_summary(store: &Store, channel: &str) -> SummaryCap {
     let ch = store.get_channel(channel).ok().flatten();
     SummaryCap {
         name: channel.to_string(),
-        about: ch.map(|c| c.about).unwrap_or_default(),
+        channel: ch
+            .as_ref()
+            .map(|_| crate::channel_ref::full_channel_ref(store, channel))
+            .unwrap_or_default(),
+        about: ch.map(|channel| channel.about).unwrap_or_default(),
     }
-}
-
-pub(super) fn channel_workspace(store: &Store, channel: &str) -> String {
-    let root = root_channel(store, channel);
-    workspace_summary(store, &root).name
 }
 
 fn channel_readiness(store: &Store, channel: &str) -> ChannelReadiness {

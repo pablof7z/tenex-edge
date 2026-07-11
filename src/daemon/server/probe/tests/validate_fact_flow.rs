@@ -232,10 +232,9 @@ fn hook_inputs_json(warnings: &[&str]) -> serde_json::Value {
     json!({
         "meta": {
             "self_row": null,
-            "workspace": { "name": "", "about": "" },
+            "workspace": { "name": "", "channel": "", "about": "" },
             "agents": [],
             "channels": [],
-            "unjoined": [],
             "warnings": warnings,
             "self_pubkey": "",
             "self_ref": "",

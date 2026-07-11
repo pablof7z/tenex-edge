@@ -8,8 +8,10 @@ pub(crate) struct FabricView {
     pub(in crate::fabric_context) self_row: Option<SelfRow>,
     pub(in crate::fabric_context) workspace: WorkspaceRow,
     pub(in crate::fabric_context) agents: Vec<AgentRow>,
+    /// Activity owned by the workspace's root channel. Rendered directly on the
+    /// workspace so the root is not repeated as a child channel.
+    pub(in crate::fabric_context) root: Option<ChannelBlock>,
     pub(in crate::fabric_context) channels: Vec<ChannelBlock>,
-    pub(in crate::fabric_context) unjoined: Vec<UnjoinedChannelRow>,
     pub(in crate::fabric_context) important: Vec<ImportantRow>,
     pub(in crate::fabric_context) warnings: Vec<WarningRow>,
     /// True when this view was built in delta mode (cursor > 0): it carries only
@@ -23,7 +25,8 @@ impl FabricView {
     /// Whether the view carries nothing renderable — the daemon suppresses an
     /// empty snapshot unless the caller forced it.
     pub(crate) fn is_empty(&self) -> bool {
-        self.channels.is_empty()
+        self.root.is_none()
+            && self.channels.is_empty()
             && self.agents.is_empty()
             && self.important.is_empty()
             && self.warnings.is_empty()
@@ -31,14 +34,12 @@ impl FabricView {
 
     /// A forced delta snapshot that surfaced nothing new. Rendered as an explicit
     /// "nothing changed" note (see `render_no_new_activity`) instead of an empty
-    /// `<workspace>` skeleton, so a quiet fabric never looks like data loss. Unjoined
-    /// channels and warnings count as content worth showing, so their presence
-    /// takes the normal render path.
+    /// `<workspace>` skeleton, so a quiet fabric never looks like data loss.
     pub(in crate::fabric_context) fn is_quiet_delta(&self) -> bool {
         self.incremental
+            && self.root.is_none()
             && self.channels.is_empty()
             && self.agents.is_empty()
-            && self.unjoined.is_empty()
             && self.important.is_empty()
             && self.warnings.is_empty()
     }
@@ -47,6 +48,7 @@ impl FabricView {
 #[derive(Clone, Default, PartialEq)]
 pub(in crate::fabric_context) struct WorkspaceRow {
     pub(in crate::fabric_context) name: String,
+    pub(in crate::fabric_context) channel: String,
     pub(in crate::fabric_context) about: String,
 }
 
@@ -93,13 +95,39 @@ pub(in crate::fabric_context) fn workspace_agents(
 pub(in crate::fabric_context) struct ChannelBlock {
     pub(in crate::fabric_context) name: String,
     pub(in crate::fabric_context) reference: String,
-    pub(in crate::fabric_context) workspace: String,
     pub(in crate::fabric_context) about: String,
     pub(in crate::fabric_context) members: Vec<MemberRow>,
     pub(in crate::fabric_context) presence: Vec<PresenceRow>,
-    pub(in crate::fabric_context) subchannels: Vec<ChannelSummaryRow>,
+    pub(in crate::fabric_context) children: Vec<ChannelBlock>,
     pub(in crate::fabric_context) messages: Vec<MessageRow>,
     pub(in crate::fabric_context) omitted: usize,
+}
+
+impl ChannelBlock {
+    pub(in crate::fabric_context) fn compact(
+        name: String,
+        reference: String,
+        about: String,
+    ) -> Self {
+        Self {
+            name,
+            reference,
+            about,
+            members: Vec::new(),
+            presence: Vec::new(),
+            children: Vec::new(),
+            messages: Vec::new(),
+            omitted: 0,
+        }
+    }
+
+    pub(in crate::fabric_context) fn is_compact(&self) -> bool {
+        self.members.is_empty()
+            && self.presence.is_empty()
+            && self.children.is_empty()
+            && self.messages.is_empty()
+            && self.omitted == 0
+    }
 }
 
 #[derive(Clone, PartialEq)]
@@ -119,15 +147,9 @@ pub(in crate::fabric_context) struct PresenceRow {
 }
 
 #[derive(Clone, PartialEq)]
-pub(in crate::fabric_context) struct ChannelSummaryRow {
-    pub(in crate::fabric_context) name: String,
-    pub(in crate::fabric_context) about: String,
-}
-
-#[derive(Clone, PartialEq)]
 pub(in crate::fabric_context) struct MessageRow {
     pub(in crate::fabric_context) id: String,
-    pub(in crate::fabric_context) channel: String,
+    pub(in crate::fabric_context) channel_ref: String,
     pub(in crate::fabric_context) from: String,
     pub(in crate::fabric_context) recipients: Vec<String>,
     pub(in crate::fabric_context) age: String,
@@ -136,18 +158,9 @@ pub(in crate::fabric_context) struct MessageRow {
     pub(in crate::fabric_context) truncated: bool,
 }
 
-/// A channel in the workspace this agent has not joined — not a dormant one;
-/// joined channels never appear here regardless of how quiet they are.
-#[derive(Clone, PartialEq)]
-pub(in crate::fabric_context) struct UnjoinedChannelRow {
-    pub(in crate::fabric_context) name: String,
-    pub(in crate::fabric_context) about: String,
-    pub(in crate::fabric_context) last_active: String,
-}
-
 #[derive(Clone, PartialEq)]
 pub(in crate::fabric_context) struct ImportantRow {
-    pub(in crate::fabric_context) channel: String,
+    pub(in crate::fabric_context) channel_ref: String,
     pub(in crate::fabric_context) message_id: String,
 }
 

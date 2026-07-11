@@ -1,5 +1,4 @@
 use crate::fabric_context::model::*;
-use crate::fabric_context::workspace_labels::channels_need_workspace;
 use owo_colors::OwoColorize as _;
 use std::fmt::Write as _;
 
@@ -41,11 +40,25 @@ pub(super) fn render_human_workspace(
     }
 
     render_agents(out, agents, agents_label, color);
-    let show_workspace = channels_need_workspace(&view.channels, &view.workspace.name);
-    for channel in &view.channels {
-        render_channel(out, channel, color, show_workspace);
+    if let Some(root) = &view.root {
+        render_channel_body(out, root, color);
     }
-    render_unjoined(out, &view.unjoined, color);
+    if view
+        .root
+        .as_ref()
+        .is_some_and(|root| !root.children.is_empty())
+        || !view.channels.is_empty()
+    {
+        let _ = writeln!(out, "{}", style("Channels", color, Style::Header));
+        if let Some(root) = &view.root {
+            for channel in &root.children {
+                render_channel(out, channel, color, 2);
+            }
+        }
+    }
+    for channel in &view.channels {
+        render_channel(out, channel, color, 2);
+    }
     render_important(out, &view.important, color);
     render_warnings(out, &view.warnings, color);
 }
@@ -114,26 +127,6 @@ fn render_presence(out: &mut String, presence: &[PresenceRow], color: bool) {
     }
 }
 
-fn render_subchannels(out: &mut String, subs: &[ChannelSummaryRow], color: bool) {
-    if subs.is_empty() {
-        return;
-    }
-    let _ = writeln!(out, "  {}", dim("Subchannels", color));
-    for ch in subs {
-        let name = format!("#{}", ch.name);
-        if ch.about.is_empty() {
-            let _ = writeln!(out, "    {}", style(&name, color, Style::Channel));
-        } else {
-            let _ = writeln!(
-                out,
-                "    {}  {}",
-                style(&name, color, Style::Channel),
-                ch.about
-            );
-        }
-    }
-}
-
 fn render_messages(out: &mut String, channel: &ChannelBlock, color: bool) {
     if channel.messages.is_empty() && channel.omitted == 0 {
         return;
@@ -182,35 +175,6 @@ fn render_messages(out: &mut String, channel: &ChannelBlock, color: bool) {
     }
 }
 
-fn render_unjoined(out: &mut String, unjoined: &[UnjoinedChannelRow], color: bool) {
-    if unjoined.is_empty() {
-        return;
-    }
-    let _ = writeln!(out, "{}", style("Other channels", color, Style::Header));
-    for ch in unjoined {
-        let name = format!("#{}", ch.name);
-        if ch.about.is_empty() {
-            let _ = writeln!(
-                out,
-                "  {}  {} {}",
-                style(&name, color, Style::Channel),
-                dim("last active", color),
-                dim(&ch.last_active, color)
-            );
-        } else {
-            let _ = writeln!(
-                out,
-                "  {}  {} {} - {}",
-                style(&name, color, Style::Channel),
-                dim("last active", color),
-                dim(&ch.last_active, color),
-                ch.about
-            );
-        }
-    }
-    out.push('\n');
-}
-
 fn render_important(out: &mut String, important: &[ImportantRow], color: bool) {
     if important.is_empty() {
         return;
@@ -225,10 +189,16 @@ fn render_important(out: &mut String, important: &[ImportantRow], color: bool) {
                 color,
                 Style::Warning
             ),
-            style(&format!("#{}", row.channel), color, Style::Channel)
+            style(&format!("#{}", row.channel_ref), color, Style::Channel)
         );
     }
     out.push('\n');
+}
+
+pub(super) fn render_channel_body(out: &mut String, channel: &ChannelBlock, color: bool) {
+    render_members(out, &channel.members, color);
+    render_presence(out, &channel.presence, color);
+    render_messages(out, channel, color);
 }
 
 fn render_warnings(out: &mut String, warnings: &[WarningRow], color: bool) {

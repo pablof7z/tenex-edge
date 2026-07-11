@@ -150,11 +150,16 @@ fn session_channel_evidence(state: &Arc<DaemonState>, session_id: &str) -> Value
             Some(session) => s.has_channel_membership_snapshot(&session.channel_h)?,
             None => false,
         };
-        Ok::<_, anyhow::Error>((session, channel, members, membership_snapshot))
+        let channel_ref = session
+            .as_ref()
+            .map(|session| crate::channel_ref::full_channel_ref(s, &session.channel_h))
+            .unwrap_or_default();
+        Ok::<_, anyhow::Error>((session, channel, members, membership_snapshot, channel_ref))
     }) {
-        Ok((Some(session), channel, members, membership_snapshot)) => json!({
+        Ok((Some(session), channel, members, membership_snapshot, channel_ref)) => json!({
             "session_found": true,
             "channel_h": session.channel_h,
+            "channel_ref": channel_ref,
             "confirmed": channel.is_some(),
             "channel_name": channel
                 .as_ref()
@@ -164,9 +169,10 @@ fn session_channel_evidence(state: &Arc<DaemonState>, session_id: &str) -> Value
             "member_count": members.len(),
             "admin_count": members.iter().filter(|member| member.role == "admin").count(),
         }),
-        Ok((None, _, _, _)) => json!({
+        Ok((None, _, _, _, _)) => json!({
             "session_found": false,
             "channel_h": "",
+            "channel_ref": "",
             "confirmed": false,
             "membership_snapshot": false,
             "member_count": 0,
@@ -175,6 +181,7 @@ fn session_channel_evidence(state: &Arc<DaemonState>, session_id: &str) -> Value
         Err(e) => json!({
             "session_found": false,
             "channel_h": "",
+            "channel_ref": "",
             "confirmed": false,
             "membership_snapshot": false,
             "member_count": 0,
