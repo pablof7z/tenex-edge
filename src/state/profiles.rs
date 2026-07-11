@@ -101,18 +101,23 @@ impl Store {
     pub fn resolve_profile_handle_pubkey(&self, handle: &str) -> Result<Option<String>> {
         let handle = handle.trim();
         let mut stmt = self.conn.prepare(
-            "SELECT DISTINCT p.pubkey FROM relay_profiles p
-             JOIN relay_status st ON st.pubkey=p.pubkey
-             WHERE p.is_backend=0 AND (p.name=?1 OR p.slug=?1)",
+            "SELECT DISTINCT pubkey FROM relay_profiles
+             WHERE is_backend=0 AND (name=?1 OR slug=?1)",
         )?;
-        let rows = stmt
+        let matches = stmt
             .query_map([handle], |row| row.get::<_, String>(0))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
-        match rows.as_slice() {
-            [] => Ok(None),
-            [one] => Ok(Some(one.clone())),
-            _ => anyhow::bail!("live handle {handle:?} is ambiguous"),
-        }
+        let pubkey = match matches.as_slice() {
+            [] => return Ok(None),
+            [one] => one,
+            _ => anyhow::bail!("remote handle {handle:?} is ambiguous"),
+        };
+        let has_status = self.conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM relay_status WHERE pubkey=?1)",
+            [pubkey],
+            |row| row.get::<_, bool>(0),
+        )?;
+        Ok(has_status.then(|| pubkey.clone()))
     }
 
     /// Reverse lookup: the pubkey of a backend with exactly this config

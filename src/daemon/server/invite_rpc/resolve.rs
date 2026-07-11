@@ -37,6 +37,9 @@ fn remote_sessions(store: &crate::state::Store, selector: &str) -> Result<Vec<Re
         let Some(profile) = store.get_profile(&pubkey)? else {
             return Ok(Vec::new());
         };
+        if profile.is_backend || profile.agent_slug.is_empty() {
+            return Ok(Vec::new());
+        }
         return Ok(vec![RemoteSession {
             pubkey,
             slug: profile.slug,
@@ -116,5 +119,18 @@ mod tests {
         let matches = remote_sessions(&store, "old-codex").unwrap();
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].pubkey, pubkey);
+    }
+
+    #[test]
+    fn backend_npub_is_not_a_resumable_session() {
+        let store = Store::open_memory().unwrap();
+        let pubkey = Keys::generate().public_key();
+        store
+            .upsert_profile(&pubkey.to_hex(), "remote", "remote", "remote", true, 1)
+            .unwrap();
+
+        assert!(remote_sessions(&store, &pubkey.to_bech32().unwrap())
+            .unwrap()
+            .is_empty());
     }
 }

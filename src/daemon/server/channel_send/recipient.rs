@@ -11,7 +11,7 @@ pub(in crate::daemon::server) struct ResolvedRecipient {
 ///   - `agent@backend-label` resolves through the backend profile cache.
 ///   - 64-hex / npub selects the permanent session identity directly.
 ///   - an exact current local handle resolves through the lease authority.
-///   - an exact current remote handle resolves only with live status evidence.
+///   - an exact remote handle resolves only with session-status history.
 ///   - a bare local agent label may resolve through the local profile cache.
 ///
 /// Raw session ids and prefixes are internal correlation values and are never

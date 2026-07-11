@@ -250,6 +250,53 @@ fn stale_profile_name_without_live_status_does_not_resolve() {
 }
 
 #[test]
+fn duplicate_reclaim_profiles_never_route_to_old_status_owner() {
+    let store = Store::open_memory().unwrap();
+    store
+        .upsert_profile_with_agent_slug(
+            "old-pk",
+            "shared-codex",
+            "shared-codex",
+            "codex",
+            "remote",
+            false,
+            1,
+        )
+        .unwrap();
+    store
+        .upsert_status(&crate::state::Status {
+            pubkey: "old-pk".into(),
+            session_id: String::new(),
+            channel_h: "channel".into(),
+            slug: "shared-codex".into(),
+            title: String::new(),
+            activity: String::new(),
+            busy: false,
+            last_seen: 1,
+            updated_at: 1,
+            expiration: 1,
+        })
+        .unwrap();
+    store
+        .upsert_profile_with_agent_slug(
+            "new-pk",
+            "shared-codex",
+            "shared-codex",
+            "codex",
+            "remote",
+            false,
+            2,
+        )
+        .unwrap();
+
+    let error = match resolve_recipient(&store, "channel", "local", "shared-codex") {
+        Ok(_) => panic!("duplicate profile projections must be ambiguous"),
+        Err(error) => error,
+    };
+    assert!(error.to_string().contains("ambiguous"));
+}
+
+#[test]
 fn local_chat_cache_scope_matches_signed_event_target() {
     assert_eq!(chat_publish_scope("sender-room", None, None), "sender-room");
     assert_eq!(
