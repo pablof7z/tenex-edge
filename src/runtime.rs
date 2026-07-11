@@ -256,7 +256,7 @@ pub async fn run_session_in_daemon(
                             .is_some_and(|session| session.work_topic_suppresses_distillation(now))
                     });
                     if topic_holds_distill {
-                        slog(&p.session_id, "[distill] discarded while an explicit work topic is protected");
+                        slog(&p.session_id, "[distill] discarded while a manual title is protected");
                     } else if let Some(labels) = result {
                         if let Err(e) = st!(|s: &Store| s.set_session_distill(
                             &p.session_id, &labels.title, &labels.activity, now,

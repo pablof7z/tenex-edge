@@ -50,6 +50,11 @@ pub enum StatusDrive {
         window_hash: Option<String>,
         at: Timestamp,
     },
+    TitleSet {
+        session_id: String,
+        title: String,
+        at: Timestamp,
+    },
     ChannelsChanged {
         session_id: String,
         channels: BTreeSet<String>,
@@ -72,6 +77,7 @@ impl StatusDrive {
             Self::TurnStarted { at, .. }
             | Self::TurnEnded { at, .. }
             | Self::DistillCompleted { at, .. }
+            | Self::TitleSet { at, .. }
             | Self::ChannelsChanged { at, .. }
             | Self::Tick { at, .. }
             | Self::SessionEnded { at, .. } => *at,

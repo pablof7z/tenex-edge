@@ -94,6 +94,7 @@ fn status_drive_kind(drive: &StatusDrive) -> &'static str {
         StatusDrive::TurnStarted { .. } => "StatusDrive::TurnStarted",
         StatusDrive::TurnEnded { .. } => "StatusDrive::TurnEnded",
         StatusDrive::DistillCompleted { .. } => "StatusDrive::DistillCompleted",
+        StatusDrive::TitleSet { .. } => "StatusDrive::TitleSet",
         StatusDrive::ChannelsChanged { .. } => "StatusDrive::ChannelsChanged",
         StatusDrive::Tick { .. } => "StatusDrive::Tick",
         StatusDrive::SessionEnded { .. } => "StatusDrive::SessionEnded",

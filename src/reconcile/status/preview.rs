@@ -111,6 +111,15 @@ fn stage_drive(
                 tx.set_input(n.activity, activity.clone())
             })?;
         }
+        StatusDrive::TitleSet {
+            session_id,
+            title,
+            at,
+        } => {
+            mutate(sessions, refresh_secs, session_id, *at, tx, |tx, n| {
+                tx.set_input(n.title, title.clone())
+            })?;
+        }
         StatusDrive::ChannelsChanged {
             session_id,
             channels,

@@ -262,7 +262,7 @@ async fn dispatch(state: &Arc<DaemonState>, req: &Request) -> Response {
             Ok(serde_json::json!({"stopped": true}))
         }
         "who" => rpc_who(state, &req.params),
-        "my_status" => rpc_my_status(state, &req.params),
+        "my_status" => rpc_my_status(state, &req.params).await,
         "session_start" => rpc_session_start(state, &req.params, None).await,
         "session_end" => rpc_session_end(state, &req.params).await,
         "session_kill" => rpc_session_kill(state, &req.params).await,

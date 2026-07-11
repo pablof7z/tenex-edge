@@ -15,11 +15,11 @@ pub struct Session {
     pub working: bool,
     pub turn_started_at: u64,
     pub last_distill_at: u64,
-    /// Explicit, broad work topic set by the agent itself. It is intentionally
-    /// separate from the automatic title/activity distillation state.
+    /// Explicit, broad title set by the agent itself. Stored separately only so
+    /// automatic distillation can avoid overwriting it during the pause window.
     pub work_topic: String,
     /// Seconds when [`Self::work_topic`] was explicitly set. Distillation pauses
-    /// for the first 30 minutes; only then does hook context display the topic.
+    /// for the first 30 minutes.
     pub work_topic_set_at: u64,
     pub seen_cursor: u64,
     pub title: String,

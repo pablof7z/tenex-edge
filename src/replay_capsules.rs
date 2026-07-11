@@ -41,6 +41,13 @@ macro_rules! status_fact {
             },
         )
     };
+    (title, $session_id:expr, $title:expr, $at:expr) => {
+        $crate::reconcile::InputFact::StatusDrive($crate::reconcile::StatusDrive::TitleSet {
+            session_id: $session_id.clone(),
+            title: $title.clone(),
+            at: $at,
+        })
+    };
     (turn, $session_id:expr, $working:expr, $at:expr) => {
         if $working {
             $crate::reconcile::InputFact::StatusDrive($crate::reconcile::StatusDrive::TurnStarted {

@@ -70,7 +70,7 @@ fn render_self(out: &mut String, row: Option<&SelfRow>) {
     if !row.work_topic.is_empty() {
         let _ = write!(
             out,
-            " Current visible work topic: \"{}\"\n  [if your work topic drifted you can update it]",
+            " Current title: \"{}\"\n  [if your title drifted you can update it]",
             esc_text(&row.work_topic)
         );
     }

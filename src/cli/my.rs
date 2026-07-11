@@ -5,7 +5,7 @@ use super::session::SessionAction;
 
 #[derive(Subcommand)]
 pub(super) enum MyAction {
-    /// Declare your current broad work topic.
+    /// Declare your current broad session title.
     Status(MyStatusArgs),
     /// Manage the current local session.
     Session {
@@ -16,7 +16,7 @@ pub(super) enum MyAction {
 
 #[derive(Args)]
 pub(super) struct MyStatusArgs {
-    /// A rare, broad work topic of at most 15 words.
+    /// A rare, broad session title of at most 15 words.
     #[arg(long, value_name = "TOPIC")]
     topic: String,
 }
@@ -34,6 +34,6 @@ fn status(args: MyStatusArgs) -> Result<()> {
         "my_status",
         crate::cli::rpc_params(serde_json::json!({ "topic": topic })),
     )?;
-    println!("Visible work topic set: \"{topic}\" (automatic distillation paused for 30 minutes)");
+    println!("Session title set: \"{topic}\" (automatic distillation paused for 30 minutes)");
     Ok(())
 }

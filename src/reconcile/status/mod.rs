@@ -190,6 +190,13 @@ impl StatusReconciler {
         })
     }
 
+    /// A manual broad title was declared by the session owner. It updates only
+    /// the persistent title; the live activity line remains whatever the current
+    /// turn already knew.
+    pub fn on_title_set(&mut self, id: &str, title: &str, now: u64) -> GraphResult<StatusOutcome> {
+        self.mutate(id, now, |tx, n| tx.set_input(n.title, title.to_string()))
+    }
+
     pub fn on_channels_changed(
         &mut self,
         id: &str,

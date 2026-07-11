@@ -63,7 +63,7 @@ pub(super) enum Cmd {
     Launch(LaunchArgs),
     /// Start an MCP server over stdio or HTTP.
     Mcp(McpArgs),
-    /// Manage your own session's visible work topic.
+    /// Manage your own session title.
     My {
         #[command(subcommand)]
         action: MyAction,

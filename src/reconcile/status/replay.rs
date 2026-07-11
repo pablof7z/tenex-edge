@@ -116,6 +116,15 @@ impl ReplayState {
                     tx.set_input(n.activity, activity.clone())
                 })?;
             }
+            StatusDrive::TitleSet {
+                session_id,
+                title,
+                at,
+            } => {
+                self.mutate(session_id, tx, *at, |tx, n| {
+                    tx.set_input(n.title, title.clone())
+                })?;
+            }
             StatusDrive::ChannelsChanged {
                 session_id,
                 channels,

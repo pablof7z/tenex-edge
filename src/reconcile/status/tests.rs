@@ -90,6 +90,23 @@ fn distill_change_publishes_and_attributes_to_activity() {
     );
 }
 
+#[test]
+fn manual_title_change_publishes_title_without_clearing_activity() {
+    let (mut r, mut ledger) = seeded(true, "Old", "checking logs", chans(["room"]), 100);
+
+    let out = r
+        .on_title_set("s1", "Testing status updates and awareness", 100)
+        .unwrap();
+    ledger.apply_result(&out.result);
+    r.assert_oracle().unwrap();
+
+    let pubs = publishes(&out.effects);
+    assert_eq!(pubs.len(), 1, "one publish for the title change");
+    assert_eq!(pubs[0].0.title, "Testing status updates and awareness");
+    assert_eq!(pubs[0].0.activity, "checking logs");
+    assert_eq!(pubs[0].1, PublishReason::Changed);
+}
+
 /// Turn-end flips the session to idle: exactly one publish, activity cleared.
 #[test]
 fn turn_end_flips_to_idle_one_publish() {

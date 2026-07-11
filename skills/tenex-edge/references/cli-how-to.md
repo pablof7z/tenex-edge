@@ -9,7 +9,7 @@
 - [Dispatch New Sessions](#dispatch-new-sessions)
 - [Add Existing Sessions Or Humans](#add-existing-sessions-or-humans)
 - [Find Prior Sessions](#find-prior-sessions)
-- [Set A Work Topic](#set-a-work-topic)
+- [Set Your Session Title](#set-your-session-title)
 - [End Your Session](#end-your-session)
 - [Refresh Awareness](#refresh-awareness)
 
@@ -127,20 +127,21 @@ tenex-edge agents list-sessions --agent <agent[@backend-label]>
 Use this when continuity with old context matters. Prefer active agents with
 current context before reviving or referencing old sessions.
 
-## Set A Work Topic
+## Set Your Session Title
 
 ```bash
 tenex-edge my status --topic "Researching MCP improvements around resource allocation"
 ```
 
 Use this very rarely, only when the broad direction of your work changes. Keep
-the topic to 15 words or fewer. It is for a durable theme, not a current task,
+the title to 15 words or fewer. It is for a durable theme, not a current task,
 mechanical step, or progress narration: avoid topics such as "working on X" or
 "fixing compilation issues."
 
-Setting a topic pauses automatic work distillation for 30 minutes. Once that
-window ends, your hook-provided identity context shows the visible topic and
-reminds you to update it if the work has drifted.
+Setting a title publishes it immediately and pauses automatic work distillation
+for 30 minutes so the distiller does not overwrite the manual title right away.
+Your hook-provided identity context shows the current title and reminds you to
+update it if the work has drifted.
 
 ## End Your Session
 

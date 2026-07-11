@@ -1,12 +1,13 @@
 use super::channel_membership_rpc::resolve_caller;
 use super::*;
+use crate::replay_capsules::status_fact;
 
 #[derive(serde::Deserialize)]
 struct MyStatusParams {
     topic: String,
 }
 
-pub(in crate::daemon::server) fn rpc_my_status(
+pub(in crate::daemon::server) async fn rpc_my_status(
     state: &Arc<DaemonState>,
     params: &serde_json::Value,
 ) -> Result<serde_json::Value> {
@@ -15,6 +16,22 @@ pub(in crate::daemon::server) fn rpc_my_status(
     let rec = resolve_caller(state, params, "my status")?;
     let set_at = now_secs();
     state.with_store(|s| s.set_session_work_topic(&rec.session_id, &topic, set_at))?;
+    let keys = state.session_signing_keys(&rec.session_id)?;
+    crate::status_seam::drive(
+        &state.status,
+        state.fabric_provider(),
+        &keys,
+        &state.store,
+        &state.outbox,
+        crate::status_seam::DriveMeta {
+            trigger: "manual_title",
+            window_hash: None,
+            replay_fact: Some(status_fact!(title, rec.session_id, topic, set_at)),
+        },
+        |r| r.on_title_set(&rec.session_id, &topic, set_at),
+    )
+    .await;
+    state.outbox_notify.notify_waiters();
     Ok(serde_json::json!({
         "session_id": rec.session_id,
         "topic": topic,
@@ -26,9 +43,10 @@ pub(in crate::daemon::server) fn rpc_my_status(
 mod tests {
     use super::*;
     use crate::state::RegisterSession;
+    use std::collections::BTreeSet;
 
     #[tokio::test]
-    async fn stores_topic_for_the_exact_caller_session() {
+    async fn stores_and_publishes_title_for_the_exact_caller_session() {
         let state = DaemonState::new_for_test().await;
         let session_id = state.with_store(|s| {
             s.register_session(&RegisterSession {
@@ -45,6 +63,24 @@ mod tests {
             })
             .unwrap()
         });
+        {
+            let mut status = state.status.lock().unwrap();
+            let out = status
+                .on_session_started(
+                    &session_id,
+                    "test-host",
+                    "codex",
+                    "pk",
+                    ".",
+                    BTreeSet::from(["root".to_string()]),
+                    true,
+                    "",
+                    "checking logs",
+                    1,
+                )
+                .unwrap();
+            assert_eq!(out.effects.len(), 1);
+        }
 
         let response = rpc_my_status(
             &state,
@@ -53,6 +89,7 @@ mod tests {
                 "topic": "Researching MCP improvements around resource allocation",
             }),
         )
+        .await
         .unwrap();
 
         assert_eq!(response["session_id"], session_id);
@@ -62,13 +99,31 @@ mod tests {
             "Researching MCP improvements around resource allocation"
         );
         assert!(rec.work_topic_set_at > 0);
+        assert_eq!(
+            rec.title,
+            "Researching MCP improvements around resource allocation"
+        );
+
+        let rows = state.with_store(|s| s.peek_outbox(10, u64::MAX).unwrap());
+        assert_eq!(rows.len(), 1);
+        let event: serde_json::Value = serde_json::from_str(&rows[0].event_json).unwrap();
+        assert_eq!(event["kind"].as_i64(), Some(30315));
+        assert!(event["tags"].as_array().unwrap().iter().any(|tag| {
+            tag.as_array().is_some_and(|parts| {
+                parts.first().and_then(|v| v.as_str()) == Some("title")
+                    && parts.get(1).and_then(|v| v.as_str())
+                        == Some("Researching MCP improvements around resource allocation")
+            })
+        }));
     }
 
     #[tokio::test]
     async fn rejects_topics_over_fifteen_words() {
         let state = DaemonState::new_for_test().await;
         let topic = vec!["word"; crate::work_topic::MAX_WORDS + 1].join(" ");
-        let err = rpc_my_status(&state, &serde_json::json!({ "topic": topic })).unwrap_err();
+        let err = rpc_my_status(&state, &serde_json::json!({ "topic": topic }))
+            .await
+            .unwrap_err();
         assert!(err.to_string().contains("at most"));
     }
 }
