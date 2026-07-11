@@ -7,18 +7,15 @@ pub(in crate::daemon::server) struct ResolvedRecipient {
     pub(super) channel: String,
 }
 
-/// Resolve a recipient/identifier to a wire pubkey under the CANONICAL scheme:
-///   - `agent@backend-label` → the durable agent on that backend (`@` NEVER
-///     means channel). The message still goes to `my_channel`.
-///   - 64-hex / npub → raw pubkey.
-///   - a session     → by canonical id, harness alias, or id prefix (correlation
-///     handles only; a session id is never a chat-target identity).
-///   - a bare agent-instance label → that instance on the LOCAL host
-///     (`label@<local_host>`), reverse-resolved to its selected pubkey.
+/// Resolve a recipient to a wire pubkey under the canonical scheme:
+///   - `agent@backend-label` resolves through the backend profile cache.
+///   - 64-hex / npub selects the permanent session identity directly.
+///   - an exact current local handle resolves through the lease authority.
+///   - an exact current remote handle resolves only with live status evidence.
+///   - a bare local agent label may resolve through the local profile cache.
 ///
-/// Sessions are local-only in the new model (session ids never travel the wire),
-/// so session-prefix matching searches the local `sessions` table; a remote agent
-/// is addressed only by `agent@backend-label` or pubkey.
+/// Raw session ids and prefixes are internal correlation values and are never
+/// accepted as chat targets.
 pub(in crate::daemon::server) fn resolve_recipient(
     store: &Store,
     my_channel: &str,
@@ -90,8 +87,7 @@ pub(in crate::daemon::server) fn resolve_recipient(
                     channel: my_channel.to_string(),
                 });
             }
-            // Bare agent-instance label → that instance on the LOCAL host
-            //    (profile fallback for remote/snapshotted peers).
+            // Bare local agent label: profile fallback for local peers.
             if let Some(pk) = store.resolve_agent_pubkey(&tok, local_host.trim())? {
                 return Ok(ResolvedRecipient {
                     pubkey: pk,
