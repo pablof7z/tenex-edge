@@ -44,7 +44,7 @@ one of two mutually-exclusive targets:
 
 - `channel add <pubkey|npub|nip05> <path> [--admin]` — add a human. `--admin`
   grants NIP-29 admin in that channel.
-- `channel add --session @agent/session <path>` — pull an existing session into the
+- `channel add --session @codex-quill-peak-369 <path>` — pull an existing session into the
   channel.
 
 On the existing-session mode, an optional `--message "..."` adds the session,

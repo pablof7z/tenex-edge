@@ -1,5 +1,24 @@
 use std::collections::BTreeMap;
 
+pub(super) fn canonical_segments(root: &str, reference: &str) -> Vec<String> {
+    let mut segments = reference
+        .split(['/', '.'])
+        .map(str::trim)
+        .filter(|segment| !segment.is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    if segments.first().is_some_and(|segment| segment == root) {
+        segments.remove(0);
+    }
+    if segments
+        .first()
+        .is_some_and(|segment| segment.eq_ignore_ascii_case("general"))
+    {
+        segments.remove(0);
+    }
+    segments
+}
+
 /// A copy-pasteable channel reference for diagnostics and ambiguity reruns:
 /// relative name path when unique, or `@<id-prefix>` when only the id can
 /// distinguish the channel.
@@ -9,25 +28,25 @@ pub(in crate::daemon::server) fn channel_reference_for(
 ) -> String {
     let root = super::root_channel(store, channel_h);
     if root == channel_h {
-        return channel_h.to_string();
+        return crate::channel_ref::full_channel_ref(store, channel_h);
     }
-
     let paths = subtree_paths(store, &root);
-    let Some((id, segs)) = paths.iter().find(|(id, _)| id == channel_h) else {
+    let Some((id, segments)) = paths.iter().find(|(id, _)| id == channel_h) else {
         return channel_id_reference(channel_h);
     };
-    channel_reference_from_paths(&paths, id, segs)
+    channel_reference_from_paths(&paths, &root, id, segments)
 }
 
 pub(super) fn channel_reference_from_paths(
     paths: &[(String, Vec<String>)],
+    root: &str,
     id: &str,
     segs: &[String],
 ) -> String {
-    let path = segs.join("/");
-    let path_unique = paths.iter().filter(|(_, s)| s.join("/") == path).count() == 1;
+    let path = segs.join(".");
+    let path_unique = paths.iter().filter(|(_, s)| s.join(".") == path).count() == 1;
     if path_unique && !path.is_empty() {
-        path
+        format!("{root}.general.{path}")
     } else {
         channel_id_reference(id)
     }

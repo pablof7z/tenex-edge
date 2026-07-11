@@ -9,4 +9,5 @@ source_refs:
 
 # ExpiredSessionRow
 
-One expired (not-currently-live) local session, named by agent/session_id. Represents the resume-candidate set — sessions whose process has exited but which a user can still resume.
+One expired local session, named by its `agent-session-code` handle. These rows
+represent sessions whose process exited but which a user can still resume.

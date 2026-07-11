@@ -159,8 +159,10 @@ mod tests {
 
     #[test]
     fn session_pull_accepts_handle_and_message() {
-        let a = parse_add("tenex-edge channel add --session @coder/sess-abc ops --message welcome");
-        assert_eq!(a.session.as_deref(), Some("@coder/sess-abc"));
+        let a = parse_add(
+            "tenex-edge channel add --session @coder-sable-grove-179 ops --message welcome",
+        );
+        assert_eq!(a.session.as_deref(), Some("@coder-sable-grove-179"));
         assert_eq!(a.first.as_deref(), Some("ops"));
         assert_eq!(a.message.as_deref(), Some("welcome"));
     }
@@ -175,7 +177,7 @@ mod tests {
 
     #[test]
     fn admin_conflicts_with_session_mode() {
-        let kind = parse_err("tenex-edge channel add --session @coder/sess ops --admin");
+        let kind = parse_err("tenex-edge channel add --session @coder-sable-grove-179 ops --admin");
         assert_eq!(kind, ErrorKind::ArgumentConflict);
     }
 

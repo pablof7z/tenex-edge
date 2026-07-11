@@ -37,7 +37,7 @@ pub(super) fn profile_host(store: &Store, pubkey: &str) -> String {
         .unwrap_or_default()
 }
 
-pub(super) fn pubkey_ref(store: &Store, pubkey: &str, local_host: &str) -> String {
+pub(crate) fn pubkey_ref(store: &Store, pubkey: &str, local_host: &str) -> String {
     let profile = store.get_profile(pubkey).ok().flatten();
     let slug = profile
         .as_ref()

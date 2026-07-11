@@ -1,4 +1,4 @@
-use super::{display_name, scope::work_root_for, WhoRow, WhoSource};
+use super::{scope::work_root_for, WhoRow, WhoSource};
 use crate::state::{Session, Status, StoreReader};
 
 /// Build a local-session row. Title/activity/busy prefer the agent's own status.
@@ -33,7 +33,7 @@ pub(super) fn local_row(store: StoreReader<'_>, s: &Session, local_host: &str, n
         rel_cwd: String::new(),
         remote: false,
         attachable: false,
-        work_root_display: display_name(store, &work_root),
+        work_root_display: work_root.clone(),
         work_root,
         pubkey: instance.pubkey,
     }
@@ -81,7 +81,7 @@ pub(super) fn peer_row(store: StoreReader<'_>, st: &Status, local_host: &str, no
         age_secs: Some(now.saturating_sub(st.last_seen)),
         rel_cwd: String::new(),
         attachable: false,
-        work_root_display: display_name(store, &work_root),
+        work_root_display: work_root.clone(),
         work_root,
         pubkey: st.pubkey.clone(),
     }

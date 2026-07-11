@@ -155,3 +155,32 @@ fn channel_create_errors_when_name_already_exists() {
 
     stop_daemon(&home);
 }
+
+#[test]
+fn channel_create_reserves_general_for_workspace_root() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let home = Home::new();
+    rewrite_config_with_user_nsec(&home);
+    let parent = unique_session("general-root");
+
+    let error = rt().block_on(async {
+        let mut client = Client::connect_or_spawn().await.expect("connect");
+        client
+            .call(
+                "channel_create",
+                serde_json::json!({
+                    "parent": parent,
+                    "name": "general",
+                    "agents": [],
+                }),
+            )
+            .await
+            .expect_err("general must stay reserved for the workspace root")
+    });
+    assert!(
+        format!("{error:#}").contains("workspace root channel"),
+        "unexpected error: {error:#}"
+    );
+
+    stop_daemon(&home);
+}

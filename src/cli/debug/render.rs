@@ -454,6 +454,12 @@ fn grid_rects(area: Rect, count: usize) -> Vec<Rect> {
     rects
 }
 
+fn even_constraints(n: usize) -> Vec<Constraint> {
+    (0..n)
+        .map(|_| Constraint::Ratio(1, n as u32))
+        .collect::<Vec<_>>()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -470,10 +476,4 @@ mod tests {
 
         assert_eq!(pane_title(&pane), "haiku-pearl-cliff-395 / aaa / aaa, dev");
     }
-}
-
-fn even_constraints(n: usize) -> Vec<Constraint> {
-    (0..n)
-        .map(|_| Constraint::Ratio(1, n as u32))
-        .collect::<Vec<_>>()
 }

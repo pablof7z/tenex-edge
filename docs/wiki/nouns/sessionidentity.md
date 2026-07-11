@@ -9,7 +9,7 @@ source_refs:
 
 # SessionIdentity
 
-A lean read-side struct (pubkey, agent slug, session id, legacy code) replacing
-the old AgentInstance. `display_slug()` returns `agent/session`, and
-`agent_ref()` returns `AgentRef(pubkey, agent/session)`. Used for routing,
-rendering, and member display.
+A lean read-side struct containing the pubkey, agent slug, session id, and
+friendly code. `display_slug()` returns `agent-session-code`, and `agent_ref()`
+returns the same public handle with its pubkey. Used for routing, rendering, and
+member display.

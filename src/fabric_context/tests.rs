@@ -120,8 +120,8 @@ fn human_who_renderer_is_non_xml_and_terminal_friendly() {
     let human = render_fabric_context_human(&store, input(None, "root", 0, 1_000, true), false)
         .expect("human who should render");
 
-    assert!(human.starts_with("main\nRoot room\n\n"), "got: {human}");
-    assert!(human.contains("#main"), "got: {human}");
+    assert!(human.starts_with("root\nRoot room\n\n"), "got: {human}");
+    assert!(human.contains("#general"), "got: {human}");
     assert!(human.contains("Members"), "got: {human}");
     assert!(human.contains("@coder"), "got: {human}");
     assert!(human.contains("offline"), "got: {human}");
@@ -199,7 +199,7 @@ fn mention_rows_are_marked_important_and_truncated_with_recovery_id() {
 
     let text = render_fabric_context(&store, input(Some(&rec), "root", 200, 300, false))
         .expect("mention should render");
-    assert!(text.contains("<channel name=\"#main\" ref=\"main\""));
+    assert!(text.contains("<channel name=\"#general\" ref=\"root.general\""));
     assert!(text.contains("<message from=\"@reviewer\" id=\"mentio\">"));
     assert!(text.contains("Reply via: `tenex-edge channel reply mentio --message \"hello world\"`"));
     assert!(!text.contains("mention=\"true\""));
@@ -375,7 +375,7 @@ fn members_are_relay_roster_backed_and_local_agents_are_labeled() {
         .unwrap();
     let solo = session_record(&empty, "solo", "solo");
     let text = render_fabric_context(&empty, input(Some(&solo), "solo", 0, 100, true)).unwrap();
-    assert!(text.contains("<channel name=\"#solo\""));
+    assert!(text.contains("<channel name=\"#general\" ref=\"solo.general\""));
     assert!(!text.contains("<members>"), "got: {text}");
 }
 
@@ -452,7 +452,7 @@ fn quiet_forced_delta_renders_no_new_activity_note() {
     let text = render_fabric_context(&store, input(Some(&rec), "root", 200, 300, true))
         .expect("forced who should always render");
     assert!(text.contains("You are @coder, running on laptop."));
-    assert!(text.contains("<no-new-activity workspace=\"main\">"));
+    assert!(text.contains("<no-new-activity workspace=\"root\">"));
     assert!(text.contains("The fabric surfaces only what changed"));
     // The tell-tale empty skeleton must NOT appear: no channel/members blocks.
     assert!(!text.contains("<members>"), "got: {text}");

@@ -12,5 +12,5 @@ source_refs:
 
 The verb for putting an existing participant into a channel, with two
 mutually-exclusive targets: a human (pubkey|npub|nip05, with optional --admin)
-or an existing live session (--session @agent/session). Fresh delegated agent
+or an existing live session (--session @agent-session-code). Fresh delegated agent
 sessions start through dispatch, not channel add.

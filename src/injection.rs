@@ -5,7 +5,7 @@
 //! ```text
 //! <tenex-edge>
 //!   <channel ref="workspace.channel.qa">
-//!     <message from="@developer/session" id="abc123">hello</message>
+//!     <message from="@developer-mist-ridge-204" id="abc123">hello</message>
 //!   </channel>
 //!
 //!   Reply via: `tenex-edge channel reply abc123 --message "hello world"`

@@ -43,8 +43,8 @@ impl Channel {
     /// The channel's human display name, if it has one — the single source of
     /// truth for "is this channel named?".
     ///
-    /// A ROOT channel (`parent` empty) uses its slug as BOTH its NIP-29 group id
-    /// and its `name` (`channel_h == name`), so the slug IS the human label.
+    /// A ROOT channel (`parent` empty) keeps the workspace slug as its durable
+    /// NIP-29 group id and uses `general` as its human channel name.
     /// A session/task room (`parent` set) whose `name` merely defaulted to its
     /// opaque id is genuinely unnamed. An empty `name` is always unnamed.
     pub fn human_name(&self) -> Option<&str> {

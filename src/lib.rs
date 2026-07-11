@@ -10,6 +10,7 @@
 
 mod applog;
 mod channel_about;
+mod channel_name;
 mod channel_ref;
 pub mod command_forensics;
 pub mod config;
@@ -49,6 +50,7 @@ pub mod reconcile;
 mod expired_sessions;
 mod turn_context;
 mod who_snapshot;
+mod who_view;
 
 #[cfg(test)]
 pub(crate) mod test_env;

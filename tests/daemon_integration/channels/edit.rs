@@ -140,8 +140,10 @@ fn channel_edit_ambiguous_reference_returns_exact_reruns() {
 
     let refs = v["ambiguous"].as_array().expect("ambiguous refs");
     assert_eq!(refs.len(), 2);
-    assert!(refs.iter().any(|v| v.as_str() == Some("planning")));
-    assert!(refs.iter().any(|v| v.as_str() == Some("epic/planning")));
+    let direct = format!("{actual_root}.general.planning");
+    let nested = format!("{actual_root}.general.epic.planning");
+    assert!(refs.iter().any(|v| v.as_str() == Some(direct.as_str())));
+    assert!(refs.iter().any(|v| v.as_str() == Some(nested.as_str())));
 
     stop_daemon(&home);
 }

@@ -58,8 +58,8 @@ mod tests {
     #[test]
     fn renders_agent_session_handle_and_resumability() {
         let out = render_expired(&[row("amber-echo-001", true), row("cedar-mesa-002", false)]);
-        assert!(out.contains("@coder/amber-echo-001"), "got: {out}");
-        assert!(out.contains("@coder/cedar-mesa-002"), "got: {out}");
+        assert!(out.contains("@coder-amber-echo-001"), "got: {out}");
+        assert!(out.contains("@coder-cedar-mesa-002"), "got: {out}");
         assert!(out.contains("#main"), "got: {out}");
         assert!(out.contains("resumable"), "got: {out}");
         assert!(out.contains("not resumable"), "got: {out}");

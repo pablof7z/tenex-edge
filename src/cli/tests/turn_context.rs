@@ -105,8 +105,7 @@ fn first_turn_renders_awareness_snapshot_not_session_code() {
         "first turn should render fabric awareness; got: {text:?}"
     );
     assert!(
-        // Only the human name renders — the opaque id is never useful to an agent (addresses by name).
-        text.contains("<channel name=\"#main\""),
+        text.contains("<channel name=\"#general\" ref=\"proj.general\""),
         "awareness should name the channel; got: {text:?}"
     );
     let expected_code = crate::util::friendly_short_code("sess-intro");

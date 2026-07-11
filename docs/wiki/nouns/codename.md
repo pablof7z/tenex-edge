@@ -11,4 +11,5 @@ source_refs:
 
 # codename
 
-friendly_short_code(session_id) — a deterministic, human-readable code derived from the session id, used as the session segment in agent/session handles and rendered as the member reference for local or remote sessions.
+`friendly_short_code(session_id)` is a deterministic human-readable code used in
+dashed session handles and member references for local or remote sessions.

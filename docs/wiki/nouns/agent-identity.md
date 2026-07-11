@@ -14,5 +14,5 @@ at start as `derive(management_secret, session_id)`, where the machine's
 management key (`tenexPrivateKey`) is the only stored secret. There is no durable
 per-agent keypair; `<edge_home>/agents/<slug>.json` is role config (harness,
 provider, model), not an identity. A session is addressed by its public handle
-`@<agent-slug>/<session-id>`, and it is trusted in a channel only through NIP-29
+`@<agent-slug>-<session-code>`, and it is trusted in a channel only through NIP-29
 membership.

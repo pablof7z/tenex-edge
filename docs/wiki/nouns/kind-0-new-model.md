@@ -10,5 +10,5 @@ source_refs:
 
 # kind:0 (new model)
 
-Per-session kind:0 profile, named `@agent/session` — the p-taggable handle.
+Per-session kind:0 profile, named `@agent-session-code` — the p-taggable handle.
 Each session publishes its own kind:0 under the role slug plus session id.

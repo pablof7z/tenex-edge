@@ -206,8 +206,8 @@ mod tests {
             .iter()
             .map(|(h, _)| channel_reference_for(&store, h))
             .collect::<Vec<_>>();
-        assert!(refs.contains(&"root".to_string()));
-        assert!(refs.contains(&"other".to_string()));
+        assert!(refs.contains(&"root.general".to_string()));
+        assert!(refs.contains(&"other.general".to_string()));
         assert_eq!(rec.channel_h, "root");
     }
 
@@ -222,6 +222,9 @@ mod tests {
             .upsert_channel("h-plan", "planning", "", "h-epic", 1)
             .unwrap();
 
-        assert_eq!(channel_reference_for(&store, "h-plan"), "epic/planning");
+        assert_eq!(
+            channel_reference_for(&store, "h-plan"),
+            "root.general.epic.planning"
+        );
     }
 }

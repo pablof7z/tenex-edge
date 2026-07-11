@@ -131,8 +131,8 @@ fn parse_pubkey_and_token() {
 #[test]
 fn extract_inline_mentions() {
     assert_eq!(
-        extract_mentions("hey @haiku/x1 and @codex, look"),
-        vec!["haiku".to_string(), "codex".to_string()]
+        extract_mentions("hey @haiku-sable-grove-179 and @codex, look"),
+        vec!["haiku-sable-grove-179".to_string(), "codex".to_string()]
     );
     assert_eq!(
         extract_mentions("ping @claude@tower please"),

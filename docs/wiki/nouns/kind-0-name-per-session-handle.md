@@ -10,5 +10,5 @@ source_refs:
 
 # kind:0 name (per-session handle)
 
-Per-session kind:0 profile, named `@agent/session`. This is the p-taggable
+Per-session kind:0 profile, named `@agent-session-code`. This is the p-taggable
 handle for mentions and invites.

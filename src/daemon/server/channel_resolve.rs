@@ -10,7 +10,7 @@ use super::*;
 
 mod paths;
 pub(in crate::daemon::server) use paths::channel_reference_for;
-use paths::{channel_reference_from_paths, path_ends_with, subtree_paths};
+use paths::{canonical_segments, channel_reference_from_paths, path_ends_with, subtree_paths};
 
 /// Resolve `name` to a `channel_h` using ONLY locally-known state — no minting,
 /// no relay calls. Returns `Some(h)` when the value resolves without provisioning:
@@ -157,13 +157,9 @@ pub(in crate::daemon::server) async fn resolve_channel_path(
     reference: &str,
     create_if_absent: bool,
 ) -> Result<String> {
-    let segments: Vec<String> = reference
-        .split(['/', '.'])
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
+    let segments = canonical_segments(root, reference);
     if segments.is_empty() {
-        anyhow::bail!("empty channel reference");
+        return Ok(root.to_string());
     }
     let mut parent = root.to_string();
     for seg in &segments {
@@ -251,6 +247,13 @@ pub(in crate::daemon::server) fn resolve_channel_ref(
     if reference.is_empty() {
         return ChannelResolution::NotFound;
     }
+    let want = canonical_segments(root, reference)
+        .into_iter()
+        .map(|segment| segment.to_lowercase())
+        .collect::<Vec<_>>();
+    if want.is_empty() {
+        return ChannelResolution::Unique(root.to_string());
+    }
     // Id passthrough: a caller (resume, launch picker) may pass a literal id.
     if store.get_channel(reference).ok().flatten().is_some() {
         return ChannelResolution::Unique(reference.to_string());
@@ -267,32 +270,24 @@ pub(in crate::daemon::server) fn resolve_channel_ref(
             .filter(|(id, _)| id.starts_with(prefix))
             .map(|(id, segs)| (id.clone(), segs.clone()))
             .collect();
-        return finish_resolution(hits);
+        return finish_resolution(hits, root);
     }
 
     // Name path: suffix-match the requested segments against each descendant's
     // relative NAME path (case-insensitive). Both `/` and `.` delimit path
     // segments, so `a/b/c` and `a.b.c` resolve identically.
-    let want: Vec<String> = reference
-        .split(['/', '.'])
-        .map(|s| s.trim().to_lowercase())
-        .filter(|s| !s.is_empty())
-        .collect();
-    if want.is_empty() {
-        return ChannelResolution::NotFound;
-    }
     let hits: Vec<(String, Vec<String>)> = paths
         .into_iter()
         .filter(|(_, segs)| path_ends_with(segs, &want))
         .collect();
-    finish_resolution(hits)
+    finish_resolution(hits, root)
 }
 
 /// Reduce raw `(channel_h, name_path)` hits to a [`ChannelResolution`]: dedup by
 /// id, then unique / ambiguous / none. Ambiguous entries render as their unique
 /// relative path, or `@<id-prefix>` when two share the same path (a same-level
 /// name collision that only the id can disambiguate).
-fn finish_resolution(mut hits: Vec<(String, Vec<String>)>) -> ChannelResolution {
+fn finish_resolution(mut hits: Vec<(String, Vec<String>)>, root: &str) -> ChannelResolution {
     hits.sort();
     hits.dedup_by(|a, b| a.0 == b.0);
     match hits.len() {
@@ -301,7 +296,7 @@ fn finish_resolution(mut hits: Vec<(String, Vec<String>)>) -> ChannelResolution 
         _ => {
             let mut refs: Vec<String> = hits
                 .iter()
-                .map(|(id, segs)| channel_reference_from_paths(&hits, id, segs))
+                .map(|(id, segs)| channel_reference_from_paths(&hits, root, id, segs))
                 .collect();
             refs.sort();
             ChannelResolution::Ambiguous(refs)

@@ -37,7 +37,7 @@ fn who_without_agent_anchor_returns_human_fabric_view_with_other_roots() {
             .call(
                 "who",
                 serde_json::json!({
-                    "root": &channel,
+                    "workspace": &channel,
                     "human_color": false
                 }),
             )
