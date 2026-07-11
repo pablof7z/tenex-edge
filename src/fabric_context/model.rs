@@ -63,6 +63,31 @@ pub(in crate::fabric_context) struct AgentRow {
     pub(in crate::fabric_context) about: String,
 }
 
+/// Agents declared in every workspace view. The all-workspaces renderers can
+/// show these once, then emit only each workspace's roster delta.
+pub(in crate::fabric_context) fn shared_agents(views: &[FabricView]) -> Vec<AgentRow> {
+    let Some((first, rest)) = views.split_first() else {
+        return Vec::new();
+    };
+    first
+        .agents
+        .iter()
+        .filter(|agent| rest.iter().all(|view| view.agents.contains(agent)))
+        .cloned()
+        .collect()
+}
+
+pub(in crate::fabric_context) fn workspace_agents(
+    view: &FabricView,
+    shared: &[AgentRow],
+) -> Vec<AgentRow> {
+    view.agents
+        .iter()
+        .filter(|agent| !shared.contains(agent))
+        .cloned()
+        .collect()
+}
+
 #[derive(Clone, PartialEq)]
 pub(in crate::fabric_context) struct ChannelBlock {
     pub(in crate::fabric_context) name: String,

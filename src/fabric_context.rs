@@ -20,8 +20,8 @@ pub(crate) use messages::{is_backend_pubkey, p_tag_pubkeys};
 pub(crate) use model::FabricView;
 
 use build::build_view;
-use human_render::render_human_view;
-use render::render_view;
+use human_render::{render_human_view, render_human_views};
+use render::{render_view, render_views};
 
 /// Stringify an already-derived [`FabricView`] into the exact `<tenex-edge>`
 /// snapshot agents see. The Trellis reconciler derives the view from declared
@@ -114,13 +114,11 @@ pub(crate) fn render_fabric_all_workspaces(
     local_host: &str,
     backend_pubkey: &str,
 ) -> String {
-    let mut out = String::new();
-    for root in roots {
-        let view = build_view(store, root_input(root, now, local_host, backend_pubkey));
-        out.push_str(&render_view(&view));
-        out.push('\n');
-    }
-    out
+    let views = roots
+        .iter()
+        .map(|root| build_view(store, root_input(root, now, local_host, backend_pubkey)))
+        .collect::<Vec<_>>();
+    render_views(&views)
 }
 
 /// Human-rendered counterpart of [`render_fabric_all_workspaces`].
@@ -132,12 +130,11 @@ pub(crate) fn render_fabric_all_workspaces_human(
     backend_pubkey: &str,
     color: bool,
 ) -> String {
-    let mut out = String::new();
-    for root in roots {
-        let view = build_view(store, root_input(root, now, local_host, backend_pubkey));
-        out.push_str(&render_human_view(&view, color));
-    }
-    out
+    let views = roots
+        .iter()
+        .map(|root| build_view(store, root_input(root, now, local_host, backend_pubkey)))
+        .collect::<Vec<_>>();
+    render_human_views(&views, color)
 }
 
 fn root_input<'a>(

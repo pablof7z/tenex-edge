@@ -2,13 +2,27 @@ use crate::fabric_context::model::*;
 use crate::fabric_context::workspace_labels::{channel_workspace, channels_need_workspace};
 use std::fmt::Write as _;
 
+mod all_workspaces;
+
+pub(in crate::fabric_context) use all_workspaces::render_views;
+
 pub(in crate::fabric_context) fn render_view(view: &FabricView) -> String {
     let mut out = String::from("<tenex-edge>");
     render_self(&mut out, view.self_row.as_ref());
+    render_workspace(&mut out, view, &view.agents, "available-agents");
+    out.push_str("\n</tenex-edge>");
+    out
+}
+
+pub(super) fn render_workspace(
+    out: &mut String,
+    view: &FabricView,
+    agents: &[AgentRow],
+    agents_tag: &str,
+) {
     if view.is_quiet_delta() {
-        render_no_new_activity(&mut out, &view.workspace.name);
-        out.push_str("\n</tenex-edge>");
-        return out;
+        render_no_new_activity(out, &view.workspace.name);
+        return;
     }
     let _ = write!(
         out,
@@ -19,17 +33,15 @@ pub(in crate::fabric_context) fn render_view(view: &FabricView) -> String {
         let _ = write!(out, " about=\"{}\"", esc_attr(&view.workspace.about));
     }
     out.push('>');
-    render_agents(&mut out, &view.agents);
+    render_agents(out, agents, agents_tag);
     let show_workspace = channels_need_workspace(&view.channels, &view.workspace.name);
     for channel in &view.channels {
-        render_channel(&mut out, channel, show_workspace);
+        render_channel(out, channel, show_workspace);
     }
-    render_unjoined(&mut out, &view.unjoined);
+    render_unjoined(out, &view.unjoined);
     out.push_str("\n  </workspace>");
-    render_important(&mut out, &view.important);
-    render_warnings(&mut out, &view.warnings);
-    out.push_str("\n</tenex-edge>");
-    out
+    render_important(out, &view.important);
+    render_warnings(out, &view.warnings);
 }
 
 /// A quiet delta: explain that the fabric reports only changes, rather than
@@ -57,11 +69,11 @@ fn render_self(out: &mut String, row: Option<&SelfRow>) {
     );
 }
 
-fn render_agents(out: &mut String, agents: &[AgentRow]) {
+pub(super) fn render_agents(out: &mut String, agents: &[AgentRow], tag: &str) {
     if agents.is_empty() {
         return;
     }
-    out.push_str("\n    <available-agents>");
+    let _ = write!(out, "\n    <{tag}>");
     for a in agents {
         let _ = write!(out, "\n      <agent ref=\"@{}\"", esc_attr(&a.reference));
         if !a.about.is_empty() {
@@ -69,7 +81,7 @@ fn render_agents(out: &mut String, agents: &[AgentRow]) {
         }
         out.push_str(" />");
     }
-    out.push_str("\n    </available-agents>");
+    let _ = write!(out, "\n    </{tag}>");
 }
 
 fn render_channel(out: &mut String, channel: &ChannelBlock, show_workspace: bool) {

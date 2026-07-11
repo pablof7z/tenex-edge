@@ -378,6 +378,68 @@ fn members_are_relay_roster_backed_and_local_agents_are_labeled() {
     assert!(!text.contains("<members>"), "got: {text}");
 }
 
+#[test]
+fn all_workspaces_factors_shared_agents_and_preserves_roster_deltas() {
+    let store = seed_store();
+    store
+        .upsert_channel("other", "other", "Other workspace", "", 1)
+        .unwrap();
+    store
+        .replace_agent_roster(&crate::state::AgentRoster {
+            backend_pubkey: "backend".into(),
+            host: "laptop".into(),
+            slug: "shared".into(),
+            use_criteria: "Available everywhere".into(),
+            channels: vec!["root".into(), "other".into()],
+            updated_at: 2,
+        })
+        .unwrap();
+    store
+        .replace_agent_roster(&crate::state::AgentRoster {
+            backend_pubkey: "backend".into(),
+            host: "laptop".into(),
+            slug: "other-only".into(),
+            use_criteria: "Only in other".into(),
+            channels: vec!["other".into()],
+            updated_at: 2,
+        })
+        .unwrap();
+
+    let roots = vec!["root".into(), "other".into()];
+    let rendered = render_fabric_all_workspaces(&store, &roots, 100, "laptop", "");
+    assert_eq!(
+        rendered.matches("<tenex-edge>").count(),
+        1,
+        "got: {rendered}"
+    );
+    assert_eq!(
+        rendered.matches("<available-agents>").count(),
+        1,
+        "got: {rendered}"
+    );
+    assert_eq!(rendered.matches("@shared").count(), 1, "got: {rendered}");
+    assert_eq!(
+        rendered.matches("<workspace-agents>").count(),
+        1,
+        "got: {rendered}"
+    );
+    assert!(rendered.contains("@other-only"), "got: {rendered}");
+
+    let human = render_fabric_all_workspaces_human(&store, &roots, 100, "laptop", "", false);
+    assert_eq!(
+        human.matches("Available agents (all workspaces)").count(),
+        1,
+        "got: {human}"
+    );
+    assert_eq!(human.matches("@shared").count(), 1, "got: {human}");
+    assert_eq!(
+        human.matches("Workspace-specific agents").count(),
+        1,
+        "got: {human}"
+    );
+    assert!(human.contains("@other-only"), "got: {human}");
+}
+
 /// A forced but empty delta (nothing new since the cursor) must explain that the
 /// fabric reports only changes, NOT emit a bare empty `<workspace>` skeleton that
 /// reads as "channels disappeared". Regression for the confusing second `who`.

@@ -3,12 +3,25 @@ use crate::fabric_context::workspace_labels::channels_need_workspace;
 use owo_colors::OwoColorize as _;
 use std::fmt::Write as _;
 
+mod all_workspaces;
 mod channel;
 
+pub(in crate::fabric_context) use all_workspaces::render_human_views;
 use channel::render_channel;
 
 pub(in crate::fabric_context) fn render_human_view(view: &FabricView, color: bool) -> String {
     let mut out = String::new();
+    render_human_workspace(&mut out, view, &view.agents, "Available agents", color);
+    out
+}
+
+pub(super) fn render_human_workspace(
+    out: &mut String,
+    view: &FabricView,
+    agents: &[AgentRow],
+    agents_label: &str,
+    color: bool,
+) {
     let _ = writeln!(out, "{}", style(&view.workspace.name, color, Style::Title));
     if !view.workspace.about.is_empty() {
         let _ = writeln!(out, "{}", dim(&view.workspace.about, color));
@@ -24,25 +37,24 @@ pub(in crate::fabric_context) fn render_human_view(view: &FabricView, color: boo
                 color
             )
         );
-        return out;
+        return;
     }
 
-    render_agents(&mut out, &view.agents, color);
+    render_agents(out, agents, agents_label, color);
     let show_workspace = channels_need_workspace(&view.channels, &view.workspace.name);
     for channel in &view.channels {
-        render_channel(&mut out, channel, color, show_workspace);
+        render_channel(out, channel, color, show_workspace);
     }
-    render_unjoined(&mut out, &view.unjoined, color);
-    render_important(&mut out, &view.important, color);
-    render_warnings(&mut out, &view.warnings, color);
-    out
+    render_unjoined(out, &view.unjoined, color);
+    render_important(out, &view.important, color);
+    render_warnings(out, &view.warnings, color);
 }
 
-fn render_agents(out: &mut String, agents: &[AgentRow], color: bool) {
+pub(super) fn render_agents(out: &mut String, agents: &[AgentRow], label: &str, color: bool) {
     if agents.is_empty() {
         return;
     }
-    let _ = writeln!(out, "{}", style("Available agents", color, Style::Header));
+    let _ = writeln!(out, "{}", style(label, color, Style::Header));
     for a in agents {
         let name = format!("@{}", a.reference);
         if a.about.is_empty() {
