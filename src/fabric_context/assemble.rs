@@ -31,6 +31,11 @@ pub(crate) fn assemble_view(inputs: &ViewInputs, cursor: u64, now: u64) -> Fabri
             agent: s.agent.clone(),
             agent_slug: s.agent_slug.clone(),
             host: s.host.clone(),
+            work_topic: if crate::work_topic::is_visible(&s.work_topic, s.work_topic_set_at, now) {
+                s.work_topic.clone()
+            } else {
+                String::new()
+            },
         }),
         workspace: WorkspaceRow {
             name: meta.workspace.name.clone(),

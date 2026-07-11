@@ -264,6 +264,7 @@ mod session_distill;
 mod session_membership_cleanup;
 mod session_native;
 mod session_ty;
+mod session_work_topic;
 pub use session_ty::Session;
 mod sessions;
 mod status;

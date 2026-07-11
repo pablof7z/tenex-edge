@@ -33,6 +33,7 @@ mod demux;
 mod invite_rpc;
 mod management_command;
 mod membership_cleanup;
+mod my_status;
 mod orchestration_handler;
 mod pty_rpc;
 mod rpc;
@@ -240,6 +241,7 @@ use diagnostics::{
 use engine_lifecycle::{cancel_session, engine_params_for, reconcile_sessions, spawn_session};
 pub use lifecycle::run;
 use lifecycle::{write_json, ClientGuard, InitProgress};
+use my_status::rpc_my_status;
 use profile_rpc::{resolve_backend_pubkey, resolve_channel_member_pubkey_hex, resolve_pubkey_hex};
 use proposal::rpc_propose;
 use resolution::{resolve_session, resolve_session_inner, CallerAnchor, ResolveScope};
@@ -260,6 +262,7 @@ async fn dispatch(state: &Arc<DaemonState>, req: &Request) -> Response {
             Ok(serde_json::json!({"stopped": true}))
         }
         "who" => rpc_who(state, &req.params),
+        "my_status" => rpc_my_status(state, &req.params),
         "session_start" => rpc_session_start(state, &req.params, None).await,
         "session_end" => rpc_session_end(state, &req.params).await,
         "session_kill" => rpc_session_kill(state, &req.params).await,

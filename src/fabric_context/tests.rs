@@ -3,6 +3,7 @@ use crate::state::{RegisterSession, RelayEvent, Session, Status, Store};
 
 mod backend_traffic;
 mod member_render;
+mod work_topic;
 
 const SELF_PK: &str = "self-pubkey";
 const OTHER_PK: &str = "other-pubkey";

@@ -146,6 +146,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     working           INTEGER NOT NULL DEFAULT 0,
     turn_started_at   INTEGER NOT NULL DEFAULT 0,
     last_distill_at   INTEGER NOT NULL DEFAULT 0,
+    work_topic        TEXT NOT NULL DEFAULT '',
+    work_topic_set_at INTEGER NOT NULL DEFAULT 0,
     seen_cursor       INTEGER NOT NULL DEFAULT 0,
     title             TEXT NOT NULL DEFAULT '',
     activity          TEXT NOT NULL DEFAULT '',

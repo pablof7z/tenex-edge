@@ -42,6 +42,7 @@ pub mod state;
 pub mod status_seam;
 pub mod transcript;
 pub mod transport;
+pub(crate) mod work_topic;
 
 pub mod reconcile;
 

@@ -32,6 +32,10 @@ pub(super) fn build_view(store: &Store, input: FabricContextInput<'_>) -> Fabric
             agent: input.self_slug.to_string(),
             agent_slug: s.agent_slug.clone(),
             host: input.local_host.to_string(),
+            work_topic: s
+                .visible_work_topic(input.now)
+                .unwrap_or_default()
+                .to_string(),
         }),
         workspace,
         agents: agents(store, &root, input.cursor, input.now, input.local_host),

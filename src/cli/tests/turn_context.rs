@@ -61,6 +61,8 @@ fn test_session(id: &str) -> Session {
         working: false,
         turn_started_at: 0,
         last_distill_at: 0,
+        work_topic: String::new(),
+        work_topic_set_at: 0,
         seen_cursor: 0,
         title: String::new(),
         activity: String::new(),

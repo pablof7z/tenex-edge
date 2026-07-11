@@ -62,4 +62,5 @@ Load only the reference needed for the current decision:
   to the human, or closing a handoff.
 - [CLI How-To](references/cli-how-to.md): Read when you need exact commands for
   reading or sending channel messages, choosing rooms, dispatching new sessions,
-  adding existing sessions or humans, or refreshing awareness.
+  adding existing sessions or humans, setting a broad work topic, or refreshing
+  awareness.

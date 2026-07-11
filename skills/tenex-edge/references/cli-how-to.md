@@ -9,6 +9,7 @@
 - [Dispatch New Sessions](#dispatch-new-sessions)
 - [Add Existing Sessions Or Humans](#add-existing-sessions-or-humans)
 - [Find Prior Sessions](#find-prior-sessions)
+- [Set A Work Topic](#set-a-work-topic)
 - [Refresh Awareness](#refresh-awareness)
 
 ## Use The Snapshot First
@@ -121,6 +122,21 @@ tenex-edge agents list-sessions --agent <agent[@backend-label]>
 
 Use this when continuity with old context matters. Prefer active agents with
 current context before reviving or referencing old sessions.
+
+## Set A Work Topic
+
+```bash
+tenex-edge my status --topic "Researching MCP improvements around resource allocation"
+```
+
+Use this very rarely, only when the broad direction of your work changes. Keep
+the topic to 15 words or fewer. It is for a durable theme, not a current task,
+mechanical step, or progress narration: avoid topics such as "working on X" or
+"fixing compilation issues."
+
+Setting a topic pauses automatic work distillation for 30 minutes. Once that
+window ends, your hook-provided identity context shows the visible topic and
+reminds you to update it if the work has drifted.
 
 ## Refresh Awareness
 

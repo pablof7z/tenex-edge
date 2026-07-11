@@ -104,6 +104,10 @@ pub(super) struct SelfCap {
     pub(super) agent_slug: String,
     #[serde(default)]
     pub(super) host: String,
+    #[serde(default)]
+    pub(super) work_topic: String,
+    #[serde(default)]
+    pub(super) work_topic_set_at: u64,
 }
 
 #[derive(Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]

@@ -9,6 +9,7 @@ use super::install::InstallArgs;
 use super::launch_cli::LaunchArgs;
 use super::mcp::McpArgs;
 use super::messaging::PublishArgs;
+use super::my::MyAction;
 use super::probe::ProbeArgs;
 use super::pty::{PtyAction, PtySupervisorArgs};
 use super::session::SessionAction;
@@ -68,6 +69,11 @@ pub(super) enum Cmd {
     Launch(LaunchArgs),
     /// Start an MCP server over stdio or HTTP.
     Mcp(McpArgs),
+    /// Manage your own session's visible work topic.
+    My {
+        #[command(subcommand)]
+        action: MyAction,
+    },
     /// Manage the current local session.
     Session {
         #[command(subcommand)]
@@ -163,6 +169,19 @@ mod tests {
             }
             _ => panic!("expected session end action"),
         }
+    }
+
+    #[test]
+    fn my_status_parses_with_topic() {
+        let cli = Cli::try_parse_from([
+            "tenex-edge",
+            "my",
+            "status",
+            "--topic",
+            "Researching MCP improvements around resource allocation",
+        ])
+        .unwrap();
+        assert!(matches!(cli.cmd, Cmd::My { .. }));
     }
 
     #[test]

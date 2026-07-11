@@ -249,7 +249,15 @@ pub async fn run_session_in_daemon(
                     slog(&p.session_id, &format!("[distill] task finished result={} error={:?}",
                         result.as_ref().map(|l| format!("title={:?} activity={:?}", l.title, l.activity)).unwrap_or_else(|| "None".into()),
                         error));
-                    if let Some(labels) = result {
+                    let topic_holds_distill = st!(|s: &Store| {
+                        s.get_session(&p.session_id)
+                            .ok()
+                            .flatten()
+                            .is_some_and(|session| session.work_topic_suppresses_distillation(now))
+                    });
+                    if topic_holds_distill {
+                        slog(&p.session_id, "[distill] discarded while an explicit work topic is protected");
+                    } else if let Some(labels) = result {
                         if let Err(e) = st!(|s: &Store| s.set_session_distill(
                             &p.session_id, &labels.title, &labels.activity, now,
                         )) {
@@ -309,42 +317,45 @@ pub async fn run_session_in_daemon(
                     // ── schedule background distillation ──────────────────
                     if distill_task.is_none() {
                         if let Some(sess) = session.as_ref() {
-                            let succeeded_this_turn =
-                                sess.turn_started_at > 0 && sess.last_distill_at >= sess.turn_started_at;
-                            let due = if last_distill_attempt == 0 {
-                                now.saturating_sub(sess.turn_started_at) >= turn_first
-                            } else if succeeded_this_turn {
-                                turn_repeat > 0 && now.saturating_sub(sess.last_distill_at) >= turn_repeat
-                            } else {
-                                now.saturating_sub(last_distill_attempt) >= turn_first
-                            };
-                            if due {
-                                let transcript_path = sess.transcript_path.clone();
-                                slog(&p.session_id, &format!("[distill] due transcript_path={:?}", transcript_path));
-                                let ctx = transcript_path.and_then(|path| {
-                                    let result = crate::transcript::read_recent(std::path::Path::new(&path), 14, 2500);
-                                    if result.is_none() {
-                                        slog(&p.session_id, &format!("[distill] read_recent returned None path={path}"));
-                                    }
-                                    result
-                                });
-                                if let Some(ctx) = ctx {
-                                    let current = (!sess.title.trim().is_empty())
-                                        .then(|| sess.title.clone());
-                                    slog(&p.session_id, &format!("[distill] spawning task ctx_len={} current_title={:?}", ctx.len(), current));
-                                    last_distill_attempt = now;
-                                    let sid = p.session_id.clone();
-                                    distill_task = Some(tokio::spawn(async move {
-                                        match tokio::time::timeout(
-                                            Duration::from_secs(20),
-                                            distill::distill_session(&ctx, current.as_deref(), &sid),
-                                        )
-                                        .await
-                                        {
-                                            Ok(triple) => triple,
-                                            Err(_) => (None, Some("distillation timed out after 20s".to_string()), None),
+                            if !sess.work_topic_suppresses_distillation(now) {
+                                let succeeded_this_turn = sess.turn_started_at > 0
+                                    && sess.last_distill_at >= sess.turn_started_at;
+                                let due = if last_distill_attempt == 0 {
+                                    now.saturating_sub(sess.turn_started_at) >= turn_first
+                                } else if succeeded_this_turn {
+                                    turn_repeat > 0
+                                        && now.saturating_sub(sess.last_distill_at) >= turn_repeat
+                                } else {
+                                    now.saturating_sub(last_distill_attempt) >= turn_first
+                                };
+                                if due {
+                                    let transcript_path = sess.transcript_path.clone();
+                                    slog(&p.session_id, &format!("[distill] due transcript_path={:?}", transcript_path));
+                                    let ctx = transcript_path.and_then(|path| {
+                                        let result = crate::transcript::read_recent(std::path::Path::new(&path), 14, 2500);
+                                        if result.is_none() {
+                                            slog(&p.session_id, &format!("[distill] read_recent returned None path={path}"));
                                         }
-                                    }));
+                                        result
+                                    });
+                                    if let Some(ctx) = ctx {
+                                        let current = (!sess.title.trim().is_empty())
+                                            .then(|| sess.title.clone());
+                                        slog(&p.session_id, &format!("[distill] spawning task ctx_len={} current_title={:?}", ctx.len(), current));
+                                        last_distill_attempt = now;
+                                        let sid = p.session_id.clone();
+                                        distill_task = Some(tokio::spawn(async move {
+                                            match tokio::time::timeout(
+                                                Duration::from_secs(20),
+                                                distill::distill_session(&ctx, current.as_deref(), &sid),
+                                            )
+                                            .await
+                                            {
+                                                Ok(triple) => triple,
+                                                Err(_) => (None, Some("distillation timed out after 20s".to_string()), None),
+                                            }
+                                        }));
+                                    }
                                 }
                             }
                         }

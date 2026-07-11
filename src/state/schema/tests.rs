@@ -62,6 +62,14 @@ fn fresh_file_db_uses_only_canonical_schema() {
         sess_cols.iter().any(|c| c == "explicit_chat_published_at"),
         "sessions.explicit_chat_published_at"
     );
+    assert!(
+        sess_cols.iter().any(|c| c == "work_topic"),
+        "sessions.work_topic"
+    );
+    assert!(
+        sess_cols.iter().any(|c| c == "work_topic_set_at"),
+        "sessions.work_topic_set_at"
+    );
 }
 
 #[test]

@@ -6,9 +6,11 @@
 //! writing — a known prior bug mutated by raw id and silently no-op'd.
 
 use super::*;
-pub(super) const COLS: &str = "session_id, agent_pubkey, agent_slug, channel_h, harness, child_pid, \
+pub(super) const COLS: &str =
+    "session_id, agent_pubkey, agent_slug, channel_h, harness, child_pid, \
      transcript_path, alive, created_at, last_seen, working, turn_started_at, last_distill_at, \
-     seen_cursor, title, activity, resume_id, distill_fail_streak, distill_notice_at, explicit_chat_published_at";
+     work_topic, work_topic_set_at, seen_cursor, title, activity, resume_id, distill_fail_streak, \
+     distill_notice_at, explicit_chat_published_at";
 
 pub(super) fn row_to_session(row: &rusqlite::Row) -> rusqlite::Result<Session> {
     Ok(Session {
@@ -25,13 +27,15 @@ pub(super) fn row_to_session(row: &rusqlite::Row) -> rusqlite::Result<Session> {
         working: row.get::<_, i64>(10)? != 0,
         turn_started_at: row.get(11)?,
         last_distill_at: row.get(12)?,
-        seen_cursor: row.get(13)?,
-        title: row.get(14)?,
-        activity: row.get(15)?,
-        resume_id: row.get(16)?,
-        distill_fail_streak: row.get(17)?,
-        distill_notice_at: row.get(18)?,
-        explicit_chat_published_at: row.get(19)?,
+        work_topic: row.get(13)?,
+        work_topic_set_at: row.get(14)?,
+        seen_cursor: row.get(15)?,
+        title: row.get(16)?,
+        activity: row.get(17)?,
+        resume_id: row.get(18)?,
+        distill_fail_streak: row.get(19)?,
+        distill_notice_at: row.get(20)?,
+        explicit_chat_published_at: row.get(21)?,
     })
 }
 

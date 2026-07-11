@@ -58,6 +58,8 @@ fn validate_canonical(conn: &Connection, path: Option<&Path>) -> Result<()> {
             "distill_fail_streak",
             "distill_notice_at",
             "explicit_chat_published_at",
+            "work_topic",
+            "work_topic_set_at",
         ],
         &[],
         path,

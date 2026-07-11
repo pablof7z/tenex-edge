@@ -67,6 +67,13 @@ fn render_self(out: &mut String, row: Option<&SelfRow>) {
         esc_text(&row.agent),
         esc_text(&row.host)
     );
+    if !row.work_topic.is_empty() {
+        let _ = write!(
+            out,
+            " Current visible work topic: \"{}\"\n  [if your work topic drifted you can update it]",
+            esc_text(&row.work_topic)
+        );
+    }
 }
 
 pub(super) fn render_agents(out: &mut String, agents: &[AgentRow], tag: &str) {
