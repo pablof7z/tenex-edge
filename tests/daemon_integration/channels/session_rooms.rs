@@ -115,10 +115,10 @@ fn first_turn_resolves_member_profiles_from_kind0() {
     let sid = unique_session("sess-member-profile");
     let remote = Keys::generate();
     let remote_pk = remote.public_key().to_hex();
-    let remote_name = "profiled-member";
+    let remote_name = "willow-echo-042";
     let remote_agent_slug = "reviewer";
     let remote_handle =
-        tenex_edge::idref::session_handle_from_profile_name(remote_name, "", remote_agent_slug);
+        tenex_edge::idref::session_handle_from_profile_name(remote_name, remote_agent_slug);
 
     let ctx = rt().block_on(async {
         profile::publish_profile(&remote, remote_name, remote_agent_slug).await;

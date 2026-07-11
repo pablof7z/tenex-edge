@@ -77,7 +77,7 @@ impl AgentRef {
 pub struct Profile {
     pub agent: AgentRef,
     /// Stable harness/role slug for the agent behind this session identity.
-    /// `agent.slug` is the published display handle, usually `agent-sessionCode`.
+    /// `agent.slug` is the published display handle, usually `sessionCode-agent`.
     pub agent_slug: String,
     pub host: String,
     /// Owner pubkeys this agent claims (the human's whitelisted pubkeys).

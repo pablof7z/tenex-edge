@@ -469,11 +469,11 @@ mod tests {
         let pane = SessionPane {
             short: "6a4ddbe6".into(),
             root: "aaa".into(),
-            agent: "haiku-pearl-cliff-395".into(),
+            agent: "pearl-cliff-395-haiku".into(),
             channels: vec!["aaa".into(), "dev".into()],
             ..SessionPane::default()
         };
 
-        assert_eq!(pane_title(&pane), "haiku-pearl-cliff-395 / aaa / aaa, dev");
+        assert_eq!(pane_title(&pane), "pearl-cliff-395-haiku / aaa / aaa, dev");
     }
 }

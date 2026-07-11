@@ -80,19 +80,7 @@ async fn maybe_post_add_message(
         .as_str()
         .unwrap_or_default()
         .to_string();
-    let host = result["host"]
-        .as_str()
-        .unwrap_or(state.host.as_str())
-        .to_string();
-    let label_with_host =
-        if label.contains('@') || crate::idref::parse_session_handle(&label).is_some() {
-            label
-        } else {
-            format!("{label}@{host}")
-        };
-    if let Some(err) =
-        message::post_add_message(state, params, channel_h, &label_with_host, message).await
-    {
+    if let Some(err) = message::post_add_message(state, params, channel_h, &label, message).await {
         if let Some(obj) = result.as_object_mut() {
             obj.insert("message_error".into(), serde_json::json!(err));
         }

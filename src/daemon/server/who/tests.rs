@@ -45,8 +45,10 @@ async fn agent_who_renders_full_snapshot_after_cursor_advanced() {
 
     assert!(fabric.contains("<members>"), "got:\n{fabric}");
     assert!(fabric.contains("id=\"root.task\""), "got:\n{fabric}");
+    let handle =
+        crate::idref::session_handle("coder", &crate::util::friendly_short_code(&session_id));
     assert!(
-        fabric.contains("<agent name=\"@coder-"),
+        fabric.contains(&format!("<agent name=\"@{handle}\"")),
         "caller must stay typed as an agent on a cold status cache:\n{fabric}"
     );
     assert!(

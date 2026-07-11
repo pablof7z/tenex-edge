@@ -78,8 +78,8 @@ mod tests {
     #[test]
     fn rewrites_full_agent_session_handle() {
         let out = rewrite_first_resolved_mention(
-            "hey @codex-willow-echo-042 now",
-            "codex-willow-echo-042",
+            "hey @willow-echo-042-codex now",
+            "willow-echo-042-codex",
             TARGET_PK,
         );
 

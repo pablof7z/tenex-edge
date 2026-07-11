@@ -170,8 +170,8 @@ fn dashed_session_handle_resolves_profile_cache() {
     store
         .upsert_profile_with_agent_slug(
             "remote-pk",
-            "codex-willow-echo-042",
-            "codex-willow-echo-042",
+            "willow-echo-042-codex",
+            "willow-echo-042-codex",
             "codex",
             "remoteBackend",
             false,
@@ -180,11 +180,34 @@ fn dashed_session_handle_resolves_profile_cache() {
         .unwrap();
 
     let resolved =
-        resolve_recipient(&store, "channel", "localBackend", "codex-willow-echo-042").unwrap();
+        resolve_recipient(&store, "channel", "localBackend", "willow-echo-042-codex").unwrap();
 
     assert_eq!(resolved.pubkey, "remote-pk");
     assert_eq!(resolved.target_session, None);
     assert_eq!(resolved.channel, "channel");
+}
+
+#[test]
+fn agent_first_session_handle_does_not_fall_through_to_profile_label_resolution() {
+    let store = Store::open_memory().unwrap();
+    store
+        .upsert_profile_with_agent_slug(
+            "remote-pk",
+            "codex-willow-echo-042",
+            "codex-willow-echo-042",
+            "codex",
+            "localBackend",
+            false,
+            1,
+        )
+        .unwrap();
+
+    let err = match resolve_recipient(&store, "channel", "localBackend", "codex-willow-echo-042") {
+        Ok(_) => panic!("agent-first session handles must stay removed"),
+        Err(err) => err,
+    };
+
+    assert!(err.to_string().contains("@sessionCode-agent"));
 }
 
 #[test]

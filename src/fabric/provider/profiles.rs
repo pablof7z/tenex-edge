@@ -24,7 +24,7 @@ impl Nip29Provider {
         let is_backend = backend_tag(&event);
         let agent_slug = agent_slug_tag(&event).unwrap_or_default();
         let (name, slug) =
-            profile_cache_fields_with_agent_slug(&display_name, &host, &agent_slug, is_backend);
+            profile_cache_fields_with_agent_slug(&display_name, &agent_slug, is_backend);
 
         self.with_store(|s| {
             s.upsert_profile_with_agent_slug(
@@ -72,7 +72,7 @@ fn backend_tag(event: &nostr_sdk::Event) -> bool {
 }
 
 fn agent_slug_tag(event: &nostr_sdk::Event) -> Option<String> {
-    tag_value(event, "agent-slug").or_else(|| tag_value(event, "agentSlug"))
+    tag_value(event, "agent-slug")
 }
 
 fn tag_value(event: &nostr_sdk::Event, name: &str) -> Option<String> {
@@ -86,14 +86,13 @@ fn tag_value(event: &nostr_sdk::Event, name: &str) -> Option<String> {
 
 fn profile_cache_fields_with_agent_slug(
     display_name: &str,
-    host: &str,
     agent_slug: &str,
     is_backend: bool,
 ) -> (String, String) {
     let name = if is_backend {
         display_name.trim().to_string()
     } else {
-        crate::idref::session_handle_from_profile_name(display_name, host, agent_slug)
+        crate::idref::session_handle_from_profile_name(display_name, agent_slug)
     };
     let slug = name.clone();
     (name, slug)
@@ -123,30 +122,23 @@ mod tests {
     }
 
     #[test]
-    fn cache_fields_keep_qualified_name_and_bare_slug() {
+    fn cache_fields_keep_profile_name_or_build_session_handle() {
         assert_eq!(
-            profile_cache_fields_with_agent_slug(
-                "developer1@remoteBackend",
-                "remoteBackend",
-                "",
-                false
-            ),
-            ("developer1".to_string(), "developer1".to_string())
-        );
-        assert_eq!(
-            profile_cache_fields_with_agent_slug("developer1", "remoteBackend", "", false),
-            ("developer1".to_string(), "developer1".to_string())
-        );
-        assert_eq!(
-            profile_cache_fields_with_agent_slug(
-                "willow-echo-042@remoteBackend",
-                "remoteBackend",
-                "developer",
-                false
-            ),
+            profile_cache_fields_with_agent_slug("developer1@remoteBackend", "", false),
             (
-                "developer-willow-echo-042".to_string(),
-                "developer-willow-echo-042".to_string()
+                "developer1@remoteBackend".to_string(),
+                "developer1@remoteBackend".to_string()
+            )
+        );
+        assert_eq!(
+            profile_cache_fields_with_agent_slug("developer1", "", false),
+            ("developer1".to_string(), "developer1".to_string())
+        );
+        assert_eq!(
+            profile_cache_fields_with_agent_slug("willow-echo-042", "developer", false),
+            (
+                "willow-echo-042-developer".to_string(),
+                "willow-echo-042-developer".to_string()
             )
         );
     }

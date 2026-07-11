@@ -8,7 +8,7 @@ pub(super) fn encode(pf: &Profile) -> Result<EventBuilder> {
     let name = if pf.is_backend {
         pf.agent.slug.clone()
     } else {
-        crate::idref::session_handle_from_profile_name(&pf.agent.slug, &pf.host, &pf.agent_slug)
+        crate::idref::session_handle_from_profile_name(&pf.agent.slug, &pf.agent_slug)
     };
     let content = serde_json::json!({ "name": name }).to_string();
     let mut tags = vec![tag(&["host", &pf.host])?];
@@ -34,7 +34,7 @@ pub(super) fn decode(event: &Event, pubkey: String) -> Option<DomainEvent> {
     let slug = if is_backend {
         name
     } else {
-        crate::idref::session_handle_from_profile_name(&name, &host, &agent_slug)
+        crate::idref::session_handle_from_profile_name(&name, &agent_slug)
     };
     Some(DomainEvent::Profile(Profile {
         agent: AgentRef::new(pubkey, slug),
@@ -47,7 +47,6 @@ pub(super) fn decode(event: &Event, pubkey: String) -> Option<DomainEvent> {
 
 fn agent_slug(event: &Event) -> String {
     first_tag(event, "agent-slug")
-        .or_else(|| first_tag(event, "agentSlug"))
         .unwrap_or_default()
         .to_string()
 }

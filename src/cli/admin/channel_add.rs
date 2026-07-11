@@ -1,6 +1,6 @@
 //! `channel add` — add a member to a channel in one of two shapes:
 //!   * human by id:        `channel add <pubkey|npub|nip05> <channel> [--admin]`
-//!   * pull an existing one:`channel add --session @agent-sessionCode <channel>`
+//!   * pull an existing one:`channel add --session @sessionCode-agent <channel>`
 //!
 //! Human adds route to the daemon's `channel_add_member`; existing-session adds
 //! route to `invite`. `--message` posts a chat mentioning the brought-online
@@ -11,7 +11,7 @@ use super::*;
 
 pub(super) async fn channel_add(a: AddArgs) -> Result<()> {
     match a.session.clone() {
-        Some(codehost) => session_add(a.first, &codehost, a.message).await,
+        Some(handle) => session_add(a.first, &handle, a.message).await,
         None => human_add(a.first, a.second, a.admin, a.message).await,
     }
 }
@@ -58,16 +58,12 @@ async fn human_add(
     Ok(())
 }
 
-async fn session_add(
-    channel: Option<String>,
-    codehost: &str,
-    message: Option<String>,
-) -> Result<()> {
+async fn session_add(channel: Option<String>, handle: &str, message: Option<String>) -> Result<()> {
     let Some(channel) = channel else {
-        anyhow::bail!("channel add --session @agent-sessionCode <channel>");
+        anyhow::bail!("channel add --session @sessionCode-agent <channel>");
     };
-    // Strip a leading `@` so both `@agent-sessionCode` and `agent-sessionCode` are accepted.
-    let selector = codehost.strip_prefix('@').unwrap_or(codehost);
+    // Strip the mention sigil before sending the canonical handle to the daemon.
+    let selector = handle.strip_prefix('@').unwrap_or(handle);
     let v = invite_call(
         &channel,
         serde_json::json!({ "session": selector }),
@@ -75,7 +71,7 @@ async fn session_add(
     )
     .await?;
     if v["ambiguous"].is_array() {
-        print_ambiguous(&format!("--session {codehost}"), &channel, &v);
+        print_ambiguous(&format!("--session {handle}"), &channel, &v);
     }
     println!("@{} is now on #{channel}", online_label(&v).bold());
     warn_message_error(&v);
@@ -98,18 +94,9 @@ async fn invite_call(
     daemon_call_async("invite", crate::cli::rpc_params(params)).await
 }
 
-/// The brought-online session's public handle from an invite response. Remote
-/// legacy responses may still carry `codename@backend`; local session handles are
-/// already complete.
+/// The brought-online session's canonical public handle from an invite response.
 fn online_label(v: &serde_json::Value) -> String {
-    let label = v["online_agent"].as_str().unwrap_or("session");
-    let host = v["host"].as_str().unwrap_or("");
-    if label.contains('@') || crate::idref::parse_session_handle(label).is_some() || host.is_empty()
-    {
-        label.to_string()
-    } else {
-        format!("{label}@{host}")
-    }
+    v["online_agent"].as_str().unwrap_or("session").to_string()
 }
 
 fn warn_message_error(v: &serde_json::Value) {
@@ -160,9 +147,9 @@ mod tests {
     #[test]
     fn session_pull_accepts_handle_and_message() {
         let a = parse_add(
-            "tenex-edge channel add --session @coder-sable-grove-179 ops --message welcome",
+            "tenex-edge channel add --session @sable-grove-179-coder ops --message welcome",
         );
-        assert_eq!(a.session.as_deref(), Some("@coder-sable-grove-179"));
+        assert_eq!(a.session.as_deref(), Some("@sable-grove-179-coder"));
         assert_eq!(a.first.as_deref(), Some("ops"));
         assert_eq!(a.message.as_deref(), Some("welcome"));
     }
@@ -177,7 +164,7 @@ mod tests {
 
     #[test]
     fn admin_conflicts_with_session_mode() {
-        let kind = parse_err("tenex-edge channel add --session @coder-sable-grove-179 ops --admin");
+        let kind = parse_err("tenex-edge channel add --session @sable-grove-179-coder ops --admin");
         assert_eq!(kind, ErrorKind::ArgumentConflict);
     }
 

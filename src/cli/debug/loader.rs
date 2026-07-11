@@ -488,7 +488,7 @@ mod tests {
 
         enrich_panes_from_store_path(&mut panes, &path);
 
-        assert_eq!(panes["sess-1"].agent, "haiku-pearl-cliff-395");
+        assert_eq!(panes["sess-1"].agent, "pearl-cliff-395-haiku");
         assert_eq!(panes["sess-1"].root, "aaa");
         assert_eq!(panes["sess-1"].channels, vec!["aaa", "dev"]);
     }

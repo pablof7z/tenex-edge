@@ -4,20 +4,20 @@
 //! Rather than re-implement chat publishing (mention resolution, p-tag, local
 //! doorbell delivery), this synthesizes a `channel_send` call from the SAME caller
 //! anchors the invite ran under, prefixing the body with the brought-online
-//! session's `@agent-sessionCode` handle so `channel_send` p-tags it.
+//! session's `@sessionCode-agent` handle so `channel_send` p-tags it.
 
 use crate::daemon::server::DaemonState;
 use std::sync::Arc;
 
-/// Publish the add-message. `label_with_host` is the online session's public
-/// `agent-sessionCode` handle. Returns an error STRING on failure
+/// Publish the add-message. `session_handle` is the online session's public
+/// `sessionCode-agent` handle. Returns an error STRING on failure
 /// rather than propagating: the membership add already succeeded, so a failed
 /// courtesy message must degrade to a warning, never fail the whole `channel add`.
 pub(super) async fn post_add_message(
     state: &Arc<DaemonState>,
     params: &serde_json::Value,
     channel_h: &str,
-    label_with_host: &str,
+    session_handle: &str,
     message: &str,
 ) -> Option<String> {
     let mut chat = params.clone();
@@ -27,7 +27,7 @@ pub(super) async fn post_add_message(
     obj.insert("channel".into(), serde_json::json!(channel_h));
     obj.insert(
         "message".into(),
-        serde_json::json!(format!("@{label_with_host} {message}")),
+        serde_json::json!(format!("@{session_handle} {message}")),
     );
     // The mention prefix can push a short message over the soft cap; the operator
     // already opted into posting it, so never reject on length here.

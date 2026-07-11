@@ -104,7 +104,7 @@ pub(super) async fn wait_remote_session_online(
         state
             .with_store(|s| s.is_channel_member(channel_h, &remote.pubkey))
             .unwrap_or(false)
-            .then(|| label_for_pubkey(state, channel_h, &remote.pubkey, &remote.backend))
+            .then(|| remote.slug.clone())
     })
     .await
 }

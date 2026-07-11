@@ -47,7 +47,7 @@ pub(super) fn member_rows(
         .collect()
 }
 
-/// A non-self member's reference: `@agent-sessionCode` when its owning session is
+/// A non-self member's reference: `@sessionCode-agent` when its owning session is
 /// known (a live status carrying a session id), else the slug/npub fallback.
 /// Mirrors `assemble::member_reference` exactly so both paths agree.
 fn member_reference(store: &Store, pk: &str, status: Option<&Status>, local_host: &str) -> String {
