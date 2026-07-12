@@ -1,0 +1,108 @@
+//! `~/.tenex-edge/harnesses.json` loader + serde.
+//!
+//! The file is a map of **bundle name -> bundle spec**. A bundle is the
+//! user-facing name you spawn (`codex-acp`, `planner`, …); it binds a `harness`
+//! (which CLI) to a `transport` (how tenex-edge drives it) plus an opaque,
+//! harness-specific `profile` object. Missing file => empty map (built-in
+//! bundles from the driver table still resolve); malformed JSON => hard error.
+
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+
+use crate::session::Harness;
+
+/// Whole-file shape: bundle name -> bundle spec.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct HarnessesConfig {
+    pub bundles: BTreeMap<String, HarnessBundle>,
+}
+
+/// One bundle: which CLI, how we drive it, and opaque tuning.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HarnessBundle {
+    /// Which underlying CLI. Parsed via `Harness::from_str` so `"claude"` and
+    /// `"claude-code"` both resolve; `Harness::Unknown` is rejected.
+    #[serde(with = "harness_serde")]
+    pub harness: Harness,
+    /// How tenex-edge drives that CLI.
+    pub transport: Transport,
+    /// Opaque, harness-specific tuning applied per the driver's
+    /// `ProfileMechanism`. `None`/`{}` => no profile.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<serde_json::Value>,
+}
+
+/// How tenex-edge drives a CLI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Transport {
+    /// Interactive terminal via the existing portable-pty supervisor.
+    Pty,
+    /// ACP: JSON-RPC 2.0 over stdio (OpenCode native, Claude via adapter).
+    Acp,
+    /// Codex `app-server`: its own JSON-RPC dialect.
+    AppServer,
+    /// One-shot run-to-exit (`claude -p`, `codex exec`, `opencode run`).
+    HeadlessExec,
+}
+
+impl Transport {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Transport::Pty => "pty",
+            Transport::Acp => "acp",
+            Transport::AppServer => "app-server",
+            Transport::HeadlessExec => "headless-exec",
+        }
+    }
+}
+
+impl HarnessesConfig {
+    /// Load `<edge_home>/harnesses.json`. Absent file => empty map (fail-open on
+    /// the file). Malformed JSON => error (fail-loud on corruption).
+    pub fn load() -> anyhow::Result<Self> {
+        let path = crate::config::edge_home().join("harnesses.json");
+        Self::load_from(&path)
+    }
+
+    pub fn load_from(path: &std::path::Path) -> anyhow::Result<Self> {
+        let bytes = match std::fs::read(path) {
+            Ok(b) => b,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Self::default()),
+            Err(e) => {
+                return Err(e).map_err(|e| {
+                    anyhow::anyhow!("reading harnesses config {}: {e}", path.display())
+                })
+            }
+        };
+        serde_json::from_slice(&bytes)
+            .map_err(|e| anyhow::anyhow!("parsing harnesses config {}: {e}", path.display()))
+    }
+
+    pub fn get(&self, bundle: &str) -> Option<&HarnessBundle> {
+        self.bundles.get(bundle)
+    }
+}
+
+/// (De)serialize `Harness` through its existing `from_str`/`as_str` so the
+/// config axis stays independent of the enum's Rust spelling and rejects
+/// unknown harnesses loudly.
+mod harness_serde {
+    use super::Harness;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(h: &Harness, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(h.as_str())
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Harness, D::Error> {
+        let raw = String::deserialize(d)?;
+        match Harness::from_str(&raw) {
+            Harness::Unknown => Err(serde::de::Error::custom(format!(
+                "unknown harness {raw:?} (expected claude-code|codex|opencode|grok)"
+            ))),
+            h => Ok(h),
+        }
+    }
+}

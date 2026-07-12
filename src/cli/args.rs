@@ -97,6 +97,9 @@ pub(super) enum Cmd {
     /// Start the per-machine daemon in the foreground.
     #[command(name = "daemon", hide = true)]
     Daemon,
+    /// Debug: drive a harness over the ACP / app-server transport end-to-end.
+    #[command(name = "__acp-smoke", hide = true)]
+    AcpSmoke(super::acp_smoke::AcpSmokeArgs),
 }
 
 #[derive(Subcommand)]

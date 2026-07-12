@@ -16,6 +16,7 @@ mod delivery;
 mod exec;
 mod launch;
 mod registry;
+pub mod transport;
 
 pub use delivery::{inject_pending_messages_pty, inject_spawn_message, ring_doorbells};
 pub(crate) use exec::{

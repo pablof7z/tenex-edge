@@ -16,6 +16,7 @@ use std::fmt::Write as _;
 use std::io::{self, IsTerminal as _, Read as _, Write as _};
 use std::time::{Duration, Instant};
 
+mod acp_smoke;
 mod admin;
 mod args;
 mod config;
@@ -136,6 +137,7 @@ pub async fn run(cli: Cli) -> Result<()> {
         Cmd::PtySupervisor(args) => pty::pty_supervisor(args),
         Cmd::Install(args) => install::install(args).await,
         Cmd::Daemon => crate::daemon::server::run().await,
+        Cmd::AcpSmoke(args) => acp_smoke::acp_smoke(args).await,
     }
 }
 
