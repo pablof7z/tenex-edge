@@ -36,7 +36,6 @@ pub fn run_supervisor(args: SupervisorArgs) -> Result<()> {
             std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700))?;
         }
     }
-    reservation::release_durable_reservation();
     let _ = std::fs::remove_file(&args.socket);
     let listener = UnixListener::bind(&args.socket)
         .with_context(|| format!("binding {}", args.socket.display()))?;
@@ -128,6 +127,7 @@ pub fn run_supervisor(args: SupervisorArgs) -> Result<()> {
             Err(e) => return Err(e).context("accepting pty client"),
         }
     }
+    reservation::release_durable_reservation();
     let _ = std::fs::remove_file(&args.socket);
     let _ = super::meta::remove_metadata(&args.id);
     Ok(())

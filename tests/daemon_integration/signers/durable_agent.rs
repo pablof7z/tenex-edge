@@ -3,7 +3,9 @@ use rusqlite::Connection;
 
 #[path = "durable_agent/config.rs"]
 mod config;
-use config::{configure_durable_agent, lease_count, read_agent_config, write_agent_config};
+use config::{
+    configure_durable_agent, durable_binding, lease_count, read_agent_config, write_agent_config,
+};
 
 #[test]
 fn durable_agent_reuses_key_rejects_concurrency_and_never_becomes_resumable() {
@@ -24,7 +26,7 @@ fn durable_agent_reuses_key_rejects_concurrency_and_never_becomes_resumable() {
                 "--workspace",
                 "tmp",
                 "--command",
-                "/usr/bin/true",
+                "/bin/sh -c 'sleep 2'",
             ],
         );
         assert!(
@@ -32,7 +34,14 @@ fn durable_agent_reuses_key_rejects_concurrency_and_never_becomes_resumable() {
             "short-lived launch failed: {}",
             String::from_utf8_lossy(&exited.stderr)
         );
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        client
+            .call(
+                "agent_launch_preflight",
+                serde_json::json!({ "agent": slug }),
+            )
+            .await
+            .expect_err("reservation remains exclusive while no-hook child is alive");
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
         let after_exit = client
             .call(
                 "agent_launch_preflight",
@@ -246,7 +255,6 @@ fn durable_agent_reuses_key_rejects_concurrency_and_never_becomes_resumable() {
         .all(|session| session.agent_pubkey != durable_pubkey));
     let normal_session = store.get_session(&normal_id).unwrap().unwrap();
     assert_ne!(normal_session.agent_pubkey, durable_pubkey);
-
     let db = Connection::open(home.store_path()).unwrap();
     let leases = lease_count(&db, &durable_pubkey);
     assert_eq!(leases, 0, "durable agents never enter handle leasing");
@@ -255,13 +263,7 @@ fn durable_agent_reuses_key_rejects_concurrency_and_never_becomes_resumable() {
         normal_leases, 1,
         "rejected mode flip keeps the normal handle"
     );
-    let current: (String, bool) = db
-        .query_row(
-            "SELECT session_id, live FROM durable_agent_sessions WHERE pubkey=?1",
-            [&durable_pubkey],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .unwrap();
+    let current = durable_binding(&db, &durable_pubkey);
     assert_eq!(current, (third_id, true));
 
     assert!(
