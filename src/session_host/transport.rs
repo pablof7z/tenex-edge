@@ -37,6 +37,12 @@ impl TransportKind {
 #[derive(Debug, Clone)]
 pub struct LaunchSpec {
     pub slug: String,
+    /// The agent's configured harness *bundle* name (a `harnesses.json` key or a
+    /// built-in harness slug), if any. Distinct from [`Self::slug`]: an agent
+    /// `reviewer` may run bundle `codex-acp`. The ACP transport MUST resolve its
+    /// harness/driver from this bundle, never from the agent slug (defect #1).
+    /// `None` for agents with no configured bundle (PTY agents).
+    pub bundle: Option<String>,
     pub root: String,
     pub abs_path: String,
     pub group: Option<String>,

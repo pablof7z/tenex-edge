@@ -64,6 +64,12 @@ pub(crate) async fn bootstrap_exec_session_start(
 }
 
 fn infer_harness(command: &[String]) -> Harness {
+    // The ACP path records the real argv (defect #8). The claude-code-acp adapter
+    // launches as `npx @zed-industries/claude-code-acp`, so argv[0] is `npx`, not
+    // `claude` — recognize the adapter package to keep the harness correct.
+    if command.iter().any(|a| a.contains("claude-code-acp")) {
+        return Harness::ClaudeCode;
+    }
     match command_binary(command).as_deref() {
         Some("claude" | "claude-code") => Harness::ClaudeCode,
         Some("codex") => Harness::Codex,

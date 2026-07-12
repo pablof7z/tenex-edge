@@ -83,7 +83,7 @@ impl RpcHandle {
     /// notifications.
     pub async fn spawn(
         cfg: SpawnConfig,
-    ) -> Result<(RpcHandle, mpsc::Receiver<SessionUpdate>), RpcError> {
+    ) -> Result<(RpcHandle, mpsc::UnboundedReceiver<SessionUpdate>), RpcError> {
         let mut cmd = Command::new(&cfg.program);
         cmd.args(&cfg.args)
             .current_dir(&cfg.cwd)
@@ -105,7 +105,13 @@ impl RpcHandle {
         let stderr = child.stderr.take().expect("piped stderr");
 
         let (write_tx, write_rx) = mpsc::channel::<String>(256);
-        let (update_tx, update_rx) = mpsc::channel::<SessionUpdate>(256);
+        // Updates use an UNBOUNDED channel (defect #15): a bounded `try_send` drops
+        // `session/update` notifications — including `turn/started`, which carries
+        // the turn_id that steer depends on — if the channel is momentarily full or
+        // the drain task hasn't registered yet. The drain always consumes promptly,
+        // so unbounded growth is bounded by one turn's notifications in practice,
+        // and we never silently lose a turn id.
+        let (update_tx, update_rx) = mpsc::unbounded_channel::<SessionUpdate>();
         let pending: PendingMap = Arc::new(Mutex::new(HashMap::new()));
         let turn_waiters: TurnWaiters = Arc::new(Mutex::new(HashMap::new()));
         let alive = Arc::new(AtomicBool::new(true));

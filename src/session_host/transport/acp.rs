@@ -44,21 +44,38 @@ fn registry() -> &'static Mutex<HashMap<String, AcpChild>> {
 
 pub struct AcpTransport;
 
+/// The harness BUNDLE name to resolve a spec's driver from — never the agent slug
+/// (defect #1). An agent `reviewer` may carry bundle `codex-acp`, and `reviewer`
+/// is not a `harnesses.json` key. Falls back to the slug only when no bundle is
+/// set (a bare-slug bundle, e.g. `opencode`).
+pub(crate) fn bundle_name(spec: &LaunchSpec) -> &str {
+    spec.bundle.as_deref().unwrap_or(&spec.slug)
+}
+
 /// The outcome of opening (or resuming) an RPC-hosted session, before it is
 /// wrapped into a `SessionEndpoint`.
 pub struct AcpOpen {
     pub endpoint_id: String,
     pub native_id: String,
     pub pid: Option<u32>,
+    /// The argv actually executed (recorded in session metadata; defect #8).
+    pub argv: Vec<String>,
 }
 
 impl AcpTransport {
-    /// Resolve the harness bundle for `slug` and spawn its RPC child, returning
-    /// the live handle + dialect + the update stream. Shared by launch/resume.
+    /// Resolve the harness bundle for `spec.bundle` and spawn its RPC child,
+    /// returning the live handle + dialect + the update stream + the argv actually
+    /// executed. Shared by launch/resume.
     async fn spawn_child(
         spec: &LaunchSpec,
-    ) -> Result<(RpcHandle, Dialect, mpsc::Receiver<SessionUpdate>)> {
+    ) -> Result<(
+        RpcHandle,
+        Dialect,
+        mpsc::UnboundedReceiver<SessionUpdate>,
+        Vec<String>,
+    )> {
         let cwd = std::path::PathBuf::from(&spec.abs_path);
+        let bundle = bundle_name(spec);
         // Profile placement (defect #5): a CwdSettingsFile profile must land where
         // the harness actually reads it. The claude-code-acp adapter reads
         // `<cwd>/.claude/settings.json` and ignores `--settings`, so its profile
@@ -66,8 +83,8 @@ impl AcpTransport {
         // be consulted. opencode instead reads `OPENCODE_CONFIG` (pointed at an
         // out-of-tree scratch), so it stays there and never clobbers a repo file.
         let cfg = HarnessesConfig::load()?;
-        let harness_kind = harness::bundle_harness_with(&cfg, &spec.slug)
-            .with_context(|| format!("resolving harness for bundle {:?}", spec.slug))?;
+        let harness_kind = harness::bundle_harness_with(&cfg, bundle)
+            .with_context(|| format!("resolving harness for bundle {bundle:?}"))?;
         let scratch = if harness_kind == Harness::ClaudeCode {
             cwd.clone()
         } else {
@@ -75,12 +92,11 @@ impl AcpTransport {
                 .join("harness-profiles")
                 .join(&spec.slug)
         };
-        let resolved = harness::resolve_with(&cfg, &spec.slug, &scratch)
-            .with_context(|| format!("resolving harness bundle {:?}", spec.slug))?;
+        let resolved = harness::resolve_with(&cfg, bundle, &scratch)
+            .with_context(|| format!("resolving harness bundle {bundle:?}"))?;
         if !matches!(resolved.transport, Transport::Acp | Transport::AppServer) {
             anyhow::bail!(
-                "harness bundle {:?} is transport {} — not an RPC transport",
-                spec.slug,
+                "harness bundle {bundle:?} is transport {} — not an RPC transport",
                 resolved.transport.as_str()
             );
         }
@@ -93,6 +109,10 @@ impl AcpTransport {
             std::fs::write(path, contents)
                 .with_context(|| format!("writing profile file {}", path.display()))?;
         }
+        // The argv actually executed (driver base_argv + profile extra_argv). We
+        // record THIS in the session metadata, not the nominal `spec.base_command`
+        // that the ACP path never runs (defect #8).
+        let argv = resolved.base_argv.clone();
         let callbacks = Callbacks::allow_all(cwd.clone());
         let cfg = spawn_config_from_driver(
             resolved.driver,
@@ -104,8 +124,8 @@ impl AcpTransport {
         let dialect = cfg.dialect;
         let (handle, updates) = RpcHandle::spawn(cfg)
             .await
-            .map_err(|e| anyhow::anyhow!("spawning RPC harness for {:?}: {e}", spec.slug))?;
-        Ok((handle, dialect, updates))
+            .map_err(|e| anyhow::anyhow!("spawning RPC harness for bundle {bundle:?}: {e}"))?;
+        Ok((handle, dialect, updates, argv))
     }
 
     fn endpoint_id(slug: &str) -> String {
@@ -124,19 +144,24 @@ impl AcpTransport {
         spec: &LaunchSpec,
         endpoint_id: &str,
         pid: Option<u32>,
+        argv: &[String],
     ) -> crate::pty::LaunchMetadata {
         crate::pty::LaunchMetadata {
             id: endpoint_id.to_string(),
             socket: String::new(),
-            // ACP has no PTY supervisor; the child *is* the process the daemon
-            // must watch for liveness, so carry its pid here (bootstrap turns
-            // `supervisor_pid` into the session's `watch_pid`).
+            // ACP has no PTY supervisor. `supervisor_pid` is only a hint; a `0`
+            // (no reported pid) is a deliberate sentinel — `pid_alive` treats it as
+            // NOT live, and ACP session liveness is decided by the transport child
+            // registry, not by pid (defect #3). Do NOT rely on this pid to prove an
+            // ACP session live.
             supervisor_pid: pid.unwrap_or(0),
             agent: spec.slug.clone(),
             root: spec.root.clone(),
             cwd: spec.abs_path.clone(),
             ephemeral: spec.ephemeral,
-            command: spec.base_command.clone(),
+            // Record the argv actually executed, not the nominal `base_command`
+            // the ACP path never runs (defect #8).
+            command: argv.to_vec(),
         }
     }
 
@@ -147,7 +172,7 @@ impl AcpTransport {
         handle: RpcHandle,
         native_id: String,
         cwd: std::path::PathBuf,
-        mut updates: mpsc::Receiver<SessionUpdate>,
+        mut updates: mpsc::UnboundedReceiver<SessionUpdate>,
     ) {
         let runtime = Arc::new(Mutex::new(AcpRuntime::default()));
         // Update-drain task (defect #6): keep the receiver alive and fold each
@@ -183,7 +208,7 @@ impl AcpTransport {
 
     /// Open a fresh session and register it; returns the open descriptor.
     pub async fn open(&self, spec: &LaunchSpec) -> Result<AcpOpen> {
-        let (handle, dialect, updates) = Self::spawn_child(spec).await?;
+        let (handle, dialect, updates, argv) = Self::spawn_child(spec).await?;
         let cwd = std::path::PathBuf::from(&spec.abs_path);
         let native_id = match dialect {
             Dialect::Acp => {
@@ -216,6 +241,7 @@ impl AcpTransport {
             endpoint_id,
             native_id,
             pid,
+            argv,
         })
     }
 }
@@ -231,7 +257,7 @@ impl SessionTransport for AcpTransport {
             kind: TransportKind::Acp,
             endpoint_id: open.endpoint_id.clone(),
             watch_pid: open.pid.and_then(|p| i32::try_from(p).ok()),
-            meta: Self::synth_meta(spec, &open.endpoint_id, open.pid),
+            meta: Self::synth_meta(spec, &open.endpoint_id, open.pid, &open.argv),
         })
     }
 
@@ -239,7 +265,7 @@ impl SessionTransport for AcpTransport {
         if resume.native_id.is_empty() {
             anyhow::bail!("session has no resume token (not resumable)");
         }
-        let (handle, dialect, updates) = Self::spawn_child(spec).await?;
+        let (handle, dialect, updates, argv) = Self::spawn_child(spec).await?;
         let cwd = std::path::PathBuf::from(&spec.abs_path);
         match dialect {
             Dialect::Acp => {
@@ -272,7 +298,7 @@ impl SessionTransport for AcpTransport {
             kind: TransportKind::Acp,
             endpoint_id: endpoint_id.clone(),
             watch_pid: pid.and_then(|p| i32::try_from(p).ok()),
-            meta: Self::synth_meta(spec, &endpoint_id, pid),
+            meta: Self::synth_meta(spec, &endpoint_id, pid, &argv),
         })
     }
 

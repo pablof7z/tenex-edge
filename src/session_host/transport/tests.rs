@@ -118,6 +118,7 @@ fn acp_transport_reports_acp_kind() {
 async fn pty_resume_without_token_errors() {
     let spec = LaunchSpec {
         slug: "claude".into(),
+        bundle: None,
         root: "chan".into(),
         abs_path: "/tmp".into(),
         group: None,
@@ -163,6 +164,7 @@ async fn live_launch_dispatch_spawns_opencode_acp() {
     std::fs::create_dir_all(&cwd).unwrap();
     let spec = LaunchSpec {
         slug: "opencode-acp".into(),
+        bundle: Some("opencode-acp".into()),
         root: "live".into(),
         abs_path: cwd.to_string_lossy().into_owned(),
         group: None,
@@ -216,6 +218,7 @@ async fn live_acp_agent_receives_delivered_prompt() {
     std::fs::create_dir_all(&cwd).unwrap();
     let spec = LaunchSpec {
         slug: "opencode-acp".into(),
+        bundle: Some("opencode-acp".into()),
         root: "live".into(),
         abs_path: cwd.to_string_lossy().into_owned(),
         group: None,
@@ -248,6 +251,47 @@ async fn live_acp_agent_receives_delivered_prompt() {
     assert!(
         !got.trim().is_empty(),
         "acp agent produced no output for the delivered prompt"
+    );
+}
+
+// ── defect #1: ACP resolves its harness from the BUNDLE, not the agent slug ────
+
+/// An agent whose slug differs from its harness bundle name resolves the correct
+/// harness/driver. Before the fix, `AcpTransport::spawn_child` passed `spec.slug`
+/// (the AGENT slug) to `resolve_with`, so any agent with `slug != bundle` — e.g.
+/// `reviewer` running bundle `codex-acp` — bailed at launch because `reviewer` is
+/// not a `harnesses.json` key. The transport must resolve from `spec.bundle`.
+#[test]
+fn acp_resolves_harness_from_bundle_not_slug() {
+    use crate::harness::{self, config::HarnessesConfig, Transport};
+    use crate::session::Harness;
+    let json = r#"{ "codex-acp": { "harness": "codex", "transport": "app-server" } }"#;
+    let cfg: HarnessesConfig = serde_json::from_str(json).unwrap();
+    let spec = LaunchSpec {
+        slug: "reviewer".into(),
+        bundle: Some("codex-acp".into()),
+        root: "chan".into(),
+        abs_path: "/tmp".into(),
+        group: None,
+        ephemeral: false,
+        base_command: vec!["codex".into()],
+    };
+    // The transport resolves from the BUNDLE name, never the slug.
+    assert_eq!(super::acp::bundle_name(&spec), "codex-acp");
+    let scratch = std::env::temp_dir().join(format!("te-acp-bundle-{}", std::process::id()));
+    let resolved = harness::resolve_with(&cfg, super::acp::bundle_name(&spec), &scratch)
+        .expect("bundle resolves to its driver");
+    assert_eq!(resolved.harness, Harness::Codex);
+    assert_eq!(resolved.transport, Transport::AppServer);
+    assert_eq!(
+        resolved.base_argv.first().map(String::as_str),
+        Some("codex")
+    );
+    // Regression pin: the PRE-FIX behavior — resolving from the agent slug — fails
+    // loud, which is exactly why an agent with slug != bundle never launched.
+    assert!(
+        harness::resolve_with(&cfg, &spec.slug, &scratch).is_err(),
+        "resolving from the agent slug must fail; the transport must use the bundle"
     );
 }
 
