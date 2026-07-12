@@ -72,6 +72,39 @@ fn mark_dead_resolves_external_id() {
     assert!(s.list_alive_sessions().unwrap().is_empty());
 }
 
+/// Defect #6: clearing a dead endpoint's socket alias MUST also mark the row
+/// dead. Otherwise the session stays ALIVE guarded only by `child_pid`, and a
+/// later reconcile — seeing a recycled PID as alive — false-revives a ghost.
+#[test]
+fn retire_dead_endpoint_clears_aliases_and_marks_row_dead() {
+    let s = Store::open_memory().unwrap();
+    let sid = s.register_session(&reg("claude-code", "c1", "h1")).unwrap();
+    s.put_alias("claude-code", "pty_session", "endpoint-1", &sid, 1000)
+        .unwrap();
+    s.put_alias("claude-code", "pty_socket", "/tmp/sock-1", &sid, 1000)
+        .unwrap();
+    assert!(s.get_session(&sid).unwrap().unwrap().alive);
+
+    s.retire_dead_endpoint(&sid).unwrap();
+
+    // The row is retired, not left ALIVE for a recycled-PID false-revive.
+    assert!(
+        !s.get_session(&sid).unwrap().unwrap().alive,
+        "clearing the socket alias must mark the session dead (defect #6)"
+    );
+    assert!(s.list_alive_sessions().unwrap().is_empty());
+    // Both endpoint socket aliases are gone.
+    let kinds: Vec<String> = s
+        .aliases_for_session(&sid)
+        .unwrap()
+        .into_iter()
+        .map(|a| a.external_id_kind)
+        .collect();
+    assert!(!kinds
+        .iter()
+        .any(|k| k == "pty_session" || k == "pty_socket"));
+}
+
 #[test]
 fn explicit_chat_marker_resolves_external_id_and_stays_first_publish() {
     let s = Store::open_memory().unwrap();
