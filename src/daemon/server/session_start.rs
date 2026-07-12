@@ -44,6 +44,7 @@ pub(in crate::daemon::server) async fn rpc_session_start(
         p.provision_command.clone(),
     )?;
     let durable_agent = !agent_identity.per_session_key;
+    validate_launch_reservation(state, &agent_identity, p.durable_reservation.as_deref())?;
     let cwd = p
         .cwd
         .map(std::path::PathBuf::from)

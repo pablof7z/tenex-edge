@@ -68,6 +68,23 @@ pub(in crate::daemon::server) fn validate_live_session_identity(
     Ok(())
 }
 
+pub(in crate::daemon::server) fn validate_launch_reservation(
+    state: &Arc<DaemonState>,
+    agent: &crate::identity::AgentIdentity,
+    reservation: Option<&str>,
+) -> Result<()> {
+    if agent.per_session_key && reservation.is_some() {
+        state
+            .with_store(|s| s.release_durable_agent_session(reservation.unwrap()))
+            .ok();
+        anyhow::bail!(
+            "agent {:?} identity mode changed after durable launch reservation; retry launch",
+            agent.slug
+        );
+    }
+    Ok(())
+}
+
 /// Select this session's signing identity.
 ///
 /// Normal agents derive a unique resumable session key and lease a handle.
@@ -94,7 +111,7 @@ pub(in crate::daemon::server) fn mint_session_identity(
     };
     let pubkey = keys.public_key().to_hex();
     let (codename, reclaimed_pubkey, durable_claim_acquired) = if durable_agent {
-        let acquired = state.with_store(|s| {
+        let claim = state.with_store(|s| {
             s.claim_durable_agent_session_with_reservation(
                 &pubkey,
                 agent_slug,
@@ -102,7 +119,18 @@ pub(in crate::daemon::server) fn mint_session_identity(
                 durable_reservation,
                 now_secs(),
             )
-        })?;
+        });
+        let acquired = match claim {
+            Ok(acquired) => acquired,
+            Err(error) => {
+                if let Some(reservation) = durable_reservation {
+                    state
+                        .with_store(|s| s.release_durable_agent_session(reservation))
+                        .ok();
+                }
+                return Err(error);
+            }
+        };
         (String::new(), None, acquired)
     } else {
         let allocation =

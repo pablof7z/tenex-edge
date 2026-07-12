@@ -239,7 +239,8 @@ use proposal::rpc_propose;
 use resolution::{resolve_session, resolve_session_inner, CallerAnchor, ResolveScope};
 use session_end::{rpc_session_end, rpc_session_kill};
 use session_signing::{
-    mint_session_identity, retire_reclaimed_profile, validate_live_session_identity,
+    mint_session_identity, retire_reclaimed_profile, validate_launch_reservation,
+    validate_live_session_identity,
 };
 use session_start::rpc_session_start;
 use status_publish::spawn_outbox_drainer;
