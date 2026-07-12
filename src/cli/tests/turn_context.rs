@@ -215,6 +215,55 @@ fn ended_turn_with_cursor_uses_delta_not_snapshot() {
     );
 }
 
+/// A first turn with no `pty_session` alias for the session (the daemon has no
+/// live PTY endpoint to inject into) carries the not-PTY-wrapped warning, so
+/// the agent learns idle mentions won't reach it until its next turn
+/// (`src/reconcile/delivery/mod.rs` returns `DeferNoEndpoint` and drops them).
+#[test]
+fn first_turn_warns_when_session_has_no_live_pty_endpoint() {
+    let store = Store::open_memory().unwrap();
+    seed_channel(&store);
+    let rec = test_session("sess-no-pty");
+    let m = Mutex::new(store);
+
+    let text = assemble_turn_start_context(&m, &rec, BACKEND, "laptop", 0)
+        .expect("first-turn intro expected");
+    assert!(
+        text.contains("This session is not hosted in a daemon PTY."),
+        "expected the not-PTY-wrapped warning; got: {text:?}"
+    );
+}
+
+/// The same first turn with a live `pty_session` alias omits the warning: the
+/// daemon has a real endpoint it can inject idle mentions into.
+#[test]
+fn first_turn_omits_pty_warning_when_session_has_a_live_endpoint() {
+    let store = Store::open_memory().unwrap();
+    seed_channel(&store);
+    let rec = test_session("sess-with-pty");
+
+    let dir = tempfile::tempdir().unwrap();
+    let socket_path = dir.path().join("live.sock");
+    let _listener = std::os::unix::net::UnixListener::bind(&socket_path).unwrap();
+    store
+        .put_alias(
+            "claude-code",
+            "pty_session",
+            socket_path.to_str().unwrap(),
+            &rec.session_id,
+            1,
+        )
+        .unwrap();
+    let m = Mutex::new(store);
+
+    let text = assemble_turn_start_context(&m, &rec, BACKEND, "laptop", 0)
+        .expect("first-turn intro expected");
+    assert!(
+        !text.contains("This session is not hosted in a daemon PTY."),
+        "a live pty_session alias must suppress the not-PTY-wrapped warning; got: {text:?}"
+    );
+}
+
 /// turn_check returns None when there is no inbox and delta_since=None.
 #[test]
 fn turn_check_context_returns_none_when_nothing_due() {

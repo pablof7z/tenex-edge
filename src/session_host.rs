@@ -19,6 +19,7 @@ mod launch;
 mod registry;
 pub mod transport;
 
+pub(crate) use delivery::session_has_live_pty_endpoint;
 pub use delivery::{
     deliver_spawn_prompt, inject_pending_messages_pty, inject_spawn_message, ring_doorbells,
 };
