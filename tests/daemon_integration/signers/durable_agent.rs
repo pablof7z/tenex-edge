@@ -3,6 +3,8 @@ use rusqlite::Connection;
 
 #[path = "durable_agent/config.rs"]
 mod config;
+#[path = "durable_agent/lifecycle.rs"]
+mod lifecycle;
 use config::{
     configure_durable_agent, durable_binding, lease_count, read_agent_config, write_agent_config,
 };
@@ -18,46 +20,7 @@ fn durable_agent_reuses_key_rejects_concurrency_and_never_becomes_resumable() {
 
     let (first_id, third_id, normal_id, chat_event_id) = rt().block_on(async {
         let mut client = Client::connect_or_spawn().await.expect("connect");
-        let exited = run_cli(
-            &home,
-            &[
-                "launch",
-                slug,
-                "--workspace",
-                "tmp",
-                "--command",
-                "/bin/sh -c 'sleep 2'",
-            ],
-        );
-        assert!(
-            exited.status.success(),
-            "short-lived launch failed: {}",
-            String::from_utf8_lossy(&exited.stderr)
-        );
-        client
-            .call(
-                "agent_launch_preflight",
-                serde_json::json!({ "agent": slug }),
-            )
-            .await
-            .expect_err("reservation remains exclusive while no-hook child is alive");
-        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-        let after_exit = client
-            .call(
-                "agent_launch_preflight",
-                serde_json::json!({ "agent": slug }),
-            )
-            .await
-            .expect("supervisor exit releases unconsumed reservation");
-        client
-            .call(
-                "agent_launch_release",
-                serde_json::json!({
-                    "durable_reservation": after_exit["durable_reservation"],
-                }),
-            )
-            .await
-            .unwrap();
+        lifecycle::assert_supervisor_releases_reservations(&home, &mut client, slug).await;
         let reserved = client
             .call(
                 "agent_launch_preflight",

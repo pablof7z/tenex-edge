@@ -25,6 +25,7 @@ pub struct SupervisorArgs {
 }
 
 pub fn run_supervisor(args: SupervisorArgs) -> Result<()> {
+    let _reservation_guard = reservation::DurableReservationGuard;
     if args.command.is_empty() {
         bail!("pty supervisor command must not be empty");
     }
@@ -127,7 +128,6 @@ pub fn run_supervisor(args: SupervisorArgs) -> Result<()> {
             Err(e) => return Err(e).context("accepting pty client"),
         }
     }
-    reservation::release_durable_reservation();
     let _ = std::fs::remove_file(&args.socket);
     let _ = super::meta::remove_metadata(&args.id);
     Ok(())

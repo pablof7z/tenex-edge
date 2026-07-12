@@ -1,4 +1,12 @@
-pub(super) fn release_durable_reservation() {
+pub(super) struct DurableReservationGuard;
+
+impl Drop for DurableReservationGuard {
+    fn drop(&mut self) {
+        release_durable_reservation();
+    }
+}
+
+fn release_durable_reservation() {
     let Ok(reservation) = std::env::var("TENEX_EDGE_DURABLE_RESERVATION") else {
         return;
     };
