@@ -139,3 +139,30 @@ fn concurrent_connections_never_allocate_the_same_handle() {
     handles.dedup();
     assert_eq!(handles.len(), 8);
 }
+
+#[test]
+fn custom_name_becomes_the_public_handle_prefix() {
+    let store = Store::open_memory().unwrap();
+    let allocation = store
+        .allocate_custom_handle("pk", "codex", "forensic-researcher", 10)
+        .unwrap();
+
+    assert_eq!(allocation.codename, "forensic-researcher");
+    assert_eq!(allocation.handle, "forensic-researcher-codex");
+}
+
+#[test]
+fn custom_name_rejects_an_existing_handle() {
+    let store = Store::open_memory().unwrap();
+    store
+        .allocate_custom_handle("first", "codex", "forensic-researcher", 10)
+        .unwrap();
+    let error = store
+        .allocate_custom_handle("second", "codex", "forensic-researcher", 11)
+        .unwrap_err();
+
+    assert!(
+        error.to_string().contains("forensic-researcher-codex"),
+        "unexpected error: {error:#}"
+    );
+}

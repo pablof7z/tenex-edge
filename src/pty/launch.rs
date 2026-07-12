@@ -12,6 +12,7 @@ pub struct SpawnSessionArgs {
     pub root: String,
     pub cwd: PathBuf,
     pub channel: Option<String>,
+    pub session_name: Option<String>,
     pub ephemeral: bool,
     pub durable_reservation: Option<String>,
     pub command: Vec<String>,
@@ -46,6 +47,9 @@ pub fn spawn_session(args: SpawnSessionArgs) -> Result<LaunchMetadata> {
         .arg(&args.agent);
     if let Some(channel) = &args.channel {
         child.arg("--channel").arg(channel);
+    }
+    if let Some(session_name) = &args.session_name {
+        child.arg("--session-name").arg(session_name);
     }
     if args.ephemeral {
         child.arg("--ephemeral");

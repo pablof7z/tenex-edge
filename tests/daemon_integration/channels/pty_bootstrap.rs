@@ -2,6 +2,9 @@ use super::*;
 use std::path::Path;
 use std::time::Duration;
 
+#[path = "pty_bootstrap/named.rs"]
+mod named;
+
 fn add_workspace_mapping(home: &Home, channel: &str, path: &Path) {
     std::fs::create_dir_all(path).unwrap();
     let map_path = home.dir.path().join("workspaces.json");

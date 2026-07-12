@@ -25,6 +25,10 @@ pub(in crate::cli) struct LaunchArgs {
     /// as a second personality.
     #[arg(long, num_args(0..=1), default_missing_value = "")]
     channel: Option<String>,
+    /// Public name for this session. With `codex`, `--name forensic-researcher`
+    /// creates `forensic-researcher-codex`; existing names are rejected.
+    #[arg(long = "name", value_name = "NAME")]
+    session_name: Option<String>,
     /// Override the entire launch command for this launch (shell-word split).
     /// Example: `-c 'ollama launch claude -- --dangerously-skip-permissions'`
     #[arg(short = 'c', long = "command", value_name = "COMMAND")]
@@ -48,6 +52,7 @@ pub(in crate::cli) async fn launch(args: LaunchArgs) -> Result<()> {
         args.slug,
         args.workspace,
         args.channel,
+        args.session_name,
         args.command_name,
         override_command,
         args.extra_args,
@@ -132,6 +137,25 @@ mod tests {
             crate::cli::args::Cmd::Launch(args) => {
                 assert_eq!(args.command_name.as_deref(), Some("safe"));
                 assert!(args.command_str.is_none());
+            }
+            _ => panic!("expected launch command"),
+        }
+    }
+
+    #[test]
+    fn launch_name_parses_as_a_public_session_name() {
+        let cli = crate::cli::args::Cli::try_parse_from([
+            "tenex-edge",
+            "launch",
+            "codex",
+            "--name",
+            "forensic-researcher",
+        ])
+        .expect("launch with name parses");
+
+        match cli.cmd {
+            crate::cli::args::Cmd::Launch(args) => {
+                assert_eq!(args.session_name.as_deref(), Some("forensic-researcher"));
             }
             _ => panic!("expected launch command"),
         }

@@ -11,6 +11,8 @@ pub(super) struct ListSessionsParams {
 #[derive(serde::Deserialize)]
 pub(super) struct LaunchPreflightParams {
     agent: String,
+    #[serde(default)]
+    session_name: Option<String>,
 }
 
 pub(crate) fn rpc_agent_launch_preflight(
@@ -19,6 +21,9 @@ pub(crate) fn rpc_agent_launch_preflight(
 ) -> Result<serde_json::Value> {
     let p: LaunchPreflightParams =
         serde_json::from_value(params.clone()).context("agent_launch_preflight params")?;
+    if let Some(name) = p.session_name.as_deref().filter(|name| !name.is_empty()) {
+        state.with_store(|s| s.ensure_custom_handle_available(&p.agent, name))?;
+    }
     let identity =
         crate::identity::load_or_create(&crate::config::edge_home(), &p.agent, now_secs())?;
     let conflict = state.with_store(|s| {

@@ -7,6 +7,7 @@ pub(crate) async fn bootstrap_pty_session_start(
     channels: &[String],
     resume_id: Option<&str>,
     dispatch_event: Option<&str>,
+    session_name: Option<&str>,
     durable_reservation: Option<&str>,
 ) -> Result<String> {
     let harness = infer_harness(&meta.command);
@@ -24,6 +25,7 @@ pub(crate) async fn bootstrap_pty_session_start(
             "pty_socket": &meta.socket,
             "resume_id": resume_id,
             "dispatch_event": dispatch_event,
+            "session_name": session_name,
             "durable_reservation": durable_reservation,
         }),
         None,

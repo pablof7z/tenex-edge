@@ -221,7 +221,7 @@ pub(super) async fn rpc_session_start_inner(
         &session_id,
         &agent_identity,
         &channel,
-        &native_id,
+        SessionIdentityInput::new(&native_id, p.session_name.as_deref()),
         p.durable_reservation.as_deref(),
     )?;
     let mut durable_guard =
