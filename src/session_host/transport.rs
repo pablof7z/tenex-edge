@@ -11,6 +11,7 @@
 
 pub mod acp;
 mod acp_runtime;
+mod acp_spawn;
 pub mod pty;
 
 use anyhow::Result;
