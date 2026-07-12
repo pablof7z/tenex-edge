@@ -21,6 +21,7 @@ impl PtyTransport {
             cwd: std::path::PathBuf::from(&spec.abs_path),
             channel: spec.group.clone().filter(|g| !g.is_empty()),
             ephemeral: spec.ephemeral,
+            durable_reservation: None,
             command: command.to_vec(),
         })?;
         Ok(SessionEndpoint {

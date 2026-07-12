@@ -12,6 +12,7 @@
 //! Delivery is fail-open: endpoint failures are logged and pending inbox rows are
 //! returned to the queue so another path can deliver them.
 
+mod admission;
 mod delivery;
 mod exec;
 mod launch;

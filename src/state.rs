@@ -219,7 +219,7 @@ static ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Mint a fresh canonical session id (daemon-owned, opaque, stable across harness
 /// id rotation).
-pub(super) fn mint_session_id() -> String {
+pub(crate) fn mint_session_id() -> String {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos() as u64)
@@ -237,6 +237,7 @@ mod channels;
 mod schema;
 pub use channels::{archived_channel_about, is_archived_channel_about, CHANNEL_ABOUT_MAX_CHARS};
 mod core;
+mod durable_agent_sessions;
 mod events;
 mod handle_leases;
 mod identities;
@@ -264,6 +265,7 @@ pub(crate) mod session_claims;
 mod session_distill;
 mod session_membership_cleanup;
 mod session_native;
+mod session_resume;
 mod session_ty;
 mod session_work_topic;
 pub use session_ty::Session;

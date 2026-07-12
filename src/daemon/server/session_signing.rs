@@ -1,35 +1,168 @@
 use super::*;
 
+impl DaemonState {
+    /// Resolve the signer selected at session start. Durable agents use their
+    /// persisted config key; normal sessions derive from the management root.
+    pub(in crate::daemon) fn session_signing_keys(&self, session_id: &str) -> Result<Keys> {
+        if let Some(keys) = self.session_keys.lock().unwrap().get(session_id).cloned() {
+            return Ok(keys);
+        }
+        let durable = self.with_store(|s| s.is_durable_agent_session(session_id))?;
+        if durable {
+            let session = self
+                .with_store(|s| s.get_session(session_id))?
+                .with_context(|| format!("durable session {session_id:?} is not registered"))?;
+            let identity = crate::identity::load_or_create(
+                &crate::config::edge_home(),
+                &session.agent_slug,
+                crate::util::now_secs(),
+            )?;
+            if identity.per_session_key || identity.pubkey_hex() != session.agent_pubkey {
+                anyhow::bail!(
+                    "durable signer configuration changed for agent {:?}",
+                    session.agent_slug
+                );
+            }
+            return Ok(identity.keys);
+        }
+        let mgmt = self.management_keys()?;
+        Ok(crate::identity::derive_session_keys_v2(
+            mgmt.secret_key(),
+            session_id,
+        ))
+    }
+}
+
 /// A freshly minted per-session identity: the session's own signing keys plus
 /// its read-side projection (pubkey, agent slug, session id).
 pub(in crate::daemon::server) struct MintedSession {
     pub keys: Keys,
     pub identity: crate::identity::SessionIdentity,
     pub reclaimed_pubkey: Option<String>,
+    pub durable_claim_acquired: bool,
 }
 
-/// Mint (or deterministically re-derive) this session's OWN keypair.
+pub(in crate::daemon::server) fn validate_live_session_identity(
+    state: &Arc<DaemonState>,
+    session: &crate::state::Session,
+    agent: &crate::identity::AgentIdentity,
+) -> Result<()> {
+    let durable = !agent.per_session_key;
+    let expected = if durable {
+        agent.pubkey_hex()
+    } else {
+        let mgmt = state.management_keys()?;
+        crate::identity::derive_session_keys_v2(mgmt.secret_key(), &session.session_id)
+            .public_key()
+            .to_hex()
+    };
+    let stored_durable = state.with_store(|s| s.is_durable_agent_session(&session.session_id))?;
+    if stored_durable != durable || session.agent_pubkey != expected {
+        anyhow::bail!(
+            "agent {:?} identity configuration changed while session {} is live; \
+             end the live session before changing perSessionKey or its persisted key",
+            session.agent_slug,
+            session.session_id
+        );
+    }
+    Ok(())
+}
+
+pub(in crate::daemon::server) fn validate_agent_identity_admission(
+    state: &Arc<DaemonState>,
+    session_id: &str,
+    agent: &crate::identity::AgentIdentity,
+) -> Result<()> {
+    let desired_durable = !agent.per_session_key;
+    let conflicts = state.with_store(|s| {
+        Ok::<_, anyhow::Error>(s.list_alive_sessions()?.into_iter().find(|session| {
+            session.agent_slug == agent.slug
+                && session.session_id != session_id
+                && (desired_durable
+                    || s.is_durable_agent_session(&session.session_id)
+                        .unwrap_or(false))
+        }))
+    })?;
+    if let Some(existing) = conflicts {
+        anyhow::bail!(
+            "agent {:?} has live session {} under an incompatible identity mode; \
+             end or attach/add the live session before launching another",
+            agent.slug,
+            existing.session_id
+        );
+    }
+    Ok(())
+}
+
+pub(in crate::daemon::server) fn validate_launch_reservation(
+    state: &Arc<DaemonState>,
+    agent: &crate::identity::AgentIdentity,
+    reservation: Option<&str>,
+) -> Result<()> {
+    if agent.per_session_key && reservation.is_some() {
+        state
+            .with_store(|s| s.release_durable_agent_session(reservation.unwrap()))
+            .ok();
+        anyhow::bail!(
+            "agent {:?} identity mode changed after durable launch reservation; retry launch",
+            agent.slug
+        );
+    }
+    Ok(())
+}
+
+/// Select this session's signing identity.
 ///
-/// `nsec = derive_session_keys_v2(management_secret, session_id)`. The management
-/// key is the per-machine root; a resumed session (same `session_id`) re-derives
-/// the identical pubkey. Per-session keys are unique by construction, so there is
-/// no occupancy/ordinal/collision logic — every session simply gets its own key.
+/// Normal agents derive a unique resumable session key and lease a handle.
+/// Agents configured with `perSessionKey:false` use their persisted config key,
+/// claim the backend-wide durable-agent slot, and publish under the bare slug.
 ///
-/// Records the minted pubkey into the append-only `identities` cache, binding it
-/// to this live session + its harness-native id (the resume key), so a later
-/// `#p`-tagged mention resolves back to the right session.
+/// Records the selected pubkey in `identities`. Per-session identities retain
+/// their native resume id; durable identities intentionally leave it empty.
 pub(in crate::daemon::server) fn mint_session_identity(
     state: &Arc<DaemonState>,
     session_id: &str,
-    agent_slug: &str,
+    agent: &crate::identity::AgentIdentity,
     h: &str,
     native_id: &str,
+    durable_reservation: Option<&str>,
 ) -> Result<MintedSession> {
-    let mgmt = state.management_keys()?;
-    let keys = crate::identity::derive_session_keys_v2(mgmt.secret_key(), session_id);
+    let agent_slug = agent.slug.as_str();
+    let durable_agent = !agent.per_session_key;
+    let keys = if durable_agent {
+        agent.keys.clone()
+    } else {
+        let mgmt = state.management_keys()?;
+        crate::identity::derive_session_keys_v2(mgmt.secret_key(), session_id)
+    };
     let pubkey = keys.public_key().to_hex();
-    let allocation = state.with_store(|s| s.allocate_handle(&pubkey, agent_slug, now_secs()))?;
-    let codename = allocation.codename;
+    let (codename, reclaimed_pubkey, durable_claim_acquired) = if durable_agent {
+        let claim = state.with_store(|s| {
+            s.claim_durable_agent_session_with_reservation(
+                &pubkey,
+                agent_slug,
+                session_id,
+                durable_reservation,
+                now_secs(),
+            )
+        });
+        let acquired = match claim {
+            Ok(acquired) => acquired,
+            Err(error) => {
+                if let Some(reservation) = durable_reservation {
+                    state
+                        .with_store(|s| s.release_durable_agent_session(reservation))
+                        .ok();
+                }
+                return Err(error);
+            }
+        };
+        (String::new(), None, acquired)
+    } else {
+        let allocation =
+            state.with_store(|s| s.allocate_handle(&pubkey, agent_slug, now_secs()))?;
+        (allocation.codename, allocation.reclaimed_pubkey, false)
+    };
     state
         .session_keys
         .lock()
@@ -42,23 +175,42 @@ pub(in crate::daemon::server) fn mint_session_identity(
         codename: codename.clone(),
         session_id: session_id.to_string(),
         channel_h: h.to_string(),
-        native_id: native_id.to_string(),
+        native_id: if durable_agent {
+            String::new()
+        } else {
+            native_id.to_string()
+        },
         alive: true,
         created_at: now_secs(),
     };
     if let Err(e) = state.with_store(|s| s.upsert_identity(&identity)) {
         state.release_session_signer(session_id);
+        if durable_agent {
+            state
+                .with_store(|s| s.release_durable_agent_session(session_id))
+                .ok();
+        }
         return Err(e);
     }
-    Ok(MintedSession {
-        keys,
-        identity: crate::identity::SessionIdentity::new(
+    let identity = if durable_agent {
+        crate::identity::SessionIdentity::durable_agent(
+            pubkey,
+            agent_slug.to_string(),
+            session_id.to_string(),
+        )
+    } else {
+        crate::identity::SessionIdentity::new(
             pubkey,
             agent_slug.to_string(),
             session_id.to_string(),
             codename,
-        ),
-        reclaimed_pubkey: allocation.reclaimed_pubkey,
+        )
+    };
+    Ok(MintedSession {
+        keys,
+        identity,
+        reclaimed_pubkey,
+        durable_claim_acquired,
     })
 }
 

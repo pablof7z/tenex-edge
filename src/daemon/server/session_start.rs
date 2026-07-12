@@ -9,16 +9,18 @@ mod effects;
 mod joined_channels;
 mod lookup;
 mod params;
+mod reservation;
 mod stale;
 
-use abort::abort_session_start;
-use alias_resolution::resolve_session_id;
+use abort::{abort_session_start, DurableStartGuard};
+use alias_resolution::{record_secondary_aliases, resolve_session_id};
 use lookup::{session_endpoint, work_root_for_scope};
 use params::SessionStartParams;
 
 pub(crate) use bootstrap::{bootstrap_exec_session_start, bootstrap_pty_session_start};
+pub(in crate::daemon::server) use reservation::rpc_session_start;
 
-pub(in crate::daemon::server) async fn rpc_session_start(
+pub(super) async fn rpc_session_start_inner(
     state: &Arc<DaemonState>,
     params: &serde_json::Value,
     progress: Option<InitProgress>,
@@ -36,14 +38,15 @@ pub(in crate::daemon::server) async fn rpc_session_start(
             format!("loading local key for agent {}", p.agent),
         );
     }
-    // Provision the agent keystore + spawn command (side effect). The durable
-    // agent key is no longer used for signing — every session mints its own key.
-    identity::load_or_create_with_command(
+    // Provision the agent keystore + spawn command and select its identity mode.
+    let agent_identity = identity::load_or_create_with_command(
         &edge,
         &p.agent,
         now_secs(),
         p.provision_command.clone(),
     )?;
+    let durable_agent = !agent_identity.per_session_key;
+    validate_launch_reservation(state, &agent_identity, p.durable_reservation.as_deref())?;
     let cwd = p
         .cwd
         .map(std::path::PathBuf::from)
@@ -153,8 +156,17 @@ pub(in crate::daemon::server) async fn rpc_session_start(
         harness_session_id.as_deref(),
         resume_id.as_deref(),
         p.watch_pid,
+        durable_agent,
         now,
     )?;
+    validate_agent_identity_admission(state, &session_id, &agent_identity)?;
+    let already_running = state.sessions.lock().unwrap().contains_key(&session_id);
+    let existing_session = already_running
+        .then(|| state.with_store(|s| s.get_session(&session_id).ok().flatten()))
+        .flatten();
+    if let Some(existing) = existing_session.as_ref() {
+        validate_live_session_identity(state, existing, &agent_identity)?;
+    }
     if let Some(prog) = &progress {
         prog.emit(
             "session_registry",
@@ -162,36 +174,20 @@ pub(in crate::daemon::server) async fn rpc_session_start(
         );
     }
 
-    // Record the secondary external-id aliases (endpoint/pid + any id not used
-    // as the primary) and the channel's absolute path on this machine. Reused
-    // endpoint/pid slots repoint to this newest owner via ON CONFLICT.
-    state.with_store(|s| {
-        if let Some(pty) = &pty_session {
-            s.put_alias(harness_str, "pty_session", pty, &session_id, now)
-                .ok();
-        }
-        if let Some(socket) = &pty_socket {
-            s.put_alias(harness_str, "pty_socket", socket, &session_id, now)
-                .ok();
-        }
-        if let Some(pid) = p.watch_pid {
-            s.put_alias(harness_str, "watch_pid", &pid.to_string(), &session_id, now)
-                .ok();
-        }
-        if let Some(hs) = &harness_session_id {
-            s.put_alias(harness_str, "harness_session", hs, &session_id, now)
-                .ok();
-        }
-        if let Some(r) = &resume_id {
-            s.put_alias(harness_str, "resume", r, &session_id, now).ok();
-        }
-        s.upsert_workspace(&work_root, &cwd.to_string_lossy(), now)
-            .ok();
-        if channel != work_root {
-            s.upsert_workspace(&channel, &cwd.to_string_lossy(), now)
-                .ok();
-        }
-    });
+    record_secondary_aliases(
+        state,
+        harness_str,
+        &session_id,
+        pty_session.as_deref(),
+        pty_socket.as_deref(),
+        harness_session_id.as_deref(),
+        resume_id.as_deref(),
+        p.watch_pid,
+        &work_root,
+        &cwd,
+        &channel,
+        now,
+    );
 
     membership_cleanup::cleanup_dead_local_sessions(state);
 
@@ -213,21 +209,23 @@ pub(in crate::daemon::server) async fn rpc_session_start(
         );
     }
 
-    let already_running = state.sessions.lock().unwrap().contains_key(&session_id);
-    let existing_channel = already_running
-        .then(|| state.with_store(|s| s.get_session(&session_id).ok().flatten()))
-        .flatten()
-        .map(|r| r.channel_h);
+    let existing_channel = existing_session.map(|r| r.channel_h);
     if let Some(existing) = existing_channel.as_ref() {
         channel = existing.clone();
     }
 
-    // Mint this session's OWN keypair (deterministic from the management secret +
-    // session id), THEN write its row carrying that pubkey. A resumed session
-    // re-derives the identical pubkey. `route_chat` keys on this `agent_pubkey`, so
-    // a p-tagged mention reaches exactly this session. Membership admission for the
-    // minted pubkey happens after channel-ready.
-    let minted = mint_session_identity(state, &session_id, &p.agent, &channel, &native_id)?;
+    // Select the derived per-session or configured durable signer, then write
+    // the row carrying that pubkey. Membership admission happens after channel-ready.
+    let minted = mint_session_identity(
+        state,
+        &session_id,
+        &agent_identity,
+        &channel,
+        &native_id,
+        p.durable_reservation.as_deref(),
+    )?;
+    let mut durable_guard =
+        DurableStartGuard::new(state, &session_id, minted.durable_claim_acquired);
     retire_reclaimed_profile(state, minted.reclaimed_pubkey.as_deref()).await?;
     // If the engine is already running (re-assert from a duplicate spawn such as
     // the offline-agent-mention handler), preserve the live session's active
@@ -247,7 +245,7 @@ pub(in crate::daemon::server) async fn rpc_session_start(
         harness_str,
         ext_kind,
         ext_id.clone(),
-        &native_id,
+        if durable_agent { "" } else { &native_id },
         &work_root,
         &channel,
         channel_for_upsert.clone(),
@@ -311,6 +309,7 @@ pub(in crate::daemon::server) async fn rpc_session_start(
             plan.row.child_pid,
             now_secs(),
         );
+        durable_guard.disarm();
         return Ok(serde_json::json!({
             "session_id": session_id,
         }));
@@ -392,6 +391,7 @@ pub(in crate::daemon::server) async fn rpc_session_start(
         plan.row.child_pid,
         now_secs(),
     );
+    durable_guard.disarm();
 
     Ok(serde_json::json!({
         "session_id": session_id,

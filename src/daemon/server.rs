@@ -37,6 +37,7 @@ mod my_status;
 mod orchestration_handler;
 mod pty_rpc;
 mod rpc;
+pub(crate) use rpc::agents::{rpc_agent_launch_preflight, rpc_agent_launch_release};
 mod session_dispatch;
 mod session_dispatch_handler;
 mod session_records;
@@ -170,14 +171,6 @@ impl DaemonState {
         })
     }
 
-    /// Re-derive the keys a session signs with, from the management secret + id.
-    pub(in crate::daemon) fn session_signing_keys(&self, session_id: &str) -> Result<Keys> {
-        let mgmt = self.management_keys()?;
-        Ok(crate::identity::derive_session_keys_v2(
-            mgmt.secret_key(),
-            session_id,
-        ))
-    }
     /// Return live per-session derived pubkeys. Callers in `resubscribe` and
     /// `handle_incoming` extend their sets with this so transient duplicates are
     /// subscribed and recognized as local authors/recipients.
@@ -246,7 +239,10 @@ use profile_rpc::{resolve_backend_pubkey, resolve_channel_member_pubkey_hex, res
 use proposal::rpc_propose;
 use resolution::{resolve_session, resolve_session_inner, CallerAnchor, ResolveScope};
 use session_end::{rpc_session_end, rpc_session_kill};
-use session_signing::{mint_session_identity, retire_reclaimed_profile};
+use session_signing::{
+    mint_session_identity, retire_reclaimed_profile, validate_agent_identity_admission,
+    validate_launch_reservation, validate_live_session_identity,
+};
 use session_start::rpc_session_start;
 use status_publish::spawn_outbox_drainer;
 use statusline::rpc_statusline;
@@ -282,6 +278,8 @@ async fn dispatch(state: &Arc<DaemonState>, req: &Request) -> Response {
         "channel_remove_member" => rpc::rpc_channel_remove_member(state, &req.params).await,
         "agents_list_sessions" => rpc::rpc_agents_list_sessions(state, &req.params),
         "agents_roster" => rpc::rpc_agents_roster(state, &req.params),
+        "agent_launch_preflight" => rpc::rpc_agent_launch_preflight(state, &req.params),
+        "agent_launch_release" => rpc::rpc_agent_launch_release(state, &req.params),
         "agent_roster_publish" => rpc_agent_roster_publish(state, &req.params).await,
         "debug_outbox" => rpc_debug_outbox(state, &req.params),
         "channel_create" => rpc_channel_create(state, &req.params).await,

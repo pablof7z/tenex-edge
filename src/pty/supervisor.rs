@@ -8,6 +8,9 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+#[path = "supervisor/reservation.rs"]
+mod reservation;
+
 const BACKLOG_LIMIT: usize = 256 * 1024;
 
 #[derive(Debug, Clone)]
@@ -22,6 +25,7 @@ pub struct SupervisorArgs {
 }
 
 pub fn run_supervisor(args: SupervisorArgs) -> Result<()> {
+    let _reservation_guard = reservation::DurableReservationGuard;
     if args.command.is_empty() {
         bail!("pty supervisor command must not be empty");
     }
@@ -50,6 +54,11 @@ pub fn run_supervisor(args: SupervisorArgs) -> Result<()> {
     cmd.env("TENEX_EDGE_AGENT", &args.agent);
     cmd.env("TENEX_EDGE_PTY_SESSION", &args.id);
     cmd.env("TENEX_EDGE_PTY_SOCKET", args.socket.as_os_str());
+    if let Ok(reservation) = std::env::var("TENEX_EDGE_DURABLE_RESERVATION") {
+        cmd.env("TENEX_EDGE_DURABLE_RESERVATION", reservation);
+    } else {
+        cmd.env_remove("TENEX_EDGE_DURABLE_RESERVATION");
+    }
     if args.ephemeral {
         cmd.env("TENEX_EDGE_EPHEMERAL", "1");
     } else {

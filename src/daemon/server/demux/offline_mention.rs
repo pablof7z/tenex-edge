@@ -3,8 +3,10 @@ use super::super::*;
 use std::sync::Arc;
 
 mod headless;
+pub(super) mod liveness;
 
 use headless::{mention_prompt, spawn_headless_mention};
+use liveness::has_alive_session_for;
 
 pub(super) fn dispatch(
     state: &Arc<DaemonState>,
@@ -39,16 +41,7 @@ pub(super) async fn handle(
     body: &str,
     requester_pubkey: Option<&str>,
 ) {
-    let has_alive = state.with_store(|s| {
-        s.list_alive_sessions()
-            .unwrap_or_default()
-            .into_iter()
-            .any(|rec| {
-                rec.agent_pubkey == mentioned_pk
-                    && s.is_session_joined_channel(&rec.session_id, channel)
-                        .unwrap_or(rec.channel_h == channel)
-            })
-    });
+    let has_alive = state.with_store(|s| has_alive_session_for(s, mentioned_pk, channel));
     if has_alive {
         tracing::debug!(
             mentioned_pk = %crate::util::pubkey_short(mentioned_pk),
@@ -120,10 +113,9 @@ pub(super) async fn handle(
         }
     }
 
-    // No live session and no active claim to resume. Look up the minted identity
-    // bound to the p-tagged pubkey to learn which agent + native session it
-    // belongs to. A per-session pubkey is unique, so this resolves to exactly one
-    // session — resuming it (via its native id) reproduces the same pubkey.
+    // No live session and no active claim to resume. Look up the identity bound
+    // to the p-tagged pubkey. Per-session identities retain a native resume id;
+    // durable-agent identities leave it empty and therefore start fresh below.
     let identity = state.with_store(|s| {
         s.get_identity_for_channel(mentioned_pk, channel)
             .ok()
