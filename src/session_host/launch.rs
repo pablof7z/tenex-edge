@@ -124,6 +124,10 @@ async fn open_agent_session(
             use crate::session_host::transport::SessionTransport;
             let spec = LaunchSpec {
                 slug: slug.to_string(),
+                // The bundle NAME (harnesses.json key) is distinct from the agent
+                // slug; the ACP transport resolves its harness/driver from this,
+                // never from the slug (defect #1).
+                bundle: crate::identity::agent_harness_bundle(&crate::config::edge_home(), slug),
                 root: root.to_string(),
                 abs_path: abs_path.to_string(),
                 group: group.map(str::to_string),
@@ -357,6 +361,7 @@ pub async fn resume_agent_in_channel(
             let (base, _agent_def) = resolve_spawn_command(slug, &transport)?;
             let spec = LaunchSpec {
                 slug: slug.to_string(),
+                bundle: crate::identity::agent_harness_bundle(&crate::config::edge_home(), slug),
                 root: root.to_string(),
                 abs_path: abs_path.clone(),
                 group: Some(group.to_string()),

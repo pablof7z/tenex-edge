@@ -282,7 +282,10 @@ pub(in crate::daemon::server) async fn reconcile_sessions(state: &Arc<DaemonStat
 }
 
 pub(in crate::daemon::server) fn pid_alive(pid: i32) -> bool {
-    nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None).is_ok()
+    // Guard non-positive pids (defect #3): `kill(0, ...)` targets the CALLER's
+    // process group and `kill(-n, ...)` a whole group, both of which spuriously
+    // succeed. A synth ACP pid of 0 (no reported child pid) must read as NOT live.
+    pid > 0 && nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None).is_ok()
 }
 
 /// Whether reconcile should treat a session left behind by a previous daemon as
@@ -294,9 +297,45 @@ pub(in crate::daemon::server) fn pid_alive(pid: i32) -> bool {
 /// ([`crate::pty::is_live`]) is the authoritative, unspoofable signal; exec
 /// sessions with no socket fall back to the PID check alone (risk #1).
 fn session_still_live(state: &Arc<DaemonState>, snap: &crate::state::Session) -> bool {
+    use crate::session_host::transport::{
+        transport_kind_for_slug, AcpTransport, EndpointRef, SessionTransport, TransportKind,
+    };
+    // ACP/RPC sessions have neither an OS-inspectable supervisor pid nor a PTY
+    // socket; their liveness is the in-process child registry (defect #3). That
+    // registry cannot survive a daemon restart, so at reconcile it is empty and an
+    // ACP session is correctly treated as gone. NEVER fall back to `pid_alive` for
+    // ACP: the recorded pid is a synth `0` (or a since-recycled child pid), which
+    // would revive an immortal ghost.
+    if matches!(
+        transport_kind_for_slug(&snap.agent_slug),
+        TransportKind::Acp
+    ) {
+        return endpoint_id_for(state, &snap.session_id)
+            .map(|endpoint_id| {
+                AcpTransport.is_live(&EndpointRef {
+                    kind: TransportKind::Acp,
+                    endpoint_id,
+                })
+            })
+            .unwrap_or(false);
+    }
     let pid_ok = snap.child_pid.map(pid_alive).unwrap_or(false);
     let pty_live = pty_socket_for(state, &snap.session_id).map(|sock| crate::pty::is_live(&sock));
     revive_decision(pid_ok, pty_live)
+}
+
+/// The ACP endpoint id bound to a session (the `pty_session` alias — for ACP this
+/// is the transport endpoint id, not a PTY pane). Used to consult the transport
+/// child registry for liveness.
+fn endpoint_id_for(state: &Arc<DaemonState>, session_id: &str) -> Option<String> {
+    state.with_store(|s| {
+        s.aliases_for_session(session_id).ok().and_then(|aliases| {
+            aliases
+                .into_iter()
+                .find(|a| a.external_id_kind == "pty_session")
+                .map(|a| a.external_id)
+        })
+    })
 }
 
 /// Pure revive decision, split out for unit testing. `pty_live` is `None` for a
@@ -322,7 +361,16 @@ fn pty_socket_for(state: &Arc<DaemonState>, session_id: &str) -> Option<String> 
 
 #[cfg(test)]
 mod tests {
-    use super::revive_decision;
+    use super::{pid_alive, revive_decision};
+
+    #[test]
+    fn nonpositive_pid_is_never_alive() {
+        // Defect #3: a synth ACP pid of 0 (`kill(0)` hits the caller's own group)
+        // and negative pids (`kill(-n)` hits a whole group) must read as NOT live,
+        // so a dead ACP session is never treated as an immortal ghost.
+        assert!(!pid_alive(0));
+        assert!(!pid_alive(-1));
+    }
 
     #[test]
     fn dead_pid_is_never_revived() {

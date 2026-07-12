@@ -39,7 +39,7 @@ pub(super) async fn reader_task(
     pending: PendingMap,
     turn_waiters: TurnWaiters,
     write_tx: mpsc::Sender<String>,
-    update_tx: mpsc::Sender<SessionUpdate>,
+    update_tx: mpsc::UnboundedSender<SessionUpdate>,
     callbacks: Callbacks,
     alive: Arc<AtomicBool>,
     exit_tx: watch::Sender<bool>,
@@ -86,7 +86,7 @@ async fn dispatch_inbound(
     pending: &PendingMap,
     turn_waiters: &TurnWaiters,
     write_tx: &mpsc::Sender<String>,
-    update_tx: &mpsc::Sender<SessionUpdate>,
+    update_tx: &mpsc::UnboundedSender<SessionUpdate>,
     callbacks: &Callbacks,
 ) {
     match inbound {
@@ -121,7 +121,10 @@ async fn dispatch_inbound(
                     }
                 }
             }
-            let _ = update_tx.try_send(SessionUpdate { method, params });
+            // Unbounded, non-blocking send: never drops an update (defect #15), and
+            // cannot deadlock the reader (no backpressure). A closed receiver (drain
+            // task gone) is the only error and is safely ignored.
+            let _ = update_tx.send(SessionUpdate { method, params });
         }
         Inbound::Other => {}
     }
