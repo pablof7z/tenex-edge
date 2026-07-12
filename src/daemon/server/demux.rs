@@ -335,6 +335,10 @@ fn derive_and_emit_tail_events(
             // Activity events are not emitted on the tail (they're durable
             // narrative, not real-time transitions).
         }
+        DomainEvent::Reaction(_) => {
+            // Reactions never reach the tail (materialize() sets tail=None), and
+            // even if one did it is passive awareness with no real-time surface.
+        }
     }
 }
 

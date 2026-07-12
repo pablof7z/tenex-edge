@@ -376,3 +376,28 @@ fn channel_reply_parses_short_id_and_message_flag() {
         _ => panic!("expected channel reply command"),
     }
 }
+
+#[test]
+fn channel_react_parses_id_emoji_and_session() {
+    let cli = crate::cli::args::Cli::try_parse_from([
+        "tenex-edge",
+        "channel",
+        "react",
+        "abc123",
+        "👍",
+        "--session",
+        "session-1",
+    ])
+    .unwrap();
+
+    match cli.cmd {
+        crate::cli::args::Cmd::Channel {
+            action: ChannelAction::React { id, emoji, session },
+        } => {
+            assert_eq!(id, "abc123");
+            assert_eq!(emoji, "👍");
+            assert_eq!(session.as_deref(), Some("session-1"));
+        }
+        _ => panic!("expected channel react command"),
+    }
+}

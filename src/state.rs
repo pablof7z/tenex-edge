@@ -145,6 +145,22 @@ pub struct MessageRecipient {
     pub delivered_at: Option<u64>,
 }
 
+/// One materialized NIP-25 reaction (kind:7) plus the body of the message it
+/// targets. Produced only by the materializer from a round-tripped relay event —
+/// never optimistically fabricated. Surfaced as passive turn-start awareness.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReactionRow {
+    pub reaction_id: String,
+    pub target_message_id: String,
+    pub channel_h: String,
+    pub reactor_pubkey: String,
+    pub emoji: String,
+    pub created_at: u64,
+    /// The reacted-to message body (joined from `messages`). Empty when the
+    /// target message is not (yet) in the local read model.
+    pub target_body: String,
+}
+
 /// Fields for registering / reasserting a local session. The daemon resolves the
 /// `(harness, external_id_kind, external_id)` alias to a canonical session;
 /// missing aliases mint a fresh canonical id.
@@ -253,6 +269,7 @@ mod workspace_roots;
 pub use workspace_roots::WorkspaceBinding;
 mod quarantine;
 pub use quarantine::QuarantinedEvent;
+mod reactions;
 mod reader;
 pub(crate) use reader::StoreReader;
 pub mod receipts;

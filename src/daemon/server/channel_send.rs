@@ -6,11 +6,13 @@ use crate::util::CHANNEL_MESSAGE_CHAR_LIMIT;
 use anyhow::bail;
 
 mod body;
+mod react;
 mod recipient;
 mod reply;
 #[cfg(test)]
 mod tests;
 
+pub(in crate::daemon::server) use react::rpc_channel_react;
 pub(in crate::daemon::server) use recipient::resolve_recipient;
 pub(in crate::daemon::server) use reply::rpc_channel_reply;
 

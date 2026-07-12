@@ -31,7 +31,20 @@ fn fresh_file_db_uses_only_canonical_schema() {
     assert!(table_exists(&conn, "workspace_roots"));
     assert!(table_exists(&conn, "trellis_replay_capsules"));
     assert!(table_exists(&conn, "durable_agent_sessions"));
+    assert!(table_exists(&conn, "relay_reactions"));
     assert!(!table_exists(&conn, "project_roots"));
+
+    let reactions = columns(&conn, "relay_reactions");
+    for col in [
+        "reaction_id",
+        "target_message_id",
+        "channel_h",
+        "reactor_pubkey",
+        "emoji",
+        "created_at",
+    ] {
+        assert!(reactions.iter().any(|c| c == col), "relay_reactions.{col}");
+    }
 
     let identities = columns(&conn, "identities");
     assert!(identities.iter().any(|c| c == "codename"));

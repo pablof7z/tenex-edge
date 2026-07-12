@@ -4,6 +4,7 @@ mod backend_traffic;
 mod channel_tree;
 mod cross_workspace;
 mod member_render;
+mod reactions;
 mod work_topic;
 
 const SELF_PK: &str = "self-pubkey";

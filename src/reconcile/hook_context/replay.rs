@@ -37,6 +37,7 @@ impl ReplayState {
         tx.set_input(nodes.members, inputs.members)?;
         tx.set_input(nodes.presence, inputs.presence)?;
         tx.set_input(nodes.messages, inputs.messages)?;
+        tx.set_input(nodes.reactions, inputs.reactions)?;
         self.nodes = Some(nodes);
         Ok(())
     }

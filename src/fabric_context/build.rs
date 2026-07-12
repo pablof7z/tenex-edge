@@ -26,6 +26,19 @@ pub(super) fn build_view(store: &Store, input: FabricContextInput<'_>) -> Fabric
     channels.dedup();
     channels.retain(|channel| channel_ready_for_render(store, channel, &mut warnings));
 
+    // Reactions on the caller's own recent messages (parity with the pure
+    // `assemble_view` path — both share the same capture + grouping helpers).
+    let reaction_floor = input.session.map(|s| s.created_at).unwrap_or(0);
+    let reaction_sources = super::reactions::capture_reaction_sources(
+        store,
+        input.self_pubkey,
+        reaction_floor,
+        input.local_host,
+        input.backend_pubkey,
+    );
+    let (reactions, reactions_omitted) =
+        super::reactions::group_reactions(&reaction_sources, input.cursor, input.now);
+
     let mut view = FabricView {
         self_row: input.session.map(|s| SelfRow {
             agent: input.self_slug.to_string(),
@@ -42,6 +55,8 @@ pub(super) fn build_view(store: &Store, input: FabricContextInput<'_>) -> Fabric
         channels: Vec::new(),
         other_workspaces: Vec::new(),
         important: Vec::new(),
+        reactions,
+        reactions_omitted,
         warnings,
         incremental: input.cursor != 0,
     };

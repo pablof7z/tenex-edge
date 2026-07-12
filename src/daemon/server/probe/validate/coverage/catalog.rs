@@ -110,6 +110,12 @@ pub(super) const DURABLE_TABLES: &[TableCoverage] = &[
         "materialized relay events",
     ),
     row(
+        "relay_reactions",
+        "direct",
+        "reaction:<id> | event:<id>",
+        "materialized NIP-25 reactions",
+    ),
+    row(
         "relay_profiles",
         "direct",
         "profile:<pubkey> | pubkey:<pubkey>",

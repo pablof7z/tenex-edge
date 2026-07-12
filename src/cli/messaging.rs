@@ -54,6 +54,29 @@ pub(super) async fn channel_reply(
     Ok(())
 }
 
+pub(super) async fn channel_react(
+    id: String,
+    emoji: String,
+    session: Option<String>,
+) -> Result<()> {
+    let params = crate::cli::rpc_params(serde_json::json!({
+        "id": id,
+        "emoji": emoji.clone(),
+        "session": session,
+    }));
+    let v = daemon_call_async("channel_react", params).await?;
+    let event_id = v["event_id"].as_str().unwrap_or("?");
+    let target = v["target"].as_str().unwrap_or("?");
+    let shown_emoji = v["emoji"].as_str().unwrap_or(&emoji);
+    println!(
+        "reacted {} {} to {}",
+        shown_emoji,
+        crate::util::short_id(event_id),
+        crate::util::short_id(target)
+    );
+    Ok(())
+}
+
 pub(super) struct ChannelReadRequest {
     pub id: Option<String>,
     pub since: Option<String>,

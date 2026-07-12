@@ -8,6 +8,7 @@ mod group_state;
 mod materialization;
 mod membership_confirmation;
 mod profiles;
+mod reactions;
 mod readiness;
 
 use crate::domain::DomainEvent;

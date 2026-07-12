@@ -32,21 +32,25 @@ pub(crate) struct ViewInputs {
     pub(crate) members: MembersInput,
     pub(crate) presence: PresenceInput,
     pub(crate) messages: MessagesInput,
+    #[serde(default)]
+    pub(crate) reactions: ReactionsInput,
 }
 
 impl ViewInputs {
-    /// Reassemble from the four canonical inputs (as read back from graph nodes).
+    /// Reassemble from the canonical inputs (as read back from graph nodes).
     pub(crate) fn from_parts(
         meta: MetaInput,
         members: MembersInput,
         presence: PresenceInput,
         messages: MessagesInput,
+        reactions: ReactionsInput,
     ) -> Self {
         Self {
             meta,
             members,
             presence,
             messages,
+            reactions,
         }
     }
 
@@ -98,6 +102,13 @@ pub(crate) struct PresenceInput {
 #[derive(Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct MessagesInput {
     pub(super) channels: BTreeMap<String, MsgBundle>,
+}
+
+/// Reactions on the caller's own recent messages (a cursor-independent superset;
+/// the cursor delta is applied at assemble time).
+#[derive(Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct ReactionsInput {
+    pub(super) rows: Vec<super::reactions::ReactionCap>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -275,6 +286,18 @@ pub(crate) fn capture_inputs(store: &Store, input: &FabricContextInput<'_>) -> V
         force: input.force,
     };
 
+    // Reactions on the caller's OWN recent messages. Floored at session creation
+    // (a session-stable value, not the cursor) so the frozen input is
+    // cursor-independent; assemble applies the real `> cursor` delta.
+    let reaction_floor = input.session.map(|s| s.created_at).unwrap_or(0);
+    let reaction_rows = super::reactions::capture_reaction_sources(
+        store,
+        input.self_pubkey,
+        reaction_floor,
+        input.local_host,
+        input.backend_pubkey,
+    );
+
     ViewInputs {
         meta,
         members: MembersInput {
@@ -285,5 +308,8 @@ pub(crate) fn capture_inputs(store: &Store, input: &FabricContextInput<'_>) -> V
         },
         presence: PresenceInput { statuses },
         messages: MessagesInput { channels: messages },
+        reactions: ReactionsInput {
+            rows: reaction_rows,
+        },
     }
 }

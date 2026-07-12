@@ -17,6 +17,7 @@ pub(super) async fn call(params: &Value) -> Result<Value> {
         "tenex_edge.channel_list" => channel_list(&args).await,
         "tenex_edge.channel_read" => channel_read(&args).await,
         "tenex_edge.channel_send" => channel_send(&args).await,
+        "tenex_edge.react" => react(&args).await,
         "tenex_edge.channel_create" => channel_create(&args).await,
         "tenex_edge.channel_join" => channel_mutation("channel_join", &args).await,
         "tenex_edge.channel_leave" => channel_mutation("channel_leave", &args).await,
@@ -76,6 +77,17 @@ async fn channel_read(args: &Value) -> Result<Value> {
 
 async fn channel_send(args: &Value) -> Result<Value> {
     daemon_identity("channel_send", channel_send_params(args)?).await
+}
+
+async fn react(args: &Value) -> Result<Value> {
+    let params = with_session(
+        json!({
+            "id": required_string(args, "message_id")?,
+            "emoji": required_string(args, "emoji")?,
+        }),
+        args,
+    );
+    daemon_identity("channel_react", params).await
 }
 
 async fn channel_create(args: &Value) -> Result<Value> {
