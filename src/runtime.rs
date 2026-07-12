@@ -227,7 +227,7 @@ pub async fn run_session_in_daemon(
         tokio::select! {
             _ = hb.tick() => {
                 if let Some(pid) = p.watch_pid {
-                    if !pid_alive(pid) { break; }
+                    if !crate::liveness::pid_alive(pid) { break; }
                 }
                 let now = now_secs();
                 if let Err(e) = st!(|s: &Store| s.touch_session(&p.session_id, now)) {
@@ -390,16 +390,10 @@ pub async fn run_session_in_daemon(
     Ok(())
 }
 
-fn pid_alive(pid: i32) -> bool {
-    nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None).is_ok()
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn current_pid_is_alive() {
-        assert!(pid_alive(std::process::id() as i32));
+        assert!(crate::liveness::pid_alive(std::process::id() as i32));
     }
 }

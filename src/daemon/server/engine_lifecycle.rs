@@ -2,6 +2,8 @@ use super::*;
 
 mod params;
 mod session_watch;
+#[cfg(test)]
+mod tests;
 
 pub(in crate::daemon::server) use params::engine_params_for;
 
@@ -112,12 +114,15 @@ pub(in crate::daemon::server) fn cancel_session(
 }
 
 /// Revive sessions a previous daemon left behind (skew re-exec / crash),
-/// rebuilding from the `sessions` table. Invariant: **a session whose process is
-/// still live is never reaped by reconcile.** For each ALIVE row we respawn the
-/// engine task iff the session is still live ([`session_still_live`]: PID alive
-/// AND, for PTY sessions, the supervisor socket answers). Only a genuinely-gone
-/// session is marked dead (so `who`/presence don't lie after a restart) and has
-/// its ordinal member crash-GC'd. Transient conditions — a cold relay
+/// rebuilding from the `sessions` table. Invariant: **a live session is never
+/// reaped and left with an orphaned supervisor.** For each ALIVE row we respawn
+/// the engine task iff the session is still live ([`session_still_live`]: PID
+/// alive AND, for PTY sessions, the supervisor socket accepts a connect+write).
+/// A genuinely-gone session is marked dead (so `who`/presence don't lie after a
+/// restart) and has its ordinal member crash-GC'd. The one case where a *live*
+/// session is retired — its agent's identity config changed under it — first
+/// kills the PTY supervisor, so no orphan is left (defect #4). Transient
+/// conditions — a cold relay
 /// (`ChannelGate::Degraded`) or a spawn hiccup — no longer reap a live session;
 /// correctness on a not-yet-ready channel is upheld by the send-time gate.
 pub(in crate::daemon::server) async fn reconcile_sessions(state: &Arc<DaemonState>) {
@@ -137,8 +142,9 @@ pub(in crate::daemon::server) async fn reconcile_sessions(state: &Arc<DaemonStat
     for snap in snaps {
         let session_id = snap.session_id.clone();
         // Only a genuinely-gone session is reaped. `child_pid` liveness alone is
-        // unsafe (PIDs recycle, reviving a ghost), so for PTY sessions the
-        // supervisor socket PING is the authoritative signal (risk #1).
+        // unsafe (PIDs recycle, reviving a ghost), so for PTY sessions a
+        // reachable supervisor socket (connect+write) is the authoritative
+        // signal (risk #1).
         if !session_still_live(state, &snap) {
             tracing::warn!(
                 session = %session_id,
@@ -184,10 +190,7 @@ pub(in crate::daemon::server) async fn reconcile_sessions(state: &Arc<DaemonStat
         };
         if let Err(e) = validate_live_session_identity(state, &snap, &agent_identity) {
             tracing::warn!(session = %session_id, error = %e, "live session identity configuration changed; retiring stale session");
-            state.with_store(|s| {
-                s.mark_dead(&session_id).ok();
-                s.mark_identity_dead_for_session(&session_id).ok();
-            });
+            retire_live_session_for_config_change(state, &session_id, snap.child_pid, now);
             continue;
         }
         let minted = match mint_session_identity(
@@ -281,21 +284,54 @@ pub(in crate::daemon::server) async fn reconcile_sessions(state: &Arc<DaemonStat
     state.outbox_notify.notify_waiters();
 }
 
-pub(in crate::daemon::server) fn pid_alive(pid: i32) -> bool {
-    // Guard non-positive pids (defect #3): `kill(0, ...)` targets the CALLER's
-    // process group and `kill(-n, ...)` a whole group, both of which spuriously
-    // succeed. A synth ACP pid of 0 (no reported child pid) must read as NOT live.
-    pid > 0 && nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None).is_ok()
+/// Retire a session whose agent identity configuration changed under it while
+/// still running. The session is genuinely LIVE (it just passed
+/// [`session_still_live`]), so we MUST kill its PTY supervisor **before** marking
+/// the row dead — otherwise we leak exactly the orphaned supervisor #382 exists
+/// to reap (defect #4). Exec/native sessions with no `pty_socket` alias have no
+/// supervisor to kill; the row is retired directly.
+fn retire_live_session_for_config_change(
+    state: &Arc<DaemonState>,
+    session_id: &str,
+    child_pid: Option<i32>,
+    now: u64,
+) {
+    if let Some(sock) = pty_socket_for(state, session_id) {
+        if let Err(e) = crate::pty::kill(&sock) {
+            tracing::warn!(
+                session = %session_id,
+                socket = %sock,
+                error = %e,
+                "failed to kill PTY supervisor while retiring session for identity-config change; supervisor may be orphaned"
+            );
+        }
+    }
+    state.with_store(|s| {
+        s.mark_dead(session_id).ok();
+        s.mark_identity_dead_for_session(session_id).ok();
+    });
+    session_watch::exited_at(
+        state,
+        session_id,
+        child_pid,
+        now,
+        "reconcile-identity-config-change",
+    );
 }
+
+// Single source of truth for pid liveness (defect #17). The `pid > 0` guard
+// (defect #3/#389) lives with the definition in `crate::liveness`.
+pub(in crate::daemon::server) use crate::liveness::pid_alive;
 
 /// Whether reconcile should treat a session left behind by a previous daemon as
 /// still alive (and therefore revive it rather than reap it).
 ///
 /// `child_pid` liveness alone is unsafe: PIDs recycle, so a dead supervisor's
 /// reused PID could revive a ghost session against an unrelated process. When the
-/// session owns a PTY supervisor socket, that socket answering a PING
-/// ([`crate::pty::is_live`]) is the authoritative, unspoofable signal; exec
-/// sessions with no socket fall back to the PID check alone (risk #1).
+/// session owns a PTY supervisor socket, that socket being reachable —
+/// connect+write, not a round-trip reply ([`crate::pty::is_live`]) — is the
+/// authoritative, unspoofable signal; exec sessions with no socket fall back to
+/// the PID check alone (risk #1).
 fn session_still_live(state: &Arc<DaemonState>, snap: &crate::state::Session) -> bool {
     use crate::session_host::transport::{
         transport_kind_for_slug, AcpTransport, EndpointRef, SessionTransport, TransportKind,
@@ -357,43 +393,4 @@ fn pty_socket_for(state: &Arc<DaemonState>, session_id: &str) -> Option<String> 
                 .map(|a| a.external_id)
         })
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{pid_alive, revive_decision};
-
-    #[test]
-    fn nonpositive_pid_is_never_alive() {
-        // Defect #3: a synth ACP pid of 0 (`kill(0)` hits the caller's own group)
-        // and negative pids (`kill(-n)` hits a whole group) must read as NOT live,
-        // so a dead ACP session is never treated as an immortal ghost.
-        assert!(!pid_alive(0));
-        assert!(!pid_alive(-1));
-    }
-
-    #[test]
-    fn dead_pid_is_never_revived() {
-        assert!(!revive_decision(false, None));
-        assert!(!revive_decision(false, Some(true)));
-        assert!(!revive_decision(false, Some(false)));
-    }
-
-    #[test]
-    fn exec_session_revives_on_pid_alone() {
-        // No PTY socket => PID liveness is authoritative.
-        assert!(revive_decision(true, None));
-    }
-
-    #[test]
-    fn live_pid_with_live_pty_is_revived() {
-        assert!(revive_decision(true, Some(true)));
-    }
-
-    #[test]
-    fn live_pid_with_dead_pty_is_not_revived() {
-        // Guards against PID recycling: the process at `child_pid` is alive but
-        // its supervisor socket is gone, so it is not our session.
-        assert!(!revive_decision(true, Some(false)));
-    }
 }

@@ -48,8 +48,8 @@ pub(super) async fn rpc_pty_send(
         }));
     };
     if !crate::pty::is_live(&pty_id) {
-        let _ = state.with_store(|s| s.clear_alias_kind(&rec.session_id, "pty_session"));
-        let _ = state.with_store(|s| s.clear_alias_kind(&rec.session_id, "pty_socket"));
+        // Retire the row + its stale alias; clearing only the alias reopens the recycled-PID false-revive (defect #6).
+        let _ = state.with_store(|s| s.retire_dead_endpoint(&rec.session_id));
         return Ok(serde_json::json!({
             "injected": false,
             "pty_id": pty_id,

@@ -303,8 +303,8 @@ async fn apply_delivery_effects(
                 delay_secs,
             } => schedule_delivery_retry(state.clone(), session_id, delay_secs),
             crate::reconcile::DeliveryEffect::ClearDeadEndpoint { session_id } => {
-                let _ = state.with_store(|s| s.clear_alias_kind(&session_id, "pty_session"));
-                let _ = state.with_store(|s| s.clear_alias_kind(&session_id, "pty_socket"));
+                // Retire the row + its stale alias; clearing only the alias reopens the recycled-PID false-revive (defect #6).
+                let _ = state.with_store(|s| s.retire_dead_endpoint(&session_id));
             }
         }
     }

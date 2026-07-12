@@ -23,6 +23,7 @@ pub mod identity;
 pub mod idref;
 pub mod injection;
 pub mod instrument;
+pub(crate) mod liveness;
 pub mod llmconfig;
 pub mod logging;
 pub(crate) mod outbox_seam;
