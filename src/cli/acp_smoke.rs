@@ -1,0 +1,204 @@
+//! `tenex-edge __acp-smoke <harness>` — debug driver that exercises the ACP /
+//! app-server transport end-to-end without any agent.json / StoredKey wiring.
+//!
+//! For an ACP harness (opencode / claude): initialize -> session/new ->
+//! session/prompt("reply PONG") -> assert stopReason end_turn -> session/load
+//! in a FRESH child process -> assert cross-process resume.
+//!
+//! For codex (app-server): initialize -> thread/start -> turn/start.
+
+use anyhow::{Context, Result};
+use clap::Args;
+
+use crate::rpc_harness::{
+    spawn_config_from_driver, AcpClient, AppServerClient, Callbacks, Dialect, RpcHandle, StopReason,
+};
+
+#[derive(Args)]
+pub struct AcpSmokeArgs {
+    /// Harness bundle to drive (e.g. `opencode`, `claude-acp`, `codex`). Falls
+    /// back to a built-in bundle when absent from harnesses.json.
+    pub harness: String,
+    /// Working directory for the session (defaults to a temp dir).
+    #[arg(long)]
+    pub cwd: Option<String>,
+    /// Prompt text to send.
+    #[arg(long, default_value = "Reply with exactly one word: PONG")]
+    pub prompt: String,
+}
+
+/// Resolve `name` to an RPC-transport bundle. A config bundle with an RPC
+/// transport is honored as-is; otherwise the bare harness slug is mapped to its
+/// natural RPC transport (opencode/claude -> ACP, codex -> app-server) so the
+/// smoke drives the JSON-RPC path rather than the PTY fallback.
+fn resolve_rpc(name: &str, scratch: &std::path::Path) -> Result<crate::harness::ResolvedHarness> {
+    use crate::harness::{config::HarnessesConfig, driver, Transport};
+    use crate::session::Harness;
+
+    let cfg = HarnessesConfig::load()?;
+    if let Some(bundle) = cfg.get(name) {
+        if matches!(bundle.transport, Transport::Acp | Transport::AppServer) {
+            return crate::harness::resolve_with(&cfg, name, scratch);
+        }
+    }
+    // Built-in RPC mapping for a bare slug.
+    let harness = Harness::from_str(name);
+    let transport = match harness {
+        Harness::Opencode | Harness::ClaudeCode => Transport::Acp,
+        Harness::Codex => Transport::AppServer,
+        _ => anyhow::bail!("harness {name:?} has no RPC transport for the smoke"),
+    };
+    let d = driver::lookup(harness, transport)
+        .with_context(|| format!("no driver for {}/{}", harness.as_str(), transport.as_str()))?;
+    Ok(crate::harness::ResolvedHarness {
+        bundle: name.to_string(),
+        harness,
+        transport,
+        driver: d,
+        base_argv: d.base_argv.iter().map(|s| s.to_string()).collect(),
+        profile: crate::harness::ProfilePlan::default(),
+    })
+}
+
+pub async fn acp_smoke(args: AcpSmokeArgs) -> Result<()> {
+    let cwd = match &args.cwd {
+        Some(c) => std::path::PathBuf::from(c),
+        None => std::env::temp_dir().join(format!("tenex-edge-acp-smoke-{}", std::process::id())),
+    };
+    std::fs::create_dir_all(&cwd).context("creating smoke cwd")?;
+
+    let scratch = crate::config::edge_home()
+        .join("harness-profiles")
+        .join(&args.harness);
+    let resolved = resolve_rpc(&args.harness, &scratch)?;
+    println!(
+        "[acp-smoke] bundle={} harness={} transport={}",
+        resolved.bundle,
+        resolved.harness.as_str(),
+        resolved.transport.as_str()
+    );
+    println!(
+        "[acp-smoke] argv={:?} cwd={}",
+        resolved.base_argv,
+        cwd.display()
+    );
+
+    for (path, contents) in &resolved.profile.files {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).ok();
+        }
+        std::fs::write(path, contents)
+            .with_context(|| format!("writing profile file {}", path.display()))?;
+        println!("[acp-smoke] wrote profile file {}", path.display());
+    }
+
+    let mk_cfg = || {
+        spawn_config_from_driver(
+            resolved.driver,
+            &resolved.base_argv,
+            &resolved.profile.extra_env,
+            cwd.clone(),
+            Callbacks::allow_all(cwd.clone()),
+        )
+    };
+
+    let cfg = mk_cfg()?;
+    match cfg.dialect {
+        Dialect::Acp => run_acp(cfg, &cwd, &args.prompt, mk_cfg).await,
+        Dialect::AppServer => run_app_server(cfg, &cwd, &args.prompt).await,
+    }
+}
+
+async fn run_acp(
+    cfg: crate::rpc_harness::SpawnConfig,
+    cwd: &std::path::Path,
+    prompt: &str,
+    mk_cfg: impl Fn() -> Result<crate::rpc_harness::SpawnConfig>,
+) -> Result<()> {
+    let (handle, mut updates) = RpcHandle::spawn(cfg)
+        .await
+        .map_err(|e| anyhow::anyhow!("spawning harness: {e}"))?;
+    let chunks = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let c = chunks.clone();
+    tokio::spawn(async move {
+        while let Some(u) = updates.recv().await {
+            if u.method.contains("update") {
+                c.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
+    });
+
+    let client = AcpClient::new(handle.clone());
+    client
+        .initialize()
+        .await
+        .map_err(|e| anyhow::anyhow!("initialize: {e}"))?;
+    println!("[acp-smoke] initialize ok");
+    let session_id = client
+        .session_new(cwd)
+        .await
+        .map_err(|e| anyhow::anyhow!("session/new: {e}"))?;
+    println!("[acp-smoke] session/new -> {session_id}");
+
+    let stop = client
+        .session_prompt(&session_id, prompt)
+        .await
+        .map_err(|e| anyhow::anyhow!("session/prompt: {e}"))?;
+    println!(
+        "[acp-smoke] session/prompt -> stopReason={:?} (chunks={})",
+        stop,
+        chunks.load(std::sync::atomic::Ordering::Relaxed)
+    );
+    if stop != StopReason::EndTurn {
+        anyhow::bail!("expected stopReason end_turn, got {stop:?}");
+    }
+    handle.kill().await;
+
+    // Fresh process: cross-process resume.
+    let (handle2, _u2) = RpcHandle::spawn(mk_cfg()?)
+        .await
+        .map_err(|e| anyhow::anyhow!("spawning resume harness: {e}"))?;
+    let client2 = AcpClient::new(handle2.clone());
+    client2
+        .initialize()
+        .await
+        .map_err(|e| anyhow::anyhow!("initialize #2: {e}"))?;
+    client2
+        .session_load(&session_id, cwd)
+        .await
+        .map_err(|e| anyhow::anyhow!("session/load (cross-process resume): {e}"))?;
+    println!("[acp-smoke] session/load cross-process resume ok for {session_id}");
+    handle2.kill().await;
+
+    println!("[acp-smoke] PASS");
+    Ok(())
+}
+
+async fn run_app_server(
+    cfg: crate::rpc_harness::SpawnConfig,
+    cwd: &std::path::Path,
+    prompt: &str,
+) -> Result<()> {
+    let (handle, _updates) = RpcHandle::spawn(cfg)
+        .await
+        .map_err(|e| anyhow::anyhow!("spawning app-server: {e}"))?;
+    let client = AppServerClient::new(handle.clone());
+    client
+        .initialize("tenex-edge", env!("CARGO_PKG_VERSION"))
+        .await
+        .map_err(|e| anyhow::anyhow!("initialize: {e}"))?;
+    println!("[acp-smoke] initialize ok");
+    let thread_id = client
+        .thread_start(cwd)
+        .await
+        .map_err(|e| anyhow::anyhow!("thread/start: {e}"))?;
+    println!("[acp-smoke] thread/start -> {thread_id}");
+    let outcome = client
+        .turn_start(&thread_id, prompt)
+        .await
+        .map_err(|e| anyhow::anyhow!("turn/start: {e}"))?;
+    println!("[acp-smoke] turn/completed -> {}", outcome.raw);
+    handle.kill().await;
+    println!("[acp-smoke] PASS");
+    Ok(())
+}
