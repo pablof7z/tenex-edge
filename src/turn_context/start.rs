@@ -126,6 +126,28 @@ pub(crate) fn assemble_turn_start(
                 slug = self_slug,
             ));
         }
+
+        // A session with no live `pty_session` alias has no daemon PTY endpoint
+        // the delivery reconciler can inject into: idle mentions get
+        // `DeferNoEndpoint` and are dropped rather than pushed
+        // (`src/reconcile/delivery/mod.rs`). This warning rides the same
+        // turn-context path as the membership warning above, so it only
+        // reaches the agent when it takes a turn — it informs, it does not
+        // itself fix the idle black-hole.
+        let pty_wrapped = {
+            let s = store.lock().expect("store mutex poisoned");
+            crate::session_host::session_has_live_pty_endpoint(&s, rec)
+        };
+        if !pty_wrapped {
+            warnings.push(
+                "This session is not hosted in a daemon PTY. Messages sent to \
+                 you while you are idle are NOT pushed to you — they wait in \
+                 your inbox until your next turn. Run `tenex-edge session \
+                 pty-wrap-me` to re-home into a daemon PTY, or keep taking \
+                 turns."
+                    .to_string(),
+            );
+        }
     }
 
     // Direct deliveries (p-tagged mentions) come from the inbox ledger. Fabric

@@ -28,6 +28,38 @@ fn endpoint_is_live(kind: TransportKind, endpoint_id: &str) -> bool {
     }
 }
 
+/// Whether `session` has a live `pty_session` alias — i.e. is hosted behind a
+/// daemon-owned endpoint the delivery reconciler can inject into. Sessions
+/// without one (a bare `claude`/`codex` process started outside the daemon,
+/// or an endpoint that died) get `DeferNoEndpoint` from the delivery
+/// reconciler: idle mentions are queued in the inbox but never pushed
+/// (`src/reconcile/delivery/mod.rs`). Used to decide whether to warn the
+/// agent about that gap in its turn context.
+///
+/// An alias-lookup failure is treated as "not wrapped" (fail loud toward
+/// warning, not toward silently suppressing it) and logged.
+pub(crate) fn session_has_live_pty_endpoint(
+    store: &crate::state::Store,
+    session: &crate::state::Session,
+) -> bool {
+    let aliases = match store.aliases_for_session(&session.session_id) {
+        Ok(aliases) => aliases,
+        Err(e) => {
+            tracing::error!(
+                session = %session.session_id,
+                error = %e,
+                "pty-wrap check: aliases lookup failed; assuming not PTY-wrapped"
+            );
+            return false;
+        }
+    };
+    let kind = transport_kind_for_slug(&session.agent_slug);
+    aliases
+        .iter()
+        .find(|a| a.external_id_kind == "pty_session")
+        .is_some_and(|a| endpoint_is_live(kind, &a.external_id))
+}
+
 /// How long to wait after `session_start` fires before typing into the PTY.
 /// The hook fires early in harness startup; we need to wait until the input
 /// box is actually interactive.

@@ -43,6 +43,76 @@ fn acp_endpoint_id_would_read_dead_under_the_old_pty_probe() {
     assert!(!endpoint_is_live(TransportKind::Acp, acp_id));
 }
 
+/// `session_has_live_pty_endpoint` gates the turn-context "not PTY-wrapped"
+/// warning (`turn_context::start`): no alias, or an alias whose endpoint is
+/// dead, both read as not-wrapped; only a `pty_session` alias resolving to a
+/// live listener reads as wrapped.
+#[test]
+fn session_has_live_pty_endpoint_true_only_for_a_live_alias() {
+    let store = crate::state::Store::open_memory().unwrap();
+    let rec = crate::state::Session {
+        session_id: "sess-pty-probe".into(),
+        agent_pubkey: "pk-probe".into(),
+        agent_slug: "probe-agent".into(),
+        channel_h: "proj".into(),
+        harness: "claude-code".into(),
+        child_pid: None,
+        transcript_path: None,
+        alive: true,
+        created_at: 1,
+        last_seen: 1,
+        working: false,
+        turn_started_at: 0,
+        last_distill_at: 0,
+        work_topic: String::new(),
+        work_topic_set_at: 0,
+        seen_cursor: 0,
+        title: String::new(),
+        activity: String::new(),
+        resume_id: String::new(),
+        distill_fail_streak: 0,
+        distill_notice_at: 0,
+        explicit_chat_published_at: 0,
+    };
+
+    assert!(
+        !session_has_live_pty_endpoint(&store, &rec),
+        "no alias at all must read as not-wrapped"
+    );
+
+    let dir = tempfile::tempdir().unwrap();
+    let dead_path = dir.path().join("dead.sock");
+    store
+        .put_alias(
+            "claude-code",
+            "pty_session",
+            dead_path.to_str().unwrap(),
+            &rec.session_id,
+            1,
+        )
+        .unwrap();
+    assert!(
+        !session_has_live_pty_endpoint(&store, &rec),
+        "an alias to a socket nobody is listening on must read as not-wrapped"
+    );
+
+    let live_path = dir.path().join("live.sock");
+    let _listener = std::os::unix::net::UnixListener::bind(&live_path).unwrap();
+    store
+        .put_alias(
+            "claude-code",
+            "pty_session",
+            live_path.to_str().unwrap(),
+            &rec.session_id,
+            2,
+        )
+        .unwrap();
+    assert!(
+        session_has_live_pty_endpoint(&store, &rec),
+        "a pty_session alias resolving to a live listener must read as wrapped"
+    );
+}
+
 /// The reconciler is transport-neutral: it plans an `Inject` carrying the
 /// endpoint id regardless of transport (`apply_delivery_effects` then routes that
 /// id by kind — ACP deliver vs. PTY inject). Confirm a live ACP endpoint id with
