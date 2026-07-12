@@ -68,6 +68,32 @@ pub(in crate::daemon::server) fn validate_live_session_identity(
     Ok(())
 }
 
+pub(in crate::daemon::server) fn validate_agent_identity_admission(
+    state: &Arc<DaemonState>,
+    session_id: &str,
+    agent: &crate::identity::AgentIdentity,
+) -> Result<()> {
+    let desired_durable = !agent.per_session_key;
+    let conflicts = state.with_store(|s| {
+        Ok::<_, anyhow::Error>(s.list_alive_sessions()?.into_iter().find(|session| {
+            session.agent_slug == agent.slug
+                && session.session_id != session_id
+                && (desired_durable
+                    || s.is_durable_agent_session(&session.session_id)
+                        .unwrap_or(false))
+        }))
+    })?;
+    if let Some(existing) = conflicts {
+        anyhow::bail!(
+            "agent {:?} has live session {} under an incompatible identity mode; \
+             end or attach/add the live session before launching another",
+            agent.slug,
+            existing.session_id
+        );
+    }
+    Ok(())
+}
+
 pub(in crate::daemon::server) fn validate_launch_reservation(
     state: &Arc<DaemonState>,
     agent: &crate::identity::AgentIdentity,

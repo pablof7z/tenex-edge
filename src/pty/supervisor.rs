@@ -8,6 +8,9 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+#[path = "supervisor/reservation.rs"]
+mod reservation;
+
 const BACKLOG_LIMIT: usize = 256 * 1024;
 
 #[derive(Debug, Clone)]
@@ -33,6 +36,7 @@ pub fn run_supervisor(args: SupervisorArgs) -> Result<()> {
             std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700))?;
         }
     }
+    reservation::release_durable_reservation();
     let _ = std::fs::remove_file(&args.socket);
     let listener = UnixListener::bind(&args.socket)
         .with_context(|| format!("binding {}", args.socket.display()))?;

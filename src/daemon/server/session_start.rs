@@ -9,6 +9,7 @@ mod effects;
 mod joined_channels;
 mod lookup;
 mod params;
+mod reservation;
 mod stale;
 
 use abort::{abort_session_start, DurableStartGuard};
@@ -17,8 +18,9 @@ use lookup::{session_endpoint, work_root_for_scope};
 use params::SessionStartParams;
 
 pub(crate) use bootstrap::{bootstrap_exec_session_start, bootstrap_pty_session_start};
+pub(in crate::daemon::server) use reservation::rpc_session_start;
 
-pub(in crate::daemon::server) async fn rpc_session_start(
+pub(super) async fn rpc_session_start_inner(
     state: &Arc<DaemonState>,
     params: &serde_json::Value,
     progress: Option<InitProgress>,
@@ -157,6 +159,7 @@ pub(in crate::daemon::server) async fn rpc_session_start(
         durable_agent,
         now,
     )?;
+    validate_agent_identity_admission(state, &session_id, &agent_identity)?;
     let already_running = state.sessions.lock().unwrap().contains_key(&session_id);
     let existing_session = already_running
         .then(|| state.with_store(|s| s.get_session(&session_id).ok().flatten()))

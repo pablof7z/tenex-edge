@@ -13,7 +13,7 @@ pub(super) struct LaunchPreflightParams {
     agent: String,
 }
 
-pub(in crate::daemon::server) fn rpc_agent_launch_preflight(
+pub(crate) fn rpc_agent_launch_preflight(
     state: &Arc<DaemonState>,
     params: &serde_json::Value,
 ) -> Result<serde_json::Value> {
@@ -21,14 +21,13 @@ pub(in crate::daemon::server) fn rpc_agent_launch_preflight(
         serde_json::from_value(params.clone()).context("agent_launch_preflight params")?;
     let identity =
         crate::identity::load_or_create(&crate::config::edge_home(), &p.agent, now_secs())?;
-    if identity.per_session_key {
-        return Ok(serde_json::json!({ "allowed": true }));
-    }
     let conflict = state.with_store(|s| {
-        let session = s
-            .list_alive_sessions()?
-            .into_iter()
-            .find(|session| session.agent_slug == p.agent);
+        let session = s.list_alive_sessions()?.into_iter().find(|session| {
+            session.agent_slug == p.agent
+                && (!identity.per_session_key
+                    || s.is_durable_agent_session(&session.session_id)
+                        .unwrap_or(false))
+        });
         let Some(session) = session else {
             return Ok(None);
         };
@@ -63,6 +62,9 @@ pub(in crate::daemon::server) fn rpc_agent_launch_preflight(
             channels
         );
     }
+    if identity.per_session_key {
+        return Ok(serde_json::json!({ "allowed": true }));
+    }
     let reservation = crate::state::mint_session_id();
     state.with_store(|s| {
         s.claim_durable_agent_session(&identity.pubkey_hex(), &p.agent, &reservation, now_secs())
@@ -73,7 +75,7 @@ pub(in crate::daemon::server) fn rpc_agent_launch_preflight(
     }))
 }
 
-pub(in crate::daemon::server) fn rpc_agent_launch_release(
+pub(crate) fn rpc_agent_launch_release(
     state: &Arc<DaemonState>,
     params: &serde_json::Value,
 ) -> Result<serde_json::Value> {

@@ -1,31 +1,9 @@
 use super::*;
 use rusqlite::Connection;
 
-fn configure_durable_agent(home: &Home, slug: &str) -> String {
-    let identity = tenex_edge::identity::load_or_create(home.dir.path(), slug, 1).unwrap();
-    let path = home.dir.path().join("agents").join(format!("{slug}.json"));
-    let mut config: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    config["perSessionKey"] = serde_json::json!(false);
-    std::fs::write(&path, serde_json::to_string_pretty(&config).unwrap()).unwrap();
-    identity.pubkey_hex()
-}
-
-fn agent_config_path(home: &Home, slug: &str) -> std::path::PathBuf {
-    home.dir.path().join("agents").join(format!("{slug}.json"))
-}
-
-fn read_agent_config(home: &Home, slug: &str) -> serde_json::Value {
-    serde_json::from_str(&std::fs::read_to_string(agent_config_path(home, slug)).unwrap()).unwrap()
-}
-
-fn write_agent_config(home: &Home, slug: &str, config: &serde_json::Value) {
-    std::fs::write(
-        agent_config_path(home, slug),
-        serde_json::to_string_pretty(config).unwrap(),
-    )
-    .unwrap();
-}
+#[path = "durable_agent/config.rs"]
+mod config;
+use config::{configure_durable_agent, lease_count, read_agent_config, write_agent_config};
 
 #[test]
 fn durable_agent_reuses_key_rejects_concurrency_and_never_becomes_resumable() {
@@ -38,6 +16,39 @@ fn durable_agent_reuses_key_rejects_concurrency_and_never_becomes_resumable() {
 
     let (first_id, third_id, normal_id, chat_event_id) = rt().block_on(async {
         let mut client = Client::connect_or_spawn().await.expect("connect");
+        let exited = run_cli(
+            &home,
+            &[
+                "launch",
+                slug,
+                "--workspace",
+                "tmp",
+                "--command",
+                "/usr/bin/true",
+            ],
+        );
+        assert!(
+            exited.status.success(),
+            "short-lived launch failed: {}",
+            String::from_utf8_lossy(&exited.stderr)
+        );
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        let after_exit = client
+            .call(
+                "agent_launch_preflight",
+                serde_json::json!({ "agent": slug }),
+            )
+            .await
+            .expect("supervisor exit releases unconsumed reservation");
+        client
+            .call(
+                "agent_launch_release",
+                serde_json::json!({
+                    "durable_reservation": after_exit["durable_reservation"],
+                }),
+            )
+            .await
+            .unwrap();
         let reserved = client
             .call(
                 "agent_launch_preflight",
@@ -82,6 +93,32 @@ fn durable_agent_reuses_key_rejects_concurrency_and_never_becomes_resumable() {
         let mut flipped = original.clone();
         flipped["perSessionKey"] = serde_json::json!(true);
         write_agent_config(&home, slug, &flipped);
+        let fresh_alias_error = client
+            .call(
+                "session_start",
+                serde_json::json!({
+                    "agent": slug, "cwd": "/tmp", "channel": channel,
+                    "harness": "codex", "session_id": "fresh-after-mode-flip",
+                }),
+            )
+            .await
+            .expect_err("fresh alias cannot bypass a live durable identity");
+        assert!(fresh_alias_error
+            .to_string()
+            .contains("incompatible identity mode"));
+        let manual_flip = run_cli(
+            &home,
+            &[
+                "launch",
+                slug,
+                "--workspace",
+                "tmp",
+                "--command",
+                "/usr/bin/true",
+            ],
+        );
+        assert!(!manual_flip.status.success());
+        assert!(String::from_utf8_lossy(&manual_flip.stderr).contains("already has live session"));
         let mode_error = client
             .call(
                 "session_start",
@@ -160,7 +197,7 @@ fn durable_agent_reuses_key_rejects_concurrency_and_never_becomes_resumable() {
             .await
             .expect_err("a second live durable-agent session must be rejected");
         assert!(
-            error.to_string().contains("already has a live session"),
+            error.to_string().contains("live session"),
             "unexpected rejection: {error:#}"
         );
 
@@ -211,21 +248,9 @@ fn durable_agent_reuses_key_rejects_concurrency_and_never_becomes_resumable() {
     assert_ne!(normal_session.agent_pubkey, durable_pubkey);
 
     let db = Connection::open(home.store_path()).unwrap();
-    let leases: u64 = db
-        .query_row(
-            "SELECT COUNT(*) FROM handle_leases WHERE pubkey=?1",
-            [&durable_pubkey],
-            |row| row.get(0),
-        )
-        .unwrap();
+    let leases = lease_count(&db, &durable_pubkey);
     assert_eq!(leases, 0, "durable agents never enter handle leasing");
-    let normal_leases: u64 = db
-        .query_row(
-            "SELECT COUNT(*) FROM handle_leases WHERE pubkey=?1",
-            [&normal_session.agent_pubkey],
-            |row| row.get(0),
-        )
-        .unwrap();
+    let normal_leases = lease_count(&db, &normal_session.agent_pubkey);
     assert_eq!(
         normal_leases, 1,
         "rejected mode flip keeps the normal handle"

@@ -1,3 +1,4 @@
+use super::admission;
 use crate::daemon::server::DaemonState;
 use crate::session_host::registry::{
     apply_agent_def_args, build_resume_command, find_spawn_def, resolve_spawn_entry,
@@ -46,6 +47,7 @@ async fn open_agent_session(
     command: &[String],
     group: Option<&str>,
     ephemeral: bool,
+    durable_reservation: Option<String>,
 ) -> Result<crate::pty::LaunchMetadata> {
     let meta = crate::pty::spawn_session(crate::pty::SpawnSessionArgs {
         id: None,
@@ -54,7 +56,7 @@ async fn open_agent_session(
         cwd: std::path::PathBuf::from(abs_path),
         channel: group.filter(|g| !g.is_empty()).map(str::to_string),
         ephemeral,
-        durable_reservation: None,
+        durable_reservation,
         command: command.to_vec(),
     })?;
     Ok(meta)
@@ -183,7 +185,24 @@ async fn spawn_agent_inner_full(
     let _ = find_spawn_def(slug);
 
     let abs_path = workspace_abs_path(state, root, client_cwd)?;
-    let meta = open_agent_session(slug, root, &abs_path, &agent_command, group, ephemeral).await?;
+    let reservation = admission::reserve(state, slug)?;
+    let opened = open_agent_session(
+        slug,
+        root,
+        &abs_path,
+        &agent_command,
+        group,
+        ephemeral,
+        reservation.clone(),
+    )
+    .await;
+    let meta = match opened {
+        Ok(meta) => meta,
+        Err(error) => {
+            admission::release(state, reservation.as_deref());
+            return Err(error);
+        }
+    };
     let pty_id = meta.id.clone();
     let empty_channels: &[String] = &[];
     let channels = joined_channels.unwrap_or(empty_channels);
@@ -194,6 +213,7 @@ async fn spawn_agent_inner_full(
         channels,
         None,
         dispatch_event,
+        reservation.as_deref(),
     )
     .await
     {
@@ -239,8 +259,16 @@ pub async fn resume_agent_in_channel(
     let abs_path = workspace_abs_path(state, root, None)?;
     // A resumed claude/codex session re-registers under the SAME session_id, so it
     // deterministically re-derives its own pubkey — no explicit hint needed.
-    let meta =
-        open_agent_session(slug, root, &abs_path, &resume_command, Some(group), false).await?;
+    let meta = open_agent_session(
+        slug,
+        root,
+        &abs_path,
+        &resume_command,
+        Some(group),
+        false,
+        None,
+    )
+    .await?;
     let pty_id = meta.id.clone();
     if let Err(e) = crate::daemon::server::session_start::bootstrap_pty_session_start(
         state,
@@ -248,6 +276,7 @@ pub async fn resume_agent_in_channel(
         Some(group),
         &[],
         Some(resume_id),
+        None,
         None,
     )
     .await
