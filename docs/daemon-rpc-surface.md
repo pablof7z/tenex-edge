@@ -62,6 +62,26 @@ resolves the caller from the PTY/session environment and refuses a
 positional target — an agent may only kill its own session. The CLI exits
 non-zero when `killed` is `false`.
 
+### `session_pty_wrap`
+```jsonc
+params: {"session": "te-…"}
+result: {"wrapped": true, "pty_id": "…", "session_id": "…"}
+       | {"wrapped": false, "refusal": "already_wrapped"|"working"|"not_resumable"|"not_found"|"kill_failed"|"resume_failed", "reason": "…"}
+```
+Re-homes a session started manually outside a daemon-owned PTY (no live
+`pty_session` alias, so idle mentions silently black-hole — see
+`turn_context::start`'s warning) into a fresh daemon PTY supervisor. Refuses
+if the session already has a live `pty_session` alias (`already_wrapped`,
+nothing to do), is mid-turn (`working`, to avoid losing in-flight work), or
+carries no harness resume token (`not_resumable`). Otherwise kills the
+manually-started process (via `session_kill`, marking the old row dead)
+BEFORE resuming the SAME harness session inside a fresh PTY, so the two
+steps cannot race a second caller across CLI round-trips. Only the harness's
+own persisted session state survives the hop; terminal scrollback from the
+killed process is lost. CLI: `tenex-edge my session pty-wrap-me --self`,
+which resolves the caller from the PTY/session environment and refuses a
+positional target — an agent may only re-home its own session. The CLI
+exits non-zero unless the refusal is `already_wrapped`.
 
 ### `who`
 ```jsonc

@@ -142,9 +142,9 @@ pub(crate) fn assemble_turn_start(
             warnings.push(
                 "This session is not hosted in a daemon PTY. Messages sent to \
                  you while you are idle are NOT pushed to you — they wait in \
-                 your inbox until your next turn. Run `tenex-edge session \
-                 pty-wrap-me` to re-home into a daemon PTY, or keep taking \
-                 turns."
+                 your inbox until your next turn. Run `tenex-edge my session \
+                 pty-wrap-me --self` to re-home into a daemon PTY, or keep \
+                 taking turns."
                     .to_string(),
             );
         }
