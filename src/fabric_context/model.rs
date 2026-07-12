@@ -16,6 +16,12 @@ pub(crate) struct FabricView {
     /// Chat remains scoped to the session's joined channels.
     pub(in crate::fabric_context) other_workspaces: Vec<WorkspaceActivity>,
     pub(in crate::fabric_context) important: Vec<ImportantRow>,
+    /// Reactions on THIS agent's own recent messages, delta-scoped to the cursor
+    /// so each reaction surfaces exactly once. Passive awareness only — never a
+    /// mention, never an inject.
+    pub(in crate::fabric_context) reactions: Vec<ReactionRow>,
+    /// Reaction groups elided by the render cap.
+    pub(in crate::fabric_context) reactions_omitted: usize,
     pub(in crate::fabric_context) warnings: Vec<WarningRow>,
     /// True when this view was built in delta mode (cursor > 0): it carries only
     /// what changed since the caller's last snapshot, not the full current state.
@@ -33,6 +39,7 @@ impl FabricView {
             && self.other_workspaces.is_empty()
             && self.agents.is_empty()
             && self.important.is_empty()
+            && self.reactions.is_empty()
             && self.warnings.is_empty()
     }
 
@@ -46,8 +53,22 @@ impl FabricView {
             && self.other_workspaces.is_empty()
             && self.agents.is_empty()
             && self.important.is_empty()
+            && self.reactions.is_empty()
             && self.warnings.is_empty()
     }
+}
+
+/// One grouped reaction awareness row: every peer who reacted with the same
+/// `emoji` to the same message of yours, collapsed into a single line.
+#[derive(Clone, PartialEq)]
+pub(in crate::fabric_context) struct ReactionRow {
+    /// Resolved display refs of the reactors (deduped, sorted).
+    pub(in crate::fabric_context) reactors: Vec<String>,
+    pub(in crate::fabric_context) emoji: String,
+    /// A short snippet of the reacted-to message body.
+    pub(in crate::fabric_context) target_snippet: String,
+    /// Relative age of the most recent reaction in the group.
+    pub(in crate::fabric_context) age: String,
 }
 
 #[derive(Clone, Default, PartialEq)]

@@ -153,6 +153,15 @@ pub fn materialize(
             outcome = admission::materialize_chat(store, event, chat);
         }
 
+        // Reactions (kind:7) are passive awareness: written to the reactions
+        // projection ONLY. `wake_mentions` stays false and this arm never enters
+        // `admission::materialize_chat`, so a reaction can never ring a doorbell,
+        // wake an idle agent, or inject mid-turn. No tail (nothing live-delivers).
+        DomainEvent::Reaction(ref rx) => {
+            Nip29Materializer::materialize_reaction(store, event, rx);
+            outcome.tail = None;
+        }
+
         // Activity (kind:1) and Proposal (kind:30023) carry no inbox routing; they
         // are cached verbatim in relay_events alongside every other kind.
         DomainEvent::Activity(_) | DomainEvent::Proposal(_) => {
@@ -285,6 +294,77 @@ mod tests {
         let outcome = materialize(&env, &[], 0, "test-pi", &store);
         assert!(outcome.tail.is_none(), "relay-authored state has no tail");
         assert_eq!(store.get_channel("proj").unwrap().unwrap().name, "Channel");
+    }
+
+    #[test]
+    fn reaction_materializes_to_projection_only_and_never_wakes() {
+        use crate::state::RecordMessage;
+        let store = Store::open_memory().unwrap();
+        let author_keys = Keys::generate();
+        let reactor_keys = Keys::generate();
+        let author_pk = author_keys.public_key().to_hex();
+
+        // Seed a message authored by `author` so the reaction join resolves.
+        let chat = build_event(
+            &author_keys,
+            9,
+            "pushed the fix",
+            vec![make_tag(&["h", "c"])],
+        );
+        let target_id = chat.id.to_hex();
+        store
+            .record_message(&RecordMessage {
+                message_id: target_id.clone(),
+                thread_id: "c".into(),
+                channel_h: "c".into(),
+                author_pubkey: author_pk.clone(),
+                author_session: None,
+                body: "pushed the fix".into(),
+                created_at: 100,
+                direction: "outbound".into(),
+                sync_state: "accepted".into(),
+                native_event_id: Some(target_id.clone()),
+                error: None,
+            })
+            .unwrap();
+
+        let reaction = build_event(
+            &reactor_keys,
+            7,
+            "👍",
+            vec![make_tag(&["e", &target_id]), make_tag(&["h", "c"])],
+        );
+        let ts = reaction.created_at.as_secs();
+        let outcome = materialize(
+            &RawEnvelope::Nostr(reaction.clone()),
+            &[],
+            ts,
+            "test-pi",
+            &store,
+        );
+
+        // Passive: no tail, no wake, no inbox row, no recipient edge.
+        assert!(outcome.tail.is_none(), "reaction emits no tail");
+        assert!(!outcome.wake_mentions, "reaction must never wake mentions");
+        assert!(
+            store.message_recipients(&target_id).unwrap().is_empty(),
+            "reaction writes no recipient edge (no inject path)"
+        );
+
+        // Exactly one reaction row, joined to the target body.
+        let rows = store
+            .reactions_on_authored_after(&author_pk, 0, 10)
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].emoji, "👍");
+        assert_eq!(rows[0].target_body, "pushed the fix");
+
+        // Replaying the same event is idempotent.
+        materialize(&RawEnvelope::Nostr(reaction), &[], ts, "test-pi", &store);
+        let rows = store
+            .reactions_on_authored_after(&author_pk, 0, 10)
+            .unwrap();
+        assert_eq!(rows.len(), 1, "replayed reaction stays a single row");
     }
 
     #[test]

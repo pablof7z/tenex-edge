@@ -218,6 +218,40 @@ pub struct ChatMessage {
     pub mentioned_pubkey: Option<String>,
 }
 
+/// Largest reaction payload we accept. Comfortably fits any single emoji,
+/// including multi-codepoint ZWJ sequences, while bounding awareness token cost
+/// and denying natural-language content a foothold in the turn-start context.
+pub const MAX_REACTION_EMOJI_BYTES: usize = 16;
+
+/// A non-disruptive acknowledgement of a specific message (NIP-25 kind:7). It is
+/// passive awareness only: a reaction never routes to the inbox, never wakes an
+/// idle agent, and never injects mid-turn. The target agent sees it as a compact
+/// delta at its next turn-start hook. `content` is the emoji (or `+`/`-`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Reaction {
+    pub reactor: AgentRef,
+    pub channel: String,
+    /// The reacted-to message's native event id (the `e` tag).
+    pub target_event_id: String,
+    /// The reaction emoji, or the NIP-25 `+`/`-` shorthand.
+    pub emoji: String,
+}
+
+impl Reaction {
+    /// The single trust-boundary predicate for reaction payloads: trimmed
+    /// non-empty, at most [`MAX_REACTION_EMOJI_BYTES`] bytes, and free of
+    /// whitespace/control characters. Applied to BOTH locally originated reactions
+    /// (the RPC) and inbound relay kind:7 events (the wire decoder), so an
+    /// adversarial peer cannot smuggle large or multi-line natural-language content
+    /// into a target agent's turn-start awareness via a kind:7 `content`.
+    pub fn emoji_is_valid(emoji: &str) -> bool {
+        let e = emoji.trim();
+        !e.is_empty()
+            && e.len() <= MAX_REACTION_EMOJI_BYTES
+            && !e.chars().any(|c| c.is_control() || c.is_whitespace())
+    }
+}
+
 /// The closed set of things that travel on the fabric. A provider maps these to
 /// and from its native representation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -227,6 +261,7 @@ pub enum DomainEvent {
     Status(Status),
     ChatMessage(ChatMessage),
     Proposal(Proposal),
+    Reaction(Reaction),
 }
 
 impl DomainEvent {
@@ -239,6 +274,7 @@ impl DomainEvent {
             DomainEvent::Status(s) => s.primary_channel(),
             DomainEvent::ChatMessage(m) => Some(&m.channel),
             DomainEvent::Proposal(p) => Some(&p.channel),
+            DomainEvent::Reaction(r) => Some(&r.channel),
         }
     }
 }

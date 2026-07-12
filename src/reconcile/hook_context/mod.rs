@@ -21,7 +21,7 @@ use trellis_core::{
 
 use crate::fabric_context::{
     assemble::assemble_view, render_view_text, FabricView, MembersInput, MessagesInput, MetaInput,
-    PresenceInput, ViewInputs,
+    PresenceInput, ReactionsInput, ViewInputs,
 };
 use crate::reconcile::labels::{CommitFacts, NodeLabels};
 
@@ -45,6 +45,7 @@ struct Nodes {
     members: InputNode<MembersInput>,
     presence: InputNode<PresenceInput>,
     messages: InputNode<MessagesInput>,
+    reactions: InputNode<ReactionsInput>,
     view: DerivedNode<FabricView>,
     output: OutputKey,
 }
@@ -106,6 +107,7 @@ impl HookContextReconciler {
         tx.set_input(nodes.members, inputs.members)?;
         tx.set_input(nodes.presence, inputs.presence)?;
         tx.set_input(nodes.messages, inputs.messages)?;
+        tx.set_input(nodes.reactions, inputs.reactions)?;
         let result = tx.commit()?;
         drop(tx);
         let mut commit =
@@ -186,6 +188,7 @@ impl HookContextReconciler {
             _ if id == n.members.id() => "members",
             _ if id == n.presence.id() => "presence",
             _ if id == n.messages.id() => "messages",
+            _ if id == n.reactions.id() => "reactions",
             _ => return None,
         })
     }
@@ -247,6 +250,9 @@ fn build_nodes(
     let messages = tx.input::<MessagesInput>("messages")?;
     labels.record(messages.id(), format!("hook/{session_id}/messages"));
     tx.set_input(messages, MessagesInput::default())?;
+    let reactions = tx.input::<ReactionsInput>("reactions")?;
+    labels.record(reactions.id(), format!("hook/{session_id}/reactions"));
+    tx.set_input(reactions, ReactionsInput::default())?;
 
     let view = tx.derived(
         "fabric-view",
@@ -257,6 +263,7 @@ fn build_nodes(
             members.id(),
             presence.id(),
             messages.id(),
+            reactions.id(),
         ])?,
         move |ctx| {
             let inputs = ViewInputs::from_parts(
@@ -264,6 +271,7 @@ fn build_nodes(
                 ctx.input(members)?.clone(),
                 ctx.input(presence)?.clone(),
                 ctx.input(messages)?.clone(),
+                ctx.input(reactions)?.clone(),
             );
             Ok(assemble_view(
                 &inputs,
@@ -288,6 +296,7 @@ fn build_nodes(
         members,
         presence,
         messages,
+        reactions,
         view,
         output: output.key(),
     })

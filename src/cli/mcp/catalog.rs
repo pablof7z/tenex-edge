@@ -95,6 +95,20 @@ const SPECS: &[ToolSpec] = &[
         read_only: false,
         destructive: false,
     },
+    ToolSpec {
+        name: "tenex_edge.react",
+        description: "React to a specific message with an emoji — a non-disruptive \
+                      acknowledgement that never interrupts the target's turn. Prefer \
+                      this over a chat reply for a bare ack (\"got it\", 👍, ✅).",
+        props: &[
+            Prop::new("message_id", "string", "Target message id or short prefix."),
+            Prop::new("emoji", "string", "Reaction emoji (e.g. 👍 ✅ 👀) or +/-."),
+            Prop::new("session", "string", "Explicit tenex-edge session id."),
+        ],
+        required: &["message_id", "emoji"],
+        read_only: false,
+        destructive: false,
+    },
     channel_tool(
         "tenex_edge.channel_join",
         "Join a channel for passive context.",

@@ -26,6 +26,8 @@ const MAX_CLUSTER_ROWS: usize = 30;
 /// Derive the fabric view from the canonical inputs + explicit `cursor`/`now`.
 pub(crate) fn assemble_view(inputs: &ViewInputs, cursor: u64, now: u64) -> FabricView {
     let meta = &inputs.meta;
+    let (reactions, reactions_omitted) =
+        super::reactions::group_reactions(&inputs.reactions.rows, cursor, now);
     let mut view = FabricView {
         self_row: meta.self_row.as_ref().map(|s| SelfRow {
             agent: s.agent.clone(),
@@ -47,6 +49,8 @@ pub(crate) fn assemble_view(inputs: &ViewInputs, cursor: u64, now: u64) -> Fabri
         channels: Vec::new(),
         other_workspaces: Vec::new(),
         important: Vec::new(),
+        reactions,
+        reactions_omitted,
         warnings: meta
             .warnings
             .iter()

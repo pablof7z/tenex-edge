@@ -27,7 +27,7 @@
 //! uses only event.pubkey (signer); self-asserted `agent` tags have no authority
 //! and are never written or read.
 
-use crate::domain::{Activity, AgentRef, ChatMessage, DomainEvent, Proposal, Status};
+use crate::domain::{Activity, AgentRef, ChatMessage, DomainEvent, Proposal, Reaction, Status};
 use crate::fabric::{NostrEventCodec, RawEnvelope};
 use crate::util::SessionId;
 use anyhow::Result;
@@ -205,6 +205,21 @@ impl Nip29WireCodec {
                 }
                 EventBuilder::new(kind(KIND_LONGFORM), body.clone()).tags(tags)
             }
+            DomainEvent::Reaction(Reaction {
+                reactor: _reactor,
+                channel,
+                target_event_id,
+                emoji,
+            }) => {
+                // NIP-25 reaction: content = emoji, `e` = target message id. The
+                // channel `h` tag scopes it to the NIP-29 group so the relay
+                // admits it and awareness can attribute it to the channel.
+                let mut tags = vec![tag(&["e", target_event_id])?];
+                if !channel.is_empty() {
+                    tags.push(h_tag(channel)?);
+                }
+                EventBuilder::new(kind(KIND_REACTION), emoji.clone()).tags(tags)
+            }
         };
         Ok(b)
     }
@@ -253,6 +268,29 @@ impl Nip29WireCodec {
                     agent: AgentRef::new(pubkey, String::new()),
                     channel,
                     text: event.content.clone(),
+                }))
+            }
+            KIND_REACTION => {
+                // A reaction MUST reference a target message via an `e` tag. A
+                // bare kind:7 (no `e`) is not a domain reaction — returning None
+                // lets it fall through to the verbatim relay_events cache.
+                let target_event_id = first_tag(event, "e")?.to_string();
+                // TRUST BOUNDARY: the content of an inbound kind:7 is untrusted —
+                // an adversarial member could e-tag one of the target's messages
+                // with a large or multi-line natural-language payload that would
+                // otherwise land verbatim in the target's turn-start awareness
+                // (prompt injection / token bloat). Reject anything that is not a
+                // bounded emoji here; an invalid reaction falls through to the
+                // verbatim relay_events cache and is never surfaced as awareness.
+                if !Reaction::emoji_is_valid(&event.content) {
+                    return None;
+                }
+                Some(DomainEvent::Reaction(Reaction {
+                    // Slug is NOT on the wire; resolved downstream from kind:0.
+                    reactor: AgentRef::new(pubkey, String::new()),
+                    channel: channel_from_tags(event).unwrap_or_default(),
+                    target_event_id,
+                    emoji: event.content.clone(),
                 }))
             }
             KIND_LONGFORM => Some(DomainEvent::Proposal(Proposal {

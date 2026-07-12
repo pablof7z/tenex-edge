@@ -16,6 +16,7 @@ use nostr_sdk::Event;
 
 mod agent_roster;
 mod messages;
+mod reactions;
 
 pub struct Nip29Materializer;
 

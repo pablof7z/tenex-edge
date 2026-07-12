@@ -165,6 +165,21 @@ pub(in crate::cli) enum ChannelAction {
         #[arg(long)]
         long_message: bool,
     },
+    /// React to a specific channel message with an emoji (a non-disruptive ACK).
+    /// Unlike a chat reply, a reaction NEVER interrupts the target's turn — it
+    /// surfaces as compact awareness at their next turn start. Use it for a bare
+    /// acknowledgement ("got it", 👍, ✅) instead of sending a chat line.
+    React {
+        /// Short or full message/event id from a mention envelope.
+        id: String,
+        /// The reaction emoji (e.g. 👍 ✅ 👀 🎉) or `+`/`-`.
+        #[arg(value_name = "EMOJI")]
+        emoji: String,
+        /// Explicit reactor session id instead of resolving from the current
+        /// PTY/harness process or root scan.
+        #[arg(long)]
+        session: Option<String>,
+    },
     /// Create a subgroup task channel and focus it. When run as an agent
     /// the new channel nests under your CURRENT channel by default, and the
     /// running session auto-joins it. If `--agent slug@backend-label` targets

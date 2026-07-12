@@ -1,5 +1,7 @@
 use super::*;
-use crate::fabric_context::{MembersInput, MessagesInput, MetaInput, PresenceInput, ViewInputs};
+use crate::fabric_context::{
+    MembersInput, MessagesInput, MetaInput, PresenceInput, ReactionsInput, ViewInputs,
+};
 use crate::reconcile::{CoverageSnapshot, InputFact, StatusDrive};
 use crate::state::trellis_commits::NewCommit;
 use serde_json::json;
@@ -83,6 +85,7 @@ async fn rpc_probe_reflects_driven_state_for_every_verb() {
             MembersInput::default(),
             PresenceInput::default(),
             MessagesInput::default(),
+            ReactionsInput::default(),
         )
     };
     crate::turn_context::render_hook_context(

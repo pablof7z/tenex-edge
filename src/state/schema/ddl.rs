@@ -87,6 +87,21 @@ CREATE INDEX IF NOT EXISTS idx_relay_events_kind
 CREATE INDEX IF NOT EXISTS idx_relay_events_addr
     ON relay_events(kind, pubkey, d_tag);
 
+-- NIP-25 reactions (kind:7) materialized from round-tripped relay events. A
+-- reaction is passive awareness only: it is NEVER routed to inbox and never wakes
+-- an agent. `reaction_id` is the kind:7 event id, so a relay echo of a locally
+-- seeded reaction is idempotent.
+CREATE TABLE IF NOT EXISTS relay_reactions (
+    reaction_id       TEXT PRIMARY KEY,
+    target_message_id TEXT NOT NULL,
+    channel_h         TEXT NOT NULL DEFAULT '',
+    reactor_pubkey    TEXT NOT NULL,
+    emoji             TEXT NOT NULL DEFAULT '+',
+    created_at        INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_relay_reactions_target
+    ON relay_reactions(target_message_id, created_at);
+
 CREATE TABLE IF NOT EXISTS relay_event_quarantine (
     id             TEXT PRIMARY KEY,
     kind           INTEGER NOT NULL,

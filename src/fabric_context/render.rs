@@ -44,6 +44,7 @@ pub(super) fn render_workspace(
         );
     }
     render_important(out, &view.important);
+    render_reactions(out, &view.reactions, view.reactions_omitted);
     render_warnings(out, &view.warnings);
 }
 
@@ -226,6 +227,12 @@ fn render_mention_message(out: &mut String, message: &MessageRow, pad: &str) {
         "\n{pad}Reply via: `tenex-edge channel reply {} --message \"hello world\"`",
         esc_text(&short)
     );
+    let _ = write!(
+        out,
+        "\n{pad}Ack-only? `tenex-edge channel react {} 👍` — never interrupts. \
+         Reply only with substantive content; never send a bare \"ok\"/\"noted\".",
+        esc_text(&short)
+    );
 }
 
 fn render_important(out: &mut String, rows: &[ImportantRow]) {
@@ -242,6 +249,33 @@ fn render_important(out: &mut String, rows: &[ImportantRow]) {
         );
     }
     out.push_str("\n  </important>");
+}
+
+fn render_reactions(out: &mut String, rows: &[ReactionRow], omitted: usize) {
+    if rows.is_empty() {
+        return;
+    }
+    out.push_str("\n\n  <reactions>");
+    for row in rows {
+        let reactors = row
+            .reactors
+            .iter()
+            .map(|r| format!("@{}", esc_text(r)))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let _ = write!(
+            out,
+            "\n    {} {} on your message \"{}\" ({})",
+            reactors,
+            esc_text(&row.emoji),
+            esc_text(&row.target_snippet),
+            esc_text(&row.age)
+        );
+    }
+    if omitted > 0 {
+        let _ = write!(out, "\n    <omitted count=\"{omitted}\" />");
+    }
+    out.push_str("\n  </reactions>");
 }
 
 fn render_warnings(out: &mut String, rows: &[WarningRow]) {

@@ -157,6 +157,14 @@ A useful completion note says what happened, what changed, where the artifact or
 evidence lives, who is affected, what remains unresolved, and whether a decision
 is still required.
 
+When your only response is an acknowledgement — you saw a message, you agree, you
+will pick it up — react to it (`tenex-edge channel react <id> 👍`) instead of
+sending a chat line. A reaction closes the loop for the sender without ringing
+their doorbell or interrupting their turn; it surfaces once as compact awareness
+at their next turn start. Never send a chat message whose entire content is "ok",
+"noted", or "got it" — that disrupts a working agent for no decision or action.
+Reserve chat replies for substantive content.
+
 ## Fail Open
 
 Coordination should improve work, not become a dependency that blocks it.

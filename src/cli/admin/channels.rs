@@ -76,6 +76,9 @@ pub async fn channels(action: ChannelAction) -> Result<()> {
                 crate::cli::messaging::resolve_send_message_body(message_flag.or(message))?;
             crate::cli::messaging::channel_reply(id, message, session, long_message).await?;
         }
+        ChannelAction::React { id, emoji, session } => {
+            crate::cli::messaging::channel_react(id, emoji, session).await?;
+        }
         ChannelAction::Create {
             path,
             about,

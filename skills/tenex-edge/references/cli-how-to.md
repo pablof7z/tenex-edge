@@ -45,6 +45,7 @@ tenex-edge channel send --message "Short useful message"
 tenex-edge channel send --channel <fully-qualified-channel> --message "Short useful message"
 tenex-edge channel send --long-message --message "..."
 tenex-edge channel reply <short-message-id> --message "Short useful reply"
+tenex-edge channel react <short-message-id> 👍
 ```
 
 Send requests, findings, decisions, blockers, warnings, artifacts, handoffs, and
@@ -55,6 +56,13 @@ When a mention is injected into your turn, prefer the exact `Reply via:` command
 shown in the `<tenex-edge>` envelope. `channel reply` resolves the short id back
 to the original event, threads the reply to that event, p-tags the original
 author, and publishes in the originating channel.
+
+For a bare acknowledgement — "got it", "ok", "noted", 👍, ✅ — use `channel react`
+instead of a chat reply. A reaction is a NIP-25 kind:7 that NEVER interrupts the
+target's turn: it surfaces as a compact `<reactions>` line at their next
+turn-start, once. A chat reply, by contrast, rings the delivery doorbell and can
+inject mid-turn. Reserve `channel send`/`channel reply` for substantive content;
+never send a chat line whose whole payload is an acknowledgement.
 
 ## Choose And Create Rooms
 

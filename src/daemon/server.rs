@@ -264,6 +264,7 @@ async fn dispatch(state: &Arc<DaemonState>, req: &Request) -> Response {
         "session_kill" => rpc_session_kill(state, &req.params).await,
         "channel_send" => rpc_channel_send(state, &req.params).await,
         "channel_reply" => channel_send::rpc_channel_reply(state, &req.params).await,
+        "channel_react" => channel_send::rpc_channel_react(state, &req.params).await,
         "publish" => rpc_propose(state, &req.params).await,
         "turn_start" => rpc_turn_start(state, &req.params).await,
         "turn_check" => rpc_turn_check(state, &req.params).await,
