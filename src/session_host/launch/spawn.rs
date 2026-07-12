@@ -5,26 +5,30 @@ pub struct DispatchedSpawn {
     pub session_id: String,
 }
 
+pub(crate) struct SpawnRequest<'a> {
+    pub(crate) launch_args: Vec<String>,
+    pub(crate) base_override: Option<Vec<String>>,
+    pub(crate) group: Option<&'a str>,
+    pub(crate) client_cwd: Option<&'a std::path::Path>,
+    pub(crate) session_name: Option<&'a str>,
+}
+
 /// Spawn a new hosted harness in `root`'s directory. Returns the endpoint id.
-pub async fn spawn_agent(
+pub(crate) async fn spawn_agent(
     state: &Arc<DaemonState>,
     slug: &str,
     root: &str,
-    launch_args: Vec<String>,
-    base_override: Option<Vec<String>>,
-    group: Option<&str>,
-    client_cwd: Option<&std::path::Path>,
-    session_name: Option<&str>,
+    request: SpawnRequest<'_>,
 ) -> Result<String> {
     spawn_agent_inner(
         state,
         slug,
         root,
-        launch_args,
-        base_override,
-        group,
-        client_cwd,
-        session_name,
+        request.launch_args,
+        request.base_override,
+        request.group,
+        request.client_cwd,
+        request.session_name,
         false,
     )
     .await
@@ -160,12 +164,14 @@ async fn spawn_agent_inner_full(
     let session_id = match crate::daemon::server::session_start::bootstrap_pty_session_start(
         state,
         &meta,
-        group,
-        channels,
-        None,
-        dispatch_event,
-        session_name,
-        reservation.as_deref(),
+        crate::daemon::server::session_start::bootstrap::PtySessionStart {
+            channel: group,
+            channels,
+            resume_id: None,
+            dispatch_event,
+            session_name,
+            durable_reservation: reservation.as_deref(),
+        },
     )
     .await
     {

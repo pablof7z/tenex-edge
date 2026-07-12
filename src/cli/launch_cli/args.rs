@@ -42,22 +42,33 @@ pub(in crate::cli) struct LaunchArgs {
     extra_args: Vec<String>,
 }
 
+pub(super) struct LaunchRequest {
+    pub(super) agent: String,
+    pub(super) root: Option<String>,
+    pub(super) channel: Option<String>,
+    pub(super) session_name: Option<String>,
+    pub(super) command_name: Option<String>,
+    pub(super) override_command: Vec<String>,
+    pub(super) extra_args: Vec<String>,
+    pub(super) prompt: Option<String>,
+}
+
 pub(in crate::cli) async fn launch(args: LaunchArgs) -> Result<()> {
     let prompt = resolve_initial_prompt(args.prompt)?;
     let override_command = args
         .command_str
         .map(|s| shlex::split(&s).unwrap_or_else(|| vec![s]))
         .unwrap_or_default();
-    super::verbs::launch(
-        args.slug,
-        args.workspace,
-        args.channel,
-        args.session_name,
-        args.command_name,
+    super::verbs::launch(LaunchRequest {
+        agent: args.slug,
+        root: args.workspace,
+        channel: args.channel,
+        session_name: args.session_name,
+        command_name: args.command_name,
         override_command,
-        args.extra_args,
+        extra_args: args.extra_args,
         prompt,
-    )
+    })
     .await
 }
 

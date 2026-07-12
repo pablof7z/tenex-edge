@@ -9,9 +9,8 @@ use anyhow::{Context, Result};
 use std::sync::Arc;
 
 mod spawn;
-pub use spawn::{
-    spawn_agent, spawn_dispatched_ephemeral_agent, spawn_ephemeral_agent, DispatchedSpawn,
-};
+pub(crate) use spawn::{spawn_agent, SpawnRequest};
+pub use spawn::{spawn_dispatched_ephemeral_agent, spawn_ephemeral_agent, DispatchedSpawn};
 
 /// Resolve which transport hosts `slug`, from its configured harness bundle. An
 /// agent with no bundle (the overwhelming majority) resolves to the PTY, and its
@@ -215,12 +214,14 @@ pub async fn resume_agent_in_channel(
     if let Err(e) = crate::daemon::server::session_start::bootstrap_pty_session_start(
         state,
         &meta,
-        Some(group),
-        &[],
-        Some(resume_id),
-        None,
-        None,
-        None,
+        crate::daemon::server::session_start::bootstrap::PtySessionStart {
+            channel: Some(group),
+            channels: &[],
+            resume_id: Some(resume_id),
+            dispatch_event: None,
+            session_name: None,
+            durable_reservation: None,
+        },
     )
     .await
     {

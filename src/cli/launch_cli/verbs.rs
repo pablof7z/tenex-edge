@@ -1,3 +1,4 @@
+use super::args::LaunchRequest;
 use anyhow::{Context as _, Result};
 
 // ── launch ───────────────────────────────────────────────────────────────────
@@ -6,16 +7,17 @@ use anyhow::{Context as _, Result};
 ///
 /// Spawns an independent portable-pty supervisor, starts the selected harness
 /// inside it, then attaches the current terminal to the new session.
-pub(crate) async fn launch(
-    agent: String,
-    root: Option<String>,
-    channel: Option<String>,
-    session_name: Option<String>,
-    command_name: Option<String>,
-    override_command: Vec<String>,
-    extra_args: Vec<String>,
-    prompt: Option<String>,
-) -> Result<()> {
+pub(super) async fn launch(request: LaunchRequest) -> Result<()> {
+    let LaunchRequest {
+        agent,
+        root,
+        channel,
+        session_name,
+        command_name,
+        override_command,
+        extra_args,
+        prompt,
+    } = request;
     let root = match root {
         Some(p) => p,
         None => crate::workspace::resolve_or_bail(&std::env::current_dir().unwrap_or_default())?,

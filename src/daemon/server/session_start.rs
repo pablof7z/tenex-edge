@@ -3,7 +3,7 @@ use super::*;
 mod abort;
 mod advisory;
 mod alias_resolution;
-mod bootstrap;
+pub(crate) mod bootstrap;
 mod channel_ready;
 mod effects;
 mod joined_channels;

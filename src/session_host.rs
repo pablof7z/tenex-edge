@@ -26,9 +26,10 @@ pub(crate) use exec::{
     agent_supports_headless_exec, bind_native_id_from_log, spawn_agent_exec, ExecLaunch,
 };
 pub use launch::{
-    resume_agent, resume_agent_in_channel, spawn_agent, spawn_dispatched_ephemeral_agent,
-    spawn_ephemeral_agent, DispatchedSpawn,
+    resume_agent, resume_agent_in_channel, spawn_dispatched_ephemeral_agent, spawn_ephemeral_agent,
+    DispatchedSpawn,
 };
+pub(crate) use launch::{spawn_agent, SpawnRequest};
 pub(crate) use registry::builtin_spawn_commands;
 pub use registry::spawnable_agents;
 

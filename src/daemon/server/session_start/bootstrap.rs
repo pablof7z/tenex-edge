@@ -1,14 +1,18 @@
 use super::*;
 
+pub(crate) struct PtySessionStart<'a> {
+    pub(crate) channel: Option<&'a str>,
+    pub(crate) channels: &'a [String],
+    pub(crate) resume_id: Option<&'a str>,
+    pub(crate) dispatch_event: Option<&'a str>,
+    pub(crate) session_name: Option<&'a str>,
+    pub(crate) durable_reservation: Option<&'a str>,
+}
+
 pub(crate) async fn bootstrap_pty_session_start(
     state: &Arc<DaemonState>,
     meta: &crate::pty::LaunchMetadata,
-    channel: Option<&str>,
-    channels: &[String],
-    resume_id: Option<&str>,
-    dispatch_event: Option<&str>,
-    session_name: Option<&str>,
-    durable_reservation: Option<&str>,
+    request: PtySessionStart<'_>,
 ) -> Result<String> {
     let harness = infer_harness(&meta.command);
     let watch_pid = i32::try_from(meta.supervisor_pid).ok();
@@ -18,15 +22,15 @@ pub(crate) async fn bootstrap_pty_session_start(
             "agent": &meta.agent,
             "harness": harness.as_str(),
             "cwd": &meta.cwd,
-            "channel": channel,
-            "channels": channels,
+            "channel": request.channel,
+            "channels": request.channels,
             "watch_pid": watch_pid,
             "pty_session": &meta.id,
             "pty_socket": &meta.socket,
-            "resume_id": resume_id,
-            "dispatch_event": dispatch_event,
-            "session_name": session_name,
-            "durable_reservation": durable_reservation,
+            "resume_id": request.resume_id,
+            "dispatch_event": request.dispatch_event,
+            "session_name": request.session_name,
+            "durable_reservation": request.durable_reservation,
         }),
         None,
     )

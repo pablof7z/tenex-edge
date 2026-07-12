@@ -170,11 +170,13 @@ pub(super) async fn invite_agent(
         state,
         &target.slug,
         work_root,
-        Vec::new(),
-        None,
-        Some(channel_h),
-        cwd.map(std::path::Path::new),
-        None,
+        crate::session_host::SpawnRequest {
+            launch_args: Vec::new(),
+            base_override: None,
+            group: Some(channel_h),
+            client_cwd: cwd.map(std::path::Path::new),
+            session_name: None,
+        },
     )
     .await?;
     let online = wait_local_agent_online(state, channel_h, &target.slug, &before).await?;

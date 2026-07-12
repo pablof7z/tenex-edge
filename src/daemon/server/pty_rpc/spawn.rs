@@ -43,11 +43,13 @@ pub(in crate::daemon::server) async fn rpc_pty_spawn(
         state,
         &p.agent,
         &p.root,
-        p.command,
-        base_override,
-        group,
-        client_cwd,
-        p.session_name.as_deref(),
+        crate::session_host::SpawnRequest {
+            launch_args: p.command,
+            base_override,
+            group,
+            client_cwd,
+            session_name: p.session_name.as_deref(),
+        },
     )
     .await?;
 
