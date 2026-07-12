@@ -20,6 +20,7 @@ pub struct SupervisorArgs {
     pub cwd: PathBuf,
     pub agent: String,
     pub channel: Option<String>,
+    pub session_name: Option<String>,
     pub ephemeral: bool,
     pub command: Vec<String>,
 }
@@ -76,6 +77,11 @@ pub fn run_supervisor(args: SupervisorArgs) -> Result<()> {
     cmd.env_remove("NO_COLOR");
     if let Some(channel) = &args.channel {
         cmd.env("TENEX_EDGE_CHANNEL", channel);
+    }
+    if let Some(session_name) = &args.session_name {
+        cmd.env("TENEX_EDGE_SESSION_NAME", session_name);
+    } else {
+        cmd.env_remove("TENEX_EDGE_SESSION_NAME");
     }
     cmd.env_remove("CLAUDE_CODE_SESSION_ID");
     cmd.env_remove("CLAUDE_CODE_CHILD_SESSION");

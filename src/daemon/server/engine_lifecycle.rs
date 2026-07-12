@@ -198,7 +198,7 @@ pub(in crate::daemon::server) async fn reconcile_sessions(state: &Arc<DaemonStat
             &session_id,
             &agent_identity,
             &snap.channel_h,
-            &snap.resume_id,
+            SessionIdentityInput::new(&snap.resume_id, None),
             None,
         ) {
             Ok(minted) => minted,

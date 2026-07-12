@@ -2,7 +2,10 @@ use super::resolution::work_root_for;
 use super::resolve_session;
 use super::*;
 
+mod spawn;
 mod status;
+
+pub(super) use spawn::rpc_pty_spawn;
 
 pub(super) async fn rpc_pty_status(state: &Arc<DaemonState>) -> Result<serde_json::Value> {
     status::rpc_pty_status(state).await
@@ -67,71 +70,6 @@ pub(super) async fn rpc_pty_send(
             "reason": "no unread messages for this session"
         }))
     }
-}
-
-// ── pty_spawn ─────────────────────────────────────────────────────────────────
-
-#[derive(serde::Deserialize)]
-struct PtySpawnParams {
-    agent: String,
-    root: String,
-    #[serde(default)]
-    command: Vec<String>,
-    /// Override the entire base command, replacing what would be resolved from
-    /// the agent file. When non-empty, `command` (extra args) is still appended.
-    /// Forwarded from `tenex-edge launch -c <string>`.
-    #[serde(default)]
-    base_command: Vec<String>,
-    /// The client's cwd, forwarded so the daemon spawns the agent in the
-    /// directory the user actually invoked `tenex-edge launch` from.
-    #[serde(default)]
-    cwd: Option<String>,
-    /// The resolved opaque channel id to scope the spawned session into.
-    #[serde(default)]
-    channel: Option<String>,
-    /// Optional initial prompt to open the fresh session on. Used by the headless
-    /// (ACP) launch path, where the child lives in the daemon and the client
-    /// cannot inject into it directly.
-    #[serde(default)]
-    prompt: Option<String>,
-}
-
-pub(super) async fn rpc_pty_spawn(
-    state: &Arc<DaemonState>,
-    params: &serde_json::Value,
-) -> Result<serde_json::Value> {
-    let p: PtySpawnParams =
-        serde_json::from_value(params.clone()).context("parsing pty_spawn params")?;
-    let client_cwd = p.cwd.as_deref().map(std::path::Path::new);
-    let base_override = if p.base_command.is_empty() {
-        None
-    } else {
-        Some(p.base_command)
-    };
-    let group = p.channel.as_deref();
-
-    provision_before_spawn(state, &p.agent, &p.root, group).await?;
-
-    let pty_id = crate::session_host::spawn_agent(
-        state,
-        &p.agent,
-        &p.root,
-        p.command,
-        base_override,
-        group,
-        client_cwd,
-    )
-    .await?;
-
-    // Deliver the initial prompt, if any, over the session's own transport. For a
-    // headless ACP launch this is the ONLY way the opening prompt reaches the
-    // child (it lives in the daemon, not the client). For a daemon-spawned PTY it
-    // matches the client-side `inject_spawn_message` behavior.
-    let prompt = p.prompt.filter(|s| !s.is_empty());
-    if let Some(prompt) = prompt.as_deref() {
-        crate::session_host::deliver_spawn_prompt(&p.agent, &pty_id, prompt).await;
-    }
-    Ok(serde_json::json!({ "pty_id": pty_id, "agent": p.agent, "root": p.root }))
 }
 
 /// Call `ensure_channel_ready` for the launch scope (the channel if given, else

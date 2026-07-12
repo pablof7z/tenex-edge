@@ -97,6 +97,69 @@ impl Store {
         anyhow::bail!("session handle space exhausted for agent {agent_slug:?}")
     }
 
+    pub(crate) fn ensure_custom_handle_available(
+        &self,
+        agent_slug: &str,
+        name: &str,
+    ) -> Result<()> {
+        let (handle, _) = custom_handle(agent_slug, name)?;
+        if self.pubkey_for_handle(&handle)?.is_some() {
+            anyhow::bail!("session name {name:?} is already in use as {handle:?}");
+        }
+        Ok(())
+    }
+
+    pub(crate) fn allocate_custom_handle(
+        &self,
+        pubkey: &str,
+        agent_slug: &str,
+        name: &str,
+        now: u64,
+    ) -> Result<HandleAllocation> {
+        let (handle, codename) = custom_handle(agent_slug, name)?;
+        let tx = Transaction::new_unchecked(&self.conn, TransactionBehavior::Immediate)?;
+        if let Some((existing, codename)) = lease_for_pubkey(&tx, pubkey)? {
+            if existing != handle {
+                anyhow::bail!(
+                    "session {pubkey:?} already uses {existing:?}, not requested name {name:?}"
+                );
+            }
+            tx.execute(
+                "UPDATE handle_leases SET live=1, last_active_at=?2 WHERE pubkey=?1",
+                params![pubkey, now],
+            )?;
+            tx.commit()?;
+            return Ok(HandleAllocation {
+                handle: existing,
+                codename,
+                reclaimed_pubkey: None,
+            });
+        }
+        if tx
+            .query_row(
+                "SELECT 1 FROM handle_leases WHERE handle=?1",
+                [&handle],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some()
+        {
+            anyhow::bail!("session name {name:?} is already in use as {handle:?}");
+        }
+        tx.execute(
+            "INSERT INTO handle_leases
+                (handle, pubkey, agent_slug, leased_at, last_active_at, live)
+             VALUES (?1, ?2, ?3, ?4, ?4, 1)",
+            params![handle, pubkey, agent_slug, now],
+        )?;
+        tx.commit()?;
+        Ok(HandleAllocation {
+            handle,
+            codename,
+            reclaimed_pubkey: None,
+        })
+    }
+
     pub(crate) fn handle_for_pubkey(&self, pubkey: &str) -> Result<Option<String>> {
         Ok(self
             .conn
@@ -153,6 +216,25 @@ fn lease_for_pubkey(tx: &Transaction<'_>, pubkey: &str) -> Result<Option<(String
         let codename = handle.strip_suffix(&suffix).unwrap_or(&handle).to_string();
         (handle, codename)
     }))
+}
+
+fn custom_handle(agent_slug: &str, name: &str) -> Result<(String, String)> {
+    let codename = name.trim();
+    if codename.is_empty() {
+        anyhow::bail!("session name must not be empty");
+    }
+    if !codename
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+    {
+        anyhow::bail!(
+            "session name {name:?} must use only ASCII letters, digits, hyphens, or underscores"
+        );
+    }
+    Ok((
+        crate::idref::session_handle(agent_slug, codename),
+        codename.to_string(),
+    ))
 }
 
 fn candidates(seed: &str) -> impl Iterator<Item = String> {

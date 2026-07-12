@@ -23,6 +23,9 @@ pub(super) struct SessionStartParams {
     /// Daemon-owned reservation acquired before a manual PTY launch.
     #[serde(default)]
     pub(super) durable_reservation: Option<String>,
+    /// Operator-selected public handle prefix from `launch --name`.
+    #[serde(default)]
+    pub(super) session_name: Option<String>,
     /// Harness-native resume token. Opencode forwards its `ses_*` id here.
     #[serde(default)]
     pub(super) resume_id: Option<String>,

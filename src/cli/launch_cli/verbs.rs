@@ -1,3 +1,4 @@
+use super::args::LaunchRequest;
 use anyhow::{Context as _, Result};
 
 // ── launch ───────────────────────────────────────────────────────────────────
@@ -6,15 +7,17 @@ use anyhow::{Context as _, Result};
 ///
 /// Spawns an independent portable-pty supervisor, starts the selected harness
 /// inside it, then attaches the current terminal to the new session.
-pub(crate) async fn launch(
-    agent: String,
-    root: Option<String>,
-    channel: Option<String>,
-    command_name: Option<String>,
-    override_command: Vec<String>,
-    extra_args: Vec<String>,
-    prompt: Option<String>,
-) -> Result<()> {
+pub(super) async fn launch(request: LaunchRequest) -> Result<()> {
+    let LaunchRequest {
+        agent,
+        root,
+        channel,
+        session_name,
+        command_name,
+        override_command,
+        extra_args,
+        prompt,
+    } = request;
     let root = match root {
         Some(p) => p,
         None => crate::workspace::resolve_or_bail(&std::env::current_dir().unwrap_or_default())?,
@@ -30,7 +33,7 @@ pub(crate) async fn launch(
             == crate::session_host::transport::TransportKind::Acp
     {
         let channel = resolve_launch_channel(&root, &agent, channel).await?;
-        return launch_acp_headless(agent, root, channel, extra_args, prompt).await;
+        return launch_acp_headless(agent, root, channel, session_name, extra_args, prompt).await;
     }
 
     let base_command = if override_command.is_empty() {
@@ -51,7 +54,10 @@ pub(crate) async fn launch(
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
     let preflight = super::super::daemon_call_async(
         "agent_launch_preflight",
-        serde_json::json!({ "agent": agent.clone() }),
+        serde_json::json!({
+            "agent": agent.clone(),
+            "session_name": session_name,
+        }),
     )
     .await
     .context("launch refused before spawning harness")?;
@@ -64,6 +70,7 @@ pub(crate) async fn launch(
         root,
         cwd: cwd_path,
         channel,
+        session_name,
         ephemeral: false,
         durable_reservation: durable_reservation.clone(),
         command,
@@ -127,12 +134,7 @@ async fn resolve_launch_channel(
         Some(name) if !name.is_empty() => {
             let v = super::super::daemon_call_async(
                 "channel_resolve",
-                serde_json::json!({
-                    "root": root,
-                    "name": name,
-                    "agent": agent,
-                    "create_if_absent": true,
-                }),
+                channel_resolve_params(root, &name, agent),
             )
             .await?;
             Ok(Some(
@@ -146,6 +148,15 @@ async fn resolve_launch_channel(
     }
 }
 
+fn channel_resolve_params(root: &str, name: &str, agent: &str) -> serde_json::Value {
+    serde_json::json!({
+        "channel": root,
+        "name": name,
+        "agent": agent,
+        "create_if_absent": true,
+    })
+}
+
 /// Launch a headless ACP/app-server agent through the daemon. The daemon opens
 /// and registers the RPC child (so the doorbell delivery path can reach it),
 /// synthesizes the launch argv from the harness bundle, appends `extra_args`, and
@@ -155,6 +166,7 @@ async fn launch_acp_headless(
     agent: String,
     root: String,
     channel: Option<String>,
+    session_name: Option<String>,
     extra_args: Vec<String>,
     prompt: Option<String>,
 ) -> Result<()> {
@@ -168,6 +180,7 @@ async fn launch_acp_headless(
         "root": root,
         "command": extra_args,
         "channel": channel,
+        "session_name": session_name,
         "cwd": cwd,
     });
     if let Some(prompt) = prompt.filter(|s| !s.is_empty()) {
@@ -262,4 +275,22 @@ async fn create_channel_interactive(
         .to_string();
     eprintln!("created channel {child_h}");
     Ok(child_h)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::channel_resolve_params;
+
+    #[test]
+    fn named_launch_channel_uses_channel_resolve_contract() {
+        assert_eq!(
+            channel_resolve_params("nmp", "forensic", "codex"),
+            serde_json::json!({
+                "channel": "nmp",
+                "name": "forensic",
+                "agent": "codex",
+                "create_if_absent": true,
+            })
+        );
+    }
 }

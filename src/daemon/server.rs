@@ -243,7 +243,7 @@ use session_end::{rpc_session_end, rpc_session_kill};
 use session_pty_wrap::rpc_session_pty_wrap;
 use session_signing::{
     mint_session_identity, retire_reclaimed_profile, validate_agent_identity_admission,
-    validate_launch_reservation, validate_live_session_identity,
+    validate_launch_reservation, validate_live_session_identity, SessionIdentityInput,
 };
 use session_start::rpc_session_start;
 use status_publish::spawn_outbox_drainer;

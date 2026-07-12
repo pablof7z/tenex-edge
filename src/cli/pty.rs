@@ -49,6 +49,8 @@ pub(in crate::cli) struct PtySupervisorArgs {
     #[arg(long)]
     channel: Option<String>,
     #[arg(long)]
+    session_name: Option<String>,
+    #[arg(long)]
     ephemeral: bool,
     #[arg(last = true, required = true)]
     command: Vec<String>,
@@ -97,6 +99,7 @@ pub(in crate::cli) fn pty_supervisor(args: PtySupervisorArgs) -> Result<()> {
         cwd: args.cwd,
         agent: args.agent,
         channel: args.channel,
+        session_name: args.session_name,
         ephemeral: args.ephemeral,
         command: args.command,
     })

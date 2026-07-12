@@ -12,7 +12,15 @@ async fn dropping_guard_after_claim_rolls_back_every_provisional_binding() {
         per_session_key: false,
         harness: None,
     };
-    let minted = mint_session_identity(&state, "orphan", &agent, "root", "", None).unwrap();
+    let minted = mint_session_identity(
+        &state,
+        "orphan",
+        &agent,
+        "root",
+        SessionIdentityInput::new("", None),
+        None,
+    )
+    .unwrap();
     assert!(minted.durable_claim_acquired);
     state.with_store(|s| {
         s.put_alias("codex", "harness_session", "native", "orphan", 1)

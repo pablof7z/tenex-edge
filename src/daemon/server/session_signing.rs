@@ -111,6 +111,24 @@ pub(in crate::daemon::server) fn validate_launch_reservation(
     Ok(())
 }
 
+/// Native-host identity data plus an optional operator-selected public name.
+pub(in crate::daemon::server) struct SessionIdentityInput<'a> {
+    native_id: &'a str,
+    session_name: Option<&'a str>,
+}
+
+impl<'a> SessionIdentityInput<'a> {
+    pub(in crate::daemon::server) fn new(
+        native_id: &'a str,
+        session_name: Option<&'a str>,
+    ) -> Self {
+        Self {
+            native_id,
+            session_name,
+        }
+    }
+}
+
 /// Select this session's signing identity.
 ///
 /// Normal agents derive a unique resumable session key and lease a handle.
@@ -124,7 +142,7 @@ pub(in crate::daemon::server) fn mint_session_identity(
     session_id: &str,
     agent: &crate::identity::AgentIdentity,
     h: &str,
-    native_id: &str,
+    input: SessionIdentityInput<'_>,
     durable_reservation: Option<&str>,
 ) -> Result<MintedSession> {
     let agent_slug = agent.slug.as_str();
@@ -159,8 +177,10 @@ pub(in crate::daemon::server) fn mint_session_identity(
         };
         (String::new(), None, acquired)
     } else {
-        let allocation =
-            state.with_store(|s| s.allocate_handle(&pubkey, agent_slug, now_secs()))?;
+        let allocation = state.with_store(|s| match input.session_name {
+            Some(name) => s.allocate_custom_handle(&pubkey, agent_slug, name, now_secs()),
+            None => s.allocate_handle(&pubkey, agent_slug, now_secs()),
+        })?;
         (allocation.codename, allocation.reclaimed_pubkey, false)
     };
     state
@@ -178,7 +198,7 @@ pub(in crate::daemon::server) fn mint_session_identity(
         native_id: if durable_agent {
             String::new()
         } else {
-            native_id.to_string()
+            input.native_id.to_string()
         },
         alive: true,
         created_at: now_secs(),
