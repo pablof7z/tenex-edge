@@ -1,4 +1,4 @@
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Command, CommandFactory, Parser, Subcommand};
 
 use super::admin::{AgentAction, AgentsAction, ChannelAction};
 use super::config::ConfigArgs;
@@ -14,12 +14,33 @@ use super::probe::ProbeArgs;
 use super::pty::{PtyAction, PtySupervisorArgs};
 use super::who::WhoArgs;
 
+/// Print the top-level help with every hidden subcommand unhidden, for
+/// `tenex-edge --help --all`. Recursively clears `hide` on subcommands only;
+/// hidden args stay hidden (they are internal modifiers).
+pub fn print_help_all() {
+    let mut cmd = Cli::command();
+    unhide_subcommands(&mut cmd);
+    let _ = cmd.print_help();
+}
+
+fn unhide_subcommands(cmd: &mut Command) {
+    for sub in cmd.get_subcommands_mut() {
+        let owned = std::mem::take(sub);
+        *sub = owned.hide(false);
+        unhide_subcommands(sub);
+    }
+}
+
 #[derive(Parser)]
 #[command(
     name = "tenex-edge",
     about = "An identity and awareness fabric for the coding agents you already run."
 )]
 pub struct Cli {
+    /// Show all commands, including hidden ones.
+    #[arg(long, hide = true)]
+    pub all: bool,
+
     #[command(subcommand)]
     pub(super) cmd: Cmd,
 }
@@ -54,6 +75,7 @@ pub(super) enum Cmd {
     /// Start an agent session on a backend/workspace and hand it a message after ACK.
     Dispatch(DispatchArgs),
     /// Hook integration and statusline for any supported agent harness.
+    #[command(hide = true)]
     Harness {
         #[command(subcommand)]
         action: HarnessAction,

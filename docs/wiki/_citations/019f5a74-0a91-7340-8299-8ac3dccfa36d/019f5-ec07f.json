@@ -1,0 +1,6 @@
+{
+  "id": "019f5-ec07f",
+  "ts": "2026-07-13T08:55:48Z",
+  "session": "019f5a74-0a91-7340-8299-8ac3dccfa36d",
+  "text": "- Consider consolidating the existing self-management grammar:\n\n```text\ntenex-edge my session\ntenex-edge my session title --topic \"...\"\ntenex-edge my session end\ntenex-edge my session kill\ntenex-edge my session pty-wrap\n```\n\nThat removes redundant `--self`, the foreign target accepted by `my session end`, and `pty-wrap-me`’s redundant suffix. [...] User: let's do tenex-edge my session status <title> instead\n\nshow me the full list of commands that tenex-edge would have as an expanded deep-tree\n\nlike:\n\ntenex-edge my\n             > session\n                       > status -- changes the status of the agent\n"
+}

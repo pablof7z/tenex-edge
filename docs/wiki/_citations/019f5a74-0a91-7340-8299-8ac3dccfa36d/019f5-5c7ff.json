@@ -1,0 +1,6 @@
+{
+  "id": "019f5-5c7ff",
+  "ts": "2026-07-13T08:55:43Z",
+  "session": "019f5a74-0a91-7340-8299-8ac3dccfa36d",
+  "text": "- `/` fuzzy search across handle, title, activity, workspace/channel, host, cwd, and transport. [...] - Fuzzy search with `/`"
+}

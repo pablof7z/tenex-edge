@@ -2,7 +2,7 @@
 
 > Derived cache — do not hand-edit. Rebuilt by proactive-context after each capture.
 
-Last updated: 2026-07-11
+Last updated: 2026-07-13
 
 ## agent-skills (2 guides)
 
@@ -21,7 +21,7 @@ Last updated: 2026-07-11
 
 | Slug | Title | Summary | Tags | Volatility | Verified | Topic |
 |------|-------|---------|------|------------|----------|-------|
-| [file-size-limits](guides/file-size-limits.md) | File Size Limits | Hand-authored source and documentation files are kept under 300 lines of code where practical (soft limit) | capture | warm | 2026-06-29 | code-organization |
+| [file-size-limits](guides/file-size-limits.md) | File Size Limits | Hand-authored source and documentation files should stay under 300 lines of code (soft limit), with 500 lines as a hard ceiling enforced by the CI `fmt · lint · | capture | warm | 2026-06-29 | code-organization |
 | [module-visibility](guides/module-visibility.md) | Module Visibility | Extracted module surfaces use narrow visibility (`pub(super)` or `pub(crate)`) rather than broad `pub` exposure; visibility is only widened when a consumer outs | capture | warm | 2026-06-29 | code-organization |
 | [scoped-formatting](guides/scoped-formatting.md) | Scoped Formatting | When a refactor runs `cargo fmt`, formatting churn on files unrelated to the change is reverted so the diff stays scoped. | capture | warm | 2026-06-29 | code-organization |
 
@@ -34,7 +34,7 @@ Last updated: 2026-07-11
 | [tenex-edge-landing-page-copy](guides/tenex-edge-landing-page-copy.md) | Tenex-Edge Landing Page Copy | The canonical positioning is spontaneous self-organization for the agents you already run — shared awareness and addressability, not durable per-agent identity. | capture | warm | 2026-07-03 | marketing |
 | [tenex-edge-landing-page-design](guides/tenex-edge-landing-page-design.md) | Tenex-Edge Landing Page Design | The landing page supports both light and dark themes via token-level custom properties with `prefers-color-scheme` and a `data-theme` override. | capture | warm | 2026-07-03 | marketing |
 
-## repo-discipline (5 guides)
+## repo-discipline (6 guides)
 
 | Slug | Title | Summary | Tags | Volatility | Verified | Topic |
 |------|-------|---------|------|------------|----------|-------|
@@ -42,9 +42,10 @@ Last updated: 2026-07-11
 | [container-state-cleanup](guides/container-state-cleanup.md) | Container State Cleanup | Stale `.container-state` profiles from prior lab sessions accumulate Rust build caches (~2.4GB each) and are gitignored disposable state that can block new cont | capture | warm | 2026-07-03 | repo-discipline |
 | [git-merge-worktree-cleanup](guides/git-merge-worktree-cleanup.md) | Git Merge Worktree Cleanup | After a merge succeeds, attempting to delete the local branch may fail if a git worktree still references that branch | capture | warm | 2026-07-03 | repo-discipline |
 | [github-issue-queue](guides/github-issue-queue.md) | GitHub Issue Queue | The repository has exactly one canonical tactical queue: GitHub Issues (`gh issue list`) | capture | warm | 2026-06-29 | repo-discipline |
+| [no-backwards-compat](guides/no-backwards-compat.md) | No Backwards Compatibility | The repository does not preserve backwards compatibility | capture | warm | 2026-07-13 | repo-discipline |
 | [planning-vs-durable-docs](guides/planning-vs-durable-docs.md) | Planning vs Durable Docs | Scattered notes, ad-hoc `TODO.md`, `NOTES.md`, `ROADMAP.md`, `PLAN-foo.md` files, parallel planning docs, and inline `// TODO:` annotations used as a substitute | capture | warm | 2026-06-29 | repo-discipline |
 
-## tenex-edge (20 guides)
+## tenex-edge (23 guides)
 
 | Slug | Title | Summary | Tags | Volatility | Verified | Topic |
 |------|-------|---------|------|------------|----------|-------|
@@ -57,6 +58,7 @@ Last updated: 2026-07-11
 | [tenex-edge-cli-commands](guides/tenex-edge-cli-commands.md) | Tenex-Edge CLI Commands | Install the CLI with `just install`, then run `tenex-edge install --all`. | capture | warm | 2026-07-06 | tenex-edge |
 | [tenex-edge-daemon](guides/tenex-edge-daemon.md) | Tenex-Edge Daemon | Daemon `cleanup()` does not delete the lock file, so the flock persists on the same inode until the old daemon process exits | capture | warm | 2026-06-29 | tenex-edge |
 | [tenex-edge-daemon-logging](guides/tenex-edge-daemon-logging.md) | Tenex-Edge Daemon Logging | The daemon logs comprehensive operational events including routing to sessions, starting new agents (with reasons), session key derivation (with reasons), subscriptio | capture | warm | 2026-06-29 | tenex-edge |
+| [tenex-edge-daemon-restart](guides/tenex-edge-daemon-restart.md) | Tenex-Edge Daemon Restart Safety | A daemon restart or binary swap must not kill live agent/PTY sessions | capture | warm | 2026-07-13 | tenex-edge |
 | [tenex-edge-daemon-write-disabled](guides/tenex-edge-daemon-write-disabled.md) | Tenex-Edge Daemon Write-Disabled Error | The \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\"write actions are disabled\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\" error message originates client-side from the daemon's own `nostr-relay-pool` Rust dependency (`Error::WriteDisabled`), not fro | capture | warm | 2026-07-03 | tenex-edge |
 | [tenex-edge-home-directory](guides/tenex-edge-home-directory.md) | Tenex-Edge Home Directory | The `edge_home()` function returns tenex-edge's data root, including `state.db`, agents, and logs, and is overridable via `TENEX_EDGE_HOME`. | capture | warm | 2026-07-03 | tenex-edge |
 | [tenex-edge-inbox-delivery](guides/tenex-edge-inbox-delivery.md) | Tenex-Edge Inbox Delivery | Inbox delivery uses an atomic `UPDATE â¦ SET state='delivered' â¦ RETURNING` claim so the first drainer (pty paste or hook) wins and the other gets nothing | capture | warm | 2026-06-29 | tenex-edge |
@@ -64,12 +66,14 @@ Last updated: 2026-07-11
 | [tenex-edge-mcp-client-identity](guides/tenex-edge-mcp-client-identity.md) | Tenex-Edge MCP Client Identity | The HTTP transport tracks `Mcp-Session-Id` (format: `mcp-<nanos>-<counter>`, matching `mint_session_id()`) to correlate requests with `initialize`: at `initiali | capture | warm | 2026-07-10 | tenex-edge |
 | [tenex-edge-mcp-server](guides/tenex-edge-mcp-server.md) | Tenex-Edge MCP Server | The MCP server debug wrapper script launches the server fully detached from the launching agent session, with a scrubbed environment (`env -i` plus only `PATH/H | capture | warm | 2026-07-10 | tenex-edge |
 | [tenex-edge-message-formatting](guides/tenex-edge-message-formatting.md) | Tenex-Edge Message Formatting | The @mention is a session-targeted Nostr kind:9 event with a p-tag addressed to another agent's pubkey that gets server-side-routed into the target session's in | capture | warm | 2026-06-29 | tenex-edge |
+| [tenex-edge-mgmt-session-list](guides/tenex-edge-mgmt-session-list.md) | Tenex-Edge Mgmt Session List | `tenex-edge mgmt session list` is an interactive TUI for local session control with fuzzy search, navigation, selection toggles, and killing | capture | warm | 2026-07-13 | tenex-edge |
 | [tenex-edge-model-config](guides/tenex-edge-model-config.md) | Tenex-Edge Model Config | `providers.json` and `llms.json` are config files living under `~/.tenex-edge` that drive model selection per role | capture | warm | 2026-07-03 | tenex-edge |
+| [tenex-edge-my-session](guides/tenex-edge-my-session.md) | Tenex-Edge My Session Command | The `my session` command gives an agent a full self/session briefing: who the agent is, the workspace it runs from, the channels it has joined, all workspaces i | capture | warm | 2026-07-13 | tenex-edge |
 | [tenex-edge-presence](guides/tenex-edge-presence.md) | Tenex-Edge Presence | Agent online presence is channel membership; kind:30315 carries per-session activity and resumable session history. | capture | warm | 2026-06-29 | tenex-edge |
 | [tenex-edge-session-distill](guides/tenex-edge-session-distill.md) | Tenex-Edge Session Distill | Distill is the LLM-powered process that turns the live conversation transcript into a stable session title and a live one-line NOW activity broadcast in a singl | capture | warm | 2026-07-03 | tenex-edge |
-| [tenex-edge-who-rendering](guides/tenex-edge-who-rendering.md) | Tenex-Edge Who Rendering | `tenex-edge who` renders terminal text for operators and structured workspace awareness XML for exact agent sessions. | capture | warm | 2026-07-11 | tenex-edge |
+| [tenex-edge-who-rendering](guides/tenex-edge-who-rendering.md) | Tenex-Edge Who Rendering | The `who` command is human-only: it always renders human-formatted terminal text, never XML, and never mutates the cursor | capture | warm | 2026-07-11 | tenex-edge |
 
-## Research Records (11 records)
+## Research Records (15 records)
 
 | Record | Date | Finding | Agent |
 |--------|------|---------|-------|
@@ -83,9 +87,13 @@ Last updated: 2026-07-11
 | [2026-07-10-697ef986f14b-af134d53-1-end-to-end-rpc-proof-that](research/2026-07-10-697ef986f14b-af134d53-1-end-to-end-rpc-proof-that.md) | 2026-07-10 | End-to-end RPC proof that mcp_session_ensure → who → channels_join → chat_write all resolve the same session with zero per-tool special-casing; verdict: PASS (same session_id and pubkey across all handlers, real event published) | main |
 | [2026-07-10-b70718e17221-cb4e41ba-1-root-cause-investigation-of-integration-test](research/2026-07-10-b70718e17221-cb4e41ba-1-root-cause-investigation-of-integration-test.md) | 2026-07-10 | Root-cause investigation of integration test flakiness: identified croissant POSIX-semaphore leak as cause via 14-run baseline + minimal C probe; verdict = infrastructure bug, not test race. | a067926378f0c4ada (de-flake agent) |
 | [2026-07-10-b70718e17221-cb4e41ba-2-residual-per-test-flake-investigation-found](research/2026-07-10-b70718e17221-cb4e41ba-2-residual-per-test-flake-investigation-found.md) | 2026-07-10 | Residual per-test flake investigation: found and fixed 6 propagation races + 1 production bug across ~85 runs; verdict = 20/20 consecutive green, all flakes eliminated. | a067926378f0c4ada (residual de-flake agent) |
+| [2026-07-13-420ca538d1c9-240640a6-1-code-grounded-investigation-of-non-pty](research/2026-07-13-420ca538d1c9-240640a6-1-code-grounded-investigation-of-non-pty.md) | 2026-07-13 | Code-grounded investigation of non-PTY session delivery consequences, tracing source paths to confirm 8 failure modes (C1–C8) with CONFIRMED verdicts and feasibility notes for three planned fixes | subagent (Research non-PTY session consequences) |
+| [2026-07-13-420ca538d1c9-240640a6-1-live-end-to-end-smoke-test](research/2026-07-13-420ca538d1c9-240640a6-1-live-end-to-end-smoke-test.md) | 2026-07-13 | Live end-to-end smoke test of pty-wrap-me command: launch non-PTY agent, confirm idle black-hole, run pty-wrap-me, verify re-home and stuck-mention delivery — VERDICT: PASS (all 5 steps) | a1e1bf6e9ea1f911f |
+| [2026-07-13-420ca538d1c9-240640a6-1-opus-research-agent-s-code-grounded](research/2026-07-13-420ca538d1c9-240640a6-1-opus-research-agent-s-code-grounded.md) | 2026-07-13 | Opus research agent's code-grounded investigation of non-PTY session delivery consequences — 8 consequences (C1–C8) each verdicted CONFIRMED, with feasibility analysis for three planned fixes | Opus research agent (a2dcd80ecdb85982b) |
+| [2026-07-13-420ca538d1c9-240640a6-2-live-smoke-test-of-pty-wrap](research/2026-07-13-420ca538d1c9-240640a6-2-live-smoke-test-of-pty-wrap.md) | 2026-07-13 | Live smoke test of pty-wrap-me command: 5-step empirical test (non-PTY repro → black-hole confirmation → fix → re-home verification) against real Claude agent and croissant relay, VERDICT: PASS | subagent (Live smoke-test pty-wrap-me) |
 | [AGENTS](research/AGENTS.md) |  |  |  |
 
-## Episode Cards (71 cards)
+## Episode Cards (76 cards)
 
 | Card | Date | Title | Salience | Status |
 |------|------|-------|----------|--------|
@@ -160,6 +168,11 @@ Last updated: 2026-07-11
 | [2026-07-10-b70718e17221-cb4e41ba-1-channel-hierarchy-notation-dotted-paths-replace](episodes/2026-07-10-b70718e17221-cb4e41ba-1-channel-hierarchy-notation-dotted-paths-replace.md) | 2026-07-10 | Channel hierarchy notation: dotted paths replace slash-separated paths; 'project' concept fully collapsed | reversal | active |
 | [2026-07-10-b70718e17221-cb4e41ba-2-daemon-startup-relay-connect-moved-off](episodes/2026-07-10-b70718e17221-cb4e41ba-2-daemon-startup-relay-connect-moved-off.md) | 2026-07-10 | Daemon startup: relay connect moved off critical path to background spawn | root-cause | active |
 | [2026-07-10-b70718e17221-cb4e41ba-3-integration-test-flakiness-root-cause-croissant](episodes/2026-07-10-b70718e17221-cb4e41ba-3-integration-test-flakiness-root-cause-croissant.md) | 2026-07-10 | Integration test flakiness root cause: croissant relay leaks POSIX named semaphores on SIGKILL | root-cause | active |
+| [2026-07-13-420ca538d1c9-240640a6-1-non-pty-delivery-black-hole-diagnosed](episodes/2026-07-13-420ca538d1c9-240640a6-1-non-pty-delivery-black-hole-diagnosed.md) | 2026-07-13 | Non-PTY delivery black-hole diagnosed and mitigated with self-service re-home tooling | root-cause | active |
+| [2026-07-13-420ca538d1c9-240640a6-1-non-pty-idle-session-black-hole](episodes/2026-07-13-420ca538d1c9-240640a6-1-non-pty-idle-session-black-hole.md) | 2026-07-13 | Non-PTY idle session black-hole: diagnosis and self-service remediation | root-cause | superseded |
+| [2026-07-13-420ca538d1c9-240640a6-1-non-pty-session-delivery-black-hole](episodes/2026-07-13-420ca538d1c9-240640a6-1-non-pty-session-delivery-black-hole.md) | 2026-07-13 | Non-PTY session delivery black-hole: diagnosis and three-part remediation | root-cause | superseded |
+| [2026-07-13-420ca538d1c9-240640a6-2-management-classifier-feedback-loop-375-root](episodes/2026-07-13-420ca538d1c9-240640a6-2-management-classifier-feedback-loop-375-root.md) | 2026-07-13 | Management classifier feedback loop (#375) root-caused and closed | root-cause | active |
+| [2026-07-13-420ca538d1c9-240640a6-3-lab-relay-port-selection-randomized-to](episodes/2026-07-13-420ca538d1c9-240640a6-3-lab-relay-port-selection-randomized-to.md) | 2026-07-13 | Lab relay port selection randomized to eliminate concurrent-lab collisions | workflow | active |
 
 ## Noun Definition Files (228 records)
 
@@ -337,7 +350,7 @@ Last updated: 2026-07-11
 | [role-available-agents](nouns/role-available-agents.md) | role (available-agents) | extracted | A type of agent you can spawn — sourced from role configs (<slug>.json = harness/provider/model). Roles are the types that can be added to a channel, not identities. A slug is no longer an identity, just a role label. |
 | [role-tenex](nouns/role-tenex.md) | role (TENEX) | extracted | A named key in llms.json that code resolves to a concrete model + credentials; the canonical example is edge-distillation. Resolution path: role → llms.json[role] (config name) → configurations[name] → {provider, model} → apiKey from providers.json. |
 | [roles-vs-members](nouns/roles-vs-members.md) | roles vs members | extracted | available-agents = role configs (<slug>.json = harness/provider/model — the |
-| [root-channel](nouns/root-channel.md) | root channel | extracted | The parent-empty channel that is also the workspace, addressed by the workspace slug. |
+| [root-channel](nouns/root-channel.md) | root channel | extracted | A channel with `parent == ''`, forming the top-level ancestor. The workspace is |
 | [routing](nouns/routing.md) | routing | extracted | matching mentions by both the recipient's public key and the channel h-tag |
 | [session](nouns/session.md) | Session | extracted | A local agent process THIS daemon hosts. OS handles only (session_id, agent_pubkey, agent_slug, channel_h, harness, child_pid, transcript_path, alive, etc.) — never agent identity, which lives in relay_status/relay_profiles. |
 | [session-as-identity-handle](nouns/session-as-identity-handle.md) | session (as identity handle) | extracted | A single run (SESSION) is only a correlation handle (the raw session_id); it is never a separate display name and is never accepted as a chat target. Under the new model, the session_id is the sole input to key derivation — nsec = derive(mgmt_secret, session_id). |
@@ -393,3 +406,4 @@ Last updated: 2026-07-11
 | [writer](nouns/writer.md) | writer | extracted | A social media writer and community engagement agent in tenex-edge. Drafts tweets, posts to Hacker News and similar communities, tracks outreach history, and builds ongoing engagement. Spawnable via claude --dangerously-skip-permissions. |
 | [writer-agent](nouns/writer-agent.md) | writer (agent) | extracted | Social media writer and community engagement agent. Drafts tweets, posts to Hacker News and similar communities, tracks outreach history, and builds ongoing engagement. |
 | [x-openai-session](nouns/x-openai-session.md) | X-Openai-Session | extracted | A stable per-conversation header ChatGPT sends unprompted on every request (including `initialize` and every `tools/call`), different per conversation, that can serve as ChatGPT's own session identifier for identity correlation without requiring the client to echo a server-minted header. |
+

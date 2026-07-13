@@ -1,0 +1,6 @@
+{
+  "id": "019f5-872d1",
+  "ts": "2026-07-13T08:55:31Z",
+  "session": "019f5a74-0a91-7340-8299-8ac3dccfa36d",
+  "text": "  And we should also delete `tenex-edge agents` since I think that thing is mostly useless -- again, this is brainstorming -- perhaps it's out of scope so just write it as a follow-on [...] - Delete `agents` and top-level `tui` completely—no aliases."
+}

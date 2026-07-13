@@ -1,0 +1,6 @@
+{
+  "id": "019f5-9fc39",
+  "ts": "2026-07-13T08:55:43Z",
+  "session": "019f5a74-0a91-7340-8299-8ac3dccfa36d",
+  "text": "- One canonical daemon query joining session records, memberships, lifecycle, and endpoints. The current TUI’s `agents_list_sessions` + `pty_status` client merge cannot reliably represent all sessions. [...] Assistant: The isolated branch is clean and based on the current `origin/master`; no implementation diff has appeared yet, so the agent is still in source/data-path analysis. I’ve confirmed the current TUI’s “all sessions” claim is structurally false for non-PTY rows, so I’ll require that owning-layer correction before accepting the PR.\n\nAssistant: The agent has confirmed the same root cause and has chosen the right boundary: a daemon-owned `operator_sessions` projection, then `mgmt session list` on top of it. That avoids papering over the current client-side merge bug."
+}

@@ -2,33 +2,34 @@
 title: File Size Limits
 slug: file-size-limits
 topic: code-organization
-summary: Hand-authored source and documentation files are kept under 300 lines of code where practical (soft limit)
+summary: Hand-authored source and documentation files should stay under 300 lines of code (soft limit), with 500 lines as a hard ceiling enforced by the CI `fmt · lint ·
 tags:
   - capture
 volatility: warm
 confidence: medium
 created: 2026-06-29
-updated: 2026-07-03
+updated: 2026-07-13
 verified: 2026-06-29
 compiled-from: conversation
 sources:
   - session:019f12f9-8a0b-7012-ad2f-f4d0cb035d2b
   - session:019f12ce-2569-72e0-b959-6d87d5daec5d
   - session:4e6163df-c3cd-4d85-99ad-041cd0ca9701
+  - session:019f5a74-0a91-7340-8299-8ac3dccfa36d
 ---
 
 # File Size Limits
 
 ## Hand-Authored File Size Limits
 
-Hand-authored source and documentation files are kept under 300 lines of code where practical (soft limit). 500 lines of code is the hard ceiling for hand-authored source files, enforced by the CI `fmt · lint · loc · test` job's LOC ratchet check. When a source file approaches the hard ceiling, it is split along domain boundaries into submodules (e.g., `channels_rpc/archive.rs` and `channels_rpc/list.rs`), following the repo's domain-boundary-split convention. Inline tests that inflate a source file's LOC belong in an external test module (e.g., a `tests.rs` file) rather than inline nested test modules, so the implementation stays under the soft target.
+Hand-authored source and documentation files should stay under 300 lines of code (soft limit), with 500 lines as a hard ceiling enforced by the CI `fmt · lint · loc · test` job's LOC ratchet check. When a code file crosses the 500-LOC hard limit, it is refactored by splitting responsibilities along domain boundaries (e.g., `channels_rpc/archive.rs` and `channels_rpc/list.rs`), not by moving arbitrary chunks to a sibling file. Inline tests that inflate a source file's LOC belong in a nested test module so the implementation stays under the soft target.
 
-<!-- citations: [^019f1-85a20] [^019f1-f4e29] [^4e616-0635a] -->
+<!-- citations: [^019f1-85a20] [^019f1-f4e29] [^4e616-0635a] [^019f5-6b718] -->
 ## Exemptions
 
 Generated, vendored, lockfile, binary, and benchmark-output artifacts are exempt from the LOC ceiling, but their producers must be kept small and documented.
 
-<!-- citations: [^019f1-37c47] [^019f1-53558] -->
+<!-- citations: [^019f1-37c47] [^019f1-53558] [^019f5-6f214] -->
 ## Local Enforcement Gates
 
 Local gates include `scripts/check_loc.sh` (LOC enforcement) and `cargo test --lib` (unit tests). The dirty worktree state fails `scripts/check_loc.sh` with three >500 LOC files and has one existing failing assertion in `cargo test --lib`.

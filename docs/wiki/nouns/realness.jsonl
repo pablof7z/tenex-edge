@@ -5,6 +5,7 @@
 {"canonical":"channel send","name":"channel send","signed":8,"status":"real"}
 {"canonical":"clawstr agentry","name":"Clawstr Agentry","signed":0,"status":"provisional"}
 {"canonical":"container state","name":"container-state","signed":1,"status":"provisional"}
+{"canonical":"forensic researcher codex","name":"forensic-researcher-codex","signed":0,"status":"provisional"}
 {"canonical":"hacker new","name":"Hacker News","signed":0,"status":"provisional"}
 {"canonical":"haiku 1","name":"haiku1","signed":1,"status":"provisional"}
 {"canonical":"kind 0","name":"kind:0","signed":11,"status":"real"}
@@ -17,11 +18,14 @@
 {"canonical":"rm rf","name":"rm -rf","signed":1,"status":"provisional"}
 {"canonical":"separately fyi","name":"Separately FYI","signed":0,"status":"provisional"}
 {"canonical":"sk or 4 f 2","name":"sk-or-…4f2a","signed":0,"status":"provisional"}
+{"canonical":"tenex edge agent","name":"tenex-edge agents","signed":-10,"status":"suppressed"}
 {"canonical":"tenex edge channel invite agent slug","name":"tenex-edge channel invite agentSlug","signed":8,"status":"real"}
 {"canonical":"tenex edge channel read","name":"tenex-edge channel read","signed":4,"status":"real"}
 {"canonical":"tenex edge chat","name":"tenex-edge chat","signed":-16,"status":"suppressed"}
-{"canonical":"tenex edge config","name":"tenex-edge mgmt config","signed":3,"status":"real"}
 {"canonical":"tenex edge daemon","name":"tenex-edge daemon","signed":3,"status":"real"}
 {"canonical":"tenex edge invite blah blah blah","name":"tenex-edge invite blah blah blah","signed":8,"status":"real"}
-{"canonical":"tenex edge launch","name":"tenex-edge launch","signed":1,"status":"provisional"}
-{"canonical":"tenex edge who","name":"tenex-edge who","signed":1,"status":"provisional"}
+{"canonical":"tenex edge launch","name":"tenex-edge launch","signed":2,"status":"provisional"}
+{"canonical":"tenex edge mgmt config","name":"tenex-edge mgmt config","signed":3,"status":"real"}
+{"canonical":"tenex edge my session","name":"tenex-edge my session","signed":9,"status":"real"}
+{"canonical":"tenex edge my session pty wrap me","name":"tenex-edge my session pty-wrap-me","signed":3,"status":"real"}
+{"canonical":"tenex edge who","name":"tenex-edge who","signed":4,"status":"real"}

@@ -10,6 +10,17 @@ fn main() {
 
     let argv = std::env::args().collect::<Vec<_>>();
     let command_log = CommandCallLog::start(&argv);
+
+    // `--help --all` (in any order) prints the full help with hidden subcommands
+    // revealed. clap intercepts `--help` before our code runs, so detect it here.
+    if argv.len() > 1
+        && argv[1..].iter().any(|a| a == "--all")
+        && argv[1..].iter().any(|a| a == "--help" || a == "-h")
+    {
+        cli::print_help_all();
+        std::process::exit(0);
+    }
+
     let cli = match Cli::try_parse_from(argv.clone()) {
         Ok(cli) => cli,
         Err(err) => {

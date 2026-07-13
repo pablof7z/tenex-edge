@@ -2,35 +2,40 @@
 title: Tenex-Edge Who Rendering
 slug: tenex-edge-who-rendering
 topic: tenex-edge
-summary: `tenex-edge who` renders terminal text for operators and structured workspace awareness XML for exact agent sessions.
+summary: "The `who` command is human-only: it always renders human-formatted terminal text, never XML, and never mutates the cursor"
 tags:
   - capture
 volatility: warm
 confidence: medium
 created: 2026-07-03
-updated: 2026-07-11
+updated: 2026-07-13
 verified: 2026-07-11
 compiled-from: conversation
 sources:
   - session:7d6bf2fe-8dc9-4bd0-aeeb-de1827bf68d1
+  - session:019f5a74-0a91-7340-8299-8ac3dccfa36d
 ---
 
 # Tenex-Edge Who Rendering
 
 ## Audience-Aware Rendering
 
-An exact live agent session receives XML with `<self>`, a global `<agents>` capability inventory, and `<workspaces>`. A bare operator receives terminal-oriented text. Both are read projections over the daemon-owned store; neither renderer queries the relay directly.
+The `who` command is human-only: it always renders human-formatted terminal text, never XML, and never mutates the cursor. Agent self-awareness is a strict session-scoped read served by `my session`, not `who`; agent invocation of `who` fails with guidance to use `my session`. A bare operator receives terminal-oriented text. Both `who` and `my session` are read projections over the daemon-owned store; neither renderer queries the relay directly.
 
-Every known workspace appears in agent XML. The workspace is its root channel,
-so `<workspace channel="workspace" ... members="N">` carries root membership
-directly and only real descendants render as `<channel>` rows. By default only
-the caller's workspace is expanded; `--all-workspaces` expands every workspace
-the caller has joined. Channel contents recurse only while the caller is a
-member of each parent channel. Member counts exclude backend keys.
+Every known workspace appears in the human view. The workspace is its root channel, so the workspace row carries root membership directly and only real descendants render as channel rows. By default only the caller's workspace is expanded; `--all-workspaces` expands every workspace the caller has joined. Channel contents recurse only while the caller is a member of each parent channel. Member counts exclude backend keys.
 
-<!-- citations: [^7d6bf-cad7a] [^7d6bf-5aab0] -->
-## Capability Availability
+`who` stays a pure human fabric view; recovery belongs in session management, so `who --expired` is removed. (Previously: `who` served both agents and operators, with agents receiving XML containing `<self>`, a global `<agents>` capability inventory, and `<workspaces>`, while operators received terminal-oriented text.)
 
-The global `<agents>` inventory groups kind:30555 advertisements by backend and role. Remote roles render as `slug@backend`, retain their `about` criteria, and list every advertised workspace in `workspace-availability`. These are spawnable capabilities, not channel members.
+<!-- citations: [^7d6bf-cad7a] [^7d6bf-5aab0] [^019f5-43e23] -->
 
-<!-- citations: [^7d6bf-bafea] [^7d6bf-db5d3] -->
+## Retired: Capability Availability
+
+Retired on 2026-07-13: This section is no longer part of the current specification. <!-- [^019f5-9a893] -->
+
+Previously captured section:
+
+> ## Capability Availability
+>
+> The global `<agents>` inventory groups kind:30555 advertisements by backend and role. Remote roles render as `slug@backend`, retain their `about` criteria, and list every advertised workspace in `workspace-availability`. These are spawnable capabilities, not channel members.
+>
+> <!-- citations: [^7d6bf-bafea] [^7d6bf-db5d3] -->
