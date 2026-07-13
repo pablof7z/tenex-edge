@@ -1,0 +1,6 @@
+{
+  "id": "019f5-0e60b",
+  "ts": "2026-07-13T10:25:10Z",
+  "session": "019f5a74-0a91-7340-8299-8ac3dccfa36d",
+  "text": "- `channel send --wait N` returns only an actual reply correlated to the outbound event.\n- With tagged recipients, only a reply from one of those recipients completes it.\n- Without a recipient, the first non-management participant who replies to that exact message completes it.\n- Unrelated channel chatter never satisfies `send --wait`. [...] - Self/backend filtering and recipient-author enforcement."
+}

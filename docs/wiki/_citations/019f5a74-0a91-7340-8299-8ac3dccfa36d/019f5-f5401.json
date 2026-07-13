@@ -1,0 +1,6 @@
+{
+  "id": "019f5-f5401",
+  "ts": "2026-07-13T10:25:10Z",
+  "session": "019f5a74-0a91-7340-8299-8ac3dccfa36d",
+  "text": "Assistant: The implementation seam is clear: extend the canonical message read model with `reply_to`, then build one daemon wait primitive over that model. `channel send --wait` can publish first and safely wait afterward because the wait subscribes before backfill; a very fast reply is recovered from storage rather than missed. [...] This changes my earlier exit-code recommendation: because timeout is an expected agent outcome, it should exit `0`. Actual daemon, identity, or channel-resolution failures remain nonzero. `channel send --wait` should print no intermediate “sent” line—only the reply envelope or timeout envelope."
+}

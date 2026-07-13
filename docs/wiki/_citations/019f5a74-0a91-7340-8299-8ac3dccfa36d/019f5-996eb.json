@@ -1,0 +1,6 @@
+{
+  "id": "019f5-996eb",
+  "ts": "2026-07-13T10:25:13Z",
+  "session": "019f5a74-0a91-7340-8299-8ac3dccfa36d",
+  "text": "User: ok, give me ideas, suggestions, etc -- yes, who would become human-only [...] - Make `who` always human-formatted, never XML, and never cursor-mutating. Agent invocation should fail with guidance to use `my session`. [...] I’ll keep `who --expired` for now because the merged management TUI intentionally lists alive local sessions, while `--expired` still owns resumable dead/old sessions. I won’t fold in the unconfirmed `--self` or `pty-wrap-me` naming cleanup."
+}

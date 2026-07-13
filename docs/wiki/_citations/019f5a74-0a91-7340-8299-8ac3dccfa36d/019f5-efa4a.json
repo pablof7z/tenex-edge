@@ -1,0 +1,6 @@
+{
+  "id": "019f5-efa4a",
+  "ts": "2026-07-13T10:25:10Z",
+  "session": "019f5a74-0a91-7340-8299-8ac3dccfa36d",
+  "text": "User: without --channel means any of the channels the agent is active on [...] - No `--channel`: wait across every channel the exact calling session is currently active/joined on.\n- Repeated `--channel`: narrow the wait to that subset.\n- Snapshot the channel set when waiting begins.\n- No active channels: fail immediately."
+}

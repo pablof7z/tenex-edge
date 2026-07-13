@@ -1,0 +1,6 @@
+{
+  "id": "019f5-9e8cc",
+  "ts": "2026-07-13T10:25:05Z",
+  "session": "019f5a74-0a91-7340-8299-8ac3dccfa36d",
+  "text": "User: let's do tenex-edge my session status <title> instead\n\nshow me the full list of commands that tenex-edge would have as an expanded deep-tree\n\nlike:\n\ntenex-edge my\n             > session\n                       > status -- changes the status of the agent\n [...] - `my session status <TITLE>` replaces `my status --topic`."
+}

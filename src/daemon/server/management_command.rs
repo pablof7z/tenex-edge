@@ -111,20 +111,14 @@ async fn execute_claimed(
 async fn add_agent(state: &Arc<DaemonState>, channel_h: &str, spec: &str) -> Result<String> {
     let work_root = state.with_store(|s| work_root_for(s, channel_h));
     let out = super::invite_rpc::invite_agent(state, channel_h, &work_root, spec, None).await?;
-    let pty = out
-        .get("pty_id")
+    let who = out
+        .get("online_agent")
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
-        .map(|s| format!(" pty={s}"))
-        .unwrap_or_default();
-    let orchestration = out
-        .get("orchestration_event_id")
-        .and_then(|v| v.as_str())
-        .filter(|s| !s.is_empty())
-        .map(|s| format!(" orchestration={}", short(s)))
-        .unwrap_or_default();
+        .map(|s| format!("@{s}"))
+        .unwrap_or_else(|| spec.to_string());
     Ok(format!(
-        "mgmt ok: added {spec} to {}.{pty}{orchestration}",
+        "mgmt ok: added {who} to {}.",
         channel_label(state, channel_h)
     ))
 }

@@ -28,10 +28,12 @@ The briefing expands every workspace and channel the session has joined, while k
 The self-management grammar is consolidated under `tenex-edge my session`:
 
 - `tenex-edge my session` — full self/session briefing.
-- `my session title --topic "..."` — set the session title.
+- `tenex-edge my session title --topic "..."` — set the session title.
 - `tenex-edge my session status <title>` — set the status of the agent.
-- `my session end` — end the session.
-- `my session kill` — kill the session.
-- `my session pty-wrap` — wrap a PTY.
+- `tenex-edge my session end` — end the session.
+- `tenex-edge my session kill` — kill the session.
+- `tenex-edge my session pty-wrap-me` — wrap a PTY.
 
-Redundant forms are removed: the `--self` flag, the foreign target previously accepted by `my session end`, and the redundant `-me` suffix on `pty-wrap-me`. <!-- [^019f5-ec07f] -->
+`my session status <TITLE>` replaces `my status --topic` as the status-setting command.
+
+<!-- citations: [^019f5-ec07f] [^019f5-9e8cc] -->

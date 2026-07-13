@@ -1,0 +1,6 @@
+{
+  "id": "019f5-a9ff9",
+  "ts": "2026-07-13T10:25:10Z",
+  "session": "019f5a74-0a91-7340-8299-8ac3dccfa36d",
+  "text": "I would not add top-level `send` while retaining `channel send`; that would create duplicate surfaces. The repository currently uses `channel send` and `--tag`. If we prefer `send --to`, it should be a deliberate replacement of those names, not aliases."
+}

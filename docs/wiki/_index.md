@@ -38,14 +38,14 @@ Last updated: 2026-07-13
 
 | Slug | Title | Summary | Tags | Volatility | Verified | Topic |
 |------|-------|---------|------|------------|----------|-------|
-| [ci-test-exclusions](guides/ci-test-exclusions.md) | CI Test Exclusions | Daemon integration tests are excluded from CI. | capture | warm | 2026-07-10 | repo-discipline |
+| [ci-test-exclusions](guides/ci-test-exclusions.md) | CI Test Exclusions | Daemon integration tests are excluded from CI | capture | warm | 2026-07-10 | repo-discipline |
 | [container-state-cleanup](guides/container-state-cleanup.md) | Container State Cleanup | Stale `.container-state` profiles from prior lab sessions accumulate Rust build caches (~2.4GB each) and are gitignored disposable state that can block new cont | capture | warm | 2026-07-03 | repo-discipline |
 | [git-merge-worktree-cleanup](guides/git-merge-worktree-cleanup.md) | Git Merge Worktree Cleanup | After a merge succeeds, attempting to delete the local branch may fail if a git worktree still references that branch | capture | warm | 2026-07-03 | repo-discipline |
 | [github-issue-queue](guides/github-issue-queue.md) | GitHub Issue Queue | The repository has exactly one canonical tactical queue: GitHub Issues (`gh issue list`) | capture | warm | 2026-06-29 | repo-discipline |
 | [no-backwards-compat](guides/no-backwards-compat.md) | No Backwards Compatibility | The repository does not preserve backwards compatibility | capture | warm | 2026-07-13 | repo-discipline |
 | [planning-vs-durable-docs](guides/planning-vs-durable-docs.md) | Planning vs Durable Docs | Scattered notes, ad-hoc `TODO.md`, `NOTES.md`, `ROADMAP.md`, `PLAN-foo.md` files, parallel planning docs, and inline `// TODO:` annotations used as a substitute | capture | warm | 2026-06-29 | repo-discipline |
 
-## tenex-edge (23 guides)
+## tenex-edge (24 guides)
 
 | Slug | Title | Summary | Tags | Volatility | Verified | Topic |
 |------|-------|---------|------|------------|----------|-------|
@@ -66,11 +66,12 @@ Last updated: 2026-07-13
 | [tenex-edge-mcp-client-identity](guides/tenex-edge-mcp-client-identity.md) | Tenex-Edge MCP Client Identity | The HTTP transport tracks `Mcp-Session-Id` (format: `mcp-<nanos>-<counter>`, matching `mint_session_id()`) to correlate requests with `initialize`: at `initiali | capture | warm | 2026-07-10 | tenex-edge |
 | [tenex-edge-mcp-server](guides/tenex-edge-mcp-server.md) | Tenex-Edge MCP Server | The MCP server debug wrapper script launches the server fully detached from the launching agent session, with a scrubbed environment (`env -i` plus only `PATH/H | capture | warm | 2026-07-10 | tenex-edge |
 | [tenex-edge-message-formatting](guides/tenex-edge-message-formatting.md) | Tenex-Edge Message Formatting | The @mention is a session-targeted Nostr kind:9 event with a p-tag addressed to another agent's pubkey that gets server-side-routed into the target session's in | capture | warm | 2026-06-29 | tenex-edge |
-| [tenex-edge-mgmt-session-list](guides/tenex-edge-mgmt-session-list.md) | Tenex-Edge Mgmt Session List | `tenex-edge mgmt session list` is an interactive TUI for local session control with fuzzy search, navigation, selection toggles, and killing | capture | warm | 2026-07-13 | tenex-edge |
+| [tenex-edge-mgmt-session-list](guides/tenex-edge-mgmt-session-list.md) | Tenex-Edge Mgmt Session List | `tenex-edge mgmt session list` is an interactive, inline Inquirer-style picker for local session control | capture | warm | 2026-07-13 | tenex-edge |
 | [tenex-edge-model-config](guides/tenex-edge-model-config.md) | Tenex-Edge Model Config | `providers.json` and `llms.json` are config files living under `~/.tenex-edge` that drive model selection per role | capture | warm | 2026-07-03 | tenex-edge |
 | [tenex-edge-my-session](guides/tenex-edge-my-session.md) | Tenex-Edge My Session Command | The `my session` command gives an agent a full self/session briefing: who the agent is, the workspace it runs from, the channels it has joined, all workspaces i | capture | warm | 2026-07-13 | tenex-edge |
 | [tenex-edge-presence](guides/tenex-edge-presence.md) | Tenex-Edge Presence | Agent online presence is channel membership; kind:30315 carries per-session activity and resumable session history. | capture | warm | 2026-06-29 | tenex-edge |
 | [tenex-edge-session-distill](guides/tenex-edge-session-distill.md) | Tenex-Edge Session Distill | Distill is the LLM-powered process that turns the live conversation transcript into a stable session title and a live one-line NOW activity broadcast in a singl | capture | warm | 2026-07-03 | tenex-edge |
+| [tenex-edge-wait-send](guides/tenex-edge-wait-send.md) | Tenex-Edge Wait & Send | This guide covers the `wait` and `channel send --wait` primitives in tenex-edge | capture | warm | 2026-07-13 | tenex-edge |
 | [tenex-edge-who-rendering](guides/tenex-edge-who-rendering.md) | Tenex-Edge Who Rendering | The `who` command is human-only: it always renders human-formatted terminal text, never XML, and never mutates the cursor | capture | warm | 2026-07-11 | tenex-edge |
 
 ## Research Records (15 records)

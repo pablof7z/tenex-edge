@@ -1,0 +1,6 @@
+{
+  "id": "019f5-3eda8",
+  "ts": "2026-07-13T10:25:11Z",
+  "session": "019f5a74-0a91-7340-8299-8ac3dccfa36d",
+  "text": "Timeout should also be agent-native:\n\n```xml\n<tenex-edge>\n  <wait outcome=\"timeout\" after=\"60s\" />\n</tenex-edge>\n```"
+}

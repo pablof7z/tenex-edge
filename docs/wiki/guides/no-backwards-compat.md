@@ -19,4 +19,6 @@ sources:
 
 ## Policy
 
-The repository does not preserve backwards compatibility. Removed surfaces must be removed completely — no hidden aliases, parser aliases, legacy flags, fallback keys, compatibility wrappers, or stale docs. <!-- [^019f5-8ad63] -->
+The repository does not preserve backwards compatibility. Removed surfaces must be removed completely — no hidden aliases, parser aliases, legacy flags, old subcommands, fallback JSON keys, duplicate MCP/tool names, stale e2e commands, compatibility wrappers, or docs teaching the old form.
+
+<!-- citations: [^019f5-8ad63] -->

@@ -1,0 +1,6 @@
+{
+  "id": "019f5-b7e00",
+  "ts": "2026-07-13T10:25:10Z",
+  "session": "019f5a74-0a91-7340-8299-8ac3dccfa36d",
+  "text": "- `wait N` is the ambient primitive: it returns the next qualifying chat event across the requested channels.\n- I prefer `--from agent5` over `--for agent5`; it describes the filter more accurately.\n- No `--channel` could mean the caller’s active channel.\n- Initially, “activity” should mean visible kind:9 chat only—not status, presence, reactions, joins, or management traffic."
+}

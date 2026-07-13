@@ -14,11 +14,12 @@
 {"canonical":"mtok ollama","name":"Mtok Ollama","signed":0,"status":"provisional"}
 {"canonical":"nak req k 39000","name":"nak req -k 39000","signed":1,"status":"provisional"}
 {"canonical":"palette ansi 256","name":"Palette ANSI-256","signed":0,"status":"provisional"}
+{"canonical":"pty acp","name":"PTY ACP","signed":1,"status":"provisional"}
 {"canonical":"push alway you piece","name":"PUSH ALWAYS YOU PIECE","signed":1,"status":"provisional"}
 {"canonical":"rm rf","name":"rm -rf","signed":1,"status":"provisional"}
 {"canonical":"separately fyi","name":"Separately FYI","signed":0,"status":"provisional"}
 {"canonical":"sk or 4 f 2","name":"sk-or-…4f2a","signed":0,"status":"provisional"}
-{"canonical":"tenex edge agent","name":"tenex-edge agents","signed":-10,"status":"suppressed"}
+{"canonical":"tenex edge agent","name":"tenex-edge agents","signed":-16,"status":"suppressed"}
 {"canonical":"tenex edge channel invite agent slug","name":"tenex-edge channel invite agentSlug","signed":8,"status":"real"}
 {"canonical":"tenex edge channel read","name":"tenex-edge channel read","signed":4,"status":"real"}
 {"canonical":"tenex edge chat","name":"tenex-edge chat","signed":-16,"status":"suppressed"}
@@ -26,6 +27,6 @@
 {"canonical":"tenex edge invite blah blah blah","name":"tenex-edge invite blah blah blah","signed":8,"status":"real"}
 {"canonical":"tenex edge launch","name":"tenex-edge launch","signed":2,"status":"provisional"}
 {"canonical":"tenex edge mgmt config","name":"tenex-edge mgmt config","signed":3,"status":"real"}
-{"canonical":"tenex edge my session","name":"tenex-edge my session","signed":9,"status":"real"}
+{"canonical":"tenex edge my session","name":"tenex-edge my session","signed":15,"status":"real"}
 {"canonical":"tenex edge my session pty wrap me","name":"tenex-edge my session pty-wrap-me","signed":3,"status":"real"}
-{"canonical":"tenex edge who","name":"tenex-edge who","signed":4,"status":"real"}
+{"canonical":"tenex edge who","name":"tenex-edge who","signed":5,"status":"real"}
