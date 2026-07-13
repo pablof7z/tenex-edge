@@ -12,7 +12,9 @@ The live lab is meant to prove that the actual development stack works:
 - containerized backends can reach the host relay
 - real host AI credentials are visible inside the container state
 - hooks/plugins are installed where the agent CLI will actually read them
-- `tenex-edge launch` and direct backend runs show the expected terminal UI
+- `tenex-edge launch` selects PTY or ACP/app-server from generated bundle config
+- ACP/app-server handshakes, prompts, and resume work through `__acp-smoke`
+- direct backend runs show the expected terminal UI and accept host auth
 - injected context, fabric snapshots, and event flow are observable
 - failures leave logs that a developer can inspect
 
@@ -69,7 +71,9 @@ The relay command:
 
 - uses `/tmp/croissant-smallmap` when present, else `${HOME}/Work/croissant`;
   set `TENEX_EDGE_DEV_CROISSANT_DIR` to override
-- binds to `TENEX_EDGE_DEV_RELAY_HOST` or the Apple container bridge IP
+- derives the advertised relay host from the current Apple Container gateway,
+  with `TENEX_EDGE_DEV_RELAY_HOST` as an override
+- binds to that host, with `TENEX_EDGE_DEV_RELAY_BIND_HOST` as an override
 - uses `TENEX_EDGE_DEV_RELAY_PORT` or an unused high port from
   `TENEX_EDGE_DEV_RELAY_PORT_BASE` (default `19888`)
 - creates a temp work directory under `${TMPDIR:-/tmp}`
@@ -89,22 +93,25 @@ TENEX_EDGE_DEV_RELAY_PORT=9888 skills/tenex-edge-dev/scripts/start-croissant-rel
 
 ## Configure Backend Profiles
 
-Single Claude profile:
+Single Claude ACP profile:
 
 ```bash
-skills/tenex-edge-dev/scripts/write-container-profiles "${LAB_ENV}" claude
+skills/tenex-edge-dev/scripts/write-container-profiles "${LAB_ENV}" claude-acp
 ```
 
 Multiple profiles:
 
 ```bash
-skills/tenex-edge-dev/scripts/write-container-profiles "${LAB_ENV}" claude codex opencode
+skills/tenex-edge-dev/scripts/write-container-profiles "${LAB_ENV}" \
+  claude-acp codex-app-server opencode-acp
 ```
 
 This writes:
 
 ```text
 .container-state/<profile>/tenex/config.json
+.container-state/<profile>/tenex/edge/harnesses.json
+.container-state/<profile>/tenex/edge/agents/<slug>.json
 .container-state/<profile>/tenex/edge/
 .container-state/<profile>/home/
 ```
@@ -115,14 +122,20 @@ daemon DB/socket/log state. That reset is intentional: a fresh relay plus stale
 workspace membership is not a valid live lab.
 
 Every profile points only at the live croissant relay. Every generated backend
-pubkey is whitelisted in every generated profile, so the backends can see each
-other in the local fabric. The generated Nostr keys are disposable fabric keys;
-the AI provider credentials still come from the host auth mounts.
+and agent pubkey is whitelisted in every profile. `harnesses.json` defines the
+bundle's underlying harness, transport, and profile; the agent file selects it
+with `harness`. The generated Nostr keys are disposable fabric keys; provider
+credentials still come from the host auth mounts.
 
 After writing profiles, inspect the public shape without exposing secrets:
 
 ```bash
-jq '{relays,indexerRelay,backendName,whitelistedPubkeys}' .container-state/claude/tenex/config.json
+jq '{relays,indexerRelay,backendName,whitelistedPubkeys}' \
+  .container-state/claude-acp/tenex/config.json
+jq 'to_entries[] | {bundle:.key,harness:.value.harness,transport:.value.transport,profile:.value.profile}' \
+  .container-state/claude-acp/tenex/edge/harnesses.json
+jq '{slug,harness,perSessionKey}' \
+  .container-state/claude-acp/tenex/edge/agents/claude.json
 ```
 
 Do not print `userNsec` or `tenexPrivateKey`.
@@ -132,11 +145,13 @@ cold Cargo builds with agent startup failures, and it proves staged auth before
 the interactive run:
 
 ```bash
-bash containers/tenex-edge/run --profile claude doctor
-bash containers/tenex-edge/run --profile claude claude -p "Respond with exactly OK." --model haiku
+bash containers/tenex-edge/run --profile claude-acp doctor
+skills/tenex-edge-dev/scripts/launch-agent "${LAB_ENV}" smoke claude-acp
 ```
 
-Use the same pattern for other providers with their cheapest working command.
+The smoke proves the actual configured bundle: initialize, session/thread
+creation, a real model prompt, and cross-process ACP resume where supported.
+Use `codex-app-server` or `opencode-acp` for their structured transports.
 
 ## Direct Agent Runs
 
@@ -145,19 +160,19 @@ installation. Direct mode runs in the foreground terminal and is not
 reattachable:
 
 ```bash
-skills/tenex-edge-dev/scripts/launch-agent-pty "${LAB_ENV}" direct claude --model haiku
+skills/tenex-edge-dev/scripts/launch-agent "${LAB_ENV}" direct claude --model haiku
 ```
 
 Codex:
 
 ```bash
-skills/tenex-edge-dev/scripts/launch-agent-pty "${LAB_ENV}" direct codex -m gpt-5.3-codex-spark
+skills/tenex-edge-dev/scripts/launch-agent "${LAB_ENV}" direct codex -m gpt-5.3-codex-spark
 ```
 
 OpenCode through the Ollama Cloud helper:
 
 ```bash
-skills/tenex-edge-dev/scripts/launch-agent-pty "${LAB_ENV}" direct opencode-ollama "${TENEX_EDGE_OPENCODE_OLLAMA_MODEL:-ollama/deepseek-r1:8b}"
+skills/tenex-edge-dev/scripts/launch-agent "${LAB_ENV}" direct opencode-ollama "${TENEX_EDGE_OPENCODE_OLLAMA_MODEL:-ollama/deepseek-r1:8b}"
 ```
 
 The helper records a container cidfile under the lab work directory when the
@@ -168,13 +183,13 @@ Do not run a second diagnostic container against the same profile while this
 foreground agent is still active. If you need same-profile `tenex-edge` RPC
 checks, stop the agent first or use the profile logs.
 
-## Launch Mode Runs
+## PTY Launch Runs
 
 Use launch mode when testing `tenex-edge launch` behavior, launch-time hook
 setup, portable PTY integration, reattach, and context injection:
 
 ```bash
-skills/tenex-edge-dev/scripts/launch-agent-pty "${LAB_ENV}" launch claude --model haiku
+skills/tenex-edge-dev/scripts/launch-agent "${LAB_ENV}" launch claude --model haiku
 ```
 
 The command runs:
@@ -204,21 +219,39 @@ bash containers/tenex-edge/run --profile claude tenex-edge pty inject "${PTY_ID}
   "Run tenex-edge who and summarize the self header."
 ```
 
+## ACP/App-Server Launch Runs
+
+Structured transports are headless. Configure the model in `harnesses.json`
+through the profile writer, not with provider CLI flags. Before launching,
+register the mounted workspace in that isolated profile:
+
+```bash
+bash containers/tenex-edge/run --profile claude-acp tenex-edge channel init
+TENEX_EDGE_DEV_PROMPT="Run tenex-edge who and summarize the self header." \
+  skills/tenex-edge-dev/scripts/launch-agent "${LAB_ENV}" launch claude-acp
+```
+
+The helper keeps the container alive after the headless CLI returns, because
+the container owns the daemon and JSON-RPC child. Do not run a second container
+against the same profile while it is live. Use host-side relay probes and the
+bind-mounted profile logs, then stop it with `cleanup-lab`.
+
 ## Multi-Agent Runs
 
 For a multi-backend test:
 
 ```bash
-skills/tenex-edge-dev/scripts/write-container-profiles "${LAB_ENV}" claude codex opencode
-skills/tenex-edge-dev/scripts/launch-agent-pty "${LAB_ENV}" launch claude --model haiku
-skills/tenex-edge-dev/scripts/launch-agent-pty "${LAB_ENV}" launch codex -m gpt-5.3-codex-spark
-skills/tenex-edge-dev/scripts/launch-agent-pty "${LAB_ENV}" launch opencode-ollama "${TENEX_EDGE_OPENCODE_OLLAMA_MODEL:-ollama/deepseek-r1:8b}"
+skills/tenex-edge-dev/scripts/write-container-profiles "${LAB_ENV}" \
+  claude-acp codex-app-server opencode-acp
+skills/tenex-edge-dev/scripts/launch-agent "${LAB_ENV}" smoke claude-acp
+skills/tenex-edge-dev/scripts/launch-agent "${LAB_ENV}" smoke codex-app-server
+skills/tenex-edge-dev/scripts/launch-agent "${LAB_ENV}" smoke opencode-acp
 ```
 
-Use separate portable PTY sessions for every backend. Send small prompts that force
-observable fabric behavior, such as running `tenex-edge who`, posting a project
-message, or responding to a mention. Keep prompts narrow; the goal is event and
-hook proof, not task completion.
+Run structured smokes sequentially. For a live delivery test, initialize each
+profile's workspace channel, launch each agent in a separate container, and use
+relay events for cross-backend traffic. Keep prompts narrow; the goal is event,
+transport, and hook proof, not task completion.
 
 ## Probe And Report
 
@@ -255,7 +288,7 @@ skills/tenex-edge-dev/scripts/cleanup-lab "${LAB_ENV}"
 Remove disposable state only when it is no longer needed for debugging:
 
 ```bash
-rm -rf .container-state/claude .container-state/codex .container-state/opencode
+rm -rf .container-state/{claude,claude-acp,codex,codex-app-server,opencode,opencode-acp}
 rm -rf "$(grep '^WORK_DIR=' "${LAB_ENV}" | cut -d= -f2- | xargs printf '%s')"
 ```
 

@@ -23,7 +23,7 @@ checked out as `.../tenex-edge-trellis` mounted at `/workspace`) as the
 project slug and creates the `workspace` NIP-29 channel. It only touches
 profile-local/container state, not host `~/.tenex-edge`. Add this step to the
 live-lab-workflow reference right after `write-container-profiles` and before
-the first `launch-agent-pty ... launch ...` call — the workflow doc
+the first `launch-agent ... launch ...` call — the workflow doc
 currently jumps straight from profile-writing to launching and does not
 mention `channel init`, so a first-time runner hits this every time.
 
@@ -31,7 +31,7 @@ mention `channel init`, so a first-time runner hits this every time.
 
 The troubleshooting reference already warns "avoid running two containers
 against the same profile at once," but it undersells the blast radius. In
-this run, launching `claude` via `launch-agent-pty ... launch claude
+this run, launching `claude` via `launch-agent ... launch claude
 --model haiku` produced a healthy session UI (`claude@claude workspace workspace
 [idle]`, no `@te_session` warning). Running
 `bash containers/tenex-edge/run --profile claude tenex-edge explain event:<id>`

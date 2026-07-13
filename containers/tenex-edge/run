@@ -25,6 +25,7 @@ Commands:
   opencode-auth [args]     Run isolated `opencode providers`.
   opencode-ollama [args]   Run isolated OpenCode with an Ollama model.
   tenex-edge [args]        Run the in-container tenex-edge binary.
+  tenex-edge-hosted [args] Run tenex-edge, then keep an ACP container alive.
   shell                    Open a read-only-source shell.
   shell-rw                 Open a writable-source shell.
   clean-state              Remove .container-state/<profile>.
@@ -222,6 +223,25 @@ with_tenex_direct() {
   ' bash "${harness}" "$@"
 }
 
+# ACP/app-server launch is headless: `tenex-edge launch` returns after the
+# daemon owns the JSON-RPC child. Keep the container alive so Docker/Apple
+# container lifecycle does not immediately reap that daemon and child.
+with_tenex_hosted() {
+  local harness="${1}"
+  shift
+  container_run readonly bash -c '
+    set -euo pipefail
+    cargo build >/dev/null
+    if [[ "$1" == "claude-code" || "$1" == "codex" || "$1" == "opencode" ]]; then
+      tenex-edge install --harness "$1" >/dev/null
+    fi
+    shift
+    "$@"
+    echo "[tenex-edge container] headless agent container remains alive; stop it with cleanup-lab"
+    exec sleep infinity
+  ' bash "${harness}" "$@"
+}
+
 select_command_profile() {
   local default_profile="$1" agent="$2"
   AGENT="${agent}"
@@ -257,6 +277,11 @@ main() {
         echo "claude: $(claude --version)"
         echo "codex: $(codex --version)"
         echo "opencode: $(opencode --version)"
+        echo "node: $(node --version)"
+        echo "claude-acp-adapter: $(command -v claude-agent-acp)"
+        codex app-server --help >/dev/null
+        opencode acp --help >/dev/null
+        echo "rpc harnesses: claude acp adapter, codex app-server, opencode acp"
         echo "nak: $(nak --version 2>/dev/null | head -1)"
         echo "ollama_host: $OLLAMA_HOST"
         echo "host_auth: '"${HOST_AUTH}"'"
@@ -291,6 +316,19 @@ main() {
         echo "codex hooks: isolated install present"
         test -f "$XDG_CONFIG_HOME/opencode/plugin/tenex-edge.ts"
         echo "opencode plugin: isolated install present"
+        if [[ -f "$TENEX_EDGE_HOME/harnesses.json" ]]; then
+          jq -e "
+            type == \"object\" and
+            all(.[]; (.harness | type == \"string\") and (.transport | type == \"string\"))
+          " "$TENEX_EDGE_HOME/harnesses.json" >/dev/null
+          for agent in "$TENEX_EDGE_HOME"/agents/*.json; do
+            [[ -e "$agent" ]] || continue
+            jq -e ".slug and .secret_key and .public_key and .harness" "$agent" >/dev/null
+          done
+          echo "harness bundles: $(jq -r "keys | join(\",\")" "$TENEX_EDGE_HOME/harnesses.json")"
+        else
+          echo "harness bundles: none"
+        fi
         echo "codex home: $CODEX_HOME"
         echo "tenex home: $TENEX_EDGE_HOME"
       '
@@ -330,6 +368,9 @@ main() {
       ;;
     tenex-edge)
       with_tenex "$(harness_for_agent "${AGENT}")" tenex-edge "$@"
+      ;;
+    tenex-edge-hosted)
+      with_tenex_hosted "$(harness_for_agent "${AGENT}")" tenex-edge "$@"
       ;;
     shell)
       container_run readonly bash "$@"

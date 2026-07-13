@@ -13,14 +13,16 @@ quote_env() {
   printf '%s=%q\n' "$key" "$value"
 }
 
-bridge_host() {
-  local host
-  host="$(ipconfig getifaddr bridge100 2>/dev/null || true)"
-  if [[ -n "${host}" ]]; then
-    printf '%s\n' "${host}"
-  else
-    printf '%s\n' "127.0.0.1"
+relay_host() {
+  local host=""
+  if command -v container >/dev/null 2>&1 && container system status >/dev/null 2>&1; then
+    host="$(container network inspect default 2>/dev/null \
+      | jq -er '.[0].status.ipv4Gateway // empty' 2>/dev/null || true)"
   fi
+  if [[ -z "${host}" ]]; then
+    host="$(ipconfig getifaddr bridge100 2>/dev/null || true)"
+  fi
+  printf '%s\n' "${host:-127.0.0.1}"
 }
 
 pick_port() {
@@ -72,7 +74,8 @@ default_croissant_dir() {
   fi
 }
 CROISSANT_DIR="${TENEX_EDGE_DEV_CROISSANT_DIR:-$(default_croissant_dir)}"
-RELAY_HOST="${TENEX_EDGE_DEV_RELAY_HOST:-$(bridge_host)}"
+RELAY_HOST="${TENEX_EDGE_DEV_RELAY_HOST:-$(relay_host)}"
+RELAY_BIND_HOST="${TENEX_EDGE_DEV_RELAY_BIND_HOST:-${RELAY_HOST}}"
 RELAY_PORT="${TENEX_EDGE_DEV_RELAY_PORT:-$(pick_port)}"
 RELAY_WS="ws://${RELAY_HOST}:${RELAY_PORT}"
 RELAY_HTTP="http://${RELAY_HOST}:${RELAY_PORT}"
@@ -113,14 +116,14 @@ fi
 
 (
   cd "${CROISSANT_DIR}"
-  PORT="${RELAY_PORT}" \
-    HOST="${RELAY_HOST}" \
+  nohup env PORT="${RELAY_PORT}" \
+    HOST="${RELAY_BIND_HOST}" \
     DATAPATH="${RELAY_DATA}" \
     OWNER_PUBLIC_KEY="${OWNER_PK}" \
     DOMAIN= \
-    ./croissant
-) >"${RELAY_LOG}" 2>&1 &
-echo "$!" >"${RELAY_PID_FILE}"
+    ./croissant >"${RELAY_LOG}" 2>&1 &
+  echo "$!" >"${RELAY_PID_FILE}"
+)
 
 if ! wait_for_relay "${RELAY_HTTP}" 20; then
   tail -80 "${RELAY_LOG}" >&2 || true
@@ -133,6 +136,7 @@ fi
   quote_env REPO_ROOT "${REPO_ROOT}"
   quote_env CROISSANT_DIR "${CROISSANT_DIR}"
   quote_env WORK_DIR "${WORK_DIR}"
+  quote_env RELAY_BIND_HOST "${RELAY_BIND_HOST}"
   quote_env RELAY_HOST "${RELAY_HOST}"
   quote_env RELAY_PORT "${RELAY_PORT}"
   quote_env RELAY_WS "${RELAY_WS}"

@@ -29,6 +29,11 @@ cargo build                 # build the tenex-edge binary under test
 `run.sh` is hermetic: it tears down any prior run, starts a fresh relay with
 empty data, and exits non-zero with a clear `FAIL` line if anything is wrong.
 
+This rig tests relay/backend coordination; it does not launch model agents.
+Use `skills/tenex-edge-dev` for provider-backed PTY, ACP, and app-server tests.
+That live lab writes the current `harnesses.json` plus `agents/<slug>.json`
+contract and drives the selected structured bundle through `__acp-smoke`.
+
 ## The Relay
 
 The default local relay binary is [`croissant`](https://viewsource.win) (at

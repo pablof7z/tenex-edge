@@ -292,11 +292,11 @@ An empty `nak` output is useful only if paired with these checks.
 
 ## Agent UI Is Not Inspectable
 
-Reattach and injection evidence requires launch mode. If an agent was started
-as a direct foreground run, stop it and relaunch through:
+PTY reattach and injection evidence requires a PTY profile in launch mode. If a
+PTY agent was started as a direct foreground run, stop it and relaunch through:
 
 ```bash
-skills/tenex-edge-dev/scripts/launch-agent-pty "${LAB_ENV}" launch claude --model haiku
+skills/tenex-edge-dev/scripts/launch-agent "${LAB_ENV}" launch claude --model haiku
 ```
 
 Use:
@@ -324,7 +324,7 @@ If the report only says "passed" or "failed", it is not done. Add:
 
 - relay URL and run id
 - profile names
-- PTY ids
+- PTY ids or ACP headless session ids
 - exact launch commands
 - probe directory
 - croissant evidence
