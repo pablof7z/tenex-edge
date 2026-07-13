@@ -12,7 +12,7 @@ harness provides.
 - A named fabric agent or session means that fabric participant.
 - A fabric agent whose stated use criteria clearly match the work is the first
   choice for that role.
-- Route by relevant function, context, capability, and ownership—not by host,
+- Route by relevant function, context, capability, and ownership, not by host,
   model, or generic agent identity.
 - An unnamed, count-based, or bounded helper request means in-session
   subagents.
