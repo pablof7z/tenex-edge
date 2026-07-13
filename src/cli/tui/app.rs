@@ -1,8 +1,10 @@
 use super::data::SessionRow;
+use super::selection::KillTarget;
 use super::{data, pane};
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use pane::PtyPane;
+use std::collections::BTreeSet;
 use std::time::Duration;
 
 pub(super) struct App {
@@ -11,8 +13,11 @@ pub(super) struct App {
     pub(super) panes: Vec<PtyPane>,
     pub(super) active_pane: Option<usize>,
     pub(super) input_mode: bool,
+    pub(super) search_mode: bool,
+    pub(super) search_query: String,
+    pub(super) marked: BTreeSet<String>,
     pub(super) status: String,
-    pub(super) pending_kill: Option<String>,
+    pub(super) pending_kill: Option<Vec<KillTarget>>,
     pub(super) refresh_interval: Duration,
 }
 
@@ -24,6 +29,9 @@ impl App {
             panes: Vec::new(),
             active_pane: None,
             input_mode: false,
+            search_mode: false,
+            search_query: String::new(),
+            marked: BTreeSet::new(),
             status: String::new(),
             pending_kill: None,
             refresh_interval,
@@ -33,18 +41,18 @@ impl App {
     pub(super) async fn refresh(&mut self) -> Result<()> {
         let previous = self.selected_session_id().map(str::to_string);
         self.sessions = data::fetch_sessions().await?;
+        self.prune_marked();
         self.selected = previous
             .and_then(|id| self.sessions.iter().position(|s| s.session_id == id))
             .unwrap_or_else(|| self.selected.min(self.sessions.len().saturating_sub(1)));
+        self.ensure_selection_visible();
         self.sync_pane_titles();
         self.status = format!("{} session(s)", self.sessions.len());
         Ok(())
     }
 
     fn selected_session_id(&self) -> Option<&str> {
-        self.sessions
-            .get(self.selected)
-            .map(|s| s.session_id.as_str())
+        self.selected_row().map(|s| s.session_id.as_str())
     }
 
     pub(super) async fn handle_key(&mut self, key: KeyEvent) -> Result<bool> {
@@ -60,15 +68,50 @@ impl App {
             return Ok(true);
         }
 
+        if self.search_mode {
+            match key.code {
+                KeyCode::Esc | KeyCode::Enter => self.search_mode = false,
+                KeyCode::Backspace => {
+                    self.search_query.pop();
+                    self.ensure_selection_visible();
+                }
+                KeyCode::Up => self.move_selection(-1),
+                KeyCode::Down => self.move_selection(1),
+                KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.search_query.push(ch);
+                    self.ensure_selection_visible();
+                }
+                _ => {}
+            }
+            self.status = format!("search: {}", self.search_query);
+            return Ok(true);
+        }
+
         if key.code != KeyCode::Char('K') {
             self.pending_kill = None;
         }
         match key.code {
-            KeyCode::Char('q') | KeyCode::Esc => return Ok(false),
+            KeyCode::Char('q') => return Ok(false),
+            KeyCode::Esc if !self.search_query.is_empty() => {
+                self.search_query.clear();
+                self.ensure_selection_visible();
+                self.status = "search cleared".to_string();
+            }
+            KeyCode::Esc => return Ok(false),
             KeyCode::Char('r') => self.refresh().await?,
             KeyCode::Up | KeyCode::Char('k') => self.move_selection(-1),
             KeyCode::Down | KeyCode::Char('j') => self.move_selection(1),
-            KeyCode::Enter | KeyCode::Char('a') => self.open_selected(true).await?,
+            KeyCode::Char('/') => {
+                self.search_mode = true;
+                self.status = format!("search: {}", self.search_query);
+            }
+            KeyCode::Char(' ') => self.toggle_selected(),
+            KeyCode::Char('a') => self.toggle_all_visible(),
+            KeyCode::Char('u') => {
+                self.marked.clear();
+                self.status = "selection cleared".to_string();
+            }
+            KeyCode::Enter => self.open_selected(true).await?,
             KeyCode::Char('o') => self.open_selected(false).await?,
             KeyCode::Char('K') => self.confirm_or_kill_selected().await?,
             KeyCode::Tab | KeyCode::Right => self.cycle_pane(1),
@@ -100,17 +143,8 @@ impl App {
         Ok(())
     }
 
-    fn move_selection(&mut self, delta: isize) {
-        if self.sessions.is_empty() {
-            self.selected = 0;
-            return;
-        }
-        let len = self.sessions.len() as isize;
-        self.selected = (self.selected as isize + delta).rem_euclid(len) as usize;
-    }
-
     async fn open_selected(&mut self, input: bool) -> Result<()> {
-        let Some(row) = self.sessions.get(self.selected).cloned() else {
+        let Some(row) = self.selected_row().cloned() else {
             self.status = "no sessions".to_string();
             return Ok(());
         };
@@ -131,42 +165,6 @@ impl App {
         };
         self.panes.push(pane);
         self.focus_pane(self.panes.len() - 1, input);
-        Ok(())
-    }
-
-    async fn confirm_or_kill_selected(&mut self) -> Result<()> {
-        let Some(row) = self.sessions.get(self.selected).cloned() else {
-            self.status = "no session selected".to_string();
-            return Ok(());
-        };
-        if self.pending_kill.as_deref() != Some(&row.session_id) {
-            self.pending_kill = Some(row.session_id.clone());
-            self.status = format!("press K again to kill {}", row_title(&row));
-            return Ok(());
-        }
-        self.pending_kill = None;
-        self.kill_session(row).await
-    }
-
-    async fn kill_session(&mut self, row: SessionRow) -> Result<()> {
-        let title = row_title(&row);
-        let v = super::super::daemon_call_async(
-            "session_kill",
-            serde_json::json!({ "session": row.session_id }),
-        )
-        .await?;
-        self.close_panes_for_session(&row.session_id);
-        self.refresh().await?;
-        let killed = v["killed"].as_bool().unwrap_or(false);
-        let ended = v["ended"].as_bool().unwrap_or(false);
-        let reason = v["reason"].as_str().unwrap_or("");
-        self.status = match (killed, ended, reason.is_empty()) {
-            (true, true, _) => format!("killed {title}"),
-            (false, true, true) => format!("ended {title}"),
-            (_, true, false) => format!("ended {title}; process stop failed: {reason}"),
-            (_, false, false) => format!("could not kill {title}: {reason}"),
-            _ => format!("could not kill {title}"),
-        };
         Ok(())
     }
 
@@ -212,7 +210,7 @@ impl App {
         }
     }
 
-    fn close_panes_for_session(&mut self, session_id: &str) {
+    pub(super) fn close_panes_for_session(&mut self, session_id: &str) {
         let mut idx = 0;
         while idx < self.panes.len() {
             if self.panes[idx].session_id() == session_id {
@@ -248,10 +246,6 @@ impl App {
             }
         }
     }
-}
-
-fn row_title(row: &SessionRow) -> String {
-    format!("{} - {}", row.agent, row.title_with_activity())
 }
 
 pub(super) fn input_escape_key(key: KeyEvent) -> bool {

@@ -26,15 +26,22 @@ pub(super) fn render(f: &mut ratatui::Frame, app: &mut App) {
     render_sessions(f, main[0], app);
     render_panes(f, main[1], app);
     render_status(f, rows[2], app);
+    super::confirmation::render(f, area, app);
 }
 
 fn render_header(f: &mut ratatui::Frame, area: Rect, app: &App) {
-    let mode = if app.input_mode { "input" } else { "control" };
+    let mode = if app.input_mode {
+        "input"
+    } else if app.search_mode {
+        "search"
+    } else {
+        "control"
+    };
     let panes = app.panes.len();
     f.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled(
-                "tenex-edge tui",
+                "tenex-edge mgmt session list",
                 Style::default()
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),
@@ -43,18 +50,45 @@ fn render_header(f: &mut ratatui::Frame, area: Rect, app: &App) {
             Span::styled(mode, Style::default().fg(Color::Yellow)),
             Span::raw("  panes="),
             Span::styled(panes.to_string(), Style::default().fg(Color::Yellow)),
+            Span::raw("  search="),
+            Span::styled(
+                if app.search_query.is_empty() {
+                    "-"
+                } else {
+                    &app.search_query
+                },
+                Style::default().fg(Color::Yellow),
+            ),
+            Span::raw("  selected="),
+            Span::styled(
+                app.marked.len().to_string(),
+                Style::default().fg(Color::Yellow),
+            ),
         ])),
         area,
     );
 }
 
 fn render_sessions(f: &mut ratatui::Frame, area: Rect, app: &App) {
-    let items = app.sessions.iter().map(session_item).collect::<Vec<_>>();
+    let visible = app.visible_indices();
+    let items = visible
+        .iter()
+        .map(|idx| {
+            session_item(
+                &app.sessions[*idx],
+                app.marked.contains(&app.sessions[*idx].session_id),
+            )
+        })
+        .collect::<Vec<_>>();
     let mut state = ListState::default();
-    if !app.sessions.is_empty() {
-        state.select(Some(app.selected));
+    if !visible.is_empty() {
+        state.select(app.selected_view_index());
     }
-    let title = format!(" sessions ({}) ", app.sessions.len());
+    let title = format!(
+        " local sessions ({}/{}) ",
+        visible.len(),
+        app.sessions.len()
+    );
     f.render_stateful_widget(
         List::new(items)
             .block(Block::default().borders(Borders::ALL).title(title))
@@ -65,7 +99,7 @@ fn render_sessions(f: &mut ratatui::Frame, area: Rect, app: &App) {
     );
 }
 
-fn session_item(row: &SessionRow) -> ListItem<'static> {
+fn session_item(row: &SessionRow, marked: bool) -> ListItem<'static> {
     let seen = if row.last_seen == 0 {
         "unknown".to_string()
     } else {
@@ -89,7 +123,11 @@ fn session_item(row: &SessionRow) -> ListItem<'static> {
     ListItem::new(vec![
         Line::from(vec![
             Span::styled(
-                row.agent.clone(),
+                if marked { "[x] " } else { "[ ] " },
+                Style::default().fg(if marked { Color::Cyan } else { Color::DarkGray }),
+            ),
+            Span::styled(
+                format!("@{}", row.handle),
                 Style::default().add_modifier(Modifier::BOLD),
             ),
             Span::raw(" "),
@@ -103,7 +141,10 @@ fn session_item(row: &SessionRow) -> ListItem<'static> {
             row.title_with_activity(),
             Style::default().fg(Color::White),
         )]),
-        Line::from(Span::styled(channels, Style::default().fg(Color::DarkGray))),
+        Line::from(Span::styled(
+            format!("{} / {}", row.workspace, channels),
+            Style::default().fg(Color::DarkGray),
+        )),
     ])
 }
 
@@ -147,11 +188,11 @@ fn render_panes(f: &mut ratatui::Frame, area: Rect, app: &mut App) {
 }
 
 fn render_details(f: &mut ratatui::Frame, area: Rect, app: &App) {
-    let lines = match app.sessions.get(app.selected) {
+    let lines = match app.selected_row() {
         Some(row) => vec![
             Line::from(vec![
-                Span::styled("agent ", Style::default().fg(Color::DarkGray)),
-                Span::raw(row.agent.clone()),
+                Span::styled("session ", Style::default().fg(Color::DarkGray)),
+                Span::raw(format!("@{} ({})", row.handle, row.agent)),
             ]),
             Line::from(vec![
                 Span::styled("title ", Style::default().fg(Color::DarkGray)),
@@ -162,8 +203,20 @@ fn render_details(f: &mut ratatui::Frame, area: Rect, app: &App) {
                 Span::raw(row.activity.clone()),
             ]),
             Line::from(vec![
+                Span::styled("workspace ", Style::default().fg(Color::DarkGray)),
+                Span::raw(format!("{} ({})", row.workspace, row.workspace_id)),
+            ]),
+            Line::from(vec![
                 Span::styled("channels ", Style::default().fg(Color::DarkGray)),
                 Span::raw(row.channels.join(",")),
+            ]),
+            Line::from(vec![
+                Span::styled("host ", Style::default().fg(Color::DarkGray)),
+                Span::raw(row.host.clone()),
+            ]),
+            Line::from(vec![
+                Span::styled("runtime ", Style::default().fg(Color::DarkGray)),
+                Span::raw(format!("{} / {}", row.harness, row.transport)),
             ]),
             Line::from(vec![
                 Span::styled("pty ", Style::default().fg(Color::DarkGray)),
@@ -196,8 +249,10 @@ fn render_details(f: &mut ratatui::Frame, area: Rect, app: &App) {
 fn render_status(f: &mut ratatui::Frame, area: Rect, app: &App) {
     let hints = if app.input_mode {
         "Esc/Ctrl-G controls"
+    } else if app.search_mode {
+        "type to fuzzy-search  backspace edit  up/down select  enter/esc close search"
     } else {
-        "up/down/jk select  enter/a attach  o open pane  tab switch  1-9 focus  x close  K,K kill  r refresh  q quit"
+        "up/down/jk navigate  / search  space toggle  a all visible  u unselect  enter attach  o pane  K,K kill  r refresh  q quit"
     };
     let status = if app.status.is_empty() {
         hints.to_string()

@@ -15,7 +15,8 @@ legacy access once tests prove the projections are authoritative.
 - Existing host adapters stay thin and keep their current CLI/RPC surface:
   `who`, `channel read/send`, `channel list --all-workspaces/init/edit`,
   `channel create/list/join/leave/switch/add`, `agents`,
-  `harness hook`, `harness statusline`, `publish`, `launch`, `tui`, and `mcp`.
+  `harness hook`, `harness statusline`, `publish`, `launch`, `mgmt session
+  list`, and `mcp`.
 - The daemon remains the only SQLite writer. New provider code must not open its
   own `rusqlite::Connection`.
 - Existing behavior is the regression oracle: same-machine local delivery,

@@ -34,6 +34,7 @@ mod invite_rpc;
 mod management_command;
 mod membership_cleanup;
 mod my_status;
+mod operator_sessions;
 mod orchestration_handler;
 mod pty_rpc;
 mod rpc;
@@ -281,6 +282,7 @@ async fn dispatch(state: &Arc<DaemonState>, req: &Request) -> Response {
         "channel_add_member" => rpc::rpc_channel_add_member(state, &req.params).await,
         "channel_remove_member" => rpc::rpc_channel_remove_member(state, &req.params).await,
         "agents_list_sessions" => rpc::rpc_agents_list_sessions(state, &req.params),
+        "operator_sessions" => operator_sessions::rpc_operator_sessions(state),
         "agents_roster" => rpc::rpc_agents_roster(state, &req.params),
         "agent_launch_preflight" => rpc::rpc_agent_launch_preflight(state, &req.params),
         "agent_launch_release" => rpc::rpc_agent_launch_release(state, &req.params),

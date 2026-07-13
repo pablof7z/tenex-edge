@@ -58,7 +58,9 @@ fn durable_agent_reuses_key_rejects_concurrency_and_never_becomes_resumable() {
             .expect_err("manual launch must be refused before PTY spawn");
         let preflight = preflight.to_string();
         assert!(preflight.contains("channel(s)"), "{preflight}");
-        assert!(preflight.contains("pty attach") || preflight.contains("tenex-edge tui"));
+        assert!(
+            preflight.contains("pty attach") || preflight.contains("tenex-edge mgmt session list")
+        );
         assert!(preflight.contains("channel add --session"), "{preflight}");
 
         let original = read_agent_config(&home, slug);

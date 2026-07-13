@@ -56,8 +56,9 @@ process (kills the owning PTY if one is tracked, else `SIGTERM`s the tracked
 child pid), then internally calls `session_end` to mark the session's
 metadata dead. `killed` reflects whether process termination itself
 succeeded; `reason` is populated on failure (including "no local session
-matched" when `session` doesn't resolve). Reachable from the TUI's kill-session
-keybinding and from the CLI: `tenex-edge my session kill --self`, which
+matched" when `session` doesn't resolve). Reachable from `tenex-edge mgmt
+session list`'s exact-session kill action and from the CLI: `tenex-edge my
+session kill --self`, which
 resolves the caller from the PTY/session environment and refuses a
 positional target — an agent may only kill its own session. The CLI exits
 non-zero when `killed` is `false`.
@@ -271,6 +272,15 @@ Health-check / keep-alive.
 
 ### `pty_status`
 Returns live portable PTY session state known to the daemon.
+
+### `operator_sessions`
+Returns the canonical local control projection consumed by `tenex-edge mgmt
+session list`. It starts from alive rows in the daemon-owned `sessions` table,
+so every result has an exact local canonical session id and local kill
+authority. Each row joins its public handle, agent/harness state, joined
+channels, workspace and filesystem binding, local host, and optional PTY
+endpoint metadata. Remote relay-only status rows are intentionally excluded;
+they remain observable through `who` and cannot be killed by this machine.
 
 ### `pty_send`
 Sends keystrokes or text to a portable PTY session.
