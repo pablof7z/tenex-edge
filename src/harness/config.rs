@@ -31,6 +31,10 @@ pub struct HarnessBundle {
     /// `ProfileMechanism`. `None`/`{}` => no profile.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile: Option<serde_json::Value>,
+    /// Named Codex config layer (`$CODEX_HOME/<name>.config.toml`) to compose
+    /// into an isolated app-server home. Valid only for Codex app-server.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codex_config_profile: Option<String>,
 }
 
 /// How tenex-edge drives a CLI.

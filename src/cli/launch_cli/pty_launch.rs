@@ -1,5 +1,4 @@
 use std::io::IsTerminal;
-use std::path::PathBuf;
 
 use anyhow::{bail, Context as _, Result};
 
@@ -129,7 +128,7 @@ fn prepare_bundle(agent: &str, bundle: &str, extra_args: Vec<String>) -> Result<
             resolved.transport.as_str()
         );
     }
-    materialize_profile(&resolved.profile.files)?;
+    resolved.profile.materialize()?;
 
     let mut argv = resolved.base_argv;
     argv.extend(extra_args);
@@ -147,18 +146,6 @@ fn prepare_bundle(agent: &str, bundle: &str, extra_args: Vec<String>) -> Result<
         env,
         env_remove,
     })
-}
-
-fn materialize_profile(files: &[(PathBuf, String)]) -> Result<()> {
-    for (path, contents) in files {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("creating profile dir {}", parent.display()))?;
-        }
-        std::fs::write(path, contents)
-            .with_context(|| format!("writing profile file {}", path.display()))?;
-    }
-    Ok(())
 }
 
 #[cfg(test)]

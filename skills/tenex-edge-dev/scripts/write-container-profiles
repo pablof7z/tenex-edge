@@ -33,6 +33,7 @@ mkdir -p "${KEY_DIR}"
 
 profile_contract() {
   local profile="$1"
+  CODEX_CONFIG_PROFILE=
   case "${profile}" in
     claude)
       AGENT_SLUG=claude
@@ -60,9 +61,15 @@ profile_contract() {
       BUNDLE=codex-app-server
       HARNESS=codex
       TRANSPORT=app-server
-      PROFILE_JSON="$(jq -cn \
-        --arg model "${TENEX_EDGE_DEV_CODEX_APP_SERVER_MODEL:-gpt-5.3-codex-spark}" \
-        '{model:$model,approval_policy:"never",sandbox_mode:"danger-full-access"}')"
+      CODEX_CONFIG_PROFILE="${TENEX_EDGE_DEV_CODEX_CONFIG_PROFILE:-}"
+      if [[ -n "${CODEX_CONFIG_PROFILE}" \
+        && -z "${TENEX_EDGE_DEV_CODEX_APP_SERVER_MODEL:-}" ]]; then
+        PROFILE_JSON='{"approval_policy":"never","sandbox_mode":"danger-full-access"}'
+      else
+        PROFILE_JSON="$(jq -cn \
+          --arg model "${TENEX_EDGE_DEV_CODEX_APP_SERVER_MODEL:-gpt-5.3-codex-spark}" \
+          '{model:$model,approval_policy:"never",sandbox_mode:"danger-full-access"}')"
+      fi
       ;;
     opencode)
       AGENT_SLUG=opencode
@@ -165,8 +172,11 @@ for i in "${!PROFILES[@]}"; do
     --arg harness "${HARNESS}" \
     --arg transport "${TRANSPORT}" \
     --argjson profile "${PROFILE_JSON}" \
+    --arg codex_config_profile "${CODEX_CONFIG_PROFILE}" \
     '{($bundle): ({harness:$harness,transport:$transport}
-      + if $profile == null then {} else {profile:$profile} end)}' \
+      + if $profile == null then {} else {profile:$profile} end
+      + if $codex_config_profile == "" then {}
+        else {codex_config_profile:$codex_config_profile} end)}' \
     >"${harnesses_cfg}"
 
   jq -n \

@@ -40,7 +40,7 @@ The agent file selects it through `harness`:
 Never print the secret fields. Safe inspection:
 
 ```bash
-jq 'to_entries[] | {bundle:.key,harness:.value.harness,transport:.value.transport,profile:.value.profile}' \
+jq 'to_entries[] | {bundle:.key,harness:.value.harness,transport:.value.transport,codex_config_profile:.value.codex_config_profile,profile:.value.profile}' \
   .container-state/claude-acp/tenex/edge/harnesses.json
 jq '{slug,harness,perSessionKey}' \
   .container-state/claude-acp/tenex/edge/agents/claude.json
@@ -59,6 +59,26 @@ rejected, set the corresponding variable and regenerate the profile. Provider
 CLI flags do not belong after a structured `tenex-edge launch`; the bundle
 profile is the source of truth.
 
+Codex app-server bundles can also select an ordinary named Codex profile:
+
+```bash
+TENEX_EDGE_DEV_CODEX_CONFIG_PROFILE=planner \
+  skills/tenex-edge-dev/scripts/write-container-profiles "${LAB_ENV}" codex-app-server
+```
+
+This writes `"codex_config_profile":"planner"` next to the bundle `profile`.
+Codex app-server rejects the CLI `--profile` selector, so tenex-edge reads base
+`config.toml`, deep-merges `planner.config.toml`, and materializes the result as
+an isolated app-server `CODEX_HOME/config.toml`. Project configuration and the
+bundle's inline `profile` (`-c` overrides) retain their normal higher
+precedence. Profile names accept only letters, numbers, hyphens, and
+underscores; missing or invalid profiles fail before launch.
+
+When a named profile is selected, the writer lets its model stand unless
+`TENEX_EDGE_DEV_CODEX_APP_SERVER_MODEL` is explicitly set. Approval and sandbox
+lab overrides remain explicit. Host auth staging projects all
+`~/.codex/*.config.toml` files into the isolated container home.
+
 ## Smoke Before Launch
 
 Generate state, run doctor, then drive the exact configured bundle:
@@ -70,8 +90,10 @@ skills/tenex-edge-dev/scripts/launch-agent "${LAB_ENV}" smoke claude-acp
 ```
 
 A passing smoke proves `initialize`, session/thread creation, a real model turn,
-and cross-process `session/load` for ACP harnesses. Codex app-server proves its
-initialize, thread, and turn lifecycle.
+and cross-process resume. ACP harnesses use `session/load`; Codex app-server
+uses a fresh process, `thread/resume`, and a second real turn. Its smoke also
+prints safe effective model, reasoning-effort, sandbox, and approval fields
+from `config/read` so named-profile application is directly observable.
 
 ## Headless Launch
 

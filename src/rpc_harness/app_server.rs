@@ -46,6 +46,20 @@ impl AppServerClient {
             .await
     }
 
+    /// `config/read {cwd,includeLayers:true}` -> effective process config.
+    pub async fn config_read(&self, cwd: &Path) -> Result<serde_json::Value, RpcError> {
+        self.handle
+            .request_timeout(
+                "config/read",
+                serde_json::json!({
+                    "cwd": cwd.to_string_lossy(),
+                    "includeLayers": true
+                }),
+                RPC_TIMEOUT,
+            )
+            .await
+    }
+
     /// `thread/start {cwd}` -> result.thread.id.
     pub async fn thread_start(&self, cwd: &Path) -> Result<String, RpcError> {
         let v = self

@@ -55,11 +55,16 @@ fn config_parses_bundles_and_rejects_unknown_harness() {
         "claude-acp": { "harness": "claude", "transport": "acp",
                         "profile": { "permissions": { "defaultMode": "acceptEdits" } } },
         "codex": { "harness": "codex", "transport": "app-server",
+                   "codex_config_profile": "planner",
                    "profile": { "model": "gpt-5-codex", "sandbox_mode": "workspace-write" } }
     }"#;
     let cfg: config::HarnessesConfig = serde_json::from_str(json).unwrap();
     assert_eq!(cfg.get("claude-acp").unwrap().harness, Harness::ClaudeCode);
     assert_eq!(cfg.get("codex").unwrap().transport, Transport::AppServer);
+    assert_eq!(
+        cfg.get("codex").unwrap().codex_config_profile.as_deref(),
+        Some("planner")
+    );
 
     let bad = r#"{ "x": { "harness": "gpt5", "transport": "acp" } }"#;
     assert!(serde_json::from_str::<config::HarnessesConfig>(bad).is_err());
@@ -103,6 +108,52 @@ fn codex_profile_becomes_config_flags() {
     assert!(joined.contains("-c model=gpt-5-codex"));
     assert!(joined.contains("-c sandbox_mode=workspace-write"));
     assert!(r.profile.files.is_empty());
+}
+
+#[test]
+fn codex_named_profile_composes_home_before_inline_overrides() {
+    let source = tempfile::tempdir().unwrap();
+    let scratch = tempfile::tempdir().unwrap();
+    std::fs::write(source.path().join("config.toml"), "model = 'base'\n").unwrap();
+    std::fs::write(
+        source.path().join("planner.config.toml"),
+        "model = 'planner'\nsandbox_mode = 'read-only'\n",
+    )
+    .unwrap();
+    let json = r#"{ "cx": { "harness": "codex", "transport": "app-server",
+        "codex_config_profile": "planner",
+        "profile": { "model_reasoning_effort": "high" } } }"#;
+    let cfg: config::HarnessesConfig = serde_json::from_str(json).unwrap();
+    let resolved =
+        resolve_with_codex_home(&cfg, "cx", scratch.path(), Some(source.path())).unwrap();
+    assert!(resolved
+        .base_argv
+        .windows(2)
+        .any(|pair| pair == ["-c", "model_reasoning_effort=high"]));
+    resolved.profile.materialize().unwrap();
+    let staged_home = scratch.path().join("codex-home");
+    let staged: toml::Value =
+        toml::from_str(&std::fs::read_to_string(staged_home.join("config.toml")).unwrap()).unwrap();
+    assert_eq!(staged["model"].as_str(), Some("planner"));
+    assert_eq!(staged["sandbox_mode"].as_str(), Some("read-only"));
+    assert!(resolved.profile.extra_env.contains(&(
+        "CODEX_HOME".to_string(),
+        staged_home.to_string_lossy().into_owned()
+    )));
+}
+
+#[test]
+fn codex_named_profile_is_rejected_for_other_transports() {
+    let cfg: config::HarnessesConfig = serde_json::from_str(
+        r#"{ "cx": { "harness": "codex", "transport": "pty",
+             "codex_config_profile": "planner" } }"#,
+    )
+    .unwrap();
+    let error = resolve_with(&cfg, "cx", &tmp_scratch())
+        .err()
+        .unwrap()
+        .to_string();
+    assert!(error.contains("only for a codex app-server bundle"));
 }
 
 #[test]

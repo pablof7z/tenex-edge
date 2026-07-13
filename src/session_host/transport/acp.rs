@@ -103,15 +103,7 @@ impl AcpTransport {
                 resolved.transport.as_str()
             );
         }
-        // Materialize any profile settings files before launch.
-        for (path, contents) in &resolved.profile.files {
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent)
-                    .with_context(|| format!("creating profile dir {}", parent.display()))?;
-            }
-            std::fs::write(path, contents)
-                .with_context(|| format!("writing profile file {}", path.display()))?;
-        }
+        resolved.profile.materialize()?;
         // The argv actually executed (driver base_argv + profile extra_argv). We
         // record THIS in the session metadata, not the nominal `spec.base_command`
         // that the ACP path never runs (defect #8).
