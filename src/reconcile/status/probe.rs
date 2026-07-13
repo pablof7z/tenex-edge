@@ -24,7 +24,7 @@ pub struct StatusStateRow {
     pub session: String,
     pub title: String,
     pub activity: String,
-    pub busy: bool,
+    pub state: crate::session_state::SessionState,
     pub channels: Vec<String>,
 }
 
@@ -103,7 +103,7 @@ impl StatusReconciler {
                 session: cmd.pubkey.clone(),
                 title: cmd.title.clone(),
                 activity: cmd.activity.clone(),
-                busy: cmd.busy,
+                state: cmd.state,
                 channels: cmd.channels.clone(),
             })
             .collect()

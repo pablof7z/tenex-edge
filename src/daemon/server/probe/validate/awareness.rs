@@ -82,7 +82,11 @@ fn build_evidence(
         .filter(|row| row.source == WhoSource::Local)
         .count();
     let peer_rows = rows.saturating_sub(local_rows);
-    let fresh_rows = snapshot.rows.iter().filter(|row| row.fresh).count();
+    let fresh_rows = snapshot
+        .rows
+        .iter()
+        .filter(|row| row.state.is_live())
+        .count();
     let spawnable = snapshot.spawnable.len();
     let known_channels = store.list_channels()?.len();
 

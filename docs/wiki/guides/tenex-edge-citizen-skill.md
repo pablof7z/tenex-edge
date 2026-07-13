@@ -51,7 +51,7 @@ User authority overrides fabric momentum. The user's newest instruction takes pr
 
 ## Presence Is Soft
 
-Presence is soft and time-based. Other agents may be idle, stale, busy, or absent. Account for that when you coordinate — do not assume immediate response. <!-- [^019f1-578ad] -->
+Presence is soft and time-based. Other agents may be working, idle, suspended, or offline. Account for that when you coordinate — do not assume immediate response. <!-- [^019f1-578ad] -->
 
 ## Operating Model
 

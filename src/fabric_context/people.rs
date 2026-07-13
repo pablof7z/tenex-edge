@@ -1,6 +1,7 @@
 use super::model::{MemberRow, PresenceRow};
 use super::refs::pubkey_ref;
 use super::FabricContextInput;
+use crate::session_state::semantic_change_at;
 use crate::state::{Status, Store};
 use crate::util::relative_time;
 use std::collections::BTreeMap;
@@ -27,9 +28,10 @@ pub(super) fn member_rows(
         .filter(|(pk, _)| pk.as_str() != input.backend_pubkey && !is_backend(store, pk))
         .map(|(pk, _role)| {
             let status = statuses.get(&pk);
-            let status_text = status
-                .map(status_text)
-                .unwrap_or_else(|| "offline".to_string());
+            let state = status
+                .map(|s| s.state.observed(s.expiration >= input.now))
+                .unwrap_or(crate::session_state::SessionState::Offline);
+            let status_text = status.map(|s| status_text(s, state)).unwrap_or_default();
             let seen = status
                 .map(|s| relative_time(s.last_seen, input.now))
                 .unwrap_or_else(|| "unknown".to_string());
@@ -40,6 +42,7 @@ pub(super) fn member_rows(
             };
             MemberRow {
                 reference,
+                state,
                 status: status_text,
                 seen,
             }
@@ -69,15 +72,22 @@ pub(super) fn presence_rows(
         return Vec::new();
     }
     store
-        .live_status_for_channel(channel, input.now)
+        .live_status_for_channel(channel, 0)
         .unwrap_or_default()
         .into_iter()
-        .filter(|s| s.updated_at > input.cursor)
+        .filter(|s| {
+            semantic_change_at(s.state, s.updated_at, s.expiration, input.now) > input.cursor
+        })
+        .filter(|s| semantic_change_at(s.state, s.updated_at, s.expiration, input.now) <= input.now)
         .filter(|s| s.pubkey != input.self_pubkey)
-        .map(|s| PresenceRow {
-            reference: presence_reference(store, &s, input.local_host),
-            status: status_text(&s),
-            seen: relative_time(s.last_seen, input.now),
+        .map(|s| {
+            let state = s.state.observed(s.expiration >= input.now);
+            PresenceRow {
+                reference: presence_reference(store, &s, input.local_host),
+                state,
+                status: status_text(&s, state),
+                seen: relative_time(s.last_seen, input.now),
+            }
         })
         .collect()
 }
@@ -98,13 +108,13 @@ fn status_map(store: &Store, channel: &str, now: u64) -> BTreeMap<String, Status
         .collect()
 }
 
-fn status_text(status: &Status) -> String {
-    if status.busy {
+fn status_text(status: &Status, state: crate::session_state::SessionState) -> String {
+    if state.is_working() {
         return non_empty(&status.activity)
             .or_else(|| non_empty(&status.title))
-            .unwrap_or_else(|| "working".to_string());
+            .unwrap_or_default();
     }
-    non_empty(&status.title).unwrap_or_else(|| "idle".to_string())
+    non_empty(&status.title).unwrap_or_default()
 }
 
 fn is_backend(store: &Store, pubkey: &str) -> bool {

@@ -114,9 +114,10 @@ fn render_members(out: &mut String, members: &[MemberRow], color: bool) {
         let reference = pad_ref(&m.reference, width);
         let _ = writeln!(
             out,
-            "    {}  {:<12} {} {}",
+            "    {}  {:<12} {} {} {}",
             style(&reference, color, Style::Agent),
-            status_text(&m.status, color),
+            state_text(m.state, color),
+            m.status,
             dim("seen", color),
             dim(&m.seen, color)
         );
@@ -138,9 +139,10 @@ fn render_presence(out: &mut String, presence: &[PresenceRow], color: bool) {
         let reference = pad_ref(&p.reference, width);
         let _ = writeln!(
             out,
-            "    {}  {:<12} {} {}",
+            "    {}  {:<12} {} {} {}",
             style(&reference, color, Style::Agent),
-            status_text(&p.status, color),
+            state_text(p.state, color),
+            p.status,
             dim("seen", color),
             dim(&p.seen, color)
         );
@@ -236,17 +238,12 @@ fn pad_ref(reference: &str, width: usize) -> String {
     format!("{:<width$}", format!("@{reference}"), width = width)
 }
 
-fn status_text(status: &str, color: bool) -> String {
-    let trimmed = status.trim();
-    let label = if trimmed.is_empty() {
-        "unknown"
-    } else {
-        trimmed
-    };
+fn state_text(state: crate::session_state::SessionState, color: bool) -> String {
+    let label = state.as_str();
     match label {
         "working" => style(label, color, Style::Good),
-        "idle" => style(label, color, Style::Idle),
-        "offline" | "unknown" => dim(label, color),
+        "idle" | "suspended" => style(label, color, Style::Idle),
+        "offline" => dim(label, color),
         _ => style(label, color, Style::Good),
     }
 }

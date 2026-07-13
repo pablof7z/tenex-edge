@@ -9,7 +9,7 @@ fn nip40_expired_status_not_live() {
         slug: "a".into(),
         title: "t".into(),
         activity: "act".into(),
-        busy: true,
+        state: crate::session_state::SessionState::Working,
         last_seen: 100,
         updated_at: 100,
         expiration: 200,

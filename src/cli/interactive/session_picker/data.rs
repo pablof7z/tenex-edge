@@ -1,5 +1,6 @@
 use anyhow::Result;
 use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
+use crate::session_state::SessionState;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(super) struct WorkspaceGroup {
@@ -24,7 +25,7 @@ pub(super) struct SessionRow {
     pub(super) workspaces: Vec<WorkspaceGroup>,
     pub(super) title: String,
     pub(super) activity: String,
-    pub(super) busy: bool,
+    pub(super) state: SessionState,
     pub(super) last_seen: u64,
     pub(super) host: String,
     pub(super) harness: String,
@@ -93,8 +94,8 @@ fn rows_from_value(value: &serde_json::Value) -> Vec<SessionRow> {
         .filter_map(parse_row)
         .collect::<Vec<_>>();
     rows.sort_by(|a, b| {
-        b.busy
-            .cmp(&a.busy)
+        state_rank(b.state)
+            .cmp(&state_rank(a.state))
             .then_with(|| b.pty_live.cmp(&a.pty_live))
             .then_with(|| b.last_seen.cmp(&a.last_seen))
             .then_with(|| a.handle.cmp(&b.handle))
@@ -129,7 +130,10 @@ fn parse_row(value: &serde_json::Value) -> Option<SessionRow> {
         workspaces,
         title: value["title"].as_str().unwrap_or("").to_string(),
         activity: value["activity"].as_str().unwrap_or("").to_string(),
-        busy: value["busy"].as_bool().unwrap_or(false),
+        state: value["state"]
+            .as_str()
+            .and_then(SessionState::parse)
+            .unwrap_or_default(),
         last_seen: value["last_seen"].as_u64().unwrap_or(0),
         host: value["host"].as_str().unwrap_or("").to_string(),
         harness: value["harness"].as_str().unwrap_or("").to_string(),
@@ -141,6 +145,15 @@ fn parse_row(value: &serde_json::Value) -> Option<SessionRow> {
             .unwrap_or(false),
         cwd,
     })
+}
+
+fn state_rank(state: SessionState) -> u8 {
+    match state {
+        SessionState::Working => 3,
+        SessionState::Idle => 2,
+        SessionState::Suspended => 1,
+        SessionState::Offline => 0,
+    }
 }
 
 fn parse_workspace(value: &serde_json::Value) -> Option<WorkspaceGroup> {
@@ -181,7 +194,7 @@ mod tests {
                 }],
                 "title": "shipping the picker",
                 "activity": "running tests",
-                "busy": true,
+                "state": "working",
                 "last_seen": 12,
                 "host": "laptop",
                 "harness": "codex",
@@ -198,7 +211,7 @@ mod tests {
         assert_eq!(rows[0].npub, "npub1publicselector");
         assert_eq!(rows[0].handle, "opal-codex");
         assert_eq!(rows[0].title, "shipping the picker");
-        assert!(rows[0].busy);
+        assert_eq!(rows[0].state, SessionState::Working);
         assert!(rows[0].fuzzy_score("npub1public").is_some());
         assert!(rows[0].fuzzy_score("repo").is_some());
         assert_eq!(rows[0].workspaces[0].name, "tenex-edge");
@@ -220,7 +233,7 @@ mod tests {
                 }],
                 "title": "codex --yolo",
                 "activity": "/repo",
-                "busy": false,
+                "state": "suspended",
                 "last_seen": 0,
                 "host": "laptop",
                 "harness": "codex",

@@ -62,7 +62,7 @@ fn chat(store: &Store, id: &str, channel: &str, at: u64, body: &str, tags_json: 
         .unwrap();
 }
 
-fn status(store: &Store, channel: &str, busy: bool, activity: &str, updated_at: u64) {
+fn status(store: &Store, channel: &str, working: bool, activity: &str, updated_at: u64) {
     store
         .upsert_status(&Status {
             pubkey: OTHER_PK.into(),
@@ -70,7 +70,7 @@ fn status(store: &Store, channel: &str, busy: bool, activity: &str, updated_at: 
             slug: "reviewer".into(),
             title: String::new(),
             activity: activity.into(),
-            busy,
+            state: crate::session_state::SessionState::classify(true, working, true),
             last_seen: updated_at,
             updated_at,
             expiration: 10_000,
@@ -182,7 +182,7 @@ fn cursor_drives_shape_and_is_attributed() {
     );
 }
 
-/// A presence row's busy/activity change moves the snapshot, and the frame is
+/// A presence row's state/activity change moves the snapshot, and the frame is
 /// attributed to the `presence` input — the "why is @X shown as working" receipt,
 /// matching the actual rendered member line.
 #[test]
@@ -199,7 +199,7 @@ fn presence_change_attributed_to_presence_input() {
     r.assert_oracle().unwrap();
     let first_text = first.text.unwrap();
     assert!(
-        first_text.contains("status=\"idle\""),
+        first_text.contains("state=\"idle\""),
         "reviewer starts idle: {first_text}"
     );
 
@@ -212,6 +212,7 @@ fn presence_change_attributed_to_presence_input() {
     r.assert_oracle().unwrap();
     let text = out.text.unwrap();
 
+    assert!(text.contains("state=\"working\""), "new state: {text}");
     assert!(
         text.contains("status=\"refactoring\""),
         "member line reflects the new activity: {text}"

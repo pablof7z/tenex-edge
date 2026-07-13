@@ -262,7 +262,7 @@ fn derive_and_emit_tail_events(
                     });
                 }
 
-                let cur = (s.title.clone(), s.busy);
+                let cur = (s.title.clone(), s.state);
                 let should_emit = {
                     let mut map = state.last_status.lock().unwrap();
                     if map.get(&key) != Some(&cur) {
@@ -278,7 +278,7 @@ fn derive_and_emit_tail_events(
                         channel: channel.clone(),
                         agent: s.agent.slug.clone(),
                         text: s.title.clone(),
-                        active: s.busy,
+                        state: s.state,
                     });
                 }
             }

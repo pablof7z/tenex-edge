@@ -22,4 +22,4 @@ pub(super) struct PeerTracked {
 }
 
 pub(super) type StatusTailKey = (String, String);
-pub(super) type StatusTailSnapshot = (String, bool);
+pub(super) type StatusTailSnapshot = (String, crate::session_state::SessionState);

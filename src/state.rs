@@ -79,7 +79,7 @@ pub struct Status {
     pub slug: String,
     pub title: String,
     pub activity: String,
-    pub busy: bool,
+    pub state: crate::session_state::SessionState,
     pub last_seen: u64,
     pub updated_at: u64,
     pub expiration: u64,

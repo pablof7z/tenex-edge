@@ -73,6 +73,7 @@ fn validate_canonical(conn: &Connection, path: Option<&Path>) -> Result<()> {
         path,
     )?;
     ensure_columns(conn, "relay_profiles", &["agent_slug"], &[], path)?;
+    ensure_columns(conn, "relay_status", &["state"], &["busy"], path)?;
     ensure_columns(conn, "outbox", &["next_attempt_at"], &[], path)?;
     ensure_table(conn, "event_claims", path)?;
     ensure_columns(

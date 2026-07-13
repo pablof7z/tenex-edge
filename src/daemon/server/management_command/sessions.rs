@@ -1,6 +1,7 @@
 //! Session listing for backend-addressed management commands.
 
 use super::super::DaemonState;
+use crate::session_state::SessionState;
 use crate::state::{Status, Store};
 use anyhow::Result;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -13,26 +14,21 @@ pub(super) fn list_sessions(state: &Arc<DaemonState>, scope_root: Option<&str>) 
         let scope = scope_root
             .map(|h| format!(" in {}", super::channel_label(state, h)))
             .unwrap_or_else(|| " in all channels".to_string());
-        return Ok(format!("mgmt ok: no running sessions{scope}"));
+        return Ok(format!("mgmt ok: no sessions{scope}"));
     }
 
     let scope = scope_root
         .map(|h| format!(" under {}", super::channel_label(state, h)))
         .unwrap_or_else(|| " across all channels".to_string());
-    let mut lines = vec![format!(
-        "mgmt ok: {} running session(s){}",
-        summaries.len(),
-        scope
-    )];
+    let mut lines = vec![format!("mgmt ok: {} session(s){}", summaries.len(), scope)];
     for row in summaries {
-        let state_word = if row.busy { "busy" } else { "idle" };
         let text = status_text(&row);
         lines.push(format!(
             "- @{} ({}) [{}] {}: {} (last active {})",
             row.agent,
             row.npub,
             row.channels.into_iter().collect::<Vec<_>>().join(", "),
-            state_word,
+            row.state,
             text,
             age(row.last_seen, now)
         ));
@@ -48,7 +44,7 @@ struct SessionSummary {
     channels: BTreeSet<String>,
     title: String,
     activity: String,
-    busy: bool,
+    state: SessionState,
     last_seen: u64,
     updated_at: u64,
 }
@@ -84,7 +80,7 @@ fn session_summaries_from_store(
                 if status.updated_at >= row.updated_at {
                     row.title = status.title.clone();
                     row.activity = status.activity.clone();
-                    row.busy = status.busy;
+                    row.state = status.state.observed(status.expiration >= now);
                     row.updated_at = status.updated_at;
                 }
                 row.last_seen = row.last_seen.max(status.last_seen);
@@ -98,7 +94,7 @@ fn session_summaries_from_store(
                     channels: BTreeSet::new(),
                     title: status.title.clone(),
                     activity: status.activity.clone(),
-                    busy: status.busy,
+                    state: status.state.observed(status.expiration >= now),
                     last_seen: status.last_seen,
                     updated_at: status.updated_at,
                 };
@@ -185,12 +181,10 @@ fn channel_label_from_map(
 }
 
 fn status_text(row: &SessionSummary) -> String {
-    let raw = if row.busy && !row.activity.trim().is_empty() {
+    let raw = if row.state.is_working() && !row.activity.trim().is_empty() {
         row.activity.trim()
     } else if !row.title.trim().is_empty() {
         row.title.trim()
-    } else if !row.activity.trim().is_empty() {
-        row.activity.trim()
     } else {
         "-"
     };
@@ -234,7 +228,7 @@ mod tests {
             slug: "coder".to_string(),
             title: "fixing parser".to_string(),
             activity: "running tests".to_string(),
-            busy: true,
+            state: SessionState::Working,
             last_seen: seen,
             updated_at: seen,
             expiration: seen + 90,

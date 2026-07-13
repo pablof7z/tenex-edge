@@ -23,8 +23,8 @@ pub(super) fn render(out: &mut String, evidence: &Value) {
         if bool_at(evidence, "graph_found") {
             let _ = writeln!(
                 out,
-                "  - published busy={} channels={} title=\"{}\" activity=\"{}\"",
-                bool_at(evidence, "graph_busy"),
+                "  - published state={} channels={} title=\"{}\" activity=\"{}\"",
+                str_at(evidence, "graph_state"),
                 channels(evidence),
                 str_at(evidence, "graph_title"),
                 str_at(evidence, "graph_activity")
@@ -53,10 +53,10 @@ pub(super) fn render(out: &mut String, evidence: &Value) {
             );
             let _ = writeln!(
                 out,
-                "  - relay published pubkey={} slug={:?} busy={} title=\"{}\" activity=\"{}\" expires={}",
+                "  - relay published pubkey={} slug={:?} state={} title=\"{}\" activity=\"{}\" expires={}",
                 str_at(evidence, "relay_pubkey"),
                 str_at(evidence, "relay_slug"),
-                bool_at(evidence, "relay_busy"),
+                str_at(evidence, "relay_state"),
                 str_at(evidence, "relay_title"),
                 str_at(evidence, "relay_activity"),
                 int_at(evidence, "relay_expiration")

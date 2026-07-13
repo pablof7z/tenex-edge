@@ -1,0 +1,39 @@
+use super::*;
+
+#[test]
+fn legacy_status_tag_is_rejected() {
+    let keys = Keys::generate();
+    let event = EventBuilder::new(Kind::from(KIND_STATUS), "")
+        .tags([
+            tag(&["h", "tenex-edge"]).unwrap(),
+            tag(&["d", "sess-legacy"]).unwrap(),
+            tag(&["status", "idle"]).unwrap(),
+        ])
+        .sign_with_keys(&keys)
+        .unwrap();
+    assert!(Nip29WireCodec.decode_event(&event).is_none());
+}
+
+#[test]
+fn canonical_state_tag_is_accepted() {
+    let keys = Keys::generate();
+    let event = EventBuilder::new(Kind::from(KIND_STATUS), "working on tests")
+        .tags([
+            tag(&["h", "tenex-edge"]).unwrap(),
+            tag(&["d", "tenex-edge"]).unwrap(),
+            tag(&["state", "working"]).unwrap(),
+            tag(&["title", "codec refactor"]).unwrap(),
+            tag(&["host", "laptop"]).unwrap(),
+        ])
+        .sign_with_keys(&keys)
+        .unwrap();
+    match Nip29WireCodec.decode_event(&event) {
+        Some(DomainEvent::Status(s)) => {
+            assert_eq!(s.channels, vec!["tenex-edge"]);
+            assert_eq!(s.activity, "working on tests");
+            assert_eq!(s.title, "codec refactor");
+            assert_eq!(s.state, SessionState::Working);
+        }
+        other => panic!("expected status, got {other:?}"),
+    }
+}

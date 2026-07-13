@@ -58,7 +58,7 @@ fn seed() -> Store {
             slug: "quill-peak-369-codex".into(),
             title: "Implement awareness".into(),
             activity: String::new(),
-            busy: false,
+            state: crate::session_state::SessionState::Idle,
             last_seen: 99,
             updated_at: 99,
             expiration: 200,

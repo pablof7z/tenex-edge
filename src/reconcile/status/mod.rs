@@ -2,6 +2,7 @@
 //! WHEN a session's public status is (re)published.
 //! One graph owns dedup, refresh, h-tags, and deterministic teardown; the host
 //! only signs and enqueues the emitted effects.
+mod command;
 mod model;
 mod preview;
 pub(crate) mod probe;
@@ -22,22 +23,8 @@ use trellis_core::{
 use crate::domain::Status;
 use crate::reconcile::labels::NodeLabels;
 
+pub use command::{StatusCommand, StatusOutcome};
 use model::{create_session, opts, status_key, SessionNodes, StaticInfo};
-
-/// The graph's in-plan command payload: everything needed to build a kind:30315
-/// EXCEPT the expiration, which the host stamps at apply time from its own clock.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct StatusCommand {
-    pub pubkey: String,
-    pub channels: Vec<String>,
-    pub title: String,
-    pub activity: String,
-    pub busy: bool,
-    pub host: String,
-    pub slug: String,
-    pub rel_cwd: String,
-    pub dispatch_event: Option<String>,
-}
 
 /// Why the reconciler is asking the host to publish.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -61,12 +48,6 @@ pub enum StatusEffect {
     /// Explicit relay retraction for callers that need immediate disappearance.
     /// Normal session end does not use this; it publishes idle with a full TTL.
     Expire { status: Status },
-}
-
-/// One reconciler tx outcome: effects to apply + the raw receipt (the Slice-8 instrumentation seam).
-pub struct StatusOutcome {
-    pub effects: Vec<StatusEffect>,
-    pub result: TransactionResult<StatusCommand>,
 }
 
 #[derive(Clone)]
@@ -115,12 +96,23 @@ impl StatusReconciler {
         rel_cwd: &str,
         channels: BTreeSet<String>,
         working: bool,
+        automatic_delivery: bool,
         title: &str,
         activity: &str,
         now: u64,
     ) -> GraphResult<StatusOutcome> {
         self.on_session_started_with_dispatch(
-            pubkey, host, slug, rel_cwd, channels, working, title, activity, None, now,
+            pubkey,
+            host,
+            slug,
+            rel_cwd,
+            channels,
+            working,
+            automatic_delivery,
+            title,
+            activity,
+            None,
+            now,
         )
     }
 
@@ -133,6 +125,7 @@ impl StatusReconciler {
         rel_cwd: &str,
         channels: BTreeSet<String>,
         working: bool,
+        automatic_delivery: bool,
         title: &str,
         activity: &str,
         dispatch_event: Option<String>,
@@ -154,6 +147,7 @@ impl StatusReconciler {
             info,
             channels,
             working,
+            automatic_delivery,
             title,
             activity,
             now / self.refresh_secs,
@@ -163,7 +157,7 @@ impl StatusReconciler {
         Ok(StatusOutcome { effects, result })
     }
 
-    /// A turn started (busy) / ended (idle: the derive clears the live activity).
+    /// A turn started (working) / ended (the derive clears live activity).
     pub fn on_turn_start(&mut self, id: &str, now: u64) -> GraphResult<StatusOutcome> {
         self.mutate(id, now, |tx, n| tx.set_input(n.working, true))
     }
@@ -204,17 +198,23 @@ impl StatusReconciler {
 
     /// A clock tick: re-arm the NIP-40 window (a `Refresh`, not a content change)
     /// if `now` crossed a refresh bucket; otherwise nothing.
-    pub fn on_tick(&mut self, id: &str, now: u64) -> GraphResult<StatusOutcome> {
-        self.mutate(id, now, |_tx, _n| Ok(()))
+    pub fn on_tick(
+        &mut self,
+        id: &str,
+        automatic_delivery: bool,
+        now: u64,
+    ) -> GraphResult<StatusOutcome> {
+        self.mutate(id, now, |tx, n| {
+            tx.set_input(n.automatic_delivery, automatic_delivery)
+        })
     }
 
-    /// The session ended (clean exit / pid death): publish one final idle status
-    /// with the normal TTL. Membership cleanup later closes the local graph row
-    /// after the same stale window removes the session from channel rosters.
+    /// The session ended: publish one immediately-expiring offline status.
     pub fn on_session_ended(&mut self, id: &str, now: u64) -> GraphResult<StatusOutcome> {
         let refresh_secs = self.refresh_secs;
         let final_arm = end_arm(now, refresh_secs);
         self.mutate(id, now, |tx, n| {
+            tx.set_input(n.live, false)?;
             tx.set_input(n.working, false)?;
             tx.set_input(n.arm, final_arm)
         })

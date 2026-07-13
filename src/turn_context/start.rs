@@ -133,7 +133,7 @@ pub(crate) fn assemble_turn_start(
         // presentation is a separate headless-mode fact above.
         let delivery_available = {
             let s = store.lock().expect("store mutex poisoned");
-            crate::session_host::session_has_live_delivery_endpoint(&s, rec)
+            crate::session_host::session_has_live_delivery_path(&s, rec)
         };
         if !delivery_available {
             warnings.push(

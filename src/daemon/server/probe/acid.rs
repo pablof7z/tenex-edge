@@ -135,12 +135,20 @@ fn remove_cause(state: &Arc<DaemonState>, fact: InputFact, cause: &str) -> Resul
                 at,
             }))
         }
-        InputFact::StatusDrive(StatusDrive::Tick { pubkey, .. }) => {
+        InputFact::StatusDrive(StatusDrive::Tick {
+            pubkey,
+            automatic_delivery,
+            ..
+        }) => {
             if !cause.ends_with("/arm") {
                 anyhow::bail!("probe acid: unsupported status cause `{cause}`");
             }
             let at = current_status_arm_at(state, &pubkey)?;
-            Ok(InputFact::StatusDrive(StatusDrive::Tick { pubkey, at }))
+            Ok(InputFact::StatusDrive(StatusDrive::Tick {
+                pubkey,
+                automatic_delivery,
+                at,
+            }))
         }
         InputFact::SubscriptionSync { mut snapshot, at } => {
             if let Some(session) = subscription_session_cause(cause) {

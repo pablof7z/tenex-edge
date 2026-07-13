@@ -7,7 +7,7 @@ use crate::state::Store;
 use trellis_testing::{DataTransactionScript, TRACE_FORMAT_VERSION};
 
 macro_rules! status_fact {
-    (started, $p:expr, $aref:expr, $session:expr, $channels:expr, $at:expr) => {
+    (started, $p:expr, $aref:expr, $session:expr, $channels:expr, $automatic_delivery:expr, $at:expr) => {
         $crate::reconcile::InputFact::StatusDrive($crate::reconcile::StatusDrive::SessionStarted(
             $crate::reconcile::StatusSessionStartedArgs {
                 pubkey: $aref.pubkey.clone(),
@@ -17,15 +17,17 @@ macro_rules! status_fact {
                 dispatch_event: $p.dispatch_event.clone(),
                 channels: $channels.clone(),
                 working: $session.working,
+                automatic_delivery: $automatic_delivery,
                 title: $session.title.clone(),
                 activity: $session.activity.clone(),
                 at: $at,
             },
         ))
     };
-    (tick, $pubkey:expr, $at:expr) => {
+    (tick, $pubkey:expr, $automatic_delivery:expr, $at:expr) => {
         $crate::reconcile::InputFact::StatusDrive($crate::reconcile::StatusDrive::Tick {
             pubkey: $pubkey.clone(),
+            automatic_delivery: $automatic_delivery,
             at: $at,
         })
     };

@@ -21,7 +21,7 @@ observed facts (the world hands us)
 Facts Trellis must **not** invent — they enter as canonical inputs: a hook
 happened, a process is alive/dead, a transcript window was captured, the LLM
 returned `NOW: doing x`, the relay accepted/rejected an event, a delivery scan
-observed pending inbox ids / PTY liveness / debounce time, a clock tick.
+observed pending inbox ids / automatic-delivery reachability / debounce time, a clock tick.
 The input-journal vocabulary is `src/reconcile/journal.rs` (`InputFact`); each
 variant names the writer it replaces.
 
@@ -46,7 +46,7 @@ direct `set_status` seam were deleted, not left alongside).
 | Surface | Module | Model | What it fixed |
 |---|---|---|---|
 | Subscriptions | `subscriptions/` | per-entity `ResourceKey` refcounted by per-session scopes | the unbounded-subscription leak — channel-leave now emits a real NIP-01 CLOSE on last-owner departure |
-| Status (kind:30315) | `status/` | per-session derived `StatusContent` → publish/expire commands | five triggers + two timers collapsed to one change-only publish path; dedup; deterministic expiry on death; h-tag correction on leave |
+| Status (kind:30315) | `status/` | live + working + automatic-delivery facts → normalized `StatusContent` → publish commands | one four-state classifier; change-only state deltas; deterministic offline publish on death; h-tag correction on leave |
 | Hook context | `hook_context/` | derived `FabricView` → materialized output frame | the hand-rolled `turn_start_audit` that drifted from the render, replaced by a receipt that *is* the render's dependency trace; cursor + `now` made explicit inputs (deterministic/replayable) |
 | Delivery | `delivery/` | `DeliveryScanFact` → inject/defer/retry/endpoint-cleanup commands | every p-tag mention with a live PTY injects immediately, including mid-turn; only debounce may schedule a retry, while missing or dead endpoints stay available for hook fallback or cleanup |
 

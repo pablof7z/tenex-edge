@@ -247,7 +247,7 @@ fn freeze_peer_status_materializes_to_unified_presence_state() {
             slug: "peer".into(),
             title: "reviewing relay state".into(),
             activity: "checking 39002".into(),
-            busy: true,
+            state: tenex_edge::session_state::SessionState::Working,
             last_seen: 105,
             updated_at: 105,
             expiration: 1_000_000,
@@ -258,5 +258,8 @@ fn freeze_peer_status_materializes_to_unified_presence_state() {
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].pubkey, "peer-pubkey");
     assert_eq!(rows[0].title, "reviewing relay state");
-    assert!(rows[0].busy);
+    assert_eq!(
+        rows[0].state,
+        tenex_edge::session_state::SessionState::Working
+    );
 }

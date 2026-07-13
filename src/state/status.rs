@@ -9,7 +9,8 @@ fn row_to_status(row: &rusqlite::Row) -> rusqlite::Result<Status> {
         slug: row.get(2)?,
         title: row.get(3)?,
         activity: row.get(4)?,
-        busy: row.get::<_, i64>(5)? != 0,
+        state: crate::session_state::SessionState::parse(&row.get::<_, String>(5)?)
+            .ok_or_else(|| rusqlite::Error::InvalidColumnType(5, "state".into(), rusqlite::types::Type::Text))?,
         last_seen: row.get(6)?,
         updated_at: row.get(7)?,
         expiration: row.get(8)?,
@@ -17,22 +18,22 @@ fn row_to_status(row: &rusqlite::Row) -> rusqlite::Result<Status> {
 }
 
 const COLS: &str =
-    "pubkey, channel_h, slug, title, activity, busy, last_seen, updated_at, expiration";
+    "pubkey, channel_h, slug, title, activity, state, last_seen, updated_at, expiration";
 
 impl Store {
     pub fn upsert_status(&self, status: &Status) -> Result<()> {
         self.conn.execute(
             "INSERT INTO relay_status
-                 (pubkey, channel_h, slug, title, activity, busy, last_seen, updated_at, expiration)
+                 (pubkey, channel_h, slug, title, activity, state, last_seen, updated_at, expiration)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
              ON CONFLICT(pubkey, channel_h) DO UPDATE SET
                  slug=excluded.slug, title=excluded.title, activity=excluded.activity,
-                 busy=excluded.busy, last_seen=excluded.last_seen,
+                 state=excluded.state, last_seen=excluded.last_seen,
                  updated_at=CASE
                      WHEN relay_status.slug <> excluded.slug
                        OR relay_status.title <> excluded.title
                        OR relay_status.activity <> excluded.activity
-                       OR relay_status.busy <> excluded.busy
+                       OR relay_status.state <> excluded.state
                      THEN excluded.updated_at ELSE relay_status.updated_at END,
                  expiration=excluded.expiration
              WHERE excluded.updated_at >= relay_status.updated_at",
@@ -42,7 +43,7 @@ impl Store {
                 status.slug,
                 status.title,
                 status.activity,
-                status.busy as i64,
+                status.state.as_str(),
                 status.last_seen,
                 status.updated_at,
                 status.expiration,
@@ -106,14 +107,14 @@ impl Store {
 mod tests {
     use crate::state::{Status, Store};
 
-    fn status(activity: &str, busy: bool, updated_at: u64) -> Status {
+    fn status(activity: &str, state: crate::session_state::SessionState, updated_at: u64) -> Status {
         Status {
             pubkey: "pk".into(),
             channel_h: "h1".into(),
             slug: "agent".into(),
             title: "Task title".into(),
             activity: activity.into(),
-            busy,
+            state,
             last_seen: updated_at,
             updated_at,
             expiration: updated_at + 100,
@@ -123,8 +124,8 @@ mod tests {
     #[test]
     fn heartbeat_refreshes_liveness_without_advancing_delta_clock() {
         let store = Store::open_memory().unwrap();
-        store.upsert_status(&status("reading", true, 100)).unwrap();
-        store.upsert_status(&status("reading", true, 150)).unwrap();
+        store.upsert_status(&status("reading", crate::session_state::SessionState::Working, 100)).unwrap();
+        store.upsert_status(&status("reading", crate::session_state::SessionState::Working, 150)).unwrap();
         let row = store.get_status("pk", "h1").unwrap().unwrap();
         assert_eq!(
             (row.last_seen, row.expiration, row.updated_at),
@@ -135,8 +136,8 @@ mod tests {
     #[test]
     fn semantic_status_change_advances_delta_clock() {
         let store = Store::open_memory().unwrap();
-        store.upsert_status(&status("reading", true, 100)).unwrap();
-        store.upsert_status(&status("writing", true, 150)).unwrap();
+        store.upsert_status(&status("reading", crate::session_state::SessionState::Working, 100)).unwrap();
+        store.upsert_status(&status("writing", crate::session_state::SessionState::Working, 150)).unwrap();
         let row = store.get_status("pk", "h1").unwrap().unwrap();
         assert_eq!((row.activity.as_str(), row.updated_at), ("writing", 150));
     }

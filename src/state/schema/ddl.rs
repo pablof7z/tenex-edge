@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS relay_status (
     slug         TEXT NOT NULL DEFAULT '',
     title        TEXT NOT NULL DEFAULT '',
     activity     TEXT NOT NULL DEFAULT '',
-    busy         INTEGER NOT NULL DEFAULT 0,
+    state        TEXT NOT NULL,
     last_seen    INTEGER NOT NULL DEFAULT 0,
     updated_at   INTEGER NOT NULL DEFAULT 0,
     expiration   INTEGER NOT NULL DEFAULT 0,

@@ -217,12 +217,19 @@ fn member_view(
         crate::fabric_context::refs::pubkey_ref(store, pubkey, input.local_host)
     };
     let (state, text, seen) = match status {
-        Some(row) => (
-            if row.busy { "working" } else { "idle" }.to_string(),
-            status_text(row),
-            relative_time(row.last_seen, input.now),
+        Some(row) => {
+            let state = row.state.observed(row.expiration >= input.now);
+            (
+                state,
+                status_text(row, state),
+                relative_time(row.last_seen, input.now),
+            )
+        }
+        None => (
+            crate::session_state::SessionState::Offline,
+            String::new(),
+            "unknown".to_string(),
         ),
-        None => ("offline".to_string(), String::new(), "unknown".to_string()),
     };
     MemberView {
         kind: if is_agent {
@@ -237,15 +244,10 @@ fn member_view(
     }
 }
 
-fn status_text(status: &Status) -> String {
-    let candidates = if status.busy {
-        [&status.activity, &status.title]
+fn status_text(status: &Status, state: crate::session_state::SessionState) -> String {
+    if state.is_working() && !status.activity.trim().is_empty() {
+        status.activity.trim().to_string()
     } else {
-        [&status.title, &status.activity]
-    };
-    candidates
-        .into_iter()
-        .find(|text| !text.trim().is_empty())
-        .map(|text| text.trim().to_string())
-        .unwrap_or_default()
+        status.title.trim().to_string()
+    }
 }

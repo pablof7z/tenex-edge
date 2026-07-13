@@ -174,7 +174,7 @@ pub struct Proposal {
 /// The agent's complete live state. From this one value a reader knows
 /// everything: who/where (agent, channels, host, rel_cwd),
 /// what the session is about (the persistent `title`), what it is doing *right
-/// now* (the live `activity`), and whether it is mid-turn (`busy`). It is scoped
+/// now* (the live `activity`), and its canonical user-facing state. It is scoped
 /// per authoritative agent pubkey, so each agent keeps its title even while idle.
 ///
 /// Liveness = freshness of this state. The daemon refreshes `expires_at` on
@@ -198,9 +198,8 @@ pub struct Status {
     /// refreshed every turn; cleared on idle (only the persistent title
     /// survives). Empty when no live activity is known.
     pub activity: String,
-    /// Whether the session is mid-turn (busy). Decoupled from `title` so an idle
-    /// session keeps showing its title with a separate idle marker.
-    pub busy: bool,
+    /// Canonical user-facing state, normalized from host/runtime facts.
+    pub state: crate::session_state::SessionState,
     /// Channel-relative working directory (e.g. `worktree1`, `sub/dir`, `.`).
     /// Public status value: never the absolute `$HOME/...` path (privacy). Lets
     /// awareness projections reflect where the agent is working.
@@ -219,10 +218,9 @@ impl Status {
         self.channels.first().map(String::as_str)
     }
 
-    /// Idle = not mid-turn. The `title` persists across idle turns, so idle is
-    /// no longer "empty title".
+    /// The `title` persists across idle turns, so idle is not "empty title".
     pub fn is_idle(&self) -> bool {
-        !self.busy
+        self.state == crate::session_state::SessionState::Idle
     }
 }
 
@@ -306,30 +304,30 @@ mod tests {
     #[test]
     fn status_idle_detection() {
         let agent = AgentRef::new("pk", "coder");
-        // A title is retained while idle: idle tracks `busy`, not the title.
+        // A title is retained while idle: state, not title content, is canonical.
         let idle = Status {
             agent: agent.clone(),
             channels: vec!["p".into()],
             host: "laptop".into(),
             title: "fixing auth".into(),
             activity: String::new(),
-            busy: false,
+            state: crate::session_state::SessionState::Idle,
             rel_cwd: String::new(),
             expires_at: None,
             dispatch_event: None,
         };
-        let busy = Status {
+        let working = Status {
             agent,
             channels: vec!["p".into()],
             host: "laptop".into(),
             title: "fixing auth".into(),
             activity: String::new(),
-            busy: true,
+            state: crate::session_state::SessionState::Working,
             rel_cwd: String::new(),
             expires_at: None,
             dispatch_event: None,
         };
         assert!(idle.is_idle());
-        assert!(!busy.is_idle());
+        assert!(!working.is_idle());
     }
 }

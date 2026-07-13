@@ -183,12 +183,12 @@ fn why_not_found_is_clean() {
 #[test]
 fn state_status_render_lists_sessions() {
     let v = json!({"verb":"state","surface":"status","rows":[
-        {"session":"s1","title":"T","activity":"reading","busy":true,"channels":["room"]}
+        {"session":"s1","title":"T","activity":"reading","state":"working","channels":["room"]}
     ]});
     let text = render_state(&v);
     assert!(text.contains("state status  (live)"));
     assert!(text.contains("status/s1"));
-    assert!(text.contains("busy"));
+    assert!(text.contains("working"));
     assert!(text.contains("activity=\"reading\""));
 }
 

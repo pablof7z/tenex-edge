@@ -37,13 +37,21 @@ pub(in crate::daemon::server) fn rpc_statusline(
         let is_member = s
             .is_channel_member(&scope, &instance.pubkey)
             .unwrap_or(true);
-        // Busy + title + live activity come straight off the local session row
+        // State + title + live activity come straight off the local session row
         // (the pre-publish draft the distiller maintains). Pure read: no drains,
         // no touches. The statusline shows the activity line (the live "doing
         // now" signal), not the persistent title.
-        let working = rec.working;
+        let automatic_delivery = crate::session_host::session_has_live_delivery_path(s, &rec);
+        let live =
+            rec.alive && now.saturating_sub(rec.last_seen) <= crate::session::STATUS_TTL_SECS;
+        let session_state =
+            crate::session_state::SessionState::classify(live, rec.working, automatic_delivery);
         let title = rec.title.clone();
-        let activity = rec.activity.clone();
+        let activity = if session_state.is_working() {
+            rec.activity.clone()
+        } else {
+            String::new()
+        };
         // `channel_title` is the channel's human handle from the relay-authored
         // kind:39000 metadata cache (relay_channels `name`). The channel name is
         // set only at create/edit now — never from the distilled session title —
@@ -79,7 +87,7 @@ pub(in crate::daemon::server) fn rpc_statusline(
             "channel_title": channel_title,
             "member_count": member_count,
             "is_member": is_member,
-            "working": working,
+            "state": session_state,
             "title": title,
             "activity": activity,
             "pending": pending_json,

@@ -252,6 +252,7 @@ mod tests {
                 ".",
                 BTreeSet::from(["room".to_string()]),
                 true,
+                true,
                 "T",
                 "reading",
                 100,

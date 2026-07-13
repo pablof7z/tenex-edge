@@ -19,6 +19,8 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
 
+mod session_status;
+
 /// Per-session debug log keyed by the raw canonical session id (an internal
 /// correlation handle; canonical ids are filename-safe).
 fn slog(pubkey: &str, msg: &str) {
@@ -201,10 +203,11 @@ pub async fn run_session_in_daemon(
     if let Some(session) = load_session("startup-status") {
         let now = now_secs();
         let chans = channel_set(&p, &store, &session);
+        let automatic_delivery = session_status::automatic_delivery(&store, Some(&session));
         drive_status!(
             "session_started",
             None,
-            status_fact!(started, p, aref, session, chans, now),
+            status_fact!(started, p, aref, session, chans, automatic_delivery, now),
             |r| {
                 r.on_session_started_with_dispatch(
                     &aref.pubkey,
@@ -213,6 +216,7 @@ pub async fn run_session_in_daemon(
                     &p.rel_cwd,
                     chans,
                     session.working,
+                    automatic_delivery,
                     &session.title,
                     &session.activity,
                     p.dispatch_event.clone(),
@@ -235,11 +239,13 @@ pub async fn run_session_in_daemon(
                 if let Err(e) = st!(|s: &Store| s.touch_session(&aref.pubkey, now)) {
                     tracing::error!(session = %aref.pubkey, error = %e, "touch_session failed — liveness not re-armed this beat");
                 }
+                let session = load_session("heartbeat");
+                let automatic_delivery = session_status::automatic_delivery(&store, session.as_ref());
                 drive_status!(
                     "tick",
                     None,
-                    status_fact!(tick, aref.pubkey, now),
-                    |r| r.on_tick(&aref.pubkey, now)
+                    status_fact!(tick, aref.pubkey, automatic_delivery, now),
+                    |r| r.on_tick(&aref.pubkey, automatic_delivery, now)
                 );
             }
             _ = obs.tick() => {

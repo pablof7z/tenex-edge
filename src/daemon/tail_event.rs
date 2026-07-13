@@ -6,6 +6,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::session_state::SessionState;
+
 /// One event on the tail stream. Sent as `Response::item(to_value(ev))`.
 ///
 /// The `category` field is the serde tag. Field names match the spec §6.A.
@@ -41,15 +43,13 @@ pub enum TailEvent {
         /// Elapsed seconds since the turn started (meaningful on idle).
         elapsed_s: Option<u64>,
     },
-    /// NIP-38 status changed: the persistent session title (`text`) and/or the
-    /// mid-turn flag (`active`).
+    /// Published session title or normalized state changed.
     Status {
         ts: u64,
         channel: String,
         agent: String,
         text: String,
-        /// Whether the session is mid-turn (idle = !active).
-        active: bool,
+        state: SessionState,
     },
     /// Peer session came online (first-seen heartbeat).
     Join {
@@ -183,7 +183,7 @@ mod tests {
             channel: "proj".into(),
             agent: "a".into(),
             text: "working".into(),
-            active: true,
+            state: SessionState::Working,
         };
         let profile = TailEvent::Profile {
             ts: 0,

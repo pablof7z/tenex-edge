@@ -161,13 +161,13 @@ pub(in crate::daemon::server) fn build_backfill(
                 session: st.pubkey.clone(),
                 rel_cwd: String::new(),
             });
-            if !st.title.is_empty() || st.busy {
+            if !st.title.is_empty() || st.state.is_working() {
                 events.push(TailEvent::Status {
                     ts: st.last_seen,
                     channel: st.channel_h.clone(),
                     agent: st.slug.clone(),
                     text: st.title.clone(),
-                    active: st.busy,
+                    state: st.state,
                 });
             }
         }

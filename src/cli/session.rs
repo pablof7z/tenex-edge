@@ -13,8 +13,7 @@ pub(super) enum SessionAction {
     ///
     /// For an agent whose harness was started manually outside a
     /// daemon-owned PTY (e.g. `codex --yolo resume <id>` typed into a raw
-    /// terminal tab), so it has no live `pty_session` alias and idle
-    /// mentions silently black-hole. This kills the manually-started
+    /// terminal tab), so mentions remain queued between turns. This kills the manually-started
     /// process and resumes the SAME harness session (same resume token,
     /// same channel) inside a fresh daemon PTY supervisor. Only the
     /// harness's own persisted session state survives the hop — terminal

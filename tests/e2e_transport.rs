@@ -67,7 +67,7 @@ async fn publishes_and_decodes_all_event_types() {
             host: "test-host".into(),
             title: "fixing the auth bug".into(),
             activity: "reading the diff".into(),
-            busy: true,
+            state: tenex_edge::session_state::SessionState::Working,
             rel_cwd: String::new(),
             expires_at: Some(1_900_000_000),
             dispatch_event: None,

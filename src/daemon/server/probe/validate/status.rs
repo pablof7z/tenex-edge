@@ -78,9 +78,11 @@ pub(super) fn status_evidence(state: &Arc<DaemonState>, target: &str, pubkey: &s
     );
     let channel_h = session.as_ref().map(|s| s.channel_h.as_str()).unwrap_or("");
     let channel_confirmed = !channel_h.is_empty() && graph_channels.iter().any(|h| h == channel_h);
-    let busy_matches = session
-        .as_ref()
-        .map(|s| graph_row.as_ref().is_some_and(|row| row.busy == s.working));
+    let working_matches = session.as_ref().map(|s| {
+        graph_row
+            .as_ref()
+            .is_some_and(|row| row.state.is_working() == s.working)
+    });
     let title_matches = session
         .as_ref()
         .map(|s| graph_row.as_ref().is_some_and(|row| row.title == s.title));
@@ -106,13 +108,13 @@ pub(super) fn status_evidence(state: &Arc<DaemonState>, target: &str, pubkey: &s
         "relay_slug": latest.map(|r| r.slug.as_str()).unwrap_or(""),
         "relay_title": latest.map(|r| r.title.as_str()).unwrap_or(""),
         "relay_activity": latest.map(|r| r.activity.as_str()).unwrap_or(""),
-        "relay_busy": latest.map(|r| r.busy).unwrap_or(false),
+        "relay_state": latest.map(|r| r.state.as_str()).unwrap_or("offline"),
         "relay_last_seen": latest.map(|r| r.last_seen).unwrap_or(0),
         "relay_expiration": latest.map(|r| r.expiration).unwrap_or(0),
         "relay_now": now,
         "graph_title": graph_row.as_ref().map(|r| r.title.as_str()).unwrap_or(""),
         "graph_activity": graph_row.as_ref().map(|r| r.activity.as_str()).unwrap_or(""),
-        "graph_busy": graph_row.as_ref().map(|r| r.busy).unwrap_or(false),
+        "graph_state": graph_row.as_ref().map(|r| r.state.as_str()).unwrap_or("offline"),
         "graph_channels": graph_channels,
         "channel_h": channel_h,
         "agent_slug": session.as_ref().map(|s| s.agent_slug.as_str()).unwrap_or(""),
@@ -123,7 +125,7 @@ pub(super) fn status_evidence(state: &Arc<DaemonState>, target: &str, pubkey: &s
         "last_seen": session.as_ref().map(|s| s.last_seen).unwrap_or(0),
         "last_distill_at": session.as_ref().map(|s| s.last_distill_at).unwrap_or(0),
         "channel_confirmed": channel_confirmed,
-        "busy_matches_session": busy_matches,
+        "working_matches_session": working_matches,
         "title_matches_session": title_matches,
         "summary": summary(pubkey, graph_found, session_row_found, session_alive, relay_rows.len(), relay_live_count, &graph_row),
         "reason": reason(graph_found, session_row_found, session_alive, relay_status_found, relay_live_count),
@@ -175,8 +177,8 @@ fn summary(
         graph_row,
     ) {
         (true, _, _, _, _, Some(row)) => format!(
-            "status `{session_id}` is published busy={} channels={}",
-            row.busy,
+            "status `{session_id}` is published state={} channels={}",
+            row.state,
             row.channels.len()
         ),
         (false, true, true, _, _, _) => {

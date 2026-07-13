@@ -32,6 +32,11 @@ impl StatusReconciler {
                 .flatten()?
                 .clone(),
             working: *self.graph.input_value(nodes.working).ok().flatten()?,
+            automatic_delivery: *self
+                .graph
+                .input_value(nodes.automatic_delivery)
+                .ok()
+                .flatten()?,
             title: self.graph.input_value(nodes.title).ok().flatten()?.clone(),
             activity: self
                 .graph
@@ -90,6 +95,7 @@ impl ReplayState {
                     info,
                     args.channels.clone(),
                     args.working,
+                    args.automatic_delivery,
                     &args.title,
                     &args.activity,
                     args.at / self.refresh_secs,
@@ -128,11 +134,18 @@ impl ReplayState {
                     tx.set_input(n.channels, channels.clone())
                 })?;
             }
-            StatusDrive::Tick { pubkey, at } => {
-                self.mutate(pubkey, tx, *at, |_tx, _n| Ok(()))?;
+            StatusDrive::Tick {
+                pubkey,
+                automatic_delivery,
+                at,
+            } => {
+                self.mutate(pubkey, tx, *at, |tx, n| {
+                    tx.set_input(n.automatic_delivery, *automatic_delivery)
+                })?;
             }
             StatusDrive::SessionEnded { pubkey, at } => {
                 if let Some(nodes) = self.sessions.get(pubkey) {
+                    tx.set_input(nodes.live, false)?;
                     tx.set_input(nodes.working, false)?;
                     tx.set_input(nodes.arm, end_arm(*at, self.refresh_secs))?;
                 }

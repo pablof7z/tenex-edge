@@ -67,7 +67,7 @@ pub(crate) struct SpawnableRow {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct WhoRow {
     pub(crate) source: WhoSource,
-    pub(crate) fresh: bool,
+    pub(crate) state: crate::session_state::SessionState,
     pub(crate) slug: String,
     pub(crate) channel: String,
     /// Persistent session title (what the session is about); survives idle turns.
@@ -76,10 +76,6 @@ pub(crate) struct WhoRow {
     /// title while mid-turn; empty (and not rendered) when idle.
     #[serde(default)]
     pub(crate) activity: String,
-    /// Whether the session is mid-turn. Drives the idle marker independently of
-    /// the title, which is retained while idle.
-    #[serde(default)]
-    pub(crate) active: bool,
     /// A local Class A session that exited but still owns a soft route claim.
     #[serde(default)]
     pub(crate) dormant: bool,
@@ -93,9 +89,6 @@ pub(crate) struct WhoRow {
     /// Local sessions and same-machine peers are never remote (the §8e fix).
     #[serde(default)]
     pub(crate) remote: bool,
-    /// True when this session has a live PTY endpoint registered.
-    #[serde(default)]
-    pub(crate) attachable: bool,
     /// Top-level work-root channel for UI grouping. `channel` remains the live
     /// routing scope (session room or task channel); this is the root-channel tab.
     #[serde(default)]

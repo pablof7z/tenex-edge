@@ -34,7 +34,7 @@ pub(super) struct StatusContent {
     pub channels: Vec<String>,
     pub title: String,
     pub activity: String,
-    pub busy: bool,
+    pub state: crate::session_state::SessionState,
 }
 
 /// One session's full collection value: the content that drives change-detection
@@ -51,7 +51,9 @@ pub(super) struct StatusValue {
 #[derive(Clone, Copy)]
 pub(super) struct SessionNodes {
     pub scope: ScopeId,
+    pub live: InputNode<bool>,
     pub working: InputNode<bool>,
+    pub automatic_delivery: InputNode<bool>,
     pub title: InputNode<String>,
     pub activity: InputNode<String>,
     pub channels: InputNode<BTreeSet<String>>,
@@ -78,7 +80,7 @@ fn command_of(id: &str, v: &StatusValue) -> StatusCommand {
         channels: v.content.channels.clone(),
         title: v.content.title.clone(),
         activity: v.content.activity.clone(),
-        busy: v.content.busy,
+        state: v.content.state,
         host: v.info.host.clone(),
         slug: v.info.slug.clone(),
         rel_cwd: v.info.rel_cwd.clone(),
@@ -123,13 +125,23 @@ pub(super) fn create_session(
     info: StaticInfo,
     channels: BTreeSet<String>,
     working: bool,
+    automatic_delivery: bool,
     title: &str,
     activity: &str,
     arm: u64,
 ) -> GraphResult<(SessionNodes, TransactionResult<StatusCommand>)> {
     let mut tx = graph.begin_transaction_with_options(opts())?;
     let nodes = stage_session(
-        &mut tx, labels, id, info, channels, working, title, activity, arm,
+        &mut tx,
+        labels,
+        id,
+        info,
+        channels,
+        working,
+        automatic_delivery,
+        title,
+        activity,
+        arm,
     )?;
     let result = tx.commit()?;
     drop(tx);
@@ -144,14 +156,24 @@ pub(super) fn stage_session(
     info: StaticInfo,
     channels: BTreeSet<String>,
     working: bool,
+    automatic_delivery: bool,
     title: &str,
     activity: &str,
     arm: u64,
 ) -> GraphResult<SessionNodes> {
     let scope = tx.create_scope(format!("status-{id}"))?;
+    let live_n = tx.input::<bool>(format!("status-{id}-live"))?;
+    labels.record(live_n.id(), format!("status/{id}/live"));
+    tx.set_input(live_n, true)?;
     let working_n = tx.input::<bool>(format!("status-{id}-working"))?;
     labels.record(working_n.id(), format!("status/{id}/working"));
     tx.set_input(working_n, working)?;
+    let automatic_delivery_n = tx.input::<bool>(format!("status-{id}-automatic-delivery"))?;
+    labels.record(
+        automatic_delivery_n.id(),
+        format!("status/{id}/automatic-delivery"),
+    );
+    tx.set_input(automatic_delivery_n, automatic_delivery)?;
     let title_n = tx.input::<String>(format!("status-{id}-title"))?;
     labels.record(title_n.id(), format!("status/{id}/title"));
     tx.set_input(title_n, title.to_string())?;
@@ -168,22 +190,28 @@ pub(super) fn stage_session(
     let content = tx.derived(
         format!("status-{id}-content"),
         DependencyList::new([
+            live_n.id(),
             working_n.id(),
+            automatic_delivery_n.id(),
             title_n.id(),
             activity_n.id(),
             channels_n.id(),
         ])?,
         move |ctx| {
-            let busy = *ctx.input(working_n)?;
+            let state = crate::session_state::SessionState::classify(
+                *ctx.input(live_n)?,
+                *ctx.input(working_n)?,
+                *ctx.input(automatic_delivery_n)?,
+            );
             Ok(StatusContent {
                 channels: ctx.input(channels_n)?.iter().cloned().collect(),
                 title: ctx.input(title_n)?.clone(),
-                activity: if busy {
+                activity: if state.is_working() {
                     ctx.input(activity_n)?.clone()
                 } else {
                     String::new()
                 },
-                busy,
+                state,
             })
         },
     )?;
@@ -209,7 +237,9 @@ pub(super) fn stage_session(
     tx.map_resource_planner(coll, scope, plan_status)?;
     Ok(SessionNodes {
         scope,
+        live: live_n,
         working: working_n,
+        automatic_delivery: automatic_delivery_n,
         title: title_n,
         activity: activity_n,
         channels: channels_n,

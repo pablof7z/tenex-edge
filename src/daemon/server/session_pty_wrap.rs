@@ -3,8 +3,8 @@
 //!
 //! An agent whose harness was started manually outside a daemon-owned PTY
 //! (e.g. `codex --yolo resume <id>` typed directly into an iTerm tab) has no
-//! `pty_session` alias. Nothing can inject a mention into it, so idle
-//! mentions silently black-hole. This RPC lets that session re-home ITSELF:
+//! `pty_session` alias. Mentions remain queued between turns. This RPC lets
+//! that session re-home ITSELF:
 //! kill the manually-started process and resume the SAME harness session
 //! (same resume token, same channel) inside a fresh daemon PTY supervisor,
 //! which registers the standard `pty_session` alias.
