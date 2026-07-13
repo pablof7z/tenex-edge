@@ -3214,6 +3214,7 @@ dependencies = [
  "clap",
  "crossterm 0.28.1",
  "dialoguer",
+ "fuzzy-matcher",
  "hmac",
  "inquire",
  "libc",

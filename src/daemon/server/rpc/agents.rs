@@ -56,7 +56,7 @@ pub(crate) fn rpc_agent_launch_preflight(
         };
         let attach = pty
             .map(|id| format!("tenex-edge pty attach {id}"))
-            .unwrap_or_else(|| "tenex-edge tui".to_string());
+            .unwrap_or_else(|| "tenex-edge mgmt session list".to_string());
         let npub = crate::idref::npub(&identity.pubkey_hex()).unwrap_or(identity.pubkey_hex());
         anyhow::bail!(
             "durable agent {:?} already has live session {} in channel(s) {}; \

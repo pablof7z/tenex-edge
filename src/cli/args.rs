@@ -12,7 +12,7 @@ use super::messaging::PublishArgs;
 use super::my::MyAction;
 use super::probe::ProbeArgs;
 use super::pty::{PtyAction, PtySupervisorArgs};
-use super::tui::TuiArgs;
+use super::tui::SessionListArgs;
 use super::who::WhoArgs;
 
 #[derive(Parser)]
@@ -68,8 +68,6 @@ pub(super) enum Cmd {
         #[command(subcommand)]
         action: MyAction,
     },
-    /// Browse live sessions and attach to PTY-governed sessions.
-    Tui(TuiArgs),
     /// Local debugging tools for hook injection and command telemetry.
     #[command(hide = true)]
     Debug {
@@ -123,8 +121,19 @@ pub(super) enum MgmtAction {
         #[command(subcommand)]
         action: AgentAction,
     },
+    /// Inspect and control sessions hosted by this machine.
+    Session {
+        #[command(subcommand)]
+        action: MgmtSessionAction,
+    },
     /// Interactively configure model providers and role-to-model assignments.
     Config(ConfigArgs),
+}
+
+#[derive(Subcommand)]
+pub(super) enum MgmtSessionAction {
+    /// Open the interactive local session manager.
+    List(SessionListArgs),
 }
 
 #[cfg(test)]
@@ -346,11 +355,31 @@ mod tests {
     }
 
     #[test]
-    fn tui_parses() {
-        let cli = Cli::try_parse_from(["tenex-edge", "tui", "--refresh-secs", "3"]).unwrap();
+    fn mgmt_session_list_parses() {
+        let cli = Cli::try_parse_from([
+            "tenex-edge",
+            "mgmt",
+            "session",
+            "list",
+            "--refresh-secs",
+            "3",
+        ])
+        .unwrap();
         match cli.cmd {
-            Cmd::Tui(args) => assert_eq!(args.refresh_secs, 3),
-            _ => panic!("expected tui command"),
+            Cmd::Mgmt {
+                action:
+                    MgmtAction::Session {
+                        action: MgmtSessionAction::List(args),
+                    },
+            } => assert_eq!(args.refresh_secs, 3),
+            _ => panic!("expected mgmt session list command"),
         }
+    }
+
+    #[test]
+    fn removed_top_level_tui_stays_unavailable() {
+        let err = parse_err(&["tenex-edge", "tui"]);
+
+        assert_eq!(err.kind(), ErrorKind::InvalidSubcommand);
     }
 }

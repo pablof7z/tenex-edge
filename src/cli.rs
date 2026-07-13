@@ -43,7 +43,7 @@ mod who;
 #[cfg(test)]
 use admin::{parse_since, render_tail_event};
 pub use args::Cli;
-use args::{Cmd, DaemonAction, MgmtAction};
+use args::{Cmd, DaemonAction, MgmtAction, MgmtSessionAction};
 
 pub(crate) fn select_agent_env(active: Option<String>, fallback: Option<String>) -> Option<String> {
     active
@@ -122,6 +122,9 @@ pub async fn run(cli: Cli) -> Result<()> {
         Cmd::Agents { action } => admin::agents(action).await,
         Cmd::Mgmt { action } => match action {
             MgmtAction::Agent { action } => admin::agent(action).await,
+            MgmtAction::Session {
+                action: MgmtSessionAction::List(args),
+            } => tui::session_list(args).await,
             MgmtAction::Config(args) => config::config(args).await,
         },
         Cmd::Dispatch(args) => dispatch::dispatch(args).await,
@@ -129,7 +132,6 @@ pub async fn run(cli: Cli) -> Result<()> {
         Cmd::Launch(args) => launch_cli::launch(args).await,
         Cmd::Mcp(args) => mcp::mcp(args).await,
         Cmd::My { action } => my::my(action),
-        Cmd::Tui(args) => tui::tui(args).await,
         Cmd::Daemon(args) => match args.action {
             Some(DaemonAction::Restart) => restart_daemon().await,
             Some(DaemonAction::Stop) => stop_daemon(),

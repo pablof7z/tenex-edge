@@ -1,7 +1,10 @@
 mod app;
+mod confirmation;
 mod data;
+mod kill;
 mod pane;
 mod render;
+mod selection;
 #[cfg(test)]
 mod tests;
 
@@ -19,13 +22,13 @@ use std::io;
 use std::time::{Duration, Instant};
 
 #[derive(Args)]
-pub(in crate::cli) struct TuiArgs {
+pub(in crate::cli) struct SessionListArgs {
     /// Session/status refresh interval in seconds.
     #[arg(long, default_value_t = 2)]
     pub(in crate::cli) refresh_secs: u64,
 }
 
-pub(in crate::cli) async fn tui(args: TuiArgs) -> Result<()> {
+pub(in crate::cli) async fn session_list(args: SessionListArgs) -> Result<()> {
     let mut app = App::new(Duration::from_secs(args.refresh_secs.max(1)));
     app.refresh().await?;
 
