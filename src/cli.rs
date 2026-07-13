@@ -42,7 +42,7 @@ mod who;
 
 #[cfg(test)]
 use admin::{parse_since, render_tail_event};
-pub use args::{print_help_all, Cli};
+pub use args::{print_help_all, print_help_contextual, Cli};
 use args::{Cmd, DaemonAction, MgmtAction, MgmtSessionAction};
 pub(crate) fn select_agent_env(active: Option<String>, fallback: Option<String>) -> Option<String> {
     active

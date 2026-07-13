@@ -31,6 +31,25 @@ fn unhide_subcommands(cmd: &mut Command) {
     }
 }
 
+/// Print top-level help with operator-only commands (`who`, `mgmt`, `launch`)
+/// unhidden when running outside an agent context (no `TENEX_EDGE_AGENT` /
+/// `TENEX_EDGE_AGENT_FALLBACK`). Inside an agent context, those commands stay
+/// hidden so agents see only their own surface. Internal/debug commands remain
+/// hidden in both contexts; use `--help --all` to see everything.
+pub fn print_help_contextual() {
+    let in_agent = super::agent_env_slug().is_some();
+    let mut cmd = Cli::command();
+    if !in_agent {
+        for sub in cmd.get_subcommands_mut() {
+            if matches!(sub.get_name(), "who" | "mgmt" | "launch") {
+                let owned = std::mem::take(sub);
+                *sub = owned.hide(false);
+            }
+        }
+    }
+    let _ = cmd.print_help();
+}
+
 #[derive(Parser)]
 #[command(
     name = "tenex-edge",
@@ -54,8 +73,9 @@ pub(super) enum Cmd {
     // turn_end). Session end has a small public surface for agents to end
     // themselves explicitly.
     /// Show the human/operator fabric view.
+    #[command(hide = true)]
     Who(WhoArgs),
-    /// Read/send chat and manage NIP-29 channels (read, send, create, edit, list, init, join, leave, archive, switch).
+    /// Read/send chat and manage channels (read, send, create, edit, list, init, join, leave, archive, switch).
     Channel {
         #[command(subcommand)]
         action: ChannelAction,
@@ -63,6 +83,7 @@ pub(super) enum Cmd {
     /// Block until matching chat arrives or the timeout passes.
     Wait(WaitArgs),
     /// Manage local setup and operator-owned configuration.
+    #[command(hide = true)]
     Mgmt {
         #[command(subcommand)]
         action: MgmtAction,
@@ -78,6 +99,7 @@ pub(super) enum Cmd {
     /// Publish a long-form proposal (kind:30023) from this agent's session.
     Publish(PublishArgs),
     /// Launch an agent through an attachable PTY or a headless RPC transport.
+    #[command(hide = true)]
     Launch(LaunchArgs),
     /// Start an MCP server over stdio or HTTP.
     Mcp(McpArgs),
@@ -134,7 +156,7 @@ pub(super) enum MgmtAction {
     /// Manage the local agent keystore: agents that have a private key on THIS
     /// machine under `<edge_home>/agents/<slug>.json`. These are the identities
     /// you can spawn locally; channel membership is governed separately by the
-    /// codec (e.g. the NIP-29 group's member list), not here.
+    /// codec (e.g. the channel group's member list), not here.
     Agent {
         #[command(subcommand)]
         action: AgentAction,
