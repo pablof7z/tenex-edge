@@ -407,3 +407,4 @@ Last updated: 2026-07-13
 | [writer](nouns/writer.md) | writer | extracted | A social media writer and community engagement agent in tenex-edge. Drafts tweets, posts to Hacker News and similar communities, tracks outreach history, and builds ongoing engagement. Spawnable via claude --dangerously-skip-permissions. |
 | [writer-agent](nouns/writer-agent.md) | writer (agent) | extracted | Social media writer and community engagement agent. Drafts tweets, posts to Hacker News and similar communities, tracks outreach history, and builds ongoing engagement. |
 | [x-openai-session](nouns/x-openai-session.md) | X-Openai-Session | extracted | A stable per-conversation header ChatGPT sends unprompted on every request (including `initialize` and every `tools/call`), different per conversation, that can serve as ChatGPT's own session identifier for identity correlation without requiring the client to echo a server-minted header. |
+
