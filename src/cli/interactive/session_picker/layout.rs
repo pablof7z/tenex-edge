@@ -186,10 +186,6 @@ impl SessionRow {
     }
 }
 
-pub(super) fn picker_page_size(session_count: usize, terminal_height: usize) -> usize {
-    session_count.min((terminal_height / 2).max(3))
-}
-
 fn join_cells(cells: &[String]) -> String {
     if cells.last().is_some_and(String::is_empty) {
         return cells.first().cloned().unwrap_or_default();
@@ -281,12 +277,5 @@ mod tests {
         assert_eq!(cell("abcdefgh", 5), "abcd…");
         assert_eq!(cell("界界界", 5), "界界…");
         assert_eq!(cell("abcdefgh", 1), "a");
-    }
-
-    #[test]
-    fn picker_uses_half_the_terminal_height_and_caps_at_session_count() {
-        assert_eq!(picker_page_size(100, 50), 25);
-        assert_eq!(picker_page_size(10, 50), 10);
-        assert_eq!(picker_page_size(100, 10), 5);
     }
 }
