@@ -51,14 +51,19 @@ Each profile gets isolated state:
 .container-state/<profile>/tenex/
 .container-state/<profile>/tenex/edge/
 .container-state/<profile>/tenex/config.json
+.container-state/<profile>/tenex/edge/harnesses.json
+.container-state/<profile>/tenex/edge/agents/<slug>.json
 ```
 
 The profile name should match the backend being tested when practical:
 
 ```text
 claude
+claude-acp
 codex
+codex-app-server
 opencode
+opencode-acp
 ```
 
 Use profile-specific state even for one-off tests. Avoid sharing state across
@@ -98,12 +103,16 @@ jq '{relays,indexerRelay,backendName,whitelistedPubkeys}' .container-state/claud
 Never print the secret fields. If a command must read them, let the command read
 the file directly.
 
+The current two-file harness/agent shape and safe inspection commands live in
+`acp-backends.md`.
+
 ## Profile Generation
 
 Use:
 
 ```bash
-skills/tenex-edge-dev/scripts/write-container-profiles "${LAB_ENV}" claude codex opencode
+skills/tenex-edge-dev/scripts/write-container-profiles "${LAB_ENV}" \
+  claude claude-acp codex codex-app-server opencode opencode-acp
 ```
 
 The script:
@@ -112,19 +121,21 @@ The script:
 - computes each public key with `nak`
 - whitelists all generated public keys in every profile
 - writes relay/indexer relay to the croissant URL from `lab.env`
+- writes a named bundle and selecting agent file for every profile
 - resets profile-local daemon/fabric state so fresh keys do not inherit an old
   relay workspace
-- prints only profile names, config paths, and pubkey prefixes
+- validates all generated JSON and prints only safe bundle metadata and pubkey prefixes
 
-If you add a custom profile, use a simple lowercase name without spaces. The
-name becomes part of file paths and generated session/container names.
+Supported profiles are `claude`, `claude-acp`, `codex`, `codex-app-server`,
+`opencode`, `opencode-acp`, `codex-ollama`, and `opencode-ollama`. Unknown
+profile names fail loudly rather than silently selecting the wrong harness.
 
 ## Launch Modes
 
 Direct mode:
 
 ```bash
-skills/tenex-edge-dev/scripts/launch-agent-pty "${LAB_ENV}" direct claude --model haiku
+skills/tenex-edge-dev/scripts/launch-agent "${LAB_ENV}" direct claude --model haiku
 ```
 
 Use direct mode when validating:
@@ -137,7 +148,7 @@ Use direct mode when validating:
 Launch mode:
 
 ```bash
-skills/tenex-edge-dev/scripts/launch-agent-pty "${LAB_ENV}" launch claude --model haiku
+skills/tenex-edge-dev/scripts/launch-agent "${LAB_ENV}" launch claude --model haiku
 ```
 
 Use launch mode when validating:
@@ -147,6 +158,8 @@ Use launch mode when validating:
 - tenex-edge hook context is injected
 - portable PTY naming, attachment, and injection behavior are correct
 - the launched agent appears as expected in fabric state
+
+For ACP/app-server smoke and headless launch, use `acp-backends.md`.
 
 The launch helper writes a cidfile in the lab work directory when the container
 runtime provides one. Clean up with `scripts/cleanup-lab` so the container-side
@@ -176,6 +189,8 @@ The named models are preferences, not brittle requirements. If a CLI rejects a
 flag or model name, capture the rejection and use the cheapest configured model
 that can run shell commands. Record the fallback in the report.
 
+Structured model overrides are listed in `acp-backends.md`.
+
 ## Doctor Expectations
 
 Run:
@@ -192,18 +207,20 @@ The doctor should prove:
 - Claude hooks can be installed into writable staged settings
 - Codex hooks can be installed into the profile state
 - OpenCode plugin state can be installed or verified
+- the Claude ACP adapter, Codex app-server, and OpenCode ACP commands exist
+- generated `harnesses.json` and agent files parse when present
 
 For live agent testing, run doctor against the exact generated profile before
 launching that profile:
 
 ```bash
-bash containers/tenex-edge/run --profile claude doctor
+bash containers/tenex-edge/run --profile claude-acp doctor
 ```
 
-Then run a tiny provider command to prove the CLI accepts the staged auth:
+Then run the structured smoke to prove the bundle and staged auth:
 
 ```bash
-bash containers/tenex-edge/run --profile claude claude -p "Respond with exactly OK." --model haiku
+skills/tenex-edge-dev/scripts/launch-agent "${LAB_ENV}" smoke claude-acp
 ```
 
 If a provider is intentionally unavailable on the host, do not call the whole
@@ -240,6 +257,6 @@ For each backend include:
 - exact command
 - model flag accepted or fallback used
 - whether host auth was accepted
-- PTY id for launch-mode runs, or foreground direct run evidence
+- PTY id for PTY launch, ACP session id for structured launch, or foreground evidence
 - log paths inspected
 - pass/fail and the next concrete failing command

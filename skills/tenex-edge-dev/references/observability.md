@@ -8,7 +8,8 @@ daemon/relay logs.
 
 Minimum useful surfaces:
 
-- portable PTY id plus attach/inject evidence for launch-mode agent sessions
+- portable PTY id plus attach/inject evidence for PTY sessions, or ACP smoke
+  output plus the headless session id and delivery evidence for RPC sessions
 - croissant relay log named in `lab.env`
 - NIP-11 response from the relay
 - `nak` event probes for the relevant kinds
@@ -39,6 +40,28 @@ bash containers/tenex-edge/run --profile claude tenex-edge pty inject "${PTY_ID}
 Keep prompts short and verifiable. Ask the agent to run one command or describe
 one visible injection surface at a time. Direct-mode runs are foreground
 auth/plugin checks; inspect them in the terminal where they are running.
+
+## Inspecting ACP/App-Server Agents
+
+Structured transports have no PTY UI. First capture the bundle smoke:
+
+```bash
+skills/tenex-edge-dev/scripts/launch-agent "${LAB_ENV}" smoke claude-acp
+```
+
+A pass includes the selected bundle/harness/transport, `initialize ok`, session
+or thread creation, a completed model turn, and ACP cross-process resume. Then
+capture the headless launch output:
+
+```text
+[tenex-edge acp] session: ...
+[tenex-edge acp] headless agent launched; it responds to channel mentions (no PTY to attach)
+```
+
+While that container is alive, do not start a second container against the
+same profile. Inspect the bind-mounted daemon/relay logs from the host and use
+host `nak` probes. For delivery, correlate the mentioned kind:9 id with the ACP
+session and the daemon's delivery/completion lines.
 
 ## Capturing Croissant
 
@@ -184,12 +207,13 @@ Use this compact shape:
 ```text
 Run:
 - relay: ws://...
-- profiles: claude, codex
-- mode: launch
+- profiles: claude-acp, codex-app-server
+- mode: smoke + headless launch
 - probe: /tmp/.../probe-...
 
 Evidence:
-- pty <id>: showed ...
+- structured smoke: initialize/turn/resume ...
+- ACP session <id>: delivery ...
 - croissant: showed ...
 - nak kind <kind>: showed ...
 - hook-tail: showed ...

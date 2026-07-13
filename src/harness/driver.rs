@@ -118,7 +118,7 @@ static DRIVERS: &[HarnessDriver] = &[
         transport: Transport::Acp,
         // adapter, not the claude binary — this is why base_argv must be
         // code-owned and not sniffed from argv[0].
-        base_argv: &["npx", "@zed-industries/claude-code-acp"],
+        base_argv: &["npx", "--yes", "@agentclientprotocol/claude-agent-acp"],
         base_env: &[EnvDirective::Remove("CLAUDECODE")],
         resume: ResumeMechanism::AcpSessionLoad,
         steer: SteerPrimitive::Hooks,

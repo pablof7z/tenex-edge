@@ -26,7 +26,10 @@ fn invalid_cell_is_absent() {
 #[test]
 fn claude_acp_uses_adapter_not_binary() {
     let d = driver::lookup(Harness::ClaudeCode, Transport::Acp).unwrap();
-    assert_eq!(d.base_argv, &["npx", "@zed-industries/claude-code-acp"]);
+    assert_eq!(
+        d.base_argv,
+        &["npx", "--yes", "@agentclientprotocol/claude-agent-acp"]
+    );
     assert!(d
         .base_env
         .contains(&driver::EnvDirective::Remove("CLAUDECODE")));

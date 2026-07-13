@@ -20,6 +20,20 @@ bash containers/tenex-edge/run opencode
 bash containers/tenex-edge/run opencode-ollama ollama/qwen2.5-coder:7b
 ```
 
+The `tenex-edge-dev` profile writer also supports structured agent profiles:
+
+```text
+claude-acp       -> Claude Code through the installed ACP adapter
+codex-app-server -> Codex app-server JSON-RPC
+opencode-acp     -> native OpenCode ACP
+```
+
+Each generated profile writes `/state/tenex/edge/harnesses.json` plus a
+selecting `/state/tenex/edge/agents/<slug>.json`. Use the skill's
+`scripts/launch-agent ... smoke` for the transport handshake/model turn and
+`scripts/launch-agent ... launch` for a live headless agent. The latter uses
+`tenex-edge-hosted` to keep the container-owned daemon and RPC child alive.
+
 `codex-login` stores subscription auth only in `.container-state/codex`.
 `codex-ollama` uses `.container-state/codex-ollama`, so local-provider testing
 does not share Codex subscription state. OpenCode has the same split between
@@ -47,6 +61,8 @@ machine.
 PTY-launched live labs can set `TENEX_EDGE_CONTAINER_NAME` and
 `TENEX_EDGE_CONTAINER_CIDFILE` so a cleanup script can stop the exact Apple
 container if the host pty pane is killed before the agent exits.
+Headless ACP/app-server labs use the same cidfile contract because there is no
+attached PTY keeping the container's main process alive.
 
 The runner defaults `OLLAMA_HOST` to `http://192.168.64.1:11434`, the Apple
 container VM's gateway to the host on this machine. Override it with
@@ -69,6 +85,8 @@ from inside the container.
 | Cargo target | `/state/target` |
 | tenex config | `/state/tenex/config.json` |
 | tenex daemon/socket/db | `/state/tenex/edge` |
+| harness bundles | `/state/tenex/edge/harnesses.json` |
+| agent bundle selectors | `/state/tenex/edge/agents/*.json` |
 
 Host Codex/OpenCode config, sessions, plugins, and host tenex daemon state are
 not mounted.
