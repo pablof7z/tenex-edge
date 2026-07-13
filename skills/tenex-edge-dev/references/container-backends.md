@@ -42,6 +42,11 @@ families are:
 Never print file contents from those paths. It is acceptable to report whether a
 path exists, whether it is mounted, and whether the CLI accepted it.
 
+For Codex, host auth staging includes base `config.toml`, auth state, and every
+top-level `*.config.toml` named profile. Stale named-profile symlinks are removed
+when their host source disappears. The files remain on the read-only host auth
+mount; app-server profile composition writes only to profile-local scratch.
+
 ## State Boundary
 
 Each profile gets isolated state:
@@ -190,6 +195,17 @@ flag or model name, capture the rejection and use the cheapest configured model
 that can run shell commands. Record the fallback in the report.
 
 Structured model overrides are listed in `acp-backends.md`.
+
+For a named Codex app-server profile, use:
+
+```bash
+TENEX_EDGE_DEV_CODEX_CONFIG_PROFILE=planner \
+  skills/tenex-edge-dev/scripts/write-container-profiles "${LAB_ENV}" codex-app-server
+```
+
+Set `TENEX_EDGE_DEV_CODEX_APP_SERVER_MODEL` as well only when the lab needs an
+inline model override to win over the named profile. See `acp-backends.md` for
+the composition and precedence contract.
 
 ## Doctor Expectations
 

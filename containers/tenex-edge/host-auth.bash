@@ -131,6 +131,24 @@ stage_claude_settings() {
   chmod u+w "${target}"
 }
 
+stage_codex_named_profiles() {
+  local source target name
+  if [[ "${HOST_AUTH}" != "1" ]]; then
+    return 0
+  fi
+  for target in "${STATE_DIR}/home/.codex"/*.config.toml; do
+    [[ -L "${target}" ]] || continue
+    [[ "$(readlink "${target}")" == /host-auth/codex/* ]] || continue
+    rm -f "${target}"
+  done
+  for source in "${HOST_HOME}/.codex"/*.config.toml; do
+    [[ -e "${source}" ]] || continue
+    name="${source##*/}"
+    stage_auth_symlink "${source}" "/host-auth/codex/${name}" \
+      "${STATE_DIR}/home/.codex/${name}"
+  done
+}
+
 build_host_auth_mounts() {
   HOST_AUTH_MOUNTS=()
   add_required_auth_dir_mount "${HOST_HOME}/.tenex-edge" "/host-auth/tenex-edge"
@@ -156,6 +174,7 @@ stage_host_auth() {
     "/host-auth/codex/config.toml" "${STATE_DIR}/home/.codex/config.toml"
   stage_auth_symlink "${HOST_HOME}/.codex/config.json" \
     "/host-auth/codex/config.json" "${STATE_DIR}/home/.codex/config.json" optional
+  stage_codex_named_profiles
 
   stage_auth_copy "${HOST_HOME}/.claude.json" "${STATE_DIR}/home/.claude.json"
   stage_auth_copy "${HOST_HOME}/.claude.json" "${STATE_DIR}/home/.claude/.claude.json"

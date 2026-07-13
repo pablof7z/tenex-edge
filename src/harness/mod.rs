@@ -6,6 +6,7 @@
 //! static, `(harness, transport)`-keyed driver table and a bundle config
 //! surface (`harnesses.json`) that is independent of `agent.json`.
 
+mod codex_profile;
 pub mod config;
 pub mod driver;
 pub mod profile;
@@ -87,8 +88,22 @@ pub fn resolve_with(
     bundle: &str,
     session_scratch: &Path,
 ) -> anyhow::Result<ResolvedHarness> {
-    let (harness, transport, profile_val) = match cfg.get(bundle) {
-        Some(b) => (b.harness, b.transport, b.profile.clone()),
+    resolve_with_codex_home(cfg, bundle, session_scratch, None)
+}
+
+fn resolve_with_codex_home(
+    cfg: &HarnessesConfig,
+    bundle: &str,
+    session_scratch: &Path,
+    codex_home: Option<&Path>,
+) -> anyhow::Result<ResolvedHarness> {
+    let (harness, transport, profile_val, codex_config_profile) = match cfg.get(bundle) {
+        Some(b) => (
+            b.harness,
+            b.transport,
+            b.profile.clone(),
+            b.codex_config_profile.clone(),
+        ),
         None => {
             // Built-in default: the bundle name IS a harness slug, driven over
             // the interactive PTY transport (byte-identical to today's spawn).
@@ -99,7 +114,7 @@ pub fn resolve_with(
                      harness slug (claude|codex|opencode|grok)"
                 );
             }
-            (harness, Transport::Pty, None)
+            (harness, Transport::Pty, None, None)
         }
     };
 
@@ -111,12 +126,22 @@ pub fn resolve_with(
         )
     })?;
 
-    let plan = profile::plan_profile(
+    let mut plan = profile::plan_profile(
         harness,
         driver.profile,
         profile_val.as_ref(),
         session_scratch,
     )?;
+    if let Some(name) = codex_config_profile.as_deref() {
+        if harness != Harness::Codex || transport != Transport::AppServer {
+            anyhow::bail!("codex_config_profile is valid only for a codex app-server bundle");
+        }
+        let source_home = match codex_home {
+            Some(path) => path.to_path_buf(),
+            None => codex_profile::source_home()?,
+        };
+        plan.extend(codex_profile::plan(name, &source_home, session_scratch)?);
+    }
 
     let mut base_argv: Vec<String> = driver.base_argv.iter().map(|s| s.to_string()).collect();
     base_argv.extend(plan.extra_argv.iter().cloned());

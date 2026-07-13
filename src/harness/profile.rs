@@ -7,6 +7,12 @@ use std::path::{Path, PathBuf};
 use super::driver::ProfileMechanism;
 use crate::session::Harness;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodexHomePlan {
+    pub source: PathBuf,
+    pub target: PathBuf,
+}
+
 /// A materialized plan: extra argv/env plus scratch files to write pre-launch.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ProfilePlan {
@@ -17,6 +23,35 @@ pub struct ProfilePlan {
     pub extra_env: Vec<(String, String)>,
     /// Files to materialize before launch: (absolute path, contents).
     pub files: Vec<(PathBuf, String)>,
+    /// Isolated Codex home to prepare before writing the composed config.
+    pub codex_home: Option<CodexHomePlan>,
+}
+
+impl ProfilePlan {
+    pub fn extend(&mut self, other: Self) {
+        self.extra_argv.extend(other.extra_argv);
+        self.extra_env.extend(other.extra_env);
+        self.files.extend(other.files);
+        if other.codex_home.is_some() {
+            self.codex_home = other.codex_home;
+        }
+    }
+
+    pub fn materialize(&self) -> anyhow::Result<()> {
+        if let Some(home) = &self.codex_home {
+            super::codex_profile::prepare_home(home)?;
+        }
+        for (path, contents) in &self.files {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| {
+                    anyhow::anyhow!("creating profile dir {}: {e}", parent.display())
+                })?;
+            }
+            std::fs::write(path, contents)
+                .map_err(|e| anyhow::anyhow!("writing profile file {}: {e}", path.display()))?;
+        }
+        Ok(())
+    }
 }
 
 fn is_empty_object(v: &serde_json::Value) -> bool {

@@ -82,6 +82,25 @@ PTY_TAIL="$(printf '%s\n' "${PTY_OUTPUT}" | launch_tail | sed -n '1,6p')"
 assert_eq $'<launch>\n<claude>\n<inspect identity>\n<-->\n<--model>\n<haiku>' \
   "${PTY_TAIL}" 'PTY prompt precedes provider arguments'
 
+HOST_HOME="${TMP}/host-home"
+STATE_DIR="${TMP}/host-auth-state"
+mkdir -p "${HOST_HOME}/.codex" "${STATE_DIR}/home/.codex"
+printf 'model = "profile-model"\n' >"${HOST_HOME}/.codex/planner.config.toml"
+export HOST_AUTH=1
+# shellcheck source=/dev/null
+source "${ROOT}/containers/tenex-edge/host-auth.bash"
+stage_codex_named_profiles
+assert_eq '/host-auth/codex/planner.config.toml' \
+  "$(readlink "${STATE_DIR}/home/.codex/planner.config.toml")" \
+  'host auth stages named Codex profiles'
+rm -f "${HOST_HOME}/.codex/planner.config.toml"
+stage_codex_named_profiles
+if [[ -e "${STATE_DIR}/home/.codex/planner.config.toml" \
+  || -L "${STATE_DIR}/home/.codex/planner.config.toml" ]]; then
+  fail 'removed host Codex profile left a stale staged symlink'
+fi
+echo 'ok: host auth removes stale named Codex profile symlinks'
+
 mkdir -p "${TMP}/relay-bin" "${TMP}/croissant"
 cat >"${TMP}/relay-bin/curl" <<'EOF'
 #!/bin/sh
@@ -130,5 +149,6 @@ if kill -0 "${RELAY_PID}" 2>/dev/null; then
 fi
 echo 'ok: readiness failure reaps the relay process'
 
-bash -n "${SKILL}"/scripts/* "${ROOT}/containers/tenex-edge/doctor"
-echo 'ok: skill and doctor scripts parse as bash'
+bash -n "${SKILL}"/scripts/* "${ROOT}/containers/tenex-edge/doctor" \
+  "${ROOT}/containers/tenex-edge/host-auth.bash"
+echo 'ok: skill and container helper scripts parse as bash'

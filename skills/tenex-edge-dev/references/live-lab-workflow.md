@@ -121,18 +121,18 @@ lab profile, preserving provider home state and build cache while removing old
 daemon DB/socket/log state. That reset is intentional: a fresh relay plus stale
 workspace membership is not a valid live lab.
 
-Every profile points only at the live croissant relay. Every generated backend
-and agent pubkey is whitelisted in every profile. `harnesses.json` defines the
-bundle's underlying harness, transport, and profile; the agent file selects it
-with `harness`. The generated Nostr keys are disposable fabric keys; provider
-credentials still come from the host auth mounts.
+Every profile points only at the live croissant relay, with every generated
+backend and agent pubkey whitelisted. `harnesses.json` defines the harness,
+transport, inline profile, and optional Codex named profile; the agent file
+selects it with `harness`. Fabric keys are disposable; provider credentials
+still come from the host auth mounts.
 
 After writing profiles, inspect the public shape without exposing secrets:
 
 ```bash
 jq '{relays,indexerRelay,backendName,whitelistedPubkeys}' \
   .container-state/claude-acp/tenex/config.json
-jq 'to_entries[] | {bundle:.key,harness:.value.harness,transport:.value.transport,profile:.value.profile}' \
+jq 'to_entries[] | {bundle:.key,harness:.value.harness,transport:.value.transport,codex_config_profile:.value.codex_config_profile,profile:.value.profile}' \
   .container-state/claude-acp/tenex/edge/harnesses.json
 jq '{slug,harness,perSessionKey}' \
   .container-state/claude-acp/tenex/edge/agents/claude.json
@@ -149,9 +149,9 @@ bash containers/tenex-edge/run --profile claude-acp doctor
 skills/tenex-edge-dev/scripts/launch-agent "${LAB_ENV}" smoke claude-acp
 ```
 
-The smoke proves the actual configured bundle: initialize, session/thread
-creation, a real model prompt, and cross-process ACP resume where supported.
-Use `codex-app-server` or `opencode-acp` for their structured transports.
+The smoke proves the configured bundle: initialize, session/thread creation, a
+real model prompt, and cross-process resume. Codex also reports safe effective
+config fields before restarting, resuming its thread, and running a second turn.
 
 ## Direct Agent Runs
 

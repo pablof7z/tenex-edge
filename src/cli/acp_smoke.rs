@@ -5,7 +5,8 @@
 //! session/prompt("reply PONG") -> assert stopReason end_turn -> session/load
 //! in a FRESH child process -> assert cross-process resume.
 //!
-//! For codex (app-server): initialize -> thread/start -> turn/start.
+//! For codex (app-server): initialize -> config/read -> thread/start ->
+//! turn/start -> fresh process -> thread/resume -> second turn/start.
 
 use anyhow::{Context, Result};
 use clap::Args;
@@ -83,12 +84,8 @@ pub async fn acp_smoke(args: AcpSmokeArgs) -> Result<()> {
         cwd.display()
     );
 
-    for (path, contents) in &resolved.profile.files {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).ok();
-        }
-        std::fs::write(path, contents)
-            .with_context(|| format!("writing profile file {}", path.display()))?;
+    resolved.profile.materialize()?;
+    for (path, _) in &resolved.profile.files {
         println!("[acp-smoke] wrote profile file {}", path.display());
     }
 
@@ -105,7 +102,7 @@ pub async fn acp_smoke(args: AcpSmokeArgs) -> Result<()> {
     let cfg = mk_cfg()?;
     match cfg.dialect {
         Dialect::Acp => run_acp(cfg, &cwd, &args.prompt, mk_cfg).await,
-        Dialect::AppServer => run_app_server(cfg, &cwd, &args.prompt).await,
+        Dialect::AppServer => run_app_server(cfg, &cwd, &args.prompt, mk_cfg).await,
     }
 }
 
@@ -178,6 +175,7 @@ async fn run_app_server(
     cfg: crate::rpc_harness::SpawnConfig,
     cwd: &std::path::Path,
     prompt: &str,
+    mk_cfg: impl Fn() -> Result<crate::rpc_harness::SpawnConfig>,
 ) -> Result<()> {
     let (handle, _updates) = RpcHandle::spawn(cfg)
         .await
@@ -188,6 +186,24 @@ async fn run_app_server(
         .await
         .map_err(|e| anyhow::anyhow!("initialize: {e}"))?;
     println!("[acp-smoke] initialize ok");
+    let effective = client
+        .config_read(cwd)
+        .await
+        .map_err(|e| anyhow::anyhow!("config/read: {e}"))?;
+    let config = effective.get("config").cloned().unwrap_or_default();
+    println!(
+        "[acp-smoke] config/read -> model={} effort={} sandbox={} approval={}",
+        config.get("model").unwrap_or(&serde_json::Value::Null),
+        config
+            .get("model_reasoning_effort")
+            .unwrap_or(&serde_json::Value::Null),
+        config
+            .get("sandbox_mode")
+            .unwrap_or(&serde_json::Value::Null),
+        config
+            .get("approval_policy")
+            .unwrap_or(&serde_json::Value::Null),
+    );
     let thread_id = client
         .thread_start(cwd)
         .await
@@ -199,6 +215,26 @@ async fn run_app_server(
         .map_err(|e| anyhow::anyhow!("turn/start: {e}"))?;
     println!("[acp-smoke] turn/completed -> {}", outcome.raw);
     handle.kill().await;
+
+    let (handle2, _updates2) = RpcHandle::spawn(mk_cfg()?)
+        .await
+        .map_err(|e| anyhow::anyhow!("spawning resume app-server: {e}"))?;
+    let client2 = AppServerClient::new(handle2.clone());
+    client2
+        .initialize("tenex-edge", env!("CARGO_PKG_VERSION"))
+        .await
+        .map_err(|e| anyhow::anyhow!("initialize #2: {e}"))?;
+    client2
+        .thread_resume(&thread_id, cwd)
+        .await
+        .map_err(|e| anyhow::anyhow!("thread/resume: {e}"))?;
+    println!("[acp-smoke] thread/resume cross-process ok for {thread_id}");
+    let resumed = client2
+        .turn_start(&thread_id, "Reply with exactly one word: RESUMED")
+        .await
+        .map_err(|e| anyhow::anyhow!("turn/start after resume: {e}"))?;
+    println!("[acp-smoke] resumed turn/completed -> {}", resumed.raw);
+    handle2.kill().await;
     println!("[acp-smoke] PASS");
     Ok(())
 }

@@ -119,6 +119,18 @@ The writer generates disposable local Nostr keys, writes
 file, and whitelists every generated pubkey in every profile. Model-provider
 auth still comes from the host credential mounts.
 
+To exercise a normal named Codex config profile through app-server, regenerate
+the bundle with its profile name:
+
+```bash
+TENEX_EDGE_DEV_CODEX_CONFIG_PROFILE=planner \
+  skills/tenex-edge-dev/scripts/write-container-profiles "${LAB_ENV}" codex-app-server
+```
+
+The runner stages host `~/.codex/*.config.toml` files without exposing their
+contents. The harness composes the selected file over base `config.toml` in an
+isolated `CODEX_HOME`; project config and inline bundle overrides still win.
+
 ## Launch Patterns
 
 Direct harness run in the foreground:
