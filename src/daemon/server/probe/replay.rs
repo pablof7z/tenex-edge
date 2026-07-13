@@ -67,6 +67,7 @@ mod tests {
             .step("tick")
             .operation(InputFact::StatusDrive(StatusDrive::Tick {
                 pubkey: "missing".into(),
+                automatic_delivery: true,
                 at: 100,
             }))
             .commit();

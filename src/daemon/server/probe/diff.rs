@@ -138,6 +138,7 @@ mod tests {
                     rel_cwd: ".".into(),
                     channels: BTreeSet::from(["room".to_string()]),
                     working: true,
+                    automatic_delivery: true,
                     title: "T".into(),
                     activity: "reading".into(),
                     dispatch_event: None,
@@ -169,6 +170,7 @@ mod tests {
             .unwrap();
         let mutation = InputFact::StatusDrive(StatusDrive::Tick {
             pubkey: "s1".into(),
+            automatic_delivery: true,
             at: 100,
         });
 
@@ -189,6 +191,7 @@ mod tests {
             "agent",
             ".",
             BTreeSet::from(["room".to_string()]),
+            true,
             true,
             "T",
             "reading",

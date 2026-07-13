@@ -218,6 +218,7 @@ mod tests {
                     rel_cwd: ".".into(),
                     channels: BTreeSet::from(["room".to_string()]),
                     working: true,
+                    automatic_delivery: true,
                     title: "T".into(),
                     activity: "reading".into(),
                     dispatch_event: None,

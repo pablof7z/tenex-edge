@@ -6,6 +6,12 @@ pub(in crate::daemon::server) struct ResolvedRecipient {
     pub(in crate::daemon::server) channel: String,
 }
 
+pub(super) struct TaggedRecipient {
+    pub(super) label: String,
+    pub(super) pubkey: String,
+    pub(super) channel: String,
+}
+
 /// Resolve a recipient to a wire pubkey under the canonical scheme:
 ///   - `agent@backend-label` resolves through the backend profile cache.
 ///   - 64-hex / npub selects the permanent session identity directly.

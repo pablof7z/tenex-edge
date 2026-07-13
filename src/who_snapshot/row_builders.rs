@@ -103,7 +103,6 @@ mod tests {
         let store = crate::state::Store::open_memory().unwrap();
         let status = Status {
             pubkey: "peer".into(),
-            session_id: "peer-session".into(),
             channel_h: "root".into(),
             slug: "reviewer".into(),
             title: "Reviewing".into(),

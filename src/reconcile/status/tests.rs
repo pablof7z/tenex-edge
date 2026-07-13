@@ -18,7 +18,7 @@ fn seeded(
     let mut ledger = ResourceLedger::new();
     let out = r
         .on_session_started(
-            "pk1", "laptop", "coder", ".", channels, working, title, activity, now,
+            "pk1", "laptop", "coder", ".", channels, working, true, title, activity, now,
         )
         .unwrap();
     ledger.apply_result(&out.result);
@@ -118,15 +118,14 @@ fn turn_end_flips_to_idle_one_publish() {
 
     let pubs = publishes(&out.effects);
     assert_eq!(pubs.len(), 1);
-    assert!(!pubs[0].0.busy, "idle after turn-end");
+    assert_eq!(pubs[0].0.state, crate::session_state::SessionState::Idle);
     assert_eq!(pubs[0].0.activity, "", "idle clears the live activity line");
     assert_eq!(pubs[0].1, PublishReason::Changed);
 }
 
-/// Ending a session publishes a final idle status that keeps the session visible
-/// for the normal NIP-40 TTL window.
+/// Ending a session publishes an immediately-expiring offline status.
 #[test]
-fn session_end_emits_idle_status_with_full_ttl() {
+fn session_end_emits_offline_status_expiring_now() {
     let (mut r, mut ledger) = seeded(true, "T", "busy", chans(["room"]), 100);
 
     let out = r.on_session_ended("pk1", 200).unwrap();
@@ -135,13 +134,13 @@ fn session_end_emits_idle_status_with_full_ttl() {
 
     let pubs = publishes(&out.effects);
     assert_eq!(pubs.len(), 1, "session-end emits one final status");
-    assert_eq!(pubs[0].0.expires_at, Some(290), "normal TTL is retained");
-    assert!(!pubs[0].0.busy);
+    assert_eq!(pubs[0].0.expires_at, Some(200));
+    assert_eq!(pubs[0].0.state, crate::session_state::SessionState::Offline);
     assert_eq!(pubs[0].0.activity, "", "activity cleared on teardown");
     assert_eq!(
         pubs[0].0.channels,
         vec!["room".to_string()],
-        "final idle status keeps the last-known h tags"
+        "final offline status keeps the last-known h tags"
     );
     assert_eq!(pubs[0].1, PublishReason::Changed);
 
@@ -159,9 +158,9 @@ fn session_end_rearms_ttl_even_when_already_idle() {
 
     let pubs = publishes(&out.effects);
     assert_eq!(pubs.len(), 1);
-    assert_eq!(pubs[0].0.expires_at, Some(190));
-    assert!(!pubs[0].0.busy);
-    assert_eq!(pubs[0].1, PublishReason::Refreshed);
+    assert_eq!(pubs[0].0.expires_at, Some(100));
+    assert_eq!(pubs[0].0.state, crate::session_state::SessionState::Offline);
+    assert_eq!(pubs[0].1, PublishReason::Changed);
 }
 
 #[test]
@@ -178,7 +177,7 @@ fn operator_revoke_expires_status_now_and_closes_the_session_row() {
     };
     assert_eq!(status.expires_at, Some(123));
     assert_eq!(status.channels, vec!["room".to_string()]);
-    assert!(!status.busy);
+    assert_eq!(status.state, crate::session_state::SessionState::Offline);
     assert!(status.activity.is_empty());
     assert!(r.state_rows().is_empty());
     ledger.assert_no_duplicate_close().unwrap();
@@ -231,7 +230,7 @@ fn tick_rearms_without_content_change_and_is_the_single_path() {
     let (mut r, mut ledger) = seeded(true, "T", "x", chans(["room"]), 0);
 
     // Cross into the next 30s refresh bucket → one refresh (content unchanged).
-    let out = r.on_tick("pk1", 30).unwrap();
+    let out = r.on_tick("pk1", true, 30).unwrap();
     ledger.apply_result(&out.result);
     r.assert_oracle().unwrap();
     let pubs = publishes(&out.effects);
@@ -242,7 +241,7 @@ fn tick_rearms_without_content_change_and_is_the_single_path() {
     assert_eq!(why.kind, ResourceCommandKind::Refresh);
 
     // Same bucket again → nothing (no unconditional republish).
-    let again = r.on_tick("pk1", 45).unwrap();
+    let again = r.on_tick("pk1", true, 45).unwrap();
     ledger.apply_result(&again.result);
     r.assert_oracle().unwrap();
     assert!(again.effects.is_empty(), "in-bucket tick is a no-op");

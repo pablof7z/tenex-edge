@@ -15,6 +15,7 @@ fn rejects_mixed_surface_scripts() {
         .operation(InputFact::StatusDrive(
             crate::reconcile::StatusDrive::Tick {
                 pubkey: "s1".into(),
+                automatic_delivery: true,
                 at: 1,
             },
         ))

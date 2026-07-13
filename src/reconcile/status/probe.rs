@@ -181,7 +181,7 @@ mod tests {
         let chans: BTreeSet<String> = channels.iter().map(|s| s.to_string()).collect();
         let out = r
             .on_session_started(
-                id, "laptop", "coder", ".", chans, true, title, activity, now,
+                id, "laptop", "coder", ".", chans, true, true, title, activity, now,
             )
             .unwrap();
         assert_eq!(out.effects.len(), 1, "startup opens");

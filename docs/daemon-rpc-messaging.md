@@ -23,13 +23,16 @@ inference.
 params: {"message": "see [report]", "attachments": [{"label": "report", "path": "/absolute/report.pdf"}],
          "channel": "…"|null, "long_message": bool, ...}
 result: {"event_id": "hex", "channel": "channel-h", "mentioned_pubkeys": ["hex", ...],
-         "mentioned_labels": ["agent", ...]}
+         "mentioned_labels": ["agent", ...],
+          "recipient_reminders": ["Reminder: @agent is suspended and will receive this message after manual resumption."]}
 ```
 
 Publishes a NIP-29 kind:9 chat message signed by the caller's own per-session key
 and returns only after checked relay acceptance. Messages over the fabric render
 limit are rejected unless `long_message=true`. `channel` is destination targeting
-only; caller identity is resolved independently from the session anchors.
+only; caller identity is resolved independently from the session anchors. A
+suspended target produces a just-in-time reminder after relay acceptance,
+including before `channel send --wait` starts blocking for a reply.
 
 Each attachment label must occur in the message as `[label]`. Before publishing
 chat, the daemon reads the file, hashes it, signs a kind:24242 Blossom upload
@@ -68,10 +71,12 @@ params: {"id": "event-id-or-prefix", "message": "see [report]",
          "attachments": [{"label": "report", "path": "/absolute/report.pdf"}],
          "long_message": bool, ...}
 result: {"event_id": "hex", "reply_to": "hex", "channel": "channel-h",
-         "mentioned_pubkey": "hex"}
+         "mentioned_pubkey": "hex",
+          "recipient_reminders": ["Reminder: @agent is suspended and will receive this message after manual resumption."]}
 ```
 
 Publishes a threaded NIP-10 reply to an existing channel message. The daemon
 resolves `id` against the channel read model, targets the original author's
-pubkey, and signs the reply with the caller's per-session key.
-Attachment upload and marker expansion use the same contract as `channel_send`.
+pubkey, and signs the reply with the caller's per-session key. Attachment upload
+and marker expansion use the same contract as `channel_send`; suspended authors
+also produce the same reminder contract.

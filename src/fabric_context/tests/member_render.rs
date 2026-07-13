@@ -71,7 +71,6 @@ fn suspended_and_offline_deltas_match_both_render_paths() {
     let rec = session(&store);
     let mut peer = Status {
         pubkey: OTHER_PK.into(),
-        session_id: "peer-sess".into(),
         channel_h: "root".into(),
         slug: "amber-reviewer".into(),
         title: "Reviewing".into(),
@@ -117,7 +116,6 @@ fn heartbeat_without_state_change_produces_no_presence_delta() {
     let rec = session(&store);
     let mut peer = Status {
         pubkey: OTHER_PK.into(),
-        session_id: "peer-sess".into(),
         channel_h: "root".into(),
         slug: "amber-reviewer".into(),
         title: "Reviewing".into(),

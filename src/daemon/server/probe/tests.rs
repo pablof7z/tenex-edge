@@ -54,6 +54,7 @@ async fn rpc_probe_reflects_driven_state_for_every_verb() {
             ".",
             BTreeSet::from(["room".to_string()]),
             true,
+            true,
             "T",
             "reading",
             1_700_000_010,
@@ -109,6 +110,7 @@ async fn rpc_probe_reflects_driven_state_for_every_verb() {
         .step("tick")
         .operation(InputFact::StatusDrive(StatusDrive::Tick {
             pubkey: "missing".into(),
+            automatic_delivery: true,
             at: 1_700_000_010,
         }))
         .commit();

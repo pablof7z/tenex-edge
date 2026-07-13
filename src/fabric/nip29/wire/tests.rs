@@ -41,7 +41,11 @@ fn status(keys: &Keys, busy: bool, rel_cwd: &str) -> DomainEvent {
         } else {
             String::new()
         },
-        busy,
+        state: if busy {
+            crate::session_state::SessionState::Working
+        } else {
+            crate::session_state::SessionState::Idle
+        },
         rel_cwd: rel_cwd.into(),
         expires_at: None,
         dispatch_event: None,
@@ -127,7 +131,7 @@ fn status_slug_is_convenience_hint_not_agent_tag() {
         host: "laptop".into(),
         title: "fixing the auth bug".into(),
         activity: "reading the diff".into(),
-        busy: true,
+        state: crate::session_state::SessionState::Working,
         rel_cwd: String::new(),
         expires_at: None,
         dispatch_event: None,
@@ -193,7 +197,7 @@ fn status_uses_constant_address_independent_from_channel_h() {
         .tags([
             tag(&["h", "tenex-edge"]).unwrap(),
             tag(&["d", "status"]).unwrap(),
-            tag(&["status", "idle"]).unwrap(),
+            tag(&["state", "idle"]).unwrap(),
         ])
         .sign_with_keys(&keys)
         .unwrap();

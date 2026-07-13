@@ -6,7 +6,7 @@ fn legacy_status_tag_is_rejected() {
     let event = EventBuilder::new(Kind::from(KIND_STATUS), "")
         .tags([
             tag(&["h", "tenex-edge"]).unwrap(),
-            tag(&["d", "sess-legacy"]).unwrap(),
+            tag(&["d", "status"]).unwrap(),
             tag(&["status", "idle"]).unwrap(),
         ])
         .sign_with_keys(&keys)
@@ -20,7 +20,7 @@ fn canonical_state_tag_is_accepted() {
     let event = EventBuilder::new(Kind::from(KIND_STATUS), "working on tests")
         .tags([
             tag(&["h", "tenex-edge"]).unwrap(),
-            tag(&["d", "tenex-edge"]).unwrap(),
+            tag(&["d", "status"]).unwrap(),
             tag(&["state", "working"]).unwrap(),
             tag(&["title", "codec refactor"]).unwrap(),
             tag(&["host", "laptop"]).unwrap(),
