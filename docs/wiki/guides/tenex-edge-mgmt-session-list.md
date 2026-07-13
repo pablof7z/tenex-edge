@@ -19,14 +19,14 @@ sources:
 
 ## Overview
 
-`tenex-edge mgmt session list` is an interactive, inline Inquire-style picker
+`tenex-edge mgmt session list` is an interactive inline picker
 for local session control. It stays in the normal terminal flow as a filterable
 checklist: the user filters sessions, toggles selection, kills the selection,
 and the picker exits cleanly. Its responsive table separates session, state,
 workspace/channel, recency, and current work on wide terminals, then collapses
-lower-priority columns on narrow terminals without wrapping rows. The visible
-option page scales to roughly half the terminal height instead of using a fixed
-row cap.
+lower-priority columns on narrow terminals without wrapping rows. The picker
+reserves a stable inline viewport equal to half the terminal height, including
+empty list space when there are fewer sessions than available rows.
 
 It is backed by the daemon-owned `operator_sessions` projection, which joins
 session records, memberships, lifecycle, filesystem bindings, and local control
