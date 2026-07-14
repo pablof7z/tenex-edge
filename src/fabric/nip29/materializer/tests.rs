@@ -162,7 +162,7 @@ fn status_materializes_and_reads_live() {
         30315,
         "compiling",
         vec![
-            make_tag(&["d", "proj"]),
+            make_tag(&["d", "status"]),
             make_tag(&["h", "proj"]),
             make_tag(&["title", "build"]),
             make_tag(&["status", "busy"]),

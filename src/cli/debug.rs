@@ -160,7 +160,7 @@ mod tests {
     #[test]
     fn command_session_uses_explicit_flag_only() {
         let v = serde_json::json!({
-            "env": {"TENEX_EDGE_SESSION": "env-session"},
+            "env": {"TENEX_EDGE_PUBKEY": "env-pubkey"},
             "command": {"explicit_session": "flag-session"},
             "process": {"cwd": "/tmp"}
         });
@@ -174,7 +174,7 @@ mod tests {
         assert_eq!(command_session(&v).as_deref(), Some("flag-session"));
 
         let v = serde_json::json!({
-            "env": {"TENEX_EDGE_SESSION": "env-session"},
+            "env": {"TENEX_EDGE_PUBKEY": "env-pubkey"},
             "command": {},
             "process": {"cwd": "/tmp"}
         });

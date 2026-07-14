@@ -5,9 +5,7 @@ use rusqlite::Connection;
 mod config;
 #[path = "durable_agent/lifecycle.rs"]
 mod lifecycle;
-use config::{
-    configure_durable_agent, durable_binding, lease_count, read_agent_config, write_agent_config,
-};
+use config::{configure_durable_agent, lease_count, read_agent_config, write_agent_config};
 
 #[test]
 fn durable_agent_reuses_key_rejects_concurrency_and_never_becomes_resumable() {
@@ -211,9 +209,6 @@ fn durable_agent_reuses_key_rejects_concurrency_and_never_becomes_resumable() {
         normal_leases, 1,
         "rejected mode flip keeps the normal handle"
     );
-    let current = durable_binding(&db, &durable_pubkey);
-    assert_eq!(current, (third_id, true));
-
     assert!(
         wait_until(std::time::Duration::from_secs(20), || {
             relay::kind0_name_for_author(&relay, &durable_pubkey).as_deref() == Some(slug)

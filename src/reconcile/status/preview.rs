@@ -191,10 +191,10 @@ mod tests {
             preview.labels.labels_for(&preview.result.changed_inputs),
             vec![
                 "status/pk/working",
-                "status/s1/title",
-                "status/s1/activity",
-                "status/s1/channels",
-                "status/s1/arm",
+                "status/pk/title",
+                "status/pk/activity",
+                "status/pk/channels",
+                "status/pk/arm",
             ]
         );
         assert_eq!(preview.result.resource_plan.commands().len(), 1);

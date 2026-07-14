@@ -157,7 +157,7 @@ fn cli_command(home: &Home, args: &[&str]) -> std::process::Command {
         // shell exports these), so session pubkey derivation is deterministic.
         .env_remove("TENEX_EDGE_AGENT")
         .env_remove("TENEX_EDGE_AGENT_FALLBACK")
-        .env_remove("TENEX_EDGE_SESSION")
+        .env_remove("TENEX_EDGE_PUBKEY")
         .env_remove("TENEX_EDGE_PTY_SESSION")
         .env_remove("TENEX_EDGE_PTY_SOCKET")
         .env_remove("TENEX_EDGE_CHANNEL")

@@ -40,6 +40,7 @@ pub(crate) async fn bootstrap_pty_session_start(
     private_run_for_public_response(state, &response)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn bootstrap_exec_session_start(
     state: &Arc<DaemonState>,
     agent: &str,

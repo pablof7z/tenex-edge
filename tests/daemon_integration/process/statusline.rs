@@ -5,8 +5,7 @@ use tenex_edge::daemon::client::Client;
 fn resolves_to_specific_session_when_pubkey_is_supplied() {
     // Regression: two sessions of the same agent in the same channel must NOT
     // collapse to a single statusline. When the statusline RPC receives an
-    // explicit `session` (the canonical id, stamped as `@te_session` on the
-    // pty session by `rpc_session_start`), it must resolve to THAT session,
+    // explicit public session pubkey, it must resolve to THAT session,
     // not whichever session is newest for the agent+cwd pair.
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     // Two concurrent same-agent sessions in one channel now share the channel
@@ -46,12 +45,9 @@ fn resolves_to_specific_session_when_pubkey_is_supplied() {
             .unwrap()
             .display_slug();
 
-        // Statusline with session A's canonical id must show session A.
+        // Statusline with session A's pubkey must show session A.
         let v = c
-            .call(
-                "statusline",
-                serde_json::json!({"harness_session": &pubkey_a}),
-            )
+            .call("statusline", serde_json::json!({"session": &pubkey_a}))
             .await
             .expect("statusline A");
         assert_eq!(
@@ -59,12 +55,9 @@ fn resolves_to_specific_session_when_pubkey_is_supplied() {
             handle_a,
             "statusline --session A must resolve to session A, not the latest"
         );
-        // Statusline with session B's canonical id must show session B.
+        // Statusline with session B's pubkey must show session B.
         let v = c
-            .call(
-                "statusline",
-                serde_json::json!({"harness_session": &pubkey_b}),
-            )
+            .call("statusline", serde_json::json!({"session": &pubkey_b}))
             .await
             .expect("statusline B");
         assert_eq!(
@@ -75,7 +68,7 @@ fn resolves_to_specific_session_when_pubkey_is_supplied() {
         // Statusline with NO session (empty) fails open; harness statusline calls
         // are expected to provide the explicit session id.
         let v = c
-            .call("statusline", serde_json::json!({"harness_session": ""}))
+            .call("statusline", serde_json::json!({}))
             .await
             .expect("statusline fallback");
         assert!(

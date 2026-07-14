@@ -40,6 +40,17 @@ pub(super) fn seed_channel(store: &Store) {
     store
         .upsert_profile_with_agent_slug("pk-coder", "coder", "coder", "coder", "laptop", false, 1)
         .unwrap();
+    store
+        .reserve_session(&crate::state::RegisterSession {
+            pubkey: "pk-coder".to_string(),
+            harness: "claude-code".to_string(),
+            agent_slug: "coder".to_string(),
+            channel_h: "proj".to_string(),
+            child_pid: None,
+            transcript_path: None,
+            now: 1,
+        })
+        .unwrap();
 }
 
 pub(super) fn test_session(_id: &str) -> Session {

@@ -10,13 +10,7 @@
 //! the reaper a self-exiting child leaks its entry and a zombie (the daemon
 //! RAM-leak pattern), so it is not optional.
 
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex, OnceLock};
-
-use anyhow::{Context, Result};
-use tokio::sync::mpsc;
-
-use super::acp_runtime::{AcpRuntime, SteerState};
+use super::acp_runtime::SteerState;
 use super::acp_spawn::{
     spawn_acp_prompt, spawn_app_server_steer, spawn_app_server_steer_pending, spawn_app_server_turn,
 };
@@ -29,21 +23,12 @@ use crate::rpc_harness::{
     SessionUpdate,
 };
 use crate::session::Harness;
+use anyhow::{Context, Result};
+use tokio::sync::mpsc;
 
-/// A live ACP/app-server child plus its native session token.
-struct AcpChild {
-    handle: RpcHandle,
-    /// ACP `sessionId` or app-server `threadId`.
-    native_id: String,
-    cwd: std::path::PathBuf,
-    /// Captured transcript + running-turn state, fed by the update-drain task.
-    runtime: Arc<Mutex<AcpRuntime>>,
-}
-
-fn registry() -> &'static Mutex<HashMap<String, AcpChild>> {
-    static REG: OnceLock<Mutex<HashMap<String, AcpChild>>> = OnceLock::new();
-    REG.get_or_init(|| Mutex::new(HashMap::new()))
-}
+#[path = "acp/registry.rs"]
+mod registry;
+use registry::{register_child, registry};
 
 pub struct AcpTransport;
 
@@ -162,47 +147,6 @@ impl AcpTransport {
         }
     }
 
-    /// Register a freshly-opened child: store it, drain its update stream into a
-    /// shared [`AcpRuntime`], and start the reaper that reclaims it on exit.
-    fn register_child(
-        endpoint_id: &str,
-        handle: RpcHandle,
-        native_id: String,
-        cwd: std::path::PathBuf,
-        mut updates: mpsc::UnboundedReceiver<SessionUpdate>,
-    ) {
-        let runtime = Arc::new(Mutex::new(AcpRuntime::default()));
-        // Update-drain task (defect #6): keep the receiver alive and fold each
-        // notification into the runtime so RPC sessions capture a transcript and
-        // track the live turn id.
-        let rt_updates = runtime.clone();
-        tokio::spawn(async move {
-            while let Some(u) = updates.recv().await {
-                if let Ok(mut rt) = rt_updates.lock() {
-                    rt.note_update(&u.method, &u.params);
-                }
-            }
-        });
-        // Reaper task (defect #1): await child exit, drop the registry entry, and
-        // `wait()` the zombie.
-        let reaper_handle = handle.clone();
-        let reaper_id = endpoint_id.to_string();
-        tokio::spawn(async move {
-            reaper_handle.wait_exit().await;
-            registry().lock().unwrap().remove(&reaper_id);
-            tracing::debug!(endpoint = %reaper_id, "acp child exited; registry entry reaped");
-        });
-        registry().lock().unwrap().insert(
-            endpoint_id.to_string(),
-            AcpChild {
-                handle,
-                native_id,
-                cwd,
-                runtime,
-            },
-        );
-    }
-
     /// Open a fresh session and register it; returns the open descriptor.
     pub async fn open(&self, spec: &LaunchSpec) -> Result<AcpOpen> {
         let (handle, dialect, updates, argv) = Self::spawn_child(spec).await?;
@@ -233,7 +177,7 @@ impl AcpTransport {
         };
         let endpoint_id = Self::endpoint_id(&spec.slug);
         let pid = handle.pid;
-        Self::register_child(&endpoint_id, handle, native_id.clone(), cwd, updates);
+        register_child(&endpoint_id, handle, native_id.clone(), cwd, updates);
         Ok(AcpOpen {
             endpoint_id,
             native_id,
@@ -290,7 +234,7 @@ impl SessionTransport for AcpTransport {
         }
         let endpoint_id = Self::endpoint_id(&spec.slug);
         let pid = handle.pid;
-        Self::register_child(&endpoint_id, handle, resume.native_id.clone(), cwd, updates);
+        register_child(&endpoint_id, handle, resume.native_id.clone(), cwd, updates);
         Ok(SessionEndpoint {
             kind: TransportKind::Acp,
             endpoint_id: endpoint_id.clone(),

@@ -25,7 +25,7 @@ async fn self_exiting_child_is_reaped_from_registry() {
         .await
         .expect("spawn short-lived child");
     let endpoint_id = format!("acp-test-{}", std::process::id());
-    AcpTransport::register_child(
+    register_child(
         &endpoint_id,
         handle,
         "native-test".into(),

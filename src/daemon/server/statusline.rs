@@ -2,12 +2,6 @@ use super::*;
 
 pub(in crate::daemon::server) const STATUSLINE_RECENT_SECS: u64 = 30;
 
-#[derive(serde::Deserialize, Default)]
-pub(in crate::daemon::server) struct StatuslineParams {
-    #[serde(default)]
-    pub(in crate::daemon::server) harness_session: Option<String>,
-}
-
 /// `statusline`: everything the host's status bar renders, in one pure-read RPC.
 /// Like `turn_check`, this is called constantly by the harness, so it must
 /// NEVER write to state.db (no drains, no touches) — peeks only.
@@ -15,21 +9,17 @@ pub(in crate::daemon::server) fn rpc_statusline(
     state: &Arc<DaemonState>,
     params: &serde_json::Value,
 ) -> Result<serde_json::Value> {
-    let p: StatuslineParams = serde_json::from_value(params.clone()).unwrap_or_default();
-    // Session ID is the only locator needed. Fail open (empty bar) when it is
-    // absent or stale — the next session_start reassert will refresh @te_session
-    // on the host integration and the bar recovers on the next refresh tick.
-    let harness_session = p.harness_session.as_deref().filter(|s| !s.is_empty());
-    let rec = match harness_session {
-        Some(id) => match state.with_store(|s| s.get_session(id)).ok().flatten() {
-            Some(r) => r,
-            None => {
-                // ID present but not in the DB — stale @te_session (e.g. after a
-                // DB restore). Return a visible error instead of an empty bar.
-                return Ok(serde_json::json!({ "error": "stale" }));
-            }
-        },
-        None => return Ok(serde_json::json!({})),
+    let anchor = CallerAnchor::from_params(params);
+    if anchor.explicit.is_none()
+        && anchor.pty_session.is_none()
+        && anchor.harness_session.is_none()
+        && anchor.watch_pid.is_none()
+    {
+        return Ok(serde_json::json!({}));
+    }
+    let rec = match resolve_session(state, &anchor) {
+        Ok(rec) => rec,
+        Err(_) => return Ok(serde_json::json!({ "error": "stale" })),
     };
     let now = now_secs();
     let host = state.host.clone();

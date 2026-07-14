@@ -74,8 +74,8 @@ pub(crate) fn ephemeral_session_env() -> bool {
 
 /// The hosted PTY session this CLI invocation runs in. It is present in the
 /// harness env from process birth and is 1:1 with the session, so the daemon
-/// resolves it to the caller's canonical session. Native harness shells outside
-/// tenex-edge launch fall back to harness ids, watched pid, or channel scan.
+/// resolves its typed PTY locator to the caller's pubkey. Native harness shells
+/// fall back to native locators, watched pid, or channel scan.
 pub(crate) fn pty_session_env() -> Option<String> {
     std::env::var("TENEX_EDGE_PTY_SESSION")
         .ok()

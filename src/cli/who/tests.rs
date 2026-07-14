@@ -90,8 +90,10 @@ fn who_snapshot_merges_local_and_peer_sessions() {
     // Local coder is a hosted session; pk-coder is one of our signing keys.
     own_identity(&store, "pk-coder", "coder");
     let _coder_sid = register_local(&store, "coder", "pk-coder", "sid-coder", 1_000);
-    // With no bound identity row, the local row displays the public session handle.
-    let coder_handle = "coder".to_string();
+    let coder_handle = store
+        .handle_for_pubkey("pk-coder")
+        .unwrap()
+        .expect("derived session public handle");
     // A relay echo of our own status (pk-coder) must be deduped out of peers.
     record_peer(&store, "pk-coder", "coder", "laptop", "", false, 1_000);
     // A genuine remote peer on a different host.

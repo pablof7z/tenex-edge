@@ -6,9 +6,10 @@ use std::sync::Mutex;
 mod fixtures;
 use fixtures::{pub_status, seed_channel, test_session, BACKEND};
 
-/// turn_start returns None on a non-first turn with no inbox, chat, or peers.
+/// A quiet non-first turn still carries the current output-mode notice without
+/// replaying the first-turn awareness snapshot.
 #[test]
-fn turn_start_context_returns_none_when_empty_non_first_turn() {
+fn quiet_non_first_turn_only_renders_output_mode_notice() {
     let store = Store::open_memory().unwrap();
     seed_channel(&store);
     let mut rec = test_session("sess-freeze-2");
@@ -18,10 +19,9 @@ fn turn_start_context_returns_none_when_empty_non_first_turn() {
     let ctx = assemble_turn_start_context(
         &m, &rec, BACKEND, "laptop", /* prev_turn_started_at */ 42,
     );
-    assert!(
-        ctx.is_none(),
-        "turn_start with no inbox, non-first turn, no peers must return None; got: {ctx:?}"
-    );
+    let text = ctx.expect("headed-mode notice expected");
+    assert!(text.contains("Headless mode is off"), "got: {text:?}");
+    assert!(!text.contains("<members>"), "got: {text:?}");
 }
 
 #[test]
@@ -70,7 +70,10 @@ fn first_turn_snapshot_uses_bound_instance_identity() {
         })
         .unwrap();
     store
-        .allocate_handle("pk-coder1", "willow-vale-071-coder", 2)
+        .bind_session_signer("pk-coder1", "test-signer-salt")
+        .unwrap();
+    store
+        .allocate_custom_handle("pk-coder1", "coder", "willow-vale-071", 2)
         .unwrap();
     let now = crate::util::now_secs();
     pub_status(
@@ -136,7 +139,7 @@ fn ended_turn_with_cursor_uses_delta_not_snapshot() {
     );
 }
 
-/// A first turn with no `pty_session` alias for the session (the daemon has no
+/// A first turn with no PTY locator for the session (the daemon has no
 /// live PTY endpoint to inject into) carries the not-PTY-wrapped warning, so
 /// the agent learns idle mentions won't reach it until its next turn
 /// (`src/reconcile/delivery/mod.rs` returns `DeferNoEndpoint` and drops them).
@@ -150,12 +153,12 @@ fn first_turn_warns_when_session_has_no_live_pty_endpoint() {
     let text = assemble_turn_start_context(&m, &rec, BACKEND, "laptop", 0)
         .expect("first-turn intro expected");
     assert!(
-        text.contains("This session is not hosted in a daemon PTY."),
+        text.contains("This session cannot receive automatic steering while idle."),
         "expected the not-PTY-wrapped warning; got: {text:?}"
     );
 }
 
-/// The same first turn with a live `pty_session` alias omits the warning: the
+/// The same first turn with a live PTY locator omits the warning: the
 /// daemon has a real endpoint it can inject idle mentions into.
 #[test]
 fn first_turn_omits_pty_warning_when_session_has_a_live_endpoint() {
@@ -180,8 +183,8 @@ fn first_turn_omits_pty_warning_when_session_has_a_live_endpoint() {
     let text = assemble_turn_start_context(&m, &rec, BACKEND, "laptop", 0)
         .expect("first-turn intro expected");
     assert!(
-        !text.contains("This session is not hosted in a daemon PTY."),
-        "a live pty_session alias must suppress the not-PTY-wrapped warning; got: {text:?}"
+        !text.contains("This session cannot receive automatic steering while idle."),
+        "a live PTY locator must suppress the not-PTY-wrapped warning; got: {text:?}"
     );
 }
 

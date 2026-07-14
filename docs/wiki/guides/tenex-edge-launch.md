@@ -34,7 +34,10 @@ When `tenex-edge launch` spawns an agent harness in pty, `default-terminal` and 
 
 With these settings in place, the fixed `tenex-edge launch` window renders agent harness colors identically to a direct launch — including the colored robot logo, orange banner, and yellow warning.
 
-`@te_session` is a pty session option stamped by the daemon that the agent harness expects to be set. When correctly configured, the status line reads `claude@isolated-test-mac project project [idle]` instead of showing a red `@te_session not set` error.
+The daemon allocates the session key before spawn and injects
+`TENEX_EDGE_PUBKEY` from process birth. PTY endpoint IDs, harness-native resume
+tokens, sockets, and PIDs remain typed runtime locators owned by that pubkey;
+none of them is a second session identity.
 
 The `tenex-edge launch` status line displays the agent identifier and session state in the format `<agent>@<host> <project> <project> [idle]` (e.g. `claude@isolated-test-mac project project [idle]`).
 

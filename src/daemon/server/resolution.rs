@@ -91,6 +91,7 @@ pub(in crate::daemon::server) fn work_root_for(s: &Store, scope: &str) -> String
 ///   2. PTY session alias  (live only)
 ///   3. harness-session alias  (live only)
 ///   4. watch pid alias  (live only)
+///
 /// Typed locators never become public selectors and never return a dead row.
 pub(in crate::daemon::server) fn resolve_session_inner(
     state: &Arc<DaemonState>,

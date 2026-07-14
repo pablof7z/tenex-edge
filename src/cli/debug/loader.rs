@@ -459,8 +459,9 @@ mod tests {
                 now: 1,
             })
             .unwrap();
+        store.bind_session_signer("pk", "test-signer-salt").unwrap();
         store
-            .allocate_handle("pk", "pearl-cliff-395-haiku", 1)
+            .allocate_custom_handle("pk", "haiku", "pearl-cliff-395", 1)
             .unwrap();
         store.upsert_channel("aaa", "aaa", "", "", 1).unwrap();
         store.upsert_channel("dev-h", "dev", "", "aaa", 1).unwrap();

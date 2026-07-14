@@ -437,7 +437,7 @@ fn turn_lifecycle_drives_pubkey_row_resolved_from_harness_locator() {
     let ended = store
         .get_session(&pubkey)
         .unwrap()
-        .expect("canonical session row");
+        .expect("pubkey-owned session row");
     assert!(
         !ended.working,
         "turn_end must clear working on the pubkey row"
@@ -451,7 +451,7 @@ fn run_cli_proto(home: &Home, args: &[&str], proto: Option<&str>) -> std::proces
     cmd.args(args)
         .env_remove("TENEX_EDGE_AGENT")
         .env_remove("TENEX_EDGE_AGENT_FALLBACK")
-        .env_remove("TENEX_EDGE_SESSION")
+        .env_remove("TENEX_EDGE_PUBKEY")
         .env_remove("TENEX_EDGE_PTY_SESSION")
         .env_remove("TENEX_EDGE_PTY_SOCKET")
         .env_remove("TENEX_EDGE_CHANNEL")
