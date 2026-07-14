@@ -55,6 +55,8 @@ pub(in crate::daemon::server) async fn rpc_session_end(
 #[derive(serde::Deserialize)]
 struct SessionKillParams {
     session: String,
+    #[serde(default)]
+    revoke_memberships: bool,
 }
 
 pub(in crate::daemon::server) async fn rpc_session_kill(
@@ -89,11 +91,19 @@ pub(in crate::daemon::server) async fn rpc_session_kill(
     .and_then(serde_json::Value::as_bool)
     .unwrap_or(false);
 
+    let cleanup_failures = if p.revoke_memberships {
+        revoke_operator_session(state, &rec).await
+    } else {
+        Vec::new()
+    };
+
     match stop {
         Ok(note) => Ok(serde_json::json!({
             "killed": true,
             "ended": ended,
             "note": note,
+            "cleanup_confirmed": cleanup_failures.is_empty(),
+            "cleanup_failures": cleanup_failures,
         })),
         Err(e) => Ok(serde_json::json!({
             "killed": false,
@@ -101,6 +111,48 @@ pub(in crate::daemon::server) async fn rpc_session_kill(
             "reason": format!("{e:#}"),
         })),
     }
+}
+
+async fn revoke_operator_session(
+    state: &Arc<DaemonState>,
+    rec: &crate::state::Session,
+) -> Vec<String> {
+    let now = now_secs();
+    let mut failures = Vec::new();
+    if let Err(error) =
+        state.with_store(|store| store.clear_session_claim_for_session(&rec.session_id))
+    {
+        failures.push(format!("session claim cleanup: {error:#}"));
+    }
+    match state.session_signing_keys(&rec.agent_pubkey) {
+        Ok(keys) => {
+            crate::status_seam::drive(
+                &state.status,
+                state.fabric_provider(),
+                &keys,
+                &state.store,
+                &state.outbox,
+                crate::status_seam::DriveMeta {
+                    trigger: "operator_session_revoke",
+                    window_hash: None,
+                    replay_fact: Some(crate::reconcile::InputFact::StatusDrive(
+                        crate::reconcile::StatusDrive::SessionRevoked {
+                            session_id: rec.session_id.clone(),
+                            at: now,
+                        },
+                    )),
+                },
+                |status| status.on_session_revoked(&rec.session_id, now),
+            )
+            .await;
+            state.outbox_notify.notify_waiters();
+        }
+        Err(error) => failures.push(format!("status expiration: {error:#}")),
+    }
+    failures.extend(
+        super::membership_cleanup::revoke_session_memberships(state, &rec.session_id).await,
+    );
+    failures
 }
 
 fn stop_local_process(state: &Arc<DaemonState>, rec: &crate::state::Session) -> Result<String> {

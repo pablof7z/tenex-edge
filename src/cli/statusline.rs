@@ -162,7 +162,11 @@ fn render_statusline_inner(v: &StatuslineView, color: bool) -> String {
     ));
 
     // Workspace: the work-root channel the session's room hangs under.
-    segs.push(paint(v.work_root.clone(), "2"));
+    segs.push(crate::console_style::paint_workspace(
+        &v.work_root,
+        &v.work_root,
+        color,
+    ));
 
     // Session: the channel the session is currently on (its `channel` when set,
     // else its per-session room). Rendered by its human NAME (kind:39000 `name`),
@@ -238,102 +242,5 @@ fn truncate_chars(s: &str, max: usize) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn view() -> StatuslineView {
-        StatuslineView {
-            agent: "amber-claude".into(),
-            host: "Kubrick's Mac".into(),
-            session_id: "some-long-uuid".into(),
-            work_root: "tenex-edge".into(),
-            // New model: `channel` is the opaque NIP-29 id (never shown when a
-            // name is cached), `channel_title` is the channel's human NAME, and
-            // `title` is the distilled session title — three distinct values.
-            channel: "41yh4c028b76a".into(),
-            channel_title: "support".into(),
-            member_count: 4,
-            is_member: true,
-            working: true,
-            title: "Refactoring the inbox".into(),
-            activity: "writing tests".into(),
-            distill_error: None,
-            error: None,
-        }
-    }
-
-    #[test]
-    fn renders_identity_root_session_title_status() {
-        let s = render_statusline(&view(), false);
-        // Channel segment renders the human NAME (`support`), never the opaque
-        // id; the distilled session title follows in its own `[…]` segment.
-        assert_eq!(
-            s,
-            "amber-claude tenex-edge support \
-             [Refactoring the inbox] [writing tests]"
-        );
-    }
-
-    #[test]
-    fn busy_with_no_activity_shows_working() {
-        let mut v = view();
-        v.activity = String::new();
-        let s = render_statusline(&v, false);
-        assert!(s.ends_with("[working]"), "got: {s}");
-    }
-
-    #[test]
-    fn idle_shows_idle() {
-        let mut v = view();
-        v.working = false;
-        let s = render_statusline(&v, false);
-        assert!(s.ends_with("[idle]"), "got: {s}");
-    }
-
-    #[test]
-    fn empty_channel_title_omits_title_segment() {
-        let mut v = view();
-        v.channel_title = String::new();
-        let s = render_statusline(&v, false);
-        assert!(!s.contains("[]"), "empty title segment rendered: {s}");
-        // Status segment still present.
-        assert!(s.contains("[writing tests]"), "got: {s}");
-    }
-
-    #[test]
-    fn membership_gap_is_loud() {
-        let mut v = view();
-        v.is_member = false;
-        let s = render_statusline(&v, false);
-        assert!(s.contains("⚠ not in channel support"), "got: {s}");
-
-        // Unknown roster (count 0) → no warning (unknown, not a problem).
-        v.member_count = 0;
-        let s = render_statusline(&v, false);
-        assert!(!s.contains("not in channel"), "got: {s}");
-    }
-
-    #[test]
-    fn distill_error_flashes_red() {
-        let mut v = view();
-        v.distill_error = Some("LLM rate-limited".into());
-        let s = render_statusline(&v, false);
-        assert!(s.contains("⚠ distill: LLM rate-limited"), "got: {s}");
-    }
-
-    #[test]
-    fn truncates_long_channel_title() {
-        let mut v = view();
-        v.channel_title = "x".repeat(100);
-        let s = render_statusline(&v, false);
-        assert!(s.contains('…'), "got: {s}");
-    }
-
-    #[test]
-    fn truncates_long_activity() {
-        let mut v = view();
-        v.activity = "y".repeat(100);
-        let s = render_statusline(&v, false);
-        assert!(s.contains('…'), "got: {s}");
-    }
-}
+#[path = "statusline/tests.rs"]
+mod tests;

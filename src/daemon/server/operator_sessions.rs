@@ -1,7 +1,7 @@
 //! Canonical local-session projection for the operator session picker.
 
 use super::*;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 pub(super) fn rpc_operator_sessions(state: &Arc<DaemonState>) -> Result<serde_json::Value> {
     let metadata = crate::pty::read_all_metadata()
@@ -33,15 +33,17 @@ fn project_sessions(
                     rec.agent_pubkey.clone(),
                 )
             });
-        let joined = store
-            .list_session_joined_channels(&rec.session_id)?
+        let mut grouped = BTreeMap::<String, Vec<String>>::new();
+        for (channel_id, _) in store.list_session_joined_channels(&rec.session_id)? {
+            let root_id = store
+                .root_channel_of(&channel_id)?
+                .unwrap_or_else(|| channel_id.clone());
+            grouped.entry(root_id).or_default().push(channel_id);
+        }
+        let workspaces = grouped
             .into_iter()
-            .map(|(id, _)| channel_value(&id, channels.get(&id)))
-            .collect::<Vec<_>>();
-        let workspace_id = store
-            .root_channel_of(&rec.channel_h)?
-            .unwrap_or_else(|| rec.channel_h.clone());
-        let workspace_path = store.workspace_path(&workspace_id)?;
+            .map(|(root_id, channel_ids)| workspace_value(store, &root_id, &channel_ids, &channels))
+            .collect::<Result<Vec<_>>>()?;
         let endpoint = store
             .aliases_for_session(&rec.session_id)?
             .into_iter()
@@ -77,16 +79,28 @@ fn project_sessions(
             "harness": rec.harness,
             "transport": transport,
             "child_pid": rec.child_pid,
-            "workspace": {
-                "id": workspace_id,
-                "name": channel_name(channels.get(&workspace_id), &workspace_id),
-                "path": workspace_path,
-            },
-            "channels": joined,
+            "workspaces": workspaces,
             "endpoint": endpoint,
         }));
     }
     Ok(rows)
+}
+
+fn workspace_value(
+    store: &Store,
+    root_id: &str,
+    channel_ids: &[String],
+    channels: &HashMap<String, crate::state::Channel>,
+) -> Result<serde_json::Value> {
+    Ok(serde_json::json!({
+        "id": root_id,
+        "name": channel_name(channels.get(root_id), root_id),
+        "path": store.workspace_path(root_id)?,
+        "channels": channel_ids
+            .iter()
+            .map(|id| channel_value(id, channels.get(id)))
+            .collect::<Vec<_>>(),
+    }))
 }
 
 fn channel_value(id: &str, channel: Option<&crate::state::Channel>) -> serde_json::Value {
@@ -119,6 +133,13 @@ mod tests {
             .upsert_channel("room", "review", "", "workspace", 2)
             .unwrap();
         store.upsert_workspace("workspace", "/repo", 3).unwrap();
+        store
+            .upsert_channel("skills-root", "skills", "", "", 3)
+            .unwrap();
+        store
+            .upsert_channel("skill-dev", "skill-dev", "", "skills-root", 4)
+            .unwrap();
+        store.upsert_workspace("skills-root", "/skills", 4).unwrap();
         let pubkey = Keys::generate().public_key().to_hex();
         let id = store
             .register_session(&crate::state::RegisterSession {
@@ -134,6 +155,7 @@ mod tests {
                 now: 10,
             })
             .unwrap();
+        store.join_session_channel(&id, "skill-dev", 11).unwrap();
 
         let rows = project_sessions(&store, "laptop", &HashMap::new()).unwrap();
         assert_eq!(rows.len(), 1);
@@ -143,9 +165,13 @@ mod tests {
             crate::idref::npub(&pubkey).expect("valid npub")
         );
         assert!(rows[0].get("session_id").is_none());
-        assert_eq!(rows[0]["workspace"]["id"], "workspace");
-        assert_eq!(rows[0]["workspace"]["path"], "/repo");
-        assert_eq!(rows[0]["channels"][0]["name"], "review");
+        assert_eq!(rows[0]["workspaces"].as_array().unwrap().len(), 2);
+        assert_eq!(rows[0]["workspaces"][0]["id"], "skills-root");
+        assert_eq!(rows[0]["workspaces"][0]["path"], "/skills");
+        assert_eq!(rows[0]["workspaces"][0]["channels"][0]["name"], "skill-dev");
+        assert_eq!(rows[0]["workspaces"][1]["id"], "workspace");
+        assert_eq!(rows[0]["workspaces"][1]["path"], "/repo");
+        assert_eq!(rows[0]["workspaces"][1]["channels"][0]["name"], "review");
         assert_eq!(rows[0]["transport"], "process");
         assert!(rows[0]["endpoint"].is_null());
 

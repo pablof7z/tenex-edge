@@ -21,7 +21,9 @@ pub(super) fn render_human_workspace(
     agents_label: &str,
     color: bool,
 ) {
-    let _ = writeln!(out, "{}", style(&view.workspace.name, color, Style::Title));
+    let workspace =
+        crate::console_style::paint_workspace(&view.workspace.name, &view.workspace.channel, color);
+    let _ = writeln!(out, "{}", style(&workspace, color, Style::Title));
     if !view.workspace.about.is_empty() {
         let _ = writeln!(out, "{}", dim(&view.workspace.about, color));
     }
@@ -43,11 +45,12 @@ pub(super) fn render_human_workspace(
     render_workspace_tree(out, view.root.as_ref(), &view.channels, color);
     for activity in &view.other_workspaces {
         out.push('\n');
-        let _ = writeln!(
-            out,
-            "{}",
-            style(&activity.workspace.name, color, Style::Title)
+        let workspace = crate::console_style::paint_workspace(
+            &activity.workspace.name,
+            &activity.workspace.channel,
+            color,
         );
+        let _ = writeln!(out, "{}", style(&workspace, color, Style::Title));
         if !activity.workspace.about.is_empty() {
             let _ = writeln!(out, "{}", dim(&activity.workspace.about, color));
         }

@@ -10,13 +10,22 @@ use crossterm::{
     execute, terminal,
 };
 use ratatui::{backend::CrosstermBackend, layout::Rect, Terminal, TerminalOptions, Viewport};
-use std::{collections::BTreeSet, io};
+use std::io;
 
-const CHROME_ROWS: u16 = 3;
+const CHROME_ROWS: u16 = 2;
+const OPTION_HEIGHT: u16 = 2;
+
+#[derive(Debug)]
+pub(super) enum PickerAction {
+    Attach(SessionChoice),
+    Kill(SessionChoice),
+    Cancel,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PickerExit {
-    Submit,
+    Attach(usize),
+    Kill(usize),
     Cancel,
 }
 
@@ -24,8 +33,8 @@ enum PickerExit {
 struct PickerState {
     choices: Vec<SessionChoice>,
     visible: Vec<usize>,
-    selected: BTreeSet<usize>,
     query: String,
+    notice: Option<String>,
     cursor: usize,
     offset: usize,
 }
@@ -36,8 +45,8 @@ impl PickerState {
         Self {
             choices,
             visible,
-            selected: BTreeSet::new(),
             query: String::new(),
+            notice: None,
             cursor: 0,
             offset: 0,
         }
@@ -47,11 +56,23 @@ impl PickerState {
         if key.kind == KeyEventKind::Release {
             return None;
         }
+        self.notice = None;
         match key.code {
             KeyCode::Esc => return Some(PickerExit::Cancel),
-            KeyCode::Enter => return Some(PickerExit::Submit),
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 return Some(PickerExit::Cancel);
+            }
+            KeyCode::Char('K') | KeyCode::Char('k')
+                if key.modifiers.contains(KeyModifiers::SHIFT) =>
+            {
+                return self.current_choice().map(PickerExit::Kill);
+            }
+            KeyCode::Enter => {
+                let choice = self.current_choice()?;
+                if self.choices[choice].row.pty_live && self.choices[choice].row.pty_id.is_some() {
+                    return Some(PickerExit::Attach(choice));
+                }
+                self.notice = Some("This session has no live attachable terminal".into());
             }
             KeyCode::Up => self.move_up(1),
             KeyCode::Down => self.move_down(1),
@@ -59,9 +80,6 @@ impl PickerState {
             KeyCode::PageDown => self.move_down(rows.max(1)),
             KeyCode::Home => self.cursor = 0,
             KeyCode::End => self.cursor = self.visible.len().saturating_sub(1),
-            KeyCode::Char(' ') => self.toggle_current(),
-            KeyCode::Right => self.selected.extend(self.visible.iter().copied()),
-            KeyCode::Left => self.selected.clear(),
             KeyCode::Backspace => {
                 self.query.pop();
                 self.refilter();
@@ -78,6 +96,10 @@ impl PickerState {
         }
         self.ensure_visible(rows);
         None
+    }
+
+    fn current_choice(&self) -> Option<usize> {
+        self.visible.get(self.cursor).copied()
     }
 
     fn move_up(&mut self, amount: usize) {
@@ -101,15 +123,6 @@ impl PickerState {
         } else {
             self.cursor.saturating_add(amount).min(last)
         };
-    }
-
-    fn toggle_current(&mut self) {
-        let Some(choice) = self.visible.get(self.cursor).copied() else {
-            return;
-        };
-        if !self.selected.remove(&choice) {
-            self.selected.insert(choice);
-        }
     }
 
     fn refilter(&mut self) {
@@ -147,20 +160,12 @@ impl PickerState {
         self.offset = self.offset.min(self.visible.len().saturating_sub(rows));
     }
 
-    fn window(&self, rows: usize) -> impl Iterator<Item = (usize, usize, &SessionChoice)> {
+    fn window(&self, rows: usize) -> impl Iterator<Item = (usize, &SessionChoice)> {
         let end = (self.offset + rows).min(self.visible.len());
         self.visible[self.offset..end]
             .iter()
             .enumerate()
-            .map(move |(relative, &choice)| (self.offset + relative, choice, &self.choices[choice]))
-    }
-
-    fn take_selected(self) -> Vec<SessionChoice> {
-        self.choices
-            .into_iter()
-            .enumerate()
-            .filter_map(|(index, choice)| self.selected.contains(&index).then_some(choice))
-            .collect()
+            .map(move |(relative, &choice)| (self.offset + relative, &self.choices[choice]))
     }
 }
 
@@ -180,11 +185,7 @@ impl Drop for RawMode {
     }
 }
 
-pub(super) fn select(
-    choices: Vec<SessionChoice>,
-    header: String,
-    terminal_height: u16,
-) -> Result<Option<Vec<SessionChoice>>> {
+pub(super) fn select(choices: Vec<SessionChoice>, terminal_height: u16) -> Result<PickerAction> {
     let height = viewport_height(terminal_height);
     let _raw_mode = RawMode::enter()?;
     let backend = CrosstermBackend::new(io::stdout());
@@ -199,28 +200,28 @@ pub(super) fn select(
 
     let mut state = PickerState::new(choices);
     let mut last_area = Rect::new(0, 0, 0, height);
-    let interaction = interaction_loop(&mut terminal, &mut state, &header, &mut last_area);
+    let interaction = interaction_loop(&mut terminal, &mut state, &mut last_area);
     let cleanup = cleanup_terminal(&mut terminal, last_area);
     drop(terminal);
     cleanup?;
 
-    match interaction? {
-        PickerExit::Submit => Ok(Some(state.take_selected())),
-        PickerExit::Cancel => Ok(None),
-    }
+    Ok(match interaction? {
+        PickerExit::Attach(index) => PickerAction::Attach(state.choices.swap_remove(index)),
+        PickerExit::Kill(index) => PickerAction::Kill(state.choices.swap_remove(index)),
+        PickerExit::Cancel => PickerAction::Cancel,
+    })
 }
 
 fn interaction_loop(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     state: &mut PickerState,
-    header: &str,
     last_area: &mut Rect,
 ) -> Result<PickerExit> {
     loop {
         let rows = option_rows(last_area.height);
         state.ensure_visible(rows);
         *last_area = terminal
-            .draw(|frame| render::draw(frame, state, header))
+            .draw(|frame| render::draw(frame, state))
             .context("drawing session picker")?
             .area;
         let Event::Key(key) = event::read().context("reading session picker input")? else {
@@ -246,14 +247,9 @@ fn cleanup_terminal(
 }
 
 fn option_rows(viewport_height: u16) -> usize {
-    usize::from(viewport_height.saturating_sub(CHROME_ROWS))
+    usize::from(viewport_height.saturating_sub(CHROME_ROWS) / OPTION_HEIGHT)
 }
 
 fn viewport_height(terminal_height: u16) -> u16 {
-    let half = terminal_height / 2;
-    if half > CHROME_ROWS {
-        half
-    } else {
-        terminal_height.max(1)
-    }
+    terminal_height.max(1)
 }

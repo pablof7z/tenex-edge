@@ -2,11 +2,11 @@
 //! WHEN a session's public status is (re)published.
 //! One graph owns dedup, refresh, h-tags, and deterministic teardown; the host
 //! only signs and enqueues the emitted effects.
-
 mod model;
 mod preview;
 pub(crate) mod probe;
 pub(crate) mod replay;
+mod revoke;
 mod status_build;
 #[cfg(test)]
 mod tests;

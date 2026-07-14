@@ -146,7 +146,7 @@ flowchart LR
     MAT["Provider = materializer<br/>decode · admit · derive · upsert"]
     STORE[("Unified read model — SQLite / state.db<br/>projects · agents+membership")]
     subgraph READERS["Readers — never touch the wire"]
-        R1["CLI: who / channel read / channel list / mgmt session list"]
+        R1["CLI: who / channel read / channel list / sessions"]
         R2["channel adapter"]
         R3["hooks / context injection"]
     end

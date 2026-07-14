@@ -44,24 +44,25 @@ and marks the session dead) but does **not** touch the hosted PTY/child
 process — a process left running after `session_end` keeps executing
 unsupervised. stderr message (`session … ended` / `no such session: …`) is
 produced client-side to match today's output. CLI: `tenex-edge my session
-end --self` (or a positional session id/alias in place of `--self`).
+end --self`; agents cannot target another session.
 
 ### `session_kill`
 ```jsonc
-params: {"session": "te-…"}
-result: {"killed": true|false, "ended": true|false, "note": "pty=…"|"pid=…", "reason": "…"}
+params: {"session": "npub1…"|"te-…", "revoke_memberships": bool}
+result: {"killed": true|false, "ended": true|false, "note": "pty=…"|"pid=…", "cleanup_confirmed": bool, "cleanup_failures": ["…"], "reason": "…"}
 ```
 Process-kill, the counterpart to `session_end`. Stops the session's hosted
 process (kills the owning PTY if one is tracked, else `SIGTERM`s the tracked
 child pid), then internally calls `session_end` to mark the session's
 metadata dead. `killed` reflects whether process termination itself
 succeeded; `reason` is populated on failure (including "no local session
-matched" when `session` doesn't resolve). Reachable from `tenex-edge mgmt
-session list`'s exact-session kill action and from the CLI: `tenex-edge my
-session kill --self`, which
-resolves the caller from the PTY/session environment and refuses a
-positional target — an agent may only kill its own session. The CLI exits
-non-zero when `killed` is `false`.
+matched" when `session` doesn't resolve). `tenex-edge sessions` sets
+`revoke_memberships`: the daemon also expires presence now, clears the resume
+claim, confirms removal from every recorded NIP-29 channel, and clears local
+channel bindings. `tenex-edge my session kill --self` leaves that flag false,
+resolves the caller from the PTY/session environment, and refuses a positional
+target — an agent may only kill its own session. The CLI exits non-zero when
+process termination or requested fabric cleanup is not confirmed.
 
 ### `session_pty_wrap`
 ```jsonc
@@ -250,13 +251,14 @@ Health-check / keep-alive.
 Returns live portable PTY session state known to the daemon.
 
 ### `operator_sessions`
-Returns the canonical local control projection consumed by `tenex-edge mgmt
-session list`. It starts from alive rows in the daemon-owned `sessions` table,
+Returns the canonical local control projection consumed by `tenex-edge
+sessions`. It starts from alive rows in the daemon-owned `sessions` table,
 but exposes only `pubkey`, `npub`, and the current public `handle`; the private
 runtime row id never crosses this RPC boundary. Each row joins agent/harness
-state, joined channels, workspace and filesystem binding, local host, and
-optional PTY endpoint metadata. Remote relay-only status rows are intentionally
-excluded; they remain observable through `who` and cannot be killed by this machine.
+state, workspace-grouped joined channels, filesystem bindings, local host, and
+an optional attach endpoint. Remote relay-only status rows are intentionally
+excluded; they remain observable through `who` and cannot be killed by this
+machine.
 
 ### `pty_send`
 Sends keystrokes or text to a portable PTY session.

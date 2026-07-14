@@ -11,7 +11,7 @@ use super::mcp::McpArgs;
 use super::messaging::{PublishArgs, WaitArgs};
 use super::my::MyAction;
 use super::probe::ProbeArgs;
-use super::pty::{PtyAction, PtySupervisorArgs};
+use super::pty::PtySupervisorArgs;
 use super::who::WhoArgs;
 
 /// Print the top-level help with every hidden subcommand unhidden, for
@@ -31,7 +31,7 @@ fn unhide_subcommands(cmd: &mut Command) {
     }
 }
 
-/// Print top-level help with operator-only commands (`who`, `mgmt`, `launch`)
+/// Print top-level help with operator-only commands (`who`, `sessions`, `mgmt`, `launch`)
 /// unhidden when running outside an agent context (no `TENEX_EDGE_AGENT` /
 /// `TENEX_EDGE_AGENT_FALLBACK`). Inside an agent context, those commands stay
 /// hidden so agents see only their own surface. Internal/debug commands remain
@@ -46,7 +46,7 @@ fn command_for_context(in_agent: bool) -> Command {
     let mut cmd = Cli::command();
     if !in_agent {
         for sub in cmd.get_subcommands_mut() {
-            if matches!(sub.get_name(), "who" | "mgmt" | "launch") {
+            if matches!(sub.get_name(), "who" | "sessions" | "mgmt" | "launch") {
                 let owned = std::mem::take(sub);
                 *sub = owned.hide(false);
             }
@@ -80,6 +80,9 @@ pub(super) enum Cmd {
     /// Show the human/operator fabric view.
     #[command(hide = true)]
     Who(WhoArgs),
+    /// Select, attach to, or immediately kill local agent sessions.
+    #[command(hide = true)]
+    Sessions,
     /// Read/send chat and manage channels (read, send, create, edit, list, init, join, leave, archive, switch).
     Channel {
         #[command(subcommand)]
@@ -122,12 +125,6 @@ pub(super) enum Cmd {
     /// Diagnostic probe over the reconciler frontier: stats/oracle/simulate/why/state.
     #[command(hide = true)]
     Probe(ProbeArgs),
-    /// Experimental portable-pty supervisor test surface.
-    #[command(hide = true)]
-    Pty {
-        #[command(subcommand)]
-        action: PtyAction,
-    },
     /// Internal portable-pty supervisor process.
     #[command(name = "__pty-supervisor", hide = true)]
     PtySupervisor(PtySupervisorArgs),
@@ -166,19 +163,8 @@ pub(super) enum MgmtAction {
         #[command(subcommand)]
         action: AgentAction,
     },
-    /// Inspect and control sessions hosted by this machine.
-    Session {
-        #[command(subcommand)]
-        action: MgmtSessionAction,
-    },
     /// Interactively configure model providers and role-to-model assignments.
     Config(ConfigArgs),
-}
-
-#[derive(Subcommand)]
-pub(super) enum MgmtSessionAction {
-    /// Select and kill local sessions from an interactive checklist.
-    List,
 }
 
 #[cfg(test)]

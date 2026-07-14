@@ -38,8 +38,8 @@ pub(super) fn reserve(state: &Arc<DaemonState>, slug: &str) -> Result<Option<Str
             channels.join(", ")
         };
         let attach = pty
-            .map(|id| format!("tenex-edge pty attach {id}"))
-            .unwrap_or_else(|| "tenex-edge mgmt session list".to_string());
+            .map(|_| "tenex-edge sessions".to_string())
+            .unwrap_or_else(|| "tenex-edge sessions".to_string());
         let pubkey = identity.pubkey_hex();
         let npub = crate::idref::npub(&pubkey).unwrap_or(pubkey);
         anyhow::bail!(

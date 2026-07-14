@@ -165,6 +165,26 @@ fn session_end_rearms_ttl_even_when_already_idle() {
 }
 
 #[test]
+fn operator_revoke_expires_status_now_and_closes_the_session_row() {
+    let (mut r, mut ledger) = seeded(true, "T", "busy", chans(["room"]), 100);
+
+    let out = r.on_session_revoked("s1", 123).unwrap();
+    ledger.apply_result(&out.result);
+    r.assert_oracle().unwrap();
+
+    assert_eq!(out.effects.len(), 1);
+    let StatusEffect::Expire { status } = &out.effects[0] else {
+        panic!("operator revoke must emit an expiring status")
+    };
+    assert_eq!(status.expires_at, Some(123));
+    assert_eq!(status.channels, vec!["room".to_string()]);
+    assert!(!status.busy);
+    assert!(status.activity.is_empty());
+    assert!(r.state_rows().is_empty());
+    ledger.assert_no_duplicate_close().unwrap();
+}
+
+#[test]
 fn forgetting_stale_session_closes_local_graph_without_publish() {
     let (mut r, ledger) = seeded(false, "T", "", chans(["room"]), 100);
 
