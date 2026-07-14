@@ -97,12 +97,10 @@ async fn open_agent_session(
     group: Option<&str>,
     session_name: Option<&str>,
     ephemeral: bool,
-    durable_reservation: Option<String>,
+    pubkey: &str,
     pty_launch: Option<PtyLaunchSpec>,
 ) -> Result<crate::pty::LaunchMetadata> {
     match transport {
-        // PTY path: byte-identical to the pre-wiring `open_agent_session` body,
-        // including the durable_reservation the supervisor holds until exit.
         TransportImpl::Pty(_) => {
             let pty_launch = pty_launch.unwrap_or_default();
             let meta = crate::pty::spawn_session(crate::pty::SpawnSessionArgs {
@@ -113,18 +111,16 @@ async fn open_agent_session(
                 channel: group.filter(|g| !g.is_empty()).map(str::to_string),
                 session_name: session_name.map(str::to_string),
                 ephemeral,
-                durable_reservation,
                 command: command.to_vec(),
-                env: pty_launch.env,
+                env: pty_launch
+                    .env
+                    .into_iter()
+                    .chain([(String::from("TENEX_EDGE_PUBKEY"), pubkey.to_string())])
+                    .collect(),
                 env_remove: pty_launch.env_remove,
             })?;
             Ok(meta)
         }
-        // ACP/app-server path: launch the RPC child and hand back the synthesized
-        // LaunchMetadata so session registration is transport-agnostic. The
-        // durable reservation is bound at registration (bootstrap carries it) and
-        // released via session-liveness + orphan cleanup, so it is not threaded
-        // into the child here (there is no supervisor to hold it).
         TransportImpl::Acp(t) => {
             use crate::session_host::transport::SessionTransport;
             let spec = LaunchSpec {
@@ -138,6 +134,7 @@ async fn open_agent_session(
                 group: group.map(str::to_string),
                 ephemeral,
                 base_command: command.to_vec(),
+                pubkey: pubkey.to_string(),
             };
             let endpoint = t.launch(&spec).await?;
             Ok(endpoint.meta)
@@ -170,11 +167,12 @@ pub async fn resume_agent_in_channel(
 
     let transport = transport_for_slug(slug)?;
     let abs_path = workspace_abs_path(state, root, None)?;
-    // A resumed claude/codex session re-registers under the SAME session_id, so it
-    // deterministically re-derives its own pubkey — no explicit hint needed.
+    let (base, _agent_def) = resolve_spawn_command(slug, &transport)?;
+    let harness = crate::daemon::server::session_start::bootstrap::infer_harness(&base);
+    let reservation =
+        admission::reserve_resume(state, slug, harness.as_str(), root, group, resume_id)?;
     let meta = match &transport {
         TransportImpl::Pty(_) => {
-            let (base, _agent_def) = resolve_spawn_entry(slug)?;
             let bin = base.first().map(String::as_str).unwrap_or("");
             let shape = resume_shape_for_bin(bin).with_context(|| {
                 format!("don't know how to resume harness binary {bin:?} (agent {slug:?})")
@@ -189,7 +187,7 @@ pub async fn resume_agent_in_channel(
                 Some(group),
                 None,
                 false,
-                None,
+                &reservation.pubkey,
                 None,
             )
             .await?
@@ -199,7 +197,6 @@ pub async fn resume_agent_in_channel(
         // harness bundle, so no PTY resume-command shaping applies.
         TransportImpl::Acp(t) => {
             use crate::session_host::transport::SessionTransport;
-            let (base, _agent_def) = resolve_spawn_command(slug, &transport)?;
             let spec = LaunchSpec {
                 slug: slug.to_string(),
                 bundle: crate::identity::agent_harness_bundle(&crate::config::edge_home(), slug),
@@ -208,6 +205,7 @@ pub async fn resume_agent_in_channel(
                 group: Some(group.to_string()),
                 ephemeral: false,
                 base_command: base,
+                pubkey: reservation.pubkey.clone(),
             };
             let resume = ResumeSpec {
                 native_id: resume_id.to_string(),
@@ -220,17 +218,19 @@ pub async fn resume_agent_in_channel(
         state,
         &meta,
         crate::daemon::server::session_start::bootstrap::PtySessionStart {
+            pubkey: &reservation.pubkey,
+            reclaimed_pubkey: None,
             channel: Some(group),
             channels: &[],
             resume_id: Some(resume_id),
             dispatch_event: None,
             session_name: None,
-            durable_reservation: None,
         },
     )
     .await
     {
         kill_endpoint(&transport, &pty_id).await;
+        admission::release(state, &reservation);
         return Err(e.context("registering resumed hosted session"));
     }
     Ok(pty_id)

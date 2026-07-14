@@ -119,6 +119,9 @@ impl DaemonState {
     pub(crate) fn whitelisted_pubkeys(&self) -> &[String] {
         &self.cfg.whitelisted_pubkeys
     }
+    pub(crate) fn per_session_rooms(&self) -> bool {
+        self.cfg.per_session_rooms
+    }
     pub(crate) fn emit_delivery_failure(
         &self,
         channel: &str,
@@ -208,12 +211,14 @@ use lifecycle::{write_json, ClientGuard, InitProgress};
 use my_session::{rpc_my_session, rpc_my_session_status};
 use profile_rpc::{resolve_backend_pubkey, resolve_channel_member_pubkey_hex, resolve_pubkey_hex};
 use proposal::rpc_propose;
-use resolution::{resolve_session, resolve_session_inner, CallerAnchor, ResolveScope};
+use resolution::{
+    resolve_public_session, resolve_session, resolve_session_inner, CallerAnchor, ResolveScope,
+};
 use session_end::{rpc_session_end, rpc_session_kill};
 use session_pty_wrap::rpc_session_pty_wrap;
-use session_signing::{
-    mint_session_identity, retire_reclaimed_profile, validate_agent_identity_admission,
-    validate_launch_reservation, validate_live_session_identity, SessionIdentityInput,
+use session_signing::retire_reclaimed_profile;
+pub(crate) use session_signing::{
+    load_session_identity, prepare_session_identity, validate_live_session_identity,
 };
 use session_start::rpc_session_start;
 use status_publish::spawn_outbox_drainer;

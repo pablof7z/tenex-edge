@@ -109,13 +109,15 @@ impl AcpTransport {
         // that the ACP path never runs (defect #8).
         let argv = resolved.base_argv.clone();
         let callbacks = Callbacks::allow_all(cwd.clone());
-        let cfg = spawn_config_from_driver(
+        let mut cfg = spawn_config_from_driver(
             resolved.driver,
             &resolved.base_argv,
             &resolved.profile.extra_env,
             cwd,
             callbacks,
         )?;
+        cfg.env
+            .push(("TENEX_EDGE_PUBKEY".to_string(), spec.pubkey.clone()));
         let dialect = cfg.dialect;
         let (handle, updates) = RpcHandle::spawn(cfg)
             .await
@@ -132,7 +134,7 @@ impl AcpTransport {
         static SEQ: AtomicU64 = AtomicU64::new(0);
         let now = crate::util::now_secs();
         let seq = SEQ.fetch_add(1, Ordering::Relaxed);
-        format!("te-acp-{slug}-{now}-{}-{seq}", std::process::id())
+        format!("acp-{slug}-{now}-{}-{seq}", std::process::id())
     }
 
     fn synth_meta(

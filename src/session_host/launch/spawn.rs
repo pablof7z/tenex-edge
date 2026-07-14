@@ -2,7 +2,7 @@ use super::*;
 
 pub struct DispatchedSpawn {
     pub pty_id: String,
-    pub session_id: String,
+    pub pubkey: String,
 }
 
 pub(crate) enum SpawnSource {
@@ -74,7 +74,7 @@ pub async fn spawn_dispatched_ephemeral_agent(
     let group = channels
         .first()
         .context("dispatch spawn requires at least one channel")?;
-    let (meta, session_id) = spawn_agent_inner_full(
+    let (meta, pubkey) = spawn_agent_inner_full(
         state,
         slug,
         root,
@@ -90,7 +90,7 @@ pub async fn spawn_dispatched_ephemeral_agent(
     .await?;
     Ok(DispatchedSpawn {
         pty_id: meta.id,
-        session_id,
+        pubkey,
     })
 }
 
@@ -145,7 +145,9 @@ async fn spawn_agent_inner_full(
     let _ = find_spawn_def(slug);
 
     let abs_path = workspace_abs_path(state, root, client_cwd)?;
-    let reservation = admission::reserve(state, slug)?;
+    let harness = crate::daemon::server::session_start::bootstrap::infer_harness(&agent_command);
+    let reservation =
+        admission::reserve_fresh(state, slug, harness.as_str(), root, group, session_name)?;
     let meta = match open_agent_session(
         &resolved.transport,
         slug,
@@ -155,29 +157,30 @@ async fn spawn_agent_inner_full(
         group,
         session_name,
         ephemeral,
-        reservation.clone(),
+        &reservation.pubkey,
         resolved.pty_launch,
     )
     .await
     {
         Ok(meta) => meta,
         Err(error) => {
-            admission::release(state, reservation.as_deref());
+            admission::release(state, &reservation);
             return Err(error);
         }
     };
     let pty_id = meta.id.clone();
     let channels = joined_channels.unwrap_or(&[]);
-    let session_id = match crate::daemon::server::session_start::bootstrap_pty_session_start(
+    let pubkey = match crate::daemon::server::session_start::bootstrap_pty_session_start(
         state,
         &meta,
         crate::daemon::server::session_start::bootstrap::PtySessionStart {
+            pubkey: &reservation.pubkey,
+            reclaimed_pubkey: reservation.reclaimed_pubkey.as_deref(),
             channel: group,
             channels,
             resume_id: None,
             dispatch_event,
             session_name,
-            durable_reservation: reservation.as_deref(),
         },
     )
     .await
@@ -185,10 +188,11 @@ async fn spawn_agent_inner_full(
         Ok(session_id) => session_id,
         Err(e) => {
             kill_endpoint(&resolved.transport, &pty_id).await;
+            admission::release(state, &reservation);
             return Err(e.context("registering hosted session"));
         }
     };
-    Ok((meta, session_id))
+    Ok((meta, pubkey))
 }
 
 struct ResolvedSource {

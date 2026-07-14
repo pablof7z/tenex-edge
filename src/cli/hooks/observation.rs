@@ -32,7 +32,7 @@ pub(super) async fn report_observation(
     let pty_session = std::env::var("TENEX_EDGE_PTY_SESSION")
         .ok()
         .filter(|s| !s.is_empty());
-    let durable_reservation = std::env::var("TENEX_EDGE_DURABLE_RESERVATION")
+    let pubkey = std::env::var("TENEX_EDGE_PUBKEY")
         .ok()
         .filter(|s| !s.is_empty());
     let session_name = std::env::var("TENEX_EDGE_SESSION_NAME")
@@ -46,7 +46,8 @@ pub(super) async fn report_observation(
         "cwd": cwd.to_string_lossy(),
         "watch_pid": watch_pid,
         "pty_session": pty_session,
-        "durable_reservation": durable_reservation,
+        "pubkey": pubkey,
+        "endpoint_kind": pty_session.as_ref().map(|_| "pty"),
         "session_name": session_name,
         // Real argv of a direct `claude --agent <slug>` invocation, detected
         // when TENEX_EDGE_AGENT was absent. Only used by the daemon to seed a

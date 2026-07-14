@@ -8,9 +8,8 @@
 //!
 //! The dead `SessionTransport` `launch`/`resume`/`deliver`/`is_live` methods that
 //! once mirrored the direct path were removed. They were never called and one of
-//! them (`launch`/`resume`) hardcoded `durable_reservation: None`, a latent trap
-//! that silently dropped the supervisor's durable reservation had the trait path
-//! ever gone live. `AcpTransport` remains the sole full [`super::SessionTransport`]
+//! them (`launch`/`resume`) could not participate in pre-spawn identity allocation.
+//! `AcpTransport` remains the sole full [`super::SessionTransport`]
 //! implementation; `PtyTransport` exposes only the two inherent methods the enum
 //! dispatcher actually invokes.
 

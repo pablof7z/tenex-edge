@@ -61,6 +61,8 @@ fn reap_headless_on_exit(
         log_path,
         started_at,
         harness,
+        pubkey,
+        runtime_generation,
     } = launch;
     let pid = child.id() as i32;
     tokio::spawn(async move {
@@ -106,12 +108,8 @@ fn reap_headless_on_exit(
                 notice::HeadlessOutcome::WaitTaskFailed(e.to_string())
             }
         };
-        crate::session_host::bind_native_id_from_log(&state, &pid.to_string(), &harness, &log_path);
-        let session = state.with_store(|s| {
-            s.alive_session_for_locator(Some(&harness), crate::state::LOCATOR_PID, &pid.to_string())
-                .ok()
-                .flatten()
-        });
+        crate::session_host::bind_native_id_from_log(&state, &pubkey, &harness, &log_path);
+        let session = state.with_store(|s| s.get_session(&pubkey).ok().flatten());
         let session_pubkey = session.as_ref().map(|rec| rec.pubkey.clone());
         let has_reply = session
             .as_ref()
@@ -132,11 +130,10 @@ fn reap_headless_on_exit(
             )
             .await;
         }
-        if let Err(e) = super::super::super::rpc_session_end(
+        if let Err(e) = super::super::super::session_end::end_runtime_generation(
             &state,
-            &serde_json::json!({
-                "session": pid.to_string(),
-            }),
+            &pubkey,
+            runtime_generation,
         )
         .await
         {

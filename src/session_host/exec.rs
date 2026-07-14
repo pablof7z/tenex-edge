@@ -20,6 +20,8 @@ pub(crate) struct ExecLaunch {
     pub(crate) log_path: PathBuf,
     pub(crate) started_at: u64,
     pub(crate) harness: String,
+    pub(crate) pubkey: String,
+    pub(crate) runtime_generation: u64,
 }
 
 impl ExecLaunch {
@@ -72,7 +74,40 @@ pub(crate) async fn spawn_agent_exec(
     );
     let abs_path = workspace_abs_path(state, root, client_cwd)?;
     let harness = harness_for_shape(shape);
-    let mut launch = spawn_process(slug, root, group, &abs_path, command, harness)?;
+    let reservation = match resume_id {
+        Some(native) => crate::session_host::admission::reserve_resume(
+            state,
+            slug,
+            harness.as_str(),
+            root,
+            group.unwrap_or(root),
+            native,
+        )?,
+        None => crate::session_host::admission::reserve_fresh(
+            state,
+            slug,
+            harness.as_str(),
+            root,
+            group,
+            None,
+        )?,
+    };
+    let mut launch = match spawn_process(
+        slug,
+        root,
+        group,
+        &abs_path,
+        command,
+        harness,
+        &reservation.pubkey,
+        reservation.runtime_generation,
+    ) {
+        Ok(launch) => launch,
+        Err(error) => {
+            crate::session_host::admission::release(state, &reservation);
+            return Err(error);
+        }
+    };
     if let Err(e) = crate::daemon::server::session_start::bootstrap_exec_session_start(
         state,
         slug,
@@ -81,10 +116,12 @@ pub(crate) async fn spawn_agent_exec(
         group,
         launch.pid(),
         native_id,
+        &reservation.pubkey,
     )
     .await
     {
         let _ = launch.child.kill();
+        crate::session_host::admission::release(state, &reservation);
         return Err(e).with_context(|| format!("registering headless exec session for {slug}"));
     }
     Ok(launch)
@@ -97,6 +134,8 @@ fn spawn_process(
     cwd: &str,
     command: Vec<String>,
     harness: Harness,
+    pubkey: &str,
+    runtime_generation: u64,
 ) -> Result<ExecLaunch> {
     if command.is_empty() {
         anyhow::bail!("headless exec command must not be empty");
@@ -119,7 +158,7 @@ fn spawn_process(
         .current_dir(cwd)
         .env("TENEX_EDGE_SPAWNED", "1")
         .env("TENEX_EDGE_AGENT", slug)
-        .env_remove("TENEX_EDGE_SESSION")
+        .env("TENEX_EDGE_PUBKEY", pubkey)
         .env_remove("TENEX_EDGE_EPHEMERAL")
         .env_remove("TENEX_EDGE_PTY_SESSION")
         .env_remove("TENEX_EDGE_PTY_SOCKET")
@@ -148,12 +187,14 @@ fn spawn_process(
         log_path,
         started_at,
         harness: harness.as_str().to_string(),
+        pubkey: pubkey.to_string(),
+        runtime_generation,
     })
 }
 
 pub(crate) fn bind_native_id_from_log(
     state: &Arc<DaemonState>,
-    session_ref: &str,
+    pubkey: &str,
     harness: &str,
     log_path: &Path,
 ) {
@@ -161,10 +202,10 @@ pub(crate) fn bind_native_id_from_log(
         return;
     };
     if let Err(e) =
-        state.with_store(|s| s.set_session_native_id(session_ref, harness, &native_id, now_secs()))
+        state.with_store(|s| s.set_native_resume_locator(pubkey, harness, &native_id, now_secs()))
     {
         tracing::warn!(
-            session = %session_ref,
+            pubkey,
             harness,
             native_id,
             error = %e,

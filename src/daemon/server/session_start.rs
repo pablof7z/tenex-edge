@@ -1,20 +1,13 @@
 use super::*;
 
-mod abort;
 mod advisory;
-mod alias_resolution;
 pub(crate) mod bootstrap;
 mod channel_ready;
 mod effects;
 mod joined_channels;
-mod lookup;
 mod params;
 mod reservation;
-mod stale;
 
-use abort::SessionStartGuard;
-use alias_resolution::{record_secondary_aliases, resolve_session_id};
-use lookup::{session_endpoint, work_root_for_scope};
 use params::SessionStartParams;
 
 pub(crate) use bootstrap::{bootstrap_exec_session_start, bootstrap_pty_session_start};
@@ -25,372 +18,333 @@ pub(super) async fn rpc_session_start_inner(
     params: &serde_json::Value,
     progress: Option<InitProgress>,
 ) -> Result<serde_json::Value> {
-    if let Some(prog) = &progress {
-        prog.emit("session_start", "parsing hook payload");
-    }
+    progress_emit(&progress, "session_start", "parsing hook payload");
     let p: SessionStartParams =
         serde_json::from_value(params.clone()).context("parsing session_start params")?;
+    if p.agent.trim().is_empty() {
+        anyhow::bail!("session_start requires an agent slug");
+    }
+
     let edge = config::edge_home();
     config::ensure_dir(&edge)?;
-    if let Some(prog) = &progress {
-        prog.emit(
-            "identity",
-            format!("loading local key for agent {}", p.agent),
-        );
-    }
-    // Provision the agent keystore + spawn command and select its identity mode.
-    let agent_identity = identity::load_or_create_with_command(
+    let agent = identity::load_or_create_with_command(
         &edge,
         &p.agent,
         now_secs(),
         p.provision_command.clone(),
     )?;
-    let durable_agent = !agent_identity.per_session_key;
-    validate_launch_reservation(state, &agent_identity, p.durable_reservation.as_deref())?;
     let cwd = p
         .cwd
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-    // The working-directory channel (the repo this harness runs in).
-    let work_root = crate::workspace::resolve(&cwd).unwrap_or_default();
-    // The channel this session belongs to: the channel named by TENEX_EDGE_CHANNEL
-    // for a task room, else the working-directory channel. The daemon is a direct
-    // entry point (e2e drives `hook --type session-start` with a NAME in
-    // TENEX_EDGE_CHANNEL), so resolve the NAME→opaque id through the ONE shared
-    // resolver here. This is the single load-bearing conversion that kills the
-    // name-vs-id double-create: every downstream consumer shares one id, and the
-    // literal-name subgroup is never minted.
-    let mut channel_provision_name: Option<String> = None;
-    let mut channel = match p.channel.clone().filter(|g| !g.is_empty()) {
-        // Session-start is a hook edge, so resolving a human channel name must not
-        // await relay provisioning. Reserve one opaque id locally and let the
-        // background readiness effect publish/materialize it.
-        Some(name) => {
-            let resolved = super::resolve_channel_for_session_start(state, &work_root, &name)
-                .with_context(|| format!("resolving launch channel {name:?}"))?;
-            channel_provision_name = resolved.provision_name;
-            resolved.channel_h
-        }
-        None => work_root.clone(),
-    };
-    let rel_cwd = crate::workspace::rel_cwd(&cwd);
-    let now = now_secs();
-    if let Some(prog) = &progress {
-        prog.emit(
-            "channel",
-            format!("resolved channel {channel} from {}", cwd.display()),
-        );
-    }
-
-    // Normalize the hook's identity inputs. claude-code/codex adopt their native
-    // native session locator (which may double as the resume token); opencode
-    // supplies no locator at initial startup and forwards its `ses_*` token later. The harness
-    // label is explicit when sent, else inferred from that shape.
-    let harness_session_id = p.harness_session.clone().filter(|s| !s.is_empty());
-    let resume_id = p.resume_id.clone().filter(|s| !s.is_empty());
-    let harness = p
-        .harness
         .as_deref()
-        .filter(|s| !s.is_empty())
-        .map(Harness::from_str)
-        .unwrap_or_else(|| {
-            if resume_id.is_some() {
-                Harness::Opencode
-            } else if harness_session_id.is_some() {
-                Harness::ClaudeCode
-            } else {
-                Harness::Unknown
-            }
+        .map(std::path::PathBuf::from)
+        .unwrap_or(std::env::current_dir()?);
+    let work_root = crate::workspace::resolve(&cwd).unwrap_or_default();
+    let rel_cwd = crate::workspace::rel_cwd(&cwd);
+    let harness = resolve_harness(&p);
+    let harness_name = harness.as_str();
+    let native_resume = p
+        .resume_id
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            p.harness_session
+                .as_deref()
+                .filter(|value| !value.is_empty())
         });
-    let harness_str = harness.as_str();
-    tracing::debug!(agent = %p.agent, harness = %harness_str, channel = %channel, "session_start hook received");
-    let pty_session = p.pty_session.clone().filter(|s| !s.is_empty());
-    // The harness-native id to bind for resume: opencode `ses_*`, else claude/codex
-    // native id.
-    let native_id = resume_id
-        .clone()
-        .or_else(|| harness_session_id.clone())
-        .unwrap_or_default();
 
-    // Per-session rooms (issue #6), gated by `perSessionRooms` (default off). A
-    // human-initiated session (no TENEX_EDGE_CHANNEL override) lives in its own
-    // minted subgroup of the work-root when enabled, else the bare channel. The
-    // room id is derived from a stable per-session anchor so a resumed session
-    // rejoins the SAME room. `room_parent` is `Some(parent)` exactly when we routed
-    // into a freshly-minted room.
-    let pid_anchor = p.watch_pid.map(|pid| format!("pid-{pid}"));
-    let room_parent: Option<String> = {
-        let anchor = harness_session_id
-            .as_deref()
-            .or(resume_id.as_deref())
-            .or(pty_session.as_deref())
-            .or(pid_anchor.as_deref());
-        match (
-            crate::session::decide_session_room(
-                p.channel.as_deref(),
-                &work_root,
-                state.cfg.per_session_rooms,
-            ),
-            anchor,
-        ) {
-            (crate::session::RoomDecision::Mint { parent }, Some(anchor)) => {
-                channel = crate::util::session_room_id(anchor);
-                Some(parent)
-            }
-            _ => None,
-        }
+    let located_pubkey = resolve_existing_pubkey(state, &p, harness_name)?;
+    let prepared = match located_pubkey.as_deref() {
+        Some(pubkey) => load_session_identity(state, pubkey, &agent)?,
+        None => prepare_session_identity(state, &agent, p.session_name.as_deref())?,
+    };
+    let pubkey = prepared.identity.pubkey.clone();
+    let reclaimed_pubkey = p
+        .reclaimed_pubkey
+        .as_deref()
+        .or(prepared.reclaimed_pubkey.as_deref())
+        .map(str::to_string);
+
+    let (mut channel, channel_provision_name) = resolve_start_channel(state, &p, &work_root)?;
+    let room_parent = if p.channel.as_deref().is_none_or(str::is_empty)
+        && state.per_session_rooms()
+        && !work_root.is_empty()
+    {
+        channel = crate::util::session_room_id(&pubkey);
+        Some(work_root.clone())
+    } else {
+        None
     };
 
-    if let Some(prog) = &progress {
-        prog.emit("session_registry", "registering or reasserting session");
+    let existing = state.with_store(|store| store.get_session(&pubkey))?;
+    let already_running = state.sessions.lock().unwrap().contains_key(&pubkey);
+    if already_running {
+        if let Some(existing) = &existing {
+            channel = existing.channel_h.clone();
+        }
     }
-    // Resolve (or mint) the canonical session id WITHOUT writing the row yet. The
-    // row is written further down, AFTER signer selection, so it is born carrying
-    // this session's ordinal pubkey (never the base) — see the `upsert_session_row`
-    // call below.
-    let (session_id, ext_kind, ext_id, mut alias_guard) = resolve_session_id(
-        state,
-        harness_str,
-        pty_session.as_deref(),
-        harness_session_id.as_deref(),
-        resume_id.as_deref(),
-        p.watch_pid,
-        durable_agent,
-        now,
-    )?;
-    validate_agent_identity_admission(state, &session_id, &agent_identity)?;
-    let already_running = state.sessions.lock().unwrap().contains_key(&session_id);
-    let existing_session = already_running
-        .then(|| state.with_store(|s| s.get_session(&session_id).ok().flatten()))
-        .flatten();
-    if let Some(existing) = existing_session.as_ref() {
-        validate_live_session_identity(state, existing, &agent_identity)?;
-    }
-    if let Some(prog) = &progress {
-        prog.emit(
-            "session_registry",
-            format!("session {session_id} registered"),
-        );
-    }
+    let now = now_secs();
+    let runtime_generation = match existing {
+        Some(existing) => {
+            if existing.agent_slug != p.agent {
+                anyhow::bail!(
+                    "pubkey {pubkey} belongs to agent {:?}, not {:?}",
+                    existing.agent_slug,
+                    p.agent
+                );
+            }
+            existing.runtime_generation
+        }
+        None => state.with_store(|store| {
+            store.reserve_session(&crate::state::RegisterSession {
+                pubkey: pubkey.clone(),
+                harness: harness_name.to_string(),
+                agent_slug: p.agent.clone(),
+                channel_h: channel.clone(),
+                child_pid: p.watch_pid,
+                transcript_path: None,
+                now,
+            })
+        })?,
+    };
+    let mut reservation = (!already_running)
+        .then(|| RuntimeReservation::new(state.clone(), pubkey.clone(), runtime_generation));
 
-    record_secondary_aliases(
-        &alias_guard,
-        harness_str,
-        &session_id,
-        pty_session.as_deref(),
-        harness_session_id.as_deref(),
-        resume_id.as_deref(),
-        p.watch_pid,
-        &work_root,
-        &cwd,
-        &channel,
-        now,
-    );
-
+    state.with_store(|store| -> Result<()> {
+        store.set_session_channel(&pubkey, &channel)?;
+        if !store.bind_runtime_process(&pubkey, runtime_generation, p.watch_pid)? {
+            anyhow::bail!(
+                "runtime generation {runtime_generation} for {pubkey} is no longer active"
+            );
+        }
+        bind_locators(store, &p, harness_name, &pubkey, now)?;
+        Ok(())
+    })?;
+    retire_reclaimed_profile(state, reclaimed_pubkey.as_deref()).await?;
     membership_cleanup::cleanup_dead_local_sessions(state);
 
-    // A new logical session arriving on the SAME watched pid OR PTY endpoint
-    // (same agent, same work root) means the harness restarted without a session-end.
-    // Cancel its engine task, release its signer reservation, and mark it dead so
-    // `who` doesn't show ghosts. (All sessions in this DB are this machine's.)
-    {
-        let new_work_root = room_parent
-            .clone()
-            .unwrap_or_else(|| state.with_store(|s| work_root_for_scope(s, &channel)));
-        stale::cancel_stale_sessions_on_restart(
-            state,
-            &session_id,
-            &p.agent,
-            p.watch_pid,
-            pty_session.as_deref(),
-            &new_work_root,
-        );
-    }
-
-    let existing_channel = existing_session.map(|r| r.channel_h);
-    if let Some(existing) = existing_channel.as_ref() {
-        channel = existing.clone();
-    }
-
-    let minted = mint_session_identity(
-        state,
-        &session_id,
-        &agent_identity,
-        &channel,
-        SessionIdentityInput::new(&native_id, p.session_name.as_deref()),
-        p.durable_reservation.as_deref(),
-    )?;
-    let mut start_guard = SessionStartGuard::new(state, &minted, already_running);
-    retire_reclaimed_profile(state, minted.reclaimed_pubkey.as_deref()).await?;
-    // If the engine is already running (re-assert from a duplicate spawn such as
-    // the offline-agent-mention handler), preserve the live session's active
-    // channel rather than stomping it with whatever TENEX_EDGE_CHANNEL the new
-    // process was launched with. Without this guard, the duplicate's stale env
-    // overwrites channel_h transiently AND permanently adds a spurious passive
-    // join to session_channels (INSERT OR IGNORE never cleans it up), causing
-    // the session to receive inbox messages from the wrong channel.
-    let channel_for_upsert = existing_channel.unwrap_or_else(|| channel.clone());
-    let effective_endpoint = pty_session
-        .clone()
-        .or_else(|| state.with_store(|s| session_endpoint(s, &session_id)));
-    let needs_chat_replay = state.subs.lock().unwrap().covers_channel(&channel);
-    let request = advisory::request_fact(
-        &session_id,
-        &p.agent,
-        harness_str,
-        ext_kind,
-        ext_id.clone(),
-        if durable_agent { "" } else { &native_id },
-        &work_root,
-        &channel,
-        channel_for_upsert.clone(),
-        &rel_cwd,
-        room_parent.clone(),
-        channel_provision_name.clone(),
-        p.watch_pid,
-        effective_endpoint.clone(),
-        pty_session.is_some(),
-        minted.identity.pubkey.clone(),
-        minted.identity.display_slug(),
+    let endpoint = p.pty_session.clone().filter(|value| !value.is_empty());
+    let request = crate::reconcile::SessionStartRequestFact {
+        pubkey: pubkey.clone(),
+        agent: p.agent.clone(),
+        harness: harness_name.to_string(),
+        native_id: native_resume.unwrap_or_default().to_string(),
+        work_root: work_root.clone(),
+        channel_h: channel.clone(),
+        channel_for_upsert: channel.clone(),
+        rel_cwd: rel_cwd.clone(),
+        room_parent,
+        channel_provision_name,
+        watch_pid: p.watch_pid,
+        pty_session: endpoint,
+        ring_doorbell: p.pty_session.is_some(),
+        signer_label: prepared.identity.display_slug(),
         already_running,
-        needs_chat_replay,
-        now,
-    );
-    let observed = advisory::observed_command(&request);
-    let plan = advisory::drive_request(state, request, &observed)?.plan;
-    let reg = crate::state::RegisterSession {
-        harness: plan.row.harness.clone(),
-        external_id_kind: plan.row.external_id_kind.clone(),
-        external_id: plan.row.external_id.clone(),
-        agent_pubkey: plan.row.agent_pubkey.clone(),
-        agent_slug: plan.row.agent_slug.clone(),
-        channel_h: plan.row.channel_h.clone(),
-        child_pid: plan.row.child_pid,
-        transcript_path: None,
-        resume_id: plan.row.resume_id.clone(),
-        now: plan.row.now,
+        channel_already_subscribed: state.subs.lock().unwrap().covers_channel(&channel),
+        at: now,
     };
-    state.with_store(|s| s.upsert_session_row(&session_id, &reg))?;
-    let joined_channels = joined_channels::record(
-        state,
-        &session_id,
-        channel_for_upsert.clone(),
-        p.channels.clone(),
-        now,
-    );
+    let plan = advisory::drive_request(state, request)?.plan;
+    let joined = joined_channels::record(state, &pubkey, channel.clone(), p.channels, now);
 
-    // Ring on endpoint registration so delivery does not depend on a later
-    // mention event.
     if plan.ring_doorbell {
         crate::session_host::ring_doorbells(state.clone());
     }
-
-    // Idempotent re-start (session reassert): the engine task already runs.
     if plan.reassert {
-        tracing::info!(
-            agent = %p.agent,
-            session = %session_id,
-            channel = %channel,
-            "session re-assert: engine already running"
-        );
-        if let Some(prog) = &progress {
-            prog.emit("session_start", "existing engine is already running");
+        advisory::record_started(state, &pubkey, &channel, p.watch_pid, now_secs());
+        if let Some(guard) = reservation.as_mut() {
+            guard.disarm();
         }
-        advisory::record_started(
-            state,
-            &session_id,
-            &plan.row.channel_h,
-            &plan.row.agent_pubkey,
-            plan.row.child_pid,
-            now_secs(),
-        );
-        start_guard.disarm();
-        alias_guard.disarm();
-        return Ok(serde_json::json!({
-            "pubkey": plan.row.agent_pubkey,
-        }));
+        return Ok(serde_json::json!({ "pubkey": pubkey }));
     }
 
-    // Session-start is the harness-critical edge: record local state and tell the
-    // daemon what relay work needs doing, but never make the harness wait for
-    // network proof or roster fan-out.
-    if let Some(prog) = &progress {
-        prog.emit("nip29", "scheduling channel readiness work");
-    }
-    effects::schedule_channel_ready(
-        state.clone(),
-        session_id.clone(),
-        plan.channel_ready.clone(),
-    );
-
+    effects::schedule_channel_ready(state.clone(), pubkey.clone(), plan.channel_ready);
     if plan.notify_outbox {
         state.outbox_notify.notify_waiters();
     }
-
-    if let Some(prog) = &progress {
-        prog.emit("subscription", "scheduling subscription work");
-    }
-
     if plan.replay_chat {
         effects::schedule_replay_chat(state.clone(), channel.clone());
     }
-    joined_channels::schedule_subscriptions(state, &joined_channels, &channel);
+    joined_channels::schedule_subscriptions(state, &joined, &channel);
 
-    let Some(spawn) = &plan.spawn else {
-        anyhow::bail!("session_start advisory plan did not include spawn intent");
-    };
-    let ep = engine_params_for(
+    let spawn = plan
+        .spawn
+        .context("session_start advisory plan did not include spawn intent")?;
+    let engine = engine_params_for(
         &state.cfg,
-        minted.identity.clone(),
-        minted.keys.clone(),
-        &spawn.session_id,
+        prepared.identity,
+        prepared.keys,
+        runtime_generation,
         &spawn.channel_h,
         &work_root,
         &spawn.rel_cwd,
-        p.dispatch_event.clone().filter(|s| !s.is_empty()),
+        p.dispatch_event.filter(|value| !value.is_empty()),
         spawn.watch_pid,
     );
-    if let Some(prog) = &progress {
-        prog.emit("engine", "starting session engine and initial publishers");
+    progress_emit(&progress, "engine", "starting session engine");
+    if let Err(error) = spawn_session(state, engine).await {
+        advisory::record_failed(state, &pubkey, "spawn_engine", &error, now_secs());
+        return Err(error);
     }
-    if let Err(e) = spawn_session(state, ep).await {
-        advisory::record_failed(state, &session_id, "spawn_engine", &e, now_secs());
-        return Err(e);
-    }
-    tracing::info!(
-        agent = %p.agent,
-        channel = %channel,
-        session = %session_id,
-        harness = %harness_str,
-        "session started"
-    );
-    if let Some(prog) = &progress {
-        prog.emit("engine", "session engine started");
-    }
-
     if plan.emit_tail {
         state.emit_tail(TailEvent::Sess {
             ts: now_secs(),
             channel: channel.clone(),
-            agent: p.agent.clone(),
-            session: session_id.clone(),
+            agent: p.agent,
+            session: pubkey.clone(),
             state: "start".into(),
-            rel_cwd: rel_cwd.clone(),
+            rel_cwd,
         });
     }
+    advisory::record_started(state, &pubkey, &channel, p.watch_pid, now_secs());
+    if let Some(guard) = reservation.as_mut() {
+        guard.disarm();
+    }
+    Ok(serde_json::json!({ "pubkey": pubkey }))
+}
 
-    advisory::record_started(
-        state,
-        &session_id,
-        &plan.row.channel_h,
-        &plan.row.agent_pubkey,
-        plan.row.child_pid,
-        now_secs(),
-    );
-    start_guard.disarm();
-    alias_guard.disarm();
+fn resolve_harness(p: &SessionStartParams) -> Harness {
+    p.harness
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .map(Harness::from_str)
+        .unwrap_or_else(|| {
+            if p.resume_id.is_some() {
+                Harness::Opencode
+            } else if p.harness_session.is_some() {
+                Harness::ClaudeCode
+            } else {
+                Harness::Unknown
+            }
+        })
+}
 
-    Ok(serde_json::json!({
-        "pubkey": plan.row.agent_pubkey,
-    }))
+fn resolve_existing_pubkey(
+    state: &Arc<DaemonState>,
+    p: &SessionStartParams,
+    harness: &str,
+) -> Result<Option<String>> {
+    if let Some(pubkey) = p.pubkey.as_deref().filter(|value| !value.is_empty()) {
+        return crate::idref::normalize_pubkey(pubkey)
+            .map(Some)
+            .context("session_start pubkey must be hex or npub");
+    }
+    let lookup = |kind: &str, value: Option<&String>| -> Result<Option<String>> {
+        let Some(value) = value.filter(|value| !value.is_empty()) else {
+            return Ok(None);
+        };
+        state.with_store(|store| store.resolve_pubkey_by_locator(harness, kind, value))
+    };
+    let resolved = lookup(crate::state::LOCATOR_PTY, p.pty_session.as_ref())?
+        .or(lookup(
+            crate::state::LOCATOR_NATIVE_RESUME,
+            p.resume_id.as_ref(),
+        )?)
+        .or(lookup(
+            crate::state::LOCATOR_NATIVE_RESUME,
+            p.harness_session.as_ref(),
+        )?)
+        .or_else(|| {
+            p.watch_pid.and_then(|pid| {
+                state
+                    .with_store(|store| {
+                        store.resolve_pubkey_by_locator(
+                            harness,
+                            crate::state::LOCATOR_PID,
+                            &pid.to_string(),
+                        )
+                    })
+                    .ok()
+                    .flatten()
+            })
+        });
+    Ok(resolved)
+}
+
+fn resolve_start_channel(
+    state: &Arc<DaemonState>,
+    p: &SessionStartParams,
+    work_root: &str,
+) -> Result<(String, Option<String>)> {
+    let Some(name) = p.channel.as_deref().filter(|value| !value.is_empty()) else {
+        return Ok((work_root.to_string(), None));
+    };
+    let resolved = resolve_channel_for_session_start(state, work_root, name)
+        .with_context(|| format!("resolving launch channel {name:?}"))?;
+    Ok((resolved.channel_h, resolved.provision_name))
+}
+
+fn bind_locators(
+    store: &crate::state::Store,
+    p: &SessionStartParams,
+    harness: &str,
+    pubkey: &str,
+    now: u64,
+) -> Result<()> {
+    if let Some(endpoint) = p.pty_session.as_deref().filter(|value| !value.is_empty()) {
+        let kind = if p.endpoint_kind.as_deref() == Some("acp") {
+            crate::state::LOCATOR_ACP
+        } else {
+            crate::state::LOCATOR_PTY
+        };
+        store.put_session_locator(harness, kind, endpoint, pubkey, now)?;
+    }
+    if let Some(native) = p
+        .resume_id
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            p.harness_session
+                .as_deref()
+                .filter(|value| !value.is_empty())
+        })
+    {
+        store.set_native_resume_locator(pubkey, harness, native, now)?;
+    }
+    if let Some(pid) = p.watch_pid {
+        store.put_session_locator(
+            harness,
+            crate::state::LOCATOR_PID,
+            &pid.to_string(),
+            pubkey,
+            now,
+        )?;
+    }
+    Ok(())
+}
+
+fn progress_emit(progress: &Option<InitProgress>, stage: &str, message: &str) {
+    if let Some(progress) = progress {
+        progress.emit(stage, message);
+    }
+}
+
+struct RuntimeReservation {
+    state: Arc<DaemonState>,
+    pubkey: String,
+    generation: u64,
+    armed: bool,
+}
+
+impl RuntimeReservation {
+    fn new(state: Arc<DaemonState>, pubkey: String, generation: u64) -> Self {
+        Self {
+            state,
+            pubkey,
+            generation,
+            armed: true,
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for RuntimeReservation {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = self
+                .state
+                .with_store(|store| store.mark_dead_if_generation(&self.pubkey, self.generation));
+        }
+    }
 }

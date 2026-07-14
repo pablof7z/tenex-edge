@@ -4,6 +4,7 @@ use serde_json::Value;
 /// "which session am I" identically. The daemon-side mirror is
 /// `CallerAnchor::from_params`.
 pub(crate) struct InvocationContext {
+    session: Option<String>,
     pty_session: Option<String>,
     harness: Option<&'static str>,
     watch_pid: Option<i32>,
@@ -14,6 +15,9 @@ pub(crate) struct InvocationContext {
 
 impl InvocationContext {
     pub(crate) fn from_current_process() -> Self {
+        let session = std::env::var("TENEX_EDGE_PUBKEY")
+            .ok()
+            .filter(|value| !value.is_empty());
         let pty_session = super::pty_session_env();
         let watch_anchor = if pty_session.is_none() {
             super::hooks::caller_watch_pid_anchor()
@@ -24,6 +28,7 @@ impl InvocationContext {
             .map(|(harness, pid)| (Some(harness), Some(pid)))
             .unwrap_or((None, None));
         Self {
+            session,
             pty_session,
             harness,
             watch_pid,
@@ -37,6 +42,7 @@ impl InvocationContext {
 
     pub(crate) fn to_rpc_json(&self) -> Value {
         serde_json::json!({
+            "session": self.session,
             "pty_session": self.pty_session,
             "harness": self.harness,
             "watch_pid": self.watch_pid,

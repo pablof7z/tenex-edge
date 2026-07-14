@@ -149,6 +149,26 @@ impl Store {
         Ok(())
     }
 
+    /// Attach the host process to exactly the runtime incarnation reserved
+    /// before spawn. A stale bootstrap cannot overwrite a newer incarnation.
+    pub fn bind_runtime_process(
+        &self,
+        pubkey: &str,
+        runtime_generation: u64,
+        child_pid: Option<i32>,
+    ) -> Result<bool> {
+        Ok(self.conn.execute(
+            "UPDATE sessions SET child_pid=?3, last_seen=?4
+             WHERE pubkey=?1 AND runtime_generation=?2 AND alive=1",
+            params![
+                pubkey,
+                runtime_generation,
+                child_pid,
+                crate::util::now_secs()
+            ],
+        )? > 0)
+    }
+
     pub fn set_session_channel(&self, pubkey: &str, channel_h: &str) -> Result<()> {
         self.conn.execute(
             "UPDATE sessions SET channel_h=?2 WHERE pubkey=?1",

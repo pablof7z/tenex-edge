@@ -54,7 +54,7 @@ impl<'a> CallerAnchor<'a> {
             })
         };
         CallerAnchor {
-            explicit: s("session"),
+            explicit: s("session").or_else(|| s("pubkey")),
             pty_session: s("pty_session"),
             harness_session: s("harness_session"),
             watch_pid: pid("watch_pid"),
@@ -118,27 +118,27 @@ pub(in crate::daemon::server) fn resolve_session_inner(
                 format!("unknown public session {selector:?}; use an npub, hex pubkey, or handle")
             });
     }
-    // 2. Hosted PTY session — THE in-session anchor for hosted launches.
+    // 2. Hosted PTY endpoint.
     if let Some(pty_session) = anchor.pty_session.filter(|s| !s.is_empty()) {
         if let Some(rec) = state
-            .with_store(|s| s.alive_session_for_alias(None, "pty_session", pty_session))
+            .with_store(|s| {
+                s.alive_session_for_locator(None, crate::state::LOCATOR_PTY, pty_session)
+            })
             .ok()
             .flatten()
         {
             return Ok(rec);
         }
     }
-    // 3. Harness-native session id reported by a hook (live only). Full-keyed by
-    //    harness — a harness id is only unique within its own harness. Canonicalize
-    //    the harness the SAME way session-start does before STORING the alias
-    //    (`Harness::from_str(..).as_str()`), so lookup and storage always agree
-    //    even for a name not in the enum (both normalize to "unknown").
+    // 3. Harness-native resume locator reported by a hook (live only).
     if let Some(hs) = anchor.harness_session.filter(|s| !s.is_empty()) {
         let harness = anchor
             .harness
             .map(|h| crate::session::Harness::from_str(h).as_str());
         if let Some(rec) = state
-            .with_store(|s| s.alive_session_for_alias(harness, "harness_session", hs))
+            .with_store(|s| {
+                s.alive_session_for_locator(harness, crate::state::LOCATOR_NATIVE_RESUME, hs)
+            })
             .ok()
             .flatten()
         {
@@ -151,59 +151,18 @@ pub(in crate::daemon::server) fn resolve_session_inner(
         let harness = crate::session::Harness::from_str(harness).as_str();
         let pid = pid.to_string();
         if let Some(rec) = state
-            .with_store(|s| s.alive_session_for_alias(Some(harness), "watch_pid", &pid))
+            .with_store(|s| {
+                s.alive_session_for_locator(Some(harness), crate::state::LOCATOR_PID, &pid)
+            })
             .ok()
             .flatten()
         {
             return Ok(rec);
         }
     }
-    // Strict: exact anchors only. Never fall through to a sibling-binding scan.
-    if scope == ResolveScope::Strict {
-        anyhow::bail!(
-            "must be run from within a tenex-edge agent session \
-             (no --session, PTY session, harness id, or watch pid resolved a live session)"
-        );
-    }
-    // 5. Scan: cwd-derived channel (or explicit group) + agent slug.
-    //    `list_alive_sessions` is newest-first, so the first match is the latest.
-    //    LIMITATION: with no exact anchor (for a native harness that has neither
-    //    a PTY session nor a harness-native id), this picks the latest
-    //    alive session for the agent in the channel — so it assumes a single live
-    //    session per (agent, channel) there. Hosted launches never reach this
-    //    tier because the PTY session anchor at step 2 is exact.
-    let cwd = anchor
-        .cwd
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-    let explicit_group = anchor.group.filter(|g| !g.is_empty());
-    let work_root = explicit_group.is_none();
-    let channel = explicit_group
-        .map(|g| g.to_string())
-        .unwrap_or_else(|| crate::workspace::resolve(&cwd).unwrap_or_default());
-    let want_agent = anchor.agent.filter(|a| !a.is_empty());
-
-    let pick = state.with_store(|s| {
-        s.list_alive_sessions()
-            .unwrap_or_default()
-            .into_iter()
-            .find(|rec| {
-                let scope_ok = rec.channel_h == channel
-                    || (work_root && work_root_for(s, &rec.channel_h) == channel);
-                let agent_ok = want_agent.map(|a| rec.agent_slug == a).unwrap_or(true);
-                scope_ok && agent_ok
-            })
-    });
-    if let Some(rec) = pick {
-        return Ok(rec);
-    }
-    if let Some(agent) = want_agent {
-        anyhow::bail!(
-            "no active tenex-edge session for agent {agent:?} in channel {channel:?} (run session-start, or pass --session)"
-        );
-    }
+    let _ = scope;
     anyhow::bail!(
-        "no active tenex-edge session for channel {channel:?} (run session-start, or pass --session)"
+        "must run inside a registered tenex-edge session or pass an npub, hex pubkey, or handle"
     )
 }
 

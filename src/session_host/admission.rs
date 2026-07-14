@@ -1,74 +1,111 @@
 use crate::daemon::server::DaemonState;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::sync::Arc;
 
-pub(super) fn reserve(state: &Arc<DaemonState>, slug: &str) -> Result<Option<String>> {
-    let identity = crate::identity::load_or_create(
+#[derive(Debug, Clone)]
+pub(super) struct Reservation {
+    pub(super) pubkey: String,
+    pub(super) runtime_generation: u64,
+    pub(super) reclaimed_pubkey: Option<String>,
+}
+
+pub(super) fn reserve_fresh(
+    state: &Arc<DaemonState>,
+    slug: &str,
+    harness: &str,
+    root: &str,
+    group: Option<&str>,
+    session_name: Option<&str>,
+) -> Result<Reservation> {
+    let agent = crate::identity::load_or_create(
         &crate::config::edge_home(),
         slug,
         crate::util::now_secs(),
     )?;
-    let conflict = state.with_store(|store| {
-        let session = store.list_alive_sessions()?.into_iter().find(|session| {
-            session.agent_slug == slug
-                && (!identity.per_session_key
-                    || store
-                        .is_durable_agent_session(&session.session_id)
-                        .unwrap_or(false))
-        });
-        let Some(session) = session else {
-            return Ok(None);
-        };
-        let channels = store
-            .list_session_joined_channels(&session.session_id)?
-            .into_iter()
-            .map(|(channel, _)| channel)
-            .collect::<Vec<_>>();
-        let pty = store
-            .aliases_for_session(&session.session_id)?
-            .into_iter()
-            .find(|alias| alias.external_id_kind == "pty_session")
-            .map(|alias| alias.external_id);
-        Ok::<_, anyhow::Error>(Some((session, channels, pty)))
-    })?;
-    if let Some((session, channels, pty)) = conflict {
-        let channels = if channels.is_empty() {
-            "<none>".to_string()
-        } else {
-            channels.join(", ")
-        };
-        let attach = pty
-            .map(|_| "tenex-edge sessions".to_string())
-            .unwrap_or_else(|| "tenex-edge sessions".to_string());
-        let pubkey = identity.pubkey_hex();
-        let npub = crate::idref::npub(&pubkey).unwrap_or(pubkey);
-        anyhow::bail!(
-            "durable agent {slug:?} already has live session {} in channel(s) {}; \
-             attach with `{attach}`, or add it to another channel with \
-             `tenex-edge channel add --session {npub} <channel>`",
-            session.session_id,
-            channels
-        );
-    }
-    if identity.per_session_key {
-        return Ok(None);
-    }
-    let reservation = crate::state::mint_session_id();
-    state.with_store(|store| {
-        store.claim_durable_agent_session(
-            &identity.pubkey_hex(),
-            slug,
-            &reservation,
-            crate::util::now_secs(),
-        )
-    })?;
-    Ok(Some(reservation))
+    let prepared = crate::daemon::server::prepare_session_identity(state, &agent, session_name)?;
+    reserve_prepared(
+        state,
+        prepared.identity.pubkey,
+        prepared.reclaimed_pubkey,
+        slug,
+        harness,
+        root,
+        group,
+    )
 }
 
-pub(super) fn release(state: &Arc<DaemonState>, reservation: Option<&str>) {
-    if let Some(reservation) = reservation {
-        state
-            .with_store(|store| store.release_durable_agent_session(reservation))
-            .ok();
+pub(super) fn reserve_resume(
+    state: &Arc<DaemonState>,
+    slug: &str,
+    harness: &str,
+    root: &str,
+    group: &str,
+    native_resume: &str,
+) -> Result<Reservation> {
+    let pubkey = state
+        .with_store(|store| {
+            store.resolve_pubkey_by_locator(
+                harness,
+                crate::state::LOCATOR_NATIVE_RESUME,
+                native_resume,
+            )
+        })?
+        .with_context(|| {
+            format!("no local pubkey owns {harness} resume locator {native_resume:?}")
+        })?;
+    let agent = crate::identity::load_or_create(
+        &crate::config::edge_home(),
+        slug,
+        crate::util::now_secs(),
+    )?;
+    let session = state
+        .with_store(|store| store.get_session(&pubkey))?
+        .with_context(|| format!("resume pubkey {pubkey} has no local runtime projection"))?;
+    crate::daemon::server::validate_live_session_identity(state, &session, &agent)?;
+    reserve_prepared(state, pubkey, None, slug, harness, root, Some(group))
+}
+
+fn reserve_prepared(
+    state: &Arc<DaemonState>,
+    pubkey: String,
+    reclaimed_pubkey: Option<String>,
+    slug: &str,
+    harness: &str,
+    root: &str,
+    group: Option<&str>,
+) -> Result<Reservation> {
+    let channel = match group.filter(|group| !group.is_empty()) {
+        Some(group) => group.to_string(),
+        None if state.per_session_rooms() => crate::util::session_room_id(&pubkey),
+        None => root.to_string(),
+    };
+    let runtime_generation = state.with_store(|store| {
+        store.reserve_session(&crate::state::RegisterSession {
+            pubkey: pubkey.clone(),
+            harness: harness.to_string(),
+            agent_slug: slug.to_string(),
+            channel_h: channel,
+            child_pid: None,
+            transcript_path: None,
+            now: crate::util::now_secs(),
+        })
+    })?;
+    Ok(Reservation {
+        pubkey,
+        runtime_generation,
+        reclaimed_pubkey,
+    })
+}
+
+pub(super) fn release(state: &Arc<DaemonState>, reservation: &Reservation) {
+    if let Err(error) = state.with_store(|store| {
+        store.mark_dead_if_generation(&reservation.pubkey, reservation.runtime_generation)
+    }) {
+        tracing::warn!(
+            pubkey = %reservation.pubkey,
+            runtime_generation = reservation.runtime_generation,
+            %error,
+            "failed to release pre-spawn runtime reservation"
+        );
     }
 }

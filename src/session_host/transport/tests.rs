@@ -169,6 +169,7 @@ async fn live_launch_dispatch_spawns_opencode_acp() {
         group: None,
         ephemeral: true,
         base_command: vec!["opencode".into()],
+        pubkey: "11".repeat(32),
     };
     let endpoint = acp.launch(&spec).await.expect("launch opencode acp");
     let ep = EndpointRef {
@@ -223,6 +224,7 @@ async fn live_acp_agent_receives_delivered_prompt() {
         group: None,
         ephemeral: true,
         base_command: vec!["opencode".into()],
+        pubkey: "22".repeat(32),
     };
     let endpoint = acp.launch(&spec).await.expect("launch opencode acp");
     let ep = EndpointRef {
@@ -273,6 +275,7 @@ fn acp_resolves_harness_from_bundle_not_slug() {
         group: None,
         ephemeral: false,
         base_command: vec!["codex".into()],
+        pubkey: "33".repeat(32),
     };
     // The transport resolves from the BUNDLE name, never the slug.
     assert_eq!(super::acp::bundle_name(&spec), "codex-acp");

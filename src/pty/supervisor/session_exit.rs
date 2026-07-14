@@ -15,7 +15,6 @@ impl Drop for SessionExitGuard {
 }
 
 fn notify_daemon(pty_id: String) {
-    let durable_reservation = std::env::var("TENEX_EDGE_DURABLE_RESERVATION").ok();
     std::thread::spawn(move || {
         let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -32,7 +31,6 @@ fn notify_daemon(pty_id: String) {
                     "pty_supervisor_exit",
                     serde_json::json!({
                         "pty_id": pty_id,
-                        "durable_reservation": durable_reservation,
                     }),
                 )
                 .await
