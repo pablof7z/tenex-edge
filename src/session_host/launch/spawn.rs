@@ -185,7 +185,7 @@ async fn spawn_agent_inner_full(
     )
     .await
     {
-        Ok(session_id) => session_id,
+        Ok(pubkey) => pubkey,
         Err(e) => {
             kill_endpoint(&resolved.transport, &pty_id).await;
             admission::release(state, &reservation);
@@ -221,7 +221,7 @@ fn resolve_source(slug: &str, source: SpawnSource) -> Result<ResolvedSource> {
             pty_launch: None,
         }),
         SpawnSource::PtyBundle(bundle) => {
-            let id = crate::pty::new_session_id(slug);
+            let id = crate::pty::new_endpoint_id(slug);
             let scratch = crate::config::edge_home()
                 .join("harness-profiles")
                 .join(&id);

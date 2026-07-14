@@ -13,7 +13,7 @@ fn acp_endpoint_liveness_uses_the_acp_registry() {
     // Crucially it is classified via the ACP path, not the PTY socket probe.
     assert!(!endpoint_is_live(
         TransportKind::Acp,
-        "te-acp-unknown-endpoint"
+        "acp-unknown-endpoint"
     ));
 }
 
@@ -27,12 +27,12 @@ fn pty_endpoint_liveness_uses_the_pty_probe() {
 
 #[test]
 fn acp_endpoint_id_would_read_dead_under_the_old_pty_probe() {
-    // The bug this fix closes: an ACP endpoint id (`te-acp-*`) is stored under the
+    // The bug this fix closes: an ACP endpoint id (`acp-*`) is stored under the
     // `pty_session` alias, so the pre-fix doorbell probed it with `pty::is_live`
     // and ALWAYS saw it dead — clearing the endpoint and dropping the mention.
     // Confirm the PTY probe indeed reports an ACP id dead, proving the doorbell
     // must consult the ACP probe (via `endpoint_is_live`) for ACP sessions.
-    let acp_id = "te-acp-claude-1-2-3";
+    let acp_id = "acp-claude-1-2-3";
     assert!(
         !crate::pty::is_live(acp_id),
         "an ACP endpoint id is not a live PTY"
@@ -123,7 +123,7 @@ fn reconciler_plans_inject_for_live_endpoint_and_clears_dead() {
         .scan(DeliveryScanFact {
             pubkey: "sess-live".into(),
             pending_event_ids: vec!["evt-1".into()],
-            endpoint_id: Some("te-acp-live".into()),
+            endpoint_id: Some("acp-live".into()),
             endpoint_live: true,
             last_injected_at: None,
             debounce_secs: 20,
@@ -134,7 +134,7 @@ fn reconciler_plans_inject_for_live_endpoint_and_clears_dead() {
     assert!(
         matches!(
             live.effects.as_slice(),
-            [DeliveryEffect::Inject { endpoint_id, .. }] if endpoint_id == "te-acp-live"
+            [DeliveryEffect::Inject { endpoint_id, .. }] if endpoint_id == "acp-live"
         ),
         "live ACP endpoint should yield Inject carrying the endpoint id, got {:?}",
         live.effects
@@ -144,7 +144,7 @@ fn reconciler_plans_inject_for_live_endpoint_and_clears_dead() {
         .scan(DeliveryScanFact {
             pubkey: "sess-dead".into(),
             pending_event_ids: vec!["evt-2".into()],
-            endpoint_id: Some("te-acp-dead".into()),
+            endpoint_id: Some("acp-dead".into()),
             endpoint_live: false,
             last_injected_at: None,
             debounce_secs: 20,

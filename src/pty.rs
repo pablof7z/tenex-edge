@@ -7,7 +7,7 @@ mod output_mode;
 mod supervisor;
 
 pub use client::{attach, attach_stream, inject, is_live, kill, list, resize, AttachStream};
-pub(crate) use launch::new_session_id;
+pub(crate) use launch::new_endpoint_id;
 pub use launch::{spawn_session, SpawnSessionArgs};
 pub use meta::{
     endpoint_socket, read_all_metadata, session_dir, session_socket, write_metadata, LaunchMetadata,

@@ -142,7 +142,7 @@ async fn live_launch_dispatch_spawns_opencode_acp() {
         return;
     }
     // harnesses.json maps opencode onto ACP so the *dispatch* resolves AcpTransport.
-    let home = std::env::temp_dir().join(format!("te-acp-launch-{}", std::process::id()));
+    let home = std::env::temp_dir().join(format!("acp-launch-{}", std::process::id()));
     std::fs::create_dir_all(&home).unwrap();
     std::env::set_var("TENEX_EDGE_HOME", &home);
     std::fs::write(
@@ -200,7 +200,7 @@ async fn live_acp_agent_receives_delivered_prompt() {
         eprintln!("skipping live test (set TENEX_EDGE_RPC_LIVE=1)");
         return;
     }
-    let home = std::env::temp_dir().join(format!("te-acp-deliver-{}", std::process::id()));
+    let home = std::env::temp_dir().join(format!("acp-deliver-{}", std::process::id()));
     std::fs::create_dir_all(&home).unwrap();
     std::env::set_var("TENEX_EDGE_HOME", &home);
     std::fs::write(
@@ -279,7 +279,7 @@ fn acp_resolves_harness_from_bundle_not_slug() {
     };
     // The transport resolves from the BUNDLE name, never the slug.
     assert_eq!(super::acp::bundle_name(&spec), "codex-acp");
-    let scratch = std::env::temp_dir().join(format!("te-acp-bundle-{}", std::process::id()));
+    let scratch = std::env::temp_dir().join(format!("acp-bundle-{}", std::process::id()));
     let resolved = harness::resolve_with(&cfg, super::acp::bundle_name(&spec), &scratch)
         .expect("bundle resolves to its driver");
     assert_eq!(resolved.harness, Harness::Codex);
@@ -300,7 +300,7 @@ fn acp_resolves_harness_from_bundle_not_slug() {
 async fn acp_is_live_false_for_unknown_endpoint() {
     let ep = EndpointRef {
         kind: TransportKind::Acp,
-        endpoint_id: "te-acp-nope".into(),
+        endpoint_id: "acp-nope".into(),
     };
     assert!(!AcpTransport.is_live(&ep));
     // kill of an unregistered endpoint is a no-op, not an error.
