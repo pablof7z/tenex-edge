@@ -166,7 +166,7 @@ fn simulate_legacy_status(state: &Arc<DaemonState>, params: &Value) -> Result<Va
     let revision_before = r.revision();
     let plan = r.preview_on_distill(session, title, activity, now)?;
     let revision_after = r.revision();
-    let fact = json!({ "kind": "legacy-distill", "session_id": session,
+    let fact = json!({ "kind": "legacy-distill", "pubkey": session,
         "title": title, "activity": activity, "now": now });
     Ok(plan_value(PlanJson {
         surface: "status",
@@ -207,8 +207,7 @@ fn infer_surface(fact: &InputFact) -> Option<&'static str> {
         | InputFact::SessionStarted { .. }
         | InputFact::SessionStartFailed(_) => Some("session_start"),
         InputFact::ProcessExited {
-            session_id: Some(_),
-            ..
+            pubkey: Some(_), ..
         } => Some("session_watch"),
         InputFact::HookContextRender(_) => Some("hook_context"),
         _ => None,
@@ -219,13 +218,13 @@ fn normalize_status_fact(fact: InputFact) -> Result<InputFact> {
     let drive = match fact {
         InputFact::StatusDrive(_) => return Ok(fact),
         InputFact::DistillCompleted {
-            session_id,
+            pubkey,
             window_hash,
             title,
             activity,
             at,
         } => StatusDrive::DistillCompleted {
-            session_id,
+            pubkey,
             title,
             activity,
             window_hash: Some(window_hash),

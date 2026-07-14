@@ -102,7 +102,7 @@ pub(super) fn state_value(state: &Arc<DaemonState>, params: &Value) -> Result<Va
                 .state_rows()
                 .into_iter()
                 .map(|row| {
-                    let session = row.session_id;
+                    let session = row.pubkey;
                     let resource_key = format!("session_start/{session}");
                     json!({
                         "session": session,

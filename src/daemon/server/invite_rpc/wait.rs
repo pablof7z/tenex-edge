@@ -13,7 +13,7 @@ pub(super) fn live_session_ids(state: &Arc<DaemonState>) -> HashSet<String> {
         .with_store(|s| s.list_alive_sessions())
         .unwrap_or_default()
         .into_iter()
-        .map(|s| s.session_id)
+        .map(|s| s.pubkey)
         .collect()
 }
 
@@ -39,11 +39,10 @@ pub(super) async fn wait_local_agent_online(
                 .into_iter()
                 .find(|rec| {
                     rec.agent_slug == slug
-                        && !before.contains(&rec.session_id)
-                        && s.is_session_joined_channel(&rec.session_id, channel_h)
+                        && !before.contains(&rec.pubkey)
+                        && s.is_session_joined_channel(&rec.pubkey, channel_h)
                             .unwrap_or(false)
-                        && s.is_channel_member(channel_h, &rec.agent_pubkey)
-                            .unwrap_or(false)
+                        && s.is_channel_member(channel_h, &rec.pubkey).unwrap_or(false)
                 })
         })
     })
@@ -54,16 +53,15 @@ pub(super) async fn wait_local_agent_online(
 pub(super) async fn wait_local_session_online(
     state: &Arc<DaemonState>,
     channel_h: &str,
-    session_id: &str,
+    pubkey: &str,
 ) -> Result<String> {
     let rec = wait_until(None, || {
         state.with_store(|s| {
-            let rec = s.get_session(session_id).ok().flatten()?;
+            let rec = s.get_session(pubkey).ok().flatten()?;
             let online = rec.alive
-                && s.is_session_joined_channel(&rec.session_id, channel_h)
+                && s.is_session_joined_channel(&rec.pubkey, channel_h)
                     .unwrap_or(false)
-                && s.is_channel_member(channel_h, &rec.agent_pubkey)
-                    .unwrap_or(false);
+                && s.is_channel_member(channel_h, &rec.pubkey).unwrap_or(false);
             online.then_some(rec)
         })
     })
@@ -147,7 +145,7 @@ fn label_for_pubkey(
             .map(|p| p.slug)
             .filter(|slug| !slug.is_empty())
             .or_else(|| {
-                s.get_status(pubkey, "", channel_h)
+                s.get_status(pubkey, channel_h)
                     .ok()
                     .flatten()
                     .map(|st| st.slug)

@@ -16,7 +16,7 @@ pub(super) fn session_start_target(target: &str) -> Option<&str> {
 pub(super) fn session_start_evidence(
     state: &Arc<DaemonState>,
     target: &str,
-    session_id: &str,
+    pubkey: &str,
 ) -> Value {
     let row = state
         .session_start
@@ -24,14 +24,14 @@ pub(super) fn session_start_evidence(
         .expect("session_start mutex poisoned")
         .state_rows()
         .into_iter()
-        .find(|row| row.session_id == session_id);
+        .find(|row| row.pubkey == pubkey);
     let Some(row) = row else {
         return json!({
             "target": target,
-            "session_id": session_id,
+            "pubkey": pubkey,
             "supported": true,
             "found": false,
-            "summary": format!("session_start `{session_id}` has no advisory row"),
+            "summary": format!("session_start `{pubkey}` has no advisory row"),
             "reason": "no SessionStartRequested/SessionStarted/SessionStartFailed fact has reached the session_start graph for this session",
         });
     };
@@ -39,20 +39,20 @@ pub(super) fn session_start_evidence(
     let summary = match row.action.as_str() {
         "RecordStarted" => format!(
             "session_start `{}` recorded started in channel `{}`",
-            row.session_id, row.channel_h
+            row.pubkey, row.channel_h
         ),
         "RecordFailed" => format!(
             "session_start `{}` failed at {}",
-            row.session_id,
+            row.pubkey,
             row.failure_stage.as_deref().unwrap_or("unknown_stage")
         ),
         "Reassert" => format!(
             "session_start `{}` has a reassert intent but no recorded started outcome",
-            row.session_id
+            row.pubkey
         ),
         _ => format!(
             "session_start `{}` has a pending execute intent",
-            row.session_id
+            row.pubkey
         ),
     };
     let reason = match row.action.as_str() {
@@ -70,7 +70,7 @@ pub(super) fn session_start_evidence(
 
     json!({
         "target": target,
-        "session_id": row.session_id,
+        "pubkey": row.pubkey,
         "supported": true,
         "found": true,
         "action": row.action,

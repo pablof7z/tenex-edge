@@ -19,22 +19,10 @@ pub(super) const DURABLE_TABLES: &[TableCoverage] = &[
         "pending channel-name reservations",
     ),
     row(
-        "durable_agent_sessions",
-        "direct",
-        "identity:<pubkey> | agent:<slug> | session:<session>",
-        "durable-agent single-live-session ownership",
-    ),
-    row(
         "handle_leases",
         "aggregate",
-        "identity:<pubkey> | profile:<pubkey>",
+        "pubkey:<pubkey> | profile:<pubkey>",
         "authoritative current public handle ownership",
-    ),
-    row(
-        "identities",
-        "direct",
-        "identity:<pubkey> | agent:<slug> | backend:<label>",
-        "local identity/session bindings",
     ),
     row(
         "event_claims",
@@ -52,7 +40,7 @@ pub(super) const DURABLE_TABLES: &[TableCoverage] = &[
     row(
         "message_recipients",
         "direct",
-        "recipient:<event>:<pubkey>[:session]",
+        "recipient:<event>:<pubkey>",
         "message delivery edges",
     ),
     row(
@@ -130,14 +118,14 @@ pub(super) const DURABLE_TABLES: &[TableCoverage] = &[
     row(
         "relay_status",
         "direct",
-        "status:<session>",
+        "status:<pubkey>",
         "published agent status rows",
     ),
     row(
-        "session_aliases",
-        "direct",
-        "alias:<harness>:<kind>:<value>",
-        "external-to-canonical session aliases",
+        "session_locators",
+        "aggregate",
+        "table:session_locators",
+        "typed host-local runtime locators",
     ),
     row(
         "session_claims",
@@ -148,19 +136,19 @@ pub(super) const DURABLE_TABLES: &[TableCoverage] = &[
     row(
         "session_signers",
         "direct",
-        "identity:<pubkey>",
+        "pubkey:<pubkey>",
         "pubkey-owned signer reconstruction material",
     ),
     row(
         "session_channels",
         "direct",
-        "joined:<session>[:channel]",
+        "joined:<pubkey>[:channel]",
         "joined channel bindings",
     ),
     row(
         "sessions",
         "direct",
-        "session:<session>",
+        "session:<pubkey>",
         "local hosted session rows",
     ),
     row(

@@ -10,7 +10,6 @@ use trellis_testing::DataTransactionScript;
 
 mod stats;
 mod validate;
-mod validate_alias;
 mod validate_awareness;
 mod validate_channel;
 mod validate_commit;
@@ -20,7 +19,6 @@ mod validate_fact_flow;
 mod validate_global;
 mod validate_handles;
 mod validate_hook_context;
-mod validate_identity;
 mod validate_inbox;
 mod validate_inputs;
 mod validate_joined;

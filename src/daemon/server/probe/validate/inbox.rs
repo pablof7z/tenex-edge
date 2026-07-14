@@ -50,7 +50,7 @@ pub(super) fn inbox_evidence(
             .map(|row| {
                 alive
                     .iter()
-                    .find(|session| session.agent_pubkey == row.target_pubkey)
+                    .find(|session| session.pubkey == row.target_pubkey)
                     .cloned()
             })
             .collect::<Vec<_>>();

@@ -54,14 +54,14 @@ pub(super) fn preview_hook_context(state: &Arc<DaemonState>, fact: &InputFact) -
         .hook_contexts
         .lock()
         .expect("hook-context mutex poisoned");
-    let graph = guard.get_mut(&fact.session_id).with_context(|| {
+    let graph = guard.get_mut(&fact.pubkey).with_context(|| {
         format!(
             "probe: hook_context graph for `{}` has not rendered",
-            fact.session_id
+            fact.pubkey
         )
     })?;
     let preview = graph
-        .preview_context(&fact.session_id, fact.cursor, fact.now, inputs)
+        .preview_context(&fact.pubkey, fact.cursor, fact.now, inputs)
         .map_err(|e| anyhow::anyhow!("hook_context preview failed: {e:?}"))?;
     Ok(plan_artifact(
         "hook_context",

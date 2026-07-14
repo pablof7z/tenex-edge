@@ -133,14 +133,14 @@ async fn kill_session(state: &Arc<DaemonState>, selector: &str) -> Result<String
         anyhow::bail!("session {selector:?} is not running");
     }
     let public_label = state
-        .with_store(|s| s.handle_for_pubkey(&rec.agent_pubkey))?
-        .or_else(|| crate::idref::npub(&rec.agent_pubkey))
-        .unwrap_or_else(|| rec.agent_pubkey.clone());
+        .with_store(|s| s.handle_for_pubkey(&rec.pubkey))?
+        .or_else(|| crate::idref::npub(&rec.pubkey))
+        .unwrap_or_else(|| rec.pubkey.clone());
     let stop_note = stop_local_process(state, &rec).await;
     let _ = super::rpc_session_end(
         state,
         &serde_json::json!({
-            "session": rec.session_id,
+            "session": rec.pubkey,
         }),
     )
     .await?;
@@ -225,9 +225,12 @@ async fn stop_local_process(
     state: &Arc<DaemonState>,
     rec: &crate::state::Session,
 ) -> Result<String> {
-    if let Some(pty_id) = pty_session_for_session(state, &rec.session_id) {
+    if let Some(pty_id) = pty_session_for_session(state, &rec.pubkey) {
         crate::pty::kill(&pty_id).with_context(|| format!("killing PTY session {pty_id}"))?;
-        state.with_store(|s| s.clear_pty_session(&rec.session_id).ok());
+        state.with_store(|s| {
+            s.clear_locator_kind(&rec.pubkey, crate::state::LOCATOR_PTY)
+                .ok()
+        });
         return Ok(format!(" pty={pty_id}"));
     }
     if let Some(pid) = rec.child_pid {
@@ -241,15 +244,15 @@ async fn stop_local_process(
     Ok(String::new())
 }
 
-fn pty_session_for_session(state: &Arc<DaemonState>, session_id: &str) -> Option<String> {
+fn pty_session_for_session(state: &Arc<DaemonState>, pubkey: &str) -> Option<String> {
     state
-        .with_store(|s| s.aliases_for_session(session_id))
+        .with_store(|s| s.locators_for_pubkey(pubkey))
         .ok()
-        .and_then(|aliases| {
-            aliases
+        .and_then(|locators| {
+            locators
                 .into_iter()
-                .find(|a| a.external_id_kind == "pty_session")
-                .map(|a| a.external_id)
+                .find(|locator| locator.locator_kind == crate::state::LOCATOR_PTY)
+                .map(|locator| locator.locator_value)
         })
 }
 

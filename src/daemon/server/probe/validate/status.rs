@@ -14,20 +14,20 @@ pub(super) fn status_target(target: &str) -> Option<&str> {
         .filter(|id| !id.trim().is_empty())
 }
 
-pub(super) fn status_evidence(state: &Arc<DaemonState>, target: &str, session_id: &str) -> Value {
+pub(super) fn status_evidence(state: &Arc<DaemonState>, target: &str, pubkey: &str) -> Value {
     let graph_row = state
         .status
         .lock()
         .expect("status mutex poisoned")
         .state_rows()
         .into_iter()
-        .find(|row| row.session == session_id);
+        .find(|row| row.session == pubkey);
     let durable = state.with_store(|s| {
-        let session = s.get_session(session_id)?;
+        let session = s.get_session(pubkey)?;
         let mut relay_rows = s
             .list_status_sessions(None, None)?
             .into_iter()
-            .filter(|row| row.session_id == session_id)
+            .filter(|row| row.pubkey == pubkey)
             .collect::<Vec<_>>();
         relay_rows.sort_by(|a, b| {
             b.last_seen
@@ -41,7 +41,7 @@ pub(super) fn status_evidence(state: &Arc<DaemonState>, target: &str, session_id
         Err(e) => {
             return json!({
                 "target": target,
-                "session_id": session_id,
+                "pubkey": pubkey,
                 "supported": true,
                 "found": false,
                 "graph_found": graph_row.is_some(),
@@ -87,7 +87,7 @@ pub(super) fn status_evidence(state: &Arc<DaemonState>, target: &str, session_id
 
     json!({
         "target": target,
-        "session_id": session_id,
+        "pubkey": pubkey,
         "supported": true,
         "found": graph_found || session_row_found || relay_status_found,
         "graph_found": graph_found,
@@ -125,7 +125,7 @@ pub(super) fn status_evidence(state: &Arc<DaemonState>, target: &str, session_id
         "channel_confirmed": channel_confirmed,
         "busy_matches_session": busy_matches,
         "title_matches_session": title_matches,
-        "summary": summary(session_id, graph_found, session_row_found, session_alive, relay_rows.len(), relay_live_count, &graph_row),
+        "summary": summary(pubkey, graph_found, session_row_found, session_alive, relay_rows.len(), relay_live_count, &graph_row),
         "reason": reason(graph_found, session_row_found, session_alive, relay_status_found, relay_live_count),
     })
 }

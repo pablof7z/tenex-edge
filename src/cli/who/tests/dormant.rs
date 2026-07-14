@@ -5,10 +5,7 @@ fn claim(owner_backend_pubkey: &str, owner_host: &str) -> SessionClaim {
     SessionClaim {
         pubkey: "pk-codex".to_string(),
         agent_slug: "codex".to_string(),
-        codename: "willow-summit-042".to_string(),
-        session_id: "sid-codex".to_string(),
         channel_h: "proj".to_string(),
-        native_id: "native-codex".to_string(),
         harness: "codex".to_string(),
         last_active_at: 900,
         expires_at: 1_100,
@@ -20,6 +17,9 @@ fn claim(owner_backend_pubkey: &str, owner_host: &str) -> SessionClaim {
 #[test]
 fn who_snapshot_renders_active_claim_as_dormant_presence() {
     let store = Store::open_memory().unwrap();
+    store
+        .allocate_handle("pk-codex", "willow-summit-042-codex", 900)
+        .unwrap();
     store
         .upsert_session_claim(&claim("backend-laptop", "laptop"))
         .unwrap();
@@ -34,6 +34,9 @@ fn who_snapshot_renders_active_claim_as_dormant_presence() {
 #[test]
 fn who_snapshot_marks_remote_owned_claims_remote() {
     let store = Store::open_memory().unwrap();
+    store
+        .allocate_handle("pk-codex", "willow-summit-042-codex", 900)
+        .unwrap();
     store
         .upsert_session_claim(&claim("backend-tower", "tower"))
         .unwrap();

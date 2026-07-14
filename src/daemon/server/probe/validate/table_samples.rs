@@ -8,7 +8,6 @@ const SAMPLE_TABLES: &[&str] = &[
     "channel_readiness_attempts",
     "channel_resolution_intents",
     "event_claims",
-    "identities",
     "inbox",
     "llm_calls",
     "message_recipients",
@@ -22,7 +21,7 @@ const SAMPLE_TABLES: &[&str] = &[
     "relay_events",
     "relay_profiles",
     "relay_status",
-    "session_aliases",
+    "session_locators",
     "session_channels",
     "session_signers",
     "sessions",
@@ -66,10 +65,9 @@ fn columns_for_table(table: &str) -> &'static [&'static str] {
     match table {
         "channel_readiness_attempts" => &["id", "channel_h", "outcome"],
         "channel_resolution_intents" => &["parent", "name", "channel_h"],
-        "identities" => &["pubkey", "agent_slug", "session_id"],
         "event_claims" => &["event_id", "claim_key", "state"],
         "inbox" => &["event_id", "target_pubkey", "state"],
-        "llm_calls" => &["id", "session_id", "provider", "model"],
+        "llm_calls" => &["id", "pubkey", "provider", "model"],
         "message_recipients" => &["message_id", "recipient_pubkey"],
         "messages" => &[
             "message_id",
@@ -85,11 +83,11 @@ fn columns_for_table(table: &str) -> &'static [&'static str] {
         "relay_event_quarantine" => &["id", "reason"],
         "relay_events" => &["id", "kind", "channel_h"],
         "relay_profiles" => &["pubkey", "slug"],
-        "relay_status" => &["session_id", "pubkey", "channel_h"],
-        "session_aliases" => &["harness", "external_id_kind", "external_id"],
-        "session_channels" => &["session_id", "channel_h"],
+        "relay_status" => &["pubkey", "channel_h"],
+        "session_locators" => &["harness", "locator_kind", "locator_value", "pubkey"],
+        "session_channels" => &["pubkey", "channel_h"],
         "session_signers" => &["pubkey"],
-        "sessions" => &["session_id", "agent_slug", "channel_h"],
+        "sessions" => &["pubkey", "agent_slug", "channel_h"],
         "trellis_commits" => &["id", "surface", "transaction_id"],
         "trellis_replay_capsules" => &["id", "surface"],
         "workspace_roots" => &["channel_h", "abs_path"],
@@ -102,7 +100,6 @@ fn sample_target(table: &str, row: &Value) -> Option<Value> {
         "channel_readiness_attempts" => format!("readiness_attempt:{}", int(row, "id")?),
         "channel_resolution_intents" => format!("channel:{}", text(row, "channel_h")?),
         "event_claims" => "table:event_claims".to_string(),
-        "identities" => format!("identity:{}", text(row, "pubkey")?),
         "inbox" => format!("inbox:{}", text(row, "event_id")?),
         "llm_calls" => format!("llm:{}", int(row, "id")?),
         "message_recipients" => recipient_target(row)?,
@@ -117,17 +114,17 @@ fn sample_target(table: &str, row: &Value) -> Option<Value> {
         "relay_event_quarantine" => format!("quarantine:{}", text(row, "id")?),
         "relay_events" => format!("event:{}", text(row, "id")?),
         "relay_profiles" => format!("profile:{}", text(row, "pubkey")?),
-        "relay_status" => format!("status:{}", text(row, "session_id")?),
-        "session_aliases" => alias_target(row)?,
+        "relay_status" => format!("status:{}", text(row, "pubkey")?),
+        "session_locators" => "table:session_locators".to_string(),
         "session_channels" => {
             format!(
                 "joined:{}:{}",
-                text(row, "session_id")?,
+                text(row, "pubkey")?,
                 text(row, "channel_h")?
             )
         }
-        "session_signers" => format!("identity:{}", text(row, "pubkey")?),
-        "sessions" => format!("session:{}", text(row, "session_id")?),
+        "session_signers" => format!("pubkey:{}", text(row, "pubkey")?),
+        "sessions" => format!("session:{}", text(row, "pubkey")?),
         "trellis_commits" => format!("commit:{}", int(row, "id")?),
         "trellis_replay_capsules" => format!("capsule:{}", int(row, "id")?),
         "workspace_roots" => format!("workspace:{}", text(row, "channel_h")?),
@@ -146,7 +143,8 @@ fn recipient_target(row: &Value) -> Option<String> {
         "recipient:{}:{}",
         text(row, "message_id")?,
         text(row, "recipient_pubkey")?
-    ))
+    );
+    Some(base)
 }
 
 fn membership_target(row: &Value) -> Option<String> {
@@ -158,15 +156,6 @@ fn membership_target(row: &Value) -> Option<String> {
         "{prefix}:{}:{}",
         text(row, "channel_h")?,
         text(row, "pubkey")?
-    ))
-}
-
-fn alias_target(row: &Value) -> Option<String> {
-    Some(format!(
-        "alias:{}:{}:{}",
-        text(row, "harness")?,
-        text(row, "external_id_kind")?,
-        text(row, "external_id")?
     ))
 }
 

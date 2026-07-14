@@ -16,7 +16,7 @@ pub(super) fn state_value(state: &Arc<DaemonState>) -> Result<Value> {
                 "resource_key": resource_key,
                 "action": row.action,
                 "event_ids": row.event_ids,
-                "pty_id": row.pty_id,
+                "endpoint_id": row.endpoint_id,
                 "retry_after_secs": row.retry_after_secs,
             })
         })

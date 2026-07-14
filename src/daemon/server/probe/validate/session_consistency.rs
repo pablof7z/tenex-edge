@@ -45,7 +45,7 @@ pub(super) fn session_consistency_evidence(state: &Arc<DaemonState>) -> Value {
     let rows = sessions
         .iter()
         .map(|session| {
-            let owner = format!("session-{}", session.session_id);
+            let owner = format!("session-{}", session.pubkey);
             let has_channel = !session.channel_h.trim().is_empty();
             let sub_h = has_channel
                 && owner_has_subscription(
@@ -59,8 +59,8 @@ pub(super) fn session_consistency_evidence(state: &Arc<DaemonState>) -> Value {
                     &format!("sub/d/{}", session.channel_h),
                     &owner,
                 );
-            let status = status_sessions.contains(&session.session_id);
-            let watch = watched_sessions.contains(&session.session_id);
+            let status = status_sessions.contains(&session.pubkey);
+            let watch = watched_sessions.contains(&session.pubkey);
             let mut missing = Vec::new();
             if !status {
                 missing.push("status");
@@ -79,7 +79,7 @@ pub(super) fn session_consistency_evidence(state: &Arc<DaemonState>) -> Value {
                 }
             }
             json!({
-                "session_id": session.session_id,
+                "pubkey": session.pubkey,
                 "agent_slug": session.agent_slug,
                 "channel_h": session.channel_h,
                 "status_found": status,

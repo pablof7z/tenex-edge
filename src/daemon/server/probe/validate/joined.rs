@@ -81,7 +81,7 @@ pub(super) fn joined_evidence(
         });
     };
 
-    let owner = format!("session-{}", session.session_id);
+    let owner = format!("session-{}", session.pubkey);
     let subs = state.subs.lock().expect("subs mutex poisoned").state_rows();
     let row_values = rows
         .iter()
@@ -111,7 +111,7 @@ pub(super) fn joined_evidence(
 
     json!({
         "target": target,
-        "session_id": session.session_id,
+        "pubkey": session.pubkey,
         "requested_session_id": parsed.session_id,
         "channel_h": parsed.channel_h,
         "kind": "joined",
@@ -126,7 +126,7 @@ pub(super) fn joined_evidence(
         "missing_channel_count": missing_channel_count,
         "rows": row_values,
         "ok": ok,
-        "summary": summary(&session.session_id, parsed.channel_h.as_deref(), rows.len(), requested_joined, session.alive, missing_subscription_count, missing_channel_count),
+        "summary": summary(&session.pubkey, parsed.channel_h.as_deref(), rows.len(), requested_joined, session.alive, missing_subscription_count, missing_channel_count),
         "reason": reason(rows.is_empty(), requested_joined, session.alive, missing_subscription_count, missing_channel_count),
     })
 }

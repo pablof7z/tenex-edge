@@ -11,7 +11,6 @@ use anyhow::Result;
 use serde_json::Value;
 use std::sync::Arc;
 
-mod alias;
 mod awareness;
 mod channel;
 mod commit;
@@ -22,7 +21,6 @@ mod envelope;
 mod event;
 mod explain_evidence;
 mod hook_context;
-mod identity;
 mod inbox;
 mod input;
 mod joined;

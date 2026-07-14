@@ -40,13 +40,13 @@ pub(crate) fn load_expired_sessions(
         .filter(|s| !s.alive)
         .map(|s| ExpiredSessionRow {
             agent_slug: s.agent_slug,
-            pubkey: s.agent_pubkey.clone(),
-            npub: crate::idref::npub(&s.agent_pubkey).unwrap_or_default(),
-            handle: store.handle_for_pubkey(&s.agent_pubkey).ok().flatten(),
+            pubkey: s.pubkey.clone(),
+            npub: crate::idref::npub(&s.pubkey).unwrap_or_default(),
+            handle: store.handle_for_pubkey(&s.pubkey).ok().flatten(),
             host: host.to_string(),
             channel: channel_name(store, &s.channel_h),
             last_seen: s.last_seen,
-            resumable: !s.resume_id.is_empty(),
+            resumable: true,
         })
         .collect()
 }
@@ -66,20 +66,28 @@ mod tests {
     use crate::state::RegisterSession;
 
     fn register(store: &Store, ext: &str, channel: &str) -> String {
+        let pubkey = format!("pk-{ext}");
         store
-            .register_session(&RegisterSession {
+            .reserve_session(&RegisterSession {
+                pubkey: pubkey.clone(),
                 harness: "claude-code".into(),
-                external_id_kind: "harness_session".into(),
-                external_id: ext.into(),
-                agent_pubkey: format!("pk-{ext}"),
                 agent_slug: "coder".into(),
                 channel_h: channel.into(),
                 child_pid: Some(7),
                 transcript_path: None,
-                resume_id: format!("resume-{ext}"),
                 now: 1_000,
             })
-            .unwrap()
+            .unwrap();
+        store
+            .put_session_locator(
+                "claude-code",
+                crate::state::LOCATOR_NATIVE_RESUME,
+                &format!("resume-{ext}"),
+                &pubkey,
+                1_000,
+            )
+            .unwrap();
+        pubkey
     }
 
     #[test]

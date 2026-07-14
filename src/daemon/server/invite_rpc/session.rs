@@ -15,9 +15,7 @@ pub(super) async fn invite_session(
             if let Some(pty_id) = live_pty_for_session(state, &rec) {
                 return pull_live_session(state, channel_h, &rec, &pty_id).await;
             }
-            if state.with_store(|s| s.is_durable_agent_session(&rec.session_id))? {
-                return pull_live_session(state, channel_h, &rec, "").await;
-            }
+            return pull_live_session(state, channel_h, &rec, "").await;
         }
         return resume_local_session(state, channel_h, work_root, &rec).await;
     }
@@ -33,11 +31,11 @@ async fn pull_live_session(
 ) -> Result<serde_json::Value> {
     ensure_live_session_member(state, channel_h, rec).await?;
     ensure_subscription(state, channel_h).await?;
-    state.with_store(|s| s.join_session_channel(&rec.session_id, channel_h, now_secs()))?;
-    let online = wait_local_session_online(state, channel_h, &rec.session_id).await?;
+    state.with_store(|s| s.join_session_channel(&rec.pubkey, channel_h, now_secs()))?;
+    let online = wait_local_session_online(state, channel_h, &rec.pubkey).await?;
     Ok(serde_json::json!({
         "pty_id": pty_id,
-        "npub": crate::idref::npub(&rec.agent_pubkey),
+        "npub": crate::idref::npub(&rec.pubkey),
         "agent": rec.agent_slug,
         "online_agent": online,
         "channel": channel_h,
@@ -51,12 +49,8 @@ async fn resume_local_session(
     work_root: &str,
     rec: &crate::state::Session,
 ) -> Result<serde_json::Value> {
-    let resume_id = super::super::pty_rpc::resume_token_for(rec).with_context(|| {
-        format!(
-            "session {} has no resume token (not resumable)",
-            rec.session_id
-        )
-    })?;
+    let resume_id = super::super::pty_rpc::resume_token_for(state, rec)
+        .with_context(|| format!("session {} has no resume token (not resumable)", rec.pubkey))?;
     super::super::pty_rpc::provision_before_spawn(
         state,
         &rec.agent_slug,
@@ -72,10 +66,10 @@ async fn resume_local_session(
         &resume_id,
     )
     .await?;
-    let online = wait_local_session_online(state, channel_h, &rec.session_id).await?;
+    let online = wait_local_session_online(state, channel_h, &rec.pubkey).await?;
     Ok(serde_json::json!({
         "pty_id": pty_id,
-        "npub": crate::idref::npub(&rec.agent_pubkey),
+        "npub": crate::idref::npub(&rec.pubkey),
         "agent": rec.agent_slug,
         "online_agent": online,
         "channel": channel_h,
@@ -124,23 +118,21 @@ async fn ensure_live_session_member(
     rec: &crate::state::Session,
 ) -> Result<()> {
     refresh_channel_members_cache(state, channel_h).await;
-    let is_member = state.with_store(|s| {
-        s.is_channel_member(channel_h, &rec.agent_pubkey)
-            .unwrap_or(false)
-    });
+    let is_member =
+        state.with_store(|s| s.is_channel_member(channel_h, &rec.pubkey).unwrap_or(false));
     if is_member {
         return Ok(());
     }
 
     let added = state
         .provider
-        .grant_member_confirmed(channel_h, &rec.agent_pubkey)
+        .grant_member_confirmed(channel_h, &rec.pubkey)
         .await;
     if !added.is_confirmed() {
         anyhow::bail!(
             "session {} is not a member of channel {:?} and could not be confirmed as added \
              (is the management key an admin of that channel?)",
-            rec.session_id,
+            rec.pubkey,
             channel_h
         );
     }
@@ -150,16 +142,16 @@ async fn ensure_live_session_member(
 
 fn live_pty_for_session(state: &Arc<DaemonState>, rec: &crate::state::Session) -> Option<String> {
     let pty_id = state
-        .with_store(|s| s.aliases_for_session(&rec.session_id))
+        .with_store(|s| s.locators_for_pubkey(&rec.pubkey))
         .ok()?
         .into_iter()
-        .find(|a| a.external_id_kind == "pty_session")?
-        .external_id;
+        .find(|locator| locator.locator_kind == crate::state::LOCATOR_PTY)?
+        .locator_value;
     if crate::pty::is_live(&pty_id) {
         return Some(pty_id);
     }
     state.with_store(|s| {
-        let _ = s.clear_alias_kind(&rec.session_id, "pty_session");
+        let _ = s.clear_locator_kind(&rec.pubkey, crate::state::LOCATOR_PTY);
     });
     None
 }

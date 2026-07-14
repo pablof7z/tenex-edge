@@ -100,7 +100,7 @@ fn seed_live_sessions(panes: &mut BTreeMap<String, SessionPane>) {
         return;
     };
     for row in v["rows"].as_array().cloned().unwrap_or_default() {
-        let session = row["session_id"].as_str().unwrap_or("").to_string();
+        let session = row["pubkey"].as_str().unwrap_or("").to_string();
         if session.is_empty() {
             continue;
         }
@@ -128,8 +128,12 @@ fn enrich_panes_from_store_path(panes: &mut BTreeMap<String, SessionPane>, path:
         return;
     };
     for pane in panes.values_mut() {
-        if let Ok(Some(identity)) = store.session_identity_for_session(&pane.session) {
-            pane.agent = identity.display_slug();
+        if let Ok(Some(session)) = store.get_session(&pane.session) {
+            pane.agent = store
+                .handle_for_pubkey(&session.pubkey)
+                .ok()
+                .flatten()
+                .unwrap_or(session.agent_slug);
         }
         enrich_pane_scope_from_store(pane, &store);
     }
@@ -437,50 +441,35 @@ fn parse_command_log(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{Identity, RegisterSession};
+    use crate::state::RegisterSession;
 
     #[test]
-    fn enriches_pane_agent_with_persisted_session_codename() {
+    fn enriches_pane_agent_with_public_session_handle() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("state.db");
         let store = crate::state::Store::open(&path).unwrap();
         store
-            .upsert_session_row(
-                "sess-1",
-                &RegisterSession {
-                    harness: "claude-code".into(),
-                    external_id_kind: "session_id".into(),
-                    external_id: "sess-1".into(),
-                    agent_pubkey: "pk".into(),
-                    agent_slug: "haiku".into(),
-                    channel_h: "aaa".into(),
-                    child_pid: None,
-                    transcript_path: None,
-                    resume_id: "native-1".into(),
-                    now: 1,
-                },
-            )
+            .reserve_session(&RegisterSession {
+                pubkey: "pk".into(),
+                harness: "claude-code".into(),
+                agent_slug: "haiku".into(),
+                channel_h: "aaa".into(),
+                child_pid: None,
+                transcript_path: None,
+                now: 1,
+            })
+            .unwrap();
+        store
+            .allocate_handle("pk", "pearl-cliff-395-haiku", 1)
             .unwrap();
         store.upsert_channel("aaa", "aaa", "", "", 1).unwrap();
         store.upsert_channel("dev-h", "dev", "", "aaa", 1).unwrap();
-        store.join_session_channel("sess-1", "dev-h", 2).unwrap();
-        store
-            .upsert_identity(&Identity {
-                pubkey: "pk".into(),
-                agent_slug: "haiku".into(),
-                codename: "pearl-cliff-395".into(),
-                session_id: "sess-1".into(),
-                channel_h: "aaa".into(),
-                native_id: "native-1".into(),
-                alive: false,
-                created_at: 1,
-            })
-            .unwrap();
+        store.join_session_channel("pk", "dev-h", 2).unwrap();
 
         let mut panes = BTreeMap::from([(
-            "sess-1".into(),
+            "pk".into(),
             SessionPane {
-                session: "sess-1".into(),
+                session: "pk".into(),
                 agent: "haiku".into(),
                 ..SessionPane::default()
             },
@@ -488,8 +477,8 @@ mod tests {
 
         enrich_panes_from_store_path(&mut panes, &path);
 
-        assert_eq!(panes["sess-1"].agent, "pearl-cliff-395-haiku");
-        assert_eq!(panes["sess-1"].root, "aaa");
-        assert_eq!(panes["sess-1"].channels, vec!["aaa", "dev"]);
+        assert_eq!(panes["pk"].agent, "pearl-cliff-395-haiku");
+        assert_eq!(panes["pk"].root, "aaa");
+        assert_eq!(panes["pk"].channels, vec!["aaa", "dev"]);
     }
 }
