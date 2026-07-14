@@ -135,7 +135,7 @@ fn enqueue_local_reply(
             }
             if s.enqueue_inbox(
                 event_id,
-                &target.session_id,
+                &target.agent_pubkey,
                 &rec.agent_pubkey,
                 &original.channel_h,
                 body,

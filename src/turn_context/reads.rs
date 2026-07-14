@@ -29,10 +29,10 @@ pub(super) fn root_channel_h(s: &Store, channel: &str) -> String {
         .unwrap_or_else(|| channel.to_string())
 }
 
-pub(super) fn take_inbox(s: &Store, session_id: &str, now: u64) -> Result<Vec<InboxRow>> {
+pub(super) fn take_inbox(s: &Store, target_pubkey: &str, now: u64) -> Result<Vec<InboxRow>> {
     // Atomic claim (pending -> delivered in one statement). Whoever drains the
     // row first wins; the inbox state is the idempotency record.
-    let mut rows = s.claim_pending_for_session(session_id, now)?;
+    let mut rows = s.claim_pending_for_pubkey(target_pubkey, now)?;
     rewrite_inbox_bodies(s, &mut rows);
     Ok(rows)
 }

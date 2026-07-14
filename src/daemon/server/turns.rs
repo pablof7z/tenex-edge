@@ -253,7 +253,7 @@ fn context_profile_pubkeys(
 ) -> Vec<String> {
     let mut pubkeys = Vec::new();
     for row in store
-        .peek_pending_for_session(&rec.session_id)
+        .peek_pending_for_pubkey(&rec.agent_pubkey)
         .unwrap_or_default()
     {
         pubkeys.push(row.from_pubkey);

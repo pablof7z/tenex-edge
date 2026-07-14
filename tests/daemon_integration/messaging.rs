@@ -165,6 +165,7 @@ fn channel_send_stdin_enqueues_live_channel_chat_for_receiver() {
         .unwrap()
         .expect("receiver session row");
     let receiver_scope = receiver_row.channel_h.clone();
+    let receiver_pubkey = receiver_row.agent_pubkey.clone();
     let receiver_handle = Store::open(&home.store_path())
         .unwrap()
         .session_identity_for_session(&receiver_canon)
@@ -240,7 +241,7 @@ fn channel_send_stdin_enqueues_live_channel_chat_for_receiver() {
         .agent_pubkey;
     assert!(
         wait_until(Duration::from_secs(2), || Store::open(&home.store_path())
-            .map(|store| receiver_inbox_rows(&store, &receiver_canon)
+            .map(|store| receiver_inbox_rows(&store, &receiver_pubkey)
                 .iter()
                 .any(|row| row.body == wire_body))
             .unwrap_or(false)),
@@ -249,12 +250,12 @@ fn channel_send_stdin_enqueues_live_channel_chat_for_receiver() {
     let store = Store::open(&home.store_path()).unwrap();
     // The inbound routing ledger may still be pending, or may already be marked
     // injected when a live PTY endpoint is present in the integration process.
-    let rows = receiver_inbox_rows(&store, &receiver_canon);
+    let rows = receiver_inbox_rows(&store, &receiver_pubkey);
     let row = rows
         .iter()
         .find(|row| row.body == wire_body)
         .expect("receiver pending chat row");
-    assert_eq!(row.target_session, receiver_canon);
+    assert_eq!(row.target_pubkey, receiver_pubkey);
     assert_eq!(row.from_pubkey, sender_pubkey);
 
     rt().block_on(async {
@@ -298,7 +299,7 @@ fn channel_send_stdin_enqueues_live_channel_chat_for_receiver() {
     let store = Store::open(&home.store_path()).unwrap();
     assert!(
         store
-            .peek_pending_for_session(&sender_canon)
+            .peek_pending_for_pubkey(&sender_pubkey)
             .unwrap()
             .is_empty(),
         "sender should not receive its own chat row"

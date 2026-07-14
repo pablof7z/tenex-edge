@@ -194,7 +194,7 @@ fn injected_mention_row_is_hidden_from_chatter() {
     store
         .enqueue_inbox(
             "mention-inj",
-            &rec.session_id,
+            &rec.agent_pubkey,
             OTHER_PK,
             "root",
             "please pick this up",
@@ -202,10 +202,10 @@ fn injected_mention_row_is_hidden_from_chatter() {
         )
         .unwrap();
     store
-        .claim_pending_for_session(&rec.session_id, 210)
+        .claim_pending_for_pubkey(&rec.agent_pubkey, 210)
         .unwrap();
     store
-        .mark_injected_for_echo(&["mention-inj".to_string()], &rec.session_id)
+        .mark_injected_for_echo(&["mention-inj".to_string()], &rec.agent_pubkey)
         .unwrap();
 
     let text = render_fabric_context(&store, input(Some(&rec), "root", 200, 300, true))

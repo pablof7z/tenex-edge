@@ -212,8 +212,15 @@ fn inbox_mention_surfaces_in_turn_context() {
     };
     {
         let s = m.lock().unwrap();
-        s.enqueue_inbox("ev-mention-1", &sid, OTHER_PK, ch, "hey do the thing", 110)
-            .unwrap();
+        s.enqueue_inbox(
+            "ev-mention-1",
+            SELF_PK,
+            OTHER_PK,
+            ch,
+            "hey do the thing",
+            110,
+        )
+        .unwrap();
     }
     let rec = m.lock().unwrap().get_session(&sid).unwrap().unwrap();
     let ctx = super::assemble_turn_start_context(&m, &rec, "", "", 0).unwrap_or_default();
@@ -245,7 +252,7 @@ fn ambient_and_mention_both_in_first_turn_context() {
         let s = m.lock().unwrap();
         s.enqueue_inbox(
             "ev-dm-1",
-            &sid,
+            SELF_PK,
             OTHER_PK,
             ch,
             "start working on X",

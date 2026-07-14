@@ -84,11 +84,21 @@ fn non_mention_chat_does_not_route_to_inbox() {
     );
 
     let store = Store::open(&home.store_path()).unwrap();
+    let receiver_pubkey = store
+        .get_session(&receiver_canon)
+        .unwrap()
+        .unwrap()
+        .agent_pubkey;
+    let sender_pubkey = store
+        .get_session(&sender_canon)
+        .unwrap()
+        .unwrap()
+        .agent_pubkey;
 
     // Inbox for the receiver must be empty — no doorbell should ring.
     assert!(
         store
-            .peek_pending_for_session(&receiver_canon)
+            .peek_pending_for_pubkey(&receiver_pubkey)
             .unwrap()
             .is_empty(),
         "non-mention message must not route to receiver inbox"
@@ -96,7 +106,7 @@ fn non_mention_chat_does_not_route_to_inbox() {
     // Sender never receives its own message either.
     assert!(
         store
-            .peek_pending_for_session(&sender_canon)
+            .peek_pending_for_pubkey(&sender_pubkey)
             .unwrap()
             .is_empty(),
         "sender must not receive its own message"

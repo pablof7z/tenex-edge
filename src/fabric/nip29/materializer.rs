@@ -174,7 +174,7 @@ impl Nip29Materializer {
     /// whose agent is explicitly p-tagged in the event. Non-mention channel chat
     /// stays in `relay_events` for ambient context but does not ring the direct
     /// doorbell. Returns `true` if at least one new inbox row was enqueued.
-    /// Idempotent: a duplicate `(event_id, target_session)` is ignored by the store.
+    /// Idempotent: a duplicate `(event_id, target_pubkey)` is ignored by the store.
     pub fn route_chat(store: &Store, event: &Event, chat: &ChatMessage) -> bool {
         let channel_h = chat.channel.as_str();
         let from_pubkey = event.pubkey.to_hex();
@@ -215,7 +215,7 @@ impl Nip29Materializer {
             }
             match store.enqueue_inbox(
                 &event_id,
-                &sess.session_id,
+                &sess.agent_pubkey,
                 &from_pubkey,
                 channel_h,
                 &chat.body,

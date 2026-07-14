@@ -170,7 +170,7 @@ pub(crate) fn assemble_turn_start(
         let s = store.lock().expect("store mutex poisoned");
         // A failed inbox claim must NOT render as an empty inbox: log loudly and
         // flag the turn so a visible marker is injected below.
-        let mentions = match take_inbox(&s, &rec.session_id, now) {
+        let mentions = match take_inbox(&s, &rec.agent_pubkey, now) {
             Ok(rows) => rows,
             Err(e) => {
                 tracing::error!(

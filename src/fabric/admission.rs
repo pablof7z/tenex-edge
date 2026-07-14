@@ -216,7 +216,7 @@ mod tests {
         let receiver = Keys::generate();
         let sender_pk = sender.public_key().to_hex();
         let receiver_pk = receiver.public_key().to_hex();
-        let receiver_sid = register(&store, &receiver_pk, "proj", "receiver");
+        register(&store, &receiver_pk, "proj", "receiver");
 
         let event = build(
             &sender,
@@ -238,7 +238,7 @@ mod tests {
             .replace_channel_admins("proj", &Vec::<String>::new(), 10)
             .unwrap();
         store
-            .replace_channel_members("proj", &[sender_pk, receiver_pk], 11)
+            .replace_channel_members("proj", &[sender_pk, receiver_pk.clone()], 11)
             .unwrap();
 
         assert!(replay_quarantined_chat(&store, "proj"));
@@ -252,7 +252,7 @@ mod tests {
                 .sync_state,
             "accepted"
         );
-        let pending = store.peek_pending_for_session(&receiver_sid).unwrap();
+        let pending = store.peek_pending_for_pubkey(&receiver_pk).unwrap();
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].body, "ship it");
     }

@@ -6,14 +6,14 @@
 //!   2. local plumbing the relay can't carry — OS process handles (`sessions`),
 //!      joined-channel state (`session_channels`), external-id aliases
 //!      (`session_aliases`), signer material, session identities, the inbound
-//!      routing ledger (`inbox`), the outbound publish queue (`outbox`), pending
-//!      channel-name reservations, and on-disk workspace paths (`workspace_roots`).
+//!      delivery ledger (`inbox`), backend replay guards (`event_claims`), the
+//!      outbound publish queue (`outbox`), pending channel-name reservations,
+//!      and on-disk workspace paths (`workspace_roots`).
 //!
-//! A pubkey appears AT MOST ONCE per channel. Canonical session identity is
-//! daemon-minted and stable; harness-native ids are aliases that repoint to the
-//! newest live owner; every turn/session mutation resolves a raw external id to
-//! the canonical id BEFORE writing. A session has one active publishing channel
-//! (`sessions.channel_h`) and may listen in additional joined channels
+//! A pubkey appears AT MOST ONCE per channel and is the durable agent identity.
+//! Daemon-minted session ids and harness-native ids locate runtime incarnations;
+//! they never own durable delivery state. A runtime has one active publishing
+//! channel (`sessions.channel_h`) and may listen in additional joined channels
 //! (`session_channels`).
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -209,7 +209,7 @@ pub struct Identity {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InboxRow {
     pub event_id: String,
-    pub target_session: String,
+    pub target_pubkey: String,
     pub state: String,
     pub from_pubkey: String,
     pub channel_h: String,
@@ -254,6 +254,7 @@ mod schema;
 pub use channels::{archived_channel_about, is_archived_channel_about, CHANNEL_ABOUT_MAX_CHARS};
 mod core;
 mod durable_agent_sessions;
+mod event_claims;
 mod events;
 mod handle_leases;
 mod identities;

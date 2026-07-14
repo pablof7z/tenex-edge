@@ -7,6 +7,7 @@ use serde_json::{json, Value};
 const SAMPLE_TABLES: &[&str] = &[
     "channel_readiness_attempts",
     "channel_resolution_intents",
+    "event_claims",
     "identities",
     "inbox",
     "llm_calls",
@@ -66,7 +67,8 @@ fn columns_for_table(table: &str) -> &'static [&'static str] {
         "channel_readiness_attempts" => &["id", "channel_h", "outcome"],
         "channel_resolution_intents" => &["parent", "name", "channel_h"],
         "identities" => &["pubkey", "agent_slug", "session_id"],
-        "inbox" => &["event_id", "target_session", "state"],
+        "event_claims" => &["event_id", "claim_key", "state"],
+        "inbox" => &["event_id", "target_pubkey", "state"],
         "llm_calls" => &["id", "session_id", "provider", "model"],
         "message_recipients" => &["message_id", "recipient_pubkey", "target_session"],
         "messages" => &[
@@ -99,6 +101,7 @@ fn sample_target(table: &str, row: &Value) -> Option<Value> {
     let target = match table {
         "channel_readiness_attempts" => format!("readiness_attempt:{}", int(row, "id")?),
         "channel_resolution_intents" => format!("channel:{}", text(row, "channel_h")?),
+        "event_claims" => "table:event_claims".to_string(),
         "identities" => format!("identity:{}", text(row, "pubkey")?),
         "inbox" => format!("inbox:{}", text(row, "event_id")?),
         "llm_calls" => format!("llm:{}", int(row, "id")?),

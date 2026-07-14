@@ -1,8 +1,8 @@
 //! The stamped persistence schema.
 //! Six `relay_*` tables are materialized caches and may be dropped/rebuilt from
 //! relay state. The remaining local tables are non-rebuildable daemon state:
-//! session bindings, aliases, identities, inbox/outbox, channel reservations,
-//! and workspace roots.
+//! runtime bindings and aliases, identities, inbox/outbox, event claims, channel
+//! reservations, and workspace roots.
 use anyhow::{Context, Result};
 use rusqlite::Connection;
 use std::collections::BTreeSet;
@@ -67,6 +67,21 @@ fn validate_canonical(conn: &Connection, path: Option<&Path>) -> Result<()> {
     )?;
     ensure_columns(conn, "relay_profiles", &["agent_slug"], &[], path)?;
     ensure_columns(conn, "outbox", &["next_attempt_at"], &[], path)?;
+    ensure_table(conn, "event_claims", path)?;
+    ensure_columns(
+        conn,
+        "event_claims",
+        &["event_id", "claim_key", "state", "updated_at"],
+        &[],
+        path,
+    )?;
+    ensure_columns(
+        conn,
+        "inbox",
+        &["event_id", "target_pubkey", "state"],
+        &["target_session"],
+        path,
+    )?;
     ensure_columns(
         conn,
         "sessions",

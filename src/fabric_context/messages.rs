@@ -34,7 +34,7 @@ pub(super) fn message_rows(
     // same text the agent already saw as literal prompt input.
     if let Some(session) = input.session {
         let injected: HashSet<String> = store
-            .injected_for_session(&session.session_id)
+            .injected_for_pubkey(&session.agent_pubkey)
             .unwrap_or_default()
             .into_iter()
             .map(|row| row.event_id)

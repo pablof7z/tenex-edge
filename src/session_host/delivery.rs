@@ -144,7 +144,7 @@ pub async fn inject_pending_messages_pty(
     rec: &crate::state::Session,
     pty_id: &str,
 ) -> Result<bool> {
-    let pending = state.with_store(|s| s.peek_pending_for_session(&rec.session_id))?;
+    let pending = state.with_store(|s| s.peek_pending_for_pubkey(&rec.agent_pubkey))?;
     if pending.is_empty() {
         return Ok(false);
     };
@@ -216,10 +216,10 @@ async fn ring_doorbells_inner(state: &Arc<DaemonState>) -> Result<()> {
 
     for rec in sessions {
         let sid = rec.session_id.clone();
-        let pending = match state.with_store(|s| s.peek_pending_for_session(&sid)) {
+        let pending = match state.with_store(|s| s.peek_pending_for_pubkey(&rec.agent_pubkey)) {
             Ok(pending) => pending,
             Err(e) => {
-                tracing::error!(session_id = %sid, error = %e, "ring_doorbells: peek_pending_for_session failed");
+                tracing::error!(session_id = %sid, error = %e, "ring_doorbells: peek_pending_for_pubkey failed");
                 state.emit_delivery_failure(
                     &rec.channel_h,
                     &rec.agent_slug,

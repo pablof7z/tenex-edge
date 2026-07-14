@@ -21,7 +21,7 @@ async fn collect_pending_prompt(
 ) -> Result<Option<PendingPrompt>> {
     let now = now_secs();
     let mut chat_rows = state
-        .with_store(|s| s.claim_pending_event_ids_for_session(event_ids, &rec.session_id, now))?;
+        .with_store(|s| s.claim_pending_event_ids_for_pubkey(event_ids, &rec.agent_pubkey, now))?;
     if chat_rows.is_empty() {
         return Ok(None);
     }
@@ -33,7 +33,7 @@ async fn collect_pending_prompt(
         crate::injection::render_terminal_mention(s, &chat_rows, &whitelisted, now)
     });
     let Some(text) = rendered else {
-        if let Err(e) = state.with_store(|s| s.reenqueue_pending(&chat_ids, &rec.session_id)) {
+        if let Err(e) = state.with_store(|s| s.reenqueue_pending(&chat_ids, &rec.agent_pubkey)) {
             tracing::error!(
                 session_id = %rec.session_id,
                 error = %e,
@@ -136,7 +136,7 @@ fn reenqueue_after_failure(
     chat_ids: &[String],
     what: &str,
 ) {
-    if let Err(re) = state.with_store(|s| s.reenqueue_pending(chat_ids, &rec.session_id)) {
+    if let Err(re) = state.with_store(|s| s.reenqueue_pending(chat_ids, &rec.agent_pubkey)) {
         tracing::error!(
             session_id = %rec.session_id,
             error = %re,
@@ -161,7 +161,7 @@ fn finalize_injection(
     prompt: &PendingPrompt,
 ) -> Result<()> {
     if let Err(e) =
-        state.with_store(|s| s.mark_injected_for_echo(&prompt.chat_ids, &rec.session_id))
+        state.with_store(|s| s.mark_injected_for_echo(&prompt.chat_ids, &rec.agent_pubkey))
     {
         tracing::error!(
             session_id = %rec.session_id,
