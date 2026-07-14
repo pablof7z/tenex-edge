@@ -227,13 +227,26 @@ fn resolve_existing_pubkey(
             .map(Some)
             .context("session_start pubkey must be hex or npub");
     }
+    let endpoint_kind = if p.endpoint_kind.as_deref() == Some("acp") {
+        crate::state::LOCATOR_ACP
+    } else {
+        crate::state::LOCATOR_PTY
+    };
+    let endpoint_pubkey = match p.pty_session.as_deref().filter(|value| !value.is_empty()) {
+        Some(endpoint) => state.with_store(|store| {
+            store
+                .alive_session_for_locator(None, endpoint_kind, endpoint)
+                .map(|session| session.map(|session| session.pubkey))
+        })?,
+        None => None,
+    };
     let lookup = |kind: &str, value: Option<&String>| -> Result<Option<String>> {
         let Some(value) = value.filter(|value| !value.is_empty()) else {
             return Ok(None);
         };
         state.with_store(|store| store.resolve_pubkey_by_locator(harness, kind, value))
     };
-    let resolved = lookup(crate::state::LOCATOR_PTY, p.pty_session.as_ref())?
+    let resolved = endpoint_pubkey
         .or(lookup(
             crate::state::LOCATOR_NATIVE_RESUME,
             p.resume_id.as_ref(),

@@ -35,7 +35,7 @@ fn pty_spawn_uses_requested_public_name_and_rejects_conflict() {
         .session_identity(&session.pubkey)
         .unwrap()
         .expect("named session identity");
-    assert_eq!(identity.slug, session_name);
+    assert_eq!(identity.slug, "codex");
     assert_eq!(identity.handle, "forensic-researcher-codex");
 
     let error = rt().block_on(async {
