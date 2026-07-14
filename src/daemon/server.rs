@@ -211,9 +211,7 @@ use lifecycle::{write_json, ClientGuard, InitProgress};
 use my_session::{rpc_my_session, rpc_my_session_status};
 use profile_rpc::{resolve_backend_pubkey, resolve_channel_member_pubkey_hex, resolve_pubkey_hex};
 use proposal::rpc_propose;
-use resolution::{
-    resolve_public_session, resolve_session, resolve_session_inner, CallerAnchor, ResolveScope,
-};
+use resolution::{resolve_session, resolve_session_inner, CallerAnchor, ResolveScope};
 use session_end::{rpc_session_end, rpc_session_kill};
 use session_pty_wrap::rpc_session_pty_wrap;
 use session_signing::retire_reclaimed_profile;

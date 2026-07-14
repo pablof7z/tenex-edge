@@ -9,4 +9,6 @@ source_refs:
 
 # CallerAnchor
 
-Everything a caller knows about 'which session am I' — one envelope resolved by one function so every in-session command identifies its session the same way; the canonical session id is daemon-minted only after the harness starts so it can never be a launch-time env var.
+Everything a caller knows about "which session am I": an explicit public
+pubkey/handle or a typed local runtime locator. Every command resolves the
+envelope through one function to the authoritative pubkey.

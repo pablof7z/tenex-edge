@@ -10,4 +10,6 @@ source_refs:
 
 # harness_session_id
 
-The harness-owned external session id, present only for harnesses that own an id of their own (claude-code, codex); None for programmatic hosts (opencode). It is ONLY a locator for session_aliases, never the identity — the daemon resolves the canonical id.
+The harness-owned resume token, present only for harnesses that expose one. It
+is stored as a typed `native_resume` locator for the authoritative pubkey and is
+never itself an identity.

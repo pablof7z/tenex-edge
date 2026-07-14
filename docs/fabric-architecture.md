@@ -127,8 +127,9 @@ read.
 
 This store already exists — `~/.tenex-edge/state.db`. Its `relay_*` tables are
 materialized projections that can be rebuilt from the fabric; its local tables
-(`sessions`, `session_channels`, `session_aliases`, `identities`, `inbox`,
-`outbox`, and `workspace_roots`) are non-rebuildable daemon state. The schema is
+(`sessions`, `session_channels`, `session_locators`, `session_signers`,
+`handle_leases`, `inbox`, `outbox`, and `workspace_roots`) are non-rebuildable
+daemon state. The schema is
 stamped at open, so an incompatible or unstamped existing DB fails loudly instead
 of being partially interpreted. The **single-writer materializer is the direct
 fix for the multi-writer `state.db` corruption** already hit when ~16

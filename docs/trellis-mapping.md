@@ -174,13 +174,14 @@ bespoke add-only path after close-on-last-owner is validated.
 
 Current shape:
 
-- Local publish intent lives on the `sessions` row: `agent_pubkey`,
+- Local publish intent lives on the pubkey-keyed `sessions` row: `pubkey`,
   `agent_slug`, `channel_h`, `alive`, `last_seen`, `working`,
   `turn_started_at`, `last_distill_at`, `title`, and `activity`.
 - Status `h` tags are derived from `session_channels`, with `sessions.channel_h`
   as a fallback. Both current status builders sort and dedupe this set.
-- The bound `identities` row is the identity/signing input for a session; the
-  daemon falls back to the base session row if the binding is unavailable.
+- `session_signers` reconstructs an ordinary session's derived signing key;
+  durable agents use their configured key. `handle_leases` supplies the only
+  public alias for a pubkey.
 - There are two status builders today. `runtime::status_for` clears `activity`
   while idle and preserves `rel_cwd`; `status_publish::status_from_session`
   copies activity even when idle and leaves `rel_cwd` empty.
