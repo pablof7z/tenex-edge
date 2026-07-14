@@ -34,7 +34,7 @@ impl ReplayState {
         let InputFact::DeliveryScan(fact) = operation else {
             return Ok(());
         };
-        let nodes = ensure_session(tx, &mut self.labels, &mut self.sessions, &fact.session_id)?;
+        let nodes = ensure_session(tx, &mut self.labels, &mut self.sessions, &fact.pubkey)?;
         self.seq += 1;
         stage_scan(tx, &nodes, fact, self.seq)
     }

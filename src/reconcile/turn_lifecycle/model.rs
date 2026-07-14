@@ -32,11 +32,11 @@ pub(crate) fn opts() -> TransactionOptions {
     TransactionOptions::default().with_audit_explanations(AuditExplanationLevel::DependencyPaths)
 }
 
-pub(crate) fn fact_session_id(fact: &InputFact) -> Option<&str> {
+pub(crate) fn fact_pubkey(fact: &InputFact) -> Option<&str> {
     match fact {
-        InputFact::TurnStarted { session_id, .. }
-        | InputFact::TurnEnded { session_id, .. }
-        | InputFact::TranscriptWindowCaptured { session_id, .. } => Some(session_id),
+        InputFact::TurnStarted { pubkey, .. }
+        | InputFact::TurnEnded { pubkey, .. }
+        | InputFact::TranscriptWindowCaptured { pubkey, .. } => Some(pubkey),
         _ => None,
     }
 }
@@ -47,11 +47,11 @@ pub(crate) fn ensure_session(
     sessions: &mut BTreeMap<String, SessionNodes>,
     seed: &TurnProjectionSeed,
 ) -> GraphResult<SessionNodes> {
-    if let Some(nodes) = sessions.get(&seed.session_id).copied() {
+    if let Some(nodes) = sessions.get(&seed.pubkey).copied() {
         return Ok(nodes);
     }
     let nodes = stage_session(tx, labels, seed)?;
-    sessions.insert(seed.session_id.clone(), nodes);
+    sessions.insert(seed.pubkey.clone(), nodes);
     Ok(nodes)
 }
 
@@ -61,22 +61,22 @@ pub(crate) fn stage_fact(
     tx: &mut Transaction<'_, TurnCommand>,
 ) -> GraphResult<()> {
     match fact {
-        InputFact::TurnStarted { session_id, at } => {
-            if let Some(nodes) = sessions.get(session_id) {
+        InputFact::TurnStarted { pubkey, at } => {
+            if let Some(nodes) = sessions.get(pubkey) {
                 tx.set_input(nodes.started_at, *at)?;
             }
         }
-        InputFact::TurnEnded { session_id, at } => {
-            if let Some(nodes) = sessions.get(session_id) {
+        InputFact::TurnEnded { pubkey, at } => {
+            if let Some(nodes) = sessions.get(pubkey) {
                 tx.set_input(nodes.ended_at, *at)?;
             }
         }
         InputFact::TranscriptWindowCaptured {
-            session_id,
+            pubkey,
             window_hash,
             ..
         } => {
-            if let Some(nodes) = sessions.get(session_id) {
+            if let Some(nodes) = sessions.get(pubkey) {
                 tx.set_input(nodes.transcript_ref, Some(window_hash.clone()))?;
             }
         }
@@ -90,7 +90,7 @@ fn stage_session(
     labels: &mut NodeLabels,
     seed: &TurnProjectionSeed,
 ) -> GraphResult<SessionNodes> {
-    let id = seed.session_id.clone();
+    let id = seed.pubkey.clone();
     let scope = tx.create_scope(format!("turn-lifecycle-{id}"))?;
     let started = tx.input::<u64>(format!("turn-{id}-started-at"))?;
     labels.record(started.id(), format!("turn_lifecycle/{id}/turn_started"));
@@ -137,10 +137,7 @@ fn stage_session(
             )]))
         },
     )?;
-    labels.record(
-        coll.id(),
-        format!("turn_lifecycle/{}/coll", seed.session_id),
-    );
+    labels.record(coll.id(), format!("turn_lifecycle/{}/coll", seed.pubkey));
     tx.map_resource_planner(coll, scope, plan_projection)?;
     Ok(SessionNodes {
         started_at: started,
@@ -172,7 +169,7 @@ fn plan_projection(
 
 fn command_of(id: &str, projection: &Projection) -> TurnCommand {
     TurnCommand {
-        session_id: id.to_string(),
+        pubkey: id.to_string(),
         working: projection.working,
         turn_started_at: projection.turn_started_at,
         transcript_ref: projection.transcript_ref.clone(),

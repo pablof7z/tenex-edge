@@ -4,7 +4,7 @@ pub(in crate::daemon::server) fn seed_from_session(
     rec: &crate::state::Session,
 ) -> crate::reconcile::CursorSeed {
     crate::reconcile::CursorSeed {
-        session_id: rec.session_id.clone(),
+        pubkey: rec.pubkey.clone(),
         seen_cursor: rec.seen_cursor,
     }
 }
@@ -15,7 +15,7 @@ pub(in crate::daemon::server) fn fact_from_session(
     working: bool,
 ) -> crate::reconcile::InputFact {
     crate::reconcile::InputFact::TurnCheckRequested {
-        session_id: rec.session_id.clone(),
+        pubkey: rec.pubkey.clone(),
         observed_cursor: rec.seen_cursor,
         working,
         at,
@@ -60,7 +60,7 @@ pub(in crate::daemon::server) fn drive_cursor_request(
             s,
             "cursor",
             trigger,
-            Some(seed.session_id.as_str()),
+            Some(seed.pubkey.as_str()),
             &commit,
             duration_us,
             created_at,
@@ -69,7 +69,7 @@ pub(in crate::daemon::server) fn drive_cursor_request(
             s,
             "cursor",
             trigger,
-            Some(seed.session_id.as_str()),
+            Some(seed.pubkey.as_str()),
             facts,
             created_at,
         );
@@ -85,12 +85,12 @@ fn apply_effects(
     for effect in effects {
         match effect {
             crate::reconcile::CursorEffect::Advance {
-                session_id,
+                pubkey,
                 to,
                 delta_since: since,
                 ..
             } => {
-                state.with_store(|s| s.apply_cursor_projection(&session_id, to))?;
+                state.with_store(|s| s.apply_cursor_projection(&pubkey, to))?;
                 delta_since = Some(since);
             }
             crate::reconcile::CursorEffect::NoFrame => {}

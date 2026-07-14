@@ -13,7 +13,7 @@ pub(crate) struct HookContextPreview {
 impl HookContextReconciler {
     pub(crate) fn preview_context(
         &mut self,
-        session_id: &str,
+        pubkey: &str,
         cursor: i64,
         now: i64,
         inputs: ViewInputs,
@@ -22,7 +22,7 @@ impl HookContextReconciler {
         let mut tx = self.graph.begin_transaction_with_options(opts())?;
         let nodes = match self.nodes.as_ref() {
             Some(nodes) => nodes.clone(),
-            None => build_nodes(&mut tx, session_id, &mut labels)?,
+            None => build_nodes(&mut tx, pubkey, &mut labels)?,
         };
         tx.set_input(nodes.cursor, cursor)?;
         tx.set_input(nodes.now, now)?;

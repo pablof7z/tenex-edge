@@ -20,10 +20,9 @@ impl StatusReconciler {
         let nodes = self.sessions.get(id)?;
         let last = self.last.get(id)?;
         Some(StatusSessionStartedArgs {
-            session_id: id.to_string(),
+            pubkey: id.to_string(),
             host: last.host.clone(),
             slug: last.slug.clone(),
-            pubkey: last.pubkey.clone(),
             rel_cwd: last.rel_cwd.clone(),
             dispatch_event: last.dispatch_event.clone(),
             channels: self
@@ -75,20 +74,19 @@ impl ReplayState {
         };
         match &drive {
             StatusDrive::SessionStarted(args) => {
-                if self.sessions.contains_key(&args.session_id) {
+                if self.sessions.contains_key(&args.pubkey) {
                     return Ok(());
                 }
                 let info = StaticInfo {
                     host: args.host.clone(),
                     slug: args.slug.clone(),
-                    pubkey: args.pubkey.clone(),
                     rel_cwd: args.rel_cwd.clone(),
                     dispatch_event: args.dispatch_event.clone(),
                 };
                 let nodes = stage_session(
                     tx,
                     &mut self.labels,
-                    &args.session_id,
+                    &args.pubkey,
                     info,
                     args.channels.clone(),
                     args.working,
@@ -96,55 +94,51 @@ impl ReplayState {
                     &args.activity,
                     args.at / self.refresh_secs,
                 )?;
-                self.sessions.insert(args.session_id.clone(), nodes);
+                self.sessions.insert(args.pubkey.clone(), nodes);
             }
-            StatusDrive::TurnStarted { session_id, at } => {
-                self.mutate(session_id, tx, *at, |tx, n| tx.set_input(n.working, true))?;
+            StatusDrive::TurnStarted { pubkey, at } => {
+                self.mutate(pubkey, tx, *at, |tx, n| tx.set_input(n.working, true))?;
             }
-            StatusDrive::TurnEnded { session_id, at } => {
-                self.mutate(session_id, tx, *at, |tx, n| tx.set_input(n.working, false))?;
+            StatusDrive::TurnEnded { pubkey, at } => {
+                self.mutate(pubkey, tx, *at, |tx, n| tx.set_input(n.working, false))?;
             }
             StatusDrive::DistillCompleted {
-                session_id,
+                pubkey,
                 title,
                 activity,
                 at,
                 ..
             } => {
-                self.mutate(session_id, tx, *at, |tx, n| {
+                self.mutate(pubkey, tx, *at, |tx, n| {
                     tx.set_input(n.title, title.clone())?;
                     tx.set_input(n.activity, activity.clone())
                 })?;
             }
-            StatusDrive::TitleSet {
-                session_id,
-                title,
-                at,
-            } => {
-                self.mutate(session_id, tx, *at, |tx, n| {
+            StatusDrive::TitleSet { pubkey, title, at } => {
+                self.mutate(pubkey, tx, *at, |tx, n| {
                     tx.set_input(n.title, title.clone())
                 })?;
             }
             StatusDrive::ChannelsChanged {
-                session_id,
+                pubkey,
                 channels,
                 at,
             } => {
-                self.mutate(session_id, tx, *at, |tx, n| {
+                self.mutate(pubkey, tx, *at, |tx, n| {
                     tx.set_input(n.channels, channels.clone())
                 })?;
             }
-            StatusDrive::Tick { session_id, at } => {
-                self.mutate(session_id, tx, *at, |_tx, _n| Ok(()))?;
+            StatusDrive::Tick { pubkey, at } => {
+                self.mutate(pubkey, tx, *at, |_tx, _n| Ok(()))?;
             }
-            StatusDrive::SessionEnded { session_id, at } => {
-                if let Some(nodes) = self.sessions.get(session_id) {
+            StatusDrive::SessionEnded { pubkey, at } => {
+                if let Some(nodes) = self.sessions.get(pubkey) {
                     tx.set_input(nodes.working, false)?;
                     tx.set_input(nodes.arm, end_arm(*at, self.refresh_secs))?;
                 }
             }
-            StatusDrive::SessionRevoked { session_id, .. } => {
-                if let Some(nodes) = self.sessions.remove(session_id) {
+            StatusDrive::SessionRevoked { pubkey, .. } => {
+                if let Some(nodes) = self.sessions.remove(pubkey) {
                     tx.close_scope(nodes.scope)?;
                 }
             }
@@ -154,12 +148,12 @@ impl ReplayState {
 
     fn mutate(
         &self,
-        session_id: &str,
+        pubkey: &str,
         tx: &mut Transaction<'_, StatusCommand>,
         at: u64,
         stage: impl FnOnce(&mut Transaction<'_, StatusCommand>, &SessionNodes) -> GraphResult<()>,
     ) -> GraphResult<()> {
-        let Some(nodes) = self.sessions.get(session_id) else {
+        let Some(nodes) = self.sessions.get(pubkey) else {
             return Ok(());
         };
         stage(tx, nodes)?;
@@ -205,10 +199,9 @@ mod tests {
             .step("start")
             .operation(InputFact::StatusDrive(StatusDrive::SessionStarted(
                 StatusSessionStartedArgs {
-                    session_id: "s1".into(),
+                    pubkey: "pk1".into(),
                     host: "laptop".into(),
                     slug: "coder".into(),
-                    pubkey: "pk1".into(),
                     rel_cwd: ".".into(),
                     channels: BTreeSet::from(["room".to_string()]),
                     working: true,
@@ -222,7 +215,7 @@ mod tests {
         script
             .step("distill")
             .operation(InputFact::StatusDrive(StatusDrive::DistillCompleted {
-                session_id: "s1".into(),
+                pubkey: "pk1".into(),
                 title: "T".into(),
                 activity: "reviewing".into(),
                 window_hash: Some("sha256:abc".into()),

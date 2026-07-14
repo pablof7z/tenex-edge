@@ -21,7 +21,6 @@ use super::StatusCommand;
 pub(super) struct StaticInfo {
     pub host: String,
     pub slug: String,
-    pub pubkey: String,
     pub rel_cwd: String,
     pub dispatch_event: Option<String>,
 }
@@ -61,7 +60,7 @@ pub(super) struct SessionNodes {
     pub activity_id: NodeId,
 }
 
-/// Resource identity for a session's status: `status/<session_id>`.
+/// Resource identity for a session's status: `status/<pubkey>`.
 pub(super) fn status_key(id: &str) -> ResourceKey {
     ResourceKey::from_segments(["status", id])
 }
@@ -75,14 +74,13 @@ pub(super) fn opts() -> TransactionOptions {
 /// Build the publish command payload for a session from its collection value.
 fn command_of(id: &str, v: &StatusValue) -> StatusCommand {
     StatusCommand {
-        session_id: id.to_string(),
+        pubkey: id.to_string(),
         channels: v.content.channels.clone(),
         title: v.content.title.clone(),
         activity: v.content.activity.clone(),
         busy: v.content.busy,
         host: v.info.host.clone(),
         slug: v.info.slug.clone(),
-        pubkey: v.info.pubkey.clone(),
         rel_cwd: v.info.rel_cwd.clone(),
         dispatch_event: v.info.dispatch_event.clone(),
     }

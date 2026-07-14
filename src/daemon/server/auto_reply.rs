@@ -45,16 +45,16 @@ struct AutoReplyTracker {
 impl AutoReplyTracker {
     fn arm(
         &mut self,
-        session_id: &str,
+        pubkey: &str,
         channel_h: &str,
         trigger_event_id: &str,
         requester_pubkey: &str,
     ) -> bool {
-        if self.explicit_publishers.contains(session_id) {
+        if self.explicit_publishers.contains(pubkey) {
             return false;
         }
         self.pending.insert(
-            session_id.to_string(),
+            pubkey.to_string(),
             PendingAutoReply {
                 channel_h: channel_h.to_string(),
                 trigger_event_id: trigger_event_id.to_string(),
@@ -64,17 +64,17 @@ impl AutoReplyTracker {
         true
     }
 
-    fn note_explicit_publish(&mut self, session_id: &str) {
-        self.explicit_publishers.insert(session_id.to_string());
-        self.pending.remove(session_id);
+    fn note_explicit_publish(&mut self, pubkey: &str) {
+        self.explicit_publishers.insert(pubkey.to_string());
+        self.pending.remove(pubkey);
     }
 
-    fn has_explicit_publish(&self, session_id: &str) -> bool {
-        self.explicit_publishers.contains(session_id)
+    fn has_explicit_publish(&self, pubkey: &str) -> bool {
+        self.explicit_publishers.contains(pubkey)
     }
 
-    fn take(&mut self, session_id: &str) -> Option<PendingAutoReply> {
-        self.pending.remove(session_id)
+    fn take(&mut self, pubkey: &str) -> Option<PendingAutoReply> {
+        self.pending.remove(pubkey)
     }
 }
 
@@ -88,36 +88,36 @@ fn lock() -> std::sync::MutexGuard<'static, AutoReplyTracker> {
     tracker().lock().expect("auto-reply mutex poisoned")
 }
 
-/// Record that a kind:9 was injected into `session_id`'s PTY and owes a reply.
+/// Record that a kind:9 was injected into `pubkey`'s PTY and owes a reply.
 /// A later arm supersedes an earlier un-answered one: the newest mention is what
 /// an auto-reply should thread to and p-tag back. Called from the pty delivery path.
 pub(crate) fn arm(
-    session_id: &str,
+    pubkey: &str,
     channel_h: &str,
     trigger_event_id: &str,
     requester_pubkey: &str,
 ) -> bool {
-    lock().arm(session_id, channel_h, trigger_event_id, requester_pubkey)
+    lock().arm(pubkey, channel_h, trigger_event_id, requester_pubkey)
 }
 
 /// True when auto-reply may be armed for this session. The durable session marker
 /// survives daemon restarts; the in-memory marker covers the gap if the store
 /// update failed after a successful explicit publish.
 pub(crate) fn should_arm_for_session(rec: &crate::state::Session) -> bool {
-    rec.explicit_chat_published_at == 0 && !lock().has_explicit_publish(&rec.session_id)
+    rec.explicit_chat_published_at == 0 && !lock().has_explicit_publish(&rec.pubkey)
 }
 
 /// The agent published through an explicit channel command. Drop any pending
 /// auto-reply so this turn does not double-post, and block future arming.
-pub(in crate::daemon::server) fn note_explicit_publish(session_id: &str) {
-    lock().note_explicit_publish(session_id);
+pub(in crate::daemon::server) fn note_explicit_publish(pubkey: &str) {
+    lock().note_explicit_publish(pubkey);
 }
 
 /// Take the pending auto-reply for a finished turn, if the agent never
 /// published one. `None` for turns that were not pty-injected (never armed) or
 /// that the agent already answered.
-pub(in crate::daemon::server) fn take(session_id: &str) -> Option<PendingAutoReply> {
-    lock().take(session_id)
+pub(in crate::daemon::server) fn take(pubkey: &str) -> Option<PendingAutoReply> {
+    lock().take(pubkey)
 }
 
 /// Publish the session's last assistant transcript text as its reply, threaded
@@ -140,7 +140,7 @@ pub(in crate::daemon::server) async fn publish_last_response(
     };
     if let Err(e) = do_publish(state, rec, &pending, &body).await {
         tracing::warn!(
-            session_id = %rec.session_id,
+            pubkey = %rec.pubkey,
             channel = %pending.channel_h,
             error = %format!("{e:#}"),
             "auto-reply: failed to publish agent's last response"
@@ -155,7 +155,7 @@ async fn do_publish(
     body: &str,
 ) -> Result<()> {
     let instance = state.session_instance(rec);
-    let keys = state.session_signing_keys(&rec.agent_pubkey)?;
+    let keys = state.session_signing_keys(&rec.pubkey)?;
     let recipients = if pending.requester_pubkey.trim().is_empty() {
         Vec::new()
     } else {

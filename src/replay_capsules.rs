@@ -10,10 +10,9 @@ macro_rules! status_fact {
     (started, $p:expr, $aref:expr, $session:expr, $channels:expr, $at:expr) => {
         $crate::reconcile::InputFact::StatusDrive($crate::reconcile::StatusDrive::SessionStarted(
             $crate::reconcile::StatusSessionStartedArgs {
-                session_id: $p.session_id.clone(),
+                pubkey: $aref.pubkey.clone(),
                 host: $p.host.clone(),
                 slug: $aref.slug.clone(),
-                pubkey: $aref.pubkey.clone(),
                 rel_cwd: $p.rel_cwd.clone(),
                 dispatch_event: $p.dispatch_event.clone(),
                 channels: $channels.clone(),
@@ -24,16 +23,16 @@ macro_rules! status_fact {
             },
         ))
     };
-    (tick, $session_id:expr, $at:expr) => {
+    (tick, $pubkey:expr, $at:expr) => {
         $crate::reconcile::InputFact::StatusDrive($crate::reconcile::StatusDrive::Tick {
-            session_id: $session_id.clone(),
+            pubkey: $pubkey.clone(),
             at: $at,
         })
     };
-    (distill, $session_id:expr, $labels:expr, $window_hash:expr, $at:expr) => {
+    (distill, $pubkey:expr, $labels:expr, $window_hash:expr, $at:expr) => {
         $crate::reconcile::InputFact::StatusDrive(
             $crate::reconcile::StatusDrive::DistillCompleted {
-                session_id: $session_id.clone(),
+                pubkey: $pubkey.clone(),
                 title: $labels.title.clone(),
                 activity: $labels.activity.clone(),
                 window_hash: $window_hash.clone(),
@@ -41,36 +40,36 @@ macro_rules! status_fact {
             },
         )
     };
-    (title, $session_id:expr, $title:expr, $at:expr) => {
+    (title, $pubkey:expr, $title:expr, $at:expr) => {
         $crate::reconcile::InputFact::StatusDrive($crate::reconcile::StatusDrive::TitleSet {
-            session_id: $session_id.clone(),
+            pubkey: $pubkey.clone(),
             title: $title.clone(),
             at: $at,
         })
     };
-    (turn, $session_id:expr, $working:expr, $at:expr) => {
+    (turn, $pubkey:expr, $working:expr, $at:expr) => {
         if $working {
             $crate::reconcile::InputFact::StatusDrive($crate::reconcile::StatusDrive::TurnStarted {
-                session_id: $session_id.clone(),
+                pubkey: $pubkey.clone(),
                 at: $at,
             })
         } else {
             $crate::reconcile::InputFact::StatusDrive($crate::reconcile::StatusDrive::TurnEnded {
-                session_id: $session_id.clone(),
+                pubkey: $pubkey.clone(),
                 at: $at,
             })
         }
     };
-    (channels, $session_id:expr, $channels:expr, $at:expr) => {
+    (channels, $pubkey:expr, $channels:expr, $at:expr) => {
         $crate::reconcile::InputFact::StatusDrive($crate::reconcile::StatusDrive::ChannelsChanged {
-            session_id: $session_id.clone(),
+            pubkey: $pubkey.clone(),
             channels: $channels.clone(),
             at: $at,
         })
     };
-    (ended, $session_id:expr, $at:expr) => {
+    (ended, $pubkey:expr, $at:expr) => {
         $crate::reconcile::InputFact::StatusDrive($crate::reconcile::StatusDrive::SessionEnded {
-            session_id: $session_id.clone(),
+            pubkey: $pubkey.clone(),
             at: $at,
         })
     };

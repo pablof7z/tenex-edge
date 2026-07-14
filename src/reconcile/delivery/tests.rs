@@ -3,10 +3,10 @@ use crate::reconcile::InputFact;
 
 fn fact(at: u64) -> DeliveryScanFact {
     DeliveryScanFact {
-        session_id: "s1".into(),
+        pubkey: "s1".into(),
         pending_event_ids: vec!["evt-1".into()],
-        pty_id: Some("pty-1".into()),
-        pty_live: true,
+        endpoint_id: Some("pty-1".into()),
+        endpoint_live: true,
         last_injected_at: None,
         debounce_secs: 20,
         force: false,
@@ -22,8 +22,8 @@ fn live_pty_with_pending_injects() {
     assert_eq!(
         out.effects,
         vec![DeliveryEffect::Inject {
-            session_id: "s1".into(),
-            pty_id: "pty-1".into(),
+            pubkey: "s1".into(),
+            endpoint_id: "pty-1".into(),
             event_ids: vec!["evt-1".into()],
         }]
     );
@@ -41,7 +41,7 @@ fn debounced_pending_schedules_retry() {
     assert_eq!(
         out.effects,
         vec![DeliveryEffect::RetryAfter {
-            session_id: "s1".into(),
+            pubkey: "s1".into(),
             delay_secs: 4,
         }]
     );

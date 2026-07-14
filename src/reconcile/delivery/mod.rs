@@ -18,10 +18,10 @@ use model::{delivery_key, ensure_session, opts, stage_scan, SessionNodes};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeliveryScanFact {
-    pub session_id: String,
+    pub pubkey: String,
     pub pending_event_ids: Vec<String>,
-    pub pty_id: Option<String>,
-    pub pty_live: bool,
+    pub endpoint_id: Option<String>,
+    pub endpoint_live: bool,
     pub last_injected_at: Option<Timestamp>,
     pub debounce_secs: u64,
     pub force: bool,
@@ -49,26 +49,26 @@ impl DeliveryAction {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DeliveryCommand {
-    pub session_id: String,
+    pub pubkey: String,
     pub action: DeliveryAction,
     pub event_ids: Vec<String>,
-    pub pty_id: Option<String>,
+    pub endpoint_id: Option<String>,
     pub retry_after_secs: Option<u64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DeliveryEffect {
     Inject {
-        session_id: String,
-        pty_id: String,
+        pubkey: String,
+        endpoint_id: String,
         event_ids: Vec<String>,
     },
     RetryAfter {
-        session_id: String,
+        pubkey: String,
         delay_secs: u64,
     },
     ClearDeadEndpoint {
-        session_id: String,
+        pubkey: String,
     },
 }
 
@@ -86,7 +86,7 @@ pub struct DeliveryStateRow {
     pub session: String,
     pub action: String,
     pub event_ids: Vec<String>,
-    pub pty_id: Option<String>,
+    pub endpoint_id: Option<String>,
     pub retry_after_secs: Option<u64>,
 }
 
@@ -153,10 +153,10 @@ impl DeliveryReconciler {
         self.last
             .values()
             .map(|cmd| DeliveryStateRow {
-                session: cmd.session_id.clone(),
+                session: cmd.pubkey.clone(),
                 action: cmd.action.as_str().to_string(),
                 event_ids: cmd.event_ids.clone(),
-                pty_id: cmd.pty_id.clone(),
+                endpoint_id: cmd.endpoint_id.clone(),
                 retry_after_secs: cmd.retry_after_secs,
             })
             .collect()
@@ -186,7 +186,7 @@ impl DeliveryReconciler {
         let mut sessions = self.sessions.clone();
         let mut labels = self.labels.clone();
         let mut tx = self.graph.begin_transaction_with_options(opts())?;
-        let nodes = ensure_session(&mut tx, &mut labels, &mut sessions, &fact.session_id)?;
+        let nodes = ensure_session(&mut tx, &mut labels, &mut sessions, &fact.pubkey)?;
         stage_scan(&mut tx, &nodes, fact, seq)?;
         let result = if preview { tx.preview()? } else { tx.commit()? };
         if !preview {
@@ -210,14 +210,13 @@ impl DeliveryReconciler {
                     continue;
                 }
             };
-            self.last
-                .insert(command.session_id.clone(), command.clone());
+            self.last.insert(command.pubkey.clone(), command.clone());
             match command.action {
                 DeliveryAction::Inject => {
-                    if let Some(pty_id) = command.pty_id.clone() {
+                    if let Some(endpoint_id) = command.endpoint_id.clone() {
                         effects.push(DeliveryEffect::Inject {
-                            session_id: command.session_id.clone(),
-                            pty_id,
+                            pubkey: command.pubkey.clone(),
+                            endpoint_id,
                             event_ids: command.event_ids.clone(),
                         });
                     }
@@ -225,14 +224,14 @@ impl DeliveryReconciler {
                 DeliveryAction::DeferDebounced => {
                     if let Some(delay_secs) = command.retry_after_secs {
                         effects.push(DeliveryEffect::RetryAfter {
-                            session_id: command.session_id.clone(),
+                            pubkey: command.pubkey.clone(),
                             delay_secs,
                         });
                     }
                 }
                 DeliveryAction::ClearDeadEndpoint => {
                     effects.push(DeliveryEffect::ClearDeadEndpoint {
-                        session_id: command.session_id.clone(),
+                        pubkey: command.pubkey.clone(),
                     });
                 }
                 DeliveryAction::DeferNoEndpoint => {}

@@ -2,18 +2,16 @@ use super::*;
 
 pub(super) fn started(
     state: &Arc<DaemonState>,
-    session_id: &str,
+    pubkey: &str,
     channel_h: &str,
-    agent_pubkey: &str,
     pid: Option<i32>,
     source: &'static str,
 ) {
     apply(
         state,
         crate::reconcile::InputFact::SessionStarted {
-            session_id: session_id.to_string(),
+            pubkey: pubkey.to_string(),
             channel_h: Some(channel_h.to_string()),
-            agent_pubkey: Some(agent_pubkey.to_string()),
             pid,
             at: now_secs(),
         },
@@ -23,16 +21,16 @@ pub(super) fn started(
 
 pub(super) fn exited(
     state: &Arc<DaemonState>,
-    session_id: &str,
+    pubkey: &str,
     pid: Option<i32>,
     source: &'static str,
 ) {
-    exited_at(state, session_id, pid, now_secs(), source);
+    exited_at(state, pubkey, pid, now_secs(), source);
 }
 
 pub(super) fn exited_at(
     state: &Arc<DaemonState>,
-    session_id: &str,
+    pubkey: &str,
     pid: Option<i32>,
     at: u64,
     source: &'static str,
@@ -40,7 +38,7 @@ pub(super) fn exited_at(
     apply(
         state,
         crate::reconcile::InputFact::ProcessExited {
-            session_id: Some(session_id.to_string()),
+            pubkey: Some(pubkey.to_string()),
             pid: pid.unwrap_or(0),
             at,
         },

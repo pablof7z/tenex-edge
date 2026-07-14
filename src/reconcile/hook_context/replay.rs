@@ -29,7 +29,7 @@ impl ReplayState {
         let inputs = decode_inputs(fact).expect("hook replay fact was prevalidated");
         let nodes = match self.nodes.take() {
             Some(nodes) => nodes,
-            None => build_nodes(tx, &fact.session_id, &mut self.labels)?,
+            None => build_nodes(tx, &fact.pubkey, &mut self.labels)?,
         };
         tx.set_input(nodes.cursor, fact.cursor)?;
         tx.set_input(nodes.now, fact.now)?;
@@ -133,7 +133,7 @@ mod tests {
         script
             .step("hook")
             .operation(InputFact::HookContextRender(HookContextRenderFact {
-                session_id: "s1".into(),
+                pubkey: "s1".into(),
                 hook_kind: "turn_start".into(),
                 cursor: 0,
                 now: 100,

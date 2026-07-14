@@ -33,12 +33,12 @@ impl ReplayState {
         operation: &InputFact,
         tx: &mut Transaction<'_, CursorCommand>,
     ) -> GraphResult<()> {
-        let Some((session_id, observed_cursor)) = fact_seed(operation) else {
+        let Some((pubkey, observed_cursor)) = fact_seed(operation) else {
             return Ok(());
         };
         let current = self
             .cursors
-            .get(&session_id)
+            .get(&pubkey)
             .copied()
             .unwrap_or(observed_cursor);
         let nodes = ensure_session(
@@ -46,7 +46,7 @@ impl ReplayState {
             &mut self.labels,
             &mut self.sessions,
             &CursorSeed {
-                session_id: session_id.clone(),
+                pubkey: pubkey.clone(),
                 seen_cursor: current,
             },
         )?;
@@ -60,7 +60,7 @@ impl ReplayState {
         } = operation
         {
             if *working && *observed_cursor == current && *at > current {
-                self.cursors.insert(session_id, *at);
+                self.cursors.insert(pubkey, *at);
             }
         }
         Ok(())

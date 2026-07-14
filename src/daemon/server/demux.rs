@@ -230,13 +230,9 @@ fn derive_and_emit_tail_events(
             }
             for channel in &s.channels {
                 // The unified Status replaces the old presence heartbeat, so
-                // first-sight of a (pubkey, session, channel) here is the peer
+                // first-sight of a (pubkey, channel) here is the peer
                 // "joined" signal for that channel.
-                let key = (
-                    s.agent.pubkey.clone(),
-                    s.session_id.as_str().to_string(),
-                    channel.clone(),
-                );
+                let key = (s.agent.pubkey.clone(), channel.clone());
                 let is_new = {
                     let mut map = state.peer_sessions.lock().unwrap();
                     if !map.contains_key(&key) {
@@ -260,7 +256,7 @@ fn derive_and_emit_tail_events(
                         channel: channel.clone(),
                         agent: s.agent.slug.clone(),
                         host: s.host.clone(),
-                        session: s.session_id.as_str().to_string(),
+                        session: s.agent.pubkey.clone(),
                         rel_cwd: s.rel_cwd.clone(),
                     });
                 }

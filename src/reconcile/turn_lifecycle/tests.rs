@@ -2,7 +2,7 @@ use super::*;
 
 fn seed() -> TurnProjectionSeed {
     TurnProjectionSeed {
-        session_id: "s1".into(),
+        pubkey: "s1".into(),
         working: false,
         turn_started_at: 0,
         transcript_ref: None,
@@ -25,7 +25,7 @@ fn turn_started_derives_session_projection_and_why() {
     r.assert_oracle().unwrap();
 
     let cmd = applied(&out);
-    assert_eq!(cmd.session_id, "s1");
+    assert_eq!(cmd.pubkey, "s1");
     assert!(cmd.working);
     assert_eq!(cmd.turn_started_at, 100);
     assert_eq!(cmd.transcript_ref.as_deref(), Some("/tmp/transcript.jsonl"));
@@ -50,7 +50,7 @@ fn turn_ended_clears_working_and_start_timestamp() {
     let out = r
         .on_turn_ended(
             TurnProjectionSeed {
-                session_id: "s1".into(),
+                pubkey: "s1".into(),
                 working: true,
                 turn_started_at: 100,
                 transcript_ref: None,

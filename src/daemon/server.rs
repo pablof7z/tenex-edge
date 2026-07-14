@@ -72,10 +72,10 @@ pub struct DaemonState {
     tail_tx: tokio::sync::broadcast::Sender<TailEvent>,
     open_clients: Mutex<u64>,
     shutdown: Notify,
-    /// Peer presence join/leave tracking, keyed by `(pubkey, session_id, channel)`.
-    /// A single session status can carry several `h` tags; each channel gets a
+    /// Peer presence join/leave tracking, keyed by `(pubkey, channel)`.
+    /// A single identity status can carry several `h` tags; each channel gets a
     /// tail-facing presence row.
-    peer_sessions: Mutex<HashMap<(String, String, String), PeerTracked>>,
+    peer_sessions: Mutex<HashMap<(String, String), PeerTracked>>,
     /// Bounded first-sight tracking of native event ids: the relay pool
     /// notifies once per matching subscription, so the same event arrives many
     /// times. Set + insertion-order queue, capped at SEEN_EVENTS_CAP.
@@ -89,7 +89,7 @@ pub struct DaemonState {
     /// same event collapse to ONE warm. Entries clear when the fetch completes, so
     /// a failed (offline) fetch is retried on the next sighting.
     warming: Mutex<std::collections::HashSet<String>>,
-    /// Last-seen (title, active) keyed by `(author_pubkey, session_id, channel)`
+    /// Last-seen (title, active) keyed by `(author_pubkey, channel)`
     /// for tail dedup. Tracking `active` too means an active→idle flip emits a
     /// tail event even though the persistent title text is unchanged.
     last_status: Mutex<HashMap<StatusTailKey, StatusTailSnapshot>>,

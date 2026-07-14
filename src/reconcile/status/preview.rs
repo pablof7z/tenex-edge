@@ -33,22 +33,22 @@ impl StatusReconciler {
 pub(super) fn status_drive_from_fact(fact: &InputFact) -> Option<StatusDrive> {
     match fact {
         InputFact::StatusDrive(drive) => Some(drive.clone()),
-        InputFact::TurnStarted { session_id, at } => Some(StatusDrive::TurnStarted {
-            session_id: session_id.clone(),
+        InputFact::TurnStarted { pubkey, at } => Some(StatusDrive::TurnStarted {
+            pubkey: pubkey.clone(),
             at: *at,
         }),
-        InputFact::TurnEnded { session_id, at } => Some(StatusDrive::TurnEnded {
-            session_id: session_id.clone(),
+        InputFact::TurnEnded { pubkey, at } => Some(StatusDrive::TurnEnded {
+            pubkey: pubkey.clone(),
             at: *at,
         }),
         InputFact::DistillCompleted {
-            session_id,
+            pubkey,
             window_hash,
             title,
             activity,
             at,
         } => Some(StatusDrive::DistillCompleted {
-            session_id: session_id.clone(),
+            pubkey: pubkey.clone(),
             title: title.clone(),
             activity: activity.clone(),
             window_hash: Some(window_hash.clone()),
@@ -67,20 +67,19 @@ fn stage_drive(
 ) -> GraphResult<()> {
     match drive {
         StatusDrive::SessionStarted(args) => {
-            if sessions.contains_key(&args.session_id) {
+            if sessions.contains_key(&args.pubkey) {
                 return Ok(());
             }
             let info = StaticInfo {
                 host: args.host.clone(),
                 slug: args.slug.clone(),
-                pubkey: args.pubkey.clone(),
                 rel_cwd: args.rel_cwd.clone(),
                 dispatch_event: args.dispatch_event.clone(),
             };
             stage_session(
                 tx,
                 labels,
-                &args.session_id,
+                &args.pubkey,
                 info,
                 args.channels.clone(),
                 args.working,
@@ -89,64 +88,53 @@ fn stage_drive(
                 args.at / refresh_secs,
             )?;
         }
-        StatusDrive::TurnStarted { session_id, at } => {
-            mutate(sessions, refresh_secs, session_id, *at, tx, |tx, n| {
+        StatusDrive::TurnStarted { pubkey, at } => {
+            mutate(sessions, refresh_secs, pubkey, *at, tx, |tx, n| {
                 tx.set_input(n.working, true)
             })?;
         }
-        StatusDrive::TurnEnded { session_id, at } => {
-            mutate(sessions, refresh_secs, session_id, *at, tx, |tx, n| {
+        StatusDrive::TurnEnded { pubkey, at } => {
+            mutate(sessions, refresh_secs, pubkey, *at, tx, |tx, n| {
                 tx.set_input(n.working, false)
             })?;
         }
         StatusDrive::DistillCompleted {
-            session_id,
+            pubkey,
             title,
             activity,
             at,
             ..
         } => {
-            mutate(sessions, refresh_secs, session_id, *at, tx, |tx, n| {
+            mutate(sessions, refresh_secs, pubkey, *at, tx, |tx, n| {
                 tx.set_input(n.title, title.clone())?;
                 tx.set_input(n.activity, activity.clone())
             })?;
         }
-        StatusDrive::TitleSet {
-            session_id,
-            title,
-            at,
-        } => {
-            mutate(sessions, refresh_secs, session_id, *at, tx, |tx, n| {
+        StatusDrive::TitleSet { pubkey, title, at } => {
+            mutate(sessions, refresh_secs, pubkey, *at, tx, |tx, n| {
                 tx.set_input(n.title, title.clone())
             })?;
         }
         StatusDrive::ChannelsChanged {
-            session_id,
+            pubkey,
             channels,
             at,
         } => {
-            mutate(sessions, refresh_secs, session_id, *at, tx, |tx, n| {
+            mutate(sessions, refresh_secs, pubkey, *at, tx, |tx, n| {
                 tx.set_input(n.channels, channels.clone())
             })?;
         }
-        StatusDrive::Tick { session_id, at } => {
-            mutate(
-                sessions,
-                refresh_secs,
-                session_id,
-                *at,
-                tx,
-                |_tx, _n| Ok(()),
-            )?;
+        StatusDrive::Tick { pubkey, at } => {
+            mutate(sessions, refresh_secs, pubkey, *at, tx, |_tx, _n| Ok(()))?;
         }
-        StatusDrive::SessionEnded { session_id, at } => {
-            if let Some(nodes) = sessions.get(session_id) {
+        StatusDrive::SessionEnded { pubkey, at } => {
+            if let Some(nodes) = sessions.get(pubkey) {
                 tx.set_input(nodes.working, false)?;
                 tx.set_input(nodes.arm, end_arm(*at, refresh_secs))?;
             }
         }
-        StatusDrive::SessionRevoked { session_id, .. } => {
-            if let Some(nodes) = sessions.get(session_id) {
+        StatusDrive::SessionRevoked { pubkey, .. } => {
+            if let Some(nodes) = sessions.get(pubkey) {
                 tx.close_scope(nodes.scope)?;
             }
         }
@@ -157,12 +145,12 @@ fn stage_drive(
 fn mutate(
     sessions: &std::collections::BTreeMap<String, SessionNodes>,
     refresh_secs: u64,
-    session_id: &str,
+    pubkey: &str,
     at: u64,
     tx: &mut Transaction<'_, StatusCommand>,
     stage: impl FnOnce(&mut Transaction<'_, StatusCommand>, &SessionNodes) -> GraphResult<()>,
 ) -> GraphResult<()> {
-    let Some(nodes) = sessions.get(session_id) else {
+    let Some(nodes) = sessions.get(pubkey) else {
         return Ok(());
     };
     stage(tx, nodes)?;
@@ -183,10 +171,9 @@ mod tests {
         let before_rev = r.revision();
         let before_labels = r.labels().len();
         let fact = InputFact::StatusDrive(StatusDrive::SessionStarted(StatusSessionStartedArgs {
-            session_id: "s1".into(),
+            pubkey: "pk".into(),
             host: "h".into(),
             slug: "a".into(),
-            pubkey: "pk".into(),
             rel_cwd: ".".into(),
             channels: BTreeSet::from(["room".into()]),
             working: true,
@@ -203,7 +190,7 @@ mod tests {
         assert_eq!(
             preview.labels.labels_for(&preview.result.changed_inputs),
             vec![
-                "status/s1/working",
+                "status/pk/working",
                 "status/s1/title",
                 "status/s1/activity",
                 "status/s1/channels",

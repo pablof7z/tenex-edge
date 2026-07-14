@@ -13,11 +13,11 @@ use trellis_core::{Graph, GraphResult, ResourceCommand, ResourceCommandCause, Tr
 use crate::reconcile::journal::InputFact;
 use crate::reconcile::labels::{key_path, NodeLabels};
 
-use model::{ensure_session, fact_session_id, opts, stage_fact, turn_key, SessionNodes};
+use model::{ensure_session, fact_pubkey, opts, stage_fact, turn_key, SessionNodes};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TurnProjectionSeed {
-    pub session_id: String,
+    pub pubkey: String,
     pub working: bool,
     pub turn_started_at: u64,
     pub transcript_ref: Option<String>,
@@ -25,7 +25,7 @@ pub struct TurnProjectionSeed {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TurnCommand {
-    pub session_id: String,
+    pub pubkey: String,
     pub working: bool,
     pub turn_started_at: u64,
     pub transcript_ref: Option<String>,
@@ -105,12 +105,12 @@ impl TurnLifecycleReconciler {
         transcript_ref: Option<String>,
     ) -> GraphResult<TurnLifecycleOutcome> {
         let mut facts = vec![InputFact::TurnStarted {
-            session_id: seed.session_id.clone(),
+            pubkey: seed.pubkey.clone(),
             at,
         }];
         if let Some(window_hash) = transcript_ref {
             facts.push(InputFact::TranscriptWindowCaptured {
-                session_id: seed.session_id.clone(),
+                pubkey: seed.pubkey.clone(),
                 window_hash,
                 at,
             });
@@ -126,7 +126,7 @@ impl TurnLifecycleReconciler {
         self.commit_facts(
             seed.clone(),
             vec![InputFact::TurnEnded {
-                session_id: seed.session_id,
+                pubkey: seed.pubkey,
                 at,
             }],
         )
@@ -139,12 +139,12 @@ impl TurnLifecycleReconciler {
         transcript_ref: Option<String>,
     ) -> GraphResult<TurnLifecyclePreview> {
         let mut facts = vec![InputFact::TurnStarted {
-            session_id: seed.session_id.clone(),
+            pubkey: seed.pubkey.clone(),
             at,
         }];
         if let Some(window_hash) = transcript_ref {
             facts.push(InputFact::TranscriptWindowCaptured {
-                session_id: seed.session_id.clone(),
+                pubkey: seed.pubkey.clone(),
                 window_hash,
                 at,
             });
@@ -160,17 +160,17 @@ impl TurnLifecycleReconciler {
         self.preview_facts(
             seed.clone(),
             &[InputFact::TurnEnded {
-                session_id: seed.session_id,
+                pubkey: seed.pubkey,
                 at,
             }],
         )
     }
 
     pub fn preview_fact(&mut self, fact: &InputFact) -> GraphResult<Option<TurnLifecyclePreview>> {
-        let Some(session_id) = fact_session_id(fact) else {
+        let Some(pubkey) = fact_pubkey(fact) else {
             return Ok(None);
         };
-        let seed = self.seed_from_live(session_id);
+        let seed = self.seed_from_live(pubkey);
         self.preview_facts(seed, std::slice::from_ref(fact))
             .map(Some)
     }
@@ -179,7 +179,7 @@ impl TurnLifecycleReconciler {
         self.last
             .values()
             .map(|cmd| TurnStateRow {
-                session: cmd.session_id.clone(),
+                session: cmd.pubkey.clone(),
                 working: cmd.working,
                 turn_started_at: cmd.turn_started_at,
                 transcript_ref: cmd.transcript_ref.clone(),
@@ -202,17 +202,17 @@ impl TurnLifecycleReconciler {
         Ok(())
     }
 
-    fn seed_from_live(&self, session_id: &str) -> TurnProjectionSeed {
+    fn seed_from_live(&self, pubkey: &str) -> TurnProjectionSeed {
         self.last
-            .get(session_id)
+            .get(pubkey)
             .map(|cmd| TurnProjectionSeed {
-                session_id: cmd.session_id.clone(),
+                pubkey: cmd.pubkey.clone(),
                 working: cmd.working,
                 turn_started_at: cmd.turn_started_at,
                 transcript_ref: cmd.transcript_ref.clone(),
             })
             .unwrap_or_else(|| TurnProjectionSeed {
-                session_id: session_id.to_string(),
+                pubkey: pubkey.to_string(),
                 working: false,
                 turn_started_at: 0,
                 transcript_ref: None,
@@ -267,7 +267,7 @@ impl TurnLifecycleReconciler {
                     continue;
                 }
             };
-            self.last.insert(cmd.session_id.clone(), cmd.clone());
+            self.last.insert(cmd.pubkey.clone(), cmd.clone());
             effects.push(TurnEffect::Apply(cmd.clone()));
         }
         effects

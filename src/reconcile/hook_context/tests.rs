@@ -32,22 +32,19 @@ fn seed_store() -> Store {
 }
 
 fn session(store: &Store) -> Session {
-    let id = store
-        .register_session(&RegisterSession {
+    store
+        .reserve_session(&RegisterSession {
+            pubkey: SELF_PK.into(),
             harness: "test".into(),
-            external_id_kind: "test".into(),
-            external_id: "sess".into(),
-            agent_pubkey: SELF_PK.into(),
             agent_slug: "coder".into(),
             channel_h: "root".into(),
             child_pid: None,
             transcript_path: None,
-            resume_id: String::new(),
             now: 10,
         })
         .unwrap();
-    store.join_session_channel(&id, "task", 20).unwrap();
-    store.get_session(&id).unwrap().unwrap()
+    store.join_session_channel(SELF_PK, "task", 20).unwrap();
+    store.get_session(SELF_PK).unwrap().unwrap()
 }
 
 fn chat(store: &Store, id: &str, channel: &str, at: u64, body: &str, tags_json: &str) {
@@ -69,7 +66,6 @@ fn status(store: &Store, channel: &str, busy: bool, activity: &str, updated_at: 
     store
         .upsert_status(&Status {
             pubkey: OTHER_PK.into(),
-            session_id: "peer-sess".into(),
             channel_h: channel.into(),
             slug: "reviewer".into(),
             title: String::new(),

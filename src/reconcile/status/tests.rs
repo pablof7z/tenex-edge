@@ -18,7 +18,7 @@ fn seeded(
     let mut ledger = ResourceLedger::new();
     let out = r
         .on_session_started(
-            "s1", "laptop", "coder", "pk1", ".", channels, working, title, activity, now,
+            "pk1", "laptop", "coder", ".", channels, working, title, activity, now,
         )
         .unwrap();
     ledger.apply_result(&out.result);
