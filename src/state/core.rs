@@ -41,7 +41,10 @@ impl Store {
         conn.busy_timeout(std::time::Duration::from_secs(5))
             .context("setting busy_timeout")?;
         schema::initialize_file(&conn, path)?;
-        let store = Self { conn };
+        let store = Self {
+            conn,
+            alias_writes: RefCell::new(Default::default()),
+        };
         store.backfill_handle_leases()?;
         store.backfill_messages_from_relay_events()?;
         Ok(store)
@@ -50,7 +53,10 @@ impl Store {
     pub fn open_memory() -> Result<Self> {
         let conn = Connection::open_in_memory()?;
         schema::initialize_memory(&conn)?;
-        let store = Self { conn };
+        let store = Self {
+            conn,
+            alias_writes: RefCell::new(Default::default()),
+        };
         store.backfill_handle_leases()?;
         store.backfill_messages_from_relay_events()?;
         Ok(store)

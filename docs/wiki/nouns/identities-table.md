@@ -9,9 +9,6 @@ source_refs:
 
 # identities (table)
 
-Maps each session's derived pubkey to its owning session and a resume binding.
-Every session's key is derived from the machine's management key as
-`derive(management_secret, session_id)`; this table records those per-session
-pubkeys so the daemon can bound its `#p` subscription (the set of pubkeys it
-listens for) and resume the right session when a mention arrives for an offline
-session.
+Maps an authoritative pubkey to local lifecycle, public-handle, and resume
+locators. It contains no signer secret or derivation input; ordinary-session
+reconstruction material is stored once in `session_signers(pubkey, signer_salt)`.

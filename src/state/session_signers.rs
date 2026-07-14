@@ -3,6 +3,7 @@
 use super::*;
 
 impl Store {
+    #[cfg(test)]
     pub(crate) fn bind_session_signer(&self, pubkey: &str, signer_salt: &str) -> Result<()> {
         self.conn.execute(
             "INSERT OR IGNORE INTO session_signers (pubkey, signer_salt) VALUES (?1, ?2)",

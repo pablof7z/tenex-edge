@@ -10,4 +10,7 @@ source_refs:
 
 # session key (new model)
 
-No base agent key exists; all keys are created at session start. nsec = derive(mgmt_secret, session_id), where mgmt_secret is per-machine, so the same session_id on two machines yields different keys. Every session is re-derivable and resumable from mgmt_key + session_id alone.
+An ordinary session key is selected at start from the per-machine management
+secret and a random, non-secret salt. Persisting the salt under the resulting
+pubkey makes the signer reconstructable and resumable without treating any
+runtime or harness id as identity.

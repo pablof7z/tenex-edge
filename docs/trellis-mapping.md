@@ -110,7 +110,7 @@ Additional non-SQL inputs:
 - `DaemonState.subscribed_projects`, currently an in-memory pin set for
   subscription coverage.
 - local durable agent pubkeys from edge-home agent keys.
-- live transient session pubkeys from `DaemonState.session_keys`.
+- local session identity pubkeys persisted in `identities`.
 - the backend pubkey.
 - `now`, status TTL, heartbeat cadence, and `seen_cursor`.
 - the nondeterministic distill result, which enters as a write to

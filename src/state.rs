@@ -17,6 +17,7 @@
 //! (`session_channels`).
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
+use std::cell::RefCell;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -25,6 +26,7 @@ pub use profile::Profile;
 
 pub struct Store {
     conn: Connection,
+    alias_writes: RefCell<aliases::provisional::AliasWriteState>,
 }
 
 /// kind:39000 group metadata. A channel is the one abstraction; `parent` is the

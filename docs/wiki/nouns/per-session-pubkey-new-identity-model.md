@@ -11,4 +11,7 @@ source_refs:
 
 # per-session pubkey (new identity model)
 
-Every session mints its own keypair; nsec = HKDF(mgmt_secret, session_id). mgmt_secret is per-machine, so the same session_id on two machines yields different keys. No base agent key, no ordinals, no occupancy/reservation logic. Only the mgmt key and an append-only pubkey→session_id map are stored.
+An ordinary session derives its signer with HKDF from the per-machine management
+secret and a random, non-secret salt. The salt is persisted under the resulting
+authoritative pubkey. Runtime ids and harness resume tokens are locators only;
+they do not participate in signer derivation.

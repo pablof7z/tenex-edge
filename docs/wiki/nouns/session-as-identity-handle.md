@@ -11,4 +11,7 @@ source_refs:
 
 # session (as identity handle)
 
-A single run (SESSION) is only a correlation handle (the raw session_id); it is never a separate display name and is never accepted as a chat target. Under the new model, the session_id is the sole input to key derivation — nsec = derive(mgmt_secret, session_id).
+A run id is private process-correlation state, not a signing identity, display
+name, or chat target. The authoritative identity is the session pubkey; ordinary
+signers reconstruct from pubkey-owned salt, while harness tokens and runtime ids
+remain typed locators.

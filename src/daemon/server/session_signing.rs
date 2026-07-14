@@ -172,49 +172,29 @@ pub(in crate::daemon::server) fn mint_session_identity(
         (keys, pubkey, String::new(), None, acquired)
     } else {
         let mgmt = state.management_keys()?;
-        state.with_store(|store| {
-            let prior = store.identity_for_session(session_id)?;
-            let signer_salt = if let Some(identity) = prior.as_ref() {
-                store
-                    .session_signer_salt(&identity.pubkey)?
-                    .with_context(|| {
-                        format!("pubkey {:?} has no signer material", identity.pubkey)
-                    })?
-            } else {
-                crate::identity::new_session_signer_salt()
-            };
-            let keys = crate::identity::derive_session_keys(mgmt.secret_key(), &signer_salt)?;
-            let pubkey = keys.public_key().to_hex();
-            if prior
-                .as_ref()
-                .is_some_and(|identity| identity.pubkey != pubkey)
-            {
-                anyhow::bail!("stored signer material does not reproduce session pubkey");
-            }
-            store.bind_session_signer(&pubkey, &signer_salt)?;
-            let allocation = match input.session_name {
-                Some(name) => store.allocate_custom_handle(&pubkey, agent_slug, name, now)?,
-                None => store.allocate_handle(&pubkey, agent_slug, now)?,
-            };
-            let record = crate::state::Identity {
-                pubkey: pubkey.clone(),
-                agent_slug: agent_slug.to_string(),
-                codename: allocation.codename.clone(),
-                session_id: session_id.to_string(),
-                channel_h: h.to_string(),
-                native_id: input.native_id.to_string(),
-                alive: true,
-                created_at: now,
-            };
-            store.upsert_identity(&record)?;
-            Ok::<_, anyhow::Error>((
-                keys,
-                pubkey,
-                allocation.codename,
-                allocation.reclaimed_pubkey,
-                false,
-            ))
-        })?
+        let (keys, pubkey, allocation) = state.with_store(|store| {
+            store.reserve_ordinary_identity(
+                session_id,
+                agent_slug,
+                h,
+                input.native_id,
+                input.session_name,
+                now,
+                |signer_salt| {
+                    let keys =
+                        crate::identity::derive_session_keys(mgmt.secret_key(), signer_salt)?;
+                    let pubkey = keys.public_key().to_hex();
+                    Ok((keys, pubkey))
+                },
+            )
+        })?;
+        (
+            keys,
+            pubkey,
+            allocation.codename,
+            allocation.reclaimed_pubkey,
+            false,
+        )
     };
     let identity = if durable_agent {
         crate::identity::SessionIdentity::durable_agent(

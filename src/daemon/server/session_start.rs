@@ -12,7 +12,7 @@ mod params;
 mod reservation;
 mod stale;
 
-use abort::{abort_session_start, SessionStartGuard};
+use abort::SessionStartGuard;
 use alias_resolution::{record_secondary_aliases, resolve_session_id};
 use lookup::{session_endpoint, work_root_for_scope};
 use params::SessionStartParams;
@@ -148,7 +148,7 @@ pub(super) async fn rpc_session_start_inner(
     // row is written further down, AFTER signer selection, so it is born carrying
     // this session's ordinal pubkey (never the base) — see the `upsert_session_row`
     // call below.
-    let (session_id, ext_kind, ext_id) = resolve_session_id(
+    let (session_id, ext_kind, ext_id, mut alias_guard) = resolve_session_id(
         state,
         harness_str,
         pty_session.as_deref(),
@@ -174,7 +174,7 @@ pub(super) async fn rpc_session_start_inner(
     }
 
     record_secondary_aliases(
-        state,
+        &alias_guard,
         harness_str,
         &session_id,
         pty_session.as_deref(),
@@ -212,8 +212,6 @@ pub(super) async fn rpc_session_start_inner(
         channel = existing.clone();
     }
 
-    // Select the derived per-session or configured durable signer, then write
-    // the row carrying that pubkey. Membership admission happens after channel-ready.
     let minted = mint_session_identity(
         state,
         &session_id,
@@ -222,7 +220,7 @@ pub(super) async fn rpc_session_start_inner(
         SessionIdentityInput::new(&native_id, p.session_name.as_deref()),
         p.durable_reservation.as_deref(),
     )?;
-    let mut start_guard = SessionStartGuard::new(state, &minted);
+    let mut start_guard = SessionStartGuard::new(state, &minted, already_running);
     retire_reclaimed_profile(state, minted.reclaimed_pubkey.as_deref()).await?;
     // If the engine is already running (re-assert from a duplicate spawn such as
     // the offline-agent-mention handler), preserve the live session's active
@@ -307,6 +305,7 @@ pub(super) async fn rpc_session_start_inner(
             now_secs(),
         );
         start_guard.disarm();
+        alias_guard.disarm();
         return Ok(serde_json::json!({
             "session_id": session_id,
         }));
@@ -355,7 +354,6 @@ pub(super) async fn rpc_session_start_inner(
     }
     if let Err(e) = spawn_session(state, ep).await {
         advisory::record_failed(state, &session_id, "spawn_engine", &e, now_secs());
-        abort_session_start(state, &session_id);
         return Err(e);
     }
     tracing::info!(
@@ -389,6 +387,7 @@ pub(super) async fn rpc_session_start_inner(
         now_secs(),
     );
     start_guard.disarm();
+    alias_guard.disarm();
 
     Ok(serde_json::json!({
         "session_id": session_id,

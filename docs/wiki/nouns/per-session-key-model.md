@@ -10,4 +10,8 @@ source_refs:
 
 # per-session key model
 
-There is no base agent key; all keys are created at session start. nsec = derive(mgmt_secret, session_id), where mgmt_secret is per-machine, so the same session_id on two machines yields different keys automatically. Nothing is stored as a secret except the mgmt key plus an append-only pubkey→session_id map.
+Ordinary-session keys are selected at session start from the per-machine
+management secret and a random, non-secret salt. Reconstruction material is
+owned by the resulting pubkey in `session_signers`; runtime locators do not
+derive identity. Configured durable agents deliberately use their configured
+key across sequential runs.

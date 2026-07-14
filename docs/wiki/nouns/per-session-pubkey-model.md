@@ -10,4 +10,7 @@ source_refs:
 
 # per-session pubkey model
 
-No base agent key exists. Every session mints its own keypair: nsec = derive(mgmt_secret, session_id). mgmt_secret is per-machine, so the same session_id on two machines yields different keys. Nothing is stored as a secret except the mgmt key; an append-only pubkey→session_id map lets the backend recognize, route, and resume.
+The pubkey is the authoritative ordinary-session identity. A fresh session
+allocates a random, non-secret salt and derives its signer from that salt plus
+the per-machine management secret. The persisted pubkey-to-salt binding lets the
+backend reconstruct the signer for resume and route directly by pubkey.

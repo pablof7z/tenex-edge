@@ -9,8 +9,7 @@ source_refs:
 
 # AgentInstance
 
-Superseded by per-session identity. There is no base-vs-ordinal identity policy
-to carry: each session has exactly one keypair, derived from the machine's
-management key as `derive(management_secret, session_id)`. The session id and its
-derived pubkey are the whole identity; there is no base pubkey or ordinal. See
-[Tenex-Edge Agent Identity](../guides/tenex-edge-agent-identity.md).
+Read-side session identity projected as pubkey, agent slug, leased public name,
+and current runtime locator. The pubkey is authoritative; the other fields are
+display or local lifecycle metadata. See [Tenex-Edge Agent
+Identity](../guides/tenex-edge-agent-identity.md).

@@ -10,6 +10,5 @@ source_refs:
 # publish_de
 
 Historical runtime closure that published `DomainEvent`s with the wrong signing
-keys. Current runtime publishing signs each event with the publishing session's
-own derived key (`derive(management_secret, session_id)`), carried through
-`EngineParams`.
+keys. Current runtime publishing signs with the key selected for the session's
+authoritative pubkey and carried through `EngineParams`.

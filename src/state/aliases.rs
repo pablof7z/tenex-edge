@@ -5,6 +5,8 @@
 
 use super::*;
 
+pub(super) mod provisional;
+
 fn row_to_alias(row: &rusqlite::Row) -> rusqlite::Result<SessionAlias> {
     Ok(SessionAlias {
         harness: row.get(0)?,
@@ -28,6 +30,25 @@ impl Store {
         session_id: &str,
         created_at: u64,
     ) -> Result<()> {
+        self.write_alias(
+            harness,
+            external_id_kind,
+            external_id,
+            session_id,
+            created_at,
+        )?;
+        self.clear_alias_write_stack(harness, external_id_kind, external_id);
+        Ok(())
+    }
+
+    fn write_alias(
+        &self,
+        harness: &str,
+        external_id_kind: &str,
+        external_id: &str,
+        session_id: &str,
+        created_at: u64,
+    ) -> Result<()> {
         self.conn.execute(
             "INSERT INTO session_aliases
                  (harness, external_id_kind, external_id, session_id, created_at)
@@ -43,6 +64,25 @@ impl Store {
             ],
         )?;
         Ok(())
+    }
+
+    fn alias_for_key(
+        &self,
+        harness: &str,
+        external_id_kind: &str,
+        external_id: &str,
+    ) -> Result<Option<SessionAlias>> {
+        Ok(self
+            .conn
+            .query_row(
+                &format!(
+                    "SELECT {ALIAS_COLS} FROM session_aliases
+                     WHERE harness=?1 AND external_id_kind=?2 AND external_id=?3"
+                ),
+                params![harness, external_id_kind, external_id],
+                row_to_alias,
+            )
+            .optional()?)
     }
 
     /// Resolve an external id of a SPECIFIC kind to its newest ALIVE session.
@@ -165,10 +205,23 @@ impl Store {
         let target = self
             .resolve_canonical_id(session_id)?
             .unwrap_or_else(|| session_id.to_string());
+        let removed = self
+            .aliases_for_session(&target)?
+            .into_iter()
+            .filter(|alias| alias.external_id_kind == external_id_kind)
+            .collect::<Vec<_>>();
         self.conn.execute(
             "DELETE FROM session_aliases WHERE session_id=?1 AND external_id_kind=?2",
             params![target, external_id_kind],
         )?;
+        for alias in removed {
+            self.clear_alias_write_stack(
+                &alias.harness,
+                &alias.external_id_kind,
+                &alias.external_id,
+            );
+        }
+        self.invalidate_alias_target(&target, external_id_kind)?;
         Ok(())
     }
 
@@ -181,14 +234,6 @@ impl Store {
         self.clear_alias_kind(session_id, "pty_session")?;
         self.mark_dead(session_id)?;
         self.mark_identity_dead_for_session(session_id)?;
-        Ok(())
-    }
-
-    pub(crate) fn clear_session_aliases(&self, session_id: &str) -> Result<()> {
-        self.conn.execute(
-            "DELETE FROM session_aliases WHERE session_id=?1",
-            [session_id],
-        )?;
         Ok(())
     }
 

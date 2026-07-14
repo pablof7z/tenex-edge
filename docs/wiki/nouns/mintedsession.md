@@ -9,4 +9,5 @@ source_refs:
 
 # MintedSession
 
-A freshly minted per-session identity: the session's own signing keys plus its read-side projection (pubkey, agent slug, session id).
+The signer selected before managed spawn plus its read-side pubkey, agent slug,
+public handle, and private runtime locator projection.
