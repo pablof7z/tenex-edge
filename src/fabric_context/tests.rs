@@ -266,7 +266,7 @@ fn empty_delta_is_silent_unless_forced() {
 
     let forced = render_fabric_context(&store, input(Some(&rec), "root", 200, 300, true))
         .expect("explicit who context should still render");
-    assert!(forced.contains("You are @coder, running on laptop."));
+    assert!(forced.contains("Agent: coder · Session: @coder · Backend: laptop"));
 }
 
 #[test]
@@ -394,7 +394,7 @@ fn quiet_forced_delta_renders_no_new_activity_note() {
 
     let text = render_fabric_context(&store, input(Some(&rec), "root", 200, 300, true))
         .expect("forced who should always render");
-    assert!(text.contains("You are @coder, running on laptop."));
+    assert!(text.contains("Agent: coder · Session: @coder · Backend: laptop"));
     assert!(text.contains("<no-new-activity workspace=\"root\">"));
     assert!(text.contains("The fabric surfaces only what changed"));
     // The tell-tale empty skeleton must NOT appear: no channel/members blocks.

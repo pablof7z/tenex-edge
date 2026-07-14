@@ -94,7 +94,7 @@ fn first_turn_renders_awareness_snapshot_not_session_code() {
         "awareness should name the channel; got: {text:?}"
     );
     assert!(
-        text.contains("You are @coder, running on laptop."),
+        text.contains("Agent: coder · Session: @coder · Backend: laptop"),
         "awareness should not derive a handle from the session id; got: {text:?}"
     );
     assert!(
@@ -153,11 +153,11 @@ fn first_turn_snapshot_uses_bound_instance_identity() {
     let text = assemble_turn_start_context(&m, &rec, BACKEND, "laptop", 0)
         .expect("first-turn intro expected");
     assert!(
-        text.contains("You are @willow-vale-071-coder, running on laptop."),
+        text.contains("Agent: coder · Session: @willow-vale-071-coder · Backend: laptop"),
         "snapshot must render the bound session codename; got: {text:?}"
     );
     assert!(
-        !text.contains("You are @coder, running on laptop."),
+        !text.contains("Session: @coder"),
         "bare agent slug must not override the bound session handle; got: {text:?}"
     );
 }

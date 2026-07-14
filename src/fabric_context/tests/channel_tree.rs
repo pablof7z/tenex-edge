@@ -8,7 +8,7 @@ fn session_view_has_self_and_chatter_human_view_does_not() {
 
     let agent = render_fabric_context(&store, input(Some(&rec), "root", 0, 1_000, false))
         .expect("session view should render");
-    assert!(agent.contains("You are @coder, running on laptop."));
+    assert!(agent.contains("Agent: coder · Session: @coder · Backend: laptop"));
     assert!(agent.contains("<chatter>"));
     assert!(agent.contains("post join context"));
     assert!(agent.contains("<workspace name=\"root\" channel=\"root\""));
@@ -20,7 +20,7 @@ fn session_view_has_self_and_chatter_human_view_does_not() {
     let human = render_fabric_context(&store, input(None, "root", 0, 1_000, true))
         .expect("human who should render");
     assert!(human.contains("<tenex-edge>"));
-    assert!(!human.contains("You are @"));
+    assert!(!human.contains("Session: @"));
     assert!(!human.contains("<chatter>"));
 }
 
