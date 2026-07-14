@@ -143,8 +143,7 @@ fn recipient_target(row: &Value) -> Option<String> {
         "recipient:{}:{}",
         text(row, "message_id")?,
         text(row, "recipient_pubkey")?
-    );
-    Some(base)
+    ))
 }
 
 fn membership_target(row: &Value) -> Option<String> {
