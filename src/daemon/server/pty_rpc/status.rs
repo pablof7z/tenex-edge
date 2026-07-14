@@ -2,8 +2,9 @@ use super::*;
 
 #[derive(Clone)]
 struct PtySessionBinding {
-    session_id: String,
-    display_id: Option<String>,
+    pubkey: String,
+    npub: Option<String>,
+    handle: Option<String>,
 }
 
 pub(super) async fn rpc_pty_status(state: &Arc<DaemonState>) -> Result<serde_json::Value> {
@@ -13,12 +14,14 @@ pub(super) async fn rpc_pty_status(state: &Arc<DaemonState>) -> Result<serde_jso
         .map(|meta| {
             let live = crate::pty::is_live(&meta.id);
             let binding = session_by_pty.get(&meta.id);
-            let session_id = binding.map(|b| b.session_id.clone());
-            let display_id = binding.and_then(|b| b.display_id.clone());
+            let pubkey = binding.map(|b| b.pubkey.clone());
+            let npub = binding.and_then(|b| b.npub.clone());
+            let handle = binding.and_then(|b| b.handle.clone());
             serde_json::json!({
                 "pty_id": meta.id,
-                "display_id": display_id,
-                "session_id": session_id,
+                "pubkey": pubkey,
+                "npub": npub,
+                "handle": handle,
                 "socket": meta.socket,
                 "agent": meta.agent,
                 "root": meta.root,
@@ -38,30 +41,21 @@ fn pty_session_bindings(
         .with_store(
             |s| -> Result<std::collections::HashMap<String, PtySessionBinding>> {
                 let mut out = std::collections::HashMap::new();
-                for alias in s.list_aliases_of_kind("pty_session")? {
-                    if out.contains_key(&alias.external_id) {
+                for locator in s.list_locators_of_kind("pty_session")? {
+                    if out.contains_key(&locator.locator_value) {
                         continue;
                     }
-                    let display_id = s.get_session(&alias.session_id)?.map(|rec| {
-                        s.session_identity_for_session(&rec.session_id)
-                            .ok()
-                            .flatten()
-                            .unwrap_or_else(|| {
-                                crate::identity::SessionIdentity::fallback(
-                                    &rec.session_id,
-                                    rec.agent_slug,
-                                    rec.agent_pubkey,
-                                )
-                            })
-                            .display_slug()
-                    });
-                    out.insert(
-                        alias.external_id,
-                        PtySessionBinding {
-                            session_id: alias.session_id,
-                            display_id,
-                        },
-                    );
+                    if let Some(rec) = s.get_session(&locator.pubkey)? {
+                        let pubkey = rec.pubkey;
+                        out.insert(
+                            locator.locator_value,
+                            PtySessionBinding {
+                                npub: crate::idref::npub(&pubkey),
+                                handle: s.handle_for_pubkey(&pubkey)?,
+                                pubkey,
+                            },
+                        );
+                    }
                 }
                 Ok(out)
             },

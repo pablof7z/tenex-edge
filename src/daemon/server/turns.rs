@@ -4,7 +4,7 @@ const CONTEXT_PROFILE_WARM_WINDOW_SECS: u64 = 4 * 60 * 60;
 
 #[derive(serde::Deserialize, Default)]
 pub(in crate::daemon::server) struct TurnStartParams {
-    session: String,
+    harness_session: String,
     #[serde(default)]
     transcript: Option<String>,
 }
@@ -15,7 +15,7 @@ pub(in crate::daemon::server) async fn rpc_turn_start(
 ) -> Result<serde_json::Value> {
     let p: TurnStartParams =
         serde_json::from_value(params.clone()).context("parsing turn_start params")?;
-    if p.session.is_empty() {
+    if p.harness_session.is_empty() {
         return Ok(serde_json::json!({
             "context": serde_json::Value::Null,
             "audit": {
@@ -25,11 +25,11 @@ pub(in crate::daemon::server) async fn rpc_turn_start(
             },
         }));
     }
-    // Hooks speak the harness id; every mutator below resolves it to the canonical
-    // session id internally, so passing the raw alias is correct. Read the previous
+    // Hooks speak a typed harness locator; the daemon resolves it to the pubkey.
+    // Read the previous
     // turn_started_at BEFORE opening the turn for audit/debug context; durable
     // snapshot-vs-delta gating lives on the session's seen_cursor.
-    let before = state.with_store(|s| s.get_session(&p.session).ok().flatten());
+    let before = state.with_store(|s| s.get_session(&p.harness_session).ok().flatten());
     let prev_started = before.as_ref().map(|r| r.turn_started_at).unwrap_or(0);
 
     let now = now_secs();
@@ -41,7 +41,7 @@ pub(in crate::daemon::server) async fn rpc_turn_start(
                 "audit": {
                     "kind": "turn_start",
                     "skipped": "session-not-found",
-                    "input_session": p.session,
+                    "input_harness_session": p.harness_session,
                     "prev_turn_started_at": prev_started,
                     "output": { "emitted": false, "bytes": 0, "text": null },
                 },
@@ -63,7 +63,7 @@ pub(in crate::daemon::server) async fn rpc_turn_start(
     state.outbox_notify.notify_waiters();
 
     let rec = state
-        .with_store(|s| s.get_session(&before.session_id).ok().flatten())
+        .with_store(|s| s.get_session(&before.pubkey).ok().flatten())
         .unwrap_or(before);
 
     let instance = state.session_instance(&rec);
@@ -74,7 +74,7 @@ pub(in crate::daemon::server) async fn rpc_turn_start(
         ts: now,
         channel: rec.channel_h.clone(),
         agent: agent_label,
-        session: rec.session_id.clone(),
+        session: rec.pubkey.clone(),
         state: "working".into(),
         elapsed_s: None,
     });
@@ -172,7 +172,7 @@ pub(in crate::daemon::server) async fn rpc_turn_check(
 
 #[derive(serde::Deserialize)]
 pub(in crate::daemon::server) struct TurnEndParams {
-    session: String,
+    harness_session: String,
 }
 
 pub(in crate::daemon::server) async fn rpc_turn_end(
@@ -181,12 +181,12 @@ pub(in crate::daemon::server) async fn rpc_turn_end(
 ) -> Result<serde_json::Value> {
     let p: TurnEndParams =
         serde_json::from_value(params.clone()).context("parsing turn_end params")?;
-    if p.session.is_empty() {
+    if p.harness_session.is_empty() {
         return Ok(serde_json::json!({ "ok": true }));
     }
     // Read working/turn_started_at BEFORE closing the turn so we can compute
     // elapsed (alias-resolving read).
-    let pre = state.with_store(|s| s.get_session(&p.session).ok().flatten());
+    let pre = state.with_store(|s| s.get_session(&p.harness_session).ok().flatten());
     let (was_working, turn_started_at) = pre
         .as_ref()
         .map(|r| (r.working, r.turn_started_at))
@@ -198,7 +198,7 @@ pub(in crate::daemon::server) async fn rpc_turn_end(
     }
     state.outbox_notify.notify_waiters();
 
-    let rec = state.with_store(|s| s.get_session(&p.session).ok().flatten());
+    let rec = state.with_store(|s| s.get_session(&p.harness_session).ok().flatten());
 
     if was_working {
         let elapsed_s = (turn_started_at > 0).then(|| now.saturating_sub(turn_started_at));
@@ -208,7 +208,7 @@ pub(in crate::daemon::server) async fn rpc_turn_end(
                 ts: now,
                 channel: rec.channel_h.clone(),
                 agent: agent_label,
-                session: rec.session_id.clone(),
+                session: rec.pubkey.clone(),
                 state: "idle".into(),
                 elapsed_s,
             });
@@ -220,7 +220,7 @@ pub(in crate::daemon::server) async fn rpc_turn_end(
     // answered via `channel send`, auto-publish its last transcript text as the
     // reply so the channel sees a response instead of silence.
     if let Some(rec) = rec.as_ref() {
-        if let Some(pending) = auto_reply::take(&rec.session_id) {
+        if let Some(pending) = auto_reply::take(&rec.pubkey) {
             auto_reply::publish_last_response(state, rec, pending).await;
         }
     }
@@ -253,7 +253,7 @@ fn context_profile_pubkeys(
 ) -> Vec<String> {
     let mut pubkeys = Vec::new();
     for row in store
-        .peek_pending_for_pubkey(&rec.agent_pubkey)
+        .peek_pending_for_pubkey(&rec.pubkey)
         .unwrap_or_default()
     {
         pubkeys.push(row.from_pubkey);
@@ -261,7 +261,7 @@ fn context_profile_pubkeys(
     }
 
     let channels = store
-        .list_session_joined_channels(&rec.session_id)
+        .list_session_joined_channels(&rec.pubkey)
         .unwrap_or_else(|_| vec![(rec.channel_h.clone(), rec.created_at)]);
     for (channel_h, _) in channels {
         for member in store.list_channel_members(&channel_h).unwrap_or_default() {
@@ -271,9 +271,7 @@ fn context_profile_pubkeys(
             .chat_for_channel(&channel_h, since, 10_000)
             .unwrap_or_default()
         {
-            if ev.kind != crate::fabric::nip29::wire::KIND_CHAT as u32
-                || ev.pubkey == rec.agent_pubkey
-            {
+            if ev.kind != crate::fabric::nip29::wire::KIND_CHAT as u32 || ev.pubkey == rec.pubkey {
                 continue;
             }
             pubkeys.push(ev.pubkey);

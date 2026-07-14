@@ -4,13 +4,12 @@ use std::path::Path;
 
 // ── normalized observation reporting ────────────────────────────────────────
 
-/// Report a NORMALIZED session observation to the daemon and return the
-/// canonical session id the daemon resolved for it.
+/// Report a normalized session observation to the daemon and return its
+/// authoritative public key.
 ///
 /// Hooks no longer decide identity: they describe what they observed (harness,
-/// the harness-owned external id if any, the resume token, hosted PTY session,
-/// watched pid, cwd) and the daemon resolves the canonical id — minting a new one,
-/// reattaching to an existing one via an alias, or superseding a stale one.
+/// the harness-owned external locator if any, the resume token, hosted PTY
+/// session, watched pid, cwd) and the daemon resolves the private run internally.
 ///
 /// `harness_session_id` is `Some` only for harnesses that own an id of their own
 /// (claude-code, codex); it is `None` for programmatic hosts (opencode) whose
@@ -42,7 +41,7 @@ pub(super) async fn report_observation(
     let params = serde_json::json!({
         "agent": agent_slug,
         "harness": host.name,
-        "session_id": harness_session_id,
+        "harness_session": harness_session_id,
         "resume_id": resume_id,
         "cwd": cwd.to_string_lossy(),
         "watch_pid": watch_pid,
@@ -62,11 +61,11 @@ pub(super) async fn report_observation(
         render_init_progress(&item);
     })
     .await?;
-    let sid = v["session_id"]
+    let pubkey = v["pubkey"]
         .as_str()
-        .context("daemon returned no session_id")?
+        .context("daemon returned no pubkey")?
         .to_string();
-    Ok(sid)
+    Ok(pubkey)
 }
 
 pub(super) fn render_init_progress(item: &serde_json::Value) {

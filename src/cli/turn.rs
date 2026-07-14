@@ -54,7 +54,7 @@ pub(super) async fn turn_start(
         });
     }
     let params = serde_json::json!({
-        "session": session,
+        "harness_session": session,
         "transcript": transcript,
     });
     // The daemon RPC can itself fail (daemon down/restarting) — exactly the case a
@@ -126,7 +126,7 @@ pub(super) async fn turn_check(
         });
     }
     match super::run_hook_blocking(move || {
-        let params = crate::cli::rpc_params(serde_json::json!({ "session": session }));
+        let params = crate::cli::rpc_params(serde_json::json!({ "harness_session": session }));
         let v = crate::daemon::blocking::call_no_spawn("turn_check", params)?;
         if let Some(ctx) = v["context"].as_str() {
             emit_context(ctx, emit);
@@ -183,7 +183,7 @@ pub(super) async fn turn_end(session: String) -> Result<()> {
     if let Err(e) = super::run_hook_blocking(move || {
         crate::daemon::blocking::call_no_spawn(
             "turn_end",
-            serde_json::json!({"session": session}),
+            serde_json::json!({"harness_session": session}),
         )?;
         Ok(())
     })

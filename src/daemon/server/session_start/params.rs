@@ -6,10 +6,10 @@ pub(super) struct SessionStartParams {
     /// spawn command; ignored when the agent already exists.
     #[serde(default)]
     pub(super) provision_command: Option<Vec<String>>,
-    /// Harness-native external session id. This is only a `session_aliases`
-    /// locator, never the identity.
+    /// Harness-native external session locator. This is only a
+    /// `session_aliases` locator, never the identity.
     #[serde(default)]
-    pub(super) session_id: Option<String>,
+    pub(super) harness_session: Option<String>,
     #[serde(default)]
     pub(super) cwd: Option<String>,
     #[serde(default)]

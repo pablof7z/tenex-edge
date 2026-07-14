@@ -64,7 +64,6 @@ async fn publishes_and_decodes_all_event_types() {
         DomainEvent::Status(Status {
             agent: aref.clone(),
             channels: vec![channel.clone()],
-            session_id: "sess-1".into(),
             host: "test-host".into(),
             title: "fixing the auth bug".into(),
             activity: "reading the diff".into(),

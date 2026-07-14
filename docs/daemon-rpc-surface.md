@@ -8,10 +8,10 @@ Coarse, lifecycle/intent-level — **not** fine-grained DB ops. The engine lives
 inside the daemon, so there is no per-DB-op RPC chatter; the surface is
 low-frequency lifecycle signals from hooks, CLI reads, and channel sends.
 
-All params/results are JSON. Hook-owned `session` fields are internal canonical
-session ids. Agent-facing resume selectors are full npub/hex pubkeys (or a
-session's current leased handle), never raw session ids. The daemon resolves the caller from the explicit session
-when present, then the PTY session, harness-native session id, watched harness
+All params/results are JSON. Public selectors are full npub/hex pubkeys or a
+session's current leased handle, never private runtime ids. Harness-owned IDs
+are typed locators, not identity. The daemon resolves the caller from the explicit public identity
+when present, then the PTY locator, harness-native locator, watched harness
 process, and finally the cwd+agent scan where that fallback is safe. **The
 resolution stays daemon-side** so every client path observes the same identity
 rules.
@@ -20,12 +20,11 @@ rules.
 Spawns an in-daemon `SessionTask` (publishes profile, presence, subscribes,
 distills, routes mentions — today's `runtime::run_session`).
 ```jsonc
-params: {"agent": "coder", "session_id": "te-…"|null, "cwd": "/path", "watch_pid": 12345|null}
-result: {"session_id": "te-…"}   // session_id printed verbatim to stdout
+params: {"agent": "coder", "harness_session": "native-id"|null, "cwd": "/path", "watch_pid": 12345|null}
+result: {"pubkey": "hex"}
 ```
-The `session_id` is the raw canonical id — an internal correlation handle for
-hooks, PTY session binding, resume, and DB rows. It is never rendered as a
-user-facing identity; a session is addressed by its dashed public handle, such
+`harness_session` is a typed harness locator and never identity. A session is
+addressed by its dashed public handle, such
 as `@quill-codex`, backed by the session's own minted pubkey. The npub is its
 permanent copy-paste resume value; the handle is a seven-day offline lease.
 The provider opens the workspace root NIP-29 group, named by the workspace slug,
@@ -36,7 +35,7 @@ allow/block file in the NIP-29 path.
 
 ### `session_end`
 ```jsonc
-params: {"session": "te-…"}
+params: {"session": "npub1…"|"hex"|"handle"}
 result: {"ended": true|false}    // false ⇒ no such session
 ```
 Metadata-only. Stops the `SessionTask` (which publishes idle presence/status
@@ -48,7 +47,7 @@ end --self`; agents cannot target another session.
 
 ### `session_kill`
 ```jsonc
-params: {"session": "npub1…"|"te-…", "revoke_memberships": bool}
+params: {"session": "npub1…"|"hex"|"handle", "revoke_memberships": bool}
 result: {"killed": true|false, "ended": true|false, "note": "pty=…"|"pid=…", "cleanup_confirmed": bool, "cleanup_failures": ["…"], "reason": "…"}
 ```
 Process-kill, the counterpart to `session_end`. Stops the session's hosted
@@ -66,8 +65,8 @@ process termination or requested fabric cleanup is not confirmed.
 
 ### `session_pty_wrap`
 ```jsonc
-params: {"session": "te-…"}
-result: {"wrapped": true, "pty_id": "…", "session_id": "…"}
+params: {"session": "npub1…"|"hex"|"handle"}
+result: {"wrapped": true, "pty_id": "…"}
        | {"wrapped": false, "refusal": "already_wrapped"|"working"|"not_resumable"|"not_found"|"kill_failed"|"resume_failed", "reason": "…"}
 ```
 Re-homes a session started manually outside a daemon-owned PTY (no live
@@ -90,7 +89,7 @@ exits non-zero unless the refusal is `already_wrapped`.
 params: {"workspace": "…"|null, "all_workspaces": bool, "cwd": "/path"}
 result: {"now": u64, "fabric_human": "…"|null,
          "rows": [ {source, fresh, slug, channel, status, host,
-                    session_id, age_secs}, … ]}
+                    pubkey, age_secs}, … ]}
 ```
 Human/operator-only live fabric projection. It returns terminal-oriented
 `fabric_human` text and never returns agent XML. Exact session anchors and loose
@@ -111,25 +110,25 @@ not advance the hook-awareness cursor.
 ### `my_session_status`
 ```jsonc
 params: {"title": "…", exact caller anchor fields...}
-result: {"session_id": "te-…", "title": "…", "distill_paused_until": u64}
+result: {"title": "…", "distill_paused_until": u64}
 ```
 Sets and immediately publishes the exact caller session's broadcast
 status/title. CLI: `tenex-edge my session status <TITLE>`.
 
 ### `turn_start`
 ```jsonc
-params: {"session": "te-…", "transcript": "/path"|null, "json": bool, "cwd": "/path"}
+params: {"harness_session": "native-id", "transcript": "/path"|null, "json": bool, "cwd": "/path"}
 result: {"context": "…"|null}    // the assembled injection text, or null
 ```
 Daemon marks the turn, records the transcript path, claims pending directed
 mentions from the inbox ledger, and returns the hook fabric context. A first
 turn (`seen_cursor=0`) renders the relevant channel snapshot;
 later turns render only rows changed since the session cursor. The cursor
-advances after rendering. Empty session id ⇒ no-op (`context: null`).
+advances after rendering. An absent harness locator yields `context: null`.
 
 ### `turn_check`
 ```jsonc
-params: {"session": "te-…"|null, "json": bool, "cwd": "/path"}
+params: {"harness_session": "native-id"|null, "json": bool, "cwd": "/path"}
 result: {"context": "…"|null}
 ```
 Claims pending directed mentions once and uses a compare-and-swap cursor advance
@@ -138,7 +137,7 @@ direct mentions still surface even when the delta window is closed.
 
 ### `turn_end`
 ```jsonc
-params: {"session": "te-…"}
+params: {"harness_session": "native-id"}
 result: {"ok": true}
 ```
 
@@ -167,7 +166,7 @@ The streaming read, send, reply, and blocking wait contracts live in
 
 ### `propose`
 ```jsonc
-params: {"title": "…", "body": "…", "session": "te-…"|null, "cwd": "/path", ...}
+params: {"title": "…", "body": "…", "session": "npub1…"|"hex"|"handle"|null, "cwd": "/path", ...}
 result: {"event_id": "hex"}
 ```
 Publishes a NIP-29 proposal (structured suggestion) to the caller's current
@@ -227,14 +226,14 @@ Lists the materialized child-channel tree under a channel.
 
 ### `channel_join` / `channel_leave` / `channel_switch` / `channel_archive`
 ```jsonc
-params: {"channel": "…", "session": "te-…"|null, ...}
+params: {"channel": "…", "session": "npub1…"|"hex"|"handle"|null, ...}
 result: {"channel": "channel-h", ...}
 ```
 Mutates the caller session's channel membership or archives a channel.
 
 ### `statusline`
 ```jsonc
-params: {"session": "te-…"|null, "cwd": "/path", ...}
+params: {"harness_session": "native-id"|null, "cwd": "/path", ...}
 result: {"working": bool, "status": "…", "session_count": N, "member_count": N,
          "is_member": bool, "pending": N, "pending_chat": N}
 ```
@@ -248,7 +247,8 @@ result: {"pong": true}
 Health-check / keep-alive.
 
 ### `pty_status`
-Returns live portable PTY session state known to the daemon.
+Returns live portable PTY state with `pty_id`, `pubkey`, `npub`, and optional
+public `handle`; private runtime ids are omitted.
 
 ### `operator_sessions`
 Returns the canonical local control projection consumed by `tenex-edge
@@ -267,7 +267,7 @@ Sends keystrokes or text to a portable PTY session.
 Spawns a new portable PTY session for an agent, optionally pre-loading a message.
 
 ### `pty_attach`
-Returns the PTY target string needed to attach to a session.
+Accepts an npub, hex pubkey, or handle and returns the PTY target plus public identity.
 
 ### `pty_resume`
 Reconstitutes a dead harness session in pty (re-opens the agent in its worktree).

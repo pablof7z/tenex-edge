@@ -5,7 +5,7 @@ pub(in crate::daemon::server) const STATUSLINE_RECENT_SECS: u64 = 30;
 #[derive(serde::Deserialize, Default)]
 pub(in crate::daemon::server) struct StatuslineParams {
     #[serde(default)]
-    pub(in crate::daemon::server) session: Option<String>,
+    pub(in crate::daemon::server) harness_session: Option<String>,
 }
 
 /// `statusline`: everything the host's status bar renders, in one pure-read RPC.
@@ -19,8 +19,8 @@ pub(in crate::daemon::server) fn rpc_statusline(
     // Session ID is the only locator needed. Fail open (empty bar) when it is
     // absent or stale — the next session_start reassert will refresh @te_session
     // on the host integration and the bar recovers on the next refresh tick.
-    let session_id = p.session.as_deref().filter(|s| !s.is_empty());
-    let rec = match session_id {
+    let harness_session = p.harness_session.as_deref().filter(|s| !s.is_empty());
+    let rec = match harness_session {
         Some(id) => match state.with_store(|s| s.get_session(id)).ok().flatten() {
             Some(r) => r,
             None => {
@@ -86,7 +86,6 @@ pub(in crate::daemon::server) fn rpc_statusline(
         Ok(serde_json::json!({
             "agent": agent_label,
             "host": host,
-            "session_id": rec.session_id,
             "work_root": work_root,
             "channel": scope,
             "channel_title": channel_title,

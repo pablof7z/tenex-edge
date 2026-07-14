@@ -34,7 +34,7 @@ pub(super) struct SessionEndArgs {
     /// End the session this command is running inside.
     #[arg(long = "self", conflicts_with = "session")]
     pub(super) self_session: bool,
-    /// Session id or alias to end.
+    /// Public session identity (npub, hex pubkey, or handle) to end.
     pub(super) session: Option<String>,
 }
 
@@ -79,7 +79,7 @@ fn end(args: SessionEndArgs) -> Result<()> {
     let session = match (args.self_session, args.session) {
         (true, None) => self_session_anchor("end")?,
         (false, Some(session)) => session,
-        (false, None) => bail!("provide a session id or use `--self`"),
+        (false, None) => bail!("provide an npub, hex pubkey, or handle, or use `--self`"),
         (true, Some(_)) => unreachable!("clap conflicts_with prevents this"),
     };
     super::session_end(session)

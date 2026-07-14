@@ -14,7 +14,7 @@ pub(in crate::cli) struct PublishArgs {
     /// address. Omit to mint a fresh id (a new proposal).
     #[arg(long = "d", value_name = "IDENTIFIER")]
     d: Option<String>,
-    /// My session id; if omitted, resolved from the current directory.
+    /// Public session identity (npub, hex pubkey, or handle); if omitted, resolved from the current process.
     #[arg(long)]
     session: Option<String>,
 }

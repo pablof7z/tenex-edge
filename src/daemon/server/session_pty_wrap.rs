@@ -67,13 +67,13 @@ fn refusal(refusal: &str, reason: impl Into<String>) -> serde_json::Value {
 /// The `pty_session` alias for a session, if it currently resolves to a LIVE
 /// endpoint. Mirrors the doorbell scan / `session_end`'s PTY-endpoint lookup
 /// (`src/session_host/delivery.rs`, `src/daemon/server/session_end.rs`).
-fn live_pty_alias(state: &Arc<DaemonState>, session_id: &str) -> Option<String> {
+fn live_pty_locator(state: &Arc<DaemonState>, pubkey: &str) -> Option<String> {
     let pty_id = state
-        .with_store(|s| s.aliases_for_session(session_id))
+        .with_store(|s| s.locators_for_pubkey(pubkey))
         .ok()?
         .into_iter()
-        .find(|a| a.external_id_kind == "pty_session")
-        .map(|a| a.external_id)?;
+        .find(|locator| locator.locator_kind == "pty_session")
+        .map(|locator| locator.locator_value)?;
     crate::pty::is_live(&pty_id).then_some(pty_id)
 }
 
@@ -83,12 +83,12 @@ pub(in crate::daemon::server) async fn rpc_session_pty_wrap(
 ) -> Result<serde_json::Value> {
     let p: SessionPtyWrapParams =
         serde_json::from_value(params.clone()).context("parsing session_pty_wrap params")?;
-    let Some(rec) = state.with_store(|s| s.get_session(&p.session).ok().flatten()) else {
+    let Some(rec) = state.with_store(|s| resolution::resolve_public_session(s, &p.session))? else {
         return Ok(refusal("not_found", "no local session matched"));
     };
 
-    let already_wrapped = live_pty_alias(state, &rec.session_id).is_some();
-    let resume_id = resume_token_for(&rec);
+    let already_wrapped = live_pty_locator(state, &rec.pubkey).is_some();
+    let resume_id = resume_token_for(state, &rec);
     let decision = decide_pty_wrap(rec.working, already_wrapped, resume_id.is_some());
 
     let resume_id = match decision {
@@ -117,13 +117,13 @@ pub(in crate::daemon::server) async fn rpc_session_pty_wrap(
 
     let slug = rec.agent_slug.clone();
     let scope = rec.channel_h.clone();
-    let session_id = rec.session_id.clone();
+    let pubkey = rec.pubkey.clone();
 
     // Kill the old (non-PTY) process and mark the session dead BEFORE the
     // resumed session registers. Ordering matters: resuming first would let
     // the fresh PTY's session-start race the old row's still-alive claim on
     // the same (pubkey, channel), risking a double-inject.
-    let kill = rpc_session_kill(state, &serde_json::json!({ "session": session_id })).await?;
+    let kill = rpc_session_kill(state, &serde_json::json!({ "session": pubkey })).await?;
     if !kill["killed"].as_bool().unwrap_or(false) {
         let reason = kill["reason"].as_str().unwrap_or("unknown");
         return Ok(refusal(
@@ -136,7 +136,6 @@ pub(in crate::daemon::server) async fn rpc_session_pty_wrap(
         Ok(pty_id) => Ok(serde_json::json!({
             "wrapped": true,
             "pty_id": pty_id,
-            "session_id": session_id,
         })),
         Err(e) => Ok(refusal(
             "resume_failed",

@@ -8,17 +8,16 @@ pub(super) use public_session::resolve as resolve_public_session;
 /// by ONE function, so every in-session command identifies its session the same
 /// way every time.
 ///
-/// The canonical session id is daemon-minted only AFTER the harness process
-/// starts, so it can never be a launch-time env var. Hosted sessions expose a
-/// PTY session id from process birth, recorded as a `pty_session` alias at
-/// session-start. Native harness shells outside tenex-edge launch use the
+/// Public identity is the session pubkey. Hosted sessions expose a typed PTY
+/// locator from process birth, recorded at session-start. Native harness shells
+/// outside tenex-edge launch use the
 /// watched harness process (`watch_pid`) as their exact anchor.
 /// `harness_session` covers harness-native ids (claude-code/codex report one via
 /// hooks; opencode does not). `cwd`+`agent`+`group` are the scan keys — used only
 /// outside `Strict`.
 #[derive(Default, Clone, Copy)]
 pub(in crate::daemon::server) struct CallerAnchor<'a> {
-    /// `--session` operator/host override (exact: canonical id or alias).
+    /// `--session` operator override: npub, hex pubkey, or current handle.
     pub explicit: Option<&'a str>,
     /// The hosted PTY session the caller runs in, resolved via its alias.
     pub pty_session: Option<&'a str>,
@@ -111,13 +110,13 @@ pub(in crate::daemon::server) fn resolve_session_inner(
     anchor: &CallerAnchor,
     scope: ResolveScope,
 ) -> Result<Session> {
-    // 1. Explicit `--session`: operator/host override. May
-    //    target a dead session deliberately (resume), so it is not alive-gated.
-    if let Some(id) = anchor.explicit.filter(|s| !s.is_empty()) {
+    // 1. Explicit `--session`: public operator identity only.
+    if let Some(selector) = anchor.explicit.filter(|s| !s.is_empty()) {
         return state
-            .with_store(|s| s.get_session(id))
-            .with_context(|| format!("unknown session {id}"))?
-            .with_context(|| format!("unknown session {id}"));
+            .with_store(|s| resolve_public_session(s, selector))?
+            .with_context(|| {
+                format!("unknown public session {selector:?}; use an npub, hex pubkey, or handle")
+            });
     }
     // 2. Hosted PTY session — THE in-session anchor for hosted launches.
     if let Some(pty_session) = anchor.pty_session.filter(|s| !s.is_empty()) {

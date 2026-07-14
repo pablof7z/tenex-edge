@@ -72,7 +72,7 @@ carry enough artifact metadata for `tenex-edge debug explain <handle>` to recove
 the effect happened:
 
 - Trellis transaction id and input-journal range or cursor.
-- Stable surface key, such as status session id, hook call id, subscription key,
+- Stable surface key, such as status author pubkey, hook call id, subscription key,
   or outbox event id.
 - Hashes or pointers for large artifacts that stayed outside the graph.
 - The `TransactionResult` audit handle that can answer `why_changed`,
@@ -88,7 +88,7 @@ to the ledger when a status or hook output was caused by that distillation.
 
 The local, non-rebuildable tables are the main owned truth:
 
-- `sessions`: session id, agent pubkey/slug, active channel, liveness,
+- `sessions`: private run key, agent pubkey/slug, active channel, liveness,
   turn state, `seen_cursor`, title, and activity (`src/state/schema.rs`).
 - `session_channels`: passive/active channel membership per session
   (`src/state/schema.rs`).
@@ -144,8 +144,8 @@ Trellis mapping:
   - `subscribed-projects`: daemon-pinned channel set.
   - `local-pubkeys`, `identity-pubkeys`, `live-session-pubkeys`,
     `backend-pubkey`.
-  - `alive-sessions`: session id, active channel, created time.
-  - `joined-channels`: `(session_id, channel_h, joined_at)`.
+  - `alive-sessions`: private run key, active channel, created time.
+  - `joined-channels`: `(private_run, channel_h, joined_at)`.
   - `channel-membership`: materialized membership/admin rows.
 - Derived node:
   - `subscription-coverage`: the `build_entity_coverage` result.
@@ -188,8 +188,8 @@ Current shape:
   enqueues raw JSON into `outbox`; the daemon heartbeat publisher bypasses
   `outbox`, calls `provider.set_status`, and mirrors the accepted status into
   `relay_status`.
-- `relay_status` is a materialized cache, one row per `(pubkey, session_id,
-  channel_h)`, live only while `expiration >= now`.
+- `relay_status` is a materialized cache, one row per `(pubkey, channel_h)`, live
+  only while `expiration >= now`.
 - Session death and session end mark local rows dead. The final published
   kind:30315 ages off by NIP-40 expiration; no final or expired status is
   published today.
@@ -214,7 +214,7 @@ Trellis mapping:
   - The host signs and applies the frame through one publish executor. Keeping
     `outbox` as the durable executor is the natural current boundary.
 - Collections:
-  - `desired-status-frames`: live status payloads keyed by session id.
+  - `desired-status-frames`: live status payloads keyed by author pubkey.
   - Optional teardown collection for closing/expired status commands when a
     session dies or a channel leaves.
 - Scopes:
@@ -257,7 +257,7 @@ Current shape:
 Trellis mapping:
 
 - Inputs:
-  - `session-viewer`: session id, current channel, created time, self identity,
+  - `session-viewer`: private run key, current channel, created time, self identity,
     and `seen_cursor`.
   - `joined-channels`: active/passive channel set.
   - `channel-metadata`: `relay_channels` rows.

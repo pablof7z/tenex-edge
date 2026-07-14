@@ -84,6 +84,9 @@ pub(crate) struct WhoRow {
     #[serde(default)]
     pub(crate) dormant: bool,
     pub(crate) host: String,
+    /// Private runtime correlation key. Used inside the daemon only and omitted
+    /// from the operator RPC projection.
+    #[serde(skip)]
     pub(crate) session_id: String,
     pub(crate) age_secs: Option<u64>,
     /// Channel-relative working dir (§8e). Empty or "." → rendered without a

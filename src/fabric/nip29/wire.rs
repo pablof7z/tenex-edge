@@ -4,12 +4,12 @@
 //! |-------------|------|
 //! | Profile     | kind:0,     content `{"name": "sessionCode-agent"}`, `["host", host]`, optional `["agent-slug", slug]`, live agent `["workspace", root_h]`; backend profiles additionally carry `["backend"]` + one `["agent", slug, desc]` per managed agent |
 //! | Activity    | kind:1,     `["h", channel]` — social narrative (no inbox routing) |
-//! | Status      | kind:30315, content = live activity (may be empty when idle), `["d", session_id]`, one or more `["h", channel]`, `["title", title]` (always), `["status", "busy"\|"idle"]`, `["host", host]`, optional `["slug", slug]`, optional `["rel-cwd", rel]`, optional NIP-40 `["expiration", ts]` |
+//! | Status      | kind:30315, content = live activity (may be empty when idle), `["d", "status"]`, one or more `["h", channel]`, `["title", title]` (always), `["status", "busy"\|"idle"]`, `["host", host]`, optional `["slug", slug]`, optional `["rel-cwd", rel]`, optional NIP-40 `["expiration", ts]` |
 //! | AgentRoster | kind:30555, backend management-key signed, `["d", capability_slug]`, `["hostname", host]`, `["use-criteria", text]`, one or more root-channel `["h", channel]` |
 //! | Chat        | kind:9,     `["h", channel]`, repeated `["p", mentioned_pubkey]` |
 //!
-//! Status is the single self-contained per-session signal: ONE kind:30315 event
-//! per `(author_pubkey, session_id)` carries the whole live state (busy/idle, the
+//! Status is the single self-contained per-agent signal: ONE kind:30315 event
+//! per author pubkey carries the whole live state (busy/idle, the
 //! live activity in the content, the persistent title, host, rel-cwd). It targets
 //! every channel the session is in with repeated `h` tags. The optional `slug`
 //! tag is a render hint only; the event signer remains the identity authority.
@@ -30,7 +30,6 @@
 
 use crate::domain::{Activity, AgentRef, ChatMessage, DomainEvent, Proposal, Reaction, Status};
 use crate::fabric::{NostrEventCodec, RawEnvelope};
-use crate::util::SessionId;
 use anyhow::Result;
 use nostr_sdk::prelude::*;
 
@@ -133,7 +132,6 @@ impl Nip29WireCodec {
             DomainEvent::Status(Status {
                 agent,
                 channels,
-                session_id,
                 host,
                 title,
                 activity,
@@ -142,11 +140,11 @@ impl Nip29WireCodec {
                 expires_at,
                 dispatch_event,
             }) => {
-                // The self-contained per-session signal. The replaceable address is
-                // `(author_pubkey, d=session_id)`; repeated h tags make the same
+                // The self-contained per-agent signal. The replaceable address is
+                // `(author_pubkey, d=status)`; repeated h tags make the same
                 // status visible in every channel the session occupies.
                 let mut tags = vec![
-                    tag(&["d", session_id.as_str()])?,
+                    tag(&["d", "status"])?,
                     tag(&["title", title])?,
                     tag(&["status", if *busy { "busy" } else { "idle" }])?,
                     tag(&["host", host])?,
@@ -230,7 +228,9 @@ impl Nip29WireCodec {
         match event.kind.as_u16() {
             KIND_PROFILE => profile::decode(event, pubkey),
             KIND_STATUS => {
-                let d = first_tag(event, "d")?;
+                if first_tag(event, "d")? != "status" {
+                    return None;
+                }
                 let channels = all_tag_values(event, "h");
                 if channels.is_empty() {
                     return None;
@@ -243,7 +243,6 @@ impl Nip29WireCodec {
                         first_tag(event, "slug").unwrap_or_default().to_string(),
                     ),
                     channels,
-                    session_id: SessionId::from(d),
                     host: first_tag(event, "host").unwrap_or_default().to_string(),
                     title: first_tag(event, "title").unwrap_or_default().to_string(),
                     // The live activity is the event content (empty when idle).

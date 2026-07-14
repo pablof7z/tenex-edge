@@ -85,27 +85,25 @@ async fn ensure_joinable(
     channel_h: &str,
 ) -> Result<()> {
     refresh_channel_members_cache(state, channel_h).await;
-    let is_member = state.with_store(
-        |s| match s.is_channel_member(channel_h, &rec.agent_pubkey) {
-            Ok(present) => present,
-            Err(e) => {
-                tracing::error!(
-                    channel = channel_h,
-                    pubkey = %rec.agent_pubkey,
-                    error = %e,
-                    "ensure_joinable: is_channel_member probe failed — treating as not a member"
-                );
-                false
-            }
-        },
-    );
+    let is_member = state.with_store(|s| match s.is_channel_member(channel_h, &rec.pubkey) {
+        Ok(present) => present,
+        Err(e) => {
+            tracing::error!(
+                channel = channel_h,
+                pubkey = %rec.pubkey,
+                error = %e,
+                "ensure_joinable: is_channel_member probe failed — treating as not a member"
+            );
+            false
+        }
+    });
     if !is_member {
         // Auto-add the agent via the management key — join/switch should be
         // transparent; an agent targeting a channel it isn't yet a member of
         // simply gets added silently rather than hitting an access error.
         let added = state
             .provider
-            .grant_member_confirmed(channel_h, &rec.agent_pubkey)
+            .grant_member_confirmed(channel_h, &rec.pubkey)
             .await;
         if !added.is_confirmed() {
             anyhow::bail!(
@@ -118,31 +116,6 @@ async fn ensure_joinable(
         refresh_channel_members_cache(state, channel_h).await;
     }
 
-    // A store error here MUST fail the switch — never read as "no occupant",
-    // which would let a second instance of the same agent silently barge into a
-    // channel another instance is already working in.
-    let occupied = state.with_store(|s| -> Result<Option<crate::state::Session>> {
-        for other in s
-            .list_alive_sessions()
-            .context("ensure_joinable: listing live sessions for occupancy check")?
-        {
-            if other.session_id != rec.session_id
-                && other.agent_pubkey == rec.agent_pubkey
-                && s.is_session_joined_channel(&other.session_id, channel_h)
-                    .context("ensure_joinable: checking channel occupancy")?
-            {
-                return Ok(Some(other));
-            }
-        }
-        Ok(None)
-    })?;
-    if occupied.is_some() {
-        anyhow::bail!(
-            "Another instance of you is already active in #{channel_h}, so you cannot join it. \
-Send it a message instead: tenex-edge channel send --channel {channel_h} --message \"...\" \
-— it will arrive in the context of the instance working there."
-        );
-    }
     Ok(())
 }
 
@@ -163,11 +136,10 @@ pub(in crate::daemon::server) async fn rpc_channel_join(
     ensure_joinable(state, &rec, &channel).await?;
     ensure_subscription(state, &channel).await?;
     state.with_store(|s| {
-        s.join_session_channel(&rec.session_id, &channel, now_secs())
+        s.join_session_channel(&rec.pubkey, &channel, now_secs())
             .ok();
     });
     Ok(serde_json::json!({
-        "session_id": rec.session_id,
         "channel": channel,
         "active_channel": rec.channel_h,
     }))
@@ -191,13 +163,13 @@ pub(in crate::daemon::server) async fn rpc_channel_leave(
         anyhow::bail!("cannot leave the active channel; switch to another channel first");
     }
     let was_joined = state.with_store(|s| {
-        s.is_session_joined_channel(&rec.session_id, &channel)
+        s.is_session_joined_channel(&rec.pubkey, &channel)
             .unwrap_or(false)
     });
     let left = if was_joined {
         let removed = state
             .provider
-            .remove_member_confirmed(&channel, &rec.agent_pubkey)
+            .remove_member_confirmed(&channel, &rec.pubkey)
             .await;
         if !removed.is_confirmed() {
             anyhow::bail!(
@@ -207,7 +179,7 @@ pub(in crate::daemon::server) async fn rpc_channel_leave(
             );
         }
         state.with_store(|s| {
-            s.leave_session_channel(&rec.session_id, &channel)
+            s.leave_session_channel(&rec.pubkey, &channel)
                 .unwrap_or(false)
         })
     } else {
@@ -218,7 +190,6 @@ pub(in crate::daemon::server) async fn rpc_channel_leave(
         subscriptions::reconcile_subs_logged(state, "channel_leave").await;
     }
     Ok(serde_json::json!({
-        "session_id": rec.session_id,
         "channel": channel,
         "left": left,
     }))
@@ -241,17 +212,11 @@ pub(in crate::daemon::server) async fn rpc_channel_switch(
     ensure_joinable(state, &rec, &new_channel).await?;
     ensure_subscription(state, &new_channel).await?;
     let prev_channel = rec.channel_h.clone();
-    set_active_session_channel(
-        state,
-        &rec.session_id,
-        &rec.agent_pubkey,
-        &new_channel,
-        true,
-    )?;
+    set_active_session_channel(state, &rec.pubkey, &rec.pubkey, &new_channel, true)?;
     if prev_channel != new_channel {
         let removed = state
             .provider
-            .remove_member_confirmed(&prev_channel, &rec.agent_pubkey)
+            .remove_member_confirmed(&prev_channel, &rec.pubkey)
             .await;
         if !removed.is_confirmed() {
             tracing::warn!(
@@ -264,7 +229,6 @@ pub(in crate::daemon::server) async fn rpc_channel_switch(
         subscriptions::reconcile_subs_logged(state, "channel_switch").await;
     }
     Ok(serde_json::json!({
-        "session_id": rec.session_id,
         "prev_channel": prev_channel,
         "channel": new_channel,
     }))

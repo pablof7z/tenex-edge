@@ -7,7 +7,7 @@ use tenex_edge::state::Store;
 fn cli_my_session_status_sets_the_exact_pty_session_title() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let home = Home::new().with_backend_key();
-    let session_id = rt().block_on(async {
+    let pubkey = rt().block_on(async {
         let mut client = Client::connect_or_spawn().await.expect("connect");
         let response = client
             .call(
@@ -15,16 +15,16 @@ fn cli_my_session_status_sets_the_exact_pty_session_title() {
                 serde_json::json!({
                     "agent": "codex",
                     "harness": "codex",
-                    "session_id": "native-title-session",
+                    "harness_session": "native-title-session",
                     "cwd": "/tmp",
                     "pty_session": "pty-title-session",
                 }),
             )
             .await
             .expect("session start");
-        response["session_id"]
+        response["pubkey"]
             .as_str()
-            .expect("canonical session id")
+            .expect("public session key")
             .to_string()
     });
 
@@ -45,7 +45,7 @@ fn cli_my_session_status_sets_the_exact_pty_session_title() {
 
     let rec = Store::open(&home.store_path())
         .unwrap()
-        .get_session(&session_id)
+        .get_session(&pubkey)
         .unwrap()
         .expect("session row");
     assert_eq!(rec.work_topic, title);
@@ -59,7 +59,7 @@ fn cli_my_session_status_sets_the_exact_pty_session_title() {
                     s.live_status_for_channel(&rec.channel_h, 0)
                         .map(|rows| {
                             rows.iter()
-                                .any(|row| row.session_id == session_id && row.title == title)
+                                .any(|row| row.pubkey == pubkey && row.title == title)
                         })
                         .unwrap_or(false)
                 })

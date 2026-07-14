@@ -34,10 +34,7 @@ pub(crate) async fn bootstrap_pty_session_start(
         None,
     )
     .await?;
-    response["session_id"]
-        .as_str()
-        .map(str::to_string)
-        .ok_or_else(|| anyhow::anyhow!("session_start bootstrap returned no session_id"))
+    private_run_for_public_response(state, &response)
 }
 
 pub(crate) async fn bootstrap_exec_session_start(
@@ -57,15 +54,25 @@ pub(crate) async fn bootstrap_exec_session_start(
             "cwd": cwd,
             "channel": channel,
             "watch_pid": watch_pid,
-            "session_id": native_id,
+            "harness_session": native_id,
         }),
         None,
     )
     .await?;
-    response["session_id"]
+    private_run_for_public_response(state, &response)
+}
+
+fn private_run_for_public_response(
+    state: &Arc<DaemonState>,
+    response: &serde_json::Value,
+) -> Result<String> {
+    let pubkey = response["pubkey"]
         .as_str()
-        .map(str::to_string)
-        .ok_or_else(|| anyhow::anyhow!("exec session_start bootstrap returned no session_id"))
+        .ok_or_else(|| anyhow::anyhow!("session_start bootstrap returned no pubkey"))?;
+    state
+        .with_store(|store| store.get_session(pubkey))?
+        .map(|session| session.pubkey)
+        .ok_or_else(|| anyhow::anyhow!("session_start created no runtime for pubkey {pubkey}"))
 }
 
 fn infer_harness(command: &[String]) -> Harness {

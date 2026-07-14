@@ -1,5 +1,4 @@
 use super::resolution::work_root_for;
-use super::resolve_session;
 use super::*;
 
 mod spawn;
@@ -11,14 +10,12 @@ pub(super) async fn rpc_pty_status(state: &Arc<DaemonState>) -> Result<serde_jso
     status::rpc_pty_status(state).await
 }
 
-fn pty_session_for_session(state: &Arc<DaemonState>, session_id: &str) -> Option<String> {
-    let aliases = state
-        .with_store(|s| s.aliases_for_session(session_id))
-        .ok()?;
-    aliases
+fn pty_session_for_pubkey(state: &Arc<DaemonState>, pubkey: &str) -> Option<String> {
+    let locators = state.with_store(|s| s.locators_for_pubkey(pubkey)).ok()?;
+    locators
         .into_iter()
-        .find(|a| a.external_id_kind == "pty_session")
-        .map(|a| a.external_id)
+        .find(|locator| locator.locator_kind == "pty_session")
+        .map(|locator| locator.locator_value)
 }
 
 // ── pty_send (manual pending-message injection) ───────────────────────────────
@@ -35,16 +32,11 @@ pub(super) async fn rpc_pty_send(
     let p: PtySendParams =
         serde_json::from_value(params.clone()).context("parsing pty_send params")?;
 
-    let rec = resolve_session(
-        state,
-        &CallerAnchor {
-            explicit: Some(&p.session),
-            ..Default::default()
-        },
-    )
-    .with_context(|| format!("no session matching {:?}", p.session))?;
+    let rec = state
+        .with_store(|store| super::resolution::resolve_public_session(store, &p.session))?
+        .with_context(|| "PTY send requires an npub, hex pubkey, or current handle")?;
 
-    let Some(pty_id) = pty_session_for_session(state, &rec.session_id) else {
+    let Some(pty_id) = pty_session_for_pubkey(state, &rec.pubkey) else {
         return Ok(serde_json::json!({
             "injected": false,
             "reason": "no PTY endpoint registered for this session"
@@ -52,7 +44,7 @@ pub(super) async fn rpc_pty_send(
     };
     if !crate::pty::is_live(&pty_id) {
         // Retire the row + its stale alias; clearing only the alias reopens the recycled-PID false-revive (defect #6).
-        let _ = state.with_store(|s| s.retire_dead_endpoint(&rec.session_id));
+        let _ = state.with_store(|s| s.retire_dead_endpoint(&rec.pubkey));
         return Ok(serde_json::json!({
             "injected": false,
             "pty_id": pty_id,
@@ -152,16 +144,16 @@ pub(super) fn rpc_pty_attach(
 ) -> Result<serde_json::Value> {
     let p: PtyAttachParams =
         serde_json::from_value(params.clone()).context("parsing pty_attach params")?;
-    let rec = resolve_session(
-        state,
-        &CallerAnchor {
-            explicit: Some(&p.session),
-            ..Default::default()
-        },
-    )
-    .with_context(|| format!("no session matching {:?}", p.session))?;
-    match pty_session_for_session(state, &rec.session_id) {
-        Some(pty) => Ok(serde_json::json!({ "pty_id": pty, "session_id": rec.session_id })),
+    let rec = state
+        .with_store(|store| super::resolution::resolve_public_session(store, &p.session))?
+        .with_context(|| "PTY attach requires an npub, hex pubkey, or current handle")?;
+    match pty_session_for_pubkey(state, &rec.pubkey) {
+        Some(pty) => Ok(serde_json::json!({
+            "pty_id": pty,
+            "pubkey": rec.pubkey,
+            "npub": crate::idref::npub(&rec.pubkey),
+            "handle": state.with_store(|store| store.handle_for_pubkey(&rec.pubkey))?,
+        })),
         None => Ok(serde_json::json!({
             "error": "no PTY endpoint registered for this session"
         })),
@@ -176,14 +168,15 @@ struct PtyResumeParams {
 }
 
 /// The harness-native resume token for a session, or `None` if we can't resume it.
-pub(in crate::daemon::server) fn resume_token_for(rec: &crate::state::Session) -> Option<String> {
-    if !rec.resume_id.is_empty() {
-        return Some(rec.resume_id.clone());
-    }
-    if rec.session_id.starts_with("te-") {
-        return None;
-    }
-    Some(rec.session_id.clone())
+pub(in crate::daemon::server) fn resume_token_for(
+    state: &Arc<DaemonState>,
+    rec: &crate::state::Session,
+) -> Option<String> {
+    state
+        .with_store(|store| store.native_resume_locator(&rec.pubkey))
+        .ok()
+        .flatten()
+        .map(|locator| locator.locator_value)
 }
 
 pub(super) async fn rpc_pty_resume(
@@ -203,7 +196,7 @@ pub(super) async fn rpc_pty_resume(
         })
         .with_context(|| "resume requires a full npub/hex pubkey or current handle")?;
     let rec = state
-        .with_store(|s| s.session_for_pubkey(&pubkey))?
+        .with_store(|s| s.get_session(&pubkey))?
         .with_context(|| {
             format!(
                 "no local session for {}",
@@ -211,7 +204,7 @@ pub(super) async fn rpc_pty_resume(
             )
         })?;
 
-    let resume_id = match resume_token_for(&rec) {
+    let resume_id = match resume_token_for(state, &rec) {
         Some(id) => id,
         None => {
             return Ok(serde_json::json!({
@@ -224,7 +217,7 @@ pub(super) async fn rpc_pty_resume(
     match crate::session_host::resume_agent(state, &rec.agent_slug, &scope, &resume_id).await {
         Ok(pty_id) => Ok(serde_json::json!({
             "pty_id": pty_id,
-            "npub": crate::idref::npub(&rec.agent_pubkey),
+            "npub": crate::idref::npub(&rec.pubkey),
             "agent": rec.agent_slug,
         })),
         Err(e) => Ok(serde_json::json!({ "error": format!("{e:#}") })),
@@ -242,17 +235,17 @@ pub(super) async fn rpc_pty_resumable(state: &Arc<DaemonState>) -> Result<serde_
 
     let mut arr = Vec::new();
     for rec in candidates {
-        if resume_token_for(&rec).is_none() || rec.alive {
+        if resume_token_for(state, &rec).is_none() || rec.alive {
             continue;
         }
-        let live_pty = pty_session_for_session(state, &rec.session_id)
+        let live_pty = pty_session_for_pubkey(state, &rec.pubkey)
             .map(|pty| crate::pty::is_live(&pty))
             .unwrap_or(false);
         if live_pty {
             continue;
         }
         let work_root = state.with_store(|s| work_root_for(s, &rec.channel_h));
-        let pubkey = rec.agent_pubkey.clone();
+        let pubkey = rec.pubkey.clone();
         let npub = crate::idref::npub(&pubkey).unwrap_or_default();
         let handle = state.with_store(|s| s.handle_for_pubkey(&pubkey).ok().flatten());
         arr.push(serde_json::json!({

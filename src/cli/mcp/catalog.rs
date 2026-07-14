@@ -52,7 +52,11 @@ const SPECS: &[ToolSpec] = &[
         description: "Read recent messages from a channel.",
         props: &[
             Prop::new("channel", "string", "Optional channel destination."),
-            Prop::new("session", "string", "Explicit tenex-edge session id."),
+            Prop::new(
+                "session",
+                "string",
+                "Public session npub, hex pubkey, or handle.",
+            ),
             Prop::new("limit", "integer", "Maximum messages to return."),
             Prop::new("since", "string", "Unix timestamp or duration like 2h."),
             Prop::new("id", "string", "Read one message by id prefix."),
@@ -73,7 +77,11 @@ const SPECS: &[ToolSpec] = &[
                 "Allow literal mention-like text without tags.",
             ),
             Prop::new("channel", "string", "Optional destination channel."),
-            Prop::new("session", "string", "Explicit tenex-edge session id."),
+            Prop::new(
+                "session",
+                "string",
+                "Public session npub, hex pubkey, or handle.",
+            ),
             Prop::new("long_message", "boolean", "Allow long messages."),
         ],
         required: &["message"],
@@ -88,7 +96,11 @@ const SPECS: &[ToolSpec] = &[
             Prop::new("about", "string", "Short stable channel description."),
             Prop::new("parent_channel", "string", "Parent channel reference."),
             Prop::new("agents", "array", "Agent targets as slug@backend strings."),
-            Prop::new("session", "string", "Explicit tenex-edge session id."),
+            Prop::new(
+                "session",
+                "string",
+                "Public session npub, hex pubkey, or handle.",
+            ),
         ],
         required: &["name", "about"],
         read_only: false,
@@ -102,7 +114,11 @@ const SPECS: &[ToolSpec] = &[
         props: &[
             Prop::new("message_id", "string", "Target message id or short prefix."),
             Prop::new("emoji", "string", "Reaction emoji (e.g. 👍 ✅ 👀) or +/-."),
-            Prop::new("session", "string", "Explicit tenex-edge session id."),
+            Prop::new(
+                "session",
+                "string",
+                "Public session npub, hex pubkey, or handle.",
+            ),
         ],
         required: &["message_id", "emoji"],
         read_only: false,
@@ -127,7 +143,11 @@ const SPECS: &[ToolSpec] = &[
 
 const CHANNEL_PROPS: &[Prop] = &[
     Prop::new("channel", "string", "Channel name, path, or opaque id."),
-    Prop::new("session", "string", "Explicit tenex-edge session id."),
+    Prop::new(
+        "session",
+        "string",
+        "Public session npub, hex pubkey, or handle.",
+    ),
 ];
 
 const fn channel_tool(

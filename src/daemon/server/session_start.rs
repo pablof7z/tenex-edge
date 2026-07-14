@@ -83,10 +83,10 @@ pub(super) async fn rpc_session_start_inner(
     }
 
     // Normalize the hook's identity inputs. claude-code/codex adopt their native
-    // `session_id` (doubles as the resume token); opencode supplies no
-    // `session_id` and forwards its `ses_*` resume token instead. The harness
+    // native session locator (which may double as the resume token); opencode
+    // supplies no locator at initial startup and forwards its `ses_*` token later. The harness
     // label is explicit when sent, else inferred from that shape.
-    let harness_session_id = p.session_id.clone().filter(|s| !s.is_empty());
+    let harness_session_id = p.harness_session.clone().filter(|s| !s.is_empty());
     let resume_id = p.resume_id.clone().filter(|s| !s.is_empty());
     let harness = p
         .harness
@@ -307,7 +307,7 @@ pub(super) async fn rpc_session_start_inner(
         start_guard.disarm();
         alias_guard.disarm();
         return Ok(serde_json::json!({
-            "session_id": session_id,
+            "pubkey": plan.row.agent_pubkey,
         }));
     }
 
@@ -391,6 +391,6 @@ pub(super) async fn rpc_session_start_inner(
     alias_guard.disarm();
 
     Ok(serde_json::json!({
-        "session_id": session_id,
+        "pubkey": plan.row.agent_pubkey,
     }))
 }

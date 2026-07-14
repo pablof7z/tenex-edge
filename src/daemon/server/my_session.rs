@@ -18,7 +18,7 @@ pub(in crate::daemon::server) fn rpc_my_session(
     let headless = state.with_store(|store| crate::session_host::session_is_headless(store, &rec));
     let expanded_workspaces = state.with_store(|store| {
         store
-            .list_session_joined_channels(&rec.session_id)
+            .list_session_joined_channels(&rec.pubkey)
             .unwrap_or_default()
             .into_iter()
             .map(|(channel, _)| {
@@ -59,8 +59,8 @@ pub(in crate::daemon::server) async fn rpc_my_session_status(
     let title = crate::work_topic::normalize(&p.title)?;
     let rec = resolve_caller(state, params, "my session status")?;
     let set_at = now_secs();
-    state.with_store(|s| s.set_session_work_topic(&rec.session_id, &title, set_at))?;
-    let keys = state.session_signing_keys(&rec.agent_pubkey)?;
+    state.with_store(|s| s.set_session_work_topic(&rec.pubkey, &title, set_at))?;
+    let keys = state.session_signing_keys(&rec.pubkey)?;
     crate::status_seam::drive(
         &state.status,
         state.fabric_provider(),
@@ -70,14 +70,13 @@ pub(in crate::daemon::server) async fn rpc_my_session_status(
         crate::status_seam::DriveMeta {
             trigger: "manual_title",
             window_hash: None,
-            replay_fact: Some(status_fact!(title, rec.session_id, title, set_at)),
+            replay_fact: Some(status_fact!(title, rec.pubkey, title, set_at)),
         },
-        |r| r.on_title_set(&rec.session_id, &title, set_at),
+        |r| r.on_title_set(&rec.pubkey, &title, set_at),
     )
     .await;
     state.outbox_notify.notify_waiters();
     Ok(serde_json::json!({
-        "session_id": rec.session_id,
         "title": title,
         "distill_paused_until": set_at.saturating_add(crate::work_topic::DISTILL_PAUSE_SECS),
     }))
@@ -207,7 +206,11 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(response["session_id"], session_id);
+        assert!(response.get("session_id").is_none());
+        assert_eq!(
+            response["title"],
+            "Researching MCP improvements around resource allocation"
+        );
         let rec = state.with_store(|s| s.get_session(&session_id).unwrap().unwrap());
         assert_eq!(
             rec.work_topic,
