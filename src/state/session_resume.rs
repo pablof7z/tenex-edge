@@ -4,27 +4,15 @@ use super::sessions::{row_to_session, COLS};
 use super::*;
 
 impl Store {
-    /// Durable-agent sessions never resume a dead historical session. Reassert
-    /// the current live alias owner, otherwise mint and repoint to a fresh id.
-    pub(crate) fn resolve_live_or_mint_session_id(
-        &self,
-        harness: &str,
-        external_id_kind: &str,
-        external_id: &str,
-        now: u64,
-    ) -> Result<String> {
-        let id = self
-            .resolve_session_by_alias(harness, external_id_kind, external_id)?
-            .and_then(|id| {
-                self.get_session(&id)
-                    .ok()
-                    .flatten()
-                    .filter(|session| session.alive)
-                    .map(|_| id)
-            })
-            .unwrap_or_else(mint_session_id);
-        self.put_alias(harness, external_id_kind, external_id, &id, now)?;
-        Ok(id)
+    pub(crate) fn session_row(&self, session_id: &str) -> Result<Option<Session>> {
+        Ok(self
+            .conn
+            .query_row(
+                &format!("SELECT {COLS} FROM sessions WHERE session_id=?1"),
+                [session_id],
+                row_to_session,
+            )
+            .optional()?)
     }
 
     /// Recent resumable per-session identities, newest first. Durable agents

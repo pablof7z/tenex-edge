@@ -9,8 +9,6 @@ source_refs:
 
 # Identity
 
-A session's keypair, derived from the machine's management key as
-`derive(management_secret, session_id)`. Identity is per session and per machine:
-the only stored secret is the machine's management key, and every session key is
-re-derivable from it plus the session id, so identities are recoverable without
-storing any nsec.
+A local lifecycle projection that binds an authoritative session pubkey to its
+agent slug, leased handle component, and runtime/resume locators. Signer
+reconstruction material lives separately in `session_signers`, keyed by pubkey.

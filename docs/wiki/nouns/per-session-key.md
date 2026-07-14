@@ -10,4 +10,7 @@ source_refs:
 
 # per-session key
 
-There is no base agent key. Every session mints its own pubkey; nsec = derive(mgmt_secret, session_id). Mgmt_secret is per-machine so the same session_id on two machines produces different keys. Nothing stored as a secret except the mgmt key; any session is recoverable by re-derivation.
+An ordinary session allocates a random, non-secret signer salt and derives its
+key from that salt plus the per-machine management secret. The salt is stored
+under the resulting authoritative pubkey, allowing signer reconstruction without
+using a runtime row id or harness resume token.

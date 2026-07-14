@@ -44,8 +44,8 @@ pub struct CoverageSnapshot {
     /// Explicitly subscribed roots + channels any local/ordinal pubkey manages
     /// or is a member of. Owned by the daemon scope.
     pub daemon_channels: BTreeSet<String>,
-    /// Addressed pubkeys: local durable + ordinal + live transient session keys +
-    /// backend identity. Owned by the daemon scope.
+    /// Addressed pubkeys: every persisted local session identity plus the backend
+    /// identity. Owned by the daemon scope.
     pub addressed_pubkeys: BTreeSet<String>,
     /// Archived channels are excluded from all `#h`/`#d` coverage.
     pub archived_channels: BTreeSet<String>,

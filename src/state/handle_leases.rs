@@ -1,7 +1,7 @@
 use super::*;
-use rusqlite::{Transaction, TransactionBehavior};
 use std::hash::{Hash, Hasher};
 
+mod allocation;
 mod remote_profiles;
 
 pub(crate) const HANDLE_LEASE_GRACE_SECS: u64 = 7 * 24 * 60 * 60;
@@ -30,78 +30,6 @@ impl Store {
         Ok(())
     }
 
-    pub(crate) fn allocate_handle(
-        &self,
-        pubkey: &str,
-        agent_slug: &str,
-        now: u64,
-    ) -> Result<HandleAllocation> {
-        let tx = Transaction::new_unchecked(&self.conn, TransactionBehavior::Immediate)?;
-        if let Some((handle, codename)) = lease_for_pubkey(&tx, pubkey)? {
-            tx.execute(
-                "UPDATE handle_leases SET live=1, last_active_at=?2 WHERE pubkey=?1",
-                params![pubkey, now],
-            )?;
-            tx.commit()?;
-            return Ok(HandleAllocation {
-                handle,
-                codename,
-                reclaimed_pubkey: None,
-            });
-        }
-
-        for codename in candidates(pubkey) {
-            let handle = crate::idref::session_handle(agent_slug, &codename);
-            if remote_profiles::reserves_handle(&tx, &handle, Some(pubkey))? {
-                continue;
-            }
-            let occupied = tx
-                .query_row(
-                    "SELECT pubkey, live, last_active_at FROM handle_leases WHERE handle=?1",
-                    [&handle],
-                    |row| {
-                        Ok((
-                            row.get::<_, String>(0)?,
-                            row.get::<_, bool>(1)?,
-                            row.get::<_, u64>(2)?,
-                        ))
-                    },
-                )
-                .optional()?;
-            let reclaimed_pubkey = match occupied {
-                None => None,
-                Some((_owner, true, _)) => continue,
-                Some((_owner, false, last_active))
-                    if now.saturating_sub(last_active) < HANDLE_LEASE_GRACE_SECS =>
-                {
-                    continue;
-                }
-                Some((owner, false, _)) => Some(owner),
-            };
-
-            if let Some(old_pubkey) = reclaimed_pubkey.as_deref() {
-                tx.execute(
-                    "UPDATE identities SET codename='' WHERE pubkey=?1",
-                    [old_pubkey],
-                )?;
-                tx.execute("DELETE FROM handle_leases WHERE handle=?1", [&handle])?;
-            }
-            tx.execute(
-                "INSERT INTO handle_leases
-                    (handle, pubkey, agent_slug, leased_at, last_active_at, live)
-                 VALUES (?1, ?2, ?3, ?4, ?4, 1)",
-                params![handle, pubkey, agent_slug, now],
-            )?;
-            tx.commit()?;
-            return Ok(HandleAllocation {
-                handle,
-                codename,
-                reclaimed_pubkey,
-            });
-        }
-        anyhow::bail!("session handle space exhausted for agent {agent_slug:?}")
-    }
-
     pub(crate) fn ensure_custom_handle_available(
         &self,
         agent_slug: &str,
@@ -114,60 +42,6 @@ impl Store {
             anyhow::bail!("session name {name:?} is already in use as {handle:?}");
         }
         Ok(())
-    }
-
-    pub(crate) fn allocate_custom_handle(
-        &self,
-        pubkey: &str,
-        agent_slug: &str,
-        name: &str,
-        now: u64,
-    ) -> Result<HandleAllocation> {
-        let (handle, codename) = custom_handle(agent_slug, name)?;
-        let tx = Transaction::new_unchecked(&self.conn, TransactionBehavior::Immediate)?;
-        if let Some((existing, codename)) = lease_for_pubkey(&tx, pubkey)? {
-            if existing != handle {
-                anyhow::bail!(
-                    "session {pubkey:?} already uses {existing:?}, not requested name {name:?}"
-                );
-            }
-            tx.execute(
-                "UPDATE handle_leases SET live=1, last_active_at=?2 WHERE pubkey=?1",
-                params![pubkey, now],
-            )?;
-            tx.commit()?;
-            return Ok(HandleAllocation {
-                handle: existing,
-                codename,
-                reclaimed_pubkey: None,
-            });
-        }
-        if remote_profiles::reserves_handle(&tx, &handle, Some(pubkey))? {
-            anyhow::bail!("session name {name:?} is already in use as {handle:?}");
-        }
-        if tx
-            .query_row(
-                "SELECT 1 FROM handle_leases WHERE handle=?1",
-                [&handle],
-                |_| Ok(()),
-            )
-            .optional()?
-            .is_some()
-        {
-            anyhow::bail!("session name {name:?} is already in use as {handle:?}");
-        }
-        tx.execute(
-            "INSERT INTO handle_leases
-                (handle, pubkey, agent_slug, leased_at, last_active_at, live)
-             VALUES (?1, ?2, ?3, ?4, ?4, 1)",
-            params![handle, pubkey, agent_slug, now],
-        )?;
-        tx.commit()?;
-        Ok(HandleAllocation {
-            handle,
-            codename,
-            reclaimed_pubkey: None,
-        })
     }
 
     pub(crate) fn handle_for_pubkey(&self, pubkey: &str) -> Result<Option<String>> {
@@ -213,22 +87,7 @@ impl Store {
     }
 }
 
-fn lease_for_pubkey(tx: &Transaction<'_>, pubkey: &str) -> Result<Option<(String, String)>> {
-    let row = tx
-        .query_row(
-            "SELECT handle, agent_slug FROM handle_leases WHERE pubkey=?1",
-            [pubkey],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-        )
-        .optional()?;
-    Ok(row.map(|(handle, agent_slug)| {
-        let suffix = format!("-{agent_slug}");
-        let codename = handle.strip_suffix(&suffix).unwrap_or(&handle).to_string();
-        (handle, codename)
-    }))
-}
-
-fn custom_handle(agent_slug: &str, name: &str) -> Result<(String, String)> {
+pub(super) fn custom_handle(agent_slug: &str, name: &str) -> Result<(String, String)> {
     let codename = name.trim();
     if codename.is_empty() {
         anyhow::bail!("session name must not be empty");
@@ -247,7 +106,7 @@ fn custom_handle(agent_slug: &str, name: &str) -> Result<(String, String)> {
     ))
 }
 
-fn candidates(seed: &str) -> impl Iterator<Item = String> {
+pub(super) fn candidates(seed: &str) -> impl Iterator<Item = String> {
     let words = crate::util::CODE_WORDS_A
         .iter()
         .chain(crate::util::CODE_WORDS_B.iter())

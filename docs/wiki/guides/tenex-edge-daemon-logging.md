@@ -62,9 +62,11 @@ PTY spawn events (identity resolution failure, concurrent instance launch, pre-p
 
 Session lifecycle logs include session_start hook received, stale session cancelled (with reason: same_pid/same_endpoint), re-assert when engine already running, session engine spawned with agent+channel+session, and session engine exited. <!-- [^47f3c-0b6d2] -->
 
-## Ordinal Allocation
+## Session Signers
 
-Session key logs include session key derived (info with session id, role slug, and pubkey prefix), management key loaded (debug with pubkey prefix), and session key released on session end. <!-- [^47f3c-2d7ce] -->
+Session-start lifecycle logs identify the selected agent, channel, and private
+runtime correlation row. Ordinary signer reconstruction material is persisted by
+pubkey and remains available across session end and resume.
 
 ## Subscriptions
 

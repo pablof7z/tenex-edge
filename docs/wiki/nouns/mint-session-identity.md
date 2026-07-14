@@ -10,4 +10,4 @@ source_refs:
 
 # mint_session_identity
 
-Mints (or deterministically re-derives) a session's own keypair via derive_session_keys_v2(management_secret, session_id). The management key is the per-machine root; a resumed session re-derives the identical pubkey. Records the minted pubkey into the append-only identities cache so later #p-tagged mentions resolve back to the right session.
+Selects a session's signing identity before managed spawn. Ordinary sessions atomically reserve a random non-secret signer salt, derived pubkey, public handle, and identity binding; resumed sessions reconstruct from the salt stored under that pubkey. Durable agents use their configured key and claim the one-active-run slot. Runtime row ids and harness-native locators are not signing inputs.

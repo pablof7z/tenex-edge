@@ -9,8 +9,7 @@ source_refs:
 
 # AgentIdentity
 
-Superseded by per-session identity. A session's signing key is derived from the
-machine's management key as `derive(management_secret, session_id)`, not resolved
-from a durable per-agent keypair. `--agent <slug>` now names a role config
-(`<edge_home>/agents/<slug>.json`: harness, provider, model), not a stored
-identity key. See [Tenex-Edge Agent Identity](../guides/tenex-edge-agent-identity.md).
+The resolved agent configuration used when selecting a session signer. Ordinary
+sessions allocate pubkey-owned reconstruction material. Agents configured with
+`perSessionKey:false` instead use the configured key across sequential runs.
+See [Tenex-Edge Agent Identity](../guides/tenex-edge-agent-identity.md).

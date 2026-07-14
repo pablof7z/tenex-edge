@@ -10,8 +10,7 @@ source_refs:
 
 # session identity
 
-The keypair a session signs and is routed by, derived at start as
-`derive(management_secret, session_id)`. It is the session's whole identity —
-there is no separate base key or ordinal. Because it is derived from the session
-id, it is stable across resume and re-derivable from the machine's management key
-without being stored.
+The authoritative pubkey a session signs and is routed by. Ordinary signers are
+reconstructable from the machine management key plus a random non-secret salt
+stored under that pubkey. A leased handle such as `quill-codex` is its public
+alias; runtime and harness ids are local locators, not cryptographic inputs.

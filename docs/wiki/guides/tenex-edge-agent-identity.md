@@ -2,14 +2,14 @@
 title: Tenex-Edge Agent Identity
 slug: tenex-edge-agent-identity
 topic: tenex-edge
-summary: Identity is per session, not per agent
+summary: Pubkeys are authoritative; handles are public aliases
 tags:
   - capture
 volatility: warm
 confidence: medium
 created: 2026-06-29
-updated: 2026-07-13
-verified: 2026-07-09
+updated: 2026-07-14
+verified: 2026-07-14
 compiled-from: conversation
 sources:
   - session:019f12ce-2569-72e0-b959-6d87d5daec5d
@@ -21,25 +21,22 @@ sources:
 
 # Tenex-Edge Agent Identity
 
-## Per-Session Identity
+## Pubkey Authority
 
-Identity is per session, not per agent. There is no durable per-agent keypair and
-no ordinals. Every session mints its own keypair at start as
-`derive(management_secret, session_id)`, where the machine's management key
-(`tenexPrivateKey`) is the only secret stored on the machine. Because a session's
-key is always re-derivable from `(management_secret, session_id)`, sessions are
-recoverable and resumable without ever storing an nsec.
+The Nostr pubkey is the authoritative session identity. Ordinary sessions derive
+their signer from the machine management secret and a random, non-secret salt.
+The salt is stored once in `session_signers`, keyed by the resulting pubkey. A
+runtime row id or harness resume token never participates in key derivation.
 
-`<edge_home>/agents/<slug>.json` is role config — harness, provider, model — not
-an identity. Launching a role produces a fresh session with a fresh derived key;
-the role file contributes behavior, not a signing identity.
+Agents configured with `perSessionKey:false` are the explicit durable exception:
+they sign with the key in `<edge_home>/agents/<slug>.json` and may reuse that
+pubkey across sequential runs, with at most one active run at a time.
 
 ## Agent/Session Handle
 
-Each session publishes a kind:0 profile with a dashed public name. For example,
-a Codex session can be mentioned as `@codex-quill-peak-369`. That handle is the
-p-taggable mention target peers use to address the session. Its friendly code is
-derived from the canonical session id, so a resumed session keeps its handle.
+Each ordinary session publishes a kind:0 profile with a leased public handle.
+For example, a Codex session can be mentioned as `@quill-codex`. The handle is a
+human-facing alias mapped to the pubkey; it is not another signing identity.
 
 ## Trust Is Channel Membership
 
@@ -58,7 +55,10 @@ new session; that session is what becomes a member.
 
 ## Session Identification and Routing
 
-The raw `session_id` is the internal correlation id, and the derived pubkey is what signs and is routed to. Peers reference a session by its dashed public handle, never by raw pubkey. A mention that cannot be resolved to a current member is silently treated as no-mention rather than erroring, so mention resolution never blocks chat delivery.
+The pubkey signs events and is the routing identity. The leased handle resolves
+to that pubkey for human-facing selection. Runtime ids, native harness tokens,
+PTY endpoints, sockets, and PIDs are local correlation or transport locators.
+They do not derive, replace, or alias the signing identity.
 
 `resolve_session_inner` is the central daemon function for resolving an exact
 caller identity. `my session` and its status mutation enter through the strict
@@ -68,10 +68,10 @@ sibling session. Human `who` does not resolve an agent session.
 <!-- citations: [^4d656-e8fdc] -->
 ## Session Resume
 
-Resume resolves sessions by exact raw `session_id`, then by `session_id` prefix.
-Because the signing key and the handle are both derived from the session id,
-resuming a session reconstitutes the same identity without any stored
-secret beyond the machine's management key.
+Resume reconstructs an ordinary signer from the pubkey-owned salt and the
+machine management key. The leased handle remains mapped to that pubkey, so a
+resumed session preserves both its signing identity and public name without
+using a runtime locator as cryptographic input.
 
 ## Identity Commands
 
@@ -80,4 +80,4 @@ inhabit: an XML `<self>` row followed by global agent capabilities and
 workspace/channel membership. Every workspace joined by that exact session is
 expanded, while merely known workspaces remain compact. Human `who` is a
 separate terminal-only operator projection. The caller member match keys on the
-session's derived pubkey.
+session's pubkey.

@@ -10,4 +10,7 @@ source_refs:
 
 # nsec (per-session key)
 
-Derived per session as nsec = derive(mgmt_secret, session_id), where mgmt_secret is the per-machine management key. There is no base agent key; nothing is stored as a secret except the mgmt key plus an append-only pubkey→session_id map.
+Ordinary sessions derive an nsec from the per-machine management secret and a
+random, non-secret signer salt. The salt is persisted in `session_signers`, keyed
+by the resulting pubkey, so runtime and harness ids never become cryptographic
+inputs. Agents configured with `perSessionKey:false` use their configured key.
