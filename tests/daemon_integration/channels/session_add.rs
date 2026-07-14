@@ -63,7 +63,7 @@ fn channel_add_session_pulls_live_pty_without_resuming() {
                     "root": &root,
                     "channel": &root,
                     "cwd": &work_dir,
-                    "base_command": no_hook_command(),
+                    "launch": {"kind": "pty-command", "argv": no_hook_command()},
                 }),
             )
             .await

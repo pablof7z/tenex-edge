@@ -149,7 +149,8 @@ async fn launch_acp_headless(
     let mut params = serde_json::json!({
         "agent": agent,
         "root": root,
-        "command": extra_args,
+        "launch": { "kind": "configured" },
+        "args": extra_args,
         "channel": channel,
         "session_name": session_name,
         "cwd": cwd,

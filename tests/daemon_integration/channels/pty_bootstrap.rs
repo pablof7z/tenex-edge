@@ -2,6 +2,8 @@ use super::*;
 use std::path::Path;
 use std::time::Duration;
 
+#[path = "pty_bootstrap/launch.rs"]
+mod launch;
 #[path = "pty_bootstrap/named.rs"]
 mod named;
 
@@ -73,7 +75,7 @@ fn pty_spawn_bootstraps_session_without_child_session_start_hook() {
                     "root": &channel,
                     "channel": &channel,
                     "cwd": &work_dir,
-                    "base_command": no_hook_command(),
+                    "launch": {"kind": "pty-command", "argv": no_hook_command()},
                 }),
             )
             .await
@@ -136,7 +138,7 @@ fn late_session_start_hook_reasserts_pty_bootstrap_session() {
                     "root": &channel,
                     "channel": &channel,
                     "cwd": &work_dir,
-                    "base_command": no_hook_command(),
+                    "launch": {"kind": "pty-command", "argv": no_hook_command()},
                 }),
             )
             .await
@@ -215,7 +217,7 @@ fn codex_hook_reasserts_launch_session_from_pty_anchor_without_native_id() {
                     "root": &channel,
                     "channel": &channel,
                     "cwd": &work_dir,
-                    "base_command": no_hook_command(),
+                    "launch": {"kind": "pty-command", "argv": no_hook_command()},
                 }),
             )
             .await

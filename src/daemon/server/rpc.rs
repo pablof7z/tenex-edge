@@ -4,10 +4,10 @@
 //! inside their submodule and re-exported here as `pub` so the dispatch
 //! table in `server.rs` can call them as `rpc::rpc_*`.
 
-pub(super) mod agents;
 pub(super) mod channel_members;
+pub(super) mod pty_supervisor;
 
-pub(super) use agents::{rpc_agent_launch_preflight, rpc_agent_launch_release};
 pub use channel_members::{
     rpc_channel_add_member, rpc_channel_members, rpc_channel_remove_member, rpc_root_channels,
 };
+pub(super) use pty_supervisor::rpc_pty_supervisor_exit;

@@ -20,48 +20,35 @@ fn durable_agent_reuses_key_rejects_concurrency_and_never_becomes_resumable() {
 
     let (first_id, third_id, normal_id, chat_event_id) = rt().block_on(async {
         let mut client = Client::connect_or_spawn().await.expect("connect");
-        lifecycle::assert_supervisor_releases_reservations(&home, &mut client, slug).await;
-        let reserved = client
-            .call(
-                "agent_launch_preflight",
-                serde_json::json!({ "agent": slug }),
-            )
-            .await
-            .expect("first launch reserves before spawn");
-        let reservation = reserved["durable_reservation"].as_str().unwrap();
-        client
-            .call(
-                "agent_launch_preflight",
-                serde_json::json!({ "agent": slug }),
-            )
-            .await
-            .expect_err("a concurrent launch cannot pass atomic reservation");
+        lifecycle::assert_supervisor_releases_reservations(&home, slug).await;
         let started = client
             .call(
                 "session_start",
                 serde_json::json!({
                     "agent": slug, "cwd": "/tmp", "channel": channel,
                     "harness": "codex", "session_id": "durable-native-a",
-                    "durable_reservation": reservation,
                 }),
             )
             .await
-            .expect("reserved launch registers session");
+            .expect("durable launch registers session");
         let first = started["session_id"].as_str().unwrap().to_string();
 
-        let preflight = client
-            .call(
-                "agent_launch_preflight",
-                serde_json::json!({ "agent": slug }),
-            )
-            .await
-            .expect_err("manual launch must be refused before PTY spawn");
-        let preflight = preflight.to_string();
-        assert!(preflight.contains("channel(s)"), "{preflight}");
-        assert!(
-            preflight.contains("pty attach") || preflight.contains("tenex-edge mgmt session list")
+        let refused = run_cli(
+            &home,
+            &[
+                "launch",
+                slug,
+                "--workspace",
+                "tmp",
+                "--command",
+                "/usr/bin/true",
+            ],
         );
-        assert!(preflight.contains("channel add --session"), "{preflight}");
+        assert!(!refused.status.success());
+        let refused = String::from_utf8_lossy(&refused.stderr);
+        assert!(refused.contains("channel(s)"), "{refused}");
+        assert!(refused.contains("pty attach") || refused.contains("tenex-edge mgmt session list"));
+        assert!(refused.contains("channel add --session"), "{refused}");
 
         let original = read_agent_config(&home, slug);
         let mut flipped = original.clone();

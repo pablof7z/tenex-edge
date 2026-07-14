@@ -23,7 +23,7 @@ fn operator_kind9_injects_into_working_launch_session() {
                     "root": channel,
                     "channel": channel,
                     "cwd": work_dir,
-                    "base_command": harness_command(&native_session, &work_dir, &log),
+                    "launch": {"kind": "pty-command", "argv": harness_command(&native_session, &work_dir, &log)},
                 }),
             )
             .await

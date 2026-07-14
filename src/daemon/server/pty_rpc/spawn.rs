@@ -1,15 +1,21 @@
 use super::*;
 
 #[derive(serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+enum LaunchIntent {
+    Configured,
+    PtyCommand { argv: Vec<String> },
+    PtyBundle { bundle: String },
+}
+
+#[derive(serde::Deserialize)]
 struct PtySpawnParams {
     agent: String,
     root: String,
+    launch: LaunchIntent,
+    /// User arguments appended to the selected command or bundle argv.
     #[serde(default)]
-    command: Vec<String>,
-    /// Override the entire base command, replacing what would be resolved from
-    /// the agent file. When non-empty, `command` (extra args) is still appended.
-    #[serde(default)]
-    base_command: Vec<String>,
+    args: Vec<String>,
     /// The client's cwd, forwarded so the daemon spawns the agent in the
     /// directory the user actually invoked `tenex-edge launch` from.
     #[serde(default)]
@@ -33,19 +39,23 @@ pub(in crate::daemon::server) async fn rpc_pty_spawn(
     let p: PtySpawnParams =
         serde_json::from_value(params.clone()).context("parsing pty_spawn params")?;
     let client_cwd = p.cwd.as_deref().map(std::path::Path::new);
-    let base_override = (!p.base_command.is_empty()).then_some(p.base_command);
+    let source = match p.launch {
+        LaunchIntent::Configured => crate::session_host::SpawnSource::Configured,
+        LaunchIntent::PtyCommand { argv } => crate::session_host::SpawnSource::PtyCommand(argv),
+        LaunchIntent::PtyBundle { bundle } => crate::session_host::SpawnSource::PtyBundle(bundle),
+    };
     let group = p.channel.as_deref();
     if let Some(name) = p.session_name.as_deref().filter(|name| !name.is_empty()) {
         state.with_store(|s| s.ensure_custom_handle_available(&p.agent, name))?;
     }
     super::provision_before_spawn(state, &p.agent, &p.root, group).await?;
-    let pty_id = crate::session_host::spawn_agent(
+    let meta = crate::session_host::spawn_agent(
         state,
         &p.agent,
         &p.root,
         crate::session_host::SpawnRequest {
-            launch_args: p.command,
-            base_override,
+            source,
+            launch_args: p.args,
             group,
             client_cwd,
             session_name: p.session_name.as_deref(),
@@ -54,7 +64,12 @@ pub(in crate::daemon::server) async fn rpc_pty_spawn(
     .await?;
 
     if let Some(prompt) = p.prompt.as_deref().filter(|prompt| !prompt.is_empty()) {
-        crate::session_host::deliver_spawn_prompt(&p.agent, &pty_id, prompt).await;
+        crate::session_host::deliver_spawn_prompt(&p.agent, &meta.id, prompt).await;
     }
-    Ok(serde_json::json!({ "pty_id": pty_id, "agent": p.agent, "root": p.root }))
+    Ok(serde_json::json!({
+        "pty_id": meta.id,
+        "pty_socket": meta.socket,
+        "agent": p.agent,
+        "root": p.root,
+    }))
 }
