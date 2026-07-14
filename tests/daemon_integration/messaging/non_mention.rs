@@ -63,7 +63,10 @@ fn non_mention_chat_does_not_route_to_inbox() {
         &home,
         &["channel", "send"],
         &format!("{body}\n"),
-        &[("TENEX_EDGE_AGENT", "ambient-sender")],
+        &[
+            ("TENEX_EDGE_AGENT", "ambient-sender"),
+            ("TENEX_EDGE_PUBKEY", &sender_pubkey),
+        ],
         std::path::Path::new("/tmp"),
     );
     assert!(

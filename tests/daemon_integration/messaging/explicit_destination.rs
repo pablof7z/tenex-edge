@@ -1,5 +1,5 @@
 use crate::daemon_harness::*;
-use nostr_sdk::prelude::{PublicKey, ToBech32};
+use nostr_sdk::prelude::{Keys, PublicKey, ToBech32};
 use std::time::Duration;
 use tenex_edge::daemon::client::Client;
 use tenex_edge::state::Store;
@@ -229,7 +229,7 @@ fn channel_commands_require_channel_when_session_joined_to_multiple_channels() {
     let home = Home::new().with_backend_key();
 
     let store = Store::open(&home.store_path()).unwrap();
-    let pubkey = "pk-multi-chat".to_string();
+    let pubkey = Keys::generate().public_key().to_hex();
     store
         .reserve_session(&tenex_edge::state::RegisterSession {
             pubkey: pubkey.clone(),

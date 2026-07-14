@@ -52,3 +52,30 @@ impl InvocationContext {
         })
     }
 }
+
+pub(crate) fn merge_rpc_params(mut base: Value, extra: Value) -> Value {
+    if let (Some(base), Some(extra)) = (base.as_object_mut(), extra.as_object()) {
+        for (key, value) in extra {
+            if value.is_null() && base.get(key).is_some_and(|current| !current.is_null()) {
+                continue;
+            }
+            base.insert(key.clone(), value.clone());
+        }
+    }
+    base
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn null_optional_selector_does_not_erase_caller_pubkey() {
+        let params = merge_rpc_params(
+            serde_json::json!({"session": "pubkey", "cwd": "/work"}),
+            serde_json::json!({"session": null, "cwd": "/override"}),
+        );
+        assert_eq!(params["session"], "pubkey");
+        assert_eq!(params["cwd"], "/override");
+    }
+}

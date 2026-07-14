@@ -97,7 +97,14 @@ fn explicit_who_and_my_session_accept_the_exact_anchor() {
     });
 
     let store = Store::open(&home.store_path()).unwrap();
-    let current_channel = session_for_harness_session(&store, "claude-code", &sid).channel_h;
+    let session = session_for_harness_session(&store, "claude-code", &sid);
+    let current_channel = session.channel_h.clone();
+    store
+        .upsert_channel(&current_channel, "who-parent", "", "", 1)
+        .unwrap();
+    store
+        .replace_channel_members(&current_channel, &[session.pubkey], 1)
+        .unwrap();
 
     rt().block_on(async {
         let mut c = Client::connect_or_spawn().await.expect("connect");

@@ -89,16 +89,9 @@ pub(crate) fn caller_identity() -> serde_json::Value {
     context::InvocationContext::from_current_process().to_rpc_json()
 }
 
-/// Build RPC params = the caller-identity fields plus `extra` (which wins on any
-/// key collision, e.g. an explicit destination `group`).
+/// Build RPC params from caller identity plus explicit non-null overrides.
 pub(crate) fn rpc_params(extra: serde_json::Value) -> serde_json::Value {
-    let mut base = caller_identity();
-    if let (Some(b), Some(e)) = (base.as_object_mut(), extra.as_object()) {
-        for (k, v) in e {
-            b.insert(k.clone(), v.clone());
-        }
-    }
-    base
+    context::merge_rpc_params(caller_identity(), extra)
 }
 
 pub async fn run(cli: Cli) -> Result<()> {

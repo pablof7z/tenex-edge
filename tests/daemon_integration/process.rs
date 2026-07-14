@@ -76,8 +76,7 @@ fn cli_subprocess_blocking_path_session_start_and_who() {
     // The session/turn lifecycle is driven only through `harness hook` now (no
     // bare verbs). Run the real binary the way the harnesses do — payload on
     // stdin — and assert the blocking client + renderer behave. This also
-    // exercises the opencode-only "no session id supplied → generate + print"
-    // branch.
+    // exercises the opencode-only branch where no native locator is supplied.
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let home = Home::new().with_backend_key();
     rt().block_on(async {
@@ -85,7 +84,8 @@ fn cli_subprocess_blocking_path_session_start_and_who() {
         c.call("ping", serde_json::json!({})).await.expect("ping");
     });
 
-    // session-start with no id: the daemon generates one, the hook prints it.
+    // Session-start with no native id: the daemon allocates the pubkey identity,
+    // while the hook remains silent because identities are not runtime output.
     let out = run_cli_stdin(
         &home,
         &["harness", "hook", "opencode", "--type", "session-start"],
@@ -96,18 +96,27 @@ fn cli_subprocess_blocking_path_session_start_and_who() {
         "session-start failed: {}",
         String::from_utf8_lossy(&out.stderr)
     );
-    // The opencode session-start hook echoes the daemon-minted canonical id as
-    // JSON ({"session_id":"te-..."}); the plugin parses it.
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    let trimmed = stdout.trim();
-    let sid = serde_json::from_str::<serde_json::Value>(trimmed)
-        .ok()
-        .and_then(|v| v["session_id"].as_str().map(str::to_string))
-        .unwrap_or_else(|| trimmed.to_string());
     assert!(
-        !sid.is_empty(),
-        "session-start printed no generated session id"
+        out.stdout.is_empty(),
+        "session-start leaked identity output: {}",
+        String::from_utf8_lossy(&out.stdout)
     );
+    let mut sid = None;
+    assert!(
+        wait_until(std::time::Duration::from_secs(5), || {
+            sid = Store::open(&home.store_path()).ok().and_then(|store| {
+                store
+                    .list_alive_sessions()
+                    .ok()?
+                    .into_iter()
+                    .find(|session| session.agent_slug == "opencode")
+                    .map(|session| session.pubkey)
+            });
+            sid.is_some()
+        }),
+        "session-start did not register an opencode pubkey"
+    );
+    let sid = sid.unwrap();
     // Forensics logs are now scoped to per-session dirs. The session-start hook
     // payload has no session_id key (opencode with no id), so it lands in _unscoped.
     let hook_log_path = home
