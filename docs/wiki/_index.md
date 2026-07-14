@@ -2,14 +2,14 @@
 
 > Derived cache — do not hand-edit. Rebuilt by proactive-context after each capture.
 
-Last updated: 2026-07-13
+Last updated: 2026-07-14
 
 ## agent-skills (2 guides)
 
 | Slug | Title | Summary | Tags | Volatility | Verified | Topic |
 |------|-------|---------|------|------------|----------|-------|
 | [tenex-edge-citizen-skill](guides/tenex-edge-citizen-skill.md) | Tenex-Edge Agent Skill | This skill teaches the mental model for self-organizing on a tenex-edge fabric through shared awareness | capture | warm | 2026-06-29 | agent-skills |
-| [tenex-edge-skills](guides/tenex-edge-skills.md) | Tenex-Edge Skills | This guide governs the family of `tenex-edge` agent skills written to `./skills/tenex-edge/` with symlinks from `~/.agents/skills/tenex-edge` and `~/.claude/ski | capture | warm | 2026-06-29 | agent-skills |
+| [tenex-edge-skills](guides/tenex-edge-skills.md) | Tenex-Edge Skills | This guide governs the `tenex-edge` agent skill written to | capture | warm | 2026-06-29 | agent-skills |
 
 ## agent-workflows (1 guide)
 
@@ -45,14 +45,15 @@ Last updated: 2026-07-13
 | [no-backwards-compat](guides/no-backwards-compat.md) | No Backwards Compatibility | The repository does not preserve backwards compatibility | capture | warm | 2026-07-13 | repo-discipline |
 | [planning-vs-durable-docs](guides/planning-vs-durable-docs.md) | Planning vs Durable Docs | Scattered notes, ad-hoc `TODO.md`, `NOTES.md`, `ROADMAP.md`, `PLAN-foo.md` files, parallel planning docs, and inline `// TODO:` annotations used as a substitute | capture | warm | 2026-06-29 | repo-discipline |
 
-## tenex-edge (24 guides)
+## tenex-edge (27 guides)
 
 | Slug | Title | Summary | Tags | Volatility | Verified | Topic |
 |------|-------|---------|------|------------|----------|-------|
 | [croissant-test-relay](guides/croissant-test-relay.md) | Croissant Test Relay | Croissant is a local NIP-29 relay binary used for fully isolated, writable test relay environments | capture | warm | 2026-07-03 | tenex-edge |
-| [tenex-edge-agent-identity](guides/tenex-edge-agent-identity.md) | Tenex-Edge Agent Identity | Identity is per session, not per agent | capture | warm | 2026-07-09 | tenex-edge |
+| [tenex-edge-agent-identity](guides/tenex-edge-agent-identity.md) | Tenex-Edge Agent Identity | Pubkeys are authoritative; handles are public aliases | capture | warm | 2026-07-14 | tenex-edge |
 | [tenex-edge-architecture](guides/tenex-edge-architecture.md) | Tenex-Edge Architecture | Tenex-edge is a Rust project (38.5k LOC in src/) providing durable Nostr-keypair identity, presence, and cross-agent messaging for AI coding-agent sessions via | capture | warm | 2026-06-29 | tenex-edge |
 | [tenex-edge-channel-create](guides/tenex-edge-channel-create.md) | Tenex-Edge Channel Create | `channels create` resolves the parent channel in this precedence: `--parent-channel <ref>`, then the creating agent's current channel (the default), then an exp | capture | warm | 2026-06-29 | tenex-edge |
+| [tenex-edge-channel-refs](guides/tenex-edge-channel-refs.md) | Tenex-Edge Channel Reference Grammar | Channel references use slash-separated paths as the single public addressing grammar, replacing dotted refs entirely with no compatibility aliases | capture | warm | 2026-07-14 | tenex-edge |
 | [tenex-edge-channel-workspace-binding](guides/tenex-edge-channel-workspace-binding.md) | Tenex-Edge Channel Workspace Binding | A project is a channel that owns a workspace binding; "project" is the role a node plays when it carries a workspace, not a separate concept or tree position | capture | warm | 2026-07-03 | tenex-edge |
 | [tenex-edge-channels](guides/tenex-edge-channels.md) | Tenex-Edge Channels | Agent online presence is active channel membership; ended or stale local sessions are removed from channel membership. | capture | warm | 2026-06-29 | tenex-edge |
 | [tenex-edge-cli-commands](guides/tenex-edge-cli-commands.md) | Tenex-Edge CLI Commands | Install the CLI with `just install`, then run `tenex-edge install --all`. | capture | warm | 2026-07-06 | tenex-edge |
@@ -61,6 +62,7 @@ Last updated: 2026-07-13
 | [tenex-edge-daemon-restart](guides/tenex-edge-daemon-restart.md) | Tenex-Edge Daemon Restart Safety | A daemon restart or binary swap must not kill live agent/PTY sessions | capture | warm | 2026-07-13 | tenex-edge |
 | [tenex-edge-daemon-write-disabled](guides/tenex-edge-daemon-write-disabled.md) | Tenex-Edge Daemon Write-Disabled Error | The \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\"write actions are disabled\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\" error message originates client-side from the daemon's own `nostr-relay-pool` Rust dependency (`Error::WriteDisabled`), not fro | capture | warm | 2026-07-03 | tenex-edge |
 | [tenex-edge-home-directory](guides/tenex-edge-home-directory.md) | Tenex-Edge Home Directory | The `edge_home()` function returns tenex-edge's data root, including `state.db`, agents, and logs, and is overridable via `TENEX_EDGE_HOME`. | capture | warm | 2026-07-03 | tenex-edge |
+| [tenex-edge-hook-xml](guides/tenex-edge-hook-xml.md) | Tenex-Edge Hook XML | The hook XML agents see always emits canonical absolute channel paths, never relative refs, so agents can safely copy them into commands from any workspace. | capture | warm | 2026-07-14 | tenex-edge |
 | [tenex-edge-inbox-delivery](guides/tenex-edge-inbox-delivery.md) | Tenex-Edge Inbox Delivery | Inbox delivery uses an atomic `UPDATE â¦ SET state='delivered' â¦ RETURNING` claim so the first drainer (pty paste or hook) wins and the other gets nothing | capture | warm | 2026-06-29 | tenex-edge |
 | [tenex-edge-launch](guides/tenex-edge-launch.md) | Tenex-Edge Launch | When `tenex-edge launch` spawns an agent harness in pty, `default-terminal` and `terminal-overrides` are set globally (`-g`) before `new-session` forks the chi | capture | warm | 2026-07-07 | tenex-edge |
 | [tenex-edge-mcp-client-identity](guides/tenex-edge-mcp-client-identity.md) | Tenex-Edge MCP Client Identity | Mcp-Session-Id is an HTTP transport correlation token, not a tenex-edge session identity or selector. | capture | warm | 2026-07-10 | tenex-edge |
@@ -71,6 +73,7 @@ Last updated: 2026-07-13
 | [tenex-edge-my-session](guides/tenex-edge-my-session.md) | Tenex-Edge My Session Command | The `my session` command gives an agent a full self/session briefing across identity, joined channels, workspaces, members, and capabilities. | capture | warm | 2026-07-13 | tenex-edge |
 | [tenex-edge-presence](guides/tenex-edge-presence.md) | Tenex-Edge Presence | Agent online presence is channel membership; kind:30315 carries per-session activity and resumable session history. | capture | warm | 2026-06-29 | tenex-edge |
 | [tenex-edge-session-distill](guides/tenex-edge-session-distill.md) | Tenex-Edge Session Distill | Distill is the LLM-powered process that turns the live conversation transcript into a stable session title and a live one-line NOW activity broadcast in a singl | capture | warm | 2026-07-03 | tenex-edge |
+| [tenex-edge-sessions](guides/tenex-edge-sessions.md) | Tenex-Edge Sessions Command | The unified session management surface is the top-level command `tenex-edge sessions` | capture | warm | 2026-07-14 | tenex-edge |
 | [tenex-edge-wait-send](guides/tenex-edge-wait-send.md) | Tenex-Edge Wait & Send | This guide covers the `wait` and `channel send --wait` primitives in tenex-edge | capture | warm | 2026-07-13 | tenex-edge |
 | [tenex-edge-who-rendering](guides/tenex-edge-who-rendering.md) | Tenex-Edge Who Rendering | The `who` command is human-only: it always renders human-formatted terminal text, never XML, and never mutates the cursor | capture | warm | 2026-07-11 | tenex-edge |
 
@@ -175,7 +178,7 @@ Last updated: 2026-07-13
 | [2026-07-13-420ca538d1c9-240640a6-2-management-classifier-feedback-loop-375-root](episodes/2026-07-13-420ca538d1c9-240640a6-2-management-classifier-feedback-loop-375-root.md) | 2026-07-13 | Management classifier feedback loop (#375) root-caused and closed | root-cause | active |
 | [2026-07-13-420ca538d1c9-240640a6-3-lab-relay-port-selection-randomized-to](episodes/2026-07-13-420ca538d1c9-240640a6-3-lab-relay-port-selection-randomized-to.md) | 2026-07-13 | Lab relay port selection randomized to eliminate concurrent-lab collisions | workflow | active |
 
-## Noun Definition Files (228 records)
+## Noun Definition Files (215 records)
 
 | Record | Name | Origin | Definition |
 |------|------|--------|------------|
@@ -183,7 +186,7 @@ Last updated: 2026-07-13
 | [add-agents-orchestration-event](nouns/add-agents-orchestration-event.md) | add-agents orchestration event | extracted | A parsed kind:9 orchestration event that asks named backends to add fresh agents |
 | [agent](nouns/agent.md) | agent | extracted | A role that a session plays on the fabric (defined by a role config under |
 | [agent-cli-subcommand](nouns/agent-cli-subcommand.md) | agent (CLI subcommand) | extracted | Manages the local role configs on THIS machine under |
-| [agent-identity](nouns/agent-identity.md) | agent identity | extracted | The Nostr pubkey is authoritative; ordinary sessions allocate one, while configured durable agents reuse theirs across sequential runs. |
+| [agent-identity](nouns/agent-identity.md) | agent identity | extracted | The Nostr pubkey is authoritative. Ordinary sessions allocate their own pubkey |
 | [agent-identity-old-model](nouns/agent-identity-old-model.md) | agent identity [old model] | extracted | Previously: identity is (agent, machine); the same slug on another machine is a different key, resolving to a durable Nostr keypair persisted under <edge_home>/agents/<slug>.json. Superseded by per-session pubkeys derived from the mgmt secret. |
 | [agent-identity-prior-model-now-retired](nouns/agent-identity-prior-model-now-retired.md) | agent identity (prior model, now retired) | extracted | Identity was (agent, machine): the same slug on another machine is a different key. An agent slug resolved to a durable Nostr keypair generated on first use and persisted under <edge_home>/agents/<slug>.json. This model was retired in favor of per-session pubkeys. |
 | [agent-instance-identity](nouns/agent-instance-identity.md) | agent-instance identity | extracted | The durable AGENT-INSTANCE = (slug, backend-label) rendered as agent@backend-label (e.g. codex@laptop). @ always means backend label, never project. A session is only a correlation handle (raw session_id), never a separate display name or chat target. |
@@ -195,8 +198,8 @@ Last updated: 2026-07-13
 | [agent-slug](nouns/agent-slug.md) | agent_slug | extracted | The harness/hook client's declared agent, taken verbatim from the hook payload (p.agent); never derived or defaulted server-side. |
 | [agent1](nouns/agent1.md) | agent1 | extracted | The claude1 profile launched in direct mode — a raw Claude session, host-pty-observed but not daemon-anchored, into which the user types the initial mention instruction. |
 | [agent2](nouns/agent2.md) | agent2 | extracted | The claude2 profile launched via tenex-edge launch — expected to receive a live daemon-pushed, attributed mention from agent1 and reply back. |
-| [agentidentity](nouns/agentidentity.md) | AgentIdentity | extracted | Resolved agent configuration used to select an ordinary per-session signer or configured durable signer. |
-| [agentinstance](nouns/agentinstance.md) | AgentInstance | extracted | Read-side projection of the authoritative pubkey plus display and local lifecycle metadata. |
+| [agentidentity](nouns/agentidentity.md) | AgentIdentity | extracted | The resolved agent configuration used when selecting a session signer. Ordinary |
+| [agentinstance](nouns/agentinstance.md) | AgentInstance | extracted | Read-side session identity projected as pubkey, agent slug, leased public name, |
 | [agentname](nouns/agentname.md) | agentName | extracted | Exactly what the session published in its kind:0 profile (the `name` field). |
 | [archived-channel](nouns/archived-channel.md) | archived channel | extracted | A channel whose about metadata is prefixed with [ARCHIVED]; non-admin members are removed and it is hidden from active surfaces (channels list, hook/fabric context, membership/subscription views). |
 | [available-agents](nouns/available-agents.md) | available-agents | extracted | Role configs (<slug>.json = harness/provider/model) — the TYPES of agents that can be added to a channel. Distinct from members, which are concrete sessions. Slug stops being an identity under this model. |
@@ -208,7 +211,7 @@ Last updated: 2026-07-13
 | [backend-qualified-agent-reference](nouns/backend-qualified-agent-reference.md) | backend-qualified agent reference | extracted | agent@backend-label — an operator/backend selection syntax for invite and legacy lookup paths, not the public session handle. Backend labels are config.json backendName values preserved exactly after trimming; they are not DNS hostnames and are not slugified. |
 | [brief-md](nouns/brief-md.md) | BRIEF.md | extracted | A standing note in the chief-of-staff home dir that the agent or user writes to, resurfacing automatically every session via session_start.py — where proactive notices like 'inbox-monitor loop is alive' or '3 decisions waiting on Pablo' live. |
 | [byline](nouns/byline.md) | byline | extracted | A short description of 'when to use this agent' — part of the agent's profile/identity on the fabric. |
-| [calleranchor](nouns/calleranchor.md) | CallerAnchor | extracted | Public pubkey/handle or typed local runtime locator resolved through one function to the authoritative pubkey. |
+| [calleranchor](nouns/calleranchor.md) | CallerAnchor | extracted | Everything a caller knows about "which session am I": an explicit public |
 | [channel](nouns/channel.md) | channel | extracted | A pure social/coordination construct: has members, messages, a name, a parent. Has no body. A NIP-29 group with a parent set; identity is (parent, name). |
 | [channel-add](nouns/channel-add.md) | channel add | extracted | The verb for putting an existing participant into a channel, with two |
 | [channel-h](nouns/channel-h.md) | channel_h | extracted | the relay group the session was actually in |
@@ -224,7 +227,7 @@ Last updated: 2026-07-13
 | [citizen-identity-retired](nouns/citizen-identity-retired.md) | citizen (identity, retired) | extracted | A sovereign cryptographic keypair plus fabric membership (Nostr) — nothing more, nothing less. This concept was retired as a product positioning element; the durable per-agent keypair no longer exists. |
 | [citizen-identity-retired-model](nouns/citizen-identity-retired-model.md) | citizen (identity) [retired model] | extracted | Previously defined as a sovereign cryptographic keypair plus fabric membership (Nostr) — nothing more, nothing less. This durable-key model was retired by the redesign in favor of per-session keys and agentic self-organization positioning. |
 | [cli-split](nouns/cli-split.md) | cli-split | extracted | A label for splitting an oversized CLI submodule. |
-| [codename](nouns/codename.md) | codename | extracted | A deterministic human-readable component used to allocate a leased public handle for a session pubkey. |
+| [codename](nouns/codename.md) | codename | extracted | A deterministic human-readable component derived from the session pubkey and |
 | [config-json](nouns/config-json.md) | config.json | extracted | The file tenex-edge reads from ~/.tenex-edge for whitelistedPubkeys, optional relays, and backendName (host label); tenex-edge keeps all of its own writable state under ~/.tenex-edge alongside it. |
 | [croissant](nouns/croissant.md) | croissant | extracted | The NIP-29 relay binary running at /opt/nip29-f7z-io on port 3336, serving nip29.f7z.io as a groups provider. |
 | [daemon](nouns/daemon.md) | daemon | extracted | ONE daemon per machine is the sole owner of state.db, the single relay connection, the inbox, presence, membership cache, and peer pruning; every CLI invocation and every per-session engine becomes a thin client that talks to it over a Unix domain socket. |
@@ -248,14 +251,14 @@ Last updated: 2026-07-13
 | [expiredsessionrow](nouns/expiredsessionrow.md) | ExpiredSessionRow | extracted | One expired local session, named by its `agent-session-code` handle. These rows |
 | [fabric](nouns/fabric.md) | fabric | extracted | The shared awareness substrate built on Nostr — server-less, with relays as dumb replaceable infrastructure rather than authorities. The fabric and the identity are the asset; the plugin/hooks are just distribution (straws, not the milkshake). |
 | [god-object](nouns/god-object.md) | god-object | extracted | A file that exceeds the project's 500-LOC ceiling with multiple concerns, used as a GitHub issue label. |
-| [harness-session-id](nouns/harness-session-id.md) | harness_session_id | extracted | Harness-owned resume token stored as a typed native_resume locator for the authoritative pubkey. |
+| [harness-session-id](nouns/harness-session-id.md) | harness_session_id | extracted | The harness-owned resume token, present only for harnesses that expose one. It |
 | [hookoutputformat](nouns/hookoutputformat.md) | HookOutputFormat | extracted | How context blocks are returned to the model by a given harness — either PlainText (stdout) or HookSpecificAdditionalContext (event-specific JSON, used by Codex). |
 | [host](nouns/host.md) | host | extracted | A disposable vessel (body) the agent identity temporarily inhabits — e.g. a Claude Code or Codex session. The host is a body; the identity is the person. |
 | [host-neutral](nouns/host-neutral.md) | host-neutral | extracted | Nothing inside tenex-edge knows about any host; hosts integrate from the outside via hooks and a skill. The Rust binary is the only source of truth for injected context; each host integration is a thin adapter piping JSON to tenex-edge. |
 | [human-in-the-fabric](nouns/human-in-the-fabric.md) | human (in the fabric) | extracted | A node, not the operator — a privileged node, a 'high-authority, high-latency oracle.' Today the human is the integration runtime (a slow, lossy, manual message bus between silos); the product's goal is to dissolve that role. |
 | [human-in-the-system](nouns/human-in-the-system.md) | human (in the system) | extracted | A node, not the operator — a privileged node; a high-authority, high-latency oracle. |
-| [identities-table](nouns/identities-table.md) | identities (table) | extracted | Maps an authoritative pubkey to local lifecycle, public-handle, and resume locators. |
-| [identity](nouns/identity.md) | Identity | extracted | Local lifecycle projection for an authoritative session pubkey; signer material is stored separately. |
+| [identities-table](nouns/identities-table.md) | identities (table) | extracted | Maps an authoritative pubkey to local lifecycle, public-handle, and resume |
+| [identity](nouns/identity.md) | Identity | extracted | A local lifecycle projection that binds an authoritative session pubkey to its |
 | [identity-old-model](nouns/identity-old-model.md) | identity (old model) | extracted | Identity is (agent, machine): the durable AGENT-INSTANCE = (slug, backend-label) → agent@backend-label. A single run (SESSION) is only a correlation handle, never a separate display name. The same slug on another machine is a different key. |
 | [idle-exit-watcher](nouns/idle-exit-watcher.md) | idle-exit watcher | extracted | Background task that shuts the daemon down after it has had no open clients and no live sessions for a configurable grace period (default 120s, overridable via TENEX_EDGE_DAEMON_GRACE_S). |
 | [inbox](nouns/inbox.md) | inbox | extracted | The inbound routing ledger and local idempotency record. Direct-message rows are keyed by inbound event and target local session; they start `pending` and become `delivered` once injected into a live PTY session. Orchestration uses the same ledger with synthetic per-target keys so each add target can complete or retry independently. |
@@ -281,7 +284,7 @@ Last updated: 2026-07-13
 | [mcp-session](nouns/mcp-session.md) | mcp_session | extracted | A new CallerAnchor anchor kind for MCP HTTP callers, the same kind of anchor as pty_session/harness_session. Resolved read-only by the existing lookup function after the caller is registered once at initialize via ensure_mcp_session. |
 | [mcp-session-anchor](nouns/mcp-session-anchor.md) | mcp_session anchor | extracted | A new CallerAnchor kind, resolved by the existing lookup function exactly like pty_session or harness_session — read-only, never creates on its own. After ensure_mcp_session registers the caller, every tool call forwards the same hint so all handlers resolve through that one shared path. |
 | [mcp-session-anchor-kind](nouns/mcp-session-anchor-kind.md) | mcp_session (anchor kind) | extracted | A new CallerAnchor kind for MCP HTTP callers, equivalent to pty_session or harness_session; resolved read-only by the existing lookup function after the caller is registered once at initialize via ensure_mcp_session. |
-| [mcp-session-id](nouns/mcp-session-id.md) | Mcp-Session-Id | extracted | HTTP transport correlation token; not a tenex-edge session identity or public selector. |
+| [mcp-session-id](nouns/mcp-session-id.md) | Mcp-Session-Id | extracted | An HTTP transport correlation token issued at MCP `initialize` time and |
 | [mcpsessions](nouns/mcpsessions.md) | McpSessions | extracted | An in-memory map of `clientInfo.name` values self-reported at `initialize`, keyed by the session-correlation header the transport mints; unbounded — entries are never evicted, so a long-lived tunnel accumulates one row per distinct MCP client session. |
 | [members](nouns/members.md) | members | extracted | Concrete *sessions*, not role types. The members of a channel are live sessions |
 | [members-new-definition](nouns/members-new-definition.md) | members (new definition) | extracted | The members of a channel are the *sessions* (concrete live sessions identified by |
@@ -292,11 +295,11 @@ Last updated: 2026-07-13
 | [message-read-model-row](nouns/message-read-model-row.md) | Message (read-model row) | extracted | Canonical chat/message read-model row whose author pubkey is the durable return address across runtime replacement. |
 | [messagerecipient](nouns/messagerecipient.md) | MessageRecipient | extracted | One recipient-pubkey edge for a canonical message. A runtime selected for immediate local delivery is an ephemeral locator, not part of this durable row. |
 | [mgmt-commands](nouns/mgmt-commands.md) | mgmt commands | extracted | Ordinary kind:9 NIP-29 chat messages that p-tag the daemon's backend key; the reply is published as a real broadcast chat event into the same shared channel group, not a private/ephemeral path. |
-| [mintedsession](nouns/mintedsession.md) | MintedSession | extracted | Signer selected before spawn plus its pubkey, public handle, and private runtime projection. |
+| [mintedsession](nouns/mintedsession.md) | MintedSession | extracted | The signer selected before managed spawn plus its read-side pubkey, agent slug, |
 | [nip-29-membership](nouns/nip-29-membership.md) | NIP-29 membership | extracted | Active channel presence and routing membership. Local daemons remove their |
 | [nip29provider](nouns/nip29provider.md) | Nip29Provider | extracted | The concrete fabric provider wrapping delivery, wire codec, materializer, and lifecycle in one place. Its fabric identifier (used in all canonical origin rows) is `"nip29"`. |
 | [north-star](nouns/north-star.md) | north-star | extracted | Part of the codebase quality north star portfolio, tracked as a GitHub issue label. |
-| [nsec-per-session-key](nouns/nsec-per-session-key.md) | nsec (per-session key) | extracted | Derived from the machine management secret and random pubkey-owned signer salt; runtime ids are not cryptographic inputs. |
+| [nsec-per-session-key](nouns/nsec-per-session-key.md) | nsec (per-session key) | extracted | Ordinary sessions derive an nsec from the per-machine management secret and a |
 | [opaque-group-id](nouns/opaque-group-id.md) | opaque_group_id | extracted | First 8 hex chars of a freshly generated keypair's pubkey ([0-9a-f]{8}), never derived from any name. Used as the durable channel_h for non-root channels. |
 | [operational-agent-profile](nouns/operational-agent-profile.md) | operational agent profile | extracted | A reusable artifact that defines a reusable agent identity and operating model, distinct from skills (which produce structured output). Agent profiles are not skills; they define who the agent is and how it operates. |
 | [orchestration-spawned-session](nouns/orchestration-spawned-session.md) | orchestration-spawned session | extracted | A session the backend launched or resumed with `TENEX_EDGE_CHANNEL` set to a |
@@ -304,13 +307,13 @@ Last updated: 2026-07-13
 | [ordinalslot](nouns/ordinalslot.md) | OrdinalSlot | extracted | Superseded by per-session identity. Ordinals are gone: sessions are no longer |
 | [peertracked](nouns/peertracked.md) | PeerTracked | extracted | Metadata tracked per live peer session for join/leave derivation: first_seen timestamp, channel, slug, and host. |
 | [pendingattach](nouns/pendingattach.md) | PendingAttach | extracted | A struct holding a pane to attach to once the event loop yields, plus a fallback session id to resume if attaching fails because the pane is stale/gone; attaching is best-effort so a pane-not-found error never surfaces to the user. |
-| [per-session-key](nouns/per-session-key.md) | per-session key | extracted | Ordinary signer derived from the machine management secret and a random salt stored under its authoritative pubkey. |
-| [per-session-key-model](nouns/per-session-key-model.md) | per-session key model | extracted | Ordinary signers use pubkey-owned reconstruction salts; configured durable agents use their configured key across sequential runs. |
+| [per-session-key](nouns/per-session-key.md) | per-session key | extracted | An ordinary session allocates a random, non-secret signer salt and derives its |
+| [per-session-key-model](nouns/per-session-key-model.md) | per-session key model | extracted | Ordinary-session keys are selected at session start from the per-machine |
 | [per-session-kind-0](nouns/per-session-kind-0.md) | per-session kind:0 | extracted | Per-session kind:0 is OBVIOUSLY the only right answer (there is no base agent |
 | [per-session-kind-0-name](nouns/per-session-kind-0-name.md) | per-session kind:0 name | extracted | `@agent-session-code` — the p-taggable handle for a live session. Each session |
-| [per-session-pubkey-model](nouns/per-session-pubkey-model.md) | per-session pubkey model | extracted | The authoritative pubkey owns the persisted salt used to reconstruct an ordinary-session signer. |
-| [per-session-pubkey-new-identity-model](nouns/per-session-pubkey-new-identity-model.md) | per-session pubkey (new identity model) | extracted | Ordinary signer derivation uses the machine management secret plus a random salt stored under the resulting pubkey. |
-| [per-session-pubkey-nsec-derivation](nouns/per-session-pubkey-nsec-derivation.md) | per-session pubkey (nsec derivation) | extracted | Ordinary nsec derivation uses pubkey-owned signer salt, never a runtime or harness id. |
+| [per-session-pubkey-model](nouns/per-session-pubkey-model.md) | per-session pubkey model | extracted | The pubkey is the authoritative ordinary-session identity. A fresh session |
+| [per-session-pubkey-new-identity-model](nouns/per-session-pubkey-new-identity-model.md) | per-session pubkey (new identity model) | extracted | An ordinary session derives its signer with HKDF from the per-machine management |
+| [per-session-pubkey-nsec-derivation](nouns/per-session-pubkey-nsec-derivation.md) | per-session pubkey (nsec derivation) | extracted | For an ordinary session, `nsec` is derived from the per-machine management |
 | [presence](nouns/presence.md) | presence | extracted | Liveness expressed as a heartbeat with TTL-expiring kind:30315 Nostr status events, published as a NIP-29 group member on a relay. |
 | [product-a](nouns/product-a.md) | Product A | extracted | A nervous system for your own fleet — durable cross-host identity, presence and awareness of what your agents are doing across devices, agents routing work to each other and to you, work that follows you from one host/device to the next. Single-player adoption, one person, one set of keys. |
 | [profile](nouns/profile.md) | Profile | extracted | The agent's published identity card. Resolves pubkey to slug, tells a peer which machine the agent lives on, and declares the human owner(s) it belongs to (p-tagged), so a recipient can decide whether to authorize it. Encoded as kind:0 with content {"name": slug}. |
@@ -332,7 +335,7 @@ Last updated: 2026-07-13
 | [pty-hosted-session](nouns/pty-hosted-session.md) | PTY-hosted session | extracted | an agent session running in a live portable PTY where injected envelopes are pasted as real user prompts |
 | [pty-session-sessionstartparams](nouns/pty-session-sessionstartparams.md) | pty_session (SessionStartParams) | extracted | Stable portable PTY session id supplied by launch-mode hook context. |
 | [pubkey-trust](nouns/pubkey-trust.md) | pubkey trust | extracted | Determined exclusively and always by NIP-29 channel membership — the mgmt backend key adds a session pubkey as a member to the channel and removes it when the session expires. |
-| [publish-de](nouns/publish-de.md) | publish_de | extracted | Historical runtime closure replaced by publishing with the signer selected for the authoritative pubkey. |
+| [publish-de](nouns/publish-de.md) | publish_de | extracted | Historical runtime closure that published `DomainEvent`s with the wrong signing |
 | [quality-gate](nouns/quality-gate.md) | quality-gate | extracted | A CI/lint/fmt/LOC ratchet gate in the project. |
 | [rawconfig](nouns/rawconfig.md) | RawConfig | extracted | Mirror of the relevant fields in ~/.tenex-edge/config.json; unknown fields are ignored so tenex-edge coexists with TENEX's larger camelCase config. |
 | [relay-profiles](nouns/relay-profiles.md) | relay_profiles | extracted | kind:0 metadata cache, keyed by pubkey. Columns include pubkey, name, slug, host, is_backend, updated_at. |
@@ -343,17 +346,17 @@ Last updated: 2026-07-13
 | [roles-vs-members](nouns/roles-vs-members.md) | roles vs members | extracted | available-agents = role configs (<slug>.json = harness/provider/model — the |
 | [root-channel](nouns/root-channel.md) | root channel | extracted | A channel with `parent == ''`, forming the top-level ancestor. The workspace is |
 | [routing](nouns/routing.md) | routing | extracted | matching mentions by both the recipient's public key and the channel h-tag |
-| [session](nouns/session.md) | Session | extracted | A pubkey-owned local runtime projection with a private monotonic generation fence. |
-| [session-as-identity-handle](nouns/session-as-identity-handle.md) | session (as identity handle) | extracted | A run id is private process correlation; the pubkey is authoritative and runtime ids never derive identity. |
-| [session-handle](nouns/session-handle.md) | session handle | extracted | Human-facing `@<session-code>-<agent-slug>` alias leased to the authoritative pubkey. |
-| [session-identity](nouns/session-identity.md) | session identity | extracted | The authoritative pubkey a session signs and is routed by; its handle is a public alias. |
-| [session-key-new-model](nouns/session-key-new-model.md) | session key (new model) | extracted | Ordinary signer selected from the machine management secret and a random salt stored under its pubkey. |
-| [session-local-row](nouns/session-local-row.md) | Session (local row) | extracted | Pubkey-keyed local runtime state; endpoints and native resume tokens live in typed locators. |
+| [session](nouns/session.md) | Session | extracted | A pubkey-owned local runtime projection. It records the runtime generation, |
+| [session-as-identity-handle](nouns/session-as-identity-handle.md) | session (as identity handle) | extracted | A run id is private process-correlation state, not a signing identity, display |
+| [session-handle](nouns/session-handle.md) | session handle | extracted | The human-friendly alias for a session: `@<session-code>-<agent-slug>`, such as |
+| [session-identity](nouns/session-identity.md) | session identity | extracted | The authoritative pubkey a session signs and is routed by. Ordinary signers are |
+| [session-key-new-model](nouns/session-key-new-model.md) | session key (new model) | extracted | An ordinary session key is selected at start from the per-machine management |
+| [session-local-row](nouns/session-local-row.md) | Session (local row) | extracted | A local runtime keyed by its authoritative pubkey. It carries a private |
 | [session-ref](nouns/session-ref.md) | session_ref | extracted | The session-bearing member reference: `agent-session-code`, shared by member-row |
 | [session-start-py](nouns/session-start-py.md) | session_start.py | extracted | A single deterministic entrypoint script the agent runs at session start instead of following a static 'list workflows' instruction; it decides what to inject — the setup guide (SETUP.md) when the home dir is not yet tracked in a git repo, or the session brief (tracked location, workflow list, BRIEF.md) when it is. |
-| [session-state-row](nouns/session-state-row.md) | Session (state row) | extracted | A local session owned by its pubkey, with runtime correlations held in typed locators. |
-| [session-state-session](nouns/session-state-session.md) | Session (state::Session) | extracted | A local session projection keyed by pubkey and fenced by runtime generation. |
-| [session-struct](nouns/session-struct.md) | Session (struct) | extracted | Pubkey-keyed runtime record with a private generation fence and process metadata. |
+| [session-state-row](nouns/session-state-row.md) | Session (state row) | extracted | A local session owned by its pubkey. The row records current lifecycle state; |
+| [session-state-session](nouns/session-state-session.md) | Session (state::Session) | extracted | A local session projection keyed by pubkey. Runtime generation fences lifecycle |
+| [session-struct](nouns/session-struct.md) | Session (struct) | extracted | The pubkey-keyed local runtime record: runtime generation, agent role slug, |
 | [sessionid](nouns/sessionid.md) | SessionId | extracted | A newtype wrapping the canonical raw session id (serde-transparent). as_str() returns the raw id, and its Display impl renders the raw id directly. |
 | [sessionidentity](nouns/sessionidentity.md) | SessionIdentity | extracted | A lean read-side struct containing the pubkey, agent slug, session id, and |
 | [short-id](nouns/short-id.md) | short_id | extracted | A short prefix of a message/event id (its first 6 hex chars) — cheap to include inline in agent-facing context. The daemon resolves any unambiguous prefix back to the full event on channel read --id, so it stays round-trippable without spending tokens on a full 64-char id. |
@@ -394,3 +397,4 @@ Last updated: 2026-07-13
 | [writer](nouns/writer.md) | writer | extracted | A social media writer and community engagement agent in tenex-edge. Drafts tweets, posts to Hacker News and similar communities, tracks outreach history, and builds ongoing engagement. Spawnable via claude --dangerously-skip-permissions. |
 | [writer-agent](nouns/writer-agent.md) | writer (agent) | extracted | Social media writer and community engagement agent. Drafts tweets, posts to Hacker News and similar communities, tracks outreach history, and builds ongoing engagement. |
 | [x-openai-session](nouns/x-openai-session.md) | X-Openai-Session | extracted | A stable per-conversation header ChatGPT sends unprompted on every request (including `initialize` and every `tools/call`), different per conversation, that can serve as ChatGPT's own session identifier for identity correlation without requiring the client to echo a server-minted header. |
+

@@ -1,0 +1,6 @@
+{
+  "id": "019f6-0aa78",
+  "ts": "2026-07-14T13:10:03Z",
+  "session": "019f606f-1d25-76d1-95da-a7bb383cbe6d",
+  "text": "I don't like the recent-presence btw -- agents now know it's always delta-based so it should be <presence><session name=\"@ivy-codex\" status=\"invento....\" /> -- just now should also be omitted when it's just now, since it's basically always just now; probably we don't even need to show the seen attr ever really. [...] I agree on all the presence cleanup:\n\n- `recent-presence` → `presence`\n- `status` element → `session`\n- `ref` → `name`\n- `text` → `status`\n- remove `seen` entirely, including from member rows [...] - `status` element → `session`\n- `ref` → `name`\n- `text` → `status`"
+}

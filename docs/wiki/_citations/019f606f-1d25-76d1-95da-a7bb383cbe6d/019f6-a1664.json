@@ -1,0 +1,6 @@
+{
+  "id": "019f6-a1664",
+  "ts": "2026-07-14T13:10:03Z",
+  "session": "019f606f-1d25-76d1-95da-a7bb383cbe6d",
+  "text": "User: and how would it look like in the xml hook agents see?\n\nAssistant: This follow-up sharpens the contract: hook XML should never emit relative refs, because agents may copy them into commands from a different workspace. I’m recording the XML shape as canonical absolute paths while keeping identity refs like `@agent` unchanged."
+}
