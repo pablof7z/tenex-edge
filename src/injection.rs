@@ -9,6 +9,7 @@
 //!   </channel>
 //!
 //!   Reply via: `tenex-edge channel reply abc123 --message "hello world"`
+//!   Attachments: add `--attach label=/path/to/file` and reference `[label]` in the message.
 //! </tenex-edge>
 //! ```
 //!
@@ -122,6 +123,7 @@ fn push_reply_hint(lines: &mut Vec<String>, event_id: &str) {
         "  Reply via: `tenex-edge channel reply {} --message \"hello world\"`",
         esc_text(&id)
     ));
+    lines.push(format!("  {}", crate::attachment::AGENT_HINT));
 }
 
 /// The human display label for a channel: its kind:39000 `name` when set, else

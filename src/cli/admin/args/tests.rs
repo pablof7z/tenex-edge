@@ -304,7 +304,9 @@ fn channel_reply_parses_short_id_and_message_flag() {
         "reply",
         "abc123",
         "--message",
-        "hello",
+        "see [trace]",
+        "--attach",
+        "trace=out/trace.bin",
         "--session",
         "session-1",
     ])
@@ -316,12 +318,15 @@ fn channel_reply_parses_short_id_and_message_flag() {
                 ChannelAction::Reply {
                     id,
                     message_flag,
+                    attachments,
                     session,
                     ..
                 },
         } => {
             assert_eq!(id, "abc123");
-            assert_eq!(message_flag.as_deref(), Some("hello"));
+            assert_eq!(message_flag.as_deref(), Some("see [trace]"));
+            assert_eq!(attachments.len(), 1);
+            assert_eq!(attachments[0].label, "trace");
             assert_eq!(session.as_deref(), Some("session-1"));
         }
         _ => panic!("expected channel reply command"),

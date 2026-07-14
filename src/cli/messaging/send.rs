@@ -1,16 +1,30 @@
 use super::*;
 
-pub(in crate::cli) async fn channel_send(
-    message: String,
-    tags: Vec<String>,
-    force: bool,
-    channel: Option<String>,
-    session: Option<String>,
-    long_message: bool,
-    wait: Option<u64>,
-) -> Result<()> {
+pub(in crate::cli) struct ChannelSendRequest {
+    pub message: String,
+    pub attachments: Vec<crate::attachment::Attachment>,
+    pub tags: Vec<String>,
+    pub force: bool,
+    pub channel: Option<String>,
+    pub session: Option<String>,
+    pub long_message: bool,
+    pub wait: Option<u64>,
+}
+
+pub(in crate::cli) async fn channel_send(req: ChannelSendRequest) -> Result<()> {
+    let ChannelSendRequest {
+        message,
+        attachments,
+        tags,
+        force,
+        channel,
+        session,
+        long_message,
+        wait,
+    } = req;
     let params = crate::cli::rpc_params(serde_json::json!({
         "message": message,
+        "attachments": attachments,
         "tags": tags,
         "force": force,
         "long_message": long_message,

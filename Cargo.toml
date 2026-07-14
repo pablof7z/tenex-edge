@@ -16,7 +16,7 @@ path = "src/lib.rs"
 
 [dependencies]
 nostr-sdk = "0.44"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "signal", "process", "io-util", "io-std", "net"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "signal", "process", "io-util", "io-std", "net", "fs"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 clap = { version = "4", features = ["derive"] }
@@ -35,6 +35,7 @@ owo-colors = { version = "4", features = ["supports-colors"] }
 rig = { package = "rig-core", version = "0.37" }
 rustls = { version = "0.23", features = ["ring"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+mime_guess = "2"
 regex = "1"
 ratatui = { version = "0.30.1", default-features = false, features = ["crossterm_0_28", "macros"] }
 hmac = "0.12"

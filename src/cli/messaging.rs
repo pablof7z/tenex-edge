@@ -2,7 +2,7 @@ use super::*;
 mod args;
 pub(super) use args::{publish, PublishArgs};
 mod send;
-pub(super) use send::channel_send;
+pub(super) use send::{channel_send, ChannelSendRequest};
 mod wait;
 pub(super) use wait::{parse_wait_seconds, wait, WaitArgs};
 #[cfg(test)]
@@ -12,12 +12,14 @@ pub(super) use envelope::{format_envelope, EnvelopeView};
 pub(super) async fn channel_reply(
     id: String,
     message: String,
+    attachments: Vec<crate::attachment::Attachment>,
     session: Option<String>,
     long_message: bool,
 ) -> Result<()> {
     let params = crate::cli::rpc_params(serde_json::json!({
         "id": id,
         "message": message,
+        "attachments": attachments,
         "long_message": long_message,
         "session": session,
     }));

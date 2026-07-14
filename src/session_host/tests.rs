@@ -274,6 +274,7 @@ fn pending_message_prompt_contains_the_actual_message_body() {
          \u{20}\u{20}</channel>\n\
          \n\
          \u{20}\u{20}Reply via: `tenex-edge channel reply abcdef --message \"hello world\"`\n\
+         \u{20}\u{20}Attachments: add `--attach label=/path/to/file` and reference `[label]` in the message.\n\
          </tenex-edge>"
     );
 }
@@ -310,6 +311,7 @@ fn whitelisted_human_mention_renders_bare_with_provenance() {
          \u{20}\u{20}</channel>\n\
          \n\
          \u{20}\u{20}Reply via: `tenex-edge channel reply ev-hum --message \"hello world\"`\n\
+         \u{20}\u{20}Attachments: add `--attach label=/path/to/file` and reference `[label]` in the message.\n\
          </tenex-edge>"
     );
 }

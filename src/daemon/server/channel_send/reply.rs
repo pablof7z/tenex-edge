@@ -11,6 +11,8 @@ struct ChannelReplyParams {
     id: String,
     message: String,
     #[serde(default)]
+    attachments: Vec<crate::attachment::Attachment>,
+    #[serde(default)]
     long_message: bool,
 }
 
@@ -26,12 +28,14 @@ pub(in crate::daemon::server) async fn rpc_channel_reply(
     if p.message.trim().is_empty() {
         bail!("reply message must not be empty");
     }
-    if !p.long_message && p.message.chars().count() > CHANNEL_MESSAGE_CHAR_LIMIT {
+    if p.attachments.is_empty()
+        && !p.long_message
+        && p.message.chars().count() > CHANNEL_MESSAGE_CHAR_LIMIT
+    {
         bail!(
             "your message is too long; keep it under {CHANNEL_MESSAGE_CHAR_LIMIT} characters or pass --long-message"
         );
     }
-
     let rec = resolve_session(state, &CallerAnchor::from_params(params))?;
     let original = state
         .with_store(|s| s.get_message_by_prefix(p.id.trim()))
@@ -41,10 +45,20 @@ pub(in crate::daemon::server) async fn rpc_channel_reply(
         .native_event_id
         .clone()
         .unwrap_or_else(|| original.message_id.clone());
-    let body = reply_body(&original.author_pubkey, &p.message)?;
-
     let instance = state.session_instance(&rec);
     let keys = state.session_signing_keys(&rec.pubkey)?;
+    let expanded_message =
+        crate::attachment::upload_and_expand(&p.message, &p.attachments, &state.cfg.relays, &keys)
+            .await?;
+    if !p.attachments.is_empty()
+        && !p.long_message
+        && expanded_message.chars().count() > CHANNEL_MESSAGE_CHAR_LIMIT
+    {
+        bail!(
+            "your message is too long after expanding attachments; keep it under {CHANNEL_MESSAGE_CHAR_LIMIT} characters or pass --long-message"
+        );
+    }
+    let body = reply_body(&original.author_pubkey, &expanded_message)?;
     let chat = ChatMessage {
         from: instance.agent_ref(),
         channel: original.channel_h.clone(),

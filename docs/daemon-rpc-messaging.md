@@ -20,7 +20,8 @@ inference.
 ## `channel_send`
 
 ```jsonc
-params: {"message": "…", "channel": "…"|null, "long_message": bool, ...}
+params: {"message": "see [report]", "attachments": [{"label": "report", "path": "/absolute/report.pdf"}],
+         "channel": "…"|null, "long_message": bool, ...}
 result: {"event_id": "hex", "channel": "channel-h", "mentioned_pubkeys": ["hex", ...],
          "mentioned_labels": ["agent", ...]}
 ```
@@ -29,6 +30,14 @@ Publishes a NIP-29 kind:9 chat message signed by the caller's own per-session ke
 and returns only after checked relay acceptance. Messages over the fabric render
 limit are rejected unless `long_message=true`. `channel` is destination targeting
 only; caller identity is resolved independently from the session anchors.
+
+Each attachment label must occur in the message as `[label]`. Before publishing
+chat, the daemon reads the file, hashes it, signs a kind:24242 Blossom upload
+authorization with the caller's session key, and uploads it to the HTTP origin
+of the primary configured relay. Every matching marker is replaced by the
+public URL returned in the verified blob descriptor. Invalid files, duplicate
+or unused labels, upload failures, malformed descriptors, hash/size mismatches,
+and post-expansion length violations fail the RPC without publishing chat.
 
 ## `channel_wait`
 
@@ -55,7 +64,9 @@ envelope and exposes no JSON/human mode.
 ## `channel_reply`
 
 ```jsonc
-params: {"id": "event-id-or-prefix", "message": "…", "long_message": bool, ...}
+params: {"id": "event-id-or-prefix", "message": "see [report]",
+         "attachments": [{"label": "report", "path": "/absolute/report.pdf"}],
+         "long_message": bool, ...}
 result: {"event_id": "hex", "reply_to": "hex", "channel": "channel-h",
          "mentioned_pubkey": "hex"}
 ```
@@ -63,3 +74,4 @@ result: {"event_id": "hex", "reply_to": "hex", "channel": "channel-h",
 Publishes a threaded NIP-10 reply to an existing channel message. The daemon
 resolves `id` against the channel read model, targets the original author's
 pubkey, and signs the reply with the caller's per-session key.
+Attachment upload and marker expansion use the same contract as `channel_send`.
