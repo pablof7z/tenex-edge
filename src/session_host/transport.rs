@@ -176,7 +176,7 @@ pub fn select_transport(bundle: Option<&str>) -> Result<TransportImpl> {
 /// live, and this classification branch is only a safe default for the
 /// already-live delivery/liveness path.
 pub fn transport_kind_for_slug(slug: &str) -> TransportKind {
-    let bundle = crate::identity::agent_harness_bundle(&crate::config::edge_home(), slug);
+    let bundle = crate::identity::agent_harness_bundle(&crate::config::mosaico_home(), slug);
     match resolve_transport_fail_open(bundle.as_deref()) {
         Transport::Acp | Transport::AppServer => TransportKind::Acp,
         Transport::Pty | Transport::HeadlessExec => TransportKind::Pty,
@@ -217,7 +217,7 @@ fn resolve_transport_fail_open(bundle: Option<&str>) -> Transport {
 /// the (possibly failed) config load, resolve the raw transport, failing open to
 /// `Transport::Pty` with a `WARN` on any config/resolution error (defect #3). Kept
 /// separate from the IO so the fail-open contract is unit-testable without touching
-/// the filesystem/`edge_home`.
+/// the filesystem/`mosaico_home`.
 fn resolve_transport_fail_open_with(
     bundle: &str,
     cfg: anyhow::Result<HarnessesConfig>,

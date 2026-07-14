@@ -9,4 +9,4 @@ source_refs:
 
 # backend_nsec
 
-The backend's own identity key, always tenexPrivateKey with no fallback to userNsec — the operator key is a human identity, not a backend identity
+The backend's own identity key, always mosaicoPrivateKey with no fallback to userNsec — the operator key is a human identity, not a backend identity

@@ -1,4 +1,4 @@
-//! NIP-29 wire shape for tenex-edge domain events.
+//! NIP-29 wire shape for mosaico domain events.
 //!
 //! | Domain      | Wire |
 //! |-------------|------|
@@ -42,7 +42,7 @@ pub const KIND_REACTION: u16 = 7;
 pub const KIND_STATUS: u16 = 30315;
 pub const KIND_AGENT_ROSTER: u16 = 30555;
 
-// NIP-29 group management (tenexPrivateKey-signed) + relay-authored state.
+// NIP-29 group management (mosaicoPrivateKey-signed) + relay-authored state.
 pub const KIND_GROUP_CREATE: u16 = 9007;
 pub const KIND_GROUP_PUT_USER: u16 = 9000;
 pub const KIND_GROUP_REMOVE_USER: u16 = 9001;
@@ -145,16 +145,10 @@ impl Nip29WireCodec {
                     tag(&["title", title])?,
                     tag(&["state", state.as_str()])?,
                     tag(&["host", host])?,
+                    tag(&["slug", &agent.slug])?,
                 ];
                 for channel in channels {
                     tags.push(h_tag(channel)?);
-                }
-                // Carry the agent slug on the wire as a convenience hint. The
-                // durable agent key IS the author, so peers can resolve it via
-                // kind:0; the slug tag avoids that extra round-trip lookup and
-                // lets `who` render the name immediately on receipt.
-                if !agent.slug.is_empty() {
-                    tags.push(tag(&["slug", &agent.slug])?);
                 }
                 if !rel_cwd.is_empty() {
                     tags.push(tag(&["rel-cwd", rel_cwd])?);
@@ -213,15 +207,10 @@ impl Nip29WireCodec {
                     return None;
                 }
                 Some(DomainEvent::Status(Status {
-                    // Slug rides as a convenience tag (avoids a kind:0 lookup);
-                    // empty on legacy emitters, resolved downstream from kind:0.
-                    agent: AgentRef::new(
-                        pubkey,
-                        first_tag(event, "slug").unwrap_or_default().to_string(),
-                    ),
+                    agent: AgentRef::new(pubkey, first_tag(event, "slug")?.to_string()),
                     channels,
-                    host: first_tag(event, "host").unwrap_or_default().to_string(),
-                    title: first_tag(event, "title").unwrap_or_default().to_string(),
+                    host: first_tag(event, "host")?.to_string(),
+                    title: first_tag(event, "title")?.to_string(),
                     // The live activity is the event content (empty when idle).
                     activity: event.content.clone(),
                     state: crate::session_state::SessionState::parse(first_tag(event, "state")?)?,

@@ -1,5 +1,5 @@
-//! The PURE fabric-view derivation: a faithful port of `build_view`/`people`/
-//! `messages` that reads ONLY the frozen [`ViewInputs`] plus the two explicit
+//! Pure fabric-view derivation. It reads only the frozen [`ViewInputs`] plus the
+//! two explicit
 //! inputs — the seen `cursor` and the wall-clock `now`. No store, no ambient
 //! time. This is the function the Trellis reconciler runs inside a derived node,
 //! so `why_changed`/`why_output_frame` attribute the snapshot to exactly these
@@ -7,8 +7,7 @@
 //!
 //! The full-vs-delta SHAPE decision keys on `cursor` (`cursor == 0` → full
 //! members/descendant tree; `cursor > 0` → changed descendants and presence);
-//! every time-relative string keys on `now`. Equivalence with the legacy
-//! `build_view` is asserted in the reconciler's regression test.
+//! every time-relative string keys on `now`.
 
 use std::collections::HashSet;
 

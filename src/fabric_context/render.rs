@@ -4,10 +4,10 @@ pub(in crate::fabric_context) mod all_workspaces;
 mod workspace;
 use workspace::render_workspace_block;
 pub(in crate::fabric_context) fn render_view(view: &FabricView) -> String {
-    let mut out = String::from("<tenex-edge>");
+    let mut out = String::from("<mosaico>");
     render_self(&mut out, view.self_row.as_ref());
     render_workspace(&mut out, view, &view.agents, "available-agents");
-    out.push_str("\n</tenex-edge>");
+    out.push_str("\n</mosaico>");
     out
 }
 
@@ -203,7 +203,7 @@ fn render_messages(out: &mut String, channel: &ChannelBlock, indent: usize) {
         if message.truncated {
             let _ = write!(
                 out,
-                "\n{detail_pad}[message truncated; run `tenex-edge channel read --id {}`]",
+                "\n{detail_pad}[message truncated; run `mosaico channel read --id {}`]",
                 esc_text(&short)
             );
         }
@@ -223,13 +223,13 @@ fn render_mention_message(out: &mut String, message: &MessageRow, pad: &str) {
     );
     let _ = write!(
         out,
-        "\n{pad}Reply via: `tenex-edge channel reply {} --message \"hello world\"`",
+        "\n{pad}Reply via: `mosaico channel reply {} --message \"hello world\"`",
         esc_text(&short)
     );
     let _ = write!(out, "\n{pad}{}", crate::attachment::AGENT_HINT);
     let _ = write!(
         out,
-        "\n{pad}Ack-only? `tenex-edge channel react {} 👍` — never interrupts. \
+        "\n{pad}Ack-only? `mosaico channel react {} 👍` — never interrupts. \
          Reply only with substantive content; never send a bare \"ok\"/\"noted\".",
         esc_text(&short)
     );

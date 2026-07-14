@@ -161,19 +161,19 @@ fn spawn_process(
     child_cmd
         .args(&command[1..])
         .current_dir(cwd)
-        .env("TENEX_EDGE_SPAWNED", "1")
-        .env("TENEX_EDGE_AGENT", slug)
-        .env("TENEX_EDGE_PUBKEY", pubkey)
-        .env_remove("TENEX_EDGE_EPHEMERAL")
-        .env_remove("TENEX_EDGE_PTY_SESSION")
-        .env_remove("TENEX_EDGE_PTY_SOCKET")
+        .env("MOSAICO_SPAWNED", "1")
+        .env("MOSAICO_AGENT", slug)
+        .env("MOSAICO_PUBKEY", pubkey)
+        .env_remove("MOSAICO_EPHEMERAL")
+        .env_remove("MOSAICO_PTY_SESSION")
+        .env_remove("MOSAICO_PTY_SOCKET")
         .env_remove("CLAUDE_CODE_CHILD_SESSION")
         .env_remove("CLAUDE_CODE_SESSION_ID")
         .stdin(Stdio::null())
         .stdout(Stdio::from(log))
         .stderr(Stdio::from(log_err));
     if let Some(channel) = group.filter(|g| !g.is_empty()) {
-        child_cmd.env("TENEX_EDGE_CHANNEL", channel);
+        child_cmd.env("MOSAICO_CHANNEL", channel);
     }
     unsafe {
         child_cmd.pre_exec(|| {
@@ -202,7 +202,7 @@ fn spawn_process(
 mod tests;
 
 fn exec_session_dir() -> PathBuf {
-    crate::config::edge_home().join("exec-sessions")
+    crate::config::mosaico_home().join("exec-sessions")
 }
 
 fn exec_id(agent: &str) -> String {

@@ -63,18 +63,10 @@ pub(super) fn fill_pane_from_hook(pane: &mut SessionPane, host: &str, stdin_json
 }
 
 pub(super) fn hook_session(v: &Value) -> Option<String> {
-    [
-        "session_id",
-        "sessionId",
-        "conversation_id",
-        "conversationId",
-        "thread_id",
-        "threadId",
-    ]
-    .iter()
-    .find_map(|key| v[*key].as_str())
-    .filter(|s| !s.is_empty())
-    .map(str::to_string)
+    v["session_id"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
 }
 
 pub(super) fn command_session(v: &Value) -> Option<String> {

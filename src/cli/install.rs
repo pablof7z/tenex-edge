@@ -1,4 +1,4 @@
-//! Detect local agent harnesses and wire tenex-edge hooks into each.
+//! Detect local agent harnesses and wire mosaico hooks into each.
 //! Mirrors the `pc install` surface: --all, --harness, --dry-run, --status,
 //! and --uninstall.
 
@@ -36,7 +36,7 @@ async fn install_with_opts(opts: InstallOpts) -> Result<()> {
     if selected.skill {
         skills::install(&opts)?;
     } else {
-        println!("\n{}", "Skipping tenex-edge skill".dimmed());
+        println!("\n{}", "Skipping mosaico skill".dimmed());
     }
 
     if selected.harnesses.is_empty() {
@@ -77,7 +77,7 @@ struct InstallSelection<'a> {
 }
 
 fn print_status(all: &[Harness]) {
-    println!("{}", "tenex-edge harness status".bold());
+    println!("{}", "mosaico harness status".bold());
     for h in all {
         let detected = if h.detected {
             "detected".green().to_string()
@@ -180,7 +180,7 @@ fn interactive_select(all: &[Harness]) -> Result<InstallSelection<'_>> {
     defaults.extend(all.iter().map(|h| h.detected));
 
     let chosen = MultiSelect::new()
-        .with_prompt("Install tenex-edge components  (space to toggle, enter to apply)")
+        .with_prompt("Install mosaico components  (space to toggle, enter to apply)")
         .items(&labels)
         .defaults(&defaults)
         .interact()?;

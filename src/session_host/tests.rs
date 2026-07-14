@@ -268,14 +268,14 @@ fn pending_message_prompt_contains_the_actual_message_body() {
 
     assert_eq!(
         prompt,
-        "<tenex-edge>\n\
+        "<mosaico>\n\
          \u{20}\u{20}<channel ref=\"proj\">\n\
          \u{20}\u{20}\u{20}\u{20}<message from=\"@pk-sende\" id=\"abcdef\">please review the PTY delivery path</message>\n\
          \u{20}\u{20}</channel>\n\
          \n\
-         \u{20}\u{20}Reply via: `tenex-edge channel reply abcdef --message \"hello world\"`\n\
+         \u{20}\u{20}Reply via: `mosaico channel reply abcdef --message \"hello world\"`\n\
          \u{20}\u{20}Attachments: add `--attach label=/path/to/file` and reference `[label]` in the message.\n\
-         </tenex-edge>"
+         </mosaico>"
     );
 }
 
@@ -294,10 +294,10 @@ fn whitelisted_human_mention_renders_bare_with_provenance() {
     };
     let store = crate::state::Store::open_memory().unwrap();
     store
-        .upsert_channel("tenex-edge", "tenex-edge", "", "", 1)
+        .upsert_channel("mosaico", "mosaico", "", "", 1)
         .unwrap();
     store
-        .upsert_channel("channel-writer-test", "writer-test", "", "tenex-edge", 100)
+        .upsert_channel("channel-writer-test", "writer-test", "", "mosaico", 100)
         .unwrap();
     // Sender is whitelisted, but the injected line still carries the source room.
     let prompt =
@@ -305,13 +305,13 @@ fn whitelisted_human_mention_renders_bare_with_provenance() {
             .unwrap();
     assert_eq!(
         prompt,
-        "<tenex-edge>\n\
-         \u{20}\u{20}<channel ref=\"tenex-edge.writer-test\">\n\
+        "<mosaico>\n\
+         \u{20}\u{20}<channel ref=\"mosaico.writer-test\">\n\
          \u{20}\u{20}\u{20}\u{20}<message from=\"@human-pk\" id=\"ev-hum\">@developer hey there</message>\n\
          \u{20}\u{20}</channel>\n\
          \n\
-         \u{20}\u{20}Reply via: `tenex-edge channel reply ev-hum --message \"hello world\"`\n\
+         \u{20}\u{20}Reply via: `mosaico channel reply ev-hum --message \"hello world\"`\n\
          \u{20}\u{20}Attachments: add `--attach label=/path/to/file` and reference `[label]` in the message.\n\
-         </tenex-edge>"
+         </mosaico>"
     );
 }

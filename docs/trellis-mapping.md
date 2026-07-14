@@ -1,12 +1,12 @@
 # Trellis Mapping for Derived Resources
 
 Status: audit map for issue #203, part of epic #202. This document maps the
-current tenex-edge derived-resource surfaces to Trellis primitives before any
+current mosaico derived-resource surfaces to Trellis primitives before any
 effect path changes.
 
 ## Boundary And End-State
 
-Trellis is the private reconciliation engine. tenex-edge owns observations and
+Trellis is the private reconciliation engine. mosaico owns observations and
 effects; Trellis owns decisions. Observed facts enter a host-owned input journal,
 a Trellis transaction computes the new derived shape, and the host applies the
 resulting inert frames or commands. Effect results then return as new observed
@@ -68,7 +68,7 @@ paths through Trellis while other paths still write directly is forbidden.
 
 Slice #210 should extend the same transaction path, not recreate a parallel
 audit system. Every projection write, resource command, and output frame should
-carry enough artifact metadata for `tenex-edge debug explain <handle>` to recover why
+carry enough artifact metadata for `mosaico debug explain <handle>` to recover why
 the effect happened:
 
 - Trellis transaction id and input-journal range or cursor.
@@ -109,7 +109,7 @@ Additional non-SQL inputs:
 
 - `DaemonState.subscribed_projects`, currently an in-memory pin set for
   subscription coverage.
-- local durable agent pubkeys from edge-home agent keys.
+- local durable agent pubkeys from mosaico-home agent keys.
 - local session identity pubkeys persisted in `identities`.
 - the backend pubkey.
 - `now`, status TTL, heartbeat cadence, and `seen_cursor`.
@@ -177,8 +177,8 @@ Current shape:
 - Local publish intent lives on the pubkey-keyed `sessions` row: `pubkey`,
   `agent_slug`, `channel_h`, `alive`, `last_seen`, `working`,
   `turn_started_at`, `last_distill_at`, `title`, and `activity`.
-- Status `h` tags are derived from `session_channels`, with `sessions.channel_h`
-  as a fallback. Both current status builders sort and dedupe this set.
+- Status `h` tags are derived from `session_channels`. Status builders sort and
+  dedupe this set.
 - `session_signers` reconstructs an ordinary session's derived signing key;
   durable agents use their configured key. `handle_leases` supplies the only
   public alias for a pubkey.
@@ -267,7 +267,7 @@ Trellis mapping:
   - `chat-history`: `messages` or `relay_events` rows relevant to the joined
     channels and cursor/window.
   - `pending-inbox`: claimed or forced direct-mention rows.
-  - `invitable-agents`: edge-home agent inventory.
+  - `invitable-agents`: mosaico-home agent inventory.
   - `warnings`: host-detected read failures and membership warnings.
 - Derived node:
   - `fabric-view/<session>`: deterministic `FabricView` over declared inputs.

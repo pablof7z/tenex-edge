@@ -32,7 +32,7 @@ pub(in crate::daemon::server) fn resolve_recipient(
         Ref::Agent { slug, host } => {
             let pk = store.resolve_agent_pubkey(&slug, &host)?.with_context(|| {
                 format!(
-                    "can't resolve {slug}@{host} (no profile seen yet — try `tenex-edge my session`)"
+                    "can't resolve {slug}@{host} (no profile seen yet — try `mosaico my session`)"
                 )
             })?;
             Ok(ResolvedRecipient {
@@ -74,7 +74,7 @@ pub(in crate::daemon::server) fn resolve_recipient(
                     channel: my_channel.to_string(),
                 });
             }
-            anyhow::bail!("can't resolve recipient {target:?} (try `tenex-edge my session`)")
+            anyhow::bail!("can't resolve recipient {target:?} (try `mosaico my session`)")
         }
     }
 }

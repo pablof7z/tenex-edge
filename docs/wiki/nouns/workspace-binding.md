@@ -10,4 +10,4 @@ source_refs:
 
 # workspace binding
 
-An optional field on a channel node consisting of `machine + path` — a git checkout / working directory on a specific machine. Its presence is what makes a node a project.
+An optional field on a root channel consisting of `machine + path` — a git checkout or working directory on a specific machine. Its presence makes the root locally usable as a workspace.

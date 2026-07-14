@@ -1,0 +1,4 @@
+interface:
+  display_name: "Mosaico"
+  short_description: "Self-organizing agent fabric coordination"
+  default_prompt: "Use $mosaico to understand the surrounding fabric and proactively coordinate agents, channels, workspaces, and public work status."

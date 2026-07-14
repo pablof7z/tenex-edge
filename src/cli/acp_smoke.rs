@@ -1,4 +1,4 @@
-//! `tenex-edge __acp-smoke <harness>` — debug driver that exercises the ACP /
+//! `mosaico __acp-smoke <harness>` — debug driver that exercises the ACP /
 //! app-server transport end-to-end without any agent.json / StoredKey wiring.
 //!
 //! For an ACP harness (opencode / claude): initialize -> session/new ->
@@ -64,11 +64,11 @@ fn resolve_rpc(name: &str, scratch: &std::path::Path) -> Result<crate::harness::
 pub async fn acp_smoke(args: AcpSmokeArgs) -> Result<()> {
     let cwd = match &args.cwd {
         Some(c) => std::path::PathBuf::from(c),
-        None => std::env::temp_dir().join(format!("tenex-edge-acp-smoke-{}", std::process::id())),
+        None => std::env::temp_dir().join(format!("mosaico-acp-smoke-{}", std::process::id())),
     };
     std::fs::create_dir_all(&cwd).context("creating smoke cwd")?;
 
-    let scratch = crate::config::edge_home()
+    let scratch = crate::config::mosaico_home()
         .join("harness-profiles")
         .join(&args.harness);
     let resolved = resolve_rpc(&args.harness, &scratch)?;
@@ -182,7 +182,7 @@ async fn run_app_server(
         .map_err(|e| anyhow::anyhow!("spawning app-server: {e}"))?;
     let client = AppServerClient::new(handle.clone());
     client
-        .initialize("tenex-edge", env!("CARGO_PKG_VERSION"))
+        .initialize("mosaico", env!("CARGO_PKG_VERSION"))
         .await
         .map_err(|e| anyhow::anyhow!("initialize: {e}"))?;
     println!("[acp-smoke] initialize ok");
@@ -221,7 +221,7 @@ async fn run_app_server(
         .map_err(|e| anyhow::anyhow!("spawning resume app-server: {e}"))?;
     let client2 = AppServerClient::new(handle2.clone());
     client2
-        .initialize("tenex-edge", env!("CARGO_PKG_VERSION"))
+        .initialize("mosaico", env!("CARGO_PKG_VERSION"))
         .await
         .map_err(|e| anyhow::anyhow!("initialize #2: {e}"))?;
     client2

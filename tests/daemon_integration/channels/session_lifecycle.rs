@@ -2,7 +2,7 @@ use super::*;
 use std::time::Duration;
 
 #[test]
-fn session_start_without_tenex_private_key_generates_key_and_provisions_channel() {
+fn session_start_without_mosaico_private_key_generates_key_and_provisions_channel() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let home = Home::new();
     rewrite_config_with_user_nsec_without_backend_key(&home, false);
@@ -23,18 +23,18 @@ fn session_start_without_tenex_private_key_generates_key_and_provisions_channel(
             std::fs::read_to_string(home.dir.path().join("config.json"))
                 .ok()
                 .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
-                .and_then(|cfg| cfg["tenexPrivateKey"].as_str().map(str::to_string))
+                .and_then(|cfg| cfg["mosaicoPrivateKey"].as_str().map(str::to_string))
                 .is_some()
         }),
-        "background readiness should generate tenexPrivateKey"
+        "background readiness should generate mosaicoPrivateKey"
     );
     let cfg: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(home.dir.path().join("config.json")).unwrap(),
     )
     .unwrap();
-    let generated = cfg["tenexPrivateKey"]
+    let generated = cfg["mosaicoPrivateKey"]
         .as_str()
-        .expect("generated tenexPrivateKey");
+        .expect("generated mosaicoPrivateKey");
     let backend_pk = pubkey_of(generated);
     let user_pk = pubkey_of(EXAMPLE_USER_NSEC);
 
@@ -109,16 +109,16 @@ fn generated_management_key_self_grants_on_existing_user_owned_channel() {
             std::fs::read_to_string(home.dir.path().join("config.json"))
                 .ok()
                 .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
-                .and_then(|cfg| cfg["tenexPrivateKey"].as_str().map(str::to_string))
+                .and_then(|cfg| cfg["mosaicoPrivateKey"].as_str().map(str::to_string))
                 .is_some()
         }),
-        "background readiness should generate tenexPrivateKey"
+        "background readiness should generate mosaicoPrivateKey"
     );
     let cfg: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(home.dir.path().join("config.json")).unwrap(),
     )
     .unwrap();
-    let backend_pk = pubkey_of(cfg["tenexPrivateKey"].as_str().unwrap());
+    let backend_pk = pubkey_of(cfg["mosaicoPrivateKey"].as_str().unwrap());
     if !wait_until(Duration::from_secs(25), || {
         refresh_channel_members(&channel);
         let members = Store::open(&home.store_path())
@@ -178,7 +178,7 @@ fn session_start_schedules_unverified_channel_work_without_blocking() {
 }
 
 /// Regression: a duplicate session-start fired by the offline-agent-mention
-/// handler (with a different TENEX_EDGE_CHANNEL env, e.g. "backlog") must NOT
+/// handler (with a different MOSAICO_CHANNEL env, e.g. "backlog") must NOT
 /// overwrite the running session's `channel_h` or add a spurious passive join
 /// in `session_channels`. Before the fix, the stale env var stomped the active
 /// channel and left the session receiving inbox messages from the wrong channel,
@@ -227,7 +227,7 @@ fn session_reassert_with_wrong_channel_does_not_corrupt_active_channel() {
         let mut c = Client::connect_or_spawn().await.expect("connect");
         // Re-assert from a duplicate spawn with a DIFFERENT channel (simulates
         // the offline-agent-mention handler spawning a new process with
-        // TENEX_EDGE_CHANNEL=stale_channel while the engine is already live).
+        // MOSAICO_CHANNEL=stale_channel while the engine is already live).
         c.call(
             "session_start",
             serde_json::json!({

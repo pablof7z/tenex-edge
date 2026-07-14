@@ -1,4 +1,4 @@
-//! Reattachable session hosting for tenex-edge.
+//! Reattachable session hosting for mosaico.
 //!
 //! Two public surfaces:
 //!

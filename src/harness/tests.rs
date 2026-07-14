@@ -2,7 +2,7 @@ use super::*;
 use crate::session::Harness;
 
 fn tmp_scratch() -> std::path::PathBuf {
-    std::env::temp_dir().join("tenex-edge-harness-test-scratch")
+    std::env::temp_dir().join("mosaico-harness-test-scratch")
 }
 
 #[test]
@@ -73,7 +73,7 @@ fn config_parses_bundles_and_rejects_unknown_harness() {
 #[test]
 fn missing_config_file_is_empty() {
     let cfg = config::HarnessesConfig::load_from(std::path::Path::new(
-        "/nonexistent/tenex-edge/harnesses.json",
+        "/nonexistent/mosaico/harnesses.json",
     ))
     .unwrap();
     assert!(cfg.bundles.is_empty());

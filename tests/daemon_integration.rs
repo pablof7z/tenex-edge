@@ -3,7 +3,7 @@
 //!
 //! All tests run against a real spawned `daemon` (one relay → a local
 //! `nak serve`, never the production fabric) over a UDS in an isolated
-//! `TENEX_EDGE_HOME`. Env mutation is serialized; the file is run single-threaded
+//! `MOSAICO_HOME`. Env mutation is serialized; the file is run single-threaded
 //! by the runner invocation in the SUMMARY (each test sets process-global env).
 
 #[path = "daemon_integration/channels.rs"]

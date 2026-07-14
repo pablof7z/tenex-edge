@@ -1,7 +1,7 @@
 use crate::daemon_harness::*;
+use mosaico::daemon::client::Client;
+use mosaico::state::Store;
 use std::time::Duration;
-use tenex_edge::daemon::client::Client;
-use tenex_edge::state::Store;
 
 #[path = "messaging/explicit_destination.rs"]
 mod explicit_destination;
@@ -196,7 +196,7 @@ fn channel_send_stdin_enqueues_live_channel_chat_for_receiver() {
         &home,
         &["channel", "send", "--tag", &receiver_handle],
         &format!("{body}\n"),
-        &[("TENEX_EDGE_PUBKEY", &sender_pubkey)],
+        &[("MOSAICO_PUBKEY", &sender_pubkey)],
         std::path::Path::new("/tmp"),
     );
     assert!(
@@ -220,7 +220,7 @@ fn channel_send_stdin_enqueues_live_channel_chat_for_receiver() {
                     "--limit",
                     "1",
                 ],
-                &[("TENEX_EDGE_PUBKEY", &sender_pubkey)],
+                &[("MOSAICO_PUBKEY", &sender_pubkey)],
                 std::path::Path::new("/tmp"),
             );
             if !out.status.success() {

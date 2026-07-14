@@ -3,7 +3,7 @@
 use anyhow::{bail, Result};
 use std::path::PathBuf;
 
-pub const OPENCODE_PLUGIN_TS: &str = include_str!("../../../integrations/opencode/tenex-edge.ts");
+pub const OPENCODE_PLUGIN_TS: &str = include_str!("../../../integrations/opencode/mosaico.ts");
 
 #[derive(Debug)]
 pub struct Harness {
@@ -31,7 +31,7 @@ pub fn harnesses() -> Result<Vec<Harness>> {
         Harness {
             id: "opencode",
             display: "opencode",
-            config_path: home.join(".config/opencode/plugin/tenex-edge.ts"),
+            config_path: home.join(".config/opencode/plugin/mosaico.ts"),
             detected: home.join(".config/opencode").exists() || bin_on_path("opencode"),
         },
         Harness {
@@ -51,7 +51,7 @@ fn home_dir_from_env(home: Option<String>) -> Result<PathBuf> {
     let Some(home) = home.filter(|h| !h.is_empty()) else {
         bail!(
             "HOME is not set: refusing to install harness hooks under the current directory. \
-             Set HOME to the real user home; TENEX_EDGE_HOME only controls tenex-edge daemon state."
+             Set HOME to the real user home; MOSAICO_HOME only controls mosaico daemon state."
         );
     };
     Ok(PathBuf::from(home))
@@ -69,9 +69,9 @@ fn bin_on_path(bin: &str) -> bool {
     std::env::split_paths(&path).any(|dir| dir.join(bin).is_file())
 }
 
-/// The hook signature we dedupe by: `tenex-edge harness hook <host> --type <type>`.
+/// The hook signature we dedupe by: `mosaico harness hook <host> --type <type>`.
 fn sig(host: &str, ty: &str) -> String {
-    format!("tenex-edge harness hook {host} --type {ty}")
+    format!("mosaico harness hook {host} --type {ty}")
 }
 
 fn claude_hook_entries() -> Vec<(&'static str, serde_json::Value)> {
@@ -172,7 +172,7 @@ mod tests {
         for home in [None, Some(String::new())] {
             let err = home_dir_from_env(home).unwrap_err().to_string();
             assert!(err.contains("HOME is not set"));
-            assert!(err.contains("TENEX_EDGE_HOME only controls"));
+            assert!(err.contains("MOSAICO_HOME only controls"));
         }
     }
 }

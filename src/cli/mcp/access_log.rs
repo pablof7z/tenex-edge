@@ -15,7 +15,7 @@ pub(super) fn log_http_event(
     }
     add_param_shape(&mut event, params);
     event.insert("headers".into(), json!(selected_headers(headers)));
-    eprintln!("[tenex-edge mcp access] {}", Value::Object(event));
+    eprintln!("[mosaico mcp access] {}", Value::Object(event));
 }
 
 fn add_param_shape(event: &mut serde_json::Map<String, Value>, params: &Value) {

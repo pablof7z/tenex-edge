@@ -1,7 +1,7 @@
 //! Pure domain model. No concrete fabric codes, labels, or serialization
 //! format.
 //!
-//! The litmus test for the provider seam: everything here is what tenex-edge
+//! The litmus test for the provider seam: everything here is what mosaico
 //! *means*, never how it travels.
 
 /// Liveness TTL: a status is "live" while its heartbeat is fresher than this.
@@ -83,7 +83,7 @@ pub struct Profile {
     pub workspace: String,
     /// Owner pubkeys this agent claims (the human's whitelisted pubkeys).
     pub owners: Vec<String>,
-    /// True when published by the tenex-edge backend process itself (not an AI
+    /// True when published by the mosaico backend process itself (not an AI
     /// agent). Used to suppress backend identities from agent-facing context
     /// injections.
     pub is_backend: bool,

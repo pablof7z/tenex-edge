@@ -72,7 +72,7 @@ pub fn scope_filters(scope: &Scope) -> Vec<Filter> {
         presence_status = h_filter(presence_status, p);
     }
     // Group-scoped events are not author-gated locally; the relay enforces
-    // membership for groups this daemon owns (created closed via tenexPrivateKey).
+    // membership for groups this daemon owns (created closed via mosaicoPrivateKey).
     filters.push(presence_status);
 
     // Chat (kind:9) — NIP-29 group chat (the sole agent-to-agent channel).
@@ -110,7 +110,7 @@ mod tests {
     fn scope_filters_cover_channel_kinds() {
         let scope = crate::fabric::Scope {
             authors: vec![Keys::generate().public_key().to_hex()],
-            channel: Some("tenex-edge".into()),
+            channel: Some("mosaico".into()),
         };
         let filters = scope_filters(&scope);
         // profiles, presence/status, chat (kind:9), and NIP-29

@@ -1,4 +1,4 @@
-const IDLE_NUDGE: &str = "[tenex-edge] Are you done with this spawned session? If so, run `tenex-edge my session end --self`; otherwise continue.";
+const IDLE_NUDGE: &str = "[mosaico] Are you done with this spawned session? If so, run `mosaico my session end --self`; otherwise continue.";
 
 pub(super) fn inject_idle_nudge(agent_slug: &str) {
     let pty_session = crate::cli::pty_session_env();
@@ -16,7 +16,7 @@ pub(super) fn inject_idle_nudge(agent_slug: &str) {
         return;
     }
     if let Err(e) = crate::pty::inject(&pty_id, IDLE_NUDGE, true, true) {
-        eprintln!("[tenex-edge] failed to inject Class B idle nudge: {e:#}");
+        eprintln!("[mosaico] failed to inject Class B idle nudge: {e:#}");
     }
 }
 
@@ -43,6 +43,6 @@ mod tests {
 
     #[test]
     fn nudge_names_self_end_command() {
-        assert!(IDLE_NUDGE.contains("tenex-edge my session end --self"));
+        assert!(IDLE_NUDGE.contains("mosaico my session end --self"));
     }
 }

@@ -34,13 +34,9 @@ mod tests {
 
     #[test]
     fn who_all_workspaces_live_parse_with_owner_args() {
-        let cli = crate::cli::args::Cli::try_parse_from([
-            "tenex-edge",
-            "who",
-            "--all-workspaces",
-            "--live",
-        ])
-        .expect("who parses");
+        let cli =
+            crate::cli::args::Cli::try_parse_from(["mosaico", "who", "--all-workspaces", "--live"])
+                .expect("who parses");
 
         match cli.cmd {
             crate::cli::args::Cmd::Who(args) => {
@@ -55,8 +51,7 @@ mod tests {
 
     #[test]
     fn removed_who_all_roots_alias_stays_unavailable() {
-        let err = match crate::cli::args::Cli::try_parse_from(["tenex-edge", "who", "--all-roots"])
-        {
+        let err = match crate::cli::args::Cli::try_parse_from(["mosaico", "who", "--all-roots"]) {
             Ok(_) => panic!("legacy who alias must stay removed"),
             Err(err) => err,
         };
@@ -66,7 +61,7 @@ mod tests {
 
     #[test]
     fn who_expired_parses() {
-        let cli = crate::cli::args::Cli::try_parse_from(["tenex-edge", "who", "--expired"])
+        let cli = crate::cli::args::Cli::try_parse_from(["mosaico", "who", "--expired"])
             .expect("who --expired parses");
         match cli.cmd {
             crate::cli::args::Cmd::Who(args) => assert!(args.expired),
@@ -78,8 +73,7 @@ mod tests {
     /// live refresh loop).
     #[test]
     fn who_expired_conflicts_with_live() {
-        let err =
-            crate::cli::args::Cli::try_parse_from(["tenex-edge", "who", "--expired", "--live"]);
+        let err = crate::cli::args::Cli::try_parse_from(["mosaico", "who", "--expired", "--live"]);
         assert!(err.is_err(), "expired + live must conflict");
     }
 }

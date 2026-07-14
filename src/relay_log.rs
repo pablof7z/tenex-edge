@@ -1,6 +1,6 @@
 //! Persistent log of every outgoing relay event and every rejection.
 //!
-//! Appends timestamped one-liners to `~/.tenex-edge/relay.log` (always) and
+//! Appends timestamped one-liners to `~/.mosaico/relay.log` (always) and
 //! echoes them to stderr. Fail-open: if the file cannot be opened the calls
 //! are no-ops beyond the stderr echo.
 //!
@@ -20,7 +20,7 @@ static LOG_FILE: OnceLock<Option<Mutex<File>>> = OnceLock::new();
 fn log_file() -> Option<&'static Mutex<File>> {
     LOG_FILE
         .get_or_init(|| {
-            let dir = crate::config::edge_home();
+            let dir = crate::config::mosaico_home();
             let _ = std::fs::create_dir_all(&dir);
             OpenOptions::new()
                 .create(true)
@@ -34,7 +34,7 @@ fn log_file() -> Option<&'static Mutex<File>> {
 
 fn log_entry(line: &str) {
     // Write to relay.log for forensics, and route through tracing at debug
-    // so it only appears in daemon stdout when RUST_LOG=tenex_edge=debug.
+    // so it only appears in daemon stdout when RUST_LOG=mosaico=debug.
     tracing::debug!("{line}");
     if let Some(mu) = log_file() {
         let ts = crate::util::format_local_datetime_ms(crate::util::now_millis());

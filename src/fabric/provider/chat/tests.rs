@@ -8,7 +8,7 @@ async fn offline_provider() -> Nip29Provider {
     let transport = Arc::new(Transport::connect(&[], Keys::generate()).await.unwrap());
     let store = Arc::new(Mutex::new(Store::open_memory().unwrap()));
     let mgmt = Keys::generate().secret_key().to_secret_hex();
-    Nip29Provider::new(transport, store, Some(mgmt), None, Vec::new(), &[])
+    Nip29Provider::new(transport, store, Some(mgmt), None, Vec::new())
 }
 
 fn chat() -> ChatMessage {

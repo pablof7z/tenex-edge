@@ -123,8 +123,8 @@ mod tests {
         let row = SessionRow {
             handle: "delta-codex".into(),
             workspaces: vec![WorkspaceGroup {
-                id: "edge-root".into(),
-                name: "tenex-edge".into(),
+                id: "mosaico-root".into(),
+                name: "mosaico".into(),
                 channels: vec![ChannelRef {
                     id: "ideas".into(),
                     name: "ideas".into(),
@@ -150,7 +150,7 @@ mod tests {
             .map(|s| s.content.as_ref())
             .collect::<String>();
         assert!(first.contains("● @delta-codex"));
-        assert!(first.contains("tenex-edge: #ideas"));
+        assert!(first.contains("mosaico: #ideas"));
         assert!(!first.contains("working"));
         assert!(!first.contains("PTY"));
         assert_eq!(second, "Implement session picker — running tests");

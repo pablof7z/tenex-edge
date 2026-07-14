@@ -10,8 +10,8 @@ pub(super) fn display_name(store: &Store, channel: &str) -> String {
 }
 
 /// The raw profile host for a pubkey (empty when unknown). Kept separate from
-/// [`pubkey_ref`] so fallback member rendering can stay identical in both the
-/// legacy and pure derivations.
+/// [`pubkey_ref`] because capture stores the host independently from the
+/// rendered public reference.
 pub(super) fn profile_host(store: &Store, pubkey: &str) -> String {
     store
         .get_profile(pubkey)

@@ -1,12 +1,10 @@
 use crate::state::{InboxRow, Session, Store};
 
 pub(crate) mod assemble;
-mod build;
 pub(crate) mod capture;
 mod human_render;
 mod messages;
 mod model;
-mod people;
 mod reactions;
 pub(crate) mod refs;
 mod render;
@@ -21,16 +19,22 @@ pub(crate) use capture::{
 pub(crate) use messages::{is_backend_pubkey, p_tag_pubkeys};
 pub(crate) use model::FabricView;
 
-use build::build_view;
 use human_render::{render_human_view, render_human_views};
 use render::render_view;
 
-/// Stringify an already-derived [`FabricView`] into the exact `<tenex-edge>`
+/// Stringify an already-derived [`FabricView`] into the exact `<mosaico>`
 /// snapshot agents see. The Trellis reconciler derives the view from declared
 /// inputs and hands it here, so the "how it is produced" changes while the
 /// rendered bytes do not.
 pub(crate) fn render_view_text(view: &FabricView) -> String {
     render_view(view)
+}
+
+fn derive_view(store: &Store, input: FabricContextInput<'_>) -> FabricView {
+    let cursor = input.cursor;
+    let now = input.now;
+    let inputs = capture_inputs(store, &input);
+    assemble::assemble_view(&inputs, cursor, now)
 }
 
 pub(crate) struct FabricContextInput<'a> {
@@ -76,7 +80,7 @@ pub(crate) fn render_fabric_context(
     input: FabricContextInput<'_>,
 ) -> Option<String> {
     let force = input.force;
-    let view = build_view(store, input);
+    let view = derive_view(store, input);
     if !force && view.is_empty() {
         return None;
     }
@@ -89,7 +93,7 @@ pub(crate) fn render_fabric_context_human(
     color: bool,
 ) -> Option<String> {
     let force = input.force;
-    let view = build_view(store, input);
+    let view = derive_view(store, input);
     if !force && view.is_empty() {
         return None;
     }
@@ -110,7 +114,7 @@ pub(crate) fn render_fabric_all_workspaces(
 ) -> String {
     let views = roots
         .iter()
-        .map(|root| build_view(store, root_input(root, now, local_host, backend_pubkey)))
+        .map(|root| derive_view(store, root_input(root, now, local_host, backend_pubkey)))
         .collect::<Vec<_>>();
     render::all_workspaces::render_views(&views)
 }
@@ -126,7 +130,7 @@ pub(crate) fn render_fabric_all_workspaces_human(
 ) -> String {
     let views = roots
         .iter()
-        .map(|root| build_view(store, root_input(root, now, local_host, backend_pubkey)))
+        .map(|root| derive_view(store, root_input(root, now, local_host, backend_pubkey)))
         .collect::<Vec<_>>();
     render_human_views(&views, color)
 }

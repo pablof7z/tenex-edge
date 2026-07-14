@@ -1,7 +1,7 @@
 use crate::daemon_harness::*;
+use mosaico::daemon::client::Client;
+use mosaico::state::Store;
 use std::time::Duration;
-use tenex_edge::daemon::client::Client;
-use tenex_edge::state::Store;
 
 #[test]
 fn cli_my_session_status_sets_the_exact_pty_session_title() {
@@ -32,7 +32,7 @@ fn cli_my_session_status_sets_the_exact_pty_session_title() {
     let out = run_cli_with_env(
         &home,
         &["my", "session", "status", title],
-        &[("TENEX_EDGE_PTY_SESSION", "pty-title-session")],
+        &[("MOSAICO_PTY_SESSION", "pty-title-session")],
     );
     assert!(
         out.status.success(),

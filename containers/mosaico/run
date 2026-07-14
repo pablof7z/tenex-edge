@@ -1,0 +1,332 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+IMAGE="${MOSAICO_CONTAINER_IMAGE:-mosaico-agents:local}"
+CONTAINERFILE="${SCRIPT_DIR}/Containerfile"
+PROFILE="${MOSAICO_CONTAINER_PROFILE:-opencode}"
+AGENT="${MOSAICO_CONTAINER_AGENT:-}"
+PROFILE_EXPLICIT=0
+
+usage() {
+  cat <<'EOF'
+Usage: bash containers/mosaico/run [--profile NAME] <command> [args...]
+
+Commands:
+  build-image              Build the Apple container image.
+  doctor                   Verify mounts, tools, hooks/plugins, and isolated state.
+  test-unit                Build mosaico and run hermetic library tests.
+  claude [args]            Run isolated Claude Code using host auth/config.
+  codex [args]             Run isolated Codex using the codex profile.
+  codex-login [args]       Run isolated `codex login` for subscription auth.
+  codex-ollama [args]      Run isolated Codex with --oss --local-provider ollama.
+  opencode [args]          Run isolated OpenCode using the opencode profile.
+  opencode-auth [args]     Run isolated `opencode providers`.
+  opencode-ollama [args]   Run isolated OpenCode with an Ollama model.
+  mosaico [args]        Run the in-container mosaico binary.
+  mosaico-hosted [args] Run mosaico, then keep an ACP container alive.
+  shell                    Open a read-only-source shell.
+  shell-rw                 Open a writable-source shell.
+  clean-state              Remove .container-state/<profile>.
+
+Env:
+  MOSAICO_CONTAINER_HOST_AUTH   Default: 1. Use real host auth/config via read-only mounts.
+  MOSAICO_CONTAINER_NAME        Optional Apple container name for cleanup.
+  MOSAICO_CONTAINER_CIDFILE     Optional path for the Apple container ID.
+  MOSAICO_CONTAINER_UID/GID     Optional numeric user/group for agent CLI processes.
+  MOSAICO_OLLAMA_HOST   Default: http://192.168.64.1:11434
+  MOSAICO_OPENCODE_OLLAMA_MODEL   Default: ollama/qwen2.5-coder:7b
+EOF
+}
+
+if [[ "${1:-}" == "--profile" ]]; then
+  PROFILE="${2:?missing profile name}"
+  PROFILE_EXPLICIT=1
+  shift 2
+fi
+
+agent_for_profile() {
+  case "${1}" in
+    claude*) echo "claude" ;;
+    codex*) echo "codex" ;;
+    *) echo "opencode" ;;
+  esac
+}
+
+AGENT="${AGENT:-$(agent_for_profile "${PROFILE}")}"
+STATE_DIR="${MOSAICO_CONTAINER_STATE:-${REPO_ROOT}/.container-state/${PROFILE}}"
+OLLAMA_HOST="${MOSAICO_OLLAMA_HOST:-http://192.168.64.1:11434}"
+HOST_AUTH="${MOSAICO_CONTAINER_HOST_AUTH:-1}"
+HOST_HOME="${MOSAICO_CONTAINER_HOST_HOME:-${HOME}}"
+
+# shellcheck source=containers/mosaico/host-auth.bash
+source "${SCRIPT_DIR}/host-auth.bash"
+
+require_container() {
+  command -v container >/dev/null 2>&1 || {
+    echo "container CLI not found. Install apple/container first." >&2
+    exit 1
+  }
+}
+
+ensure_system() {
+  if ! container system status >/dev/null 2>&1; then
+    container system start
+  fi
+}
+
+build_image() {
+  require_container
+  ensure_system
+  container build --file "${CONTAINERFILE}" --tag "${IMAGE}" "${SCRIPT_DIR}"
+}
+
+ensure_image() {
+  require_container
+  ensure_system
+  if ! container image inspect "${IMAGE}" >/dev/null 2>&1; then
+    build_image
+  fi
+}
+
+prepare_state() {
+  mkdir -p \
+    "${STATE_DIR}/home/.codex" \
+    "${STATE_DIR}/home/.claude" \
+    "${STATE_DIR}/home/.config/opencode" \
+    "${STATE_DIR}/home/.local/share" \
+    "${STATE_DIR}/home/.local/share/opencode" \
+    "${STATE_DIR}/home/.cache" \
+    "${STATE_DIR}/cargo" \
+    "${STATE_DIR}/target" \
+    "${STATE_DIR}/mosaico"
+
+  if [[ ! -f "${STATE_DIR}/mosaico/config.json" ]]; then
+    cat >"${STATE_DIR}/mosaico/config.json" <<JSON
+{
+  "whitelistedPubkeys": [],
+  "relays": ["wss://relay.tenex.chat"],
+  "indexerRelay": "wss://relay.tenex.chat",
+  "backendName": "container-${PROFILE}"
+}
+JSON
+  fi
+
+  if [[ "${MOSAICO_CONTAINER_CLEAR_SOCKET:-1}" == "1" ]]; then
+    rm -f "${STATE_DIR}/mosaico/daemon.sock"
+  fi
+}
+
+container_run() {
+  local access="${1:-readonly}"
+  shift || true
+
+  ensure_image
+  prepare_state
+  stage_host_auth
+  build_host_auth_mounts
+
+  local source_mount="type=bind,source=${REPO_ROOT},target=/workspace"
+  if [[ "${access}" == "readonly" ]]; then
+    source_mount="${source_mount},readonly"
+  fi
+
+  local run_args=(--rm)
+  if [[ -n "${MOSAICO_CONTAINER_NAME:-}" ]]; then
+    run_args+=(--name "${MOSAICO_CONTAINER_NAME}")
+  fi
+  if [[ -n "${MOSAICO_CONTAINER_CIDFILE:-}" ]]; then
+    mkdir -p "$(dirname "${MOSAICO_CONTAINER_CIDFILE}")"
+    rm -f "${MOSAICO_CONTAINER_CIDFILE}"
+    run_args+=(--cidfile "${MOSAICO_CONTAINER_CIDFILE}")
+  fi
+  if [[ -t 0 && -t 1 ]]; then
+    run_args+=(-i -t)
+  fi
+  if [[ -n "${MOSAICO_CONTAINER_UID:-}" ]]; then
+    run_args+=(--uid "${MOSAICO_CONTAINER_UID}")
+  fi
+  if [[ -n "${MOSAICO_CONTAINER_GID:-}" ]]; then
+    run_args+=(--gid "${MOSAICO_CONTAINER_GID}")
+  fi
+
+  local passthrough_env_args=()
+  local name
+  for name in \
+    ANTHROPIC_API_KEY \
+    ANTHROPIC_AUTH_TOKEN \
+    ANTHROPIC_BASE_URL \
+    CLAUDE_CODE_OAUTH_TOKEN \
+    CLAUDE_CODE_ORGANIZATION_UUID \
+    MOSAICO_DISTILL_CMD
+  do
+    if [[ -n "${!name:-}" ]]; then
+      passthrough_env_args+=(--env "${name}=${!name}")
+    fi
+  done
+
+  container run "${run_args[@]}" \
+    --cpus "${MOSAICO_CONTAINER_CPUS:-4}" \
+    --memory "${MOSAICO_CONTAINER_MEMORY:-4G}" \
+    --mount "${source_mount}" \
+    --mount "type=bind,source=${STATE_DIR},target=/state" \
+    --workdir /workspace \
+    --env HOME=/state/home \
+    --env XDG_CONFIG_HOME=/state/home/.config \
+    --env XDG_CACHE_HOME=/state/home/.cache \
+    --env XDG_DATA_HOME=/state/home/.local/share \
+    --env CARGO_HOME=/state/cargo \
+    --env CARGO_TARGET_DIR=/state/target \
+    --env CODEX_HOME=/state/home/.codex \
+    --env CLAUDE_CONFIG_DIR=/state/home/.claude \
+    --env OLLAMA_HOST="${OLLAMA_HOST}" \
+    --env MOSAICO_CONFIG=/state/mosaico/config.json \
+    --env MOSAICO_HOME=/state/mosaico \
+    --env MOSAICO_BIN=/state/target/debug/mosaico \
+    --env MOSAICO_AGENT="${AGENT}" \
+    --env PATH=/state/target/debug:/usr/local/cargo/bin:/usr/local/bin:/usr/bin:/bin \
+    "${HOST_AUTH_MOUNTS[@]+"${HOST_AUTH_MOUNTS[@]}"}" \
+    "${passthrough_env_args[@]+"${passthrough_env_args[@]}"}" \
+    "${IMAGE}" "$@"
+}
+
+with_mosaico() {
+  local harness="${1}"
+  shift
+  container_run readonly bash -c '
+    set -euo pipefail
+    cargo build >/dev/null
+    if [[ "$1" == "claude-code" || "$1" == "codex" || "$1" == "opencode" ]]; then
+      mosaico install --harness "$1" >/dev/null
+    fi
+    shift
+    exec "$@"
+  ' bash "${harness}" "$@"
+}
+
+# Same staging as with_mosaico (build + hook install), but runs the final
+# command directly. Reattachable hosted sessions are covered by
+# `mosaico launch`.
+with_mosaico_direct() {
+  local harness="${1}"
+  shift
+  container_run readonly bash -c '
+    set -euo pipefail
+    cargo build >/dev/null
+    if [[ "$1" == "claude-code" || "$1" == "codex" || "$1" == "opencode" ]]; then
+      mosaico install --harness "$1" >/dev/null
+    fi
+    shift
+    exec "$@"
+  ' bash "${harness}" "$@"
+}
+
+# ACP/app-server launch is headless: `mosaico launch` returns after the
+# daemon owns the JSON-RPC child. Keep the container alive so Docker/Apple
+# container lifecycle does not immediately reap that daemon and child.
+with_mosaico_hosted() {
+  local harness="${1}"
+  shift
+  container_run readonly bash -c '
+    set -euo pipefail
+    cargo build >/dev/null
+    if [[ "$1" == "claude-code" || "$1" == "codex" || "$1" == "opencode" ]]; then
+      mosaico install --harness "$1" >/dev/null
+    fi
+    shift
+    "$@"
+    echo "[mosaico container] headless agent container remains alive; stop it with cleanup-lab"
+    exec sleep infinity
+  ' bash "${harness}" "$@"
+}
+
+select_command_profile() {
+  local default_profile="$1" agent="$2"
+  AGENT="${agent}"
+  if [[ "${PROFILE_EXPLICIT}" != "1" ]]; then
+    PROFILE="${default_profile}"
+    STATE_DIR="${MOSAICO_CONTAINER_STATE:-${REPO_ROOT}/.container-state/${PROFILE}}"
+  fi
+}
+
+harness_for_agent() {
+  case "${1}" in
+    claude) echo "claude-code" ;;
+    *) echo "${1}" ;;
+  esac
+}
+
+main() {
+  local cmd="${1:-}"
+  [[ -n "${cmd}" ]] || { usage; exit 2; }
+  shift || true
+
+  case "${cmd}" in
+    build-image)
+      build_image
+      ;;
+    doctor)
+      container_run readonly bash /workspace/containers/mosaico/doctor \
+        "${PROFILE}" "${HOST_AUTH}"
+      ;;
+    test-unit)
+      container_run readonly bash -c 'cargo build && cargo test --lib'
+      ;;
+    claude)
+      select_command_profile claude claude
+      with_mosaico_direct claude-code claude "$@"
+      ;;
+    codex)
+      select_command_profile codex codex
+      with_mosaico_direct codex codex "$@"
+      ;;
+    codex-login)
+      select_command_profile codex codex
+      container_run readonly codex login "$@"
+      ;;
+    codex-ollama)
+      select_command_profile codex-ollama codex
+      with_mosaico_direct codex codex --oss --local-provider ollama "$@"
+      ;;
+    opencode)
+      select_command_profile opencode opencode
+      with_mosaico_direct opencode opencode "$@"
+      ;;
+    opencode-auth)
+      select_command_profile opencode opencode
+      container_run readonly opencode providers "$@"
+      ;;
+    opencode-ollama)
+      local model="${1:-${MOSAICO_OPENCODE_OLLAMA_MODEL:-ollama/qwen2.5-coder:7b}}"
+      if [[ $# -gt 0 ]]; then shift; fi
+      select_command_profile opencode-ollama opencode
+      with_mosaico_direct opencode opencode -m "${model}" "$@"
+      ;;
+    mosaico)
+      with_mosaico "$(harness_for_agent "${AGENT}")" mosaico "$@"
+      ;;
+    mosaico-hosted)
+      with_mosaico_hosted "$(harness_for_agent "${AGENT}")" mosaico "$@"
+      ;;
+    shell)
+      container_run readonly bash "$@"
+      ;;
+    shell-rw)
+      container_run writable bash "$@"
+      ;;
+    clean-state)
+      rm -rf "${STATE_DIR}"
+      ;;
+    -h|--help|help)
+      usage
+      ;;
+    *)
+      echo "unknown command: ${cmd}" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+}
+
+main "$@"

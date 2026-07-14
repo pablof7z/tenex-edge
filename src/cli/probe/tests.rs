@@ -46,33 +46,13 @@ fn replay_action_projects_rpc_params() {
 }
 
 #[test]
-fn simulate_action_projects_rpc_params() {
-    let action = ProbeAction::Simulate {
-        surface: "status".into(),
-        fact: None,
-        session: Some("s1".into()),
-        activity: Some("reviewing the PR".into()),
-        title: None,
-        now: None,
-    };
-    let (verb, params) = action.to_rpc().unwrap();
-    assert_eq!(verb, "simulate");
-    assert_eq!(params["session"], "s1");
-    assert_eq!(params["activity"], "reviewing the PR");
-    assert!(params["title"].is_null());
-}
-
-#[test]
 fn simulate_action_parses_fact_json() {
     let action = ProbeAction::Simulate {
         surface: "subscriptions".into(),
-        fact: Some(r#"{"SubscriptionSync":{"snapshot":{"daemon_channels":[],"addressed_pubkeys":[],"archived_channels":[],"sessions":{}},"at":1}}"#.into()),
-        session: None,
-        activity: None,
-        title: None,
-        now: None,
+        fact: r#"{"SubscriptionSync":{"snapshot":{"daemon_channels":[],"addressed_pubkeys":[],"archived_channels":[],"sessions":{}},"at":1}}"#.into(),
     };
-    let (_verb, params) = action.to_rpc().unwrap();
+    let (verb, params) = action.to_rpc().unwrap();
+    assert_eq!(verb, "simulate");
     assert!(params["fact"].is_object());
     assert_eq!(params["fact"]["SubscriptionSync"]["at"], 1);
 }

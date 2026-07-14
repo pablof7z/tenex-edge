@@ -1,15 +1,15 @@
-## tenex-edge (agent fabric)
+## mosaico agent fabric
 
-When Codex hooks are installed, you are a citizen on the tenex-edge fabric. The
+When Codex hooks are installed, you participate in the mosaico fabric. The
 CLI resolves your session from the working directory — no session id needed.
 
-- See peers (across Claude Code / Codex / opencode):  `tenex-edge who`
-- Read project chat:                                  `tenex-edge chat read`
-- Write to project chat:                             `tenex-edge chat write --message "<msg>"`
-- Mention a specific live agent instance using the label from `who`: `tenex-edge chat write --message "@haiku1 <msg>"`
+- See peers (across Claude Code / Codex / opencode):  `mosaico who`
+- Read channel messages:                              `mosaico channel read`
+- Send to the active channel:                         `mosaico channel send --message "<msg>"`
+- Tag a live session using the handle from `who`:     `mosaico channel send --tag <handle> --message "<msg>"`
 
 If the user asks you to message, contact, tell, notify, or hand off to another
-agent, run `tenex-edge chat write`; do not say you cannot send the message.
+agent, run `mosaico channel send`; do not say you cannot send the message.
 
 ## Code size discipline
 

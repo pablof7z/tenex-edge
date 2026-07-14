@@ -9,7 +9,7 @@ pub(crate) const KIND_GROUP_MEMBERS: u16 = 39002;
 pub(crate) const KIND_NOTE: u16 = 1;
 
 pub(crate) fn relay_url() -> String {
-    std::env::var("TE_NIP29_RELAY").unwrap_or_else(|_| "wss://nip29.f7z.io".to_string())
+    std::env::var("MOSAICO_NIP29_RELAY").unwrap_or_else(|_| "wss://nip29.f7z.io".to_string())
 }
 
 pub(crate) fn unique_slug() -> String {
@@ -17,7 +17,7 @@ pub(crate) fn unique_slug() -> String {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
-    format!("te-probe-{nanos:x}")
+    format!("mosaico-probe-{nanos:x}")
 }
 
 pub(crate) fn h_tag(slug: &str) -> Tag {

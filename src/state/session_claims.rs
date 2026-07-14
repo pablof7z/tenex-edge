@@ -17,8 +17,8 @@ const COLS: &str = "pubkey, agent_slug, channel_h, harness, last_active_at, expi
 
 impl SessionClaim {
     pub(crate) fn is_owned_by_backend(&self, backend_pubkey: Option<&str>) -> bool {
-        self.owner_backend_pubkey.is_empty()
-            || backend_pubkey
+        !self.owner_backend_pubkey.is_empty()
+            && backend_pubkey
                 .filter(|pubkey| !pubkey.is_empty())
                 .is_some_and(|pubkey| pubkey == self.owner_backend_pubkey)
     }

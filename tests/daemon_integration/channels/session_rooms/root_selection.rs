@@ -4,8 +4,8 @@ use super::super::{rewrite_config_with_user_nsec, unique_session, write_config};
 use crate::daemon_harness::{
     pubkey_for_harness_session, rt, stop_daemon, wait_until, Home, ENV_LOCK,
 };
-use tenex_edge::daemon::client::Client;
-use tenex_edge::state::Store;
+use mosaico::daemon::client::Client;
+use mosaico::state::Store;
 
 /// With per-session rooms disabled, a human-initiated session uses the work-root
 /// root channel.

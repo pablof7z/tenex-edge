@@ -1,31 +1,30 @@
 # Codex integration
 
 Codex integrates through Codex lifecycle hooks. Each hook calls the
-`tenex-edge` binary directly:
+`mosaico` binary directly:
 
-    tenex-edge harness hook codex --type <hook-type>
+    mosaico harness hook codex --type <hook-type>
 
 Install the hooks by copying `config.template.toml` into either:
 
 - `~/.codex/config.toml` for all Codex projects
 - `<repo>/.codex/config.toml` for one trusted project
 
-`tenex-edge` must be on PATH. Codex requires non-managed hooks to be reviewed
+`mosaico` must be on PATH. Codex requires non-managed hooks to be reviewed
 and trusted in `/hooks`.
 
 The hook mapping is:
 
-- `SessionStart` → `tenex-edge harness hook codex --type session-start`
-- `UserPromptSubmit` → `tenex-edge harness hook codex --type user-prompt-submit`
-  (marks the turn "working", injects pending chat messages and `tenex-edge who` output)
-- `PostToolUse` → `tenex-edge harness hook codex --type post-tool-use`
+- `SessionStart` → `mosaico harness hook codex --type session-start`
+- `UserPromptSubmit` → `mosaico harness hook codex --type user-prompt-submit`
+  (marks the turn "working", injects pending chat messages and `mosaico who` output)
+- `PostToolUse` → `mosaico harness hook codex --type post-tool-use`
   (read-only chat peek mid-turn; does not drain)
-- `Stop` → `tenex-edge harness hook codex --type stop`
+- `Stop` → `mosaico harness hook codex --type stop`
   (marks the session idle when the turn finishes)
 
-The adapter accepts Codex session identifiers under `session_id`, `sessionId`,
-`conversation_id`, `conversationId`, `thread_id`, or `threadId`, then uses that
-value consistently as the tenex-edge session id. Codex hook payloads may carry a
+The adapter reads the Codex session identifier from `session_id` and uses that
+value consistently as the mosaico session id. Codex hook payloads may carry a
 live `transcript_path` (a JSONL rollout file) handed at `turn-start` and re-read
 as the turn progresses.
 

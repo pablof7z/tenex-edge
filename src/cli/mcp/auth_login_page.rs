@@ -38,9 +38,9 @@ button.addEventListener("click", async () => {
         ["u", form.dataset.authorizeUrl],
         ["method", "POST"],
         ["challenge", form.elements.login_challenge.value],
-        ["client", "tenex-edge-mcp"]
+        ["client", "mosaico-mcp"]
       ],
-      content: "tenex-edge OAuth login"
+      content: "mosaico OAuth login"
     });
     form.elements.nip07_pubkey.value = pubkey;
     form.elements.nip07_event.value = JSON.stringify(event);
@@ -56,7 +56,7 @@ button.addEventListener("click", async () => {
     format!(
         r#"<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>tenex-edge login</title>
+<title>mosaico login</title>
 <style>
 :root{{color-scheme:light;--paper:#f7f4ee;--ink:#13150f;--muted:#6d6c64;--teal:#1c6b64;--ease:cubic-bezier(.22,1,.36,1)}}
 *{{box-sizing:border-box}}
@@ -102,9 +102,9 @@ input[type=password]:focus{{box-shadow:inset 0 0 0 1px rgba(28,107,100,.35),0 0 
 @media (prefers-reduced-motion:reduce){{.copy,.shell{{animation:none}}.primary,.secondary,.icon{{transition:none}}}}
 </style>
 <main>
-  <section class="copy" aria-label="tenex-edge OAuth pairing">
+  <section class="copy" aria-label="mosaico OAuth pairing">
     <span class="eyebrow"><span class="dot"></span>OAuth Pairing</span>
-    <h1>tenex edge</h1>
+    <h1>mosaico</h1>
     <p class="lede">Authorize ChatGPT to reach your agent fabric with a whitelisted Nostr identity. The signer proves control; the server keeps the session token scoped.</p>
     <div class="proofs" aria-label="Security notes">
       <span class="proof">NIP-07 first</span>

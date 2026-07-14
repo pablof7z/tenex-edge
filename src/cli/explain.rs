@@ -1,4 +1,4 @@
-//! `tenex-edge debug explain <handle>` — point at an artifact, see what produced it.
+//! `mosaico debug explain <handle>` — point at an artifact, see what produced it.
 //!
 //! The store is daemon-owned, so this thin verb forwards the handle to the
 //! `explain` RPC (like `who`) and renders the joined record it returns. For a
@@ -143,8 +143,8 @@ mod tests {
             "kind": "event",
             "receipts": [{
                 "id": 1, "surface": "status", "transaction_id": 5, "revision": 2,
-                "changed_summary": "{\"inputs\":[],\"session_id\":\"te-a1b2\",\"window_hash\":\"sha256:9f2c\"}",
-                "commands": "[{\"kind\":\"replace\",\"key\":\"status/te-a1b2\",\"reason\":\"replace\"}]",
+                "changed_summary": "{\"inputs\":[],\"session_id\":\"mosaico-a1b2\",\"window_hash\":\"sha256:9f2c\"}",
+                "commands": "[{\"kind\":\"replace\",\"key\":\"status/mosaico-a1b2\",\"reason\":\"replace\"}]",
                 "artifact_ref": "e3f9…30315", "created_at": 1_720_000_000_000i64,
             }],
             "llm_call": {

@@ -176,11 +176,11 @@ pub(super) async fn publish_start_failure_notice(
 pub(super) fn mention_prompt(body: &str) -> String {
     let body = body.trim();
     let body = if body.is_empty() {
-        "You were mentioned in tenex-edge. Check your channel context and respond if needed."
+        "You were mentioned in mosaico. Check your channel context and respond if needed."
     } else {
         body
     };
     format!(
-        "{body}\n\n[reply via `tenex-edge channel send --message \"...\"` - replies do not auto-publish]"
+        "{body}\n\n[reply via `mosaico channel send --message \"...\"` - replies do not auto-publish]"
     )
 }

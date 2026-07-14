@@ -1,10 +1,10 @@
-# tenex-edge: moving the authority frontier under a live agent fabric
+# mosaico: moving the authority frontier under a live agent fabric
 
 Date: 2026-07-05
 
 This is the closeout artifact for issue #240 and the case-study layer of the
 Authority Frontier epic (#228). The core question was whether Trellis merely
-observes tenex-edge state, or now leads the state transitions that are safe for
+observes mosaico state, or now leads the state transitions that are safe for
 it to lead.
 
 ## Result

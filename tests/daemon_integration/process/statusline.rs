@@ -1,5 +1,5 @@
 use crate::daemon_harness::*;
-use tenex_edge::daemon::client::Client;
+use mosaico::daemon::client::Client;
 
 #[test]
 fn resolves_to_specific_session_when_pubkey_is_supplied() {
@@ -33,7 +33,7 @@ fn resolves_to_specific_session_when_pubkey_is_supplied() {
         let pubkey_a = a["pubkey"].as_str().unwrap().to_string();
         let pubkey_b = b["pubkey"].as_str().unwrap().to_string();
         assert_ne!(pubkey_a, pubkey_b, "two sessions must mint distinct keys");
-        let store = tenex_edge::state::Store::open(&home.store_path()).unwrap();
+        let store = mosaico::state::Store::open(&home.store_path()).unwrap();
         let handle_a = store
             .session_identity(&pubkey_a)
             .unwrap()

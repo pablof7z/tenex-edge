@@ -55,19 +55,19 @@ pub fn run_supervisor(args: SupervisorArgs) -> Result<()> {
     })?;
     let mut cmd = CommandBuilder::from_argv(args.command.iter().map(OsString::from).collect());
     cmd.cwd(&args.cwd);
-    cmd.env("TENEX_EDGE_SPAWNED", "1");
-    cmd.env("TENEX_EDGE_AGENT", &args.agent);
-    cmd.env("TENEX_EDGE_PTY_SESSION", &args.id);
-    cmd.env("TENEX_EDGE_PTY_SOCKET", args.socket.as_os_str());
-    if let Ok(pubkey) = std::env::var("TENEX_EDGE_PUBKEY") {
-        cmd.env("TENEX_EDGE_PUBKEY", pubkey);
+    cmd.env("MOSAICO_SPAWNED", "1");
+    cmd.env("MOSAICO_AGENT", &args.agent);
+    cmd.env("MOSAICO_PTY_SESSION", &args.id);
+    cmd.env("MOSAICO_PTY_SOCKET", args.socket.as_os_str());
+    if let Ok(pubkey) = std::env::var("MOSAICO_PUBKEY") {
+        cmd.env("MOSAICO_PUBKEY", pubkey);
     } else {
-        cmd.env_remove("TENEX_EDGE_PUBKEY");
+        cmd.env_remove("MOSAICO_PUBKEY");
     }
     if args.ephemeral {
-        cmd.env("TENEX_EDGE_EPHEMERAL", "1");
+        cmd.env("MOSAICO_EPHEMERAL", "1");
     } else {
-        cmd.env_remove("TENEX_EDGE_EPHEMERAL");
+        cmd.env_remove("MOSAICO_EPHEMERAL");
     }
     let term = std::env::var("TERM")
         .ok()
@@ -80,12 +80,12 @@ pub fn run_supervisor(args: SupervisorArgs) -> Result<()> {
     cmd.env("FORCE_COLOR", "1");
     cmd.env_remove("NO_COLOR");
     if let Some(channel) = &args.channel {
-        cmd.env("TENEX_EDGE_CHANNEL", channel);
+        cmd.env("MOSAICO_CHANNEL", channel);
     }
     if let Some(session_name) = &args.session_name {
-        cmd.env("TENEX_EDGE_SESSION_NAME", session_name);
+        cmd.env("MOSAICO_SESSION_NAME", session_name);
     } else {
-        cmd.env_remove("TENEX_EDGE_SESSION_NAME");
+        cmd.env_remove("MOSAICO_SESSION_NAME");
     }
     cmd.env_remove("CLAUDE_CODE_SESSION_ID");
     cmd.env_remove("CLAUDE_CODE_CHILD_SESSION");
@@ -129,7 +129,7 @@ pub fn run_supervisor(args: SupervisorArgs) -> Result<()> {
                     &clients,
                     &backlog,
                 ) {
-                    eprintln!("[tenex-edge pty supervisor] client error: {e:#}");
+                    eprintln!("[mosaico pty supervisor] client error: {e:#}");
                 }
             }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
@@ -212,7 +212,7 @@ fn remember(backlog: &Arc<Mutex<VecDeque<u8>>>, bytes: &[u8]) {
 }
 
 pub(super) fn trace(message: &str) {
-    let Ok(path) = std::env::var("TENEX_EDGE_PTY_TRACE") else {
+    let Ok(path) = std::env::var("MOSAICO_PTY_TRACE") else {
         return;
     };
     if let Ok(mut file) = std::fs::OpenOptions::new()
@@ -225,7 +225,7 @@ pub(super) fn trace(message: &str) {
 }
 
 pub(super) fn trace_bytes(label: &str, bytes: &[u8]) {
-    let Ok(path) = std::env::var("TENEX_EDGE_PTY_TRACE") else {
+    let Ok(path) = std::env::var("MOSAICO_PTY_TRACE") else {
         return;
     };
     let hex = bytes

@@ -3,13 +3,16 @@ use super::*;
 // ── agent (local keystore) ────────────────────────────────────────────────────
 
 pub async fn agent(action: AgentAction) -> Result<()> {
-    let edge_home = crate::config::edge_home();
+    let mosaico_home = crate::config::mosaico_home();
     match action {
         AgentAction::List => {
-            let rows = crate::identity::list_local_agent_details(&edge_home);
+            let rows = crate::identity::list_local_agent_details(&mosaico_home);
             if rows.is_empty() {
-                println!("No local agents in {}", edge_home.join("agents").display());
-                println!("Add one with: tenex-edge mgmt agent add <slug> [-- <command>]");
+                println!(
+                    "No local agents in {}",
+                    mosaico_home.join("agents").display()
+                );
+                println!("Add one with: mosaico mgmt agent add <slug> [-- <command>]");
                 return Ok(());
             }
             let max_slug = rows.iter().map(|r| r.slug.len()).max().unwrap_or(0);
@@ -30,7 +33,7 @@ pub async fn agent(action: AgentAction) -> Result<()> {
                 _ => None,
             };
             let (id, created) =
-                crate::identity::add_local_agent(&edge_home, &slug, command, now_secs())?;
+                crate::identity::add_local_agent(&mosaico_home, &slug, command, now_secs())?;
             let verb = if created { "created" } else { "updated" };
             println!(
                 "{} {} {}",
@@ -44,7 +47,7 @@ pub async fn agent(action: AgentAction) -> Result<()> {
             }
             if created {
                 if let Some(byline) = prompt_use_criteria()? {
-                    crate::identity::set_local_agent_byline(&edge_home, &slug, Some(byline))?;
+                    crate::identity::set_local_agent_byline(&mosaico_home, &slug, Some(byline))?;
                 }
             }
             if !workspaces.is_empty() {
@@ -55,12 +58,12 @@ pub async fn agent(action: AgentAction) -> Result<()> {
             publish_roster(None).await;
         }
         AgentAction::Assign { slug, workspaces } => {
-            let found = crate::identity::list_local_agent_details(&edge_home)
+            let found = crate::identity::list_local_agent_details(&mosaico_home)
                 .into_iter()
                 .any(|a| a.slug == slug);
             if !found {
                 anyhow::bail!(
-                    "no such local agent: {slug} (add it with `tenex-edge mgmt agent add {slug}`)"
+                    "no such local agent: {slug} (add it with `mosaico mgmt agent add {slug}`)"
                 );
             }
             if !workspaces.is_empty() {
@@ -71,7 +74,7 @@ pub async fn agent(action: AgentAction) -> Result<()> {
             publish_roster(None).await;
         }
         AgentAction::Remove { slug } => {
-            match crate::identity::remove_local_agent(&edge_home, &slug)? {
+            match crate::identity::remove_local_agent(&mosaico_home, &slug)? {
                 Some(parked) => {
                     println!(
                         "removed {} (key parked at {})",

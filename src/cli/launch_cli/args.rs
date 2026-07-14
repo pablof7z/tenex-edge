@@ -19,7 +19,7 @@ pub(in crate::cli) struct LaunchArgs {
     /// open an interactive fuzzy picker over all known rooms for the workspace.
     /// When per-session rooms are disabled (the default), omitting `--channel`
     /// entirely also opens the picker; with per-session rooms enabled, omitting
-    /// it mints a fresh per-session room instead. The daemon's tenexPrivateKey
+    /// it mints a fresh per-session room instead. The daemon's mosaicoPrivateKey
     /// adds the agent as a member; if the same derived pubkey is already in the
     /// group a fresh session produces a distinct key via a new anchor, acting
     /// as a second personality.
@@ -51,7 +51,7 @@ pub(in crate::cli) struct LaunchArgs {
     )]
     headless: bool,
     /// Extra args passed after `--`; appended to the launch command.
-    /// Example: `tenex-edge launch codex -- --yolo`
+    /// Example: `mosaico launch codex -- --yolo`
     #[arg(index = 3, last = true, value_name = "ARGS")]
     extra_args: Vec<String>,
 }
@@ -127,13 +127,13 @@ mod tests {
 
     #[test]
     fn launch_channel_tristate_is_explicit_contract() {
-        let omitted = crate::cli::args::Cli::try_parse_from(["tenex-edge", "launch", "codex"])
+        let omitted = crate::cli::args::Cli::try_parse_from(["mosaico", "launch", "codex"])
             .expect("launch without channel parses");
         let picker =
-            crate::cli::args::Cli::try_parse_from(["tenex-edge", "launch", "codex", "--channel"])
+            crate::cli::args::Cli::try_parse_from(["mosaico", "launch", "codex", "--channel"])
                 .expect("launch with channel picker parses");
         let named = crate::cli::args::Cli::try_parse_from([
-            "tenex-edge",
+            "mosaico",
             "launch",
             "codex",
             "--channel",
@@ -154,7 +154,7 @@ mod tests {
     #[test]
     fn launch_command_name_parses_independently_from_override() {
         let cli = crate::cli::args::Cli::try_parse_from([
-            "tenex-edge",
+            "mosaico",
             "launch",
             "codex",
             "--command-name",
@@ -174,7 +174,7 @@ mod tests {
     #[test]
     fn launch_name_parses_as_a_public_session_name() {
         let cli = crate::cli::args::Cli::try_parse_from([
-            "tenex-edge",
+            "mosaico",
             "launch",
             "codex",
             "--name",
@@ -193,17 +193,17 @@ mod tests {
     #[test]
     fn launch_workspace_flag_parses() {
         let cli = crate::cli::args::Cli::try_parse_from([
-            "tenex-edge",
+            "mosaico",
             "launch",
             "codex",
             "--workspace",
-            "tenex-edge",
+            "mosaico",
         ])
         .expect("launch --workspace parses");
 
         match cli.cmd {
             crate::cli::args::Cmd::Launch(args) => {
-                assert_eq!(args.workspace.as_deref(), Some("tenex-edge"));
+                assert_eq!(args.workspace.as_deref(), Some("mosaico"));
             }
             _ => panic!("expected launch command"),
         }
@@ -212,7 +212,7 @@ mod tests {
     #[test]
     fn launch_harness_override_parses() {
         let cli = crate::cli::args::Cli::try_parse_from([
-            "tenex-edge",
+            "mosaico",
             "launch",
             "claude",
             "--harness",
@@ -232,7 +232,7 @@ mod tests {
     fn launch_harness_conflicts_with_command_overrides() {
         for args in [
             vec![
-                "tenex-edge",
+                "mosaico",
                 "launch",
                 "claude",
                 "--harness",
@@ -241,7 +241,7 @@ mod tests {
                 "claude",
             ],
             vec![
-                "tenex-edge",
+                "mosaico",
                 "launch",
                 "claude",
                 "--harness",
@@ -257,7 +257,7 @@ mod tests {
     #[test]
     fn launch_headless_bypass_parses_and_conflicts_with_pty_overrides() {
         let cli =
-            crate::cli::args::Cli::try_parse_from(["tenex-edge", "launch", "claude", "--headless"])
+            crate::cli::args::Cli::try_parse_from(["mosaico", "launch", "claude", "--headless"])
                 .expect("launch --headless parses");
         match cli.cmd {
             crate::cli::args::Cmd::Launch(args) => assert!(args.headless),
@@ -265,7 +265,7 @@ mod tests {
         }
 
         assert!(crate::cli::args::Cli::try_parse_from([
-            "tenex-edge",
+            "mosaico",
             "launch",
             "claude",
             "--headless",
@@ -278,7 +278,7 @@ mod tests {
     #[test]
     fn launch_prompt_parses_before_forwarded_args() {
         let cli = crate::cli::args::Cli::try_parse_from([
-            "tenex-edge",
+            "mosaico",
             "launch",
             "codex",
             "check on the deploy",
@@ -298,14 +298,9 @@ mod tests {
 
     #[test]
     fn launch_forwarded_args_do_not_become_prompt() {
-        let cli = crate::cli::args::Cli::try_parse_from([
-            "tenex-edge",
-            "launch",
-            "codex",
-            "--",
-            "--yolo",
-        ])
-        .expect("launch with only forwarded args parses");
+        let cli =
+            crate::cli::args::Cli::try_parse_from(["mosaico", "launch", "codex", "--", "--yolo"])
+                .expect("launch with only forwarded args parses");
 
         match cli.cmd {
             crate::cli::args::Cmd::Launch(args) => {

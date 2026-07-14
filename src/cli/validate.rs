@@ -1,4 +1,4 @@
-//! `tenex-edge debug validate` - user-facing validation with explanations.
+//! `mosaico debug validate` - user-facing validation with explanations.
 //!
 //! This is intentionally a thin client over the daemon's existing `probe`
 //! validation verb, so the visible command and the hidden diagnostic surface
@@ -132,7 +132,7 @@ mod tests {
     #[test]
     fn validate_command_parses_as_debug_subcommand() {
         let cli = crate::cli::args::Cli::try_parse_from([
-            "tenex-edge",
+            "mosaico",
             "debug",
             "validate",
             "status:s1",
@@ -158,7 +158,7 @@ mod tests {
     #[test]
     fn validate_targets_alias_requests_local_catalog() {
         let cli =
-            crate::cli::args::Cli::try_parse_from(["tenex-edge", "debug", "validate", "targets"])
+            crate::cli::args::Cli::try_parse_from(["mosaico", "debug", "validate", "targets"])
                 .expect("validate targets parses");
 
         match cli.cmd {
@@ -175,7 +175,7 @@ mod tests {
     #[test]
     fn validate_targets_command_parses_and_renders_catalog() {
         let cli =
-            crate::cli::args::Cli::try_parse_from(["tenex-edge", "debug", "validate", "--targets"])
+            crate::cli::args::Cli::try_parse_from(["mosaico", "debug", "validate", "--targets"])
                 .expect("validate --targets parses");
 
         match cli.cmd {
@@ -196,7 +196,7 @@ mod tests {
         assert!(text.contains("session:<pubkey>"));
         assert!(text.contains("recipient:<event>:<pubkey>"));
         assert!(text.contains("delivery:<event>:<pubkey>"));
-        assert!(text.contains("tenex-edge debug validate commit:<id>"));
+        assert!(text.contains("mosaico debug validate commit:<id>"));
 
         let json = targets::catalog_json();
         assert_eq!(json["verb"], "validate_targets");

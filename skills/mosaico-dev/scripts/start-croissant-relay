@@ -1,0 +1,166 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+need() {
+  command -v "$1" >/dev/null 2>&1 || {
+    echo "missing required command: $1" >&2
+    exit 1
+  }
+}
+
+quote_env() {
+  local key="$1" value="$2"
+  printf '%s=%q\n' "$key" "$value"
+}
+
+relay_host() {
+  local host=""
+  if command -v container >/dev/null 2>&1 && container system status >/dev/null 2>&1; then
+    host="$(container network inspect default 2>/dev/null \
+      | jq -er '.[0].status.ipv4Gateway // empty' 2>/dev/null || true)"
+  fi
+  if [[ -z "${host}" ]]; then
+    host="$(ipconfig getifaddr bridge100 2>/dev/null || true)"
+  fi
+  printf '%s\n' "${host:-127.0.0.1}"
+}
+
+pick_port() {
+  local start="${MOSAICO_DEV_RELAY_PORT_BASE:-19888}"
+  local limit="${MOSAICO_DEV_RELAY_PORT_LIMIT:-200}"
+  local port end
+  end=$((start + limit))
+  for ((port = start; port < end; port++)); do
+    if ! lsof -nP -tiTCP:"${port}" -sTCP:LISTEN >/dev/null 2>&1; then
+      printf '%s\n' "${port}"
+      return 0
+    fi
+  done
+  echo "no free relay port found in ${start}..$((end - 1))" >&2
+  return 1
+}
+
+wait_for_relay() {
+  local http="$1"
+  local timeout="${2:-20}"
+  local start now
+  start="$(date +%s)"
+  while true; do
+    if curl -fsS -H 'Accept: application/nostr+json' "$http" >/dev/null 2>&1; then
+      return 0
+    fi
+    now="$(date +%s)"
+    if (( now - start >= timeout )); then
+      return 1
+    fi
+    sleep 1
+  done
+}
+
+stop_relay() {
+  local pid
+  [[ -s "${RELAY_PID_FILE:-}" ]] || return 0
+  pid="$(cat "${RELAY_PID_FILE}")"
+  if kill -0 "${pid}" 2>/dev/null; then
+    kill "${pid}" 2>/dev/null || true
+    wait "${pid}" 2>/dev/null || true
+  fi
+}
+
+need curl
+need jq
+need lsof
+need nak
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+
+RUN_ID="${MOSAICO_DEV_RUN_ID:-$(date +%Y%m%d-%H%M%S)}"
+default_croissant_dir() {
+  if [[ -x /tmp/croissant-smallmap/croissant ]]; then
+    printf '%s\n' /tmp/croissant-smallmap
+  else
+    printf '%s\n' "${HOME}/Work/croissant"
+  fi
+}
+CROISSANT_DIR="${MOSAICO_DEV_CROISSANT_DIR:-$(default_croissant_dir)}"
+RELAY_HOST="${MOSAICO_DEV_RELAY_HOST:-$(relay_host)}"
+RELAY_BIND_HOST="${MOSAICO_DEV_RELAY_BIND_HOST:-${RELAY_HOST}}"
+RELAY_PORT="${MOSAICO_DEV_RELAY_PORT:-$(pick_port)}"
+RELAY_WS="ws://${RELAY_HOST}:${RELAY_PORT}"
+RELAY_HTTP="http://${RELAY_HOST}:${RELAY_PORT}"
+WORK_DIR="${MOSAICO_DEV_WORK:-${TMPDIR:-/tmp}/mosaico-live-lab-${RUN_ID}}"
+RELAY_DATA="${WORK_DIR}/relay-data"
+RELAY_PID_FILE="${WORK_DIR}/relay.pid"
+RELAY_LOG="${WORK_DIR}/relay.log"
+ENV_FILE="${WORK_DIR}/lab.env"
+
+if [[ ! -d "${CROISSANT_DIR}" ]]; then
+  echo "croissant checkout not found: ${CROISSANT_DIR}" >&2
+  exit 1
+fi
+
+if [[ -f "${RELAY_PID_FILE}" ]] && kill -0 "$(cat "${RELAY_PID_FILE}")" 2>/dev/null; then
+  echo "relay process already exists: $(cat "${RELAY_PID_FILE}")" >&2
+  exit 1
+fi
+
+listener_pid="$(lsof -nP -tiTCP:"${RELAY_PORT}" -sTCP:LISTEN 2>/dev/null | head -1 || true)"
+if [[ -n "${listener_pid}" ]]; then
+  echo "port ${RELAY_PORT} is already held by pid ${listener_pid}" >&2
+  exit 1
+fi
+
+mkdir -p "${RELAY_DATA}" "${WORK_DIR}/keys"
+OWNER_SK_FILE="${WORK_DIR}/keys/relay-owner.nsec"
+if [[ ! -s "${OWNER_SK_FILE}" ]]; then
+  nak key generate >"${OWNER_SK_FILE}"
+  chmod 600 "${OWNER_SK_FILE}"
+fi
+OWNER_PK="$(nak key public "$(cat "${OWNER_SK_FILE}")")"
+
+if [[ ! -x "${CROISSANT_DIR}/croissant" || "${MOSAICO_DEV_FORCE_RELAY_BUILD:-0}" == "1" ]]; then
+  need go
+  (cd "${CROISSANT_DIR}" && CGO_ENABLED=1 go build -o ./croissant)
+fi
+
+(
+  cd "${CROISSANT_DIR}"
+  exec nohup env PORT="${RELAY_PORT}" \
+    HOST="${RELAY_BIND_HOST}" \
+    DATAPATH="${RELAY_DATA}" \
+    OWNER_PUBLIC_KEY="${OWNER_PK}" \
+    DOMAIN= \
+    ./croissant
+) >"${RELAY_LOG}" 2>&1 &
+echo "$!" >"${RELAY_PID_FILE}"
+
+if ! wait_for_relay "${RELAY_HTTP}" "${MOSAICO_DEV_RELAY_READY_TIMEOUT:-20}"; then
+  stop_relay
+  tail -80 "${RELAY_LOG}" >&2 || true
+  echo "relay did not become ready: ${RELAY_HTTP}" >&2
+  exit 1
+fi
+
+{
+  quote_env RUN_ID "${RUN_ID}"
+  quote_env REPO_ROOT "${REPO_ROOT}"
+  quote_env CROISSANT_DIR "${CROISSANT_DIR}"
+  quote_env WORK_DIR "${WORK_DIR}"
+  quote_env RELAY_BIND_HOST "${RELAY_BIND_HOST}"
+  quote_env RELAY_HOST "${RELAY_HOST}"
+  quote_env RELAY_PORT "${RELAY_PORT}"
+  quote_env RELAY_WS "${RELAY_WS}"
+  quote_env RELAY_HTTP "${RELAY_HTTP}"
+  quote_env RELAY_DATA "${RELAY_DATA}"
+  quote_env RELAY_PID_FILE "${RELAY_PID_FILE}"
+  quote_env RELAY_LOG "${RELAY_LOG}"
+  quote_env OWNER_PUBLIC_KEY "${OWNER_PK}"
+  quote_env OWNER_SK_FILE "${OWNER_SK_FILE}"
+} >"${ENV_FILE}"
+
+echo "run_id=${RUN_ID}"
+echo "env=${ENV_FILE}"
+echo "relay=${RELAY_WS}"
+echo "relay_pid=$(cat "${RELAY_PID_FILE}")"
+echo "owner_pubkey=${OWNER_PK:0:12}"

@@ -2,11 +2,11 @@ use super::log_path;
 use anyhow::{Context, Result};
 use std::path::PathBuf;
 
-/// Fork a detached `tenex-edge daemon`: own session (`setsid` via
+/// Fork a detached `mosaico daemon`: own session (`setsid` via
 /// `process_group(0)`), stdio → daemon.log, survives the parent exiting.
 ///
 /// The binary is `current_exe()` so an upgraded binary spawns its own daemon
-/// (the basis of the version-skew re-exec). `$TENEX_EDGE_BIN` overrides it —
+/// (the basis of the version-skew re-exec). `$MOSAICO_BIN` overrides it —
 /// used by tests (whose `current_exe()` is the test harness) and as an escape
 /// hatch.
 ///
@@ -15,7 +15,7 @@ use std::path::PathBuf;
 /// terminal/session) so the caller can `try_wait()` for a fast crash instead
 /// of blindly polling the socket for the full startup timeout.
 pub(super) fn spawn_detached_daemon() -> Result<std::process::Child> {
-    let exe = match std::env::var_os("TENEX_EDGE_BIN") {
+    let exe = match std::env::var_os("MOSAICO_BIN") {
         Some(p) => PathBuf::from(p),
         None => std::env::current_exe().context("locating own executable")?,
     };

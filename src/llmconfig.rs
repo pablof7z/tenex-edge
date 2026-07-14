@@ -1,5 +1,5 @@
-//! Resolve a TENEX **role** (e.g. `edge-distillation`) to a concrete model +
-//! credentials, reading the EXISTING TENEX config format from `~/.tenex-edge`:
+//! Resolve a TENEX **role** (e.g. `mosaico-distillation`) to a concrete model +
+//! credentials, reading the EXISTING TENEX config format from `~/.mosaico`:
 //!
 //!   - `providers.json`: `{ "providers": { "<provider>": { "apiKey": ... } } }`
 //!     where for `ollama` the `apiKey` field actually holds the **base URL**.
@@ -30,9 +30,9 @@ pub struct ResolvedModel {
     pub base_url: String,
 }
 
-/// Resolve a role using the default `edge_home()`.
+/// Resolve a role using the default `mosaico_home()`.
 pub fn resolve_role(role: &str) -> Option<ResolvedModel> {
-    resolve_role_in(&crate::config::edge_home(), role)
+    resolve_role_in(&crate::config::mosaico_home(), role)
 }
 
 /// Pure core: resolve `role` against the `providers.json` + `llms.json` found in
@@ -114,13 +114,13 @@ mod tests {
             "ollama/deepseek-v4-flash:cloud": { "model": "deepseek-v4-flash:cloud", "provider": "ollama" },
             "anthropic-conf": { "model": "claude", "provider": "anthropic" }
         },
-        "edge-distillation": "openrouter/openai/gpt-4o-mini"
+        "mosaico-distillation": "openrouter/openai/gpt-4o-mini"
     }"#;
 
     #[test]
     fn resolves_openrouter_role() {
         let d = write_dir(PROVIDERS, LLMS);
-        let r = resolve_role_in(d.path(), "edge-distillation").unwrap();
+        let r = resolve_role_in(d.path(), "mosaico-distillation").unwrap();
         assert_eq!(r.provider, "openrouter");
         assert_eq!(r.model, "openai/gpt-4o-mini");
         assert_eq!(r.api_key, "sk-or-test");
@@ -133,10 +133,10 @@ mod tests {
             "configurations": {
                 "ollama/deepseek-v4-flash:cloud": { "model": "deepseek-v4-flash:cloud", "provider": "ollama" }
             },
-            "edge-distillation": "ollama/deepseek-v4-flash:cloud"
+            "mosaico-distillation": "ollama/deepseek-v4-flash:cloud"
         }"#;
         let d = write_dir(PROVIDERS, llms);
-        let r = resolve_role_in(d.path(), "edge-distillation").unwrap();
+        let r = resolve_role_in(d.path(), "mosaico-distillation").unwrap();
         assert_eq!(r.provider, "ollama");
         assert_eq!(r.model, "deepseek-v4-flash:cloud");
         assert_eq!(r.base_url, "http://localhost:11434");
@@ -147,10 +147,10 @@ mod tests {
     fn unsupported_provider_resolves_none() {
         let llms = r#"{
             "configurations": { "anthropic-conf": { "model": "claude", "provider": "anthropic" } },
-            "edge-distillation": "anthropic-conf"
+            "mosaico-distillation": "anthropic-conf"
         }"#;
         let d = write_dir(PROVIDERS, llms);
-        assert!(resolve_role_in(d.path(), "edge-distillation").is_none());
+        assert!(resolve_role_in(d.path(), "mosaico-distillation").is_none());
     }
 
     #[test]
@@ -160,11 +160,11 @@ mod tests {
             "configurations": {
                 "claude-haiku": { "model": "claude-haiku-4-5-20251001", "provider": "claude-cli" }
             },
-            "edge-distillation": "claude-haiku"
+            "mosaico-distillation": "claude-haiku"
         }"#;
         let providers = r#"{ "providers": {} }"#;
         let d = write_dir(providers, llms);
-        let r = resolve_role_in(d.path(), "edge-distillation").unwrap();
+        let r = resolve_role_in(d.path(), "mosaico-distillation").unwrap();
         assert_eq!(r.provider, "claude-cli");
         assert_eq!(r.model, "claude-haiku-4-5-20251001");
         assert_eq!(r.api_key, "");
@@ -184,7 +184,7 @@ mod tests {
         let providers =
             r#"{ "providers": { "openrouter": { "apiKey": ["sk-or-A", "sk-or-B"] } } }"#;
         let d = write_dir(providers, LLMS);
-        let r = resolve_role_in(d.path(), "edge-distillation").unwrap();
+        let r = resolve_role_in(d.path(), "mosaico-distillation").unwrap();
         assert_eq!(r.api_key, "sk-or-A");
     }
 }

@@ -73,17 +73,7 @@ pub struct MaterializationOutcome {
 /// Tail is emitted for every decoded domain event. `wake_mentions` is set only
 /// when a chat message is newly routed to a live local session.
 ///
-/// `_hosted` and `_now` are retained for call-site compatibility: caches now key
-/// off the event's own `created_at` (NIP-01 newest-wins) and read identically for
-/// local and remote agents, so neither the hosted set nor wall-clock `now` gate
-/// materialization.
-pub fn materialize(
-    env: &RawEnvelope,
-    _hosted: &[String],
-    _now: u64,
-    _provider_instance: &str,
-    store: &crate::state::Store,
-) -> MaterializationOutcome {
+pub fn materialize(env: &RawEnvelope, store: &crate::state::Store) -> MaterializationOutcome {
     use crate::domain::DomainEvent;
     use crate::fabric::nip29::materializer::Nip29Materializer;
     use crate::fabric::nip29::wire::Nip29WireCodec;
@@ -227,15 +217,7 @@ mod tests {
             "heads up: I pushed the parser fix",
             vec![make_tag(&["h", "mychannel"])],
         );
-        let ambient_ts = ambient.created_at.as_secs();
-        let hosted = vec![sender_pk.clone(), receiver_pk.clone()];
-        let outcome = materialize(
-            &RawEnvelope::Nostr(ambient.clone()),
-            &hosted,
-            ambient_ts,
-            "test-pi",
-            &store,
-        );
+        let outcome = materialize(&RawEnvelope::Nostr(ambient.clone()), &store);
         assert!(
             !outcome.wake_mentions,
             "ambient message must not wake inbox"
@@ -256,14 +238,7 @@ mod tests {
                 make_tag(&["p", &receiver_pk]),
             ],
         );
-        let mention_ts = mention.created_at.as_secs();
-        let outcome2 = materialize(
-            &RawEnvelope::Nostr(mention.clone()),
-            &hosted,
-            mention_ts,
-            "test-pi",
-            &store,
-        );
+        let outcome2 = materialize(&RawEnvelope::Nostr(mention.clone()), &store);
         assert!(outcome2.wake_mentions, "mention should wake inbox");
         let receiver_rows = store.peek_pending_for_pubkey(&receiver_pk).unwrap();
         assert_eq!(receiver_rows.len(), 1);
@@ -288,7 +263,7 @@ mod tests {
             vec![make_tag(&["d", "proj"]), make_tag(&["name", "Channel"])],
         );
         let env = RawEnvelope::Nostr(event);
-        let outcome = materialize(&env, &[], 0, "test-pi", &store);
+        let outcome = materialize(&env, &store);
         assert!(outcome.tail.is_none(), "relay-authored state has no tail");
         assert_eq!(store.get_channel("proj").unwrap().unwrap().name, "Channel");
     }
@@ -330,14 +305,7 @@ mod tests {
             "👍",
             vec![make_tag(&["e", &target_id]), make_tag(&["h", "c"])],
         );
-        let ts = reaction.created_at.as_secs();
-        let outcome = materialize(
-            &RawEnvelope::Nostr(reaction.clone()),
-            &[],
-            ts,
-            "test-pi",
-            &store,
-        );
+        let outcome = materialize(&RawEnvelope::Nostr(reaction.clone()), &store);
 
         // Passive: no tail, no wake, no inbox row, no recipient edge.
         assert!(outcome.tail.is_none(), "reaction emits no tail");
@@ -356,7 +324,7 @@ mod tests {
         assert_eq!(rows[0].target_body, "pushed the fix");
 
         // Replaying the same event is idempotent.
-        materialize(&RawEnvelope::Nostr(reaction), &[], ts, "test-pi", &store);
+        materialize(&RawEnvelope::Nostr(reaction), &store);
         let rows = store
             .reactions_on_authored_after(&author_pk, 0, 10)
             .unwrap();
@@ -370,7 +338,7 @@ mod tests {
         // kind:7 (reaction) is not decoded by the codec but must still be cached.
         let event = build_event(&agent, 7, "+", vec![make_tag(&["h", "proj"])]);
         let env = RawEnvelope::Nostr(event.clone());
-        materialize(&env, &[], 0, "test-pi", &store);
+        materialize(&env, &store);
         assert!(store.has_event(&event.id.to_hex()).unwrap());
     }
 }

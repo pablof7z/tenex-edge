@@ -50,7 +50,7 @@ mod tests {
 
     #[test]
     fn plain_render_does_not_emit_terminal_escapes() {
-        assert_eq!(paint_workspace("tenex-edge", "root", false), "tenex-edge");
-        assert!(paint_workspace("tenex-edge", "root", true).contains("\u{1b}[38;5;"));
+        assert_eq!(paint_workspace("mosaico", "root", false), "mosaico");
+        assert!(paint_workspace("mosaico", "root", true).contains("\u{1b}[38;5;"));
     }
 }

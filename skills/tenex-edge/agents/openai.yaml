@@ -1,4 +1,0 @@
-interface:
-  display_name: "Tenex Edge"
-  short_description: "Self-organizing agent fabric coordination"
-  default_prompt: "Use $tenex-edge to understand the surrounding fabric and proactively coordinate agents, channels, workspaces, and public work status."

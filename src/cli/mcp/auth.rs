@@ -18,7 +18,7 @@ use super::auth_support::{
 use super::auth_types::{validate_token_request, AuthCode, LoginChallenge};
 pub(super) use super::auth_types::{AuthorizeForm, AuthorizeParams, TokenForm};
 
-const SCOPES: &[&str] = &["tenex:read", "tenex:write"];
+const SCOPES: &[&str] = &["mosaico:read", "mosaico:write"];
 
 #[derive(Clone)]
 pub(super) struct AuthState {
@@ -44,7 +44,7 @@ impl AuthState {
         let cfg = crate::config::Config::load()?;
         let secret = match cfg.management_nsec().cloned() {
             Some(secret) => secret,
-            None => crate::config::ensure_tenex_private_key()?,
+            None => crate::config::ensure_mosaico_private_key()?,
         };
         Ok(Self {
             public_url: public_url.trim_end_matches('/').to_string(),
@@ -60,7 +60,7 @@ impl AuthState {
             "resource": self.public_url,
             "authorization_servers": [self.public_url],
             "scopes_supported": SCOPES,
-            "resource_documentation": "https://github.com/pablof7z/tenex-edge",
+            "resource_documentation": "https://github.com/pablof7z/mosaico",
         })
     }
 

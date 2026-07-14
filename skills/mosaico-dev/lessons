@@ -1,0 +1,170 @@
+# mosaico-dev live lab lessons
+
+## `mosaico channel init` is required before `mosaico launch`
+
+`mosaico launch <agent> -- <args>` fails fast with:
+
+```
+mosaico: no known workspace in /workspace; run `mosaico channel init` or
+git init first, or pass `--workspace <slug>`
+```
+
+even though `/workspace` (the mounted `REPO_ROOT`) is already a git repo. The
+workspace registry (`~/.mosaico/workspaces.json`, inside container/profile
+state) is separate from git-repo detection. Run once per profile before the
+first `launch` in a lab:
+
+```bash
+bash containers/mosaico/run --profile claude mosaico channel init
+```
+
+This registers the directory's basename (e.g. `workspace` for a worktree
+checked out as `.../mosaico-trellis` mounted at `/workspace`) as the
+workspace slug and creates the `workspace` channel. It only touches
+profile-local/container state, not host `~/.mosaico`. The main skill and
+live-lab workflow include this step before both PTY and structured launches.
+
+## Running a second container against the same profile WHILE a launch-mode agent is alive breaks that agent's daemon connection
+
+The troubleshooting reference already warns "avoid running two containers
+against the same profile at once," but it undersells the blast radius. In
+this run, launching `claude` via `launch-agent ... launch claude
+--model haiku` produced a healthy session UI (`claude@claude workspace workspace
+[idle]`, no missing-session warning). Running
+`bash containers/mosaico/run --profile claude mosaico explain event:<id>`
+in a **second** container against the same profile while that PTY session
+was still up:
+
+- succeeded and printed a correct receipt, BUT
+- started its own daemon in its own container/VM bound to the same
+  bind-mounted socket path, logged
+  `removing locally managed offline agent from channel ... reason=startup-stale-pid`,
+  and evicted the live agent's pubkey from the channel.
+- The live PTY session's statusline flipped to `[mosaico: down]` and its next
+  prompt hung with `UserPromptSubmit hook timed out after 30s` — the session
+  was unrecoverable; it had to be killed (`container stop/rm`, or choose Kill
+  from `mosaico sessions`) and relaunched fresh.
+
+Lesson: treat "same-profile RPC" as a hard stop, not a soft caution. Before
+any `mosaico explain ...` / `mosaico channel ...` / other one-shot
+`mosaico` subcommand against a profile, first stop that profile's
+launch-mode agent (`container stop <name>`, or choose Kill in `mosaico sessions`),
+remove the stale `daemon.sock` if needed), THEN run the diagnostic command. Only `nak`
+against the relay directly (no container involved) is safe to run
+concurrently with a live agent.
+
+## The 30315 status content/title stays empty for short turns — distill only fires ~30s into a turn
+
+`src/distill.rs` documents this precisely: "The engine decides *when* to
+distill (30s into a turn, then periodically)." Turns driven by trivial
+prompts (e.g. "run mosaico my session") finish in 5-10 seconds — well under the
+threshold — so the published kind:30315 always has `title=""` and empty
+`content` even though `status` correctly flips `idle`→`busy`→`idle`. To
+observe a real distill attempt you must keep the turn's wall-clock duration
+above ~30s. Backgrounding a long shell command (e.g. "sleep 40 in the
+background") does NOT work — Claude Code ends the turn as soon as it hands
+control back to the user, even if a background job is still running. What
+worked: asking the agent to run several short foreground commands
+sequentially (`sleep 8` x4, ~32-50s total foreground wall time), which kept
+the turn open long enough to cross the 30s distill threshold (confirmed via
+`.container-state/<profile>/mosaico/logs/distill.log`).
+
+## The `mosaico-distillation` LLM role can be misconfigured to an unreachable local endpoint, and `explain` correctly reports "not distill-driven" for a failed distill
+
+In this host's `~/.mosaico/llms.json` (projected read-only into the
+container at `/host-auth/mosaico/llms.json`), the `mosaico-distillation`
+role resolves to `ollama/deepseek-v4-flash:cloud`, which attempts
+`http://localhost:8081/api/chat` — unreachable from inside the container
+(the reachable Ollama endpoint is `OLLAMA_HOST=http://192.168.64.1:11434`,
+used successfully by other roles/doctor checks). Result:
+`distill error: ollama/deepseek-v4-flash:cloud prompt failed: ... error
+sending request for url (http://localhost:8081/api/chat)`, followed by a
+graceful `falling back to nudge-to-keep`. `mosaico explain event:<id>` on
+the resulting status publish correctly prints `LLM inputs: (none — this
+publish was not distill-driven)` — this matches `src/distill.rs`'s
+`distill_session`, which only produces a `DistillCapture` (and therefore a
+queryable `llm_calls` row) on a *successful* model round-trip; an `Err` path
+falls through to nudge-to-keep with `capture = None`. So `explain` is
+behaving correctly here — the gap is host LLM-role config, not the
+reconciler/explain code.
+
+## `scripts/cleanup-lab` now relies on cidfiles and the relay PID
+
+The cleanup helper no longer scans external session names. It reads the
+container cidfiles under the lab work directory, stops those containers when the
+container runtime is available, and kills the relay PID recorded in `lab.env`.
+For a stuck launch-mode PTY, open the session picker with the same profile/home
+context and choose Kill:
+
+```bash
+bash containers/mosaico/run --profile claude mosaico sessions
+```
+
+### How the LLM-inputs money shot was actually produced (working recipe)
+
+The `$MOSAICO_DISTILL_CMD` override (checked before the `mosaico-distillation`
+role, `src/distill.rs::distill_session` step (a)) pipes the transcript slice to
+any external command's stdin and parses `TITLE:`/`NOW:` lines from its stdout.
+The capture it records has `provider="command"`, `model=<the command string>`,
+and — importantly — `system_prompt = SESSION_SYSTEM_PROMPT` (the crate constant,
+`capture()` hardcodes it regardless of override), so `mosaico explain` still
+shows the canonical distiller system prompt. Recipe that worked end-to-end:
+
+1. Wrapper script dropped into profile home (bind-mounted at `/state/home`,
+   preserved across `write-container-profiles` Mosaico-state resets):
+   `.container-state/claude/home/distill-claude.sh` (chmod +x), body:
+   ```sh
+   #!/bin/sh
+   exec claude -p --model haiku --no-session-persistence --disallowedTools '*' \
+     --system-prompt '<two-line TITLE:/NOW: instruction>'
+   ```
+   The transcript arrives on stdin (claude -p reads the prompt from stdin);
+   stdout is the two labelled lines. `claude` lives at `/usr/local/bin/claude`,
+   which IS on the daemon's restricted PATH, so `Command::new("claude")` /
+   `sh -c` both resolve.
+2. Passthrough: `containers/mosaico/run`'s env allow-list only forwarded
+   `ANTHROPIC_*` / `CLAUDE_CODE_*`. Added `MOSAICO_DISTILL_CMD` to that loop
+   (one line) so a host-set value reaches the container daemon's env.
+3. Inject at launch: pty swallows the current shell env when a server already
+   exists, so set it explicitly with `pty new-session -e`:
+   ```bash
+   pty new-session -d -s <sess> -e MOSAICO_DISTILL_CMD='sh /state/home/distill-claude.sh' \
+     "cd <repo> && env MOSAICO_CONTAINER_NAME=<sess> MOSAICO_CONTAINER_CIDFILE=<cid> \
+      bash containers/mosaico/run --profile claude mosaico launch claude -- --model haiku"
+   ```
+4. Drive a >30s turn with real content, e.g. "Read src/distill.rs,
+   src/explain.rs, src/instrument.rs and one-line each, then run 'sleep 8 &&
+   echo tN' four times sequentially, then say finished." The reads give the
+   model real TITLE/NOW material; the four foreground sleeps guarantee the
+   turn crosses the 30s distill threshold.
+5. `distill.log` then shows `using MOSAICO_DISTILL_CMD override` with NO
+   `distill error` / `falling back` line, and the 30315 gains
+   `title="Build transcript distillation and query system"` +
+   `content="Reading source code and executing commands"`.
+6. STOP the agent (same-profile RPC lesson), then:
+   - `mosaico explain session:<sid>` → latest llm_call + the status
+     receipt(s) sharing its `window_hash` (the receipt's `artifact_ref` is the
+     exact distill-driven 30315 id).
+   - `mosaico explain event:<that-30315-id>` → the join, headed
+     `LLM inputs — what was fed to the model so it said this:` with
+     provider/model, window_hash, parsed title/activity, the full system
+     prompt, the fed transcript slice, and the raw `TITLE:`/`NOW:` response.
+   - `mosaico explain llm:<row-id>` → the same call by row id (reverse
+     join to its status receipts).
+
+Two gotchas seen: (i) the override's `CommandDistiller::run_all` uses a
+*blocking* `std::process::Command`; while the `claude -p` distiller subprocess
+runs (cold start can take ~1-2 min end to end here), the statusline briefly
+reads `[mosaico: down]` because the blocking call ties up the async worker — it
+recovers on completion and is NOT a failure. (ii) Only the `on_distill`
+publish (the one whose title/activity changed) carries `window_hash` in its
+receipt; later TTL heartbeat republishes carry the same title but drive with
+`None` window_hash, so `explain event:` on those shows "not distill-driven".
+Use the receipt list from `explain session:` to pick the right event id.
+
+The durable fix for the underlying gap is still worthwhile: either repair the
+host `mosaico-distillation` role to point at a reachable model (it currently
+resolves to `ollama/deepseek-v4-flash:cloud` → `http://localhost:8081`, which
+is unreachable in-container), or keep `MOSAICO_DISTILL_CMD` in the run
+allow-list (done in this worktree) so labs can force a working distiller
+without touching host config.

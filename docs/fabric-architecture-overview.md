@@ -1,4 +1,4 @@
-# tenex-edge — Fabric Architecture (overview)
+# mosaico — Fabric Architecture (overview)
 
 > The one-page version. For the schema, capabilities, and migration plan, see
 > [`fabric-architecture.md`](./fabric-architecture.md).
@@ -8,12 +8,12 @@
 **Everything is read from a single local store. How the data got there is
 irrelevant to anyone reading it.**
 
-That's the whole design. A *fabric* — legacy-tag notes, NIP-29 groups, MLS, a future
-a2a, whatever — is a detail that lives on the write side. Readers never see it.
+That's the whole design. The current *fabric* is NIP-29 groups over Nostr. A
+future provider may use another protocol, but readers never see that choice.
 
 ```mermaid
 flowchart LR
-    FABRICS["fabrics<br/>legacy-tag · nip29 · mls · …"]
+    FABRICS["fabric<br/>NIP-29 over Nostr"]
     PROVIDER["Provider<br/>(write side)"]
     STORE[("local store")]
     READERS["readers<br/>CLI · hooks · adapters"]
@@ -45,8 +45,9 @@ touch a Provider).
 
 Three things fall out of it, and they're the reason it's worth the seam:
 
-1. **Fabrics mix freely.** One project on NIP-29, another on legacy-tag — same tables.
-   A reader can't tell which is which, and shouldn't.
+1. **The read contract is provider-independent.** Today every workspace uses
+   NIP-29. A future provider can populate the same tables without changing any
+   reader.
 2. **Every per-fabric quirk hides behind the write side.** Who counts as a
    "member," whether a description is authoritative or local, whether the project
    list is enumerated or merely *observed* — all of that is *how the Provider

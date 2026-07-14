@@ -11,70 +11,70 @@ fn parse_err(args: &[&str]) -> clap::Error {
 
 #[test]
 fn removed_tail_command_stays_unavailable() {
-    let err = parse_err(&["tenex-edge", "tail", "--live"]);
+    let err = parse_err(&["mosaico", "tail", "--live"]);
 
     assert_eq!(err.kind(), ErrorKind::InvalidSubcommand);
 }
 
 #[test]
 fn removed_chat_command_stays_unavailable() {
-    let err = parse_err(&["tenex-edge", "chat", "read"]);
+    let err = parse_err(&["mosaico", "chat", "read"]);
 
     assert_eq!(err.kind(), ErrorKind::InvalidSubcommand);
 }
 
 #[test]
 fn removed_publish_command_stays_unavailable() {
-    let err = parse_err(&["tenex-edge", "publish", "--title", "T"]);
+    let err = parse_err(&["mosaico", "publish", "--title", "T"]);
 
     assert_eq!(err.kind(), ErrorKind::InvalidSubcommand);
 }
 
 #[test]
 fn duplicate_top_level_send_surface_stays_unavailable() {
-    let err = parse_err(&["tenex-edge", "send", "hello"]);
+    let err = parse_err(&["mosaico", "send", "hello"]);
 
     assert_eq!(err.kind(), ErrorKind::InvalidSubcommand);
 }
 
 #[test]
 fn removed_project_command_stays_unavailable() {
-    let err = parse_err(&["tenex-edge", "project", "list"]);
+    let err = parse_err(&["mosaico", "project", "list"]);
 
     assert_eq!(err.kind(), ErrorKind::InvalidSubcommand);
 }
 
 #[test]
 fn removed_agent_command_stays_unavailable() {
-    let err = parse_err(&["tenex-edge", "agent", "list"]);
+    let err = parse_err(&["mosaico", "agent", "list"]);
 
     assert_eq!(err.kind(), ErrorKind::InvalidSubcommand);
 }
 
 #[test]
 fn removed_config_command_stays_unavailable() {
-    let err = parse_err(&["tenex-edge", "config", "providers"]);
+    let err = parse_err(&["mosaico", "config", "providers"]);
 
     assert_eq!(err.kind(), ErrorKind::InvalidSubcommand);
 }
 
 #[test]
 fn removed_session_command_stays_unavailable() {
-    let err = parse_err(&["tenex-edge", "session", "end", "--self"]);
+    let err = parse_err(&["mosaico", "session", "end", "--self"]);
 
     assert_eq!(err.kind(), ErrorKind::InvalidSubcommand);
 }
 
 #[test]
 fn removed_channels_alias_stays_unavailable() {
-    let err = parse_err(&["tenex-edge", "channels", "list"]);
+    let err = parse_err(&["mosaico", "channels", "list"]);
 
     assert_eq!(err.kind(), ErrorKind::InvalidSubcommand);
 }
 
 #[test]
 fn daemon_stop_parses() {
-    let cli = Cli::try_parse_from(["tenex-edge", "daemon", "stop"]).unwrap();
+    let cli = Cli::try_parse_from(["mosaico", "daemon", "stop"]).unwrap();
 
     match cli.cmd {
         Cmd::Daemon(args) => assert!(matches!(args.action, Some(DaemonAction::Stop))),
@@ -84,7 +84,7 @@ fn daemon_stop_parses() {
 
 #[test]
 fn daemon_restart_parses() {
-    let cli = Cli::try_parse_from(["tenex-edge", "daemon", "restart"]).unwrap();
+    let cli = Cli::try_parse_from(["mosaico", "daemon", "restart"]).unwrap();
 
     match cli.cmd {
         Cmd::Daemon(args) => assert!(matches!(args.action, Some(DaemonAction::Restart))),
@@ -94,7 +94,7 @@ fn daemon_restart_parses() {
 
 #[test]
 fn session_end_self_parses() {
-    let cli = Cli::try_parse_from(["tenex-edge", "my", "session", "end", "--self"]).unwrap();
+    let cli = Cli::try_parse_from(["mosaico", "my", "session", "end", "--self"]).unwrap();
     match cli.cmd {
         Cmd::My {
             action:
@@ -111,7 +111,7 @@ fn session_end_self_parses() {
 
 #[test]
 fn session_kill_self_parses() {
-    let cli = Cli::try_parse_from(["tenex-edge", "my", "session", "kill", "--self"]).unwrap();
+    let cli = Cli::try_parse_from(["mosaico", "my", "session", "kill", "--self"]).unwrap();
     match cli.cmd {
         Cmd::My {
             action:
@@ -127,21 +127,21 @@ fn session_kill_self_parses() {
 
 #[test]
 fn session_kill_without_self_is_rejected() {
-    let err = parse_err(&["tenex-edge", "my", "session", "kill"]);
+    let err = parse_err(&["mosaico", "my", "session", "kill"]);
 
     assert_eq!(err.kind(), ErrorKind::MissingRequiredArgument);
 }
 
 #[test]
 fn session_kill_rejects_positional_target() {
-    let err = parse_err(&["tenex-edge", "my", "session", "kill", "--self", "te-123"]);
+    let err = parse_err(&["mosaico", "my", "session", "kill", "--self", "mosaico-123"]);
 
     assert_eq!(err.kind(), ErrorKind::UnknownArgument);
 }
 
 #[test]
 fn session_kill_rejects_positional_target_without_self() {
-    let err = parse_err(&["tenex-edge", "my", "session", "kill", "te-123"]);
+    let err = parse_err(&["mosaico", "my", "session", "kill", "mosaico-123"]);
 
     assert!(matches!(
         err.kind(),
@@ -151,8 +151,7 @@ fn session_kill_rejects_positional_target_without_self() {
 
 #[test]
 fn session_pty_wrap_me_self_parses() {
-    let cli =
-        Cli::try_parse_from(["tenex-edge", "my", "session", "pty-wrap-me", "--self"]).unwrap();
+    let cli = Cli::try_parse_from(["mosaico", "my", "session", "pty-wrap-me", "--self"]).unwrap();
     match cli.cmd {
         Cmd::My {
             action:
@@ -168,7 +167,7 @@ fn session_pty_wrap_me_self_parses() {
 
 #[test]
 fn session_pty_wrap_me_requires_self() {
-    let err = parse_err(&["tenex-edge", "my", "session", "pty-wrap-me"]);
+    let err = parse_err(&["mosaico", "my", "session", "pty-wrap-me"]);
 
     assert_eq!(err.kind(), ErrorKind::MissingRequiredArgument);
 }
@@ -176,7 +175,7 @@ fn session_pty_wrap_me_requires_self() {
 #[test]
 fn session_pty_wrap_me_rejects_positional_target() {
     let err = parse_err(&[
-        "tenex-edge",
+        "mosaico",
         "my",
         "session",
         "pty-wrap-me",
@@ -189,7 +188,7 @@ fn session_pty_wrap_me_rejects_positional_target() {
 
 #[test]
 fn session_pty_wrap_me_rejects_positional_target_without_self() {
-    let err = parse_err(&["tenex-edge", "my", "session", "pty-wrap-me", "te-123"]);
+    let err = parse_err(&["mosaico", "my", "session", "pty-wrap-me", "mosaico-123"]);
 
     assert!(matches!(
         err.kind(),
@@ -199,14 +198,14 @@ fn session_pty_wrap_me_rejects_positional_target_without_self() {
 
 #[test]
 fn mgmt_config_parses() {
-    let cli = Cli::try_parse_from(["tenex-edge", "mgmt", "config", "providers"]).unwrap();
+    let cli = Cli::try_parse_from(["mosaico", "mgmt", "config", "providers"]).unwrap();
     assert!(matches!(cli.cmd, Cmd::Mgmt { .. }));
 }
 
 #[test]
 fn my_session_status_parses_positional_title() {
     let cli = Cli::try_parse_from([
-        "tenex-edge",
+        "mosaico",
         "my",
         "session",
         "status",
@@ -229,7 +228,7 @@ fn my_session_status_parses_positional_title() {
 
 #[test]
 fn my_session_without_action_parses_as_briefing() {
-    let cli = Cli::try_parse_from(["tenex-edge", "my", "session"]).unwrap();
+    let cli = Cli::try_parse_from(["mosaico", "my", "session"]).unwrap();
     assert!(matches!(
         cli.cmd,
         Cmd::My {
@@ -241,7 +240,7 @@ fn my_session_without_action_parses_as_briefing() {
 #[test]
 fn removed_my_status_stays_unavailable() {
     let err = parse_err(&[
-        "tenex-edge",
+        "mosaico",
         "my",
         "status",
         "--topic",
@@ -253,44 +252,44 @@ fn removed_my_status_stays_unavailable() {
 
 #[test]
 fn removed_agents_command_stays_unavailable() {
-    let err = parse_err(&["tenex-edge", "agents", "list-sessions"]);
+    let err = parse_err(&["mosaico", "agents", "list-sessions"]);
 
     assert_eq!(err.kind(), ErrorKind::InvalidSubcommand);
 }
 
 #[test]
 fn mcp_command_parses() {
-    let cli = Cli::try_parse_from(["tenex-edge", "mcp"]).unwrap();
+    let cli = Cli::try_parse_from(["mosaico", "mcp"]).unwrap();
     assert!(matches!(cli.cmd, Cmd::Mcp(_)));
 }
 
 #[test]
 fn mcp_http_command_parses() {
-    let cli = Cli::try_parse_from(["tenex-edge", "mcp", "--http", "--port", "9000"]).unwrap();
+    let cli = Cli::try_parse_from(["mosaico", "mcp", "--http", "--port", "9000"]).unwrap();
     assert!(matches!(cli.cmd, Cmd::Mcp(_)));
 }
 
 #[test]
 fn sessions_parses() {
-    let cli = Cli::try_parse_from(["tenex-edge", "sessions"]).unwrap();
+    let cli = Cli::try_parse_from(["mosaico", "sessions"]).unwrap();
     assert!(matches!(cli.cmd, Cmd::Sessions));
 }
 
 #[test]
 fn removed_session_and_pty_command_trees_stay_unavailable() {
     assert_eq!(
-        parse_err(&["tenex-edge", "mgmt", "session", "list"]).kind(),
+        parse_err(&["mosaico", "mgmt", "session", "list"]).kind(),
         ErrorKind::InvalidSubcommand
     );
     assert_eq!(
-        parse_err(&["tenex-edge", "pty", "list"]).kind(),
+        parse_err(&["mosaico", "pty", "list"]).kind(),
         ErrorKind::InvalidSubcommand
     );
 }
 
 #[test]
 fn removed_top_level_tui_stays_unavailable() {
-    let err = parse_err(&["tenex-edge", "tui"]);
+    let err = parse_err(&["mosaico", "tui"]);
 
     assert_eq!(err.kind(), ErrorKind::InvalidSubcommand);
 }

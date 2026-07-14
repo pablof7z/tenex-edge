@@ -98,7 +98,7 @@ fn render_channel_read_row(item: &serde_json::Value, use_color: bool) -> String 
     if item["truncated"].as_bool().unwrap_or(false) {
         if let Some(id) = item["event_id"].as_str().filter(|s| !s.is_empty()) {
             text.push_str(&format!(
-                "\n[message truncated; run `tenex-edge channel read --id {id}`]"
+                "\n[message truncated; run `mosaico channel read --id {id}`]"
             ));
         }
     }

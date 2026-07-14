@@ -10,4 +10,4 @@ source_refs:
 
 # host-neutral
 
-Nothing inside tenex-edge knows about any host; hosts integrate from the outside via hooks and a skill. The Rust binary is the only source of truth for injected context; each host integration is a thin adapter piping JSON to tenex-edge.
+Nothing inside mosaico knows about any host; hosts integrate from the outside via hooks and a skill. The Rust binary is the only source of truth for injected context; each host integration is a thin adapter piping JSON to mosaico.

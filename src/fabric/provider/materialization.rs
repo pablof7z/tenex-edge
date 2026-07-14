@@ -5,14 +5,8 @@ use crate::state::Store;
 
 impl Nip29Provider {
     /// Decode one raw envelope and apply all store side-effects.
-    pub fn materialize(
-        &self,
-        env: &RawEnvelope,
-        hosted: &[String],
-        now: u64,
-        store: &Store,
-    ) -> MaterializationOutcome {
-        let outcome = crate::fabric::materialize(env, hosted, now, &self.provider_instance, store);
+    pub fn materialize(&self, env: &RawEnvelope, store: &Store) -> MaterializationOutcome {
+        let outcome = crate::fabric::materialize(env, store);
         if let Some(channel) = roster_snapshot_channel(env) {
             self.readiness.invalidate_channel(channel);
         }

@@ -29,15 +29,15 @@ kill_pidfile() {
 stop_backend() {
   local name="$1"
   kill_pidfile "$(backend_pidfile "$name")" "backend ${name} daemon"
-  local sock; sock="$(backend_edge_home "$name")/daemon.sock"
+  local sock; sock="$(backend_mosaico_home "$name")/daemon.sock"
   # pkill matches the daemon by the socket dir it serves (each home is unique).
-  pkill -f "${TENEX_EDGE_BIN} daemon" 2>/dev/null && true
+  pkill -f "${MOSAICO_BIN} daemon" 2>/dev/null && true
   rm -f "$sock"
 }
 
 stop_pty_supervisors() {
   local pids pid
-  pids="$(ps -axo pid=,command= | awk -v bin="${TENEX_EDGE_BIN}" -v work="${E2E_WORK}" '
+  pids="$(ps -axo pid=,command= | awk -v bin="${MOSAICO_BIN}" -v work="${E2E_WORK}" '
     index($0, bin " __pty-supervisor") && index($0, work) { print $1 }
   ')"
   [[ -n "${pids}" ]] || return 0
@@ -53,11 +53,11 @@ stop_pty_supervisors() {
   done
 }
 
-log "tearing down tenex-edge e2e rig"
+log "tearing down mosaico e2e rig"
 
 stop_pty_supervisors
-stop_backend edge-a
-stop_backend edge-b
+stop_backend mosaico-a
+stop_backend mosaico-b
 kill_pidfile "${RELAY_PIDFILE}" "NIP-29 relay"
 
 # Also reclaim the relay PORT: an orphan relay from a manual launch or a crashed
@@ -75,9 +75,9 @@ if [[ -n "${port_pids}" ]]; then
 fi
 
 # Final sweep: any daemon launched from THIS binary that survived.
-if pgrep -f "${TENEX_EDGE_BIN} daemon" >/dev/null 2>&1; then
+if pgrep -f "${MOSAICO_BIN} daemon" >/dev/null 2>&1; then
   warn "sweeping stray daemon processes"
-  pkill -9 -f "${TENEX_EDGE_BIN} daemon" 2>/dev/null || true
+  pkill -9 -f "${MOSAICO_BIN} daemon" 2>/dev/null || true
 fi
 
 stop_pty_supervisors

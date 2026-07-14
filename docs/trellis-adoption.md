@@ -1,6 +1,6 @@
 # Trellis adoption
 
-tenex-edge derives live resources — relay subscriptions, kind:30315 status,
+mosaico derives live resources — relay subscriptions, kind:30315 status,
 mention delivery, and the injected hook/fabric-context snapshot — from changing state. Those
 derivations and the effects that follow are now owned by
 [Trellis](https://github.com/pablof7z/trellis), a deterministic reconciliation
@@ -14,7 +14,7 @@ engine: state changes go in; effect plans and receipts come out.
 observed facts (the world hands us)
   → a Trellis transaction decides new semantic state
   → Trellis emits resource commands / output frames (plain data)
-  → tenex-edge applies them (sign, publish, subscribe, render)
+  → mosaico applies them (sign, publish, subscribe, render)
   → success/failure re-enters as new observed facts
 ```
 
@@ -50,7 +50,7 @@ direct `set_status` seam were deleted, not left alongside).
 | Hook context | `hook_context/` | derived `FabricView` → materialized output frame | the hand-rolled `turn_start_audit` that drifted from the render, replaced by a receipt that *is* the render's dependency trace; cursor + `now` made explicit inputs (deterministic/replayable) |
 | Delivery | `delivery/` | `DeliveryScanFact` → inject/defer/retry/endpoint-cleanup commands | every p-tag mention with a live PTY injects immediately, including mid-turn; only debounce may schedule a retry, while missing or dead endpoints stay available for hook fallback or cleanup |
 
-## Retrospective instrumentation (`tenex-edge debug explain`)
+## Retrospective instrumentation (`mosaico debug explain`)
 
 Every distill round-trip records an `llm_calls` row (the exact transcript slice,
 system prompt, model, raw response, keyed by a sha256 `window_hash`). Every
@@ -61,10 +61,10 @@ summary, commands, `artifact_ref` = the published event id or inbox event id). T
 Replay capsules live in `trellis_replay_capsules` as versioned
 `DataTransactionScript<InputFact>` JSON captured at the drive seam. Retention is
 bounded to the newest 512 capsules and 16 MiB of serialized script bytes; the
-same off-values used by `TENEX_EDGE_HOOK_CALL_LOG` also disable capsule capture
-unless `TENEX_EDGE_REPLAY_CAPSULES` overrides the gate.
+same off-values used by `MOSAICO_HOOK_CALL_LOG` also disable capsule capture
+unless `MOSAICO_REPLAY_CAPSULES` overrides the gate.
 
-`tenex-edge probe simulate <surface> --fact '<InputFact JSON>'` stages one fact
+`mosaico probe simulate <surface> --fact '<InputFact JSON>'` stages one fact
 against the daemon-held status or subscription graph and calls
 `Transaction::preview()` instead of committing. The returned plan is the resource
 commands and changed labels that would result; the live revision stays unchanged.
@@ -73,10 +73,10 @@ fact/snapshot before applying host effects and blocks the effect if the committe
 plan does not match the previewed plan.
 
 ```
-tenex-edge debug explain event:<30315-id>   # the receipt + the exact LLM inputs behind the activity
-tenex-edge debug explain event:<inbox-id>   # why a mention injected, deferred, or retried
-tenex-edge debug explain hook:<session>[@ts] # why the injected snapshot had this shape
-tenex-edge debug explain llm:<id> | session:<id>[@ts] | txn:<surface>:<id> | sub:<channel>
+mosaico debug explain event:<30315-id>   # the receipt + the exact LLM inputs behind the activity
+mosaico debug explain event:<inbox-id>   # why a mention injected, deferred, or retried
+mosaico debug explain hook:<session>[@ts] # why the injected snapshot had this shape
+mosaico debug explain llm:<id> | session:<id>[@ts] | txn:<surface>:<id> | sub:<channel>
 ```
 
 `--json` for the raw joined record; `--redact` to replace prompt/transcript
@@ -88,8 +88,7 @@ Every reconciler test calls `assert_incremental_equals_full()` after each
 transaction — Trellis's oracle rebuilds all derived state from canonical inputs
 and compares it to the incrementally-maintained state. The hook-context surface
 additionally ships `determinism_and_replay` (same inputs → identical snapshot
-*and* identical receipt) and `equivalence_with_legacy_build_view` (byte-for-byte
-against the pre-Trellis renderer). All of these run under `cargo test --lib`
+and identical receipt) and a canonical-view equivalence test. All of these run under `cargo test --lib`
 (`just test-unit`) — the CI contract — so incremental/full divergence or a
 render regression fails the build.
 

@@ -5,7 +5,7 @@ use std::io::Write as _;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const LOG_SCHEMA: &str = "tenex-edge.hook-call.v1";
+const LOG_SCHEMA: &str = "mosaico.hook-call.v1";
 
 pub(super) struct HookCallLog {
     path: Option<PathBuf>,
@@ -112,29 +112,19 @@ impl HookCallLog {
 }
 
 fn log_path(parsed_json: Option<&Value>) -> Option<PathBuf> {
-    if let Ok(raw) = std::env::var("TENEX_EDGE_HOOK_CALL_LOG") {
+    if let Ok(raw) = std::env::var("MOSAICO_HOOK_CALL_LOG") {
         let trimmed = raw.trim();
         if matches!(trimmed, "" | "0" | "false" | "off" | "none") {
             return None;
         }
         return Some(PathBuf::from(trimmed));
     }
-    let session_id = parsed_json.and_then(|v| {
-        [
-            "session_id",
-            "sessionId",
-            "conversation_id",
-            "conversationId",
-            "thread_id",
-            "threadId",
-        ]
-        .iter()
-        .find_map(|k| v[*k].as_str())
-        .filter(|s| !s.is_empty())
-    });
+    let session_id = parsed_json
+        .and_then(|v| v["session_id"].as_str())
+        .filter(|s| !s.is_empty());
     let dir = match session_id {
-        Some(id) => crate::config::edge_home().join("sessions").join(id),
-        None => crate::config::edge_home()
+        Some(id) => crate::config::mosaico_home().join("sessions").join(id),
+        None => crate::config::mosaico_home()
             .join("sessions")
             .join("_unscoped"),
     };
@@ -311,7 +301,7 @@ mod tests {
             "user-prompt-submit",
             Some("sess-1"),
             serde_json::json!({ "kind": "turn_start" }),
-            Some("<tenex-edge>"),
+            Some("<mosaico>"),
         );
 
         let raw = std::fs::read_to_string(path).unwrap();
@@ -323,7 +313,7 @@ mod tests {
         assert_eq!(rows[0]["detail"]["output"]["emitted"], false);
         assert_eq!(rows[0]["detail"]["audit"]["kind"], "turn_check");
         assert_eq!(rows[1]["note"], "context-audit");
-        assert_eq!(rows[1]["detail"]["output"]["text"], "<tenex-edge>");
+        assert_eq!(rows[1]["detail"]["output"]["text"], "<mosaico>");
         assert_eq!(rows[2]["note"], "context-injection");
     }
 }

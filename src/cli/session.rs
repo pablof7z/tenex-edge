@@ -90,7 +90,7 @@ fn kill(args: SessionKillArgs) -> Result<()> {
     // ever relaxed: `session kill` never accepts a target other than the
     // caller's own session.
     if !args.self_session {
-        bail!("`tenex-edge my session kill` requires `--self`");
+        bail!("`mosaico my session kill` requires `--self`");
     }
     let session = self_session_anchor("kill")?;
     super::session_kill(session)
@@ -102,19 +102,19 @@ fn pty_wrap_me(args: SessionPtyWrapMeArgs) -> Result<()> {
     // constraint is ever relaxed. `pty-wrap-me` never accepts a target other
     // than the caller's own session.
     if !args.self_session {
-        bail!("`tenex-edge my session pty-wrap-me` requires `--self`");
+        bail!("`mosaico my session pty-wrap-me` requires `--self`");
     }
     let session = self_session_anchor("pty-wrap-me")?;
     super::session_pty_wrap_me(session)
 }
 
 fn self_session_anchor(verb: &str) -> Result<String> {
-    std::env::var("TENEX_EDGE_PUBKEY")
+    std::env::var("MOSAICO_PUBKEY")
         .ok()
         .filter(|value| !value.is_empty())
         .ok_or_else(|| {
             anyhow::anyhow!(
-                "`tenex-edge my session {verb} --self` must run inside a managed tenex-edge session"
+                "`mosaico my session {verb} --self` must run inside a managed mosaico session"
             )
         })
 }
@@ -125,7 +125,7 @@ mod tests {
     use crate::test_env::EnvGuard;
 
     fn outside_any_session() -> EnvGuard {
-        EnvGuard::set("TENEX_EDGE_PUBKEY", "")
+        EnvGuard::set("MOSAICO_PUBKEY", "")
     }
 
     #[test]
@@ -146,7 +146,7 @@ mod tests {
 
         assert_eq!(
             err.to_string(),
-            "`tenex-edge my session kill --self` must run inside a managed tenex-edge session"
+            "`mosaico my session kill --self` must run inside a managed mosaico session"
         );
     }
 
@@ -162,7 +162,7 @@ mod tests {
 
         assert_eq!(
             err.to_string(),
-            "`tenex-edge my session end --self` must run inside a managed tenex-edge session"
+            "`mosaico my session end --self` must run inside a managed mosaico session"
         );
     }
 
@@ -197,7 +197,7 @@ mod tests {
 
         assert_eq!(
             err.to_string(),
-            "`tenex-edge my session pty-wrap-me --self` must run inside a managed tenex-edge session"
+            "`mosaico my session pty-wrap-me --self` must run inside a managed mosaico session"
         );
     }
 }

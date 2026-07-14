@@ -19,7 +19,7 @@ impl Nip29Provider {
     ) -> Result<EventId> {
         let mgmt_keys = self
             .management_keys()
-            .ok_or_else(|| anyhow::anyhow!("no signing key (tenexPrivateKey) set"))?;
+            .ok_or_else(|| anyhow::anyhow!("no signing key (mosaicoPrivateKey) set"))?;
         let mut tags = vec![tag(&["d", slug])?, tag(&["hostname", host])?];
         if !use_criteria.trim().is_empty() {
             tags.push(tag(&["use-criteria", use_criteria.trim()])?);

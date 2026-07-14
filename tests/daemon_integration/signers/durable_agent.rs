@@ -124,7 +124,7 @@ fn durable_agent_reuses_key_and_rejects_concurrency() {
         write_agent_config(&home, slug, &original);
 
         let normal_slug = "mode-flip-normal";
-        tenex_edge::identity::load_or_create(home.dir.path(), normal_slug, 1).unwrap();
+        mosaico::identity::load_or_create(home.dir.path(), normal_slug, 1).unwrap();
         let normal = start_session(
             &mut client,
             normal_slug,

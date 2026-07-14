@@ -185,7 +185,7 @@ mod tests {
 
         let store = Store::open_memory().unwrap();
         store
-            .upsert_channel("workspace", "tenex-edge", "", "", 1)
+            .upsert_channel("workspace", "mosaico", "", "", 1)
             .unwrap();
         store
             .upsert_channel("room", "review", "", "workspace", 2)
@@ -242,7 +242,7 @@ mod tests {
     fn projection_includes_live_unbound_supervisor() {
         let store = Store::open_memory().unwrap();
         store
-            .upsert_channel("workspace", "tenex-edge", "", "", 1)
+            .upsert_channel("workspace", "mosaico", "", "", 1)
             .unwrap();
         store.upsert_workspace("workspace", "/repo", 1).unwrap();
         let metadata = crate::pty::LaunchMetadata {
@@ -269,7 +269,7 @@ mod tests {
         assert_eq!(rows[0]["bound"], false);
         assert_eq!(rows[0]["handle"], "codex");
         assert_eq!(rows[0]["endpoint"]["pty_id"], "pty-1");
-        assert_eq!(rows[0]["workspaces"][0]["name"], "tenex-edge");
+        assert_eq!(rows[0]["workspaces"][0]["name"], "mosaico");
         assert_eq!(rows[0]["title"], "codex --yolo");
     }
 }

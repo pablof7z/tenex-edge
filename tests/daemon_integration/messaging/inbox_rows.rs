@@ -1,4 +1,4 @@
-use tenex_edge::state::{InboxRow, Store};
+use mosaico::state::{InboxRow, Store};
 
 pub(super) fn receiver_inbox_rows(store: &Store, receiver_pubkey: &str) -> Vec<InboxRow> {
     let mut rows = store.peek_pending_for_pubkey(receiver_pubkey).unwrap();

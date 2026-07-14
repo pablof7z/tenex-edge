@@ -129,7 +129,7 @@ fn handle_incoming(state: &Arc<DaemonState>, event: &Event) {
     let hosted: Vec<String> = {
         let mut h = state.hosted_pubkeys();
         h.extend(crate::identity::list_local_pubkeys(
-            &crate::config::edge_home(),
+            &crate::config::mosaico_home(),
         ));
         h.extend(state.with_store(|s| s.list_local_session_pubkeys().unwrap_or_default()));
         h.sort_unstable();
@@ -140,7 +140,7 @@ fn handle_incoming(state: &Arc<DaemonState>, event: &Event) {
     // ALWAYS materialize: store writes are idempotent, and re-deliveries are
     // load-bearing — a refreshed subscription replays stored events, which is
     // how a NEW session receives mentions that predate it.
-    let outcome = state.with_store(|s| state.provider.materialize(&env, &hosted, now, s));
+    let outcome = state.with_store(|s| state.provider.materialize(&env, s));
 
     // Proactively resolve the kind:0 of every identity this event just surfaced
     // (author + p-tagged members/mentions), so a peer seen for the first time in a

@@ -26,7 +26,7 @@ pub(crate) struct WhoSnapshot {
     pub(crate) now: u64,
     pub(crate) rows: Vec<WhoRow>,
     pub(crate) other_roots: Vec<OtherRootSummary>,
-    /// Agents tenex-edge has an identity for that can be spawned locally.
+    /// Agents mosaico has an identity for that can be spawned locally.
     #[serde(default)]
     pub(crate) spawnable: Vec<SpawnableRow>,
     /// When the current scope is a per-session room, the work-root channel it is

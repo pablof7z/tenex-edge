@@ -53,13 +53,13 @@ fn opens_one_narrow_req_per_entity_and_is_idempotent() {
     assert_eq!(
         opened,
         set([
-            "te-v2-global-kind-9000",
-            "te-v2-h-room-a",
-            "te-v2-h-room-b",
-            "te-v2-gstate-room-a",
-            "te-v2-gstate-room-b",
-            "te-v2-p-pk-1",
-            "te-v2-p-pk-2",
+            "mosaico-v2-global-kind-9000",
+            "mosaico-v2-h-room-a",
+            "mosaico-v2-h-room-b",
+            "mosaico-v2-gstate-room-a",
+            "mosaico-v2-gstate-room-b",
+            "mosaico-v2-p-pk-1",
+            "mosaico-v2-p-pk-2",
         ])
     );
     for e in &effects {
@@ -90,7 +90,6 @@ fn opens_one_narrow_req_per_entity_and_is_idempotent() {
 fn channel_closes_only_when_last_session_leaves() {
     let mut r = SubscriptionReconciler::new().unwrap();
     let shared_h = sub_key(Space::ChannelH, "shared");
-
     // Two live sessions both joined "shared"; s1 also sits in "solo".
     let (effects, _result) = r
         .sync(&CoverageSnapshot {
@@ -99,11 +98,13 @@ fn channel_closes_only_when_last_session_leaves() {
         })
         .unwrap();
     r.assert_oracle().unwrap();
-
     // "shared" is opened exactly once despite two owners (refcounted, coalesced).
     let opened = open_ids(&effects);
     assert_eq!(
-        opened.iter().filter(|id| *id == "te-v2-h-shared").count(),
+        opened
+            .iter()
+            .filter(|id| *id == "mosaico-v2-h-shared")
+            .count(),
         1,
         "shared #h opened once for two owners: {opened:?}"
     );
@@ -118,7 +119,7 @@ fn channel_closes_only_when_last_session_leaves() {
         .unwrap();
     r.assert_oracle().unwrap();
     assert!(
-        !close_ids(&after_s1).contains(&"te-v2-h-shared".to_string()),
+        !close_ids(&after_s1).contains(&"mosaico-v2-h-shared".to_string()),
         "shared must NOT close while s2 still holds it: {after_s1:?}"
     );
     assert_eq!(r.owner_count(&shared_h), 1, "only s2 still owns shared #h");
@@ -134,8 +135,8 @@ fn channel_closes_only_when_last_session_leaves() {
     r.assert_oracle().unwrap();
     let closed = close_ids(&after_s2);
     assert!(
-        closed.contains(&"te-v2-h-shared".to_string())
-            && closed.contains(&"te-v2-gstate-shared".to_string()),
+        closed.contains(&"mosaico-v2-h-shared".to_string())
+            && closed.contains(&"mosaico-v2-gstate-shared".to_string()),
         "last leave emits a real CLOSE for shared #h and #d: {after_s2:?}"
     );
     assert_eq!(
@@ -220,8 +221,8 @@ fn session_end_scope_close_tears_down_sole_owned_reqs() {
 
     let closed = close_ids(&effects);
     assert!(
-        closed.contains(&"te-v2-h-room".to_string())
-            && closed.contains(&"te-v2-gstate-room".to_string()),
+        closed.contains(&"mosaico-v2-h-room".to_string())
+            && closed.contains(&"mosaico-v2-gstate-room".to_string()),
         "session-end tears down its solely-owned REQs: {effects:?}"
     );
     let why = r
@@ -267,11 +268,10 @@ fn daemon_owned_channel_survives_session_leave() {
         "daemon-owned channel must not close on session leave: {effects:?}"
     );
     assert!(r.covers_channel("managed"));
-
     // Only when the daemon also drops it (e.g. membership revoked) does it close.
     let (final_effects, _r) = r.sync(&CoverageSnapshot::default()).unwrap();
     r.assert_oracle().unwrap();
-    assert!(close_ids(&final_effects).contains(&"te-v2-h-managed".to_string()));
+    assert!(close_ids(&final_effects).contains(&"mosaico-v2-h-managed".to_string()));
     assert!(!r.covers_channel("managed"));
 }
 
@@ -290,7 +290,7 @@ fn archived_channels_are_excluded() {
         .unwrap();
     r.assert_oracle().unwrap();
     let opened = open_ids(&effects);
-    assert!(opened.contains(&"te-v2-h-live".to_string()));
+    assert!(opened.contains(&"mosaico-v2-h-live".to_string()));
     assert!(
         !opened.iter().any(|id| id.contains("old")),
         "archived channel opens nothing: {opened:?}"

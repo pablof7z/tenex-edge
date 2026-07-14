@@ -1,43 +1,43 @@
-//! Persistence for the daemon-owned management key (`tenexPrivateKey`).
+//! Persistence for the daemon-owned management key (`mosaicoPrivateKey`).
 
 use anyhow::{Context, Result};
 use nostr_sdk::prelude::Keys;
 use serde_json::Value;
 use std::path::Path;
 
-pub(crate) fn generate_tenex_private_key() -> String {
+pub(crate) fn generate_mosaico_private_key() -> String {
     Keys::generate().secret_key().to_secret_hex()
 }
 
-pub(crate) fn ensure_tenex_private_key() -> Result<String> {
-    ensure_tenex_private_key_at(&super::config_path(), generate_tenex_private_key)
+pub(crate) fn ensure_mosaico_private_key() -> Result<String> {
+    ensure_mosaico_private_key_at(&super::config_path(), generate_mosaico_private_key)
 }
 
-fn ensure_tenex_private_key_at(path: &Path, generate: impl FnOnce() -> String) -> Result<String> {
+fn ensure_mosaico_private_key_at(path: &Path, generate: impl FnOnce() -> String) -> Result<String> {
     let content =
         std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     let mut root: Value =
         serde_json::from_str(&content).with_context(|| format!("parsing {}", path.display()))?;
-    let (key, changed) = ensure_tenex_private_key_value(&mut root, generate)?;
+    let (key, changed) = ensure_mosaico_private_key_value(&mut root, generate)?;
     if changed {
         write_pretty(path, &root)?;
         tracing::info!(
             config = %path.display(),
-            "generated missing tenexPrivateKey for daemon management"
+            "generated missing mosaicoPrivateKey for daemon management"
         );
     }
     Ok(key)
 }
 
-fn ensure_tenex_private_key_value(
+fn ensure_mosaico_private_key_value(
     root: &mut Value,
     generate: impl FnOnce() -> String,
 ) -> Result<(String, bool)> {
     let object = root
         .as_object_mut()
-        .context("config.json must be a JSON object to add tenexPrivateKey")?;
+        .context("config.json must be a JSON object to add mosaicoPrivateKey")?;
     if let Some(existing) = object
-        .get("tenexPrivateKey")
+        .get("mosaicoPrivateKey")
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|s| !s.is_empty())
@@ -47,7 +47,7 @@ fn ensure_tenex_private_key_value(
 
     let generated = generate();
     object.insert(
-        "tenexPrivateKey".to_string(),
+        "mosaicoPrivateKey".to_string(),
         Value::String(generated.clone()),
     );
     Ok((generated, true))
@@ -75,41 +75,41 @@ mod tests {
         )
         .unwrap();
 
-        let key = ensure_tenex_private_key_at(&path, || "backend-secret".to_string()).unwrap();
+        let key = ensure_mosaico_private_key_at(&path, || "backend-secret".to_string()).unwrap();
 
         assert_eq!(key, "backend-secret");
         let root: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
         assert_eq!(root["version"], 3);
-        assert_eq!(root["tenexPrivateKey"], "backend-secret");
+        assert_eq!(root["mosaicoPrivateKey"], "backend-secret");
     }
 
     #[test]
     fn preserves_existing_key() {
         let mut root = serde_json::json!({
             "backendName": "test",
-            "tenexPrivateKey": "existing-secret",
+            "mosaicoPrivateKey": "existing-secret",
         });
 
         let (key, changed) =
-            ensure_tenex_private_key_value(&mut root, || "new-secret".to_string()).unwrap();
+            ensure_mosaico_private_key_value(&mut root, || "new-secret".to_string()).unwrap();
 
         assert_eq!(key, "existing-secret");
         assert!(!changed);
-        assert_eq!(root["tenexPrivateKey"], "existing-secret");
+        assert_eq!(root["mosaicoPrivateKey"], "existing-secret");
     }
 
     #[test]
     fn replaces_blank_key() {
         let mut root = serde_json::json!({
             "backendName": "test",
-            "tenexPrivateKey": "   ",
+            "mosaicoPrivateKey": "   ",
         });
 
         let (key, changed) =
-            ensure_tenex_private_key_value(&mut root, || "backend-secret".to_string()).unwrap();
+            ensure_mosaico_private_key_value(&mut root, || "backend-secret".to_string()).unwrap();
 
         assert_eq!(key, "backend-secret");
         assert!(changed);
-        assert_eq!(root["tenexPrivateKey"], "backend-secret");
+        assert_eq!(root["mosaicoPrivateKey"], "backend-secret");
     }
 }

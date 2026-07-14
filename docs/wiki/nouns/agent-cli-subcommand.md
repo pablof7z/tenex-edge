@@ -10,7 +10,7 @@ source_refs:
 # agent (CLI subcommand)
 
 Manages the local role configs on THIS machine under
-`<edge_home>/agents/<slug>.json` — the harness/provider/model definitions a
+`<mosaico_home>/agents/<slug>.json` — the harness/provider/model definitions a
 session can be launched with. These files hold no identity key; session keys are
 derived per session from the machine's management key. Channel membership is
 governed separately by the NIP-29 group's member list.

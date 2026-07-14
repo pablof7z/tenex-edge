@@ -13,7 +13,7 @@ fn channel_read_row_prints_truncation_recovery_command() {
     });
     let text = render_channel_read_row(&item, false);
     assert!(text.contains("<writer@laptop> word0 word1..."));
-    assert!(text.contains("tenex-edge channel read --id event-123"));
+    assert!(text.contains("mosaico channel read --id event-123"));
 }
 
 #[test]

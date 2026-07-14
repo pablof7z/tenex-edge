@@ -1,5 +1,4 @@
-//! `<members>` rendering: `@codename-agent` per member, with the legacy (`people`)
-//! and pure (`assemble`) paths proven byte-identical.
+//! `<members>` rendering: `@codename-agent` per member.
 
 use crate::fabric_context::{
     assemble, capture_inputs, render_fabric_context, render_fabric_context_human, render_view_text,
@@ -9,7 +8,7 @@ use crate::state::{Status, Store};
 use super::{input, seed_store, session, session_record, OTHER_PK, SELF_PK};
 
 /// A member with a live status renders under that status's public handle; the
-/// pure and legacy paths agree.
+/// The public session handle wins over the durable profile name.
 #[test]
 fn member_row_shows_session_handle_without_role_for_peer_session() {
     let store = seed_store();

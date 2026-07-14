@@ -1,16 +1,16 @@
 {
   "hooks": {
     "SessionStart": [
-      { "hooks": [{ "type": "command", "command": "tenex-edge harness hook claude-code --type session-start" }] }
+      { "hooks": [{ "type": "command", "command": "mosaico harness hook claude-code --type session-start" }] }
     ],
     "SessionEnd": [
-      { "hooks": [{ "type": "command", "command": "tenex-edge harness hook claude-code --type session-end" }] }
+      { "hooks": [{ "type": "command", "command": "mosaico harness hook claude-code --type session-end" }] }
     ],
     "UserPromptSubmit": [
-      { "hooks": [{ "type": "command", "command": "tenex-edge harness hook claude-code --type user-prompt-submit" }] }
+      { "hooks": [{ "type": "command", "command": "mosaico harness hook claude-code --type user-prompt-submit" }] }
     ],
     "Stop": [
-      { "hooks": [{ "type": "command", "command": "tenex-edge harness hook claude-code --type stop" }] }
+      { "hooks": [{ "type": "command", "command": "mosaico harness hook claude-code --type stop" }] }
     ]
   }
 }

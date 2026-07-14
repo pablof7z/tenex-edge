@@ -1,6 +1,6 @@
-//! First-run bootstrap for `~/.tenex-edge/config.json` — the file the daemon
+//! First-run bootstrap for `~/.mosaico/config.json` — the file the daemon
 //! reads for `whitelistedPubkeys`/`relays`/`backendName` and the daemon-owned
-//! `tenexPrivateKey`. The shared provisioning path also backfills a missing
+//! `mosaicoPrivateKey`. The shared provisioning path also backfills a missing
 //! management key, but fresh bootstrap should write a complete config.
 
 use anyhow::Result;
@@ -24,11 +24,11 @@ pub(super) fn run_if_needed(opts: &super::args::InstallOpts) -> Result<()> {
 }
 
 /// Runs the interactive bootstrap when `config.json` is missing, and backfills
-/// `tenexPrivateKey` when an existing config predates the backend-key split.
+/// `mosaicoPrivateKey` when an existing config predates the backend-key split.
 fn ensure_device_config() -> Result<()> {
     let path = crate::config::config_path();
     if path.exists() {
-        crate::config::ensure_tenex_private_key()?;
+        crate::config::ensure_mosaico_private_key()?;
         return Ok(());
     }
 
@@ -37,14 +37,12 @@ fn ensure_device_config() -> Result<()> {
         "No device config found at".bold(),
         path.display().to_string().cyan()
     );
-    println!(
-        "tenex-edge's daemon needs this file to start (whitelisted operator pubkeys, relays)."
-    );
+    println!("mosaico's daemon needs this file to start (whitelisted operator pubkeys, relays).");
 
     if !(io::stdin().is_terminal() && io::stdout().is_terminal()) {
         println!(
             "Not running in a terminal — skipping setup. The daemon won't start until \
-             {} exists; re-run `tenex-edge install` in a terminal, or create it by hand.",
+             {} exists; re-run `mosaico install` in a terminal, or create it by hand.",
             path.display()
         );
         return Ok(());
@@ -57,7 +55,7 @@ fn ensure_device_config() -> Result<()> {
     if !run_setup {
         println!(
             "Skipped. The daemon won't start until {} exists — re-run \
-             `tenex-edge install` to set it up later.",
+             `mosaico install` to set it up later.",
             path.display()
         );
         return Ok(());
@@ -88,11 +86,14 @@ fn ensure_device_config() -> Result<()> {
         whitelisted_pubkeys.clone(),
         relay,
         backend_name,
-        crate::config::generate_tenex_private_key(),
+        crate::config::generate_mosaico_private_key(),
     );
     super::write_json(&path, &doc)?;
     println!("wrote {}", path.display());
-    println!("{}", "generated tenexPrivateKey for this backend".dimmed());
+    println!(
+        "{}",
+        "generated mosaicoPrivateKey for this backend".dimmed()
+    );
     if whitelisted_pubkeys.is_empty() {
         println!(
             "{}",
@@ -107,13 +108,13 @@ fn device_config_doc(
     whitelisted_pubkeys: Vec<String>,
     relay: String,
     backend_name: String,
-    tenex_private_key: String,
+    mosaico_private_key: String,
 ) -> serde_json::Value {
     serde_json::json!({
         "whitelistedPubkeys": whitelisted_pubkeys,
         "relays": [relay],
         "backendName": backend_name,
-        "tenexPrivateKey": tenex_private_key,
+        "mosaicoPrivateKey": mosaico_private_key,
     })
 }
 
@@ -135,7 +136,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn fresh_device_config_includes_tenex_private_key() {
+    fn fresh_device_config_includes_mosaico_private_key() {
         let doc = device_config_doc(
             vec!["operator".to_string()],
             "wss://relay.example".to_string(),
@@ -144,7 +145,7 @@ mod tests {
         );
 
         assert_eq!(
-            doc.get("tenexPrivateKey").and_then(|v| v.as_str()),
+            doc.get("mosaicoPrivateKey").and_then(|v| v.as_str()),
             Some("backend-secret")
         );
     }

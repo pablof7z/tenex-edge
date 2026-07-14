@@ -1,17 +1,17 @@
-//! `tenex-edge statusline` — the fabric, one line at a time.
+//! `mosaico statusline` — the fabric, one line at a time.
 //!
 //! Renders the awareness floor for a host status bar:
-//!   claude@kubrick tenex-edge support [Refactoring the inbox] [writing tests]
-//!   └ identity ┘  └ root┘  └channel┘ └ distilled title ┘   └ live activity ┘
+//!   amber-claude mosaico support [Refactoring the inbox] [writing tests]
+//!   └ identity ┘ └ root┘ └channel┘ └ distilled title ┘   └ live activity ┘
 //!
 //! The channel segment is the channel's human NAME (kind:39000 `name`), falling
 //! back to its raw id only when no name is cached — the opaque id is never shown
 //! when a name exists.
 //!
 //! `agentName` is exactly what the session published in its kind:0 profile
-//! (the `name` field). `host` is the backend's exact config label. `root-name` is
-//! the work-root channel the session room hangs under. `#session` is the
-//! channel the session is currently on (changes with `tenex-edge channels
+//! (the `name` field). `root-name` is the work-root channel the session room
+//! hangs under. `#session` is the
+//! channel the session is currently on (changes with `mosaico channels
 //! switch`). `[title]` is that channel's title on the relay (kind:39000 `name`
 //! tag for a task channel; the distilled session title for a per-session
 //! room). `[status]` is what the agent last published in its kind:30315 — the
@@ -58,7 +58,7 @@ pub(super) fn statusline(session: Option<String>) -> Result<()> {
     let session_id = match session_id {
         Some(id) => id,
         None => {
-            println!("[te: no session id]");
+            println!("[mosaico: no session id]");
             return Ok(());
         }
     };
@@ -69,14 +69,14 @@ pub(super) fn statusline(session: Option<String>) -> Result<()> {
         Err(_) => {
             // Daemon is not running — emit a visible indicator so the status bar
             // shows WHY it's blank rather than silently displaying nothing.
-            println!("[te: down]");
+            println!("[mosaico: down]");
             return Ok(());
         }
     };
     let view = match serde_json::from_value::<StatuslineView>(v) {
         Ok(v) => v,
         Err(e) => {
-            println!("[te: bad daemon response: {e}]");
+            println!("[mosaico: bad daemon response: {e}]");
             return Ok(());
         }
     };
@@ -104,7 +104,7 @@ pub struct StatuslineView {
     #[serde(default)]
     work_root: String,
     /// The NIP-29 channel the session is currently routing under — its
-    /// `channel` when set (via `tenex-edge channel switch`), else its
+    /// `channel` when set (via `mosaico channel switch`), else its
     /// per-session room `root`. The `#session-…` segment renders this id.
     #[serde(default)]
     channel: String,
@@ -225,7 +225,7 @@ fn render_statusline_inner(v: &StatuslineView, color: bool) -> String {
     // Daemon-reported error (e.g. stale session ID that wasn't found in the DB).
     // Short and visible — the user needs to know WHY the bar is broken.
     if let Some(ref err) = v.error {
-        return paint(format!("[te: {err}]"), "1;31");
+        return paint(format!("[mosaico: {err}]"), "1;31");
     }
 
     segs.join(" ")

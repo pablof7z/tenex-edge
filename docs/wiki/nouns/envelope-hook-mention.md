@@ -9,4 +9,4 @@ source_refs:
 
 # envelope (hook mention)
 
-hooks-only format: wrapped in `<tenex-edge>` tags with a reply CLI hint and no message-id
+hooks-only format: wrapped in `<mosaico>` tags with a reply CLI hint and no message-id

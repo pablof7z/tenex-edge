@@ -4,7 +4,7 @@ use crate::fabric_context::model::{shared_agents, workspace_agents, FabricView};
 #[allow(dead_code)]
 pub(in crate::fabric_context) fn render_views(views: &[FabricView]) -> String {
     let shared = shared_agents(views);
-    let mut out = String::from("<tenex-edge>");
+    let mut out = String::from("<mosaico>");
     render_agents(&mut out, &shared, "available-agents");
 
     for view in views {
@@ -12,6 +12,6 @@ pub(in crate::fabric_context) fn render_views(views: &[FabricView]) -> String {
         render_workspace(&mut out, view, &additions, "workspace-agents");
     }
 
-    out.push_str("\n</tenex-edge>");
+    out.push_str("\n</mosaico>");
     out
 }

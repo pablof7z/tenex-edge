@@ -4,8 +4,8 @@
 //! Normal sessions derive their own signer from the backend root; agents with
 //! `perSessionKey:false` sign with this persisted key across sequential runs.
 //!
-//! NOTE: agent keypairs live under `<edge_home>/agents/<slug>.json`, which
-//! defaults to `~/.tenex-edge/agents/`. `edge_home()` defaults to `~/.tenex-edge`.
+//! NOTE: agent keypairs live under `<mosaico_home>/agents/<slug>.json`, which
+//! defaults to `~/.mosaico/agents/`. `mosaico_home()` defaults to `~/.mosaico`.
 
 use anyhow::{bail, Context, Result};
 use nostr_sdk::prelude::*;
@@ -48,7 +48,7 @@ struct StoredKey {
     /// The default keeps the normal per-session derived-key contract.
     #[serde(default = "default_per_session_key", rename = "perSessionKey")]
     per_session_key: bool,
-    /// Name of the `~/.tenex-edge/harnesses.json` bundle that hosts this agent.
+    /// Name of the `~/.mosaico/harnesses.json` bundle that hosts this agent.
     /// `None` (the default) means the built-in PTY spawn — behavior is unchanged
     /// for every agent that does not opt into a bundle. A bundle whose transport
     /// is `acp`/`app-server` launches the agent over the RPC transport instead.
@@ -97,12 +97,12 @@ impl AgentIdentity {
     }
 }
 
-fn agents_dir(edge_home: &Path) -> PathBuf {
-    edge_home.join("agents")
+fn agents_dir(mosaico_home: &Path) -> PathBuf {
+    mosaico_home.join("agents")
 }
 
-fn key_path(edge_home: &Path, slug: &str) -> PathBuf {
-    agents_dir(edge_home).join(format!("{slug}.json"))
+fn key_path(mosaico_home: &Path, slug: &str) -> PathBuf {
+    agents_dir(mosaico_home).join(format!("{slug}.json"))
 }
 
 fn validate_slug(slug: &str) -> Result<()> {
@@ -117,22 +117,22 @@ fn validate_slug(slug: &str) -> Result<()> {
 }
 
 /// Load the agent's keypair, generating + persisting it on first use.
-pub fn load_or_create(edge_home: &Path, slug: &str, now: u64) -> Result<AgentIdentity> {
-    load_or_create_with_command(edge_home, slug, now, None)
+pub fn load_or_create(mosaico_home: &Path, slug: &str, now: u64) -> Result<AgentIdentity> {
+    load_or_create_with_command(mosaico_home, slug, now, None)
 }
 
 /// Like `load_or_create`, but when the identity doesn't exist yet, persists
 /// `command` as its spawn command (e.g. the real argv of a direct `claude
-/// --agent <slug>` invocation detected outside `tenex-edge launch`). Ignored
+/// --agent <slug>` invocation detected outside `mosaico launch`). Ignored
 /// — never overwrites an existing identity's stored command.
 pub fn load_or_create_with_command(
-    edge_home: &Path,
+    mosaico_home: &Path,
     slug: &str,
     now: u64,
     command: Option<Vec<String>>,
 ) -> Result<AgentIdentity> {
     validate_slug(slug)?;
-    let path = key_path(edge_home, slug);
+    let path = key_path(mosaico_home, slug);
     if path.exists() {
         let s = std::fs::read_to_string(&path)
             .with_context(|| format!("reading key {}", path.display()))?;
@@ -166,8 +166,8 @@ pub fn load_or_create_with_command(
         per_session_key: true,
         harness: None,
     };
-    std::fs::create_dir_all(agents_dir(edge_home))
-        .with_context(|| format!("creating {}", agents_dir(edge_home).display()))?;
+    std::fs::create_dir_all(agents_dir(mosaico_home))
+        .with_context(|| format!("creating {}", agents_dir(mosaico_home).display()))?;
     let body = serde_json::to_string_pretty(&stored)?;
     atomic_write(&path, &body)?;
     tracing::info!(slug, pubkey = %&stored.public_key[..8], path = %path.display(), "agent key created");

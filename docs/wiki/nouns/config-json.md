@@ -9,4 +9,4 @@ source_refs:
 
 # config.json
 
-The file tenex-edge reads from ~/.tenex-edge for whitelistedPubkeys, optional relays, and backendName (host label); tenex-edge keeps all of its own writable state under ~/.tenex-edge alongside it.
+The file mosaico reads from ~/.mosaico for whitelistedPubkeys, optional relays, and backendName (host label); mosaico keeps all of its own writable state under ~/.mosaico alongside it.

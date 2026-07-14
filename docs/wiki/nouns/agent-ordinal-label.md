@@ -14,4 +14,4 @@ longer disambiguated by an ordinal (`smith1`, `smith2`); each session has its ow
 public handle `@<agent-slug>-<session-code>`. That handle is
 the addressable identity peers see. See
 [session handle](session-handle.md) and
-[Tenex-Edge Agent Identity](../guides/tenex-edge-agent-identity.md).
+[Mosaico Agent Identity](../guides/mosaico-agent-identity.md).

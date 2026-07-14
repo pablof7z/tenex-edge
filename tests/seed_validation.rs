@@ -1,6 +1,6 @@
 //! SEED (ignored by default; run explicitly against the live NIP-29 relay):
 //!
-//!   TE_NIP29_RELAY=wss://nip29.f7z.io \
+//!   MOSAICO_NIP29_RELAY=wss://nip29.f7z.io \
 //!     cargo test --test seed_validation -- --ignored --nocapture
 //!
 //! Publishes ONE complete, self-contained agent session to the live relay so a
@@ -20,13 +20,13 @@
 //! This is a manual reader-app seed, not a routine regression test; it leaves a
 //! validation group, status, and conversation events on the configured relay.
 
+use mosaico::domain::{AgentRef, DomainEvent, Profile as MosaicoProfile, Status};
+use mosaico::fabric::nip29::wire::Nip29WireCodec;
 use nostr_sdk::prelude::*;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tenex_edge::domain::{AgentRef, DomainEvent, Profile as TeProfile, Status};
-use tenex_edge::fabric::nip29::wire::Nip29WireCodec;
 
 fn relay_url() -> String {
-    std::env::var("TE_NIP29_RELAY").unwrap_or_else(|_| "wss://nip29.f7z.io".to_string())
+    std::env::var("MOSAICO_NIP29_RELAY").unwrap_or_else(|_| "wss://nip29.f7z.io".to_string())
 }
 
 fn now_secs() -> u64 {
@@ -154,7 +154,7 @@ async fn seed_session_with_thread_root_link() {
     // 1) Agent profile (kind:0) so the reader shows a name, not a raw npub.
     let profile = sign_domain(
         &agent,
-        &DomainEvent::Profile(TeProfile {
+        &DomainEvent::Profile(MosaicoProfile {
             agent: agent_ref.clone(),
             agent_slug: "validator".into(),
             host: "seed-host".into(),
@@ -178,7 +178,7 @@ async fn seed_session_with_thread_root_link() {
             host: "seed-host".into(),
             title: title.into(),
             activity: String::new(),
-            state: tenex_edge::session_state::SessionState::Idle,
+            state: mosaico::session_state::SessionState::Idle,
             rel_cwd: "tenex-off".into(),
             expires_at: Some(base + 365 * 24 * 3600),
             dispatch_event: None,

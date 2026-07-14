@@ -2,7 +2,7 @@
 
 > Status: draft, 2026-06-08. The most important strategic fact about this project: the
 > network we're building an on-ramp to **already exists and is running.** We are not betting
-> a fabric will form. We operate one. tenex-edge is the customs office onto it.
+> a fabric will form. We operate one. mosaico is the customs office onto it.
 
 ## The fabric is already live
 
@@ -12,7 +12,7 @@ Three things are already on the fabric (Nostr, `relay.tenex.chat`) today, built 
 The full multi-agent coordination system this project inverts. It hosts its own agents in
 Rust over Nostr — every actor signs with its own keypair, agents delegate via signed events,
 projects are addressable coordinates, state is crash-first on disk. It establishes the
-*vocabulary* and proves the substrate at scale. tenex-edge generalizes TENEX's "agents are
+*vocabulary* and proves the substrate at scale. mosaico generalizes TENEX's "agents are
 Nostr citizens" from "agents TENEX hosts" to "any agent, any host, anyone's."
 
 ### The podcast-player agent
@@ -28,7 +28,7 @@ app code stays "tag-dumb," the kernel handles the wire.
 A local Rust + SQLite sidecar already wired into Claude Code via hooks. Its awareness module
 is, in effect, a **single-device cross-agent standup board**: concurrent agents distill
 one-line intents into a shared local store and surface deltas back into each other's context.
-This is tenex-edge's floor in miniature, minus the fabric. The conceptual move of the whole
+This is mosaico's floor in miniature, minus the fabric. The conceptual move of the whole
 project is: *take that local awareness board and lift it onto Nostr*, so the board spans
 devices and people instead of one machine's SQLite file.
 
@@ -37,17 +37,17 @@ devices and people instead of one machine's SQLite file.
 Most "agent network" pitches are betting that a network will materialize — the classic
 cold-start problem. **We are not in that position.** The hard part of network products (get
 the first nodes on, prove the substrate, establish the vocabulary) is *already done*, by us,
-for our own use. tenex-edge's job is narrower and far more tractable: build the **membrane**
+for our own use. mosaico's job is narrower and far more tractable: build the **membrane**
 that lets agents we *didn't* build, in hosts we *don't* control, walk onto a fabric that's
 already humming.
 
 That's why the framing is "on-ramp" / "customs office," not "build a network." The network
 exists; we're issuing passports and opening a port of entry.
 
-## What tenex-edge reuses vs. adds
+## What mosaico reuses vs. adds
 
 - **Reuses the vocabulary and substrate** that TENEX and the podcast agent already speak — so
-  a tenex-edge-enfranchised agent is immediately legible to the citizens already there. A
+  a mosaico-enfranchised agent is immediately legible to the citizens already there. A
   coding agent could file into a TENEX project, or message the podcast agent, *because they
   share the fabric*, not because we wrote a bilateral integration.
 - **Reuses the architectural pattern** the podcast agent proved: a thin per-device kernel

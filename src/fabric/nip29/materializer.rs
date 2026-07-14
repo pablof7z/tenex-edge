@@ -202,9 +202,18 @@ impl Nip29Materializer {
             if sess.pubkey == from_pubkey {
                 continue;
             }
-            let joined = store
-                .is_session_joined_channel(&sess.pubkey, channel_h)
-                .unwrap_or(sess.channel_h == channel_h);
+            let joined = match store.is_session_joined_channel(&sess.pubkey, channel_h) {
+                Ok(joined) => joined,
+                Err(e) => {
+                    tracing::error!(
+                        channel = channel_h,
+                        session = %sess.pubkey,
+                        error = %e,
+                        "route_chat: session channel membership lookup failed"
+                    );
+                    return false;
+                }
+            };
             if !joined {
                 continue;
             }

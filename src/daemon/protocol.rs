@@ -16,11 +16,11 @@ const PROTOCOL_VERSION_BASE: u32 = 64;
 
 /// Effective protocol version. A client refuses to talk to a daemon whose
 /// protocol differs (older daemon → ask it to exit & respawn; newer daemon →
-/// tell the human to restart the session). `$TENEX_EDGE_PROTOCOL` overrides it
+/// tell the human to restart the session). `$MOSAICO_PROTOCOL` overrides it
 /// for tests that need to simulate a binary upgrade (a newer client meeting an
 /// older daemon) without two binaries.
 pub fn protocol_version() -> u32 {
-    std::env::var("TENEX_EDGE_PROTOCOL")
+    std::env::var("MOSAICO_PROTOCOL")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(PROTOCOL_VERSION_BASE)
@@ -73,7 +73,7 @@ pub(crate) fn please_exit() -> PleaseExit {
 
 pub(crate) fn daemon_too_new_message(daemon_protocol: u32, client_protocol: u32) -> String {
     format!(
-        "daemon protocol {daemon_protocol} is newer than this binary's {client_protocol} — restart your tenex-edge session (or reinstall)"
+        "daemon protocol {daemon_protocol} is newer than this binary's {client_protocol} — restart your mosaico session (or reinstall)"
     )
 }
 
@@ -202,6 +202,6 @@ mod tests {
     fn daemon_too_new_message_matches_client_paths() {
         let msg = daemon_too_new_message(58, 57);
         assert!(msg.contains("daemon protocol 58 is newer"));
-        assert!(msg.contains("restart your tenex-edge session"));
+        assert!(msg.contains("restart your mosaico session"));
     }
 }

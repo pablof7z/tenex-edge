@@ -36,7 +36,7 @@ pub(super) async fn rpc_dispatch(
         &CallerAnchor::from_params(params),
         ResolveScope::Strict,
     )
-    .context("dispatch must be run from within a tenex-edge agent session")?;
+    .context("dispatch must be run from within a mosaico agent session")?;
     let backend_pubkey = match target.backend.as_deref() {
         Some(backend) if backend != state.host => resolve_backend_pubkey(state, backend).await?,
         _ => state

@@ -88,7 +88,7 @@ async fn execute_claimed(
 ) -> Result<String> {
     let command = parse_command(&event.content)?;
     let signer = event.pubkey.to_hex();
-    if !is_admin(state, channel_h, &signer).await {
+    if !is_admin(state, channel_h, &signer).await? {
         anyhow::bail!(
             "signer {} is not an admin of channel {}",
             crate::util::pubkey_short(&signer),
@@ -180,17 +180,17 @@ async fn archive_named_channel(
     ))
 }
 
-async fn is_admin(state: &Arc<DaemonState>, channel_h: &str, signer: &str) -> bool {
+async fn is_admin(state: &Arc<DaemonState>, channel_h: &str, signer: &str) -> Result<bool> {
     if state.with_store(|s| s.is_channel_admin(channel_h, signer).unwrap_or(false)) {
-        return true;
+        return Ok(true);
     }
-    state
+    Ok(state
         .provider
         .fetch_group_roles(channel_h)
-        .await
+        .await?
         .get(signer)
         .map(String::as_str)
-        == Some("admin")
+        == Some("admin"))
 }
 
 async fn publish_reply(
@@ -202,7 +202,7 @@ async fn publish_reply(
     let keys = state.management_keys()?;
     let pubkey = keys.public_key().to_hex();
     let chat = ChatMessage {
-        from: AgentRef::new(pubkey, format!("{} (tenex-edge)", state.host)),
+        from: AgentRef::new(pubkey, format!("{} (mosaico)", state.host)),
         channel: channel_h.to_string(),
         body: body.to_string(),
         mentioned_pubkeys: vec![requester.to_string()],

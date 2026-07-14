@@ -63,12 +63,13 @@ fn channel_id_for_name_resolves_within_parent() {
             .as_deref(),
         Some("ff99ff99")
     );
-    // Legacy duplicate (parent, name): most-recently-updated wins.
-    s.upsert_channel("zz000000", "support", "", "proj", 20)
-        .unwrap();
+    // A second id cannot claim the same canonical (parent, name).
+    assert!(s
+        .upsert_channel("zz000000", "support", "", "proj", 20)
+        .is_err());
     assert_eq!(
         s.channel_id_for_name("proj", "support").unwrap().as_deref(),
-        Some("zz000000")
+        Some("ab12cd34")
     );
 }
 
@@ -82,10 +83,7 @@ fn channel_human_name_distinguishes_root_slug_from_unnamed_session_room() {
         created_at: 1,
         updated_at: 1,
     };
-    assert_eq!(
-        chan("tenex-edge", "tenex-edge", "").human_name(),
-        Some("tenex-edge")
-    );
+    assert_eq!(chan("mosaico", "mosaico", "").human_name(), Some("mosaico"));
     assert_eq!(
         chan("ab12cd34", "support", "proj").human_name(),
         Some("support")

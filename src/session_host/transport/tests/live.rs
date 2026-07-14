@@ -3,13 +3,13 @@
 use super::*;
 
 fn live_home(label: &str) -> Option<std::path::PathBuf> {
-    if std::env::var("TENEX_EDGE_RPC_LIVE").ok().as_deref() != Some("1") {
-        eprintln!("skipping live test (set TENEX_EDGE_RPC_LIVE=1)");
+    if std::env::var("MOSAICO_RPC_LIVE").ok().as_deref() != Some("1") {
+        eprintln!("skipping live test (set MOSAICO_RPC_LIVE=1)");
         return None;
     }
     let home = std::env::temp_dir().join(format!("acp-{label}-{}", std::process::id()));
     std::fs::create_dir_all(&home).unwrap();
-    std::env::set_var("TENEX_EDGE_HOME", &home);
+    std::env::set_var("MOSAICO_HOME", &home);
     std::fs::write(
         home.join("harnesses.json"),
         r#"{ "opencode-acp": { "harness": "opencode", "transport": "acp" } }"#,
@@ -56,7 +56,7 @@ async fn live_launch_dispatch_spawns_opencode_acp() {
     assert!(endpoint.watch_pid.is_some());
     assert!(acp.is_live(&ep));
     acp.kill(&ep).await.unwrap();
-    std::env::remove_var("TENEX_EDGE_HOME");
+    std::env::remove_var("MOSAICO_HOME");
 }
 
 #[tokio::test]
@@ -89,6 +89,6 @@ async fn live_acp_agent_receives_delivered_prompt() {
         }
     }
     acp.kill(&ep).await.unwrap();
-    std::env::remove_var("TENEX_EDGE_HOME");
+    std::env::remove_var("MOSAICO_HOME");
     assert!(!got.trim().is_empty());
 }

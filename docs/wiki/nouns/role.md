@@ -10,4 +10,4 @@ source_refs:
 
 # role
 
-A name your code resolves to a model, e.g. "edge-distillation". Only roles actually read by tenex-edge's own code (via resolve_role) are meaningful; a role name the code never resolves does nothing.
+A name your code resolves to a model, e.g. "mosaico-distillation". Only roles actually read by mosaico's own code (via resolve_role) are meaningful; a role name the code never resolves does nothing.

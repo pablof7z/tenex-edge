@@ -2,7 +2,7 @@ use super::model::*;
 use std::fmt::Write as _;
 
 pub(super) fn render_agent_who(view: &AgentWhoView) -> String {
-    let mut out = String::from("<tenex-edge>");
+    let mut out = String::from("<mosaico>");
     let _ = write!(
         out,
         "\n  <self name=\"@{}\" host=\"{}\" headless=\"{}\" />",
@@ -15,7 +15,7 @@ pub(super) fn render_agent_who(view: &AgentWhoView) -> String {
     for workspace in &view.workspaces {
         render_workspace(&mut out, workspace);
     }
-    out.push_str("\n  </workspaces>\n</tenex-edge>");
+    out.push_str("\n  </workspaces>\n</mosaico>");
     out
 }
 

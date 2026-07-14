@@ -5,9 +5,9 @@ use super::{
 use crate::daemon_harness::{
     pubkey_for_harness_session, rt, stop_daemon, wait_until, Home, ENV_LOCK,
 };
+use mosaico::daemon::client::Client;
+use mosaico::state::Store;
 use nostr_sdk::prelude::Keys;
-use tenex_edge::daemon::client::Client;
-use tenex_edge::state::Store;
 
 #[path = "session_rooms/profile.rs"]
 mod profile;
@@ -97,7 +97,7 @@ fn first_turn_injects_channel_context_block() {
             .to_string()
     });
 
-    assert!(ctx.contains("<tenex-edge>"), "context was: {ctx}");
+    assert!(ctx.contains("<mosaico>"), "context was: {ctx}");
     assert!(
         !ctx.contains("[session"),
         "must not expose a session code; context was: {ctx}"
@@ -127,7 +127,7 @@ fn first_turn_resolves_member_profiles_from_kind0() {
     let remote_name = "willow-echo-042";
     let remote_agent_slug = "reviewer";
     let remote_handle =
-        tenex_edge::idref::session_handle_from_profile_name(remote_name, remote_agent_slug);
+        mosaico::idref::session_handle_from_profile_name(remote_name, remote_agent_slug);
 
     let ctx = rt().block_on(async {
         profile::publish_profile(&remote, remote_name, remote_agent_slug).await;
@@ -142,7 +142,7 @@ fn first_turn_resolves_member_profiles_from_kind0() {
         wait_for_channel_metadata(&home, "tmp");
         c.call(
             "channel_add_member",
-            serde_json::json!({"channel": "tmp", "pubkey": remote_pk}),
+            serde_json::json!({"channel": "tmp", "pubkey": remote_pk, "session": &pubkey}),
         )
         .await
         .expect("channel_add_member profiled member");
@@ -172,7 +172,7 @@ fn first_turn_resolves_member_profiles_from_kind0() {
             .to_string()
     });
 
-    let want = format!("ref=\"@{remote_handle}\" status=\"offline\"");
+    let want = format!("ref=\"@{remote_handle}\" state=\"offline\"");
     assert!(ctx.contains(&want), "kind:0 profile should resolve: {ctx}");
     assert!(
         !ctx.contains(&format!("@{}", &remote_pk[..8])),

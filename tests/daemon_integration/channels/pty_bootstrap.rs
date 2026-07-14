@@ -29,7 +29,7 @@ fn no_hook_command() -> Vec<String> {
     ]
 }
 
-fn wait_for_alive(home: &Home, agent: &str, channel: &str) -> tenex_edge::state::Session {
+fn wait_for_alive(home: &Home, agent: &str, channel: &str) -> mosaico::state::Session {
     let mut found = None;
     assert!(
         wait_until(Duration::from_secs(25), || {
@@ -47,8 +47,8 @@ fn wait_for_alive(home: &Home, agent: &str, channel: &str) -> tenex_edge::state:
     found.unwrap()
 }
 
-fn pty_meta(pty_id: &str) -> tenex_edge::pty::LaunchMetadata {
-    tenex_edge::pty::read_all_metadata()
+fn pty_meta(pty_id: &str) -> mosaico::pty::LaunchMetadata {
+    mosaico::pty::read_all_metadata()
         .into_iter()
         .find(|meta| meta.id == pty_id)
         .expect("pty metadata")
@@ -109,7 +109,7 @@ fn pty_spawn_bootstraps_session_without_child_session_start_hook() {
             .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     );
 
-    let _ = tenex_edge::pty::kill(&pty_id);
+    let _ = mosaico::pty::kill(&pty_id);
     stop_daemon(&home);
 }
 
@@ -184,7 +184,7 @@ fn late_session_start_hook_reasserts_pty_bootstrap_session() {
         Some(first.pubkey.as_str())
     );
 
-    let _ = tenex_edge::pty::kill(&pty_id);
+    let _ = mosaico::pty::kill(&pty_id);
     stop_daemon(&home);
 }
 
@@ -224,10 +224,10 @@ fn codex_hook_reasserts_launch_session_from_pty_anchor_without_native_id() {
         &["harness", "hook", "codex", "--type", "session-start"],
         "",
         &[
-            ("TENEX_EDGE_AGENT", agent),
-            ("TENEX_EDGE_PTY_SESSION", pty_id.as_str()),
-            ("TENEX_EDGE_PTY_SOCKET", meta.socket.as_str()),
-            ("TENEX_EDGE_INIT_PROGRESS", "0"),
+            ("MOSAICO_AGENT", agent),
+            ("MOSAICO_PTY_SESSION", pty_id.as_str()),
+            ("MOSAICO_PTY_SOCKET", meta.socket.as_str()),
+            ("MOSAICO_INIT_PROGRESS", "0"),
         ],
         &work_dir,
     );
@@ -253,6 +253,6 @@ fn codex_hook_reasserts_launch_session_from_pty_anchor_without_native_id() {
         .collect::<Vec<_>>();
     assert_eq!(alive.len(), 1, "codex hook should not mint a duplicate");
 
-    let _ = tenex_edge::pty::kill(&pty_id);
+    let _ = mosaico::pty::kill(&pty_id);
     stop_daemon(&home);
 }

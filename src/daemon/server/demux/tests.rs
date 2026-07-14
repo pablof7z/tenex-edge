@@ -167,21 +167,21 @@ fn remote_claim_gate_does_not_skip_when_claim_expired() {
 }
 
 #[test]
-fn remote_claim_gate_treats_unowned_claim_as_local() {
+fn remote_claim_gate_treats_missing_owner_as_remote() {
     let store = Store::open_memory().unwrap();
     let mut c = claim("pk", "proj", "", 100);
     c.owner_backend_pubkey.clear();
     store.upsert_session_claim(&c).unwrap();
 
-    // Empty owner is treated as "ours" regardless of our backend pubkey.
-    assert!(!remote_backend_owns_active_claim(
+    // A claim without the canonical owner cannot be attributed to this backend.
+    assert!(remote_backend_owns_active_claim(
         &store,
         "pk",
         "proj",
         50,
         Some(BACKEND_A)
     ));
-    assert!(!remote_backend_owns_active_claim(
+    assert!(remote_backend_owns_active_claim(
         &store, "pk", "proj", 50, None
     ));
 }

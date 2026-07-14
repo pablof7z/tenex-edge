@@ -76,7 +76,7 @@ pub(super) async fn turn_start(
                     }),
                 });
             }
-            eprintln!("[tenex-edge] turn-start hook skipped: {e:#}");
+            eprintln!("[mosaico] turn-start hook skipped: {e:#}");
             return Ok(HookContextResult {
                 context: None,
                 audit: serde_json::json!({
@@ -144,7 +144,7 @@ pub(super) async fn turn_check(
     {
         Ok(result) => Ok(result),
         Err(e) => {
-            eprintln!("[tenex-edge] post-tool-use hook skipped: {e:#}");
+            eprintln!("[mosaico] post-tool-use hook skipped: {e:#}");
             Ok(HookContextResult {
                 context: None,
                 audit: serde_json::json!({
@@ -189,7 +189,7 @@ pub(super) async fn turn_end(session: String) -> Result<()> {
     })
     .await
     {
-        eprintln!("[tenex-edge] stop hook skipped: {e:#}");
+        eprintln!("[mosaico] stop hook skipped: {e:#}");
     }
     Ok(())
 }

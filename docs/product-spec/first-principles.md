@@ -51,7 +51,7 @@ human scheduled *into* the workflow as a resource, not standing over it.
 ## 4. Enfranchise; don't own
 
 This is the literal inversion of TENEX. TENEX **owns** its agents — it hosts them, runs
-their loop, and rents each one a context. tenex-edge **owns nothing**. It enfranchises
+their loop, and rents each one a context. mosaico **owns nothing**. It enfranchises
 agents that other people and other tools built, by granting them identity and fabric
 membership.
 

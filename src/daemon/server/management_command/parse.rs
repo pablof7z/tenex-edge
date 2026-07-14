@@ -3,7 +3,7 @@
 use super::ManagementCommand;
 use anyhow::{Context, Result};
 
-const HASH_PLACEHOLDER: &str = "__tenex_edge_channel_hash__";
+const HASH_PLACEHOLDER: &str = "__mosaico_channel_hash__";
 
 pub(super) fn parse_command(body: &str) -> Result<ManagementCommand> {
     let body = strip_leading_inline_mentions(body.trim());
@@ -29,7 +29,7 @@ pub(super) fn parse_command(body: &str) -> Result<ManagementCommand> {
             if selector.is_empty() {
                 anyhow::bail!("kill requires a session npub, hex pubkey, or current handle");
             }
-            if selector.starts_with("te-") || selector.starts_with('$') {
+            if selector.starts_with("mosaico-") || selector.starts_with('$') {
                 anyhow::bail!("raw session ids are internal; use the npub, hex pubkey, or handle");
             }
             Ok(ManagementCommand::Kill { selector: selector.to_string() })
@@ -182,7 +182,7 @@ mod tests {
         // loop is still broken because the agent's prose follow-up is not shaped.
         assert!(is_command_shaped("kill")); // missing public selector
         assert!(parse_command("kill").is_err());
-        assert!(parse_command("kill te-abc123").is_err());
+        assert!(parse_command("kill mosaico-abc123").is_err());
         assert!(parse_command("kill $abc123").is_err());
         assert!(is_command_shaped("add coder@")); // malformed spec
         assert!(parse_command("add coder@").is_err());

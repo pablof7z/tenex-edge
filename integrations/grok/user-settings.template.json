@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "tenex-edge harness hook grok --type session-start",
+            "command": "mosaico harness hook grok --type session-start",
             "timeout": 10
           }
         ]
@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "tenex-edge harness hook grok --type session-end",
+            "command": "mosaico harness hook grok --type session-end",
             "timeout": 10
           }
         ]
@@ -27,7 +27,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "tenex-edge harness hook grok --type user-prompt-submit",
+            "command": "mosaico harness hook grok --type user-prompt-submit",
             "timeout": 30
           }
         ]
@@ -38,7 +38,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "tenex-edge harness hook grok --type post-tool-use",
+            "command": "mosaico harness hook grok --type post-tool-use",
             "timeout": 10
           }
         ]
@@ -49,7 +49,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "tenex-edge harness hook grok --type stop",
+            "command": "mosaico harness hook grok --type stop",
             "timeout": 10
           }
         ]

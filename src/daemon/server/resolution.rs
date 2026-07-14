@@ -10,7 +10,7 @@ pub(super) use public_session::resolve as resolve_public_session;
 ///
 /// Public identity is the session pubkey. Hosted sessions expose a typed PTY
 /// locator from process birth, recorded at session-start. Native harness shells
-/// outside tenex-edge launch use the
+/// outside mosaico launch use the
 /// watched harness process (`watch_pid`) as their exact anchor.
 /// `harness_session` covers harness-native resume locators reported by hooks.
 #[derive(Default, Clone, Copy)]
@@ -134,7 +134,7 @@ pub(in crate::daemon::server) fn resolve_session_inner(
         }
     }
     // 4. Watched harness process — exact for native Claude/Codex/Grok shells
-    // that were not launched through tenex-edge and therefore lack a PTY anchor.
+    // that were not launched through mosaico and therefore lack a PTY anchor.
     if let (Some(pid), Some(harness)) = (anchor.watch_pid, anchor.harness) {
         let harness = crate::session::Harness::from_str(harness).as_str();
         let pid = pid.to_string();
@@ -150,7 +150,7 @@ pub(in crate::daemon::server) fn resolve_session_inner(
     }
     let _ = scope;
     anyhow::bail!(
-        "must run inside a registered tenex-edge session or pass an npub, hex pubkey, or handle"
+        "must run inside a registered mosaico session or pass an npub, hex pubkey, or handle"
     )
 }
 

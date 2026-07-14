@@ -6,14 +6,14 @@
 //!   1. **Git repo name** — derived from `git rev-parse --git-common-dir`, so a
 //!      repo and all of its git worktrees resolve to the **same** slug (the
 //!      basename of the shared main repo root).
-//!   2. **`~/.tenex-edge/workspaces.json`** — a JSON object mapping slugs to
+//!   2. **`~/.mosaico/workspaces.json`** — a JSON object mapping slugs to
 //!      absolute paths. The cwd itself, or its nearest ancestor present in the
 //!      map, wins. This is the only way to give a non-git directory a workspace.
 //!   3. Otherwise: `Err(NoWorkspace)`. The caller decides how to surface — hooks
-//!      exit 0 silently; explicit CLI verbs print a "run `tenex-edge channel
+//!      exit 0 silently; explicit CLI verbs print a "run `mosaico channel
 //!      init` or `git init`" message and exit non-zero.
 //!
-//! The map at `~/.tenex-edge/workspaces.json` is the single source of truth for
+//! The map at `~/.mosaico/workspaces.json` is the single source of truth for
 //! non-git workspaces.
 
 use anyhow::{Context, Result};
@@ -38,7 +38,7 @@ impl std::error::Error for NoWorkspace {}
 /// Resolve the workspace slug for a working directory.
 ///
 /// Returns the slug, or [`NoWorkspace`] when the cwd is not in a git repo and is
-/// not registered in `~/.tenex-edge/workspaces.json` (nor any ancestor of it).
+/// not registered in `~/.mosaico/workspaces.json` (nor any ancestor of it).
 pub fn resolve(cwd: &Path) -> std::result::Result<String, NoWorkspace> {
     // 1. git repo name (shared across all worktrees of the same repo).
     if let Some(root) = git_toplevel(cwd) {
@@ -85,13 +85,13 @@ pub fn rel_cwd(cwd: &Path) -> String {
 }
 
 /// Like [`resolve`], but on [`NoWorkspace`] returns an `anyhow::Error` whose
-/// `Display` form is the user-facing "no known workspace … run `tenex-edge
+/// `Display` form is the user-facing "no known workspace … run `mosaico
 /// channel init` or `git init`" message. For the explicit-CLI-verb path only;
 /// hooks should call [`resolve`] and exit 0 on `Err`.
 pub fn resolve_or_bail(cwd: &Path) -> Result<String> {
     resolve(cwd).map_err(|e| {
         anyhow::anyhow!(
-            "{e}; run `tenex-edge channel init` or `git init` first, or pass `--workspace <slug>`"
+            "{e}; run `mosaico channel init` or `git init` first, or pass `--workspace <slug>`"
         )
     })
 }
@@ -125,10 +125,10 @@ pub fn register_workspace(cwd: &Path, force: bool) -> Result<(String, PathBuf)> 
 
 // ── workspaces.json map ──────────────────────────────────────────────────────
 
-/// The on-disk map at `<edge_home>/workspaces.json`: a JSON object mapping
+/// The on-disk map at `<mosaico_home>/workspaces.json`: a JSON object mapping
 /// slugs to absolute paths.
 fn map_path() -> PathBuf {
-    crate::config::edge_home().join("workspaces.json")
+    crate::config::mosaico_home().join("workspaces.json")
 }
 
 /// Read the slug→path map. A MISSING file is "no workspaces registered yet" (an

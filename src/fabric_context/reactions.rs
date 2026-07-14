@@ -1,8 +1,6 @@
 //! Reaction awareness: the delta-scoped "reactions on your own recent messages"
-//! section. Shared by the legacy `build_view` path and the pure `assemble_view`
-//! path so the two can never drift (both call [`group_reactions`]); the store read
-//! ([`capture_reaction_sources`]) is likewise shared so the frozen inputs match a
-//! direct build.
+//! section. The store read ([`capture_reaction_sources`]) freezes the inputs;
+//! [`group_reactions`] then derives the rendered rows.
 //!
 //! A reaction is passive awareness only — it is materialized from a round-tripped
 //! kind:7 and surfaced here at turn start. It never enters the mention/inbox path.

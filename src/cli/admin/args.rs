@@ -6,7 +6,7 @@ pub(in crate::cli) enum AgentAction {
     List,
     /// Add a local agent: mint + persist its keypair if the slug is new. Pass a
     /// harness launch command after `--` to set its default named command (e.g.
-    /// `tenex-edge mgmt agent add reviewer -- claude --dangerously-skip-permissions`);
+    /// `mosaico mgmt agent add reviewer -- claude --dangerously-skip-permissions`);
     /// re-running with a new command overwrites that default. With no commands,
     /// interactive launch prompts for one and daemon/TUI spawns use built-in
     /// defaults only for built-in harness slugs.
@@ -236,8 +236,8 @@ pub(in crate::cli) enum ChannelAction {
         #[arg(long = "all-workspaces", conflicts_with = "workspace")]
         workspaces: bool,
     },
-    /// Register the current directory as a tenex-edge workspace. Maps
-    /// the directory's basename as a slug in `~/.tenex-edge/workspaces.json` so a
+    /// Register the current directory as a mosaico workspace. Maps
+    /// the directory's basename as a slug in `~/.mosaico/workspaces.json` so a
     /// non-git directory resolves to a workspace. Refuses if the slug is already
     /// mapped to a different path; pass `--force` to overwrite. No-op if the
     /// slug already maps to this exact path.

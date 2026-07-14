@@ -19,20 +19,20 @@ mod spawn;
 use crate::config;
 use std::path::PathBuf;
 
-/// `$TENEX_EDGE_HOME/daemon.sock` — the UDS the daemon binds and clients connect.
+/// `$MOSAICO_HOME/daemon.sock` — the UDS the daemon binds and clients connect.
 pub fn socket_path() -> PathBuf {
-    config::edge_home().join("daemon.sock")
+    config::mosaico_home().join("daemon.sock")
 }
 
-/// `$TENEX_EDGE_HOME/daemon.lock` — `flock`'d to serialize racing spawners and
+/// `$MOSAICO_HOME/daemon.lock` — `flock`'d to serialize racing spawners and
 /// to mark "a daemon is running".
 pub fn lock_path() -> PathBuf {
-    config::edge_home().join("daemon.lock")
+    config::mosaico_home().join("daemon.lock")
 }
 
-/// `$TENEX_EDGE_HOME/daemon.log` — detached daemon stdout+stderr.
+/// `$MOSAICO_HOME/daemon.log` — detached daemon stdout+stderr.
 pub fn log_path() -> PathBuf {
-    config::edge_home().join("daemon.log")
+    config::mosaico_home().join("daemon.log")
 }
 
 /// Last few lines of `daemon.log`, for surfacing a just-crashed daemon's own
@@ -80,15 +80,15 @@ pub(crate) fn poll_spawned_child(child: &mut std::process::Child) -> SpawnedChil
 }
 
 pub fn store_path() -> PathBuf {
-    config::edge_home().join("state.db")
+    config::mosaico_home().join("state.db")
 }
 
-/// `$TENEX_EDGE_HOME/daemon.inhibit` — presence of this file tells hook-path
-/// callers not to spawn the daemon. Written by `tenex-edge daemon stop`; removed
-/// by `tenex-edge daemon restart` or the next non-hook command that needs the
+/// `$MOSAICO_HOME/daemon.inhibit` — presence of this file tells hook-path
+/// callers not to spawn the daemon. Written by `mosaico daemon stop`; removed
+/// by `mosaico daemon restart` or the next non-hook command that needs the
 /// daemon.
 pub fn inhibit_path() -> PathBuf {
-    config::edge_home().join("daemon.inhibit")
+    config::mosaico_home().join("daemon.inhibit")
 }
 
 pub fn is_inhibited() -> bool {

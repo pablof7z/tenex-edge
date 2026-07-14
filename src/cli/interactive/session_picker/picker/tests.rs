@@ -50,19 +50,19 @@ fn shift_k_kills_the_highlighted_session_without_selection_state() {
 #[test]
 fn filtering_uses_hidden_fields_and_prefers_handle_matches() {
     let mut cwd = choice("opal", "", false);
-    cwd.row.cwd = Some("/repo/edge".into());
+    cwd.row.cwd = Some("/repo/mosaico".into());
     let mut state = PickerState::new(vec![
         cwd,
         choice("delta-codex", "ordinary work", false),
         choice("other-codex", "reviewing delta output", false),
     ]);
 
-    for character in "rpedge".chars() {
+    for character in "rpmosaico".chars() {
         state.handle_key(key(KeyCode::Char(character)), 10);
     }
     assert_eq!(state.visible, vec![0]);
 
-    for _ in 0..6 {
+    for _ in 0..9 {
         state.handle_key(key(KeyCode::Backspace), 10);
     }
     for character in "delta".chars() {

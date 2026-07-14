@@ -30,7 +30,7 @@ pub fn new_session_signer_salt() -> String {
 /// its persisted random salt. The resulting pubkey is the session identity;
 /// neither a daemon row id nor a harness-native locator participates.
 pub fn derive_session_keys(mgmt_secret: &SecretKey, signer_salt: &str) -> anyhow::Result<Keys> {
-    const SALT: &[u8] = b"tenex-edge/session-pubkey/v3";
+    const SALT: &[u8] = b"mosaico/session-pubkey/v3";
     let signer_salt = PublicKey::from_hex(signer_salt)
         .map_err(|error| anyhow::anyhow!("invalid session signer salt: {error}"))?;
     let signer_salt = signer_salt.as_bytes();

@@ -1,4 +1,4 @@
-//! Read/modify/write `providers.json` and `llms.json` under `edge_home()`.
+//! Read/modify/write `providers.json` and `llms.json` under `mosaico_home()`.
 //!
 //! Both files are shared with the wider TENEX config format (see
 //! `crate::llmconfig`'s module docs), so mutations preserve every key this
@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
-/// `~/.tenex-edge/providers.json`.
+/// `~/.mosaico/providers.json`.
 pub(super) struct ProvidersFile {
     path: PathBuf,
     root: Value,
@@ -17,7 +17,7 @@ pub(super) struct ProvidersFile {
 
 impl ProvidersFile {
     pub(super) fn load() -> Result<Self> {
-        Self::load_in(&crate::config::edge_home())
+        Self::load_in(&crate::config::mosaico_home())
     }
 
     fn load_in(dir: &Path) -> Result<Self> {
@@ -92,7 +92,7 @@ fn display_value(v: Option<&Value>) -> String {
     }
 }
 
-/// `~/.tenex-edge/llms.json`.
+/// `~/.mosaico/llms.json`.
 pub(super) struct LlmsFile {
     path: PathBuf,
     root: Value,
@@ -100,7 +100,7 @@ pub(super) struct LlmsFile {
 
 impl LlmsFile {
     pub(super) fn load() -> Result<Self> {
-        Self::load_in(&crate::config::edge_home())
+        Self::load_in(&crate::config::mosaico_home())
     }
 
     fn load_in(dir: &Path) -> Result<Self> {
@@ -214,7 +214,7 @@ mod tests {
         let mut file = LlmsFile::load_in(dir.path()).unwrap();
         assert!(file.roles().is_empty());
 
-        let name = file.set_role("edge-distillation", "openrouter", "openai/gpt-4o-mini");
+        let name = file.set_role("mosaico-distillation", "openrouter", "openai/gpt-4o-mini");
         assert_eq!(name, "openrouter/openai/gpt-4o-mini");
         file.save().unwrap();
 
@@ -222,7 +222,7 @@ mod tests {
         assert_eq!(
             reloaded.roles(),
             vec![(
-                "edge-distillation".to_string(),
+                "mosaico-distillation".to_string(),
                 "openrouter/openai/gpt-4o-mini".to_string()
             )]
         );
@@ -242,7 +242,7 @@ mod tests {
         .unwrap();
 
         let mut file = LlmsFile::load_in(dir.path()).unwrap();
-        file.set_role("edge-distillation", "ollama", "llama3");
+        file.set_role("mosaico-distillation", "ollama", "llama3");
         file.save().unwrap();
 
         let raw = std::fs::read_to_string(dir.path().join("llms.json")).unwrap();

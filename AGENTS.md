@@ -46,8 +46,8 @@ Rules — enforced strictly:
 
 ## Daemon restart & deploy
 
-A daemon restart (or binary swap) must **not** kill live agent/PTY sessions. The daemon and every detached PTY supervisor are the **same binary** (`tenex-edge`, re-invoked as `__pty-supervisor`), so killing by process name reaps the whole fleet.
+A daemon restart (or binary swap) must **not** kill live agent/PTY sessions. The daemon and every detached PTY supervisor are the **same binary** (`mosaico`, re-invoked as `__pty-supervisor`), so killing by process name reaps the whole fleet.
 
-- **Never kill the daemon by bare binary name.** A restart kills only the daemon process (`pkill -f 'tenex-edge daemon'`), never `pkill -x tenex-edge` / a process group / a cgroup. The daemon re-adopts the still-running supervisors on boot via `reconcile_sessions`.
+- **Never kill the daemon by bare binary name.** A restart kills only the daemon process (`pkill -f 'mosaico daemon'`), never `pkill -x mosaico` / a process group / a cgroup. The daemon re-adopts the still-running supervisors on boot via `reconcile_sessions`.
 - **systemd units must set `KillMode=process`** so stopping the unit signals only the main daemon PID, leaving the detached supervisors alive across the restart.
 - `scripts/reset.sh` is a full **wipe** (deletes `state.db` and the sessions dir), so it deliberately reaps supervisors too — do not model a restart on it.

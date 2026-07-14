@@ -189,8 +189,8 @@ mod tests {
                 "handle": "opal-codex",
                 "agent": "codex",
                 "workspaces": [{
-                    "id": "root", "name": "tenex-edge", "path": "/repo",
-                    "channels": [{"id": "root", "name": "tenex-edge"}]
+                    "id": "root", "name": "mosaico", "path": "/repo",
+                    "channels": [{"id": "root", "name": "mosaico"}]
                 }],
                 "title": "shipping the picker",
                 "activity": "running tests",
@@ -214,7 +214,7 @@ mod tests {
         assert_eq!(rows[0].state, SessionState::Working);
         assert!(rows[0].fuzzy_score("npub1public").is_some());
         assert!(rows[0].fuzzy_score("repo").is_some());
-        assert_eq!(rows[0].workspaces[0].name, "tenex-edge");
+        assert_eq!(rows[0].workspaces[0].name, "mosaico");
         assert_eq!(rows[0].pty_id.as_deref(), Some("pty-1"));
         assert!(rows[0].pty_live);
     }
@@ -228,8 +228,8 @@ mod tests {
                 "handle": "codex",
                 "agent": "codex",
                 "workspaces": [{
-                    "id": "root", "name": "tenex-edge", "path": "/repo",
-                    "channels": [{"id": "root", "name": "tenex-edge"}]
+                    "id": "root", "name": "mosaico", "path": "/repo",
+                    "channels": [{"id": "root", "name": "mosaico"}]
                 }],
                 "title": "codex --yolo",
                 "activity": "/repo",

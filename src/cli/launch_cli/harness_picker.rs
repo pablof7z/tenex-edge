@@ -29,7 +29,7 @@ impl fmt::Display for PickerOption {
 /// boundary, so configuration errors fail loudly here instead of silently
 /// changing the requested transport.
 pub(super) fn configured_rpc_bundle(agent: &str) -> Result<Option<String>> {
-    let Some(bundle) = crate::identity::agent_harness_bundle(&crate::config::edge_home(), agent)
+    let Some(bundle) = crate::identity::agent_harness_bundle(&crate::config::mosaico_home(), agent)
     else {
         return Ok(None);
     };

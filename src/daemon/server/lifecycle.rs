@@ -4,7 +4,7 @@ mod roster_bootstrap;
 
 pub async fn run() -> Result<()> {
     let storage = crate::daemon::storage_paths::StoragePaths::current();
-    config::ensure_dir(&storage.edge_home)?;
+    config::ensure_dir(&storage.mosaico_home)?;
     crate::logging::init_daemon_logging(&storage.daemon_log_path)?;
     let lock = match StartupLock::try_acquire()? {
         Some(l) => l,
@@ -15,14 +15,14 @@ pub async fn run() -> Result<()> {
     };
     let listener = bind_socket()?;
     tracing::info!(
-        edge_home = %storage.edge_home.display(),
+        mosaico_home = %storage.mosaico_home.display(),
         config = %storage.config_path.display(),
         socket = %storage.socket_path.display(),
         state_db = %storage.state_db_path.display(),
         daemon_log = %storage.daemon_log_path.display(),
         lock = %storage.lock_path.display(),
-        tenex_edge_home_set = storage.tenex_edge_home_set,
-        edge_home_is_default = storage.edge_home_is_default,
+        mosaico_home_set = storage.mosaico_home_set,
+        mosaico_home_is_default = storage.mosaico_home_is_default,
         "daemon storage paths"
     );
     tracing::info!(socket = %socket_path().display(), "daemon listening");
@@ -32,7 +32,7 @@ pub async fn run() -> Result<()> {
     let started_at = now_secs();
     // One relay connection. AUTH identity is irrelevant to delivery (verified:
     // an A-authed connection receives events p-tagged to B), so authenticate
-    // with the backend's own key (`tenexPrivateKey`) rather than minting a
+    // with the backend's own key (`mosaicoPrivateKey`) rather than minting a
     // separate identity — a fresh keystore file would land in the same
     // `agents/` directory as real agents and leak into `who`/invite listings
     // as a phantom agent.
@@ -71,7 +71,6 @@ pub async fn run() -> Result<()> {
         cfg.management_nsec().cloned(),
         cfg.user_nsec().cloned(),
         cfg.whitelisted_pubkeys.clone(),
-        &cfg.relays, // provider_instance hashes main relays only, not indexer
     ));
     let state = Arc::new(DaemonState {
         store,

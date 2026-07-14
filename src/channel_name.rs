@@ -18,11 +18,11 @@ mod tests {
 
     #[test]
     fn workspace_name_is_reserved_only_directly_below_its_root() {
-        assert!(validate_child("tenex-edge", Some("tenex-edge")).is_err());
-        assert!(validate_child("TENEX-EDGE", Some("tenex-edge")).is_err());
-        assert!(validate_child("tenex-edge", None).is_ok());
-        assert!(validate_child("reviews", Some("tenex-edge")).is_ok());
-        assert!(validate_child("epic/reviews", Some("tenex-edge")).is_err());
-        assert!(validate_child("epic.reviews", Some("tenex-edge")).is_err());
+        assert!(validate_child("mosaico", Some("mosaico")).is_err());
+        assert!(validate_child("MOSAICO", Some("mosaico")).is_err());
+        assert!(validate_child("mosaico", None).is_ok());
+        assert!(validate_child("reviews", Some("mosaico")).is_ok());
+        assert!(validate_child("epic/reviews", Some("mosaico")).is_err());
+        assert!(validate_child("epic.reviews", Some("mosaico")).is_err());
     }
 }

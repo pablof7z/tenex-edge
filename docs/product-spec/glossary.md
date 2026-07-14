@@ -27,7 +27,7 @@ address, and message each other. Already exists and is populated (see
 [ecosystem.md](ecosystem.md)). Relays are dumb, replaceable infrastructure — not authorities.
 
 ### Enfranchise
-What tenex-edge does: grant a foreign-hosted agent identity + fabric membership so it becomes
+What mosaico does: grant a foreign-hosted agent identity + fabric membership so it becomes
 a citizen. The verb that distinguishes us from TENEX, which *owns/hosts* its agents instead.
 
 ### Fleet
@@ -105,10 +105,10 @@ about*, never *commands to obey*. The foundation of the cross-person threat mode
 [trust-and-safety.md](trust-and-safety.md).
 
 ### TENEX (proper)
-Our predecessor: a multi-agent system that *hosts* its own agents over Nostr. tenex-edge is
+Our predecessor: a multi-agent system that *hosts* its own agents over Nostr. mosaico is
 its inversion — it hosts nothing and enfranchises agents it didn't build. Also live substrate
 and proof that the fabric works (see [ecosystem.md](ecosystem.md)).
 
 ### proactive-context (`pc`)
 An existing local Rust+SQLite sidecar wired into Claude Code that already runs a single-device
-cross-agent awareness board. The floor in miniature; tenex-edge lifts it onto the fabric.
+cross-agent awareness board. The floor in miniature; mosaico lifts it onto the fabric.

@@ -102,7 +102,7 @@ fn print_ambiguous_create(
     for r in refs.iter().filter_map(|r| r.as_str()) {
         let full_path = format!("{r}.{leaf}");
         let mut cmd = format!(
-            "  tenex-edge channel create {} --about {}",
+            "  mosaico channel create {} --about {}",
             shell_quote(&full_path),
             shell_quote(about)
         );

@@ -1,5 +1,5 @@
-//! Canonical, now/cursor-INDEPENDENT capture of everything `build_view` reads
-//! from the store, partitioned into the four sources the fabric snapshot derives
+//! Canonical, now/cursor-independent capture of everything the fabric view reads
+//! from the store, partitioned into the four sources the snapshot derives
 //! from: channel/subchannel metadata, the member roster, presence/status rows,
 //! and chat/mentions. This is the pure-data boundary the Trellis reconciler feeds
 //! as graph inputs (see [`crate::reconcile::hook_context`]); the wall-clock `now`
@@ -177,9 +177,9 @@ pub(super) struct EvCap {
     pub(super) forced_mention: bool,
 }
 
-/// Read the store ONCE and freeze the four canonical inputs. Mirrors the store
-/// reads `build_view`/`people`/`messages` perform, but keeps the `now`/`cursor`
-/// filtering out (superset captures) so the reconciler owns that decision.
+/// Read the store once and freeze the four canonical inputs. `now`/`cursor`
+/// filtering stays out of the superset captures so the reconciler owns that
+/// decision.
 pub(crate) fn capture_inputs(store: &Store, input: &FabricContextInput<'_>) -> ViewInputs {
     let root = read::root_channel(store, input.scope);
     let channel_hs = read::selected_channels(store, input);

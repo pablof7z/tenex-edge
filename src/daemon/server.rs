@@ -104,11 +104,11 @@ impl DaemonState {
         self.provider.management_pubkey()
     }
 
-    /// Management signer for NIP-29 group ops; provisions `tenexPrivateKey`.
+    /// Management signer for NIP-29 group ops; provisions `mosaicoPrivateKey`.
     fn management_keys(&self) -> Result<Keys> {
         self.provider
             .management_keys()
-            .ok_or_else(|| anyhow::anyhow!("no signing key (tenexPrivateKey) set"))
+            .ok_or_else(|| anyhow::anyhow!("no signing key (mosaicoPrivateKey) set"))
     }
     pub(crate) fn with_store<R>(&self, f: impl FnOnce(&Store) -> R) -> R {
         let g = self.store.lock().expect("store mutex poisoned");
@@ -192,8 +192,7 @@ use agent_roster::{publish_local_agent_roster, rpc_agent_roster_publish};
 use channel_membership_rpc::{rpc_channel_join, rpc_channel_leave, rpc_channel_switch};
 use channel_read_tail::{handle_channel_read, handle_tail};
 use channel_resolve::{
-    resolve_channel_for_session_start, resolve_channel_path, resolve_channel_ref, root_channel,
-    rpc_channel_resolve, ChannelResolution,
+    resolve_channel_path, resolve_channel_ref, root_channel, rpc_channel_resolve, ChannelResolution,
 };
 use channel_send::rpc_channel_send;
 use channels_rpc::{
@@ -355,7 +354,7 @@ fn env_u64(key: &str, default: u64) -> u64 {
 
 fn status_ttl_duration() -> Duration {
     Duration::from_secs(env_u64(
-        "TENEX_EDGE_STATUS_TTL_S",
+        "MOSAICO_STATUS_TTL_S",
         crate::domain::STATUS_TTL_SECS,
     ))
 }

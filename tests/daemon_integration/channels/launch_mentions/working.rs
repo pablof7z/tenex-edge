@@ -35,7 +35,7 @@ fn operator_kind9_injects_into_working_launch_session() {
     wait_for_group_member(&home, &channel, &rec.pubkey);
     Store::open(&home.store_path())
         .unwrap()
-        .set_working(&rec.pubkey, true, tenex_edge::util::now_secs())
+        .set_working(&rec.pubkey, true, mosaico::util::now_secs())
         .expect("mark launch session working");
 
     let body = format!("operator relay injection {}", unique_session("body"));

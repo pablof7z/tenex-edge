@@ -16,7 +16,7 @@ pub use spawn::{spawn_dispatched_ephemeral_agent, spawn_ephemeral_agent, Dispatc
 /// agent with no bundle (the overwhelming majority) resolves to the PTY, and its
 /// launch path is byte-identical to before this wiring existed.
 fn transport_for_slug(slug: &str) -> Result<TransportImpl> {
-    let bundle = crate::identity::agent_harness_bundle(&crate::config::edge_home(), slug);
+    let bundle = crate::identity::agent_harness_bundle(&crate::config::mosaico_home(), slug);
     select_transport(bundle.as_deref())
 }
 
@@ -47,7 +47,7 @@ fn resolve_spawn_command(
         Err(e) => {
             if matches!(transport, TransportImpl::Acp(_)) {
                 let bundle =
-                    crate::identity::agent_harness_bundle(&crate::config::edge_home(), slug);
+                    crate::identity::agent_harness_bundle(&crate::config::mosaico_home(), slug);
                 let cfg = crate::harness::config::HarnessesConfig::load()?;
                 let harness =
                     crate::harness::bundle_harness_with(&cfg, bundle.as_deref().unwrap_or(slug))?;
@@ -115,7 +115,7 @@ async fn open_agent_session(
                 env: pty_launch
                     .env
                     .into_iter()
-                    .chain([(String::from("TENEX_EDGE_PUBKEY"), pubkey.to_string())])
+                    .chain([(String::from("MOSAICO_PUBKEY"), pubkey.to_string())])
                     .collect(),
                 env_remove: pty_launch.env_remove,
             })?;
@@ -128,7 +128,7 @@ async fn open_agent_session(
                 // The bundle NAME (harnesses.json key) is distinct from the agent
                 // slug; the ACP transport resolves its harness/driver from this,
                 // never from the slug (defect #1).
-                bundle: crate::identity::agent_harness_bundle(&crate::config::edge_home(), slug),
+                bundle: crate::identity::agent_harness_bundle(&crate::config::mosaico_home(), slug),
                 root: root.to_string(),
                 abs_path: abs_path.to_string(),
                 group: group.map(str::to_string),
@@ -199,7 +199,7 @@ pub async fn resume_agent_in_channel(
             use crate::session_host::transport::SessionTransport;
             let spec = LaunchSpec {
                 slug: slug.to_string(),
-                bundle: crate::identity::agent_harness_bundle(&crate::config::edge_home(), slug),
+                bundle: crate::identity::agent_harness_bundle(&crate::config::mosaico_home(), slug),
                 root: root.to_string(),
                 abs_path: abs_path.clone(),
                 group: Some(group.to_string()),

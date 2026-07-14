@@ -1,8 +1,8 @@
-# tenex-edge — Fabric Architecture (proposal)
+# mosaico — Fabric Architecture (proposal)
 
 > High-level architecture for the swap-seam. The load-bearing idea: **all data is
 > read from one unified local store; *how* it was hydrated is irrelevant to its
-> use.** A **Fabric Provider** (legacy-tag / nip29 / mls / a2a / …) is a write-side
+> use.** A **Fabric Provider** (nip29 / mls / a2a / …) is a write-side
 > materializer that owns all of how-and-who — wire shape, membership/admission, lifecycle
 > side-effects — and projects everything into canonical store rows. Readers query
 > the store; nothing in a read path ever names a kind, a tag, a group, or a relay.
@@ -16,7 +16,7 @@ The current `Codec` seam swaps *NIP layouts*, not *fabrics*. It traffics in
 
 - **wire mapping** (domain event ↔ envelope),
 - **subscription model** (`filters → Vec<Filter>`, relay-REQ-shaped),
-- **admission control** (NIP-29 group create / lock / put-user, bolted into `legacy-tag`).
+- **admission control** (NIP-29 group create / lock / put-user, bolted into the wire codec).
 
 That fusion is why "a new codec" can only ever be another nostr codec, and why
 NIP-29 — an *admission strategy* — leaks into an *event codec*. The fix is to cut the
@@ -32,7 +32,6 @@ Two observations drive the whole design:
    |--------|----------------|---------------|
    | nip29  | in the NIP-29 group | live `39002` members list (kept subscribed) |
    | mls    | in the MLS group | MLS group roster after invite/accept |
-   | legacy-tag  | locally accepted | a future legacy-tag-owned local trust file |
 
    The **shape** is uniform (`is_member(project, pubkey)` + a change stream); the
    **source** is the provider's secret. Add a member from another machine → the
@@ -45,11 +44,9 @@ Two observations drive the whole design:
    |--------|---------------------|---------|
    | nip29  | server-side — relay rejects non-member writes (closed group) | the relay |
    | mls    | cryptographically — non-members cannot decrypt | the crypto |
-   | legacy-tag  | client-side — a future legacy-tag provider filters inbound locally | us |
 
    **Principle:** the domain `is_member` gate is *always* consulted client-side;
-   server/crypto enforcement is defense-in-depth, never a replacement. legacy-tag has
-   no server enforcement at all, and even nip29 has inbound p-tag paths outside
+   server/crypto enforcement is defense-in-depth, never a replacement. Even nip29 has inbound p-tag paths outside
    the group `#h` stream: the daemon's aggregate `#p` subscription receives them
    without a relay-side group-membership check. So the gate can never be skipped
    — which is exactly why it lives in the domain, above the provider seam.
@@ -62,7 +59,6 @@ Two observations drive the whole design:
    |--------|-----------------------------|
    | nip29  | create group `9007` → lock closed `9002` → put agent member `9000` |
    | mls    | create MLS group → invite agent key → await accept |
-   | legacy-tag  | **no-op** — a "group" is just a `t`/`h` tag on each event |
 
 ---
 
@@ -89,7 +85,6 @@ flowchart TD
         direction LR
         P1["Nip29Provider"]
         P2["MlsProvider"]
-        P3["LegacyTagProvider"]
     end
 
     subgraph WIRE["Wire / transport substrate"]
@@ -101,9 +96,8 @@ flowchart TD
     PS --> SEAM
     CM --> SEAM
     ADMIT --> SEAM
-    SEAM --> P1 & P2 & P3
+    SEAM --> P1 & P2
     P1 --> R1
-    P3 --> R1
     P2 --> R2
 ```
 
@@ -125,7 +119,7 @@ holds a `Provider`, names a kind, or touches the wire. This is CQRS, and it is
 exactly why the daemon can solely own `state.db`: providers write, IPC clients
 read.
 
-This store already exists — `~/.tenex-edge/state.db`. Its `relay_*` tables are
+This store already exists — `~/.mosaico/state.db`. Its `relay_*` tables are
 materialized projections that can be rebuilt from the fabric; its local tables
 (`sessions`, `session_channels`, `session_locators`, `session_signers`,
 `handle_leases`, `inbox`, `outbox`, and `workspace_roots`) are non-rebuildable
@@ -139,10 +133,9 @@ session/CLI is a read-only IPC client.
 ```mermaid
 flowchart LR
     subgraph FABRICS["Fabrics — write-side, adapter-facing"]
-        F1["legacy-tag"]
-        F2["nip29"]
-        F3["mls"]
-        F4["a2a / invented / future"]
+        F1["nip29"]
+        F2["mls"]
+        F3["a2a / invented / future"]
     end
     MAT["Provider = materializer<br/>decode · admit · derive · upsert"]
     STORE[("Unified read model — SQLite / state.db<br/>projects · agents+membership")]
@@ -154,7 +147,6 @@ flowchart LR
     F1 --> MAT
     F2 --> MAT
     F3 --> MAT
-    F4 --> MAT
     MAT -- write --> STORE
     STORE -- query --> R1
     STORE -- query --> R2
@@ -187,7 +179,7 @@ pubkey/npub is the honest identity.
 **Three consequences that make "how we hydrate is irrelevant" true:**
 
 1. **Multiple providers populate one store.** Project A on nip29 and project B on
-   legacy-tag land in the *same* tables; a reader querying `list_projects()` cannot
+   MLS land in the *same* tables; a reader querying `list_projects()` cannot
    tell which fabric backed which row, and doesn't care.
 2. **Every per-fabric difference lives behind the materialization seam.** The
    provenance axis, the enforcement-locus, the derived-vs-enumerated distinction
@@ -265,28 +257,12 @@ per fabric:
 |--------|----------------------|----------------------|-------------------------|
 | nip29  | groups the agent belongs to (reverse of `39002`) / relay group enumeration | relay-authored `kind:39000` group metadata | **canonical & shared** — one source, every machine agrees |
 | mls    | MLS groups in local state | group-context extension / metadata message | **member-authored**, cryptographically scoped to the group |
-| legacy-tag  | *derived* — observed `h`/`t` tags + local list of dirs run in | **none native** → local descriptor file or a self-published note | **client-local** — two machines may disagree; eventually-divergent |
-
-The sharp edge is **legacy-tag**: a "group" is just a tag, so there is no native
-carrier for a description and no authoritative project registry. Two consequences
-the domain must absorb:
-
-- **The list is *derived*, not *enumerated*.** For legacy-tag, `list_projects()` is
-  reconstructed from observed events (which `h`/`t` tags have we seen?) plus a
-  local record of directories opened — never a server-side directory listing.
-- **Description is `Option`, and may be local-only.** The domain types
-  `description: Option<String>` and tolerate per-machine divergence. This is the
-  exact analogue of legacy-tag's client-side membership enforcement: not a flaw in the
-  abstraction, but the abstraction faithfully surfacing that the fabric has no
-  shared truth here.
 
 **Hydration mode is the materializer's business too** — *pull vs. live*. nip29/mls
 can one-shot **fetch** the `39000` metadata *or* **subscribe** to it (it's
 replaceable) and re-upsert on every change, so a description edited on another
 machine propagates by simply updating the store row — and the reader's next
-`SELECT` reflects it with zero changes anywhere above the seam. legacy-tag uses whatever
-local mechanism applies (file watch, or re-derive from the event stream). Either
-way the reader sees only the current row; "a new project appeared on the fabric"
+`SELECT` reflects it with zero changes anywhere above the seam. The reader sees only the current row; "a new project appeared on the fabric"
 is just an `INSERT` it will observe on its next query (or via a store-level
 change-notify, never a fabric subscription).
 
@@ -348,8 +324,6 @@ sequenceDiagram
         P->>FAB: create MLS group
         P->>FAB: invite agent key
         FAB-->>P: agent accepts → roster updated
-    else legacy-tag provider
-        P-->>P: no-op (group == t/h tag; nothing to create)
     end
 
     Note over P,FAB: thereafter the materializer just keeps the store current
@@ -398,7 +372,7 @@ The behavior-preserving phase ladder and validation commands live in [fabric-arc
 - **Identity binding** (agent keypair ↔ fabric identity) is assumed shared, but
   MLS adds a key-package / accept handshake with no nostr analogue. Is that a
   fifth provider capability, or part of Lifecycle?
-- **Multi-fabric at once** — can a daemon run nip29 *and* legacy-tag providers
+- **Multi-fabric at once** — can a daemon run nip29 *and* MLS providers
   concurrently (one project per fabric), and are rosters ever merged across
   providers or always partitioned by `project_id` / `project_origins`?
 - **Store schema evolution** — the current policy is fail-loud schema stamps, not

@@ -1,5 +1,5 @@
 //! `probe` RPC arm — the hidden diagnostic surface over the reconciler frontier
-//! (frontier design §4). The CLI (`tenex-edge probe <verb>`) forwards a `verb`
+//! (frontier design §4). The CLI (`mosaico probe <verb>`) forwards a `verb`
 //! plus verb params here; this module dispatches to one implementation file per
 //! verb, each kept small and independently testable:
 //!

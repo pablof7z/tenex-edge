@@ -50,7 +50,7 @@ fn backend_pubkey_excluded_from_roster_without_cached_profile() {
         };
         let captured = capture_inputs(&store, &cap_input);
         let trellis = render_view_text(&assemble::assemble_view(&captured, 0, 100));
-        assert_eq!(trellis, text, "build_view and assemble must agree");
+        assert_eq!(trellis, text, "captured rendering must be deterministic");
         text
     };
 
@@ -148,7 +148,7 @@ fn backend_traffic_excluded_from_chatter() {
         };
         let captured = capture_inputs(&store, &cap_input);
         let trellis = render_view_text(&assemble::assemble_view(&captured, 0, 1_000));
-        assert_eq!(trellis, text, "build_view and assemble must agree");
+        assert_eq!(trellis, text, "captured rendering must be deterministic");
         text
     };
 

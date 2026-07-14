@@ -1,8 +1,8 @@
 use crate::daemon_harness::*;
+use mosaico::daemon::client::Client;
+use mosaico::state::Store;
 use nostr_sdk::prelude::{Keys, PublicKey, ToBech32};
 use std::time::Duration;
-use tenex_edge::daemon::client::Client;
-use tenex_edge::state::Store;
 
 #[test]
 fn explicit_channel_is_pure_destination_selection_and_preserves_tags() {
@@ -231,7 +231,7 @@ fn channel_commands_require_channel_when_session_joined_to_multiple_channels() {
     let store = Store::open(&home.store_path()).unwrap();
     let pubkey = Keys::generate().public_key().to_hex();
     store
-        .reserve_session(&tenex_edge::state::RegisterSession {
+        .reserve_session(&mosaico::state::RegisterSession {
             pubkey: pubkey.clone(),
             harness: "codex".to_string(),
             agent_slug: "multi-chat".to_string(),
@@ -264,7 +264,7 @@ fn channel_commands_require_channel_when_session_joined_to_multiple_channels() {
     });
     assert!(
         write_err.contains("channel send is ambiguous")
-            && write_err.contains("tenex-edge channel send --channel"),
+            && write_err.contains("mosaico channel send --channel"),
         "unexpected channel send error: {write_err}"
     );
 
@@ -285,7 +285,7 @@ fn channel_commands_require_channel_when_session_joined_to_multiple_channels() {
     });
     assert!(
         read_err.contains("channel read is ambiguous")
-            && read_err.contains("tenex-edge channel read --channel"),
+            && read_err.contains("mosaico channel read --channel"),
         "unexpected channel read error: {read_err}"
     );
 

@@ -1,12 +1,12 @@
 //! Daemon mechanics: spawn-if-absent, spawn race, stale-socket reclaim,
 //! version-skew handshake, and a basic RPC round-trip. These drive the thin
 //! client against a real spawned `daemon` over a UDS in an isolated
-//! `TENEX_EDGE_HOME`.
+//! `MOSAICO_HOME`.
 //!
 //! The daemon connects ONE relay at startup, so each test points its config's
 //! `relays` at a local `nak serve` (NOT the production relay — that would touch
 //! the live fabric). Each test isolates its daemon via a fresh temp
-//! `TENEX_EDGE_HOME`; env mutation is serialized with a mutex.
+//! `MOSAICO_HOME`; env mutation is serialized with a mutex.
 
 #[path = "common/mod.rs"]
 mod common;
@@ -18,7 +18,7 @@ use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use tenex_edge::daemon::client::Client;
+use mosaico::daemon::client::Client;
 
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 
@@ -41,7 +41,7 @@ impl Drop for Home {
 impl Home {
     fn new() -> Self {
         let dir = tempfile::tempdir().unwrap();
-        std::env::set_var("TENEX_EDGE_HOME", dir.path());
+        std::env::set_var("MOSAICO_HOME", dir.path());
         // Config with a LOCAL relay so the daemon never dials the live fabric.
         let cfg = dir.path().join("config.json");
         let body = serde_json::json!({
@@ -50,11 +50,11 @@ impl Home {
             "relays": [shared_relay_url()],
         });
         std::fs::write(&cfg, serde_json::to_string(&body).unwrap()).unwrap();
-        std::env::set_var("TENEX_CONFIG", &cfg);
-        std::env::set_var("TENEX_EDGE_DAEMON_GRACE_S", "30");
+        std::env::set_var("MOSAICO_CONFIG", &cfg);
+        std::env::set_var("MOSAICO_DAEMON_GRACE_S", "30");
         // The thin client spawns `current_exe() daemon`; in a test binary that
         // is the harness, so point it at the real built binary.
-        std::env::set_var("TENEX_EDGE_BIN", bin());
+        std::env::set_var("MOSAICO_BIN", bin());
         // Register /tmp as a channel so hook-driven session_start finds a
         // resolvable channel (the new "refuse without a channel" gate would
         // otherwise silently exit 0).
@@ -75,12 +75,12 @@ impl Home {
 }
 
 /// The thin client spawns `current_exe() daemon`. In a test binary that is the
-/// test harness, not tenex-edge — so point it at the built binary via the env
+/// test harness, not mosaico — so point it at the built binary via the env
 /// the client reads. We override by building the real binary path and exporting
 /// it... but the client uses current_exe() directly. Instead, tests that need a
 /// REAL spawned daemon must run the actual binary. We use CARGO_BIN_EXE.
 fn bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_tenex-edge"))
+    PathBuf::from(env!("CARGO_BIN_EXE_mosaico"))
 }
 
 /// Spawn the daemon by exec'ing the real binary (not current_exe of the test).
@@ -88,9 +88,9 @@ fn spawn_real_daemon(home: &Home) -> std::process::Child {
     let log = std::fs::File::create(home.dir.path().join("daemon.log")).unwrap();
     std::process::Command::new(bin())
         .arg("daemon")
-        .env("TENEX_EDGE_HOME", home.dir.path())
-        .env("TENEX_CONFIG", home.dir.path().join("config.json"))
-        .env("TENEX_EDGE_DAEMON_GRACE_S", "30")
+        .env("MOSAICO_HOME", home.dir.path())
+        .env("MOSAICO_CONFIG", home.dir.path().join("config.json"))
+        .env("MOSAICO_DAEMON_GRACE_S", "30")
         .stdout(log.try_clone().unwrap())
         .stderr(log)
         .spawn()

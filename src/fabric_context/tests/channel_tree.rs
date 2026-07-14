@@ -19,7 +19,7 @@ fn session_view_has_self_and_chatter_human_view_does_not() {
 
     let human = render_fabric_context(&store, input(None, "root", 0, 1_000, true))
         .expect("human who should render");
-    assert!(human.contains("<tenex-edge>"));
+    assert!(human.contains("<mosaico>"));
     assert!(!human.contains("Session: @"));
     assert!(!human.contains("<chatter>"));
 }

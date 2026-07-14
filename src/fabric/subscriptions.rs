@@ -29,19 +29,19 @@ use nostr_sdk::prelude::{Alphabet, Filter, SingleLetterTag, SubscriptionId};
 /// spawn-on-mention chat replay re-streams a channel's stored events without
 /// opening a second concurrent REQ.
 pub(crate) fn id_h_narrow(h: &str) -> SubscriptionId {
-    SubscriptionId::new(format!("te-v2-h-{h}"))
+    SubscriptionId::new(format!("mosaico-v2-h-{h}"))
 }
 /// Semantic id for an addressed pubkey's narrow `#p` REQ.
 pub(crate) fn id_p_narrow(pk: &str) -> SubscriptionId {
-    SubscriptionId::new(format!("te-v2-p-{pk}"))
+    SubscriptionId::new(format!("mosaico-v2-p-{pk}"))
 }
 /// Semantic id for a group's narrow group-state `#d` REQ.
 pub(crate) fn id_gstate_narrow(h: &str) -> SubscriptionId {
-    SubscriptionId::new(format!("te-v2-gstate-{h}"))
+    SubscriptionId::new(format!("mosaico-v2-gstate-{h}"))
 }
 /// Semantic id for one daemon-lifetime, unscoped kind subscription.
 pub(crate) fn id_global_kind(kind: u16) -> SubscriptionId {
-    SubscriptionId::new(format!("te-v2-global-kind-{kind}"))
+    SubscriptionId::new(format!("mosaico-v2-global-kind-{kind}"))
 }
 
 // ── Pure filter builders ────────────────────────────────────────────────────────
@@ -163,7 +163,7 @@ mod tests {
         assert_eq!(json, r#"{"kinds":[9000]}"#);
         assert_eq!(
             id_global_kind(put_user).to_string(),
-            "te-v2-global-kind-9000"
+            "mosaico-v2-global-kind-9000"
         );
     }
 }

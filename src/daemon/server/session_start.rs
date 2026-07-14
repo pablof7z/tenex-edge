@@ -27,10 +27,10 @@ pub(super) async fn rpc_session_start_inner(
         anyhow::bail!("session_start requires an agent slug");
     }
 
-    let edge = config::edge_home();
-    config::ensure_dir(&edge)?;
+    let mosaico_home = config::mosaico_home();
+    config::ensure_dir(&mosaico_home)?;
     let agent = identity::load_or_create_with_command(
-        &edge,
+        &mosaico_home,
         &p.agent,
         now_secs(),
         p.provision_command.clone(),
@@ -216,16 +216,14 @@ fn resolve_harness(p: &SessionStartParams) -> Harness {
 }
 
 fn resolve_start_channel(
-    state: &Arc<DaemonState>,
+    _state: &Arc<DaemonState>,
     p: &SessionStartParams,
     work_root: &str,
 ) -> Result<(String, Option<String>)> {
-    let Some(name) = p.channel.as_deref().filter(|value| !value.is_empty()) else {
+    let Some(channel_h) = p.channel.as_deref().filter(|value| !value.is_empty()) else {
         return Ok((work_root.to_string(), None));
     };
-    let resolved = resolve_channel_for_session_start(state, work_root, name)
-        .with_context(|| format!("resolving launch channel {name:?}"))?;
-    Ok((resolved.channel_h, resolved.provision_name))
+    Ok((channel_h.to_string(), None))
 }
 
 fn bind_locators(

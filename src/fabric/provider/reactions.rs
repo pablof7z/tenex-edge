@@ -44,17 +44,9 @@ impl Nip29Provider {
         }
 
         let event_id = self.transport.publish_event_checked(&signed).await?;
-        let created_at = signed.created_at.as_secs();
         // Seed locally through the single materializer writer.
-        let provider_instance = self.provider_instance.clone();
         self.with_store(|store| {
-            crate::fabric::materialize(
-                &RawEnvelope::Nostr(signed.clone()),
-                &[],
-                created_at,
-                &provider_instance,
-                store,
-            );
+            crate::fabric::materialize(&RawEnvelope::Nostr(signed.clone()), store);
         });
         Ok(event_id.to_hex())
     }

@@ -1,7 +1,7 @@
 use crate::daemon_harness::*;
+use mosaico::daemon::client::Client;
+use mosaico::state::Store;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tenex_edge::daemon::client::Client;
-use tenex_edge::state::Store;
 
 #[path = "signers/durable_agent.rs"]
 mod durable_agent;
@@ -31,7 +31,7 @@ fn rewrite_config_with_nak_relay(home: &Home) -> String {
         "relays": [relay],
         "indexerRelay": relay,
         "userNsec": EXAMPLE_USER_NSEC,
-        "tenexPrivateKey": EXAMPLE_BACKEND_SEC_HEX,
+        "mosaicoPrivateKey": EXAMPLE_BACKEND_SEC_HEX,
     });
     std::fs::write(&cfg, serde_json::to_string(&body).unwrap()).unwrap();
     relay

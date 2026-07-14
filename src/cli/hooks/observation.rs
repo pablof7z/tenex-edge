@@ -29,13 +29,13 @@ pub(super) async fn report_observation(
     watch_pid: Option<i32>,
     provision_command: Option<Vec<String>>,
 ) -> Result<String> {
-    let pty_session = std::env::var("TENEX_EDGE_PTY_SESSION")
+    let pty_session = std::env::var("MOSAICO_PTY_SESSION")
         .ok()
         .filter(|s| !s.is_empty());
-    let pubkey = std::env::var("TENEX_EDGE_PUBKEY")
+    let pubkey = std::env::var("MOSAICO_PUBKEY")
         .ok()
         .filter(|s| !s.is_empty());
-    let session_name = std::env::var("TENEX_EDGE_SESSION_NAME")
+    let session_name = std::env::var("MOSAICO_SESSION_NAME")
         .ok()
         .filter(|s| !s.is_empty());
     let params = serde_json::json!({
@@ -50,7 +50,7 @@ pub(super) async fn report_observation(
         "endpoint_kind": pty_session.as_ref().map(|_| "pty"),
         "session_name": session_name,
         // Real argv of a direct `claude --agent <slug>` invocation, detected
-        // when TENEX_EDGE_AGENT was absent. Only used by the daemon to seed a
+        // when MOSAICO_AGENT was absent. Only used by the daemon to seed a
         // brand-new identity's spawn command; ignored for an existing one.
         "provision_command": provision_command,
         // NIP-29 subgroup id this hosted process was spawned into, when
@@ -70,7 +70,7 @@ pub(super) async fn report_observation(
 }
 
 pub(super) fn render_init_progress(item: &serde_json::Value) {
-    if std::env::var("TENEX_EDGE_INIT_PROGRESS").ok().as_deref() == Some("0") {
+    if std::env::var("MOSAICO_INIT_PROGRESS").ok().as_deref() == Some("0") {
         return;
     }
     if item.get("kind").and_then(|v| v.as_str()) != Some("init_progress") {
@@ -82,7 +82,7 @@ pub(super) fn render_init_progress(item: &serde_json::Value) {
         .unwrap_or_default();
     let phase = item.get("phase").and_then(|v| v.as_str()).unwrap_or("init");
     let message = item.get("message").and_then(|v| v.as_str()).unwrap_or("");
-    eprintln!("[tenex-edge init +{elapsed}ms] {phase}: {message}");
+    eprintln!("[mosaico init +{elapsed}ms] {phase}: {message}");
 }
 
 // ── process-tree PID search (for harnesses like Codex that omit their PID) ───
@@ -149,7 +149,7 @@ fn extract_agent_flag(argv: &[String]) -> Option<String> {
 }
 
 /// Look for a live ancestor directly running `claude ... --agent <name>` —
-/// i.e. NOT spawned via `tenex-edge launch`, which sets `TENEX_EDGE_AGENT`
+/// i.e. NOT spawned via `mosaico launch`, which sets `MOSAICO_AGENT`
 /// instead and short-circuits this search. Returns the requested slug and
 /// the ancestor's full command line (split into argv), so a brand-new
 /// identity can be provisioned with that exact invocation as its spawn

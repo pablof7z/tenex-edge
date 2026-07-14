@@ -15,7 +15,7 @@ use super::pty::PtySupervisorArgs;
 use super::who::WhoArgs;
 
 /// Print the top-level help with every hidden subcommand unhidden, for
-/// `tenex-edge --help --all`. Recursively clears `hide` on subcommands only;
+/// `mosaico --help --all`. Recursively clears `hide` on subcommands only;
 /// hidden args stay hidden (they are internal modifiers).
 pub fn print_help_all() {
     let mut cmd = Cli::command();
@@ -32,8 +32,8 @@ fn unhide_subcommands(cmd: &mut Command) {
 }
 
 /// Print top-level help with operator-only commands (`who`, `sessions`, `mgmt`, `launch`)
-/// unhidden when running outside an agent context (no `TENEX_EDGE_AGENT` /
-/// `TENEX_EDGE_AGENT_FALLBACK`). Inside an agent context, those commands stay
+/// unhidden when running outside an agent context (no `MOSAICO_AGENT`).
+/// Inside an agent context, those commands stay
 /// hidden so agents see only their own surface. Internal/debug commands remain
 /// hidden in both contexts; use `--help --all` to see everything.
 pub fn print_help_contextual() {
@@ -57,7 +57,7 @@ fn command_for_context(in_agent: bool) -> Command {
 
 #[derive(Parser)]
 #[command(
-    name = "tenex-edge",
+    name = "mosaico",
     about = "An identity and awareness fabric for the coding agents you already run."
 )]
 pub struct Cli {
@@ -126,7 +126,7 @@ pub(super) enum Cmd {
     /// Internal portable-pty supervisor process.
     #[command(name = "__pty-supervisor", hide = true)]
     PtySupervisor(PtySupervisorArgs),
-    /// Detect local agent harnesses and wire tenex-edge's hook entries into each.
+    /// Detect local agent harnesses and wire mosaico's hook entries into each.
     #[command(hide = true)]
     Install(InstallArgs),
     /// Manage the per-machine daemon.
@@ -154,7 +154,7 @@ pub(super) enum DaemonAction {
 #[derive(Subcommand)]
 pub(super) enum MgmtAction {
     /// Manage the local agent keystore: agents that have a private key on THIS
-    /// machine under `<edge_home>/agents/<slug>.json`. These are the identities
+    /// machine under `<mosaico_home>/agents/<slug>.json`. These are the identities
     /// you can spawn locally; channel membership is governed separately by the
     /// codec (e.g. the channel group's member list), not here.
     Agent {

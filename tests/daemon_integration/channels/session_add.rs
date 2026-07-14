@@ -24,7 +24,7 @@ fn no_hook_command() -> Vec<String> {
     ]
 }
 
-fn wait_for_alive(home: &Home, agent: &str, channel: &str) -> tenex_edge::state::Session {
+fn wait_for_alive(home: &Home, agent: &str, channel: &str) -> mosaico::state::Session {
     let mut found = None;
     assert!(
         wait_until(Duration::from_secs(25), || {
@@ -88,14 +88,14 @@ fn channel_add_session_pulls_live_pty_without_resuming() {
             .expect("channel_create");
         v["child_h"].as_str().unwrap().to_string()
     });
-    let pty_count = tenex_edge::pty::read_all_metadata().len();
+    let pty_count = mosaico::pty::read_all_metadata().len();
 
     let added = rt().block_on(async {
         let mut c = Client::connect_or_spawn().await.expect("connect");
         c.call(
             "invite",
             serde_json::json!({
-                "channel": &side,
+                "channel": format!("@{side}"),
                 "session": &rec.pubkey,
                 "cwd": &work_dir,
             }),
@@ -104,7 +104,7 @@ fn channel_add_session_pulls_live_pty_without_resuming() {
         .expect("invite live session")
     });
     assert_eq!(added["pty_id"], pty_id);
-    assert_eq!(tenex_edge::pty::read_all_metadata().len(), pty_count);
+    assert_eq!(mosaico::pty::read_all_metadata().len(), pty_count);
 
     assert!(
         wait_until(Duration::from_secs(25), || {
@@ -130,6 +130,6 @@ fn channel_add_session_pulls_live_pty_without_resuming() {
         .channel_h;
     assert_eq!(active, root);
 
-    let _ = tenex_edge::pty::kill(&pty_id);
+    let _ = mosaico::pty::kill(&pty_id);
     stop_daemon(&home);
 }

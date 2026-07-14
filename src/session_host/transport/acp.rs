@@ -76,7 +76,7 @@ impl AcpTransport {
         let scratch = if harness_kind == Harness::ClaudeCode {
             cwd.clone()
         } else {
-            crate::config::edge_home()
+            crate::config::mosaico_home()
                 .join("harness-profiles")
                 .join(&spec.slug)
         };
@@ -102,7 +102,7 @@ impl AcpTransport {
             callbacks,
         )?;
         cfg.env
-            .push(("TENEX_EDGE_PUBKEY".to_string(), spec.pubkey.clone()));
+            .push(("MOSAICO_PUBKEY".to_string(), spec.pubkey.clone()));
         let dialect = cfg.dialect;
         let (handle, updates) = RpcHandle::spawn(cfg)
             .await
@@ -166,7 +166,7 @@ impl AcpTransport {
             Dialect::AppServer => {
                 let client = AppServerClient::new(handle.clone());
                 client
-                    .initialize("tenex-edge", env!("CARGO_PKG_VERSION"))
+                    .initialize("mosaico", env!("CARGO_PKG_VERSION"))
                     .await
                     .map_err(|e| anyhow::anyhow!("app-server initialize: {e}"))?;
                 client
@@ -223,7 +223,7 @@ impl SessionTransport for AcpTransport {
             Dialect::AppServer => {
                 let client = AppServerClient::new(handle.clone());
                 client
-                    .initialize("tenex-edge", env!("CARGO_PKG_VERSION"))
+                    .initialize("mosaico", env!("CARGO_PKG_VERSION"))
                     .await
                     .map_err(|e| anyhow::anyhow!("app-server initialize (resume): {e}"))?;
                 client

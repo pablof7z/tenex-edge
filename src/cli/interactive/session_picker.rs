@@ -13,7 +13,7 @@ struct SessionChoice {
 
 pub(in crate::cli) async fn sessions() -> Result<()> {
     if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
-        bail!("tenex-edge sessions is interactive — run it in a terminal");
+        bail!("mosaico sessions is interactive — run it in a terminal");
     }
 
     loop {

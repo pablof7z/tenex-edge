@@ -44,32 +44,27 @@ mod who;
 use admin::{parse_since, render_tail_event};
 pub use args::{print_help_all, print_help_contextual, Cli};
 use args::{Cmd, DaemonAction, MgmtAction};
-pub(crate) fn select_agent_env(active: Option<String>, fallback: Option<String>) -> Option<String> {
-    active
-        .filter(|s| !s.is_empty())
-        .or_else(|| fallback.filter(|s| !s.is_empty()))
+pub(crate) fn select_agent_env(active: Option<String>) -> Option<String> {
+    active.filter(|s| !s.is_empty())
 }
 
 pub(crate) fn agent_env_slug() -> Option<String> {
-    select_agent_env(
-        std::env::var("TENEX_EDGE_AGENT").ok(),
-        std::env::var("TENEX_EDGE_AGENT_FALLBACK").ok(),
-    )
+    select_agent_env(std::env::var("MOSAICO_AGENT").ok())
 }
 
 /// The NIP-29 subgroup id (`h`) this PTY session was spawned into, exported as
-/// `TENEX_EDGE_CHANNEL`. Present only for sessions launched into a subgroup task
+/// `MOSAICO_CHANNEL`. Present only for sessions launched into a subgroup task
 /// room; absent for ordinary channel sessions. Threaded into session-resolving
 /// RPCs so the daemon binds to the subgroup session (stored under this `h`)
 /// rather than a sibling parent-channel session in the same working directory.
 pub(crate) fn channel_env() -> Option<String> {
-    std::env::var("TENEX_EDGE_CHANNEL")
+    std::env::var("MOSAICO_CHANNEL")
         .ok()
         .filter(|s| !s.is_empty())
 }
 
 pub(crate) fn ephemeral_session_env() -> bool {
-    std::env::var("TENEX_EDGE_EPHEMERAL").ok().as_deref() == Some("1")
+    std::env::var("MOSAICO_EPHEMERAL").ok().as_deref() == Some("1")
 }
 
 /// The hosted PTY session this CLI invocation runs in. It is present in the
@@ -77,7 +72,7 @@ pub(crate) fn ephemeral_session_env() -> bool {
 /// resolves its typed PTY locator to the caller's pubkey. Native harness shells
 /// fall back to native locators, watched pid, or channel scan.
 pub(crate) fn pty_session_env() -> Option<String> {
-    std::env::var("TENEX_EDGE_PTY_SESSION")
+    std::env::var("MOSAICO_PTY_SESSION")
         .ok()
         .filter(|s| !s.is_empty())
 }
@@ -95,7 +90,7 @@ pub(crate) fn rpc_params(extra: serde_json::Value) -> serde_json::Value {
 }
 
 pub async fn run(cli: Cli) -> Result<()> {
-    // Any explicit command (except `harness hook`) signals intent to use tenex-edge, so
+    // Any explicit command (except `harness hook`) signals intent to use mosaico, so
     // clear the daemon stop-inhibit. Hooks honour the sentinel — they must never
     // restart a daemon the operator explicitly stopped. `daemon stop` re-arms it
     // unconditionally, so clearing first is harmless.
@@ -105,7 +100,7 @@ pub async fn run(cli: Cli) -> Result<()> {
     ) && crate::daemon::is_inhibited()
     {
         crate::daemon::clear_inhibit();
-        eprintln!("[tenex-edge] stop inhibit cleared");
+        eprintln!("[mosaico] stop inhibit cleared");
     }
     match cli.cmd {
         Cmd::Who(args) => who::who(args),
@@ -148,8 +143,8 @@ fn stop_daemon() -> Result<()> {
     request_daemon_shutdown();
     crate::daemon::set_inhibit();
     eprintln!(
-        "[tenex-edge] hooks will not restart the daemon; \
-         run `tenex-edge daemon restart` to resume"
+        "[mosaico] hooks will not restart the daemon; \
+         run `mosaico daemon restart` to resume"
     );
     Ok(())
 }
@@ -162,7 +157,7 @@ async fn restart_daemon() -> Result<()> {
     crate::daemon::clear_inhibit();
     let mut client = crate::daemon::client::Client::connect_or_spawn().await?;
     client.call("ping", serde_json::json!({})).await?;
-    eprintln!("[tenex-edge] daemon restarted");
+    eprintln!("[mosaico] daemon restarted");
     Ok(())
 }
 
@@ -172,7 +167,7 @@ fn request_daemon_shutdown() -> bool {
     match crate::daemon::blocking::call_no_spawn("shutdown", serde_json::json!({})) {
         Ok(_) => wait_for_daemon_exit(),
         Err(_) => {
-            eprintln!("[tenex-edge] daemon was not running");
+            eprintln!("[mosaico] daemon was not running");
             true
         }
     }
@@ -188,18 +183,18 @@ fn wait_for_daemon_exit() -> bool {
     loop {
         match crate::daemon::client::StartupLock::try_acquire() {
             Ok(Some(_lock)) => {
-                eprintln!("[tenex-edge] daemon stopped");
+                eprintln!("[mosaico] daemon stopped");
                 return true;
             }
             Ok(None) => {}
             Err(e) => {
-                eprintln!("[tenex-edge] daemon shutdown requested but could not confirm exit: {e}");
+                eprintln!("[mosaico] daemon shutdown requested but could not confirm exit: {e}");
                 return false;
             }
         }
         if Instant::now() >= deadline {
             eprintln!(
-                "[tenex-edge] daemon shutdown requested but it did not exit within {DAEMON_SHUTDOWN_TIMEOUT:?}"
+                "[mosaico] daemon shutdown requested but it did not exit within {DAEMON_SHUTDOWN_TIMEOUT:?}"
             );
             return false;
         }
@@ -269,7 +264,7 @@ pub(super) fn session_end_hook(session: String) -> Result<()> {
         "session_end",
         serde_json::json!({"session": session}),
     ) {
-        eprintln!("[tenex-edge] session-end hook skipped: {e:#}");
+        eprintln!("[mosaico] session-end hook skipped: {e:#}");
     }
     Ok(())
 }
@@ -288,7 +283,7 @@ pub(super) async fn daemon_call_async(
 const HOOK_DAEMON_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Hook-path daemon call: returns `Ok(Null)` when the daemon is inhibited
-/// (after `tenex-edge daemon stop`) so hooks fail open rather than spawning it.
+/// (after `mosaico daemon stop`) so hooks fail open rather than spawning it.
 pub(super) async fn daemon_call_hook_async(
     method: &str,
     params: serde_json::Value,

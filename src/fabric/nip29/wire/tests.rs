@@ -30,9 +30,8 @@ fn has_tag_name(event: &Event, name: &str) -> bool {
 
 fn status(keys: &Keys, busy: bool, rel_cwd: &str) -> DomainEvent {
     DomainEvent::Status(Status {
-        // Non-empty slug emission is covered separately.
-        agent: AgentRef::new(keys.public_key().to_hex(), String::new()),
-        channels: vec!["tenex-edge".into()],
+        agent: AgentRef::new(keys.public_key().to_hex(), "coder"),
+        channels: vec!["mosaico".into()],
         host: "laptop".into(),
         title: "fixing the auth bug".into(),
         activity: if busy {
@@ -100,7 +99,7 @@ fn status_is_per_group_self_contained_signal() {
         .unwrap();
     assert_eq!(signed.kind.as_u16(), KIND_STATUS);
     assert!(has_tag(&signed, "d", "status"));
-    assert!(has_tag(&signed, "h", "tenex-edge"));
+    assert!(has_tag(&signed, "h", "mosaico"));
     // No private runtime id appears as an address or side tag.
     assert!(!has_tag_name(&signed, "session-id"));
     assert!(has_tag(&signed, "title", "fixing the auth bug"));
@@ -112,18 +111,16 @@ fn status_is_per_group_self_contained_signal() {
     // The live activity is the content, not a tag.
     assert_eq!(signed.content, "reading the diff");
     assert!(!has_tag_name(&signed, "activity"));
-    // Empty slugs are omitted rather than emitting a useless hint.
-    assert!(!has_tag_name(&signed, "slug"));
+    assert!(has_tag(&signed, "slug", "coder"));
     // No legacy presence-heartbeat artifacts, no self-asserted agent tag.
     assert!(!has_tag_name(&signed, "agent"));
 }
-
 #[test]
-fn status_slug_is_convenience_hint_not_agent_tag() {
+fn status_slug_is_canonical_hint_not_agent_tag() {
     let keys = Keys::generate();
     let ev = DomainEvent::Status(Status {
         agent: agent(&keys, "coder"),
-        channels: vec!["tenex-edge".into()],
+        channels: vec!["mosaico".into()],
         host: "laptop".into(),
         title: "fixing the auth bug".into(),
         activity: "reading the diff".into(),
@@ -191,15 +188,18 @@ fn status_uses_constant_address_independent_from_channel_h() {
     let keys = Keys::generate();
     let event = EventBuilder::new(Kind::from(KIND_STATUS), "")
         .tags([
-            tag(&["h", "tenex-edge"]).unwrap(),
+            tag(&["h", "mosaico"]).unwrap(),
             tag(&["d", "status"]).unwrap(),
             tag(&["state", "idle"]).unwrap(),
+            tag(&["title", ""]).unwrap(),
+            tag(&["host", "laptop"]).unwrap(),
+            tag(&["slug", "codex"]).unwrap(),
         ])
         .sign_with_keys(&keys)
         .unwrap();
     match Nip29WireCodec.decode_event(&event) {
         Some(DomainEvent::Status(s)) => {
-            assert_eq!(s.channels, vec!["tenex-edge"]);
+            assert_eq!(s.channels, vec!["mosaico"]);
         }
         other => panic!("expected status, got {other:?}"),
     }
@@ -210,8 +210,8 @@ fn status_private_runtime_id_d_is_rejected() {
     let keys = Keys::generate();
     let event = EventBuilder::new(Kind::from(KIND_STATUS), "working on tests")
         .tags([
-            tag(&["h", "tenex-edge"]).unwrap(),
-            tag(&["d", "te-private-run"]).unwrap(),
+            tag(&["h", "mosaico"]).unwrap(),
+            tag(&["d", "mosaico-private-run"]).unwrap(),
             tag(&["status", "busy"]).unwrap(),
             tag(&["title", "codec refactor"]).unwrap(),
             tag(&["host", "laptop"]).unwrap(),
@@ -227,18 +227,17 @@ fn activity_roundtrip() {
     let keys = Keys::generate();
     let ev = DomainEvent::Activity(Activity {
         agent: AgentRef::new(keys.public_key().to_hex(), String::new()),
-        channel: "tenex-edge".into(),
+        channel: "mosaico".into(),
         text: "fixing the auth bug".into(),
     });
     assert_eq!(roundtrip(ev.clone(), &keys), ev);
 }
-
 #[test]
 fn activity_uses_nip29_h_tag_not_hashtag() {
     let keys = Keys::generate();
     let ev = DomainEvent::Activity(Activity {
         agent: agent(&keys, "coder"),
-        channel: "tenex-edge".into(),
+        channel: "mosaico".into(),
         text: "fixing the auth bug".into(),
     });
     let signed = Nip29WireCodec
@@ -246,7 +245,7 @@ fn activity_uses_nip29_h_tag_not_hashtag() {
         .unwrap()
         .sign_with_keys(&keys)
         .unwrap();
-    assert!(has_tag(&signed, "h", "tenex-edge"));
+    assert!(has_tag(&signed, "h", "mosaico"));
     assert!(!has_tag_name(&signed, "t"));
 }
 
@@ -330,13 +329,12 @@ fn reaction_with_e_tag_decodes_and_emits_kind7_tags() {
         other => panic!("expected Reaction, got {other:?}"),
     }
 }
-
 #[test]
 fn kind_24011_presence_is_ignored() {
     let keys = Keys::generate();
     let event = EventBuilder::new(Kind::from(24011u16), "")
         .tags([
-            tag(&["h", "tenex-edge"]).unwrap(),
+            tag(&["h", "mosaico"]).unwrap(),
             tag(&["legacy-session", "sess-123"]).unwrap(),
             tag(&["expiration", "1900000000"]).unwrap(),
         ])
@@ -351,7 +349,7 @@ fn t_only_channel_notes_are_ignored() {
     // (no `h` tag means no channel, so channel_from_tags returns None).
     let keys = Keys::generate();
     let event = EventBuilder::new(Kind::from(1u16), "old shape")
-        .tags([tag(&["t", "tenex-edge"]).unwrap()])
+        .tags([tag(&["t", "mosaico"]).unwrap()])
         .sign_with_keys(&keys)
         .unwrap();
     assert!(Nip29WireCodec.decode_event(&event).is_none());

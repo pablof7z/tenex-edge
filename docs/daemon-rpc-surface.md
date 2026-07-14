@@ -1,4 +1,4 @@
-# tenex-edge daemon RPC surface
+# mosaico daemon RPC surface
 
 Companion to [daemon-design.md](daemon-design.md). This file owns the durable wire-method catalog for the per-machine daemon.
 
@@ -42,7 +42,7 @@ Metadata-only. Stops the `SessionTask` (which publishes idle presence/status
 and marks the session dead) but does **not** touch the hosted PTY/child
 process — a process left running after `session_end` keeps executing
 unsupervised. stderr message (`session … ended` / `no such session: …`) is
-produced client-side to match today's output. CLI: `tenex-edge my session
+produced client-side to match today's output. CLI: `mosaico my session
 end --self`; agents cannot target another session.
 
 ### `session_kill`
@@ -55,10 +55,10 @@ process (kills the owning PTY if one is tracked, else `SIGTERM`s the tracked
 child pid), then internally calls `session_end` to mark the session's
 metadata dead. `killed` reflects whether process termination itself
 succeeded; `reason` is populated on failure (including "no local session
-matched" when `session` doesn't resolve). `tenex-edge sessions` sets
+matched" when `session` doesn't resolve). `mosaico sessions` sets
 `revoke_memberships`: the daemon also expires presence now, clears the resume
 claim, confirms removal from every recorded NIP-29 channel, and clears local
-channel bindings. `tenex-edge my session kill --self` leaves that flag false,
+channel bindings. `mosaico my session kill --self` leaves that flag false,
 resolves the caller from the PTY/session environment, and refuses a positional
 target — an agent may only kill its own session. The CLI exits non-zero when
 process termination or requested fabric cleanup is not confirmed.
@@ -79,7 +79,7 @@ manually-started process (via `session_kill`, marking the old row dead)
 BEFORE resuming the SAME harness session inside a fresh PTY, so the two
 steps cannot race a second caller across CLI round-trips. Only the harness's
 own persisted session state survives the hop; terminal scrollback from the
-killed process is lost. CLI: `tenex-edge my session pty-wrap-me --self`,
+killed process is lost. CLI: `mosaico my session pty-wrap-me --self`,
 which resolves the caller from the PTY/session environment and refuses a
 positional target — an agent may only re-home its own session. The CLI
 exits non-zero unless the refusal is `already_wrapped`.
@@ -99,7 +99,7 @@ agent/group hints are rejected with guidance to use `my_session`.
 ```jsonc
 params: {"pty_session": "…"|null, "harness_session": "…"|null,
          "watch_pid": N|null, ...}
-result: {"fabric": "<tenex-edge>…</tenex-edge>"}
+result: {"fabric": "<mosaico>…</mosaico>"}
 ```
 Strict self-scoped agent briefing. It resolves the exact live caller and emits
 `<self>`, global `<agents>` capabilities, all known workspaces, nested channels,
@@ -113,7 +113,7 @@ params: {"title": "…", exact caller anchor fields...}
 result: {"title": "…", "distill_paused_until": u64}
 ```
 Sets and immediately publishes the exact caller session's broadcast
-status/title. CLI: `tenex-edge my session status <TITLE>`.
+status/title. CLI: `mosaico my session status <TITLE>`.
 
 ### `turn_start`
 ```jsonc
@@ -243,7 +243,7 @@ Returns live portable PTY state with `pty_id`, `pubkey`, `npub`, and optional
 public `handle`; private runtime ids are omitted.
 
 ### `operator_sessions`
-Returns the canonical local control projection consumed by `tenex-edge
+Returns the canonical local control projection consumed by `mosaico
 sessions`. It starts from alive rows in the daemon-owned `sessions` table,
 but exposes only `pubkey`, `npub`, and the current public `handle`; the private
 runtime row id never crosses this RPC boundary. Each row joins agent/harness

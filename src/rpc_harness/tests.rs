@@ -102,12 +102,12 @@ async fn fs_bridge_jails_writes() {
 
 /// LIVE smoke against real `opencode acp` on this machine. Gated so CI without
 /// auth skips it. Run with:
-///   TENEX_EDGE_RPC_LIVE=1 cargo test --lib -- --ignored rpc_harness::tests::live_opencode
+///   MOSAICO_RPC_LIVE=1 cargo test --lib -- --ignored rpc_harness::tests::live_opencode
 #[tokio::test]
 #[ignore]
 async fn live_opencode_roundtrip_and_resume() {
-    if std::env::var("TENEX_EDGE_RPC_LIVE").ok().as_deref() != Some("1") {
-        eprintln!("skipping live test (set TENEX_EDGE_RPC_LIVE=1)");
+    if std::env::var("MOSAICO_RPC_LIVE").ok().as_deref() != Some("1") {
+        eprintln!("skipping live test (set MOSAICO_RPC_LIVE=1)");
         return;
     }
     let cwd = std::env::temp_dir().join(format!("rpc-live-{}", std::process::id()));

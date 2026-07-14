@@ -30,15 +30,15 @@ fn active_claims_are_ttl_bounded() {
 }
 
 #[test]
-fn claim_ownership_treats_legacy_empty_owner_as_local() {
+fn claim_ownership_requires_an_exact_non_empty_backend() {
     let mut c = claim("pk", 20);
     assert!(c.is_owned_by_backend(Some("backend-a")));
     assert!(!c.is_owned_by_backend(Some("backend-b")));
     assert!(!c.is_owned_by_backend(None));
 
     c.owner_backend_pubkey.clear();
-    assert!(c.is_owned_by_backend(None));
-    assert!(c.is_owned_by_backend(Some("backend-b")));
+    assert!(!c.is_owned_by_backend(None));
+    assert!(!c.is_owned_by_backend(Some("backend-b")));
 }
 
 #[test]

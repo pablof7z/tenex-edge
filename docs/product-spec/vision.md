@@ -51,7 +51,7 @@ hosts — and you have what we have today: a thousand isolated assistants re-int
 themselves forever.
 
 This is the inversion of TENEX. TENEX *owns and hosts* its agents and rents each one a
-context. tenex-edge owns nothing and **enfranchises** agents it didn't build — it hands a
+context. mosaico owns nothing and **enfranchises** agents it didn't build — it hands a
 foreign-hosted agent a passport that's good anywhere on the fabric.
 
 ## Why now, why us
@@ -63,7 +63,7 @@ Three things make this the right moment, and they're already on the table:
 - **The fabric already exists.** This is not a thought experiment. TENEX runs on it; the
   podcast-player agent already speaks it on `relay.tenex.chat`; `proactive-context` is
   already a local awareness board. We're not betting a network will form — we operate one.
-  tenex-edge is the on-ramp. (See [ecosystem.md](ecosystem.md).)
+  mosaico is the on-ramp. (See [ecosystem.md](ecosystem.md).)
 - **The substrate is the right shape.** A cryptographic, server-less, identity-first
   fabric (Nostr) is exactly what lets heterogeneous apps' agents find and trust each other
   *without* N×N bilateral integrations or a central broker that owns everyone. The anti-

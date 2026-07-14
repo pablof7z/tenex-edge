@@ -1,6 +1,6 @@
 use super::*;
 
-const CLAIM_GRACE_ENV: &str = "TENEX_EDGE_EPHEMERAL_GRACE_SECS";
+const CLAIM_GRACE_ENV: &str = "MOSAICO_EPHEMERAL_GRACE_SECS";
 const DEFAULT_CLAIM_GRACE_SECS: u64 = 15 * 60;
 
 pub(in crate::daemon::server) async fn rpc_session_end(

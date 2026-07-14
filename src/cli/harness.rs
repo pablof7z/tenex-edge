@@ -5,7 +5,7 @@ use clap::Subcommand;
 pub(in crate::cli) enum HarnessAction {
     /// Handle a hook event from a supported agent harness.
     /// Reads hook JSON from stdin; emits context to inject into the model (if any).
-    /// Usage: `tenex-edge harness hook <name> --type <hook-type>`
+    /// Usage: `mosaico harness hook <name> --type <hook-type>`
     /// Always exits 0 — a hook failure (daemon down, config missing, RPC
     /// timeout, …) is fabric plumbing, never something to surface to the
     /// harness or inject into the agent's context.
@@ -44,7 +44,7 @@ pub(in crate::cli) async fn harness(action: HarnessAction) -> Result<()> {
             // pollute the agent's context with fabric plumbing it didn't ask
             // about. Log it for our own debugging and always exit clean.
             if let Err(e) = super::hooks::hook_run(harness, hook_type).await {
-                eprintln!("[tenex-edge] hook error (ignored): {e:#}");
+                eprintln!("[mosaico] hook error (ignored): {e:#}");
             }
             Ok(())
         }
@@ -60,7 +60,7 @@ mod tests {
     #[test]
     fn harness_statusline_args_parse_with_owner_args() {
         let cli = crate::cli::args::Cli::try_parse_from([
-            "tenex-edge",
+            "mosaico",
             "harness",
             "statusline",
             "--session",

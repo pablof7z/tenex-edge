@@ -1,9 +1,8 @@
-//! Leaf store readers for [`super::capture_inputs`]. Each mirrors the exact
-//! store read `build_view`/`people`/`messages` performs, resolving now/cursor-
-//! independent data (names, refs, membership, raw rows) into owned capture
-//! structs. No `now`/`cursor` filtering happens here.
+//! Leaf store readers for [`super::capture_inputs`]. They resolve
+//! now/cursor-independent data (names, refs, membership, raw rows) into owned
+//! capture structs. No `now`/`cursor` filtering happens here.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use super::{AgentCap, ChannelSummaryCap, EvCap, MsgBundle, SelfCap, SummaryCap};
 use crate::fabric_context::messages::{is_backend_traffic, mentions_pubkey, p_tag_pubkeys};
@@ -33,8 +32,8 @@ pub(super) fn self_cap(s: &Session, input: &FabricContextInput<'_>) -> SelfCap {
     }
 }
 
-/// The ordered, deduped, archived-pruned channel set — identical to the head of
-/// `build_view` (joined channels ∪ forced-message channels, minus archived).
+/// The ordered, deduped, archived-pruned channel set: joined channels plus
+/// forced-message channels, minus archived channels.
 pub(super) fn selected_channels(store: &Store, input: &FabricContextInput<'_>) -> Vec<String> {
     let mut channels = channels_for(store, input.session, input.scope);
     let forced_by_channel = group_forced(input.forced_messages, input.scope);
@@ -147,12 +146,20 @@ pub(super) fn capture_messages(
     if input.session.is_none() {
         return MsgBundle::default();
     }
+    let injected: HashSet<String> = input
+        .session
+        .and_then(|session| store.injected_for_pubkey(&session.pubkey).ok())
+        .unwrap_or_default()
+        .into_iter()
+        .map(|row| row.event_id)
+        .collect();
     let events = store
         .chat_for_channel(channel, 0, CHAT_CAPTURE_CAP)
         .unwrap_or_default()
         .into_iter()
         .filter(|e| e.kind == crate::fabric::nip29::wire::KIND_CHAT as u32)
         .filter(|e| e.pubkey != input.self_pubkey)
+        .filter(|e| !injected.contains(&e.id))
         .filter(|e| !is_backend_traffic(store, input.backend_pubkey, &e.pubkey, &e.tags_json))
         .map(|ev| {
             let resolved_body = crate::profile::rewrite_body_mentions(store, &ev.content);

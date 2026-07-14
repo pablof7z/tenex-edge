@@ -7,9 +7,9 @@ CREATE TABLE IF NOT EXISTS relay_channels (
     about       TEXT NOT NULL DEFAULT '',
     parent      TEXT NOT NULL DEFAULT '',
     created_at  INTEGER NOT NULL,
-    updated_at  INTEGER NOT NULL
+    updated_at  INTEGER NOT NULL,
+    UNIQUE(parent, name)
 );
-
 CREATE TABLE IF NOT EXISTS relay_channel_members (
     channel_h   TEXT NOT NULL,
     pubkey      TEXT NOT NULL,

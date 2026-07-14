@@ -4,7 +4,7 @@ use clap::Parser;
 #[test]
 fn accepts_repeated_tags_and_explicit_session_anchor() {
     let cli = crate::cli::args::Cli::try_parse_from([
-        "tenex-edge",
+        "mosaico",
         "channel",
         "send",
         "hello",
