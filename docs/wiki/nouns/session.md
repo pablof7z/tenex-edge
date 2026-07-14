@@ -9,4 +9,6 @@ source_refs:
 
 # Session
 
-A local agent process THIS daemon hosts. OS handles only (session_id, agent_pubkey, agent_slug, channel_h, harness, child_pid, transcript_path, alive, etc.) — never agent identity, which lives in relay_status/relay_profiles.
+A pubkey-owned local runtime projection. It records the runtime generation,
+agent role slug, active channel, harness, process metadata, liveness, and work
+state. The pubkey is both the row key and the session's signing identity.
