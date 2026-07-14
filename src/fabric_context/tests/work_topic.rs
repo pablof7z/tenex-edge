@@ -19,7 +19,7 @@ fn explicit_work_topic_appears_immediately_as_current_title() {
     )
     .expect("explicit context should render");
     assert!(
-        visible.contains("You are @coder, running on laptop. Current title: \"Researching MCP improvements around resource allocation\""),
+        visible.contains("Agent: coder · Session: @coder · Backend: laptop\n  Current title: \"Researching MCP improvements around resource allocation\""),
         "got: {visible}"
     );
     assert!(

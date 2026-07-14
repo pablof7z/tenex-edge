@@ -101,8 +101,11 @@ fn first_turn_injects_channel_context_block() {
         "must not repeat the raw session id; context was: {ctx}"
     );
     assert!(ctx.contains("<channel "), "context was: {ctx}");
-    // Self identity should render with backend host context, not ordinals.
-    assert!(ctx.contains(", running on "), "no self line: {ctx}");
+    // Self identity should distinguish the stable agent from the session and backend.
+    assert!(
+        ctx.contains("Agent: coder · Session: @") && ctx.contains("-coder · Backend: test-host"),
+        "no self line: {ctx}"
+    );
 
     stop_daemon(&home);
 }

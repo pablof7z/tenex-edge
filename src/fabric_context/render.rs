@@ -63,14 +63,15 @@ fn render_self(out: &mut String, row: Option<&SelfRow>) {
     };
     let _ = write!(
         out,
-        "\n  You are @{}, running on {}.",
+        "\n  Agent: {} · Session: @{} · Backend: {}",
+        esc_text(&row.agent_slug),
         esc_text(&row.agent),
         esc_text(&row.host)
     );
     if !row.work_topic.is_empty() {
         let _ = write!(
             out,
-            " Current title: \"{}\"\n  [if your title drifted you can update it]",
+            "\n  Current title: \"{}\"\n  [if your title drifted you can update it]",
             esc_text(&row.work_topic)
         );
     }
