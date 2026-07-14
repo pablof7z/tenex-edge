@@ -1,8 +1,8 @@
 use super::*;
-use crate::state::{Identity, RegisterSession, Status};
+use crate::state::{RegisterSession, Status};
 use crate::who_snapshot::{load_who_snapshot, WhoSource};
 
-/// Register a local session (daemon mints the canonical id).
+/// Register a local pubkey-owned session.
 fn register_local(store: &Store, slug: &str, pubkey: &str, ext_id: &str, ts: u64) -> String {
     register_local_in(store, slug, pubkey, "proj", ext_id, ts)
 }
@@ -16,19 +16,27 @@ fn register_local_in(
     ts: u64,
 ) -> String {
     store
-        .register_session(&RegisterSession {
+        .reserve_session(&RegisterSession {
+            pubkey: pubkey.to_string(),
             harness: "claude-code".to_string(),
-            external_id_kind: "harness_session".to_string(),
-            external_id: ext_id.to_string(),
-            agent_pubkey: pubkey.to_string(),
             agent_slug: slug.to_string(),
             channel_h: channel.to_string(),
             child_pid: Some(42),
             transcript_path: None,
-            resume_id: String::new(),
             now: ts,
         })
-        .unwrap()
+        .unwrap();
+    store.allocate_handle(pubkey, slug, ts).unwrap();
+    store
+        .put_session_locator(
+            "claude-code",
+            crate::state::LOCATOR_NATIVE_RESUME,
+            ext_id,
+            pubkey,
+            ts,
+        )
+        .unwrap();
+    pubkey.to_string()
 }
 
 /// Set a session's local pre-publish draft title. Local rows fall back to this
@@ -57,7 +65,6 @@ fn record_peer(
     store
         .upsert_status(&Status {
             pubkey: pubkey.to_string(),
-            session_id: format!("sid-{slug}"),
             channel_h: "proj".to_string(),
             slug: slug.to_string(),
             title: title.to_string(),
@@ -73,18 +80,8 @@ fn record_peer(
 /// Declare `pubkey` as a key this daemon signs as, so a relay echo of our own
 /// status is dropped from the peer set.
 fn own_identity(store: &Store, pubkey: &str, slug: &str) {
-    store
-        .upsert_identity(&Identity {
-            pubkey: pubkey.to_string(),
-            agent_slug: slug.to_string(),
-            codename: "willow-echo-042".to_string(),
-            session_id: String::new(),
-            channel_h: "proj".to_string(),
-            native_id: String::new(),
-            alive: true,
-            created_at: 1,
-        })
-        .unwrap();
+    let _ = slug;
+    store.bind_session_signer(pubkey, "test-salt").unwrap();
 }
 
 #[test]
@@ -93,8 +90,10 @@ fn who_snapshot_merges_local_and_peer_sessions() {
     // Local coder is a hosted session; pk-coder is one of our signing keys.
     own_identity(&store, "pk-coder", "coder");
     let _coder_sid = register_local(&store, "coder", "pk-coder", "sid-coder", 1_000);
-    // With no bound identity row, the local row displays the public session handle.
-    let coder_handle = "coder".to_string();
+    let coder_handle = store
+        .handle_for_pubkey("pk-coder")
+        .unwrap()
+        .expect("derived session public handle");
     // A relay echo of our own status (pk-coder) must be deduped out of peers.
     record_peer(&store, "pk-coder", "coder", "laptop", "", false, 1_000);
     // A genuine remote peer on a different host.
@@ -136,8 +135,8 @@ fn who_snapshot_uses_session_draft_title_for_sibling_sessions() {
     let store = Store::open_memory().unwrap();
     // Two sibling sessions for the same agent, each with its own canonical id and
     // its own local draft title (no kind:30315 published yet).
-    let id_a = register_local(&store, "claude", "pk-claude", "sid-a", 1_000);
-    let id_b = register_local(&store, "claude", "pk-claude", "sid-b", 1_000);
+    let id_a = register_local(&store, "claude", "pk-claude-a", "sid-a", 1_000);
+    let id_b = register_local(&store, "claude", "pk-claude-b", "sid-b", 1_000);
     seed_draft_title(&store, &id_a, "reading files", 1_000);
     seed_draft_title(&store, &id_b, "running tests", 1_000);
 
@@ -145,12 +144,12 @@ fn who_snapshot_uses_session_draft_title_for_sibling_sessions() {
     let row_a = snapshot
         .rows
         .iter()
-        .find(|r| r.session_id == id_a)
+        .find(|r| r.pubkey == id_a)
         .expect("session-a row");
     let row_b = snapshot
         .rows
         .iter()
-        .find(|r| r.session_id == id_b)
+        .find(|r| r.pubkey == id_b)
         .expect("session-b row");
     assert_eq!(row_a.status, "reading files");
     assert_eq!(row_b.status, "running tests");
@@ -182,7 +181,6 @@ fn who_snapshot_hides_archived_channel_presence() {
     store
         .upsert_status(&Status {
             pubkey: "pk-reviewer".to_string(),
-            session_id: "sid-reviewer".to_string(),
             channel_h: "archived".to_string(),
             slug: "reviewer".to_string(),
             title: "done".to_string(),

@@ -34,7 +34,6 @@ fn status(keys: &Keys, busy: bool, rel_cwd: &str) -> DomainEvent {
         // fields; non-empty slug emission is covered separately.
         agent: AgentRef::new(keys.public_key().to_hex(), String::new()),
         channels: vec!["tenex-edge".into()],
-        session_id: "sess-123".into(),
         host: "laptop".into(),
         title: "fixing the auth bug".into(),
         activity: if busy {
@@ -91,7 +90,7 @@ fn empty_rel_cwd_emits_no_tag_and_decodes_empty() {
 
 #[test]
 fn status_is_per_group_self_contained_signal() {
-    // The unified shape: `d == session_id`, `h == group_id`, full tag set,
+    // The unified shape: `d == status`, `h == group_id`, full tag set,
     // content = live activity, title persisted as a tag even when busy.
     let keys = Keys::generate();
     let signed = Nip29WireCodec
@@ -100,9 +99,9 @@ fn status_is_per_group_self_contained_signal() {
         .sign_with_keys(&keys)
         .unwrap();
     assert_eq!(signed.kind.as_u16(), KIND_STATUS);
-    assert!(has_tag(&signed, "d", "sess-123"));
+    assert!(has_tag(&signed, "d", "status"));
     assert!(has_tag(&signed, "h", "tenex-edge"));
-    // The session id is the address, not a duplicate side tag.
+    // No private runtime id appears as an address or side tag.
     assert!(!has_tag_name(&signed, "session-id"));
     assert!(has_tag(&signed, "title", "fixing the auth bug"));
     assert!(has_tag(&signed, "status", "busy"));
@@ -116,7 +115,6 @@ fn status_is_per_group_self_contained_signal() {
     // Empty slugs are omitted rather than emitting a useless hint.
     assert!(!has_tag_name(&signed, "slug"));
     // No legacy presence-heartbeat artifacts, no self-asserted agent tag.
-    assert!(!has_tag(&signed, "d", "tenex-edge-presence:sess-123"));
     assert!(!has_tag_name(&signed, "agent"));
 }
 
@@ -126,7 +124,6 @@ fn status_slug_is_convenience_hint_not_agent_tag() {
     let ev = DomainEvent::Status(Status {
         agent: agent(&keys, "coder"),
         channels: vec!["tenex-edge".into()],
-        session_id: "sess-123".into(),
         host: "laptop".into(),
         title: "fixing the auth bug".into(),
         activity: "reading the diff".into(),
@@ -190,21 +187,18 @@ fn status_expiration_roundtrips_and_emits_tag() {
 }
 
 #[test]
-fn status_session_address_can_differ_from_channel_h() {
-    // Status is addressed by session id and can be visible in one or more h-tagged
-    // channels; the session address is independent from each channel tag.
+fn status_uses_constant_address_independent_from_channel_h() {
     let keys = Keys::generate();
     let event = EventBuilder::new(Kind::from(KIND_STATUS), "")
         .tags([
             tag(&["h", "tenex-edge"]).unwrap(),
-            tag(&["d", "tenex-edge:sess-xyz"]).unwrap(),
+            tag(&["d", "status"]).unwrap(),
             tag(&["status", "idle"]).unwrap(),
         ])
         .sign_with_keys(&keys)
         .unwrap();
     match Nip29WireCodec.decode_event(&event) {
         Some(DomainEvent::Status(s)) => {
-            assert_eq!(s.session_id.as_str(), "tenex-edge:sess-xyz");
             assert_eq!(s.channels, vec!["tenex-edge"]);
         }
         other => panic!("expected status, got {other:?}"),
@@ -212,28 +206,19 @@ fn status_session_address_can_differ_from_channel_h() {
 }
 
 #[test]
-fn status_session_id_d_is_accepted() {
-    // Canonical shape: `d` is the session id; `h` is the channel id.
+fn status_private_runtime_id_d_is_rejected() {
     let keys = Keys::generate();
     let event = EventBuilder::new(Kind::from(KIND_STATUS), "working on tests")
         .tags([
             tag(&["h", "tenex-edge"]).unwrap(),
-            tag(&["d", "tenex-edge"]).unwrap(),
+            tag(&["d", "te-private-run"]).unwrap(),
             tag(&["status", "busy"]).unwrap(),
             tag(&["title", "codec refactor"]).unwrap(),
             tag(&["host", "laptop"]).unwrap(),
         ])
         .sign_with_keys(&keys)
         .unwrap();
-    match Nip29WireCodec.decode_event(&event) {
-        Some(DomainEvent::Status(s)) => {
-            assert_eq!(s.channels, vec!["tenex-edge"]);
-            assert_eq!(s.activity, "working on tests");
-            assert_eq!(s.title, "codec refactor");
-            assert!(s.busy);
-        }
-        other => panic!("expected status, got {other:?}"),
-    }
+    assert!(Nip29WireCodec.decode_event(&event).is_none());
 }
 
 #[test]

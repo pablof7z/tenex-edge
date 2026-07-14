@@ -17,7 +17,7 @@ use model::{cursor_key, ensure_session, fact_seed, opts, stage_fact, SessionNode
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CursorSeed {
-    pub session_id: String,
+    pub pubkey: String,
     pub seen_cursor: u64,
 }
 
@@ -38,7 +38,7 @@ impl CursorFrame {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CursorCommand {
-    pub session_id: String,
+    pub pubkey: String,
     pub cursor_before: u64,
     pub cursor_after: u64,
     pub delta_since: Option<u64>,
@@ -48,7 +48,7 @@ pub struct CursorCommand {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CursorEffect {
     Advance {
-        session_id: String,
+        pubkey: String,
         from: u64,
         to: u64,
         delta_since: u64,
@@ -140,11 +140,11 @@ impl CursorReconciler {
     }
 
     pub fn preview_fact(&mut self, fact: &InputFact) -> GraphResult<Option<CursorPreview>> {
-        let Some((session_id, observed_cursor)) = fact_seed(fact) else {
+        let Some((pubkey, observed_cursor)) = fact_seed(fact) else {
             return Ok(None);
         };
         let seed = CursorSeed {
-            session_id,
+            pubkey,
             seen_cursor: observed_cursor,
         };
         self.preview_request(seed, fact).map(Some)
@@ -154,7 +154,7 @@ impl CursorReconciler {
         self.last
             .values()
             .map(|cmd| CursorStateRow {
-                session: cmd.session_id.clone(),
+                session: cmd.pubkey.clone(),
                 cursor: cmd.cursor_after,
                 last_frame: cmd.frame.as_str().to_string(),
                 delta_since: cmd.delta_since,
@@ -206,7 +206,7 @@ impl CursorReconciler {
 
     fn current_cursor(&self, seed: &CursorSeed) -> u64 {
         self.cursors
-            .get(&seed.session_id)
+            .get(&seed.pubkey)
             .copied()
             .unwrap_or(seed.seen_cursor)
     }
@@ -220,12 +220,11 @@ impl CursorReconciler {
                 | ResourceCommand::Refresh { command, .. } => command,
                 ResourceCommand::Close { .. } => continue,
             };
-            self.cursors
-                .insert(cmd.session_id.clone(), cmd.cursor_after);
-            self.last.insert(cmd.session_id.clone(), cmd.clone());
+            self.cursors.insert(cmd.pubkey.clone(), cmd.cursor_after);
+            self.last.insert(cmd.pubkey.clone(), cmd.clone());
             match cmd.frame {
                 CursorFrame::HookFrame => effects.push(CursorEffect::Advance {
-                    session_id: cmd.session_id.clone(),
+                    pubkey: cmd.pubkey.clone(),
                     from: cmd.cursor_before,
                     to: cmd.cursor_after,
                     delta_since: cmd.delta_since.unwrap_or(cmd.cursor_before),

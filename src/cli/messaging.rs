@@ -5,6 +5,10 @@ mod send;
 pub(super) use send::channel_send;
 mod wait;
 pub(super) use wait::{parse_wait_seconds, wait, WaitArgs};
+#[cfg(test)]
+mod envelope;
+#[cfg(test)]
+pub(super) use envelope::{format_envelope, EnvelopeView};
 pub(super) async fn channel_reply(
     id: String,
     message: String,
@@ -210,80 +214,6 @@ fn strip_single_trailing_newline(mut s: String) -> String {
             s.pop();
         }
     }
-    s
-}
-
-// ── envelope rendering ───────────────────────────────────────────────────────
-
-/// Everything needed to render one inbound message as an email-like envelope.
-#[cfg(test)]
-pub(super) struct EnvelopeView<'a> {
-    pub from_slug: &'a str,
-    /// Sender's host label. Empty, or equal to `self_host`, → no remote annotation.
-    pub host: &'a str,
-    /// The viewer's own host, to decide whether the sender is `[remote: …]`.
-    pub self_host: &'a str,
-    pub subject: &'a str,
-    pub branch: &'a str,
-    pub commit: &'a str,
-    pub dirty: u32,
-    /// Short reply id (see `event_short_id`).
-    pub id: &'a str,
-    /// When the sender published (unix secs); rendered absolute + relative.
-    pub sent_at: u64,
-    pub now: u64,
-    pub body: &'a str,
-}
-
-/// Render an inbound message as an email-like envelope:
-///
-/// ```text
-/// From: codex@tenex-edge
-/// Date: 2026-06-12 14:23 (3 min ago)
-/// Subject: NIP-29 group creation failing
-/// Branch: features/oauth (a1b2c3d) [1 file dirty]
-/// ID: 01234567
-/// --
-/// <body>
-/// ```
-///
-/// The Subject and Branch lines are omitted when absent; a remote sender adds
-/// `[remote: <host>]` to the From line.
-#[cfg(test)]
-pub(super) fn format_envelope(e: &EnvelopeView) -> String {
-    use crate::util::dirty_label;
-    use std::fmt::Write as _;
-
-    // Canonical sender identity is the public agent label with host.
-    let from = crate::idref::agent_ref_from(e.from_slug, e.host, e.self_host);
-
-    let mut s = String::new();
-    let _ = write!(s, "From: {from}");
-    let _ = write!(
-        s,
-        "\nDate: {} ({})",
-        format_local_datetime(e.sent_at),
-        crate::util::relative_time(e.sent_at, e.now)
-    );
-    if !e.subject.is_empty() {
-        let _ = write!(s, "\nSubject: {}", e.subject);
-    }
-    if !e.branch.is_empty() {
-        let commit = if e.commit.is_empty() {
-            String::new()
-        } else {
-            format!(" ({})", e.commit)
-        };
-        let _ = write!(
-            s,
-            "\nBranch: {}{}{}",
-            e.branch,
-            commit,
-            dirty_label(e.dirty)
-        );
-    }
-    let _ = write!(s, "\nID: {}", e.id);
-    let _ = write!(s, "\n--\n{}", e.body);
     s
 }
 

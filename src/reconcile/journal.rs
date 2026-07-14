@@ -39,42 +39,42 @@ pub type Timestamp = u64;
 pub enum StatusDrive {
     SessionStarted(StatusSessionStartedArgs),
     TurnStarted {
-        session_id: String,
+        pubkey: String,
         at: Timestamp,
     },
     TurnEnded {
-        session_id: String,
+        pubkey: String,
         at: Timestamp,
     },
     DistillCompleted {
-        session_id: String,
+        pubkey: String,
         title: String,
         activity: String,
         window_hash: Option<String>,
         at: Timestamp,
     },
     TitleSet {
-        session_id: String,
+        pubkey: String,
         title: String,
         at: Timestamp,
     },
     ChannelsChanged {
-        session_id: String,
+        pubkey: String,
         channels: BTreeSet<String>,
         at: Timestamp,
     },
     Tick {
-        session_id: String,
+        pubkey: String,
         at: Timestamp,
     },
     SessionEnded {
-        session_id: String,
+        pubkey: String,
         at: Timestamp,
     },
     /// An operator deliberately destroyed the session and requested immediate
     /// public disappearance instead of the ordinary ended-session TTL.
     SessionRevoked {
-        session_id: String,
+        pubkey: String,
         at: Timestamp,
     },
 }
@@ -97,10 +97,9 @@ impl StatusDrive {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StatusSessionStartedArgs {
-    pub session_id: String,
+    pub pubkey: String,
     pub host: String,
     pub slug: String,
-    pub pubkey: String,
     pub rel_cwd: String,
     pub channels: BTreeSet<String>,
     pub working: bool,
@@ -134,7 +133,7 @@ pub enum InputFact {
     /// Replaces the daemon's independent `seen_cursor` compare-and-swap decision.
     TurnCheckRequested {
         /// Session whose hook requested a check.
-        session_id: String,
+        pubkey: String,
         /// The cursor observed on the session row before asking Trellis.
         observed_cursor: Timestamp,
         /// Whether this render is allowed to advance the cursor.
@@ -148,12 +147,10 @@ pub enum InputFact {
     /// Replaces `state::sessions::Store::register_session` /
     /// `upsert_session_row` writing the initial `sessions` row.
     SessionStarted {
-        /// Canonical session id.
-        session_id: String,
+        /// Authoritative pubkey whose runtime became active.
+        pubkey: String,
         /// Channel hash the session is bound to, if any.
         channel_h: Option<String>,
-        /// Agent pubkey owning the session, if known at start.
-        agent_pubkey: Option<String>,
         /// Host pid to watch for liveness, if the session is process-backed.
         pid: Option<i32>,
         /// When the session started.
@@ -166,7 +163,7 @@ pub enum InputFact {
     /// turn_started_at)`.
     TurnStarted {
         /// Session whose turn started.
-        session_id: String,
+        pubkey: String,
         /// When the turn started.
         at: Timestamp,
     },
@@ -178,7 +175,7 @@ pub enum InputFact {
     /// the transcript pointer.
     TranscriptWindowCaptured {
         /// Session the window belongs to.
-        session_id: String,
+        pubkey: String,
         /// Stable hash of the captured transcript window (the pointer, not the
         /// body).
         window_hash: String,
@@ -193,7 +190,7 @@ pub enum InputFact {
     /// activity, last_distill_at)`.
     DistillCompleted {
         /// Session that was distilled.
-        session_id: String,
+        pubkey: String,
         /// The transcript window this distillation summarizes.
         window_hash: String,
         /// Distilled human-readable title.
@@ -209,7 +206,7 @@ pub enum InputFact {
     /// Replaces `state::sessions::Store::set_working(id, working = false, ..)`.
     TurnEnded {
         /// Session whose turn ended.
-        session_id: String,
+        pubkey: String,
         /// When the turn ended.
         at: Timestamp,
     },
@@ -257,7 +254,7 @@ pub enum InputFact {
     /// `state::sessions::Store::mark_dead` when the host pid disappears.
     ProcessExited {
         /// Session backed by the process, if the pid maps to one.
-        session_id: Option<String>,
+        pubkey: Option<String>,
         /// The pid that exited.
         pid: i32,
         /// When the exit was observed.

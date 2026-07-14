@@ -20,8 +20,8 @@ async fn collect_pending_prompt(
     event_ids: &[String],
 ) -> Result<Option<PendingPrompt>> {
     let now = now_secs();
-    let mut chat_rows = state
-        .with_store(|s| s.claim_pending_event_ids_for_pubkey(event_ids, &rec.agent_pubkey, now))?;
+    let mut chat_rows =
+        state.with_store(|s| s.claim_pending_event_ids_for_pubkey(event_ids, &rec.pubkey, now))?;
     if chat_rows.is_empty() {
         return Ok(None);
     }
@@ -33,16 +33,16 @@ async fn collect_pending_prompt(
         crate::injection::render_terminal_mention(s, &chat_rows, &whitelisted, now)
     });
     let Some(text) = rendered else {
-        if let Err(e) = state.with_store(|s| s.reenqueue_pending(&chat_ids, &rec.agent_pubkey)) {
+        if let Err(e) = state.with_store(|s| s.reenqueue_pending(&chat_ids, &rec.pubkey)) {
             tracing::error!(
-                session_id = %rec.session_id,
+                pubkey = %rec.pubkey,
                 error = %e,
                 "failed to re-enqueue claimed-but-unrendered inbox rows; mention may be lost"
             );
             state.emit_delivery_failure(
                 &rec.channel_h,
                 &rec.agent_slug,
-                &rec.session_id,
+                &rec.pubkey,
                 format!("failed to re-enqueue claimed-but-unrendered inbox rows: {e:#}"),
             );
         }
@@ -67,11 +67,11 @@ async fn collect_pending_prompt(
 pub(super) async fn inject_planned_messages_pty(
     state: &Arc<DaemonState>,
     rec: &crate::state::Session,
-    pty_id: &str,
+    endpoint_id: &str,
     event_ids: &[String],
 ) -> Result<bool> {
-    if !crate::pty::is_live(pty_id) {
-        anyhow::bail!("pty session {pty_id} is not live");
+    if !crate::pty::is_live(endpoint_id) {
+        anyhow::bail!("pty session {endpoint_id} is not live");
     }
     let Some(prompt) = collect_pending_prompt(state, rec, event_ids).await? else {
         return Ok(false);
@@ -79,7 +79,7 @@ pub(super) async fn inject_planned_messages_pty(
 
     // Bracketed-paste the rendered mention WITHOUT submitting, so terminal echo
     // and the follow-up newline stay under our control.
-    if let Err(e) = crate::pty::inject(pty_id, &prompt.text, true, false) {
+    if let Err(e) = crate::pty::inject(endpoint_id, &prompt.text, true, false) {
         reenqueue_after_failure(state, rec, &prompt.chat_ids, "pty inject");
         return Err(e);
     }
@@ -87,7 +87,7 @@ pub(super) async fn inject_planned_messages_pty(
     // The mention is now in the agent's PTY. Submit it after a short beat so the
     // paste settles before the newline (PTY-only: ACP submits inline).
     tokio::time::sleep(Duration::from_millis(200)).await;
-    crate::pty::inject(pty_id, "", false, true)?;
+    crate::pty::inject(endpoint_id, "", false, true)?;
     Ok(true)
 }
 
@@ -136,16 +136,16 @@ fn reenqueue_after_failure(
     chat_ids: &[String],
     what: &str,
 ) {
-    if let Err(re) = state.with_store(|s| s.reenqueue_pending(chat_ids, &rec.agent_pubkey)) {
+    if let Err(re) = state.with_store(|s| s.reenqueue_pending(chat_ids, &rec.pubkey)) {
         tracing::error!(
-            session_id = %rec.session_id,
+            pubkey = %rec.pubkey,
             error = %re,
             "failed to roll back claimed inbox rows after {what} failure; mention may be lost"
         );
         state.emit_delivery_failure(
             &rec.channel_h,
             &rec.agent_slug,
-            &rec.session_id,
+            &rec.pubkey,
             format!("failed to roll back claimed inbox rows after {what} failure: {re:#}"),
         );
     }
@@ -160,18 +160,16 @@ fn finalize_injection(
     rec: &crate::state::Session,
     prompt: &PendingPrompt,
 ) -> Result<()> {
-    if let Err(e) =
-        state.with_store(|s| s.mark_injected_for_echo(&prompt.chat_ids, &rec.agent_pubkey))
-    {
+    if let Err(e) = state.with_store(|s| s.mark_injected_for_echo(&prompt.chat_ids, &rec.pubkey)) {
         tracing::error!(
-            session_id = %rec.session_id,
+            pubkey = %rec.pubkey,
             error = %e,
             "failed to mark injected inbox rows for echo suppression"
         );
         state.emit_delivery_failure(
             &rec.channel_h,
             &rec.agent_slug,
-            &rec.session_id,
+            &rec.pubkey,
             format!("failed to mark injected inbox rows for echo suppression: {e:#}"),
         );
         anyhow::bail!("failed to mark injected inbox rows for echo suppression: {e:#}");
@@ -182,7 +180,7 @@ fn finalize_injection(
         && crate::daemon::server::auto_reply::should_arm_for_session(rec)
     {
         crate::daemon::server::auto_reply::arm(
-            &rec.session_id,
+            &rec.pubkey,
             &prompt.trigger_channel,
             &prompt.trigger_event_id,
             &prompt.trigger_from_pubkey,

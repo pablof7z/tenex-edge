@@ -121,16 +121,17 @@ fn handle_incoming(state: &Arc<DaemonState>, event: &Event) {
         "incoming event"
     );
     let env = crate::fabric::RawEnvelope::Nostr(event.clone());
-    // Expand the hosted set to include every known local session pubkey.
+    // Expand the hosted set to include configured offline targets and every
+    // known local session pubkey.
     // This makes `is_self` (Profile/Status self-skip), the routing gate
     // (`hosted.contains(&m.to_pubkey)`), and the sender admission check
     // (`hosted.contains(&sender_pk)`) all recognize session-signed events.
     let hosted: Vec<String> = {
         let mut h = state.hosted_pubkeys();
-        // Session pubkeys are local identities too: a mention
-        // p-tagged to e.g. `smith1` must be recognized as self so the routing gate
-        // and self-skip treat it like a hosted agent, not a foreign peer.
-        h.extend(state.with_store(|s| s.list_identity_pubkeys().unwrap_or_default()));
+        h.extend(crate::identity::list_local_pubkeys(
+            &crate::config::edge_home(),
+        ));
+        h.extend(state.with_store(|s| s.list_local_session_pubkeys().unwrap_or_default()));
         h.sort_unstable();
         h.dedup();
         h
@@ -230,13 +231,9 @@ fn derive_and_emit_tail_events(
             }
             for channel in &s.channels {
                 // The unified Status replaces the old presence heartbeat, so
-                // first-sight of a (pubkey, session, channel) here is the peer
+                // first-sight of a (pubkey, channel) here is the peer
                 // "joined" signal for that channel.
-                let key = (
-                    s.agent.pubkey.clone(),
-                    s.session_id.as_str().to_string(),
-                    channel.clone(),
-                );
+                let key = (s.agent.pubkey.clone(), channel.clone());
                 let is_new = {
                     let mut map = state.peer_sessions.lock().unwrap();
                     if !map.contains_key(&key) {
@@ -260,7 +257,7 @@ fn derive_and_emit_tail_events(
                         channel: channel.clone(),
                         agent: s.agent.slug.clone(),
                         host: s.host.clone(),
-                        session: s.session_id.as_str().to_string(),
+                        session: s.agent.pubkey.clone(),
                         rel_cwd: s.rel_cwd.clone(),
                     });
                 }

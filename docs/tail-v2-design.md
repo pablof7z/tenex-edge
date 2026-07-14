@@ -44,10 +44,9 @@ Line grammar: `<TS>  <cat>  <agent@project[sess]>  <verb/glyph> <detail>`
 - TS: wall-clock `HH:MM:SS` default; `--relative` for `12s ago`.
 - cat: fixed 5-char colored tag (msg=yellow, sync=cyan/red, turn=green,
   stat=magenta, join=green, leave=dim, sess=blue, proj=dim).
-- identity: `slug@project[sess]` (peers: `slug@host[sess]`); the agent is the
-  agent-instance label (`haiku`, `haiku1`, …) backed by its selected pubkey, and
-  `sess` is a short prefix of the raw canonical `session_id` — an operator
-  correlation handle only, never a user-facing identity.
+- identity: `handle@project` (peers: `handle@host`); the handle is the sole
+  outward-facing alias for the session pubkey. Runtime endpoint and process
+  locators never appear in the identity column.
 - glyphs: `▶` started, `⏸` idle, `→` message, `✗`/failed.
   ASCII fallback via `--no-emoji` (`>`,`||`,`->`,`[x]`).
 - thread id `#xxxx` (4-char short of thread/root id); same thread = same code.
@@ -114,10 +113,9 @@ locally (`render_tail_event(&TailEvent,&Opts)`); `--json` prints verbatim.
   39000→Proj on change, new Profile→Profile.
 
 ### C. Derive join/leave
-join = first time a peer session_id is seen (first_seen); subsequent beats emit
-nothing. leave = prune/expiry sweep (prune_peer_sessions / Presence.expires_at)
-emits Leave{online_s}. Local leave = rpc_session_end. Keep a small in-memory
-HashMap<session_id,(first_seen,project,slug,host)> on DaemonState.
+join = first time a `(pubkey, channel)` presence is seen; subsequent beats emit
+nothing. leave = the status-expiry sweep. Local leave = `rpc_session_end`. Keep
+the bounded `(pubkey, channel)` presence projection on `DaemonState`.
 
 ### D. Backfill
 `{backfill:N, since:ts}` param on handle_tail. Backfill from the canonical

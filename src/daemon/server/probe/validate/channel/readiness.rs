@@ -26,7 +26,7 @@ pub(super) fn evidence(state: &Arc<DaemonState>, channel_h: &str) -> Readiness {
         .into_iter()
         .filter(|row| row.channel_h == channel_h)
         .collect::<Vec<_>>();
-    rows.sort_by(|a, b| a.session_id.cmp(&b.session_id));
+    rows.sort_by(|a, b| a.pubkey.cmp(&b.pubkey));
 
     let channel_ready_count = rows
         .iter()
@@ -54,7 +54,7 @@ pub(super) fn evidence(state: &Arc<DaemonState>, channel_h: &str) -> Readiness {
         .take(8)
         .map(|row| {
             json!({
-                "session_id": row.session_id,
+                "pubkey": row.pubkey,
                 "action": row.action,
                 "channel_h": row.channel_h,
                 "has_channel_ready_intent": row.has_channel_ready_intent,

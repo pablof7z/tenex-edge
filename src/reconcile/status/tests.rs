@@ -18,7 +18,7 @@ fn seeded(
     let mut ledger = ResourceLedger::new();
     let out = r
         .on_session_started(
-            "s1", "laptop", "coder", "pk1", ".", channels, working, title, activity, now,
+            "pk1", "laptop", "coder", ".", channels, working, title, activity, now,
         )
         .unwrap();
     ledger.apply_result(&out.result);
@@ -45,14 +45,14 @@ fn identical_state_commit_is_deduped() {
     let (mut r, mut ledger) = seeded(true, "T", "", chans(["room"]), 100);
 
     // First distill: activity changes → exactly one publish.
-    let first = r.on_distill("s1", "T", "reading", 100).unwrap();
+    let first = r.on_distill("pk1", "T", "reading", 100).unwrap();
     ledger.apply_result(&first.result);
     r.assert_oracle().unwrap();
     assert_eq!(publishes(&first.effects).len(), 1);
 
     // Committing the IDENTICAL state again (same title/activity, same tick bucket)
     // must emit NOTHING — the graph change-detection swallows it.
-    let second = r.on_distill("s1", "T", "reading", 100).unwrap();
+    let second = r.on_distill("pk1", "T", "reading", 100).unwrap();
     ledger.apply_result(&second.result);
     r.assert_oracle().unwrap();
     assert!(
@@ -70,9 +70,9 @@ fn identical_state_commit_is_deduped() {
 #[test]
 fn distill_change_publishes_and_attributes_to_activity() {
     let (mut r, mut ledger) = seeded(true, "T", "", chans(["room"]), 100);
-    let activity_node = r.activity_input("s1").unwrap();
+    let activity_node = r.activity_input("pk1").unwrap();
 
-    let out = r.on_distill("s1", "T", "compiling", 100).unwrap();
+    let out = r.on_distill("pk1", "T", "compiling", 100).unwrap();
     ledger.apply_result(&out.result);
     r.assert_oracle().unwrap();
 
@@ -81,7 +81,7 @@ fn distill_change_publishes_and_attributes_to_activity() {
     assert_eq!(pubs[0].0.activity, "compiling");
     assert_eq!(pubs[0].1, PublishReason::Changed);
 
-    let why = r.why_command("s1").expect("a command was emitted for s1");
+    let why = r.why_command("pk1").expect("a command was emitted for pk1");
     assert_eq!(why.kind, ResourceCommandKind::Replace);
     assert!(
         why.input_causes.contains(&activity_node),
@@ -95,7 +95,7 @@ fn manual_title_change_publishes_title_without_clearing_activity() {
     let (mut r, mut ledger) = seeded(true, "Old", "checking logs", chans(["room"]), 100);
 
     let out = r
-        .on_title_set("s1", "Testing status updates and awareness", 100)
+        .on_title_set("pk1", "Testing status updates and awareness", 100)
         .unwrap();
     ledger.apply_result(&out.result);
     r.assert_oracle().unwrap();
@@ -112,7 +112,7 @@ fn manual_title_change_publishes_title_without_clearing_activity() {
 fn turn_end_flips_to_idle_one_publish() {
     let (mut r, mut ledger) = seeded(true, "T", "writing", chans(["room"]), 100);
 
-    let out = r.on_turn_end("s1", 100).unwrap();
+    let out = r.on_turn_end("pk1", 100).unwrap();
     ledger.apply_result(&out.result);
     r.assert_oracle().unwrap();
 
@@ -129,7 +129,7 @@ fn turn_end_flips_to_idle_one_publish() {
 fn session_end_emits_idle_status_with_full_ttl() {
     let (mut r, mut ledger) = seeded(true, "T", "busy", chans(["room"]), 100);
 
-    let out = r.on_session_ended("s1", 200).unwrap();
+    let out = r.on_session_ended("pk1", 200).unwrap();
     ledger.apply_result(&out.result);
     r.assert_oracle().unwrap();
 
@@ -153,7 +153,7 @@ fn session_end_emits_idle_status_with_full_ttl() {
 fn session_end_rearms_ttl_even_when_already_idle() {
     let (mut r, mut ledger) = seeded(false, "T", "", chans(["room"]), 100);
 
-    let out = r.on_session_ended("s1", 100).unwrap();
+    let out = r.on_session_ended("pk1", 100).unwrap();
     ledger.apply_result(&out.result);
     r.assert_oracle().unwrap();
 
@@ -168,7 +168,7 @@ fn session_end_rearms_ttl_even_when_already_idle() {
 fn operator_revoke_expires_status_now_and_closes_the_session_row() {
     let (mut r, mut ledger) = seeded(true, "T", "busy", chans(["room"]), 100);
 
-    let out = r.on_session_revoked("s1", 123).unwrap();
+    let out = r.on_session_revoked("pk1", 123).unwrap();
     ledger.apply_result(&out.result);
     r.assert_oracle().unwrap();
 
@@ -188,11 +188,11 @@ fn operator_revoke_expires_status_now_and_closes_the_session_row() {
 fn forgetting_stale_session_closes_local_graph_without_publish() {
     let (mut r, ledger) = seeded(false, "T", "", chans(["room"]), 100);
 
-    r.forget_session("s1").unwrap();
+    r.forget_session("pk1").unwrap();
     r.assert_oracle().unwrap();
 
     assert!(r.state_rows().is_empty());
-    let why = r.why_command("s1").expect("a close was emitted for s1");
+    let why = r.why_command("pk1").expect("a close was emitted for pk1");
     assert_eq!(why.kind, ResourceCommandKind::Close);
     assert!(
         matches!(why.cause, ResourceCommandCause::ScopeClosed { .. }),
@@ -209,7 +209,7 @@ fn forgetting_stale_session_closes_local_graph_without_publish() {
 fn channel_leave_corrects_h_tags() {
     let (mut r, mut ledger) = seeded(true, "T", "x", chans(["a", "b"]), 100);
 
-    let out = r.on_channels_changed("s1", chans(["a"]), 100).unwrap();
+    let out = r.on_channels_changed("pk1", chans(["a"]), 100).unwrap();
     ledger.apply_result(&out.result);
     r.assert_oracle().unwrap();
 
@@ -231,18 +231,18 @@ fn tick_rearms_without_content_change_and_is_the_single_path() {
     let (mut r, mut ledger) = seeded(true, "T", "x", chans(["room"]), 0);
 
     // Cross into the next 30s refresh bucket → one refresh (content unchanged).
-    let out = r.on_tick("s1", 30).unwrap();
+    let out = r.on_tick("pk1", 30).unwrap();
     ledger.apply_result(&out.result);
     r.assert_oracle().unwrap();
     let pubs = publishes(&out.effects);
     assert_eq!(pubs.len(), 1);
     assert_eq!(pubs[0].1, PublishReason::Refreshed);
     assert_eq!(pubs[0].0.expires_at, Some(120), "TTL re-armed to now + ttl");
-    let why = r.why_command("s1").unwrap();
+    let why = r.why_command("pk1").unwrap();
     assert_eq!(why.kind, ResourceCommandKind::Refresh);
 
     // Same bucket again → nothing (no unconditional republish).
-    let again = r.on_tick("s1", 45).unwrap();
+    let again = r.on_tick("pk1", 45).unwrap();
     ledger.apply_result(&again.result);
     r.assert_oracle().unwrap();
     assert!(again.effects.is_empty(), "in-bucket tick is a no-op");

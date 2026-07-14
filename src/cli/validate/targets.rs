@@ -36,9 +36,9 @@ const TARGET_FORMS: &[TargetForm] = &[
         example: "tenex-edge debug validate <event-id-or-npub>",
     },
     TargetForm {
-        target: "status:<session>",
+        target: "status:<pubkey>",
         proves: "status graph, local session row, relay status rows, and channel agreement",
-        example: "tenex-edge debug validate status:<session>",
+        example: "tenex-edge debug validate status:<pubkey>",
     },
     TargetForm {
         target: "sub:<channel> | sub/<h|d|p>/<id>",
@@ -81,9 +81,9 @@ const TARGET_FORMS: &[TargetForm] = &[
         example: "tenex-edge debug validate awareness:<channel>",
     },
     TargetForm {
-        target: "session:<session> | joined:<session>[:channel] | session_channel:<session>",
+        target: "session:<pubkey> | joined:<pubkey>[:channel] | session_channel:<pubkey>",
         proves: "local session, current channel binding, joined channel, and active subscriptions",
-        example: "tenex-edge debug validate joined:<session>",
+        example: "tenex-edge debug validate joined:<pubkey>",
     },
     TargetForm {
         target: "alias:<harness>:<kind>:<value> | harness_session:<harness>:<id> | resume:<harness>:<id> | pty_session:<id> | watch_pid:<pid>",

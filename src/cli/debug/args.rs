@@ -21,7 +21,7 @@ pub(in crate::cli) enum DebugAction {
         /// Filter panes/events to one or more workspaces (repeatable).
         #[arg(long = "workspace", value_name = "WORKSPACE")]
         workspaces: Vec<String>,
-        /// Filter panes/events to a session id (or a unique prefix of it).
+        /// Filter panes/events to a public session npub, hex pubkey, or handle.
         #[arg(long)]
         session: Option<String>,
         /// Maximum panes in the grid.

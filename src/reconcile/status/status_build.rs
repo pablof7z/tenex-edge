@@ -1,12 +1,10 @@
 use super::StatusCommand;
 use crate::domain::{AgentRef, Status};
-use crate::util::SessionId;
 
 pub(super) fn to_status(cmd: &StatusCommand, ttl_secs: u64, now: u64, expiring: bool) -> Status {
     Status {
         agent: AgentRef::new(cmd.pubkey.clone(), cmd.slug.clone()),
         channels: cmd.channels.clone(),
-        session_id: SessionId::new(cmd.session_id.clone()),
         host: cmd.host.clone(),
         title: cmd.title.clone(),
         activity: if expiring {

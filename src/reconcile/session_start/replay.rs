@@ -8,7 +8,7 @@ use crate::reconcile::journal::InputFact;
 use crate::reconcile::labels::NodeLabels;
 use crate::reconcile::replay::ReplayReport;
 
-use super::model::{ensure_session, fact_session_id, stage_fact, SessionNodes};
+use super::model::{ensure_session, fact_pubkey, stage_fact, SessionNodes};
 use super::SessionStartCommand;
 
 struct ReplayState {
@@ -31,10 +31,10 @@ impl ReplayState {
         operation: &InputFact,
         tx: &mut Transaction<'_, SessionStartCommand>,
     ) -> GraphResult<()> {
-        let Some(session_id) = fact_session_id(operation) else {
+        let Some(pubkey) = fact_pubkey(operation) else {
             return Ok(());
         };
-        let nodes = ensure_session(tx, &mut self.labels, &mut self.nodes, session_id)?;
+        let nodes = ensure_session(tx, &mut self.labels, &mut self.nodes, pubkey)?;
         self.seq += 1;
         stage_fact(tx, &nodes, operation, self.seq)
     }

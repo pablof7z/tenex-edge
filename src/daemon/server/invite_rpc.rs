@@ -15,11 +15,7 @@ use wait::{
 struct InviteParams {
     channel: String,
     #[serde(default)]
-    agent: Option<String>,
-    #[serde(default)]
     session: Option<String>,
-    #[serde(default)]
-    agent_slug: Option<String>,
     #[serde(default)]
     harness_session: Option<String>,
     #[serde(default)]
@@ -34,15 +30,6 @@ struct InviteParams {
     /// mentioning the brought-online session, once it is confirmed online.
     #[serde(default)]
     add_message: Option<String>,
-}
-
-impl InviteParams {
-    fn caller_agent(&self) -> Option<&str> {
-        self.agent
-            .as_deref()
-            .or(self.agent_slug.as_deref())
-            .filter(|s| !s.trim().is_empty())
-    }
 }
 
 pub(super) async fn rpc_invite(
@@ -98,8 +85,6 @@ fn resolve_target_channel(state: &Arc<DaemonState>, p: &InviteParams) -> Result<
         harness_session: p.harness_session.as_deref(),
         watch_pid: p.watch_pid,
         harness: p.harness.as_deref(),
-        cwd: p.cwd.as_deref(),
-        agent: p.caller_agent(),
         ..Default::default()
     };
     let root = match resolve_session_inner(state, &anchor, ResolveScope::Strict) {

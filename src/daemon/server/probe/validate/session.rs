@@ -12,13 +12,13 @@ pub(super) fn session_target(target: &str) -> Option<&str> {
         .filter(|id| !id.trim().is_empty())
 }
 
-pub(super) fn session_evidence(state: &Arc<DaemonState>, target: &str, session_id: &str) -> Value {
-    let session = match state.with_store(|s| s.get_session(session_id)) {
+pub(super) fn session_evidence(state: &Arc<DaemonState>, target: &str, pubkey: &str) -> Value {
+    let session = match state.with_store(|s| s.get_session(pubkey)) {
         Ok(row) => row,
         Err(e) => {
             return json!({
                 "target": target,
-                "session_id": session_id,
+                "pubkey": pubkey,
                 "supported": true,
                 "found": false,
                 "error": e.to_string(),
@@ -30,11 +30,11 @@ pub(super) fn session_evidence(state: &Arc<DaemonState>, target: &str, session_i
     let Some(session) = session else {
         return json!({
             "target": target,
-            "session_id": session_id,
+            "pubkey": pubkey,
             "supported": true,
             "found": false,
-            "summary": format!("session `{session_id}` has no local row"),
-            "reason": "no local session row exists for this session id or alias",
+            "summary": format!("session `{pubkey}` has no local row"),
+            "reason": "no local session row exists for this pubkey",
         });
     };
 
@@ -44,15 +44,15 @@ pub(super) fn session_evidence(state: &Arc<DaemonState>, target: &str, session_i
         .expect("status mutex poisoned")
         .state_rows()
         .into_iter()
-        .any(|row| row.session == session.session_id);
+        .any(|row| row.session == session.pubkey);
     let watch_found = state
         .session_watch
         .lock()
         .expect("session_watch mutex poisoned")
         .state_rows()
         .into_iter()
-        .any(|row| row.session == session.session_id);
-    let owner = format!("session-{}", session.session_id);
+        .any(|row| row.session == session.pubkey);
+    let owner = format!("session-{}", session.pubkey);
     let subs = state.subs.lock().expect("subs mutex poisoned").state_rows();
     let has_channel = !session.channel_h.trim().is_empty();
     let sub_h_owned = has_channel
@@ -81,7 +81,7 @@ pub(super) fn session_evidence(state: &Arc<DaemonState>, target: &str, session_i
     let ok = session.alive && missing.is_empty();
     json!({
         "target": target,
-        "session_id": session.session_id,
+        "pubkey": session.pubkey,
         "supported": true,
         "found": true,
         "alive": session.alive,
@@ -96,7 +96,7 @@ pub(super) fn session_evidence(state: &Arc<DaemonState>, target: &str, session_i
         "sub_d_owned": sub_d_owned,
         "missing": missing,
         "ok": ok,
-        "summary": summary(session_id, session.alive, ok),
+        "summary": summary(pubkey, session.alive, ok),
         "reason": reason(session.alive, ok),
     })
 }
@@ -135,13 +135,13 @@ fn owner_has_subscription(
     })
 }
 
-fn summary(session_id: &str, alive: bool, ok: bool) -> String {
+fn summary(pubkey: &str, alive: bool, ok: bool) -> String {
     if ok {
-        format!("session `{session_id}` agrees across status/watch/subscriptions")
+        format!("session `{pubkey}` agrees across status/watch/subscriptions")
     } else if alive {
-        format!("session `{session_id}` is alive but missing live surface evidence")
+        format!("session `{pubkey}` is alive but missing live surface evidence")
     } else {
-        format!("session `{session_id}` is not alive locally")
+        format!("session `{pubkey}` is not alive locally")
     }
 }
 

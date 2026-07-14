@@ -30,19 +30,19 @@ struct Decision {
     seq: u64,
 }
 
-pub(crate) fn fact_session_id(fact: &InputFact) -> Option<&str> {
+pub(crate) fn fact_pubkey(fact: &InputFact) -> Option<&str> {
     match fact {
-        InputFact::SessionStartRequested(req) => Some(req.session_id.as_str()),
-        InputFact::SessionStarted { session_id, .. } => Some(session_id.as_str()),
-        InputFact::SessionStartFailed(SessionStartFailedFact { session_id, .. }) => {
-            Some(session_id.as_str())
+        InputFact::SessionStartRequested(req) => Some(req.pubkey.as_str()),
+        InputFact::SessionStarted { pubkey, .. } => Some(pubkey.as_str()),
+        InputFact::SessionStartFailed(SessionStartFailedFact { pubkey, .. }) => {
+            Some(pubkey.as_str())
         }
         _ => None,
     }
 }
 
-pub(crate) fn session_key(session_id: &str) -> ResourceKey {
-    ResourceKey::from_segments(["session_start", session_id])
+pub(crate) fn session_key(pubkey: &str) -> ResourceKey {
+    ResourceKey::from_segments(["session_start", pubkey])
 }
 
 pub(crate) fn opts() -> TransactionOptions {
@@ -53,13 +53,13 @@ pub(crate) fn ensure_session(
     tx: &mut Transaction<'_, SessionStartCommand>,
     labels: &mut NodeLabels,
     sessions: &mut BTreeMap<String, SessionNodes>,
-    session_id: &str,
+    pubkey: &str,
 ) -> GraphResult<SessionNodes> {
-    if let Some(nodes) = sessions.get(session_id).copied() {
+    if let Some(nodes) = sessions.get(pubkey).copied() {
         return Ok(nodes);
     }
-    let nodes = stage_session(tx, labels, session_id)?;
-    sessions.insert(session_id.to_string(), nodes);
+    let nodes = stage_session(tx, labels, pubkey)?;
+    sessions.insert(pubkey.to_string(), nodes);
     Ok(nodes)
 }
 
@@ -97,14 +97,14 @@ pub(crate) fn stage_fact(
 fn stage_session(
     tx: &mut Transaction<'_, SessionStartCommand>,
     labels: &mut NodeLabels,
-    session_id: &str,
+    pubkey: &str,
 ) -> GraphResult<SessionNodes> {
-    let scope = tx.create_scope(format!("session-start-{session_id}"))?;
-    let request = input(tx, labels, session_id, "request", None)?;
-    let outcome = input(tx, labels, session_id, "outcome", OUTCOME_PENDING)?;
-    let failure_stage = input(tx, labels, session_id, "failure_stage", String::new())?;
-    let failure_error = input(tx, labels, session_id, "failure_error", String::new())?;
-    let seq = input(tx, labels, session_id, "seq", 0u64)?;
+    let scope = tx.create_scope(format!("session-start-{pubkey}"))?;
+    let request = input(tx, labels, pubkey, "request", None)?;
+    let outcome = input(tx, labels, pubkey, "outcome", OUTCOME_PENDING)?;
+    let failure_stage = input(tx, labels, pubkey, "failure_stage", String::new())?;
+    let failure_error = input(tx, labels, pubkey, "failure_error", String::new())?;
+    let seq = input(tx, labels, pubkey, "seq", 0u64)?;
     let nodes = SessionNodes {
         request,
         outcome,
@@ -113,7 +113,7 @@ fn stage_session(
         seq,
     };
     let decision = tx.derived(
-        format!("session-start-{session_id}-decision"),
+        format!("session-start-{pubkey}-decision"),
         DependencyList::new([
             request.id(),
             outcome.id(),
@@ -138,13 +138,10 @@ fn stage_session(
             }))
         },
     )?;
-    labels.record(
-        decision.id(),
-        format!("session_start/{session_id}/decision"),
-    );
-    let id = session_id.to_string();
+    labels.record(decision.id(), format!("session_start/{pubkey}/decision"));
+    let id = pubkey.to_string();
     let coll = tx.map_collection::<String, Decision>(
-        format!("session-start-{session_id}-coll"),
+        format!("session-start-{pubkey}-coll"),
         DependencyList::new([decision.id()])?,
         move |ctx| {
             Ok(ctx
@@ -154,7 +151,7 @@ fn stage_session(
                 .unwrap_or_default())
         },
     )?;
-    labels.record(coll.id(), format!("session_start/{session_id}/coll"));
+    labels.record(coll.id(), format!("session_start/{pubkey}/coll"));
     tx.map_resource_planner(coll, scope, plan_session_start)?;
     Ok(nodes)
 }
@@ -162,12 +159,12 @@ fn stage_session(
 fn input<T: Clone + PartialEq + Send + Sync + 'static>(
     tx: &mut Transaction<'_, SessionStartCommand>,
     labels: &mut NodeLabels,
-    session_id: &str,
+    pubkey: &str,
     name: &str,
     value: T,
 ) -> GraphResult<InputNode<T>> {
-    let node = tx.input::<T>(format!("session-start-{session_id}-{name}"))?;
-    labels.record(node.id(), format!("session_start/{session_id}/{name}"));
+    let node = tx.input::<T>(format!("session-start-{pubkey}-{name}"))?;
+    labels.record(node.id(), format!("session_start/{pubkey}/{name}"));
     tx.set_input(node, value)?;
     Ok(node)
 }
@@ -185,7 +182,7 @@ fn command_from_inputs(
         _ => SessionStartAction::Execute,
     };
     SessionStartCommand {
-        session_id: req.session_id.clone(),
+        pubkey: req.pubkey.clone(),
         action,
         plan: plan_from_request(req),
         failure_stage: (!failure_stage.is_empty()).then_some(failure_stage),

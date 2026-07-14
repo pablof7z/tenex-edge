@@ -76,8 +76,8 @@ impl Reconciler {
             .collect()
     }
 
-    pub fn explain_watch(&self, session_id: &str) -> Option<SessionWatchWhy> {
-        let key = watch_key(session_id);
+    pub fn explain_watch(&self, pubkey: &str) -> Option<SessionWatchWhy> {
+        let key = watch_key(pubkey);
         let why = self.graph.why_resource_command(&key)?;
         let cause = self.cause_label(&why.cause);
         let mut input_causes = self.labels.labels_for(&why.input_causes);
@@ -120,7 +120,7 @@ fn session_watch_fact(fact: &InputFact) -> bool {
         fact,
         InputFact::SessionStarted { .. }
             | InputFact::ProcessExited {
-                session_id: Some(_),
+                pubkey: Some(_),
                 ..
             }
     )

@@ -9,4 +9,5 @@ source_refs:
 
 # Session (state row)
 
-A local agent process THIS daemon hosts. OS handles only — never agent identity (that lives in relay_status/relay_profiles).
+A local session owned by its pubkey. The row records current lifecycle state;
+PTY, ACP, native-resume, and PID correlations live in the typed locator table.

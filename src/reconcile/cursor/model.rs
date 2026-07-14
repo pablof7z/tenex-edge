@@ -31,10 +31,10 @@ struct Decision {
 pub(crate) fn fact_seed(fact: &InputFact) -> Option<(String, u64)> {
     match fact {
         InputFact::TurnCheckRequested {
-            session_id,
+            pubkey,
             observed_cursor,
             ..
-        } => Some((session_id.clone(), *observed_cursor)),
+        } => Some((pubkey.clone(), *observed_cursor)),
         _ => None,
     }
 }
@@ -53,11 +53,11 @@ pub(crate) fn ensure_session(
     sessions: &mut BTreeMap<String, SessionNodes>,
     seed: &CursorSeed,
 ) -> GraphResult<SessionNodes> {
-    if let Some(nodes) = sessions.get(&seed.session_id).copied() {
+    if let Some(nodes) = sessions.get(&seed.pubkey).copied() {
         return Ok(nodes);
     }
     let nodes = stage_session(tx, labels, seed)?;
-    sessions.insert(seed.session_id.clone(), nodes);
+    sessions.insert(seed.pubkey.clone(), nodes);
     Ok(nodes)
 }
 
@@ -89,7 +89,7 @@ fn stage_session(
     labels: &mut NodeLabels,
     seed: &CursorSeed,
 ) -> GraphResult<SessionNodes> {
-    let id = seed.session_id.clone();
+    let id = seed.pubkey.clone();
     let scope = tx.create_scope(format!("cursor-{id}"))?;
     let current = tx.input::<u64>(format!("cursor-{id}-current"))?;
     labels.record(current.id(), format!("cursor/{id}/current_cursor"));
@@ -124,7 +124,7 @@ fn stage_session(
             )]))
         },
     )?;
-    labels.record(coll.id(), format!("cursor/{}/coll", seed.session_id));
+    labels.record(coll.id(), format!("cursor/{}/coll", seed.pubkey));
     tx.map_resource_planner(coll, scope, plan_cursor)?;
     Ok(nodes)
 }
@@ -188,7 +188,7 @@ fn plan_cursor(
 fn command_of(id: &str, decision: &Decision) -> CursorCommand {
     let _ = decision.seq;
     CursorCommand {
-        session_id: id.to_string(),
+        pubkey: id.to_string(),
         cursor_before: decision.cursor_before,
         cursor_after: decision.cursor_after,
         delta_since: decision.delta_since,

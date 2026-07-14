@@ -17,18 +17,15 @@ use crate::reconcile::journal::InputFact;
 use crate::reconcile::labels::{key_path, NodeLabels};
 use crate::reconcile::SessionStartRequestFact;
 
-use model::{ensure_session, fact_session_id, opts, session_key, stage_fact, SessionNodes};
+use model::{ensure_session, fact_pubkey, opts, session_key, stage_fact, SessionNodes};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SessionRowIntent {
+    pub pubkey: String,
     pub harness: String,
-    pub external_id_kind: String,
-    pub external_id: String,
-    pub agent_pubkey: String,
     pub agent_slug: String,
     pub channel_h: String,
     pub child_pid: Option<i32>,
-    pub resume_id: String,
     pub now: u64,
 }
 
@@ -38,17 +35,16 @@ pub struct ChannelReadyIntent {
     pub work_root: String,
     pub room_parent: Option<String>,
     pub name: Option<String>,
-    pub signer_pubkey: String,
+    pub pubkey: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EngineStartIntent {
-    pub session_id: String,
+    pub pubkey: String,
     pub channel_h: String,
     pub rel_cwd: String,
     pub watch_pid: Option<i32>,
     pub signer_label: String,
-    pub signer_pubkey: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -76,7 +72,7 @@ pub enum SessionStartAction {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SessionStartCommand {
-    pub session_id: String,
+    pub pubkey: String,
     pub action: SessionStartAction,
     pub plan: SessionStartPlan,
     pub failure_stage: Option<String>,
@@ -140,7 +136,7 @@ impl SessionStartReconciler {
     }
 
     pub fn preview_fact(&mut self, fact: &InputFact) -> GraphResult<Option<SessionStartPreview>> {
-        if fact_session_id(fact).is_none() {
+        if fact_pubkey(fact).is_none() {
             return Ok(None);
         }
         let (result, labels) = self.stage(fact, self.next_seq + 1, true)?;
@@ -152,10 +148,10 @@ impl SessionStartReconciler {
         Ok(())
     }
 
-    pub fn explain_session_start(&self, session_id: &str) -> Option<SessionStartWhy> {
-        let why = self.graph.why_resource_command(&session_key(session_id))?;
+    pub fn explain_session_start(&self, pubkey: &str) -> Option<SessionStartWhy> {
+        let why = self.graph.why_resource_command(&session_key(pubkey))?;
         Some(SessionStartWhy {
-            resource_key: key_path(&session_key(session_id)),
+            resource_key: key_path(&session_key(pubkey)),
             last_kind: format!("{:?}", why.kind),
             cause: self.cause_label(&why.cause),
             input_causes: self.labels.labels_for(&why.input_causes),
@@ -166,10 +162,10 @@ impl SessionStartReconciler {
         self.commands
             .values()
             .map(|cmd| SessionStartStateRow {
-                session_id: cmd.session_id.clone(),
+                pubkey: cmd.pubkey.clone(),
                 action: format!("{:?}", cmd.action),
                 channel_h: cmd.plan.row.channel_h.clone(),
-                signer_pubkey: cmd.plan.row.agent_pubkey.clone(),
+                signer_pubkey: cmd.plan.row.pubkey.clone(),
                 reassert: cmd.plan.reassert,
                 failure_stage: cmd.failure_stage.clone(),
                 failure_error: cmd.failure_error.clone(),
@@ -188,13 +184,13 @@ impl SessionStartReconciler {
         seq: u64,
         preview: bool,
     ) -> GraphResult<(TransactionResult<SessionStartCommand>, NodeLabels)> {
-        let Some(session_id) = fact_session_id(fact) else {
+        let Some(pubkey) = fact_pubkey(fact) else {
             unreachable!("session-start facts are classified before staging")
         };
         let mut nodes = self.nodes.clone();
         let mut labels = self.labels.clone();
         let mut tx = self.graph.begin_transaction_with_options(opts())?;
-        let session = ensure_session(&mut tx, &mut labels, &mut nodes, session_id)?;
+        let session = ensure_session(&mut tx, &mut labels, &mut nodes, pubkey)?;
         stage_fact(&mut tx, &session, fact, seq)?;
         let result = if preview { tx.preview()? } else { tx.commit()? };
         if !preview {
@@ -220,7 +216,7 @@ impl SessionStartReconciler {
             });
         if let Some(command) = &command {
             self.commands
-                .insert(command.session_id.clone(), command.clone());
+                .insert(command.pubkey.clone(), command.clone());
         }
         command
     }
@@ -239,7 +235,7 @@ impl SessionStartReconciler {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SessionStartStateRow {
-    pub session_id: String,
+    pub pubkey: String,
     pub action: String,
     pub channel_h: String,
     pub signer_pubkey: String,
@@ -265,14 +261,11 @@ pub(crate) fn plan_from_request(req: &SessionStartRequestFact) -> SessionStartPl
     let active = !req.already_running;
     SessionStartPlan {
         row: SessionRowIntent {
+            pubkey: req.pubkey.clone(),
             harness: req.harness.clone(),
-            external_id_kind: req.external_id_kind.clone(),
-            external_id: req.external_id.clone(),
-            agent_pubkey: req.signer_pubkey.clone(),
             agent_slug: req.agent.clone(),
             channel_h: req.channel_for_upsert.clone(),
             child_pid: req.watch_pid,
-            resume_id: req.native_id.clone(),
             now: req.at,
         },
         channel_ready: active.then(|| ChannelReadyIntent {
@@ -280,21 +273,20 @@ pub(crate) fn plan_from_request(req: &SessionStartRequestFact) -> SessionStartPl
             work_root: req.work_root.clone(),
             room_parent: req.room_parent.clone(),
             name: req.channel_provision_name.clone(),
-            signer_pubkey: req.signer_pubkey.clone(),
+            pubkey: req.pubkey.clone(),
         }),
-        admit_pubkey: active.then(|| req.signer_pubkey.clone()),
+        admit_pubkey: active.then(|| req.pubkey.clone()),
         pty_session: req.pty_session.clone(),
         ring_doorbell: req.ring_doorbell,
         notify_outbox: active,
         ensure_subscription: active,
         replay_chat: active && (req.channel_already_subscribed || req.pty_session.is_some()),
         spawn: active.then(|| EngineStartIntent {
-            session_id: req.session_id.clone(),
+            pubkey: req.pubkey.clone(),
             channel_h: req.channel_h.clone(),
             rel_cwd: req.rel_cwd.clone(),
             watch_pid: req.watch_pid,
             signer_label: req.signer_label.clone(),
-            signer_pubkey: req.signer_pubkey.clone(),
         }),
         emit_tail: active,
         reassert: req.already_running,

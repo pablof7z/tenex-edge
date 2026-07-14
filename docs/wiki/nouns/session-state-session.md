@@ -9,4 +9,6 @@ source_refs:
 
 # Session (state::Session)
 
-A local agent process this daemon hosts. OS handles only (session_id, pid, transcript_path, liveness) — never agent identity, which lives in relay_status/relay_profiles.
+A local session projection keyed by pubkey. Runtime generation fences lifecycle
+updates, while process and harness correlations are typed locators rather than
+identities.

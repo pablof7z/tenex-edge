@@ -66,7 +66,6 @@ pub(super) fn build(
         ("channel_evidence", json!(target_checks.channel_evidence)),
         ("commit_evidence", json!(target_checks.commit_evidence)),
         ("coverage_evidence", json!(target_checks.coverage_evidence)),
-        ("alias_evidence", json!(target_checks.alias_evidence)),
         (
             "workspace_evidence",
             json!(target_checks.workspace_evidence),
@@ -99,7 +98,6 @@ pub(super) fn build(
             "readiness_attempt_evidence",
             json!(target_checks.readiness_attempt_evidence),
         ),
-        ("identity_evidence", json!(target_checks.identity_evidence)),
         (
             "hook_context_evidence",
             json!(target_checks.hook_context_evidence),

@@ -1,9 +1,9 @@
 //! Target-specific evidence collection for non-Trellis validation targets.
 use super::report::bool_at;
 use super::{
-    alias, awareness, channel, commit, coverage, cursor, event, hook_context, identity, inbox,
-    joined, llm, membership, message, outbox, quarantine, readiness_attempt, recipient, session,
-    session_start, session_watch, status, subscription, turn, workspace, DaemonState,
+    awareness, channel, commit, coverage, cursor, event, hook_context, inbox, joined, llm,
+    membership, message, outbox, quarantine, readiness_attempt, recipient, session, session_start,
+    session_watch, status, subscription, turn, workspace, DaemonState,
 };
 use serde_json::Value;
 use std::sync::Arc;
@@ -12,7 +12,6 @@ pub(super) struct TargetChecks {
     pub(super) channel_evidence: Option<Value>,
     pub(super) commit_evidence: Option<Value>,
     pub(super) coverage_evidence: Option<Value>,
-    pub(super) alias_evidence: Option<Value>,
     pub(super) workspace_evidence: Option<Value>,
     pub(super) membership_evidence: Option<Value>,
     pub(super) membership_snapshot_evidence: Option<Value>,
@@ -24,7 +23,6 @@ pub(super) struct TargetChecks {
     pub(super) message_evidence: Option<Value>,
     pub(super) recipient_evidence: Option<Value>,
     pub(super) readiness_attempt_evidence: Option<Value>,
-    pub(super) identity_evidence: Option<Value>,
     pub(super) hook_context_evidence: Option<Value>,
     pub(super) llm_evidence: Option<Value>,
     pub(super) txn_evidence: Option<Value>,
@@ -56,8 +54,6 @@ impl TargetChecks {
                 .map(|id| commit::commit_evidence(state, target, id)),
             coverage_evidence: coverage::coverage_target(target)
                 .map(|parsed| coverage::coverage_evidence(state, target, &parsed)),
-            alias_evidence: alias::alias_target(target)
-                .map(|parsed| alias::alias_evidence(state, target, &parsed)),
             workspace_evidence: workspace::workspace_target(target)
                 .map(|id| workspace::workspace_evidence(state, target, id)),
             membership_evidence: membership::membership_target(target)
@@ -80,8 +76,6 @@ impl TargetChecks {
                 .map(|parsed| recipient::recipient_evidence(state, target, &parsed)),
             readiness_attempt_evidence: readiness_attempt::readiness_attempt_target(target)
                 .map(|id| readiness_attempt::readiness_attempt_evidence(state, target, id)),
-            identity_evidence: identity::identity_target(target)
-                .map(|parsed| identity::identity_evidence(state, target, &parsed)),
             hook_context_evidence: hook_context::hook_context_target(target)
                 .map(|id| hook_context::hook_context_evidence(state, target, id)),
             llm_evidence: llm::llm_target(target).map(|id| llm::llm_evidence(state, target, id)),
@@ -113,7 +107,6 @@ impl TargetChecks {
         self.channel_evidence.is_some()
             || self.commit_evidence.is_some()
             || self.coverage_evidence.is_some()
-            || self.alias_evidence.is_some()
             || self.workspace_evidence.is_some()
             || self.membership_evidence.is_some()
             || self.membership_snapshot_evidence.is_some()
@@ -125,7 +118,6 @@ impl TargetChecks {
             || self.message_evidence.is_some()
             || self.recipient_evidence.is_some()
             || self.readiness_attempt_evidence.is_some()
-            || self.identity_evidence.is_some()
             || self.hook_context_evidence.is_some()
             || self.llm_evidence.is_some()
             || self.txn_evidence.is_some()
@@ -187,9 +179,6 @@ impl TargetChecks {
         if let Some(v) = &self.coverage_evidence {
             coverage::push_coverage_check(checks, limitations, v);
         }
-        if let Some(v) = &self.alias_evidence {
-            alias::push_alias_check(checks, limitations, v);
-        }
         if let Some(v) = &self.workspace_evidence {
             workspace::push_workspace_check(checks, limitations, v);
         }
@@ -222,9 +211,6 @@ impl TargetChecks {
         }
         if let Some(v) = &self.readiness_attempt_evidence {
             readiness_attempt::push_readiness_attempt_check(checks, limitations, v);
-        }
-        if let Some(v) = &self.identity_evidence {
-            identity::push_identity_check(checks, limitations, v);
         }
         if let Some(v) = &self.hook_context_evidence {
             hook_context::push_hook_context_check(checks, limitations, v);

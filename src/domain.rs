@@ -4,8 +4,6 @@
 //! The litmus test for the provider seam: everything here is what tenex-edge
 //! *means*, never how it travels.
 
-use crate::util::SessionId;
-
 /// Liveness TTL: a status is "live" while its heartbeat is fresher than this.
 /// The daemon refreshes the provider-native expiry to `now + STATUS_TTL_SECS` on
 /// every heartbeat, so a stopped session disappears from live views roughly this
@@ -173,12 +171,11 @@ pub struct Proposal {
     pub audience: Vec<String>,
 }
 
-/// The agent's complete live state for one local session. From this one value a
-/// reader knows everything: who/where (agent, channels, host, session, rel_cwd),
+/// The agent's complete live state. From this one value a reader knows
+/// everything: who/where (agent, channels, host, rel_cwd),
 /// what the session is about (the persistent `title`), what it is doing *right
 /// now* (the live `activity`), and whether it is mid-turn (`busy`). It is scoped
-/// per session, so each session keeps its own title even while idle and after it
-/// exits.
+/// per authoritative agent pubkey, so each agent keeps its title even while idle.
 ///
 /// Liveness = freshness of this state. The daemon refreshes `expires_at` on
 /// every heartbeat. Beats stop, the provider-native expiry passes, and readers
@@ -190,8 +187,6 @@ pub struct Status {
     /// Channels this session is currently present in. Materializers fan this
     /// single session status out to per-channel read rows.
     pub channels: Vec<String>,
-    /// The session this status belongs to.
-    pub session_id: SessionId,
     /// The machine this session lives on.
     pub host: String,
     /// The session title: a short, stable description of what the session is
@@ -233,8 +228,7 @@ impl Status {
 
 /// A channel chat line. It is ambient channel context; live sessions see it
 /// going forward only. Chat fans out to every alive channel session by pubkey +
-/// channel membership; session ids are for lifecycle/status, not chat
-/// addressing.
+/// channel membership; private runtime ids never address chat.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChatMessage {
     pub from: AgentRef,
@@ -316,7 +310,6 @@ mod tests {
         let idle = Status {
             agent: agent.clone(),
             channels: vec!["p".into()],
-            session_id: "s1".into(),
             host: "laptop".into(),
             title: "fixing auth".into(),
             activity: String::new(),
@@ -328,7 +321,6 @@ mod tests {
         let busy = Status {
             agent,
             channels: vec!["p".into()],
-            session_id: "s1".into(),
             host: "laptop".into(),
             title: "fixing auth".into(),
             activity: String::new(),

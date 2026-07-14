@@ -21,8 +21,8 @@ use std::time::Duration;
 
 /// Per-session debug log keyed by the raw canonical session id (an internal
 /// correlation handle; canonical ids are filename-safe).
-fn slog(session_id: &str, msg: &str) {
-    crate::applog::append(&format!("{session_id}.log"), "", msg);
+fn slog(pubkey: &str, msg: &str) {
+    crate::applog::append(&format!("{pubkey}.log"), "", msg);
 }
 
 /// The distill task's output: labels, an optional LLM error, and the optional
@@ -42,7 +42,7 @@ pub struct EngineParams {
     pub channel: String,
     /// Top-level workspace channel containing `channel`.
     pub workspace: String,
-    pub session_id: String,
+    pub runtime_generation: u64,
     pub host: String,
     /// Channel-relative working directory (§8e), advertised on presence/status.
     pub rel_cwd: String,
@@ -73,7 +73,7 @@ impl EngineParams {
 fn status_channels(p: &EngineParams, store: &Mutex<Store>, session: &Session) -> Vec<String> {
     let mut channels = match store.lock() {
         Ok(g) => g
-            .list_session_joined_channels(&session.session_id)
+            .list_session_joined_channels(&session.pubkey)
             .unwrap_or_default()
             .into_iter()
             .map(|(channel, _)| channel)
@@ -150,10 +150,10 @@ pub async fn run_session_in_daemon(
     // a store error (loud): a swallowed Err here silently skips the heartbeat/distill
     // cycle that depends on the row, masking DB corruption as an idle session.
     let load_session = |label: &str| -> Option<Session> {
-        match st!(|s: &Store| s.get_session(&p.session_id)) {
+        match st!(|s: &Store| s.get_session(&aref.pubkey)) {
             Ok(row) => row,
             Err(e) => {
-                tracing::error!(session = %p.session_id, error = %e, "{label}: get_session failed — skipping this cycle");
+                tracing::error!(session = %aref.pubkey, error = %e, "{label}: get_session failed — skipping this cycle");
                 None
             }
         }
@@ -195,8 +195,8 @@ pub async fn run_session_in_daemon(
         };
     }
 
-    if let Err(e) = st!(|s: &Store| s.touch_session(&p.session_id, now_secs())) {
-        tracing::error!(session = %p.session_id, error = %e, "touch_session failed — liveness not bumped at startup");
+    if let Err(e) = st!(|s: &Store| s.touch_session(&aref.pubkey, now_secs())) {
+        tracing::error!(session = %aref.pubkey, error = %e, "touch_session failed — liveness not bumped at startup");
     }
     if let Some(session) = load_session("startup-status") {
         let now = now_secs();
@@ -207,10 +207,9 @@ pub async fn run_session_in_daemon(
             status_fact!(started, p, aref, session, chans, now),
             |r| {
                 r.on_session_started_with_dispatch(
-                    &p.session_id,
+                    &aref.pubkey,
                     &p.host,
                     &aref.slug,
-                    &aref.pubkey,
                     &p.rel_cwd,
                     chans,
                     session.working,
@@ -233,14 +232,14 @@ pub async fn run_session_in_daemon(
                     if !crate::liveness::pid_alive(pid) { break; }
                 }
                 let now = now_secs();
-                if let Err(e) = st!(|s: &Store| s.touch_session(&p.session_id, now)) {
-                    tracing::error!(session = %p.session_id, error = %e, "touch_session failed — liveness not re-armed this beat");
+                if let Err(e) = st!(|s: &Store| s.touch_session(&aref.pubkey, now)) {
+                    tracing::error!(session = %aref.pubkey, error = %e, "touch_session failed — liveness not re-armed this beat");
                 }
                 drive_status!(
                     "tick",
                     None,
-                    status_fact!(tick, p.session_id, now),
-                    |r| r.on_tick(&p.session_id, now)
+                    status_fact!(tick, aref.pubkey, now),
+                    |r| r.on_tick(&aref.pubkey, now)
                 );
             }
             _ = obs.tick() => {
@@ -249,30 +248,30 @@ pub async fn run_session_in_daemon(
                 // ── collect a finished background distillation ────────────
                 if distill_task.as_ref().is_some_and(|h| h.is_finished()) {
                     let (result, error, capture) = distill_task.take().unwrap().await.ok().unwrap_or((None, None, None));
-                    slog(&p.session_id, &format!("[distill] task finished result={} error={:?}",
+                    slog(&aref.pubkey, &format!("[distill] task finished result={} error={:?}",
                         result.as_ref().map(|l| format!("title={:?} activity={:?}", l.title, l.activity)).unwrap_or_else(|| "None".into()),
                         error));
                     let topic_holds_distill = st!(|s: &Store| {
-                        s.get_session(&p.session_id)
+                        s.get_session(&aref.pubkey)
                             .ok()
                             .flatten()
                             .is_some_and(|session| session.work_topic_suppresses_distillation(now))
                     });
                     if topic_holds_distill {
-                        slog(&p.session_id, "[distill] discarded while a manual title is protected");
+                        slog(&aref.pubkey, "[distill] discarded while a manual title is protected");
                     } else if let Some(labels) = result {
                         if let Err(e) = st!(|s: &Store| s.set_session_distill(
-                            &p.session_id, &labels.title, &labels.activity, now,
+                            &aref.pubkey, &labels.title, &labels.activity, now,
                         )) {
-                            tracing::error!(session = %p.session_id, error = %e, "set_session_distill failed — distilled title not persisted");
+                            tracing::error!(session = %aref.pubkey, error = %e, "set_session_distill failed — distilled title not persisted");
                         }
-                        slog(&p.session_id, &format!("[distill] applied title={:?}", labels.title));
+                        slog(&aref.pubkey, &format!("[distill] applied title={:?}", labels.title));
 
                         let window_hash = capture.as_ref().map(|c| crate::instrument::window_hash(&c.transcript_slice));
                         if let (Some(cap), Some(wh)) = (capture.as_ref(), window_hash.as_deref()) {
                             let created_at = crate::instrument::now_millis();
                             st!(|s: &Store| crate::instrument::record_llm_call(
-                                s, &p.session_id, wh, cap,
+                                s, &aref.pubkey, wh, cap,
                                 Some(labels.title.as_str()),
                                 (!labels.activity.is_empty()).then_some(labels.activity.as_str()),
                                 created_at,
@@ -280,14 +279,14 @@ pub async fn run_session_in_daemon(
                         }
 
                         drive_status!("distill", window_hash.as_deref(), status_fact!(
-                            distill, p.session_id, labels, window_hash, now
+                            distill, aref.pubkey, labels, window_hash, now
                         ), |r| {
-                            r.on_distill(&p.session_id, &labels.title, &labels.activity, now)
+                            r.on_distill(&aref.pubkey, &labels.title, &labels.activity, now)
                         });
                     } else if let Some(err_msg) = error {
-                        slog(&p.session_id, &format!("[distill] ERROR: {err_msg}"));
-                        if let Err(e) = st!(|s: &Store| s.record_distill_failure(&p.session_id)) {
-                            tracing::error!(session = %p.session_id, error = %e, "record_distill_failure failed");
+                        slog(&aref.pubkey, &format!("[distill] ERROR: {err_msg}"));
+                        if let Err(e) = st!(|s: &Store| s.record_distill_failure(&aref.pubkey)) {
+                            tracing::error!(session = %aref.pubkey, error = %e, "record_distill_failure failed");
                         }
                     }
                 }
@@ -299,13 +298,13 @@ pub async fn run_session_in_daemon(
                     .unwrap_or((false, 0));
 
                 if working != prev_working {
-                    drive_status!("turn_edge", None, status_fact!(turn, p.session_id, working, now), |r| {
-                        if working { r.on_turn_start(&p.session_id, now) } else { r.on_turn_end(&p.session_id, now) }
+                    drive_status!("turn_edge", None, status_fact!(turn, aref.pubkey, working, now), |r| {
+                        if working { r.on_turn_start(&aref.pubkey, now) } else { r.on_turn_end(&aref.pubkey, now) }
                     });
                 }
                 if let Some(chans) = session.as_ref().map(|s| channel_set(&p, &store, s)) {
-                    drive_status!("channels_changed", None, status_fact!(channels, p.session_id, chans, now), |r| {
-                        r.on_channels_changed(&p.session_id, chans, now)
+                    drive_status!("channels_changed", None, status_fact!(channels, aref.pubkey, chans, now), |r| {
+                        r.on_channels_changed(&aref.pubkey, chans, now)
                     });
                 }
 
@@ -333,20 +332,20 @@ pub async fn run_session_in_daemon(
                                 };
                                 if due {
                                     let transcript_path = sess.transcript_path.clone();
-                                    slog(&p.session_id, &format!("[distill] due transcript_path={:?}", transcript_path));
+                                    slog(&aref.pubkey, &format!("[distill] due transcript_path={:?}", transcript_path));
                                     let ctx = transcript_path.and_then(|path| {
                                         let result = crate::transcript::read_recent(std::path::Path::new(&path), 14, 2500);
                                         if result.is_none() {
-                                            slog(&p.session_id, &format!("[distill] read_recent returned None path={path}"));
+                                            slog(&aref.pubkey, &format!("[distill] read_recent returned None path={path}"));
                                         }
                                         result
                                     });
                                     if let Some(ctx) = ctx {
                                         let current = (!sess.title.trim().is_empty())
                                             .then(|| sess.title.clone());
-                                        slog(&p.session_id, &format!("[distill] spawning task ctx_len={} current_title={:?}", ctx.len(), current));
+                                        slog(&aref.pubkey, &format!("[distill] spawning task ctx_len={} current_title={:?}", ctx.len(), current));
                                         last_distill_attempt = now;
-                                        let sid = p.session_id.clone();
+                                        let sid = aref.pubkey.clone();
                                         distill_task = Some(tokio::spawn(async move {
                                             match tokio::time::timeout(
                                                 Duration::from_secs(20),
@@ -380,15 +379,12 @@ pub async fn run_session_in_daemon(
     drive_status!(
         "session_ended",
         None,
-        status_fact!(ended, p.session_id, end_now),
-        |r| r.on_session_ended(&p.session_id, end_now)
+        status_fact!(ended, aref.pubkey, end_now),
+        |r| r.on_session_ended(&aref.pubkey, end_now)
     );
 
-    if let Err(e) = st!(|s: &Store| {
-        s.touch_session(&p.session_id, end_now)?;
-        s.mark_dead(&p.session_id)
-    }) {
-        tracing::error!(session = %p.session_id, error = %e, "mark_dead failed — session row left alive after clean exit");
+    if let Err(e) = st!(|s: &Store| { s.touch_session(&aref.pubkey, end_now) }) {
+        tracing::error!(pubkey = %aref.pubkey, error = %e, "final liveness touch failed");
     }
     Ok(())
 }

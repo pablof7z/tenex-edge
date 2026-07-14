@@ -3,11 +3,9 @@ use crate::reconcile::InputFact;
 
 fn request(already_running: bool, ordinal: u32) -> InputFact {
     InputFact::SessionStartRequested(crate::reconcile::SessionStartRequestFact {
-        session_id: "s1".into(),
+        pubkey: "s1".into(),
         agent: "coder".into(),
         harness: "codex".into(),
-        external_id_kind: "harness_session".into(),
-        external_id: "native-1".into(),
         native_id: "native-1".into(),
         work_root: "/repo".into(),
         channel_h: "room".into(),
@@ -22,11 +20,6 @@ fn request(already_running: bool, ordinal: u32) -> InputFact {
         watch_pid: Some(42),
         pty_session: Some("%1".into()),
         ring_doorbell: true,
-        signer_pubkey: if ordinal > 0 {
-            "ord".into()
-        } else {
-            "base".into()
-        },
         signer_label: if ordinal > 0 {
             "cedar-orbit-113".into()
         } else {
@@ -44,14 +37,14 @@ fn request_derives_execute_plan() {
     let out = r.drive(request(false, 1)).unwrap();
     let cmd = out.command.unwrap();
     assert_eq!(cmd.action, SessionStartAction::Execute);
-    assert_eq!(cmd.plan.row.agent_pubkey, "ord");
-    assert_eq!(cmd.plan.admit_pubkey.as_deref(), Some("ord"));
+    assert_eq!(cmd.plan.row.pubkey, "s1");
+    assert_eq!(cmd.plan.admit_pubkey.as_deref(), Some("s1"));
     assert_eq!(
         cmd.plan
             .channel_ready
             .as_ref()
-            .map(|ready| ready.signer_pubkey.as_str()),
-        Some("ord")
+            .map(|ready| ready.pubkey.as_str()),
+        Some("s1")
     );
     assert!(cmd.plan.ensure_subscription);
     assert!(cmd.plan.replay_chat);
@@ -94,9 +87,8 @@ fn started_and_failed_round_trip_after_request() {
     r.drive(request(false, 0)).unwrap();
     let started = r
         .drive(InputFact::SessionStarted {
-            session_id: "s1".into(),
+            pubkey: "s1".into(),
             channel_h: Some("room".into()),
-            agent_pubkey: Some("base".into()),
             pid: Some(42),
             at: 101,
         })
@@ -108,7 +100,7 @@ fn started_and_failed_round_trip_after_request() {
     let failed = r
         .drive(InputFact::SessionStartFailed(
             crate::reconcile::SessionStartFailedFact {
-                session_id: "s1".into(),
+                pubkey: "s1".into(),
                 stage: "spawn".into(),
                 error: "boom".into(),
                 at: 102,
@@ -140,9 +132,8 @@ fn replay_dispatch_accepts_request_and_started() {
     script
         .step("started")
         .operation(InputFact::SessionStarted {
-            session_id: "s1".into(),
+            pubkey: "s1".into(),
             channel_h: Some("room".into()),
-            agent_pubkey: Some("base".into()),
             pid: Some(42),
             at: 101,
         })

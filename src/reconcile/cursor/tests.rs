@@ -2,14 +2,14 @@ use super::*;
 
 fn seed() -> CursorSeed {
     CursorSeed {
-        session_id: "s1".into(),
+        pubkey: "s1".into(),
         seen_cursor: 10,
     }
 }
 
 fn fact(observed_cursor: u64, at: u64, working: bool) -> InputFact {
     InputFact::TurnCheckRequested {
-        session_id: "s1".into(),
+        pubkey: "s1".into(),
         observed_cursor,
         working,
         at,
@@ -25,7 +25,7 @@ fn first_matching_turn_check_advances_cursor() {
     assert_eq!(
         out.effects,
         vec![CursorEffect::Advance {
-            session_id: "s1".into(),
+            pubkey: "s1".into(),
             from: 10,
             to: 20,
             delta_since: 10,

@@ -127,8 +127,9 @@ read.
 
 This store already exists — `~/.tenex-edge/state.db`. Its `relay_*` tables are
 materialized projections that can be rebuilt from the fabric; its local tables
-(`sessions`, `session_channels`, `session_aliases`, `identities`, `inbox`,
-`outbox`, and `workspace_roots`) are non-rebuildable daemon state. The schema is
+(`sessions`, `session_channels`, `session_locators`, `session_signers`,
+`handle_leases`, `inbox`, `outbox`, and `workspace_roots`) are non-rebuildable
+daemon state. The schema is
 stamped at open, so an incompatible or unstamped existing DB fails loudly instead
 of being partially interpreted. The **single-writer materializer is the direct
 fix for the multi-writer `state.db` corruption** already hit when ~16
@@ -167,7 +168,7 @@ column a reader sees; a hidden `origin`/`wire_id` column may exist for the
 | Entity | Today's table(s) | Holds | Within |
 |--------|------------------|-------|--------|
 | project/channel metadata | `relay_channels` | slug/name, about text, parent channel | — |
-| agents + identity | `relay_profiles`, `identities`, `durable_agent_sessions` | identity card plus per-session or configured durable binding | — |
+| agents + identity | `relay_profiles`, `handle_leases`, `session_signers` | pubkey identity plus public-handle and signer bindings | — |
 | membership | `relay_channel_members`, `relay_channel_member_sets` | which pubkeys belong to a channel | a project/channel |
 | status | `relay_status`, `sessions` | who's online, plus per-session activity, title, and history | a project/channel |
 | messages + recipients | `messages`, `message_recipients` | chat body, author pubkey, sync state, recipient pubkeys | a project/channel |
@@ -388,11 +389,10 @@ from another computer → the nip29 materializer's live `39002` subscription ups
 the `membership` table → the next admission check and the next reader `SELECT`
 both reflect it, with zero changes above the store.
 
----
-
 ## 6. Implementation ladder
 
 The behavior-preserving phase ladder and validation commands live in [fabric-architecture-implementation.md](fabric-architecture-implementation.md).
+
 ## 7. Remaining decisions
 
 - **Identity binding** (agent keypair ↔ fabric identity) is assumed shared, but

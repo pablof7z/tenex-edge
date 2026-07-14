@@ -54,7 +54,6 @@ fn seed() -> Store {
     store
         .upsert_status(&Status {
             pubkey: "self-pk".into(),
-            session_id: "session".into(),
             channel_h: "alpha".into(),
             slug: "quill-peak-369-codex".into(),
             title: "Implement awareness".into(),

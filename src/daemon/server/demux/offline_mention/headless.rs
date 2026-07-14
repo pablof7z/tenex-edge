@@ -14,7 +14,6 @@ pub(super) async fn spawn_headless_mention(
     work_root: &str,
     channel_h: &str,
     body: &str,
-    resume_id: Option<&str>,
     mention_notice: MentionNotice,
 ) -> anyhow::Result<bool> {
     if !crate::session_host::agent_supports_headless_exec(agent_slug) {
@@ -26,7 +25,7 @@ pub(super) async fn spawn_headless_mention(
         agent_slug,
         work_root,
         &prompt,
-        resume_id,
+        None,
         None,
         Some(channel_h),
         None,
@@ -62,6 +61,8 @@ fn reap_headless_on_exit(
         log_path,
         started_at,
         harness,
+        pubkey,
+        runtime_generation,
     } = launch;
     let pid = child.id() as i32;
     tokio::spawn(async move {
@@ -107,9 +108,9 @@ fn reap_headless_on_exit(
                 notice::HeadlessOutcome::WaitTaskFailed(e.to_string())
             }
         };
-        crate::session_host::bind_native_id_from_log(&state, &pid.to_string(), &harness, &log_path);
-        let session = state.with_store(|s| s.get_session(&pid.to_string()).ok().flatten());
-        let session_id = session.as_ref().map(|rec| rec.session_id.clone());
+        crate::session_host::bind_native_id_from_log(&state, &pubkey, &harness, &log_path);
+        let session = state.with_store(|s| s.get_session(&pubkey).ok().flatten());
+        let session_pubkey = session.as_ref().map(|rec| rec.pubkey.clone());
         let has_reply = session
             .as_ref()
             .map(|rec| notice::session_published_reply_since(&state, rec, started_at))
@@ -120,7 +121,7 @@ fn reap_headless_on_exit(
                 notice::NoReplyNotice {
                     agent_slug: &agent_slug,
                     channel: &channel,
-                    session_id: session_id.as_deref(),
+                    session_pubkey: session_pubkey.as_deref(),
                     requester_pubkey: mention_notice.requester_pubkey.as_deref(),
                     target_label: mention_notice.target_label.as_deref(),
                     exec_id: &id,
@@ -129,11 +130,10 @@ fn reap_headless_on_exit(
             )
             .await;
         }
-        if let Err(e) = super::super::super::rpc_session_end(
+        if let Err(e) = super::super::super::session_end::end_runtime_generation(
             &state,
-            &serde_json::json!({
-                "session": pid.to_string(),
-            }),
+            &pubkey,
+            runtime_generation,
         )
         .await
         {
@@ -163,7 +163,7 @@ pub(super) async fn publish_start_failure_notice(
         notice::NoReplyNotice {
             agent_slug,
             channel,
-            session_id: None,
+            session_pubkey: None,
             requester_pubkey,
             target_label: Some(target_label),
             exec_id: "spawn",

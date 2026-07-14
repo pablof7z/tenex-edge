@@ -2,7 +2,7 @@
 title: Tenex-Edge MCP Client Identity
 slug: tenex-edge-mcp-client-identity
 topic: tenex-edge
-summary: "The HTTP transport tracks `Mcp-Session-Id` (format: `mcp-<nanos>-<counter>`, matching `mint_session_id()`) to correlate requests with `initialize`: at `initiali"
+summary: "Mcp-Session-Id is an HTTP transport correlation token, not a tenex-edge session identity or selector."
 tags:
   - capture
 volatility: warm
@@ -19,7 +19,11 @@ sources:
 
 ## HTTP Session Identity Correlation
 
-The HTTP transport tracks `Mcp-Session-Id` (format: `mcp-<nanos>-<counter>`, matching `mint_session_id()`) to correlate requests with `initialize`: at `initialize` it captures `clientInfo.name` into an `HttpState.mcp_sessions` map, returns the session id via the `Mcp-Session-Id` response header (CORS-allowed), and on subsequent requests reads the incoming `Mcp-Session-Id` header to look up the stored name. <!-- [^4d656-84c25] -->
+The HTTP transport tracks `Mcp-Session-Id` only to correlate requests with
+`initialize`: it captures `clientInfo.name`, returns the token in the response
+header, and uses it to recover that transport metadata on later requests. It
+does not identify a tenex-edge session and is never a public session selector.
+<!-- [^4d656-84c25] -->
 
 ## Client Info Propagation in RPC Builders
 

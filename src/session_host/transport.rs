@@ -53,6 +53,8 @@ pub struct LaunchSpec {
     pub ephemeral: bool,
     /// Resolved argv incl. base_argv + profile + user flags + agent-def args.
     pub base_command: Vec<String>,
+    /// Authoritative session identity allocated before the child starts.
+    pub pubkey: String,
 }
 
 /// A prior session's native resume token.

@@ -32,7 +32,7 @@ fn command_values(commands: &[ResourceCommand<crate::reconcile::CursorCommand>])
                 "resource": key_path(c.key()),
             });
             if let Some(cmd) = payload(c) {
-                v["session"] = Value::String(cmd.session_id.clone());
+                v["pubkey"] = Value::String(cmd.pubkey.clone());
                 v["frame"] = Value::String(cmd.frame.as_str().to_string());
                 v["cursor_before"] = Value::from(cmd.cursor_before);
                 v["cursor_after"] = Value::from(cmd.cursor_after);

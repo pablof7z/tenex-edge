@@ -70,15 +70,15 @@ pub(super) fn simulate_hook_context_fact(
         .hook_contexts
         .lock()
         .expect("hook-context mutex poisoned");
-    let graph = guard.get_mut(&render.session_id).with_context(|| {
+    let graph = guard.get_mut(&render.pubkey).with_context(|| {
         format!(
             "probe simulate: hook_context graph for `{}` has not rendered",
-            render.session_id
+            render.pubkey
         )
     })?;
     let revision_before = graph.revision();
     let preview_result = graph
-        .preview_context(&render.session_id, render.cursor, render.now, inputs)
+        .preview_context(&render.pubkey, render.cursor, render.now, inputs)
         .map(|preview| (preview, revision_before, graph.revision()));
     let (preview, revision_before, revision_after) =
         preview_result.map_err(|e| anyhow::anyhow!("hook_context preview failed: {e:?}"))?;

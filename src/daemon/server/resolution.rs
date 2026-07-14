@@ -8,17 +8,14 @@ pub(super) use public_session::resolve as resolve_public_session;
 /// by ONE function, so every in-session command identifies its session the same
 /// way every time.
 ///
-/// The canonical session id is daemon-minted only AFTER the harness process
-/// starts, so it can never be a launch-time env var. Hosted sessions expose a
-/// PTY session id from process birth, recorded as a `pty_session` alias at
-/// session-start. Native harness shells outside tenex-edge launch use the
+/// Public identity is the session pubkey. Hosted sessions expose a typed PTY
+/// locator from process birth, recorded at session-start. Native harness shells
+/// outside tenex-edge launch use the
 /// watched harness process (`watch_pid`) as their exact anchor.
-/// `harness_session` covers harness-native ids (claude-code/codex report one via
-/// hooks; opencode does not). `cwd`+`agent`+`group` are the scan keys — used only
-/// outside `Strict`.
+/// `harness_session` covers harness-native resume locators reported by hooks.
 #[derive(Default, Clone, Copy)]
 pub(in crate::daemon::server) struct CallerAnchor<'a> {
-    /// `--session` operator/host override (exact: canonical id or alias).
+    /// `--session` operator override: npub, hex pubkey, or current handle.
     pub explicit: Option<&'a str>,
     /// The hosted PTY session the caller runs in, resolved via its alias.
     pub pty_session: Option<&'a str>,
@@ -33,10 +30,6 @@ pub(in crate::daemon::server) struct CallerAnchor<'a> {
     /// harness-session lookup — a harness-native id is only unique WITHIN its
     /// harness. (`pty_session` needs no harness.)
     pub harness: Option<&'a str>,
-    /// Scan keys (used only in `Channel` scope).
-    pub cwd: Option<&'a str>,
-    pub agent: Option<&'a str>,
-    pub group: Option<&'a str>,
 }
 
 impl<'a> CallerAnchor<'a> {
@@ -55,14 +48,11 @@ impl<'a> CallerAnchor<'a> {
             })
         };
         CallerAnchor {
-            explicit: s("session"),
+            explicit: s("session").or_else(|| s("pubkey")),
             pty_session: s("pty_session"),
             harness_session: s("harness_session"),
             watch_pid: pid("watch_pid"),
             harness: s("harness"),
-            cwd: s("cwd"),
-            agent: s("agent"),
-            group: s("group"),
         }
     }
 }
@@ -101,45 +91,42 @@ pub(in crate::daemon::server) fn work_root_for(s: &Store, scope: &str) -> String
 ///   2. PTY session alias  (live only)
 ///   3. harness-session alias  (live only)
 ///   4. watch pid alias  (live only)
-///   5. cwd+agent scan  (only outside `Strict`)
 ///
-/// The exact anchors (2,3) resolve through `alive_session_for_alias_kind`, which
-/// matches the alias KIND (not just the raw id) and never returns a dead row —
-/// so a stale endpoint/harness alias whose owner exited cannot bind a ghost.
+/// Typed locators never become public selectors and never return a dead row.
 pub(in crate::daemon::server) fn resolve_session_inner(
     state: &Arc<DaemonState>,
     anchor: &CallerAnchor,
     scope: ResolveScope,
 ) -> Result<Session> {
-    // 1. Explicit `--session`: operator/host override. May
-    //    target a dead session deliberately (resume), so it is not alive-gated.
-    if let Some(id) = anchor.explicit.filter(|s| !s.is_empty()) {
+    // 1. Explicit `--session`: public operator identity only.
+    if let Some(selector) = anchor.explicit.filter(|s| !s.is_empty()) {
         return state
-            .with_store(|s| s.get_session(id))
-            .with_context(|| format!("unknown session {id}"))?
-            .with_context(|| format!("unknown session {id}"));
+            .with_store(|s| resolve_public_session(s, selector))?
+            .with_context(|| {
+                format!("unknown public session {selector:?}; use an npub, hex pubkey, or handle")
+            });
     }
-    // 2. Hosted PTY session — THE in-session anchor for hosted launches.
+    // 2. Hosted PTY endpoint.
     if let Some(pty_session) = anchor.pty_session.filter(|s| !s.is_empty()) {
         if let Some(rec) = state
-            .with_store(|s| s.alive_session_for_alias(None, "pty_session", pty_session))
+            .with_store(|s| {
+                s.alive_session_for_locator(None, crate::state::LOCATOR_PTY, pty_session)
+            })
             .ok()
             .flatten()
         {
             return Ok(rec);
         }
     }
-    // 3. Harness-native session id reported by a hook (live only). Full-keyed by
-    //    harness — a harness id is only unique within its own harness. Canonicalize
-    //    the harness the SAME way session-start does before STORING the alias
-    //    (`Harness::from_str(..).as_str()`), so lookup and storage always agree
-    //    even for a name not in the enum (both normalize to "unknown").
+    // 3. Harness-native resume locator reported by a hook (live only).
     if let Some(hs) = anchor.harness_session.filter(|s| !s.is_empty()) {
         let harness = anchor
             .harness
             .map(|h| crate::session::Harness::from_str(h).as_str());
         if let Some(rec) = state
-            .with_store(|s| s.alive_session_for_alias(harness, "harness_session", hs))
+            .with_store(|s| {
+                s.alive_session_for_locator(harness, crate::state::LOCATOR_NATIVE_RESUME, hs)
+            })
             .ok()
             .flatten()
         {
@@ -152,59 +139,18 @@ pub(in crate::daemon::server) fn resolve_session_inner(
         let harness = crate::session::Harness::from_str(harness).as_str();
         let pid = pid.to_string();
         if let Some(rec) = state
-            .with_store(|s| s.alive_session_for_alias(Some(harness), "watch_pid", &pid))
+            .with_store(|s| {
+                s.alive_session_for_locator(Some(harness), crate::state::LOCATOR_PID, &pid)
+            })
             .ok()
             .flatten()
         {
             return Ok(rec);
         }
     }
-    // Strict: exact anchors only. Never fall through to a sibling-binding scan.
-    if scope == ResolveScope::Strict {
-        anyhow::bail!(
-            "must be run from within a tenex-edge agent session \
-             (no --session, PTY session, harness id, or watch pid resolved a live session)"
-        );
-    }
-    // 5. Scan: cwd-derived channel (or explicit group) + agent slug.
-    //    `list_alive_sessions` is newest-first, so the first match is the latest.
-    //    LIMITATION: with no exact anchor (for a native harness that has neither
-    //    a PTY session nor a harness-native id), this picks the latest
-    //    alive session for the agent in the channel — so it assumes a single live
-    //    session per (agent, channel) there. Hosted launches never reach this
-    //    tier because the PTY session anchor at step 2 is exact.
-    let cwd = anchor
-        .cwd
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-    let explicit_group = anchor.group.filter(|g| !g.is_empty());
-    let work_root = explicit_group.is_none();
-    let channel = explicit_group
-        .map(|g| g.to_string())
-        .unwrap_or_else(|| crate::workspace::resolve(&cwd).unwrap_or_default());
-    let want_agent = anchor.agent.filter(|a| !a.is_empty());
-
-    let pick = state.with_store(|s| {
-        s.list_alive_sessions()
-            .unwrap_or_default()
-            .into_iter()
-            .find(|rec| {
-                let scope_ok = rec.channel_h == channel
-                    || (work_root && work_root_for(s, &rec.channel_h) == channel);
-                let agent_ok = want_agent.map(|a| rec.agent_slug == a).unwrap_or(true);
-                scope_ok && agent_ok
-            })
-    });
-    if let Some(rec) = pick {
-        return Ok(rec);
-    }
-    if let Some(agent) = want_agent {
-        anyhow::bail!(
-            "no active tenex-edge session for agent {agent:?} in channel {channel:?} (run session-start, or pass --session)"
-        );
-    }
+    let _ = scope;
     anyhow::bail!(
-        "no active tenex-edge session for channel {channel:?} (run session-start, or pass --session)"
+        "must run inside a registered tenex-edge session or pass an npub, hex pubkey, or handle"
     )
 }
 

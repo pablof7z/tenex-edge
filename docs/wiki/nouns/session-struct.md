@@ -9,4 +9,6 @@ source_refs:
 
 # Session (struct)
 
-The OS/process-level record: session_id, agent_pubkey, agent_slug, channel_h, harness, child_pid, transcript_path, alive. agent_pubkey is the per-session minted pubkey the session currently signs as.
+The pubkey-keyed local runtime record: runtime generation, agent role slug,
+channel, harness, child process, transcript, liveness, and work state. Runtime
+generation is an internal stale-teardown fence, never a selector or identity.

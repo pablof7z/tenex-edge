@@ -14,7 +14,7 @@ pub(super) fn llm_evidence(state: &Arc<DaemonState>, target: &str, id: i64) -> V
         let call = s.get_llm_call(id)?;
         let explanation = crate::explain::explain(s, &crate::explain::Handle::Llm(id))?;
         let session = match &call {
-            Some(call) => s.get_session(&call.session_id)?,
+            Some(call) => s.get_session(&call.pubkey)?,
             None => None,
         };
         Ok::<_, anyhow::Error>((call, explanation, session))
@@ -65,7 +65,7 @@ pub(super) fn llm_evidence(state: &Arc<DaemonState>, target: &str, id: i64) -> V
         "supported": true,
         "found": true,
         "call_found": true,
-        "session_id": call.session_id,
+        "pubkey": call.pubkey,
         "session_row_found": session_row_found,
         "session_alive": session.as_ref().is_some_and(|s| s.alive),
         "provider": call.provider,

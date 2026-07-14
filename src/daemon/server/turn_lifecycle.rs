@@ -4,7 +4,7 @@ pub(in crate::daemon::server) fn seed_from_session(
     rec: &crate::state::Session,
 ) -> crate::reconcile::TurnProjectionSeed {
     crate::reconcile::TurnProjectionSeed {
-        session_id: rec.session_id.clone(),
+        pubkey: rec.pubkey.clone(),
         working: rec.working,
         turn_started_at: rec.turn_started_at,
         transcript_ref: rec.transcript_path.clone(),
@@ -18,12 +18,12 @@ pub(in crate::daemon::server) fn drive_turn_started(
     transcript_ref: Option<String>,
 ) -> Result<()> {
     let mut facts = vec![crate::reconcile::InputFact::TurnStarted {
-        session_id: seed.session_id.clone(),
+        pubkey: seed.pubkey.clone(),
         at,
     }];
     if let Some(window_hash) = transcript_ref.clone() {
         facts.push(crate::reconcile::InputFact::TranscriptWindowCaptured {
-            session_id: seed.session_id.clone(),
+            pubkey: seed.pubkey.clone(),
             window_hash,
             at,
         });
@@ -41,7 +41,7 @@ pub(in crate::daemon::server) fn drive_turn_ended(
     at: u64,
 ) -> Result<()> {
     let facts = vec![crate::reconcile::InputFact::TurnEnded {
-        session_id: seed.session_id.clone(),
+        pubkey: seed.pubkey.clone(),
         at,
     }];
     drive_projection(state, "turn_ended", seed.clone(), facts, |r| {
@@ -95,7 +95,7 @@ fn drive_projection(
             s,
             "turn_lifecycle",
             trigger,
-            Some(seed.session_id.as_str()),
+            Some(seed.pubkey.as_str()),
             &commit,
             duration_us,
             created_at,
@@ -104,7 +104,7 @@ fn drive_projection(
             s,
             "turn_lifecycle",
             trigger,
-            Some(seed.session_id.as_str()),
+            Some(seed.pubkey.as_str()),
             facts,
             created_at,
         );
@@ -120,7 +120,7 @@ fn apply_effects(
         match effect {
             crate::reconcile::TurnEffect::Apply(cmd) => state.with_store(|s| {
                 s.apply_turn_projection(
-                    &cmd.session_id,
+                    &cmd.pubkey,
                     cmd.working,
                     cmd.turn_started_at,
                     cmd.transcript_ref.as_deref(),

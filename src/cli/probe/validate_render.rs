@@ -5,7 +5,6 @@
 use serde_json::Value;
 use std::fmt::Write as _;
 
-mod alias_tail;
 mod commit_tail;
 mod coverage_tail;
 mod cursor_tail;
@@ -13,7 +12,6 @@ mod error_tail;
 mod event_tail;
 mod fabric_tail;
 mod hook_context_tail;
-mod identity_tail;
 mod inbox_tail;
 mod input_tail;
 mod joined_tail;
@@ -106,9 +104,6 @@ pub(in crate::cli) fn render_validate(v: &Value) -> String {
     if let Some(coverage) = v.get("coverage_evidence").filter(|v| !v.is_null()) {
         coverage_tail::render(&mut out, coverage);
     }
-    if let Some(alias) = v.get("alias_evidence").filter(|v| !v.is_null()) {
-        alias_tail::render(&mut out, alias);
-    }
     if let Some(workspace) = v.get("workspace_evidence").filter(|v| !v.is_null()) {
         workspace_tail::render(&mut out, workspace);
     }
@@ -144,9 +139,6 @@ pub(in crate::cli) fn render_validate(v: &Value) -> String {
     }
     if let Some(attempt) = v.get("readiness_attempt_evidence").filter(|v| !v.is_null()) {
         readiness_attempt_tail::render(&mut out, attempt);
-    }
-    if let Some(identity) = v.get("identity_evidence").filter(|v| !v.is_null()) {
-        identity_tail::render(&mut out, identity);
     }
     if let Some(hook) = v.get("hook_context_evidence").filter(|v| !v.is_null()) {
         hook_context_tail::render(&mut out, hook);

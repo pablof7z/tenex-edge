@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 /// structure out of the public fact API.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HookContextRenderFact {
-    pub session_id: String,
+    pub pubkey: String,
     pub hook_kind: String,
     pub cursor: i64,
     pub now: i64,

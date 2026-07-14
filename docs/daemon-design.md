@@ -68,7 +68,7 @@ Claude channel adapter shell out to these verbs and parse their stdout).
   it). It holds exactly one `Store` (single SQLite connection → one writer by
   construction) and one `Transport` (one relay connection).
 - Per-session work that today lives in a detached process becomes a tokio task
-  inside the daemon (`SessionTask`), keyed by `session_id`.
+  inside the daemon (`SessionTask`), keyed by a private run key.
 
 ### Spawn-if-absent
 
@@ -202,7 +202,7 @@ Walking each verb's true I/O shape:
 
 | verb               | shape                | mechanism                                            |
 |--------------------|----------------------|------------------------------------------------------|
-| `session_start`    | one-shot             | daemon spawns a `SessionTask`, returns `session_id`  |
+| `session_start`    | one-shot             | daemon spawns a `SessionTask`, returns its public `pubkey` |
 | `session_end`      | one-shot             | daemon stops the `SessionTask`                       |
 | `turn_start`       | one-shot (may be big)| daemon drains chat + builds context, returns text    |
 | `turn_check`       | one-shot, read-only  | peek chat; no writes                                 |

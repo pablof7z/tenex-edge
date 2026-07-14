@@ -125,7 +125,7 @@ Add read-facing methods for host/RPC code:
 - `list_agents_read_model(project)`
 - `list_presence_read_model(project)`
 - `list_status_read_model(project)`
-- `undelivered_messages_for_session(session_id)`
+- `undelivered_messages_for_pubkey(pubkey)`
 
 Add write-facing methods for provider/materializer code:
 

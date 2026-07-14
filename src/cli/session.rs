@@ -34,7 +34,7 @@ pub(super) struct SessionEndArgs {
     /// End the session this command is running inside.
     #[arg(long = "self", conflicts_with = "session")]
     pub(super) self_session: bool,
-    /// Session id or alias to end.
+    /// Public session identity (npub, hex pubkey, or handle) to end.
     pub(super) session: Option<String>,
 }
 
@@ -79,7 +79,7 @@ fn end(args: SessionEndArgs) -> Result<()> {
     let session = match (args.self_session, args.session) {
         (true, None) => self_session_anchor("end")?,
         (false, Some(session)) => session,
-        (false, None) => bail!("provide a session id or use `--self`"),
+        (false, None) => bail!("provide an npub, hex pubkey, or handle, or use `--self`"),
         (true, Some(_)) => unreachable!("clap conflicts_with prevents this"),
     };
     super::session_end(session)
@@ -110,15 +110,12 @@ fn pty_wrap_me(args: SessionPtyWrapMeArgs) -> Result<()> {
 }
 
 fn self_session_anchor(verb: &str) -> Result<String> {
-    super::pty_session_env()
-        .or_else(|| {
-            std::env::var("TENEX_EDGE_SESSION")
-                .ok()
-                .filter(|s| !s.is_empty())
-        })
+    std::env::var("TENEX_EDGE_PUBKEY")
+        .ok()
+        .filter(|value| !value.is_empty())
         .ok_or_else(|| {
             anyhow::anyhow!(
-                "`tenex-edge my session {verb} --self` must run inside a tenex-edge PTY session"
+                "`tenex-edge my session {verb} --self` must run inside a managed tenex-edge session"
             )
         })
 }
@@ -129,9 +126,7 @@ mod tests {
     use crate::test_env::EnvGuard;
 
     fn outside_any_session() -> EnvGuard {
-        let mut g = EnvGuard::set("TENEX_EDGE_PTY_SESSION", "");
-        g.set_var("TENEX_EDGE_SESSION", "");
-        g
+        EnvGuard::set("TENEX_EDGE_PUBKEY", "")
     }
 
     #[test]
@@ -152,7 +147,7 @@ mod tests {
 
         assert_eq!(
             err.to_string(),
-            "`tenex-edge my session kill --self` must run inside a tenex-edge PTY session"
+            "`tenex-edge my session kill --self` must run inside a managed tenex-edge session"
         );
     }
 
@@ -168,7 +163,7 @@ mod tests {
 
         assert_eq!(
             err.to_string(),
-            "`tenex-edge my session end --self` must run inside a tenex-edge PTY session"
+            "`tenex-edge my session end --self` must run inside a managed tenex-edge session"
         );
     }
 
@@ -182,7 +177,7 @@ mod tests {
 
         assert!(err
             .to_string()
-            .contains("provide a session id or use `--self`"));
+            .contains("provide an npub, hex pubkey, or handle, or use `--self`"));
     }
 
     #[test]
@@ -203,7 +198,7 @@ mod tests {
 
         assert_eq!(
             err.to_string(),
-            "`tenex-edge my session pty-wrap-me --self` must run inside a tenex-edge PTY session"
+            "`tenex-edge my session pty-wrap-me --self` must run inside a managed tenex-edge session"
         );
     }
 }

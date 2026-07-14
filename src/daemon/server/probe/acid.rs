@@ -104,7 +104,7 @@ fn strip_handle_id<'a>(handle: &'a str, prefixes: &[&str]) -> Option<&'a str> {
 fn remove_cause(state: &Arc<DaemonState>, fact: InputFact, cause: &str) -> Result<InputFact> {
     match fact {
         InputFact::StatusDrive(StatusDrive::DistillCompleted {
-            session_id,
+            pubkey,
             mut title,
             mut activity,
             window_hash,
@@ -116,31 +116,31 @@ fn remove_cause(state: &Arc<DaemonState>, fact: InputFact, cause: &str) -> Resul
                 .expect("status mutex poisoned")
                 .state_rows()
                 .into_iter()
-                .find(|row| row.session == session_id)
-                .with_context(|| format!("probe acid: no status row for `{session_id}`"))?;
+                .find(|row| row.session == pubkey)
+                .with_context(|| format!("probe acid: no status row for `{pubkey}`"))?;
             if cause.ends_with("/activity") {
                 activity = current.activity;
             } else if cause.ends_with("/title") {
                 title = current.title;
             } else if cause.ends_with("/arm") {
-                at = current_status_arm_at(state, &session_id)?;
+                at = current_status_arm_at(state, &pubkey)?;
             } else {
                 anyhow::bail!("probe acid: unsupported status cause `{cause}`");
             }
             Ok(InputFact::StatusDrive(StatusDrive::DistillCompleted {
-                session_id,
+                pubkey,
                 title,
                 activity,
                 window_hash,
                 at,
             }))
         }
-        InputFact::StatusDrive(StatusDrive::Tick { session_id, .. }) => {
+        InputFact::StatusDrive(StatusDrive::Tick { pubkey, .. }) => {
             if !cause.ends_with("/arm") {
                 anyhow::bail!("probe acid: unsupported status cause `{cause}`");
             }
-            let at = current_status_arm_at(state, &session_id)?;
-            Ok(InputFact::StatusDrive(StatusDrive::Tick { session_id, at }))
+            let at = current_status_arm_at(state, &pubkey)?;
+            Ok(InputFact::StatusDrive(StatusDrive::Tick { pubkey, at }))
         }
         InputFact::SubscriptionSync { mut snapshot, at } => {
             if let Some(session) = subscription_session_cause(cause) {
@@ -156,39 +156,39 @@ fn remove_cause(state: &Arc<DaemonState>, fact: InputFact, cause: &str) -> Resul
             }
             Ok(InputFact::SubscriptionSync { snapshot, at })
         }
-        InputFact::TurnStarted { session_id, at } => {
+        InputFact::TurnStarted { pubkey, at } => {
             if !cause.ends_with("/turn_started") {
                 anyhow::bail!("probe acid: unsupported turn cause `{cause}`");
             }
-            let current = current_turn_row(state, &session_id)?;
+            let current = current_turn_row(state, &pubkey)?;
             Ok(InputFact::TurnStarted {
-                session_id,
+                pubkey,
                 at: current.turn_started_at.min(at),
             })
         }
-        InputFact::TurnEnded { session_id, .. } => {
+        InputFact::TurnEnded { pubkey, .. } => {
             if !cause.ends_with("/turn_ended") {
                 anyhow::bail!("probe acid: unsupported turn cause `{cause}`");
             }
-            Ok(InputFact::TurnEnded { session_id, at: 0 })
+            Ok(InputFact::TurnEnded { pubkey, at: 0 })
         }
         InputFact::TranscriptWindowCaptured {
-            session_id,
+            pubkey,
             window_hash,
             at,
         } => {
             if !cause.ends_with("/transcript_window") {
                 anyhow::bail!("probe acid: unsupported turn cause `{cause}`");
             }
-            let current = current_turn_row(state, &session_id)?;
+            let current = current_turn_row(state, &pubkey)?;
             Ok(InputFact::TranscriptWindowCaptured {
-                session_id,
+                pubkey,
                 window_hash: current.transcript_ref.unwrap_or(window_hash),
                 at,
             })
         }
         InputFact::TurnCheckRequested {
-            session_id,
+            pubkey,
             mut observed_cursor,
             mut working,
             mut at,
@@ -203,7 +203,7 @@ fn remove_cause(state: &Arc<DaemonState>, fact: InputFact, cause: &str) -> Resul
                 anyhow::bail!("probe acid: unsupported cursor cause `{cause}`");
             }
             Ok(InputFact::TurnCheckRequested {
-                session_id,
+                pubkey,
                 observed_cursor,
                 working,
                 at,
@@ -218,25 +218,25 @@ fn remove_cause(state: &Arc<DaemonState>, fact: InputFact, cause: &str) -> Resul
     }
 }
 
-fn current_status_arm_at(state: &Arc<DaemonState>, session_id: &str) -> Result<u64> {
+fn current_status_arm_at(state: &Arc<DaemonState>, pubkey: &str) -> Result<u64> {
     state
         .status
         .lock()
         .expect("status mutex poisoned")
-        .current_arm_at(session_id)
-        .with_context(|| format!("probe acid: no status arm for `{session_id}`"))
+        .current_arm_at(pubkey)
+        .with_context(|| format!("probe acid: no status arm for `{pubkey}`"))
 }
 
 fn mutate_unrelated(fact: InputFact) -> Result<InputFact> {
     match fact {
         InputFact::StatusDrive(StatusDrive::DistillCompleted {
-            session_id,
+            pubkey,
             title,
             activity,
             window_hash,
             at,
         }) => Ok(InputFact::StatusDrive(StatusDrive::DistillCompleted {
-            session_id,
+            pubkey,
             title,
             activity,
             window_hash: Some(format!(
@@ -250,23 +250,23 @@ fn mutate_unrelated(fact: InputFact) -> Result<InputFact> {
             at: at.saturating_add(999_999),
         }),
         InputFact::TranscriptWindowCaptured {
-            session_id,
+            pubkey,
             window_hash,
             at,
         } => Ok(InputFact::TranscriptWindowCaptured {
-            session_id,
+            pubkey,
             window_hash,
             at: at.saturating_add(999_999),
         }),
-        InputFact::TurnStarted { session_id, at } => Ok(InputFact::TurnStarted { session_id, at }),
-        InputFact::TurnEnded { session_id, at } => Ok(InputFact::TurnEnded { session_id, at }),
+        InputFact::TurnStarted { pubkey, at } => Ok(InputFact::TurnStarted { pubkey, at }),
+        InputFact::TurnEnded { pubkey, at } => Ok(InputFact::TurnEnded { pubkey, at }),
         InputFact::TurnCheckRequested {
-            session_id,
+            pubkey,
             observed_cursor,
             working,
             at,
         } => Ok(InputFact::TurnCheckRequested {
-            session_id,
+            pubkey,
             observed_cursor,
             working,
             at,
@@ -278,7 +278,7 @@ fn mutate_unrelated(fact: InputFact) -> Result<InputFact> {
 
 fn current_turn_row(
     state: &Arc<DaemonState>,
-    session_id: &str,
+    pubkey: &str,
 ) -> Result<crate::reconcile::turn_lifecycle::TurnStateRow> {
     state
         .turn_lifecycle
@@ -286,8 +286,8 @@ fn current_turn_row(
         .expect("turn lifecycle mutex poisoned")
         .state_rows()
         .into_iter()
-        .find(|row| row.session == session_id)
-        .with_context(|| format!("probe acid: no turn_lifecycle row for `{session_id}`"))
+        .find(|row| row.session == pubkey)
+        .with_context(|| format!("probe acid: no turn_lifecycle row for `{pubkey}`"))
 }
 
 fn subscription_session_cause(cause: &str) -> Option<String> {

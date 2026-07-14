@@ -130,14 +130,14 @@ impl Reconciler {
     fn next_live_sessions(&self, fact: &InputFact) -> BTreeSet<String> {
         let mut live = self.current_live_sessions();
         match fact {
-            InputFact::SessionStarted { session_id, .. } => {
-                live.insert(session_id.clone());
+            InputFact::SessionStarted { pubkey, .. } => {
+                live.insert(pubkey.clone());
             }
             InputFact::ProcessExited {
-                session_id: Some(session_id),
+                pubkey: Some(pubkey),
                 ..
             } => {
-                live.remove(session_id);
+                live.remove(pubkey);
             }
             _ => {}
         }
@@ -157,8 +157,8 @@ impl Reconciler {
 }
 
 /// Resource identity for one watched session.
-pub fn watch_key(session_id: &str) -> ResourceKey {
-    ResourceKey::from_segments(["session-watch", session_id])
+pub fn watch_key(pubkey: &str) -> ResourceKey {
+    ResourceKey::from_segments(["session-watch", pubkey])
 }
 
 #[cfg(test)]
@@ -169,9 +169,8 @@ mod tests {
 
     fn started(id: &str, at: u64) -> InputFact {
         InputFact::SessionStarted {
-            session_id: id.to_owned(),
+            pubkey: id.to_owned(),
             channel_h: None,
-            agent_pubkey: None,
             pid: None,
             at,
         }
@@ -179,7 +178,7 @@ mod tests {
 
     fn exited(id: &str, at: u64) -> InputFact {
         InputFact::ProcessExited {
-            session_id: Some(id.to_owned()),
+            pubkey: Some(id.to_owned()),
             pid: 1,
             at,
         }

@@ -1,79 +1,27 @@
-use super::messaging::{format_envelope, EnvelopeView};
-use crate::state::{Identity, RegisterSession, Session, Status, Store};
+use crate::state::{RegisterSession, Store};
 use crate::turn_context::{assemble_turn_check_context, assemble_turn_start_context};
 use std::sync::Mutex;
 
-#[path = "turn_context/headless.rs"]
-mod headless;
+#[path = "turn_context/fixtures.rs"]
+mod fixtures;
+use fixtures::{pub_status, seed_channel, test_session, BACKEND};
 
-const BACKEND: &str = "pk-backend";
+/// A quiet non-first turn still carries the current output-mode notice without
+/// replaying the first-turn awareness snapshot.
+#[test]
+fn quiet_non_first_turn_only_renders_output_mode_notice() {
+    let store = Store::open_memory().unwrap();
+    seed_channel(&store);
+    let mut rec = test_session("sess-freeze-2");
+    rec.seen_cursor = crate::util::now_secs();
+    let m = Mutex::new(store);
 
-/// Publish a relay_status (kind:30315) row — the single source awareness reads
-/// for "who is doing what here", local and remote alike.
-#[allow(clippy::too_many_arguments)]
-fn pub_status(
-    store: &Store,
-    pubkey: &str,
-    slug: &str,
-    title: &str,
-    activity: &str,
-    busy: bool,
-    updated_at: u64,
-    now: u64,
-) {
-    store
-        .upsert_status(&Status {
-            pubkey: pubkey.to_string(),
-            session_id: format!("sid-{slug}"),
-            channel_h: "proj".to_string(),
-            slug: slug.to_string(),
-            title: title.to_string(),
-            activity: activity.to_string(),
-            busy,
-            last_seen: updated_at,
-            updated_at,
-            expiration: now + 90,
-        })
-        .unwrap();
-}
-
-/// Materialize the `proj` channel + roster so awareness has fabric context.
-fn seed_channel(store: &Store) {
-    // Opaque id "proj" with a distinct human name "main" (production ids are random, never the name).
-    store.upsert_channel("proj", "main", "", "", 1).unwrap();
-    store
-        .replace_channel_members("proj", &["pk-coder".to_string()], 1)
-        .unwrap();
-    store
-        .upsert_profile_with_agent_slug("pk-coder", "coder", "coder", "coder", "laptop", false, 1)
-        .unwrap();
-}
-
-fn test_session(id: &str) -> Session {
-    Session {
-        session_id: id.to_string(),
-        agent_pubkey: "pk-coder".to_string(),
-        agent_slug: "coder".to_string(),
-        channel_h: "proj".to_string(),
-        harness: "claude-code".to_string(),
-        child_pid: None,
-        transcript_path: None,
-        alive: true,
-        created_at: 1,
-        last_seen: 1,
-        working: false,
-        turn_started_at: 0,
-        last_distill_at: 0,
-        work_topic: String::new(),
-        work_topic_set_at: 0,
-        seen_cursor: 0,
-        title: String::new(),
-        activity: String::new(),
-        resume_id: String::new(),
-        distill_fail_streak: 0,
-        distill_notice_at: 0,
-        explicit_chat_published_at: 0,
-    }
+    let ctx = assemble_turn_start_context(
+        &m, &rec, BACKEND, "laptop", /* prev_turn_started_at */ 42,
+    );
+    let text = ctx.expect("headed-mode notice expected");
+    assert!(text.contains("Headless mode is off"), "got: {text:?}");
+    assert!(!text.contains("<members>"), "got: {text:?}");
 }
 
 #[test]
@@ -110,31 +58,22 @@ fn first_turn_snapshot_uses_bound_instance_identity() {
     store
         .replace_channel_members("proj", &["pk-coder1".to_string()], 2)
         .unwrap();
-    let sid = store
-        .register_session(&RegisterSession {
+    store
+        .reserve_session(&RegisterSession {
+            pubkey: "pk-coder1".to_string(),
             harness: "codex".to_string(),
-            external_id_kind: "session".to_string(),
-            external_id: "sess-ordinal-native".to_string(),
-            agent_pubkey: "pk-coder".to_string(),
             agent_slug: "coder".to_string(),
             channel_h: "proj".to_string(),
             child_pid: None,
             transcript_path: None,
-            resume_id: String::new(),
             now: 1,
         })
         .unwrap();
     store
-        .upsert_identity(&Identity {
-            pubkey: "pk-coder1".to_string(),
-            agent_slug: "coder".to_string(),
-            codename: "willow-vale-071".to_string(),
-            session_id: sid.clone(),
-            channel_h: "proj".to_string(),
-            native_id: "sess-ordinal-native".to_string(),
-            alive: true,
-            created_at: 2,
-        })
+        .bind_session_signer("pk-coder1", "test-signer-salt")
+        .unwrap();
+    store
+        .allocate_custom_handle("pk-coder1", "coder", "willow-vale-071", 2)
         .unwrap();
     let now = crate::util::now_secs();
     pub_status(
@@ -147,7 +86,7 @@ fn first_turn_snapshot_uses_bound_instance_identity() {
         now,
         now,
     );
-    let rec = store.get_session(&sid).unwrap().unwrap();
+    let rec = store.get_session("pk-coder1").unwrap().unwrap();
     let m = Mutex::new(store);
 
     let text = assemble_turn_start_context(&m, &rec, BACKEND, "laptop", 0)
@@ -197,6 +136,68 @@ fn ended_turn_with_cursor_uses_delta_not_snapshot() {
     assert!(
         !text.contains("since you joined"),
         "post-first-turn chat must not be labelled as join-time context; got: {text:?}"
+    );
+}
+
+/// A first turn with no PTY locator for the session (the daemon has no
+/// live PTY endpoint to inject into) carries the not-PTY-wrapped warning, so
+/// the agent learns idle mentions won't reach it until its next turn
+/// (`src/reconcile/delivery/mod.rs` returns `DeferNoEndpoint` and drops them).
+#[test]
+fn first_turn_warns_when_session_has_no_live_pty_endpoint() {
+    let store = Store::open_memory().unwrap();
+    seed_channel(&store);
+    let rec = test_session("sess-no-pty");
+    let m = Mutex::new(store);
+
+    let text = assemble_turn_start_context(&m, &rec, BACKEND, "laptop", 0)
+        .expect("first-turn intro expected");
+    assert!(
+        text.contains("This session cannot receive automatic steering while idle."),
+        "expected the not-PTY-wrapped warning; got: {text:?}"
+    );
+}
+
+/// The same first turn with a live PTY locator omits the warning: the
+/// daemon has a real endpoint it can inject idle mentions into.
+#[test]
+fn first_turn_omits_pty_warning_when_session_has_a_live_endpoint() {
+    let store = Store::open_memory().unwrap();
+    seed_channel(&store);
+    let rec = test_session("sess-with-pty");
+
+    let dir = tempfile::tempdir().unwrap();
+    let socket_path = dir.path().join("live.sock");
+    let _listener = std::os::unix::net::UnixListener::bind(&socket_path).unwrap();
+    store
+        .put_session_locator(
+            "claude-code",
+            crate::state::LOCATOR_PTY,
+            socket_path.to_str().unwrap(),
+            &rec.pubkey,
+            1,
+        )
+        .unwrap();
+    let m = Mutex::new(store);
+
+    let text = assemble_turn_start_context(&m, &rec, BACKEND, "laptop", 0)
+        .expect("first-turn intro expected");
+    assert!(
+        !text.contains("This session cannot receive automatic steering while idle."),
+        "a live PTY locator must suppress the not-PTY-wrapped warning; got: {text:?}"
+    );
+}
+
+/// turn_check returns None when there is no inbox and delta_since=None.
+#[test]
+fn turn_check_context_returns_none_when_nothing_due() {
+    let store = Store::open_memory().unwrap();
+    seed_channel(&store);
+    let m = Mutex::new(store);
+    let ctx = assemble_turn_check_context(&m, &test_session("sess-no-rows"), "laptop", None, 200);
+    assert!(
+        ctx.is_none(),
+        "turn_check with no inbox, no delta → None; got: {ctx:?}"
     );
 }
 
@@ -347,56 +348,5 @@ fn turn_check_direct_mentions_surface_from_inbox() {
     assert!(s.is_event_handled("mention-1", "pk-coder").unwrap());
 }
 
-// ── envelope rendering (pure; unchanged by the persistence rewrite) ───────────
-
-fn view<'a>() -> EnvelopeView<'a> {
-    EnvelopeView {
-        from_slug: "amber-codex",
-        host: "",
-        self_host: "my-box",
-        subject: "NIP-29 group creation failing",
-        branch: "features/oauth",
-        commit: "a1b2c3d",
-        dirty: 0,
-        id: "01234567",
-        sent_at: 1_000,
-        now: 1_180, // +3 min
-        body: "can you take a look?",
-    }
-}
-
-#[test]
-fn envelope_has_email_like_headers_then_body() {
-    let out = format_envelope(&view());
-    let lines: Vec<&str> = out.lines().collect();
-    assert_eq!(lines[0], "From: amber-codex");
-    assert!(lines[1].starts_with("Date: ") && lines[1].ends_with("(3 min ago)"));
-    assert_eq!(lines[2], "Subject: NIP-29 group creation failing");
-    assert_eq!(lines[3], "Branch: features/oauth (a1b2c3d)");
-    assert_eq!(lines[4], "ID: 01234567");
-    assert_eq!(lines[5], "--");
-    assert_eq!(lines[6], "can you take a look?");
-}
-
-#[test]
-fn dirty_count_and_remote_host_annotate() {
-    let mut v = view();
-    v.dirty = 1;
-    v.host = "prodBackend";
-    let out = format_envelope(&v);
-    assert!(out.contains("From: amber-codex"));
-    assert!(out.contains("Branch: features/oauth (a1b2c3d) [1 file dirty]"));
-    v.dirty = 3;
-    assert!(format_envelope(&v).contains("[3 files dirty]"));
-}
-
-#[test]
-fn subject_and_branch_lines_omitted_when_empty() {
-    let mut v = view();
-    v.subject = "";
-    v.branch = "";
-    let out = format_envelope(&v);
-    assert!(!out.contains("Subject:"));
-    assert!(!out.contains("Branch:"));
-    assert!(!out.contains("remote:"));
-}
+#[path = "turn_context/envelope.rs"]
+mod envelope;

@@ -9,8 +9,8 @@
 //!   - Agent session handles are rendered with [`session_handle`].
 //!   - Backend labels are config.json `backendName` values and are preserved
 //!     exactly after trimming. They are not DNS hostnames and are not slugified.
-//!   - Raw session ids are internal correlation handles. A friendly session
-//!     codename appears before the agent slug in `sessionCode-agent`.
+//!   - Private runtime ids are never rendered or accepted as identity. A friendly
+//!     session codename appears before the agent slug in `sessionCode-agent`.
 //!
 //! Every renderer formats through this module; every input is classified via
 //! [`parse_ref`] or normalized through the session-handle helpers.
@@ -83,13 +83,9 @@ pub fn agent_ref_from(slug: &str, host: &str, local_host: &str) -> String {
 /// Display for a sender on an envelope "From" line. `slug` is expected to be an
 /// already-normalized session handle; callers that provide a bare slug plus
 /// host degrade through the backend-qualified form.
-pub fn session_label(session_id: &str, slug: &str, host: &str) -> String {
-    if slug.is_empty() {
-        session_id.to_string()
-    } else {
-        let _ = host;
-        slug.to_string()
-    }
+pub fn session_label(slug: &str, host: &str) -> String {
+    let _ = host;
+    slug.to_string()
 }
 
 /// A short prefix of a message/event id for envelope IDs and send confirmations.

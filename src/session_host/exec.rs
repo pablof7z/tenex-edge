@@ -3,16 +3,20 @@ use crate::session::Harness;
 use crate::session_host::launch::workspace_abs_path;
 use crate::session_host::registry::{
     apply_agent_def_args, build_headless_command, headless_shape_for_bin, resolve_spawn_entry,
-    HeadlessShape,
 };
-use crate::util::now_secs;
 use anyhow::{Context, Result};
-use std::io::Read as _;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Stdio};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+#[path = "exec/native_id.rs"]
+mod native_id;
+pub(crate) use native_id::bind_native_id_from_log;
+#[cfg(test)]
+use native_id::extract_native_session_id;
+use native_id::{fresh_native_session_id, harness_for_shape};
 
 pub(crate) struct ExecLaunch {
     pub(crate) id: String,
@@ -20,6 +24,8 @@ pub(crate) struct ExecLaunch {
     pub(crate) log_path: PathBuf,
     pub(crate) started_at: u64,
     pub(crate) harness: String,
+    pub(crate) pubkey: String,
+    pub(crate) runtime_generation: u64,
 }
 
 impl ExecLaunch {
@@ -72,7 +78,40 @@ pub(crate) async fn spawn_agent_exec(
     );
     let abs_path = workspace_abs_path(state, root, client_cwd)?;
     let harness = harness_for_shape(shape);
-    let mut launch = spawn_process(slug, root, group, &abs_path, command, harness)?;
+    let reservation = match resume_id {
+        Some(native) => crate::session_host::admission::reserve_resume(
+            state,
+            slug,
+            harness.as_str(),
+            root,
+            group.unwrap_or(root),
+            native,
+        )?,
+        None => crate::session_host::admission::reserve_fresh(
+            state,
+            slug,
+            harness.as_str(),
+            root,
+            group,
+            None,
+        )?,
+    };
+    let mut launch = match spawn_process(
+        slug,
+        root,
+        group,
+        &abs_path,
+        command,
+        harness,
+        &reservation.pubkey,
+        reservation.runtime_generation,
+    ) {
+        Ok(launch) => launch,
+        Err(error) => {
+            crate::session_host::admission::release(state, &reservation);
+            return Err(error);
+        }
+    };
     if let Err(e) = crate::daemon::server::session_start::bootstrap_exec_session_start(
         state,
         slug,
@@ -81,15 +120,18 @@ pub(crate) async fn spawn_agent_exec(
         group,
         launch.pid(),
         native_id,
+        &reservation.pubkey,
     )
     .await
     {
         let _ = launch.child.kill();
+        crate::session_host::admission::release(state, &reservation);
         return Err(e).with_context(|| format!("registering headless exec session for {slug}"));
     }
     Ok(launch)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn spawn_process(
     slug: &str,
     root: &str,
@@ -97,6 +139,8 @@ fn spawn_process(
     cwd: &str,
     command: Vec<String>,
     harness: Harness,
+    pubkey: &str,
+    runtime_generation: u64,
 ) -> Result<ExecLaunch> {
     if command.is_empty() {
         anyhow::bail!("headless exec command must not be empty");
@@ -119,7 +163,7 @@ fn spawn_process(
         .current_dir(cwd)
         .env("TENEX_EDGE_SPAWNED", "1")
         .env("TENEX_EDGE_AGENT", slug)
-        .env_remove("TENEX_EDGE_SESSION")
+        .env("TENEX_EDGE_PUBKEY", pubkey)
         .env_remove("TENEX_EDGE_EPHEMERAL")
         .env_remove("TENEX_EDGE_PTY_SESSION")
         .env_remove("TENEX_EDGE_PTY_SOCKET")
@@ -148,117 +192,9 @@ fn spawn_process(
         log_path,
         started_at,
         harness: harness.as_str().to_string(),
+        pubkey: pubkey.to_string(),
+        runtime_generation,
     })
-}
-
-pub(crate) fn bind_native_id_from_log(
-    state: &Arc<DaemonState>,
-    session_ref: &str,
-    harness: &str,
-    log_path: &Path,
-) {
-    let Some(native_id) = extract_native_session_id(log_path) else {
-        return;
-    };
-    if let Err(e) =
-        state.with_store(|s| s.set_session_native_id(session_ref, harness, &native_id, now_secs()))
-    {
-        tracing::warn!(
-            session = %session_ref,
-            harness,
-            native_id,
-            error = %e,
-            "failed to bind native session id from headless log"
-        );
-    }
-}
-
-fn harness_for_shape(shape: HeadlessShape) -> Harness {
-    match shape {
-        HeadlessShape::ClaudePrint => Harness::ClaudeCode,
-        HeadlessShape::CodexExec => Harness::Codex,
-        HeadlessShape::OpencodeRun => Harness::Opencode,
-    }
-}
-
-fn fresh_native_session_id(
-    shape: HeadlessShape,
-    resume_id: Option<&str>,
-) -> Result<Option<String>> {
-    match (shape, resume_id) {
-        (HeadlessShape::ClaudePrint, None) => Ok(Some(random_uuid_v4()?)),
-        _ => Ok(None),
-    }
-}
-
-fn random_uuid_v4() -> Result<String> {
-    let mut bytes = [0_u8; 16];
-    std::fs::File::open("/dev/urandom")
-        .context("opening /dev/urandom")?
-        .read_exact(&mut bytes)
-        .context("reading random UUID bytes")?;
-    bytes[6] = (bytes[6] & 0x0f) | 0x40;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    Ok(format!(
-        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-        bytes[0],
-        bytes[1],
-        bytes[2],
-        bytes[3],
-        bytes[4],
-        bytes[5],
-        bytes[6],
-        bytes[7],
-        bytes[8],
-        bytes[9],
-        bytes[10],
-        bytes[11],
-        bytes[12],
-        bytes[13],
-        bytes[14],
-        bytes[15]
-    ))
-}
-
-pub(crate) fn extract_native_session_id(log_path: &Path) -> Option<String> {
-    let content = std::fs::read_to_string(log_path).ok()?;
-    content.lines().find_map(|line| {
-        let value = serde_json::from_str::<serde_json::Value>(line).ok()?;
-        native_id_from_value(&value)
-    })
-}
-
-fn native_id_from_value(value: &serde_json::Value) -> Option<String> {
-    if let Some(items) = value.as_array() {
-        return items.iter().find_map(native_id_from_value);
-    }
-    const KEYS: &[&str] = &[
-        "session_id",
-        "sessionId",
-        // opencode NDJSON (`run --format json`) tags every line with `sessionID`.
-        "sessionID",
-        "conversation_id",
-        "conversationId",
-        "thread_id",
-        "threadId",
-    ];
-    let object = value.as_object()?;
-    for key in KEYS {
-        if let Some(id) = object.get(*key).and_then(|v| v.as_str()) {
-            if !id.is_empty() {
-                return Some(id.to_string());
-            }
-        }
-    }
-    if let Some(id) = object
-        .get("session")
-        .and_then(|v| v.get("id"))
-        .and_then(|v| v.as_str())
-        .filter(|id| !id.is_empty())
-    {
-        return Some(id.to_string());
-    }
-    object.values().find_map(native_id_from_value)
 }
 
 #[cfg(test)]

@@ -20,7 +20,7 @@ use crate::util::now_secs;
 
 #[path = "status_seam/replay.rs"]
 mod replay;
-use replay::status_replay_seed_session_id;
+use replay::status_replay_seed_pubkey;
 
 pub(crate) struct DriveMeta<'a> {
     pub trigger: &'a str,
@@ -45,7 +45,7 @@ pub(crate) async fn drive(
         let replay_seed = meta
             .replay_fact
             .as_ref()
-            .and_then(status_replay_seed_session_id)
+            .and_then(status_replay_seed_pubkey)
             .and_then(|id| rec.replay_seed(id));
         let preview = meta.replay_fact.as_ref().and_then(|fact| {
             rec.preview_fact(fact)
@@ -91,7 +91,7 @@ pub(crate) async fn drive(
             .expect("effectful status commit has preview"),
     )
     .await;
-    let trigger_ref = status_session_id(&outcome.result);
+    let trigger_ref = status_pubkey(&outcome.result);
     record_status_receipt(store, meta.window_hash, &outcome.result, &event_ids);
     if let Some(facts) = facts {
         let created_at = crate::instrument::now_millis();
@@ -123,7 +123,7 @@ pub(crate) async fn drive(
     }
 }
 
-fn status_session_id(result: &TransactionResult<StatusCommand>) -> Option<&str> {
+fn status_pubkey(result: &TransactionResult<StatusCommand>) -> Option<&str> {
     result
         .resource_plan
         .commands()
@@ -131,7 +131,7 @@ fn status_session_id(result: &TransactionResult<StatusCommand>) -> Option<&str> 
         .find_map(|c| match c {
             ResourceCommand::Open { command, .. }
             | ResourceCommand::Replace { command, .. }
-            | ResourceCommand::Refresh { command, .. } => Some(command.session_id.as_str()),
+            | ResourceCommand::Refresh { command, .. } => Some(command.pubkey.as_str()),
             ResourceCommand::Close { .. } => None,
         })
 }
@@ -148,7 +148,7 @@ fn record_status_receipt(
     let Some(artifact_ref) = event_ids.first().cloned() else {
         return;
     };
-    let session_id = status_session_id(result);
+    let pubkey = status_pubkey(result);
     let row = NewReceipt {
         surface: "status".into(),
         transaction_id: result.transaction_id.get() as i64,
@@ -157,7 +157,7 @@ fn record_status_receipt(
             &result.changed_inputs,
             &result.changed_derived_nodes,
             &result.changed_collection_nodes,
-            session_id,
+            pubkey,
             window_hash,
         ),
         commands: crate::instrument::commands_json(result.resource_plan.commands()),
@@ -187,7 +187,7 @@ async fn apply_status_effects(
         };
         let source_ref = format!(
             "status/{}#tx:{}",
-            status.session_id.as_str(),
+            status.agent.pubkey,
             result.transaction_id.get()
         );
         if let Some(id) = enqueue_status(

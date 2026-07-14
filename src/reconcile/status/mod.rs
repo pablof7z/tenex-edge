@@ -28,14 +28,13 @@ use model::{create_session, opts, status_key, SessionNodes, StaticInfo};
 /// EXCEPT the expiration, which the host stamps at apply time from its own clock.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StatusCommand {
-    pub session_id: String,
+    pub pubkey: String,
     pub channels: Vec<String>,
     pub title: String,
     pub activity: String,
     pub busy: bool,
     pub host: String,
     pub slug: String,
-    pub pubkey: String,
     pub rel_cwd: String,
     pub dispatch_event: Option<String>,
 }
@@ -110,10 +109,9 @@ impl StatusReconciler {
     #[allow(clippy::too_many_arguments)]
     pub fn on_session_started(
         &mut self,
-        id: &str,
+        pubkey: &str,
         host: &str,
         slug: &str,
-        pubkey: &str,
         rel_cwd: &str,
         channels: BTreeSet<String>,
         working: bool,
@@ -122,17 +120,16 @@ impl StatusReconciler {
         now: u64,
     ) -> GraphResult<StatusOutcome> {
         self.on_session_started_with_dispatch(
-            id, host, slug, pubkey, rel_cwd, channels, working, title, activity, None, now,
+            pubkey, host, slug, rel_cwd, channels, working, title, activity, None, now,
         )
     }
 
     #[allow(clippy::too_many_arguments)]
     pub fn on_session_started_with_dispatch(
         &mut self,
-        id: &str,
+        pubkey: &str,
         host: &str,
         slug: &str,
-        pubkey: &str,
         rel_cwd: &str,
         channels: BTreeSet<String>,
         working: bool,
@@ -141,20 +138,19 @@ impl StatusReconciler {
         dispatch_event: Option<String>,
         now: u64,
     ) -> GraphResult<StatusOutcome> {
-        if self.sessions.contains_key(id) {
+        if self.sessions.contains_key(pubkey) {
             return self.empty_commit();
         }
         let info = StaticInfo {
             host: host.to_string(),
             slug: slug.to_string(),
-            pubkey: pubkey.to_string(),
             rel_cwd: rel_cwd.to_string(),
             dispatch_event,
         };
         let (nodes, result) = create_session(
             &mut self.graph,
             &mut self.labels,
-            id,
+            pubkey,
             info,
             channels,
             working,
@@ -162,7 +158,7 @@ impl StatusReconciler {
             activity,
             now / self.refresh_secs,
         )?;
-        self.sessions.insert(id.to_string(), nodes);
+        self.sessions.insert(pubkey.to_string(), nodes);
         let effects = self.translate(&result, now);
         Ok(StatusOutcome { effects, result })
     }
@@ -304,7 +300,7 @@ impl StatusReconciler {
                     continue;
                 }
             };
-            self.last.insert(cmd.session_id.clone(), cmd.clone());
+            self.last.insert(cmd.pubkey.clone(), cmd.clone());
             effects.push(StatusEffect::Publish {
                 status: self.to_status(cmd, now, false),
                 reason,

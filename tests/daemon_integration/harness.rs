@@ -4,6 +4,10 @@ use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+#[path = "harness/daemon.rs"]
+mod daemon;
+pub(crate) use daemon::stop_daemon;
+
 pub(crate) static ENV_LOCK: Mutex<()> = Mutex::new(());
 
 pub(crate) fn shared_relay_url() -> String {
@@ -153,7 +157,7 @@ fn cli_command(home: &Home, args: &[&str]) -> std::process::Command {
         // shell exports these), so session pubkey derivation is deterministic.
         .env_remove("TENEX_EDGE_AGENT")
         .env_remove("TENEX_EDGE_AGENT_FALLBACK")
-        .env_remove("TENEX_EDGE_SESSION")
+        .env_remove("TENEX_EDGE_PUBKEY")
         .env_remove("TENEX_EDGE_PTY_SESSION")
         .env_remove("TENEX_EDGE_PTY_SOCKET")
         .env_remove("TENEX_EDGE_CHANNEL")
@@ -241,50 +245,42 @@ pub(crate) fn chat_in_channel(
 /// session identity row has been materialized yet.
 pub(crate) fn session_identity_pubkey(
     store: &tenex_edge::state::Store,
-    session_id: &str,
+    pubkey: &str,
+) -> Option<String> {
+    store.session_identity(pubkey).unwrap().map(|i| i.pubkey)
+}
+
+/// Resolve a harness-owned native session id through its typed locator.
+pub(crate) fn pubkey_for_harness_session(
+    store: &tenex_edge::state::Store,
+    harness: &str,
+    harness_session: &str,
 ) -> Option<String> {
     store
-        .identity_for_session(session_id)
+        .resolve_pubkey_by_locator(harness, "native_resume", harness_session)
         .unwrap()
-        .map(|i| i.pubkey)
+}
+
+pub(crate) fn session_for_harness_session(
+    store: &tenex_edge::state::Store,
+    harness: &str,
+    harness_session: &str,
+) -> tenex_edge::state::Session {
+    let pubkey = pubkey_for_harness_session(store, harness, harness_session)
+        .expect("harness session locator");
+    store.get_session(&pubkey).unwrap().expect("session row")
 }
 
 /// The PTY supervisor id bound to a session via its `pty_session` alias, if any.
 /// Replaces the removed `get_session_endpoint(session, "pty")`.
 pub(crate) fn pty_session_for_session(
     store: &tenex_edge::state::Store,
-    session_id: &str,
+    pubkey: &str,
 ) -> Option<String> {
     store
-        .aliases_for_session(session_id)
+        .locators_for_pubkey(pubkey)
         .unwrap()
         .into_iter()
-        .find(|a| a.external_id_kind == "pty_session")
-        .map(|a| a.external_id)
-}
-
-/// Stop the daemon by sending the version-skew please_exit and waiting for the
-/// socket to disappear (keeps tests from leaking daemons).
-pub(crate) fn stop_daemon(home: &Home) {
-    use std::io::{BufRead, BufReader, Write};
-    use std::os::unix::net::UnixStream;
-    if let Ok(stream) = UnixStream::connect(home.sock()) {
-        let mut w = stream.try_clone().unwrap();
-        let mut r = BufReader::new(stream);
-        let _ = writeln!(
-            w,
-            "{}",
-            serde_json::json!({"protocol": u32::MAX, "client_version": "t"})
-        );
-        let mut welcome = String::new();
-        let _ = r.read_line(&mut welcome);
-        let _ = writeln!(w, "{}", serde_json::json!({"protocol": u32::MAX}));
-        let mut resp = String::new();
-        let _ = r.read_line(&mut resp);
-    }
-    let deadline = Instant::now() + Duration::from_secs(3);
-    while Instant::now() < deadline && home.sock().exists() {
-        std::thread::sleep(Duration::from_millis(25));
-    }
-    let _ = std::fs::remove_file(home.dir.path().join("daemon.lock"));
+        .find(|locator| locator.locator_kind == "pty")
+        .map(|locator| locator.locator_value)
 }

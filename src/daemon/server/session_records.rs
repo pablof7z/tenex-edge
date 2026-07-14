@@ -9,6 +9,7 @@ pub(super) struct HostedAgent {
 
 pub(super) struct SessionHandle {
     pub(super) cancel: Arc<Notify>,
+    pub(super) runtime_generation: u64,
 }
 
 /// Metadata tracked per live peer session for join/leave derivation.
@@ -20,5 +21,5 @@ pub(super) struct PeerTracked {
     pub(super) host: String,
 }
 
-pub(super) type StatusTailKey = (String, String, String);
+pub(super) type StatusTailKey = (String, String);
 pub(super) type StatusTailSnapshot = (String, bool);

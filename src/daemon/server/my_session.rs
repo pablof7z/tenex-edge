@@ -18,7 +18,7 @@ pub(in crate::daemon::server) fn rpc_my_session(
     let headless = state.with_store(|store| crate::session_host::session_is_headless(store, &rec));
     let expanded_workspaces = state.with_store(|store| {
         store
-            .list_session_joined_channels(&rec.session_id)
+            .list_session_joined_channels(&rec.pubkey)
             .unwrap_or_default()
             .into_iter()
             .map(|(channel, _)| {
@@ -59,8 +59,8 @@ pub(in crate::daemon::server) async fn rpc_my_session_status(
     let title = crate::work_topic::normalize(&p.title)?;
     let rec = resolve_caller(state, params, "my session status")?;
     let set_at = now_secs();
-    state.with_store(|s| s.set_session_work_topic(&rec.session_id, &title, set_at))?;
-    let keys = state.session_signing_keys(&rec.agent_pubkey)?;
+    state.with_store(|s| s.set_session_work_topic(&rec.pubkey, &title, set_at))?;
+    let keys = state.session_signing_keys(&rec.pubkey)?;
     crate::status_seam::drive(
         &state.status,
         state.fabric_provider(),
@@ -70,14 +70,13 @@ pub(in crate::daemon::server) async fn rpc_my_session_status(
         crate::status_seam::DriveMeta {
             trigger: "manual_title",
             window_hash: None,
-            replay_fact: Some(status_fact!(title, rec.session_id, title, set_at)),
+            replay_fact: Some(status_fact!(title, rec.pubkey, title, set_at)),
         },
-        |r| r.on_title_set(&rec.session_id, &title, set_at),
+        |r| r.on_title_set(&rec.pubkey, &title, set_at),
     )
     .await;
     state.outbox_notify.notify_waiters();
     Ok(serde_json::json!({
-        "session_id": rec.session_id,
         "title": title,
         "distill_paused_until": set_at.saturating_add(crate::work_topic::DISTILL_PAUSE_SECS),
     }))
@@ -92,26 +91,26 @@ mod tests {
     #[tokio::test]
     async fn briefing_is_read_only_and_expands_only_the_exact_sessions_workspaces() {
         let state = DaemonState::new_for_test().await;
-        let session_id = state.with_store(|s| {
+        let pubkey = state.with_store(|s| {
             s.upsert_channel("alpha", "alpha", "Alpha", "", 1).unwrap();
             s.upsert_channel("beta", "beta", "Beta", "", 1).unwrap();
             s.upsert_profile("pk", "codex", "codex", "test-host", false, 1)
                 .unwrap();
             s.upsert_channel_member("alpha", "pk", "member", 1).unwrap();
             s.upsert_channel_member("beta", "pk", "member", 1).unwrap();
-            s.register_session(&RegisterSession {
+            s.reserve_session(&RegisterSession {
+                pubkey: "pk".into(),
                 harness: "codex".into(),
-                external_id_kind: "pty_session".into(),
-                external_id: "pty-briefing".into(),
-                agent_pubkey: "pk".into(),
                 agent_slug: "codex".into(),
                 channel_h: "alpha".into(),
                 child_pid: Some(42),
                 transcript_path: None,
-                resume_id: String::new(),
                 now: 10,
             })
-            .unwrap()
+            .unwrap();
+            s.put_session_locator("codex", crate::state::LOCATOR_PTY, "pty-briefing", "pk", 10)
+                .unwrap();
+            "pk".to_string()
         });
 
         let first = rpc_my_session(
@@ -131,7 +130,7 @@ mod tests {
         assert!(first
             .contains("<workspace name=\"beta\" channel=\"beta\" about=\"Beta\" members=\"1\" />"));
 
-        state.with_store(|s| s.join_session_channel(&session_id, "beta", 20).unwrap());
+        state.with_store(|s| s.join_session_channel(&pubkey, "beta", 20).unwrap());
         let second = rpc_my_session(
             &state,
             &serde_json::json!({
@@ -144,7 +143,7 @@ mod tests {
             .contains("<workspace name=\"beta\" channel=\"beta\" about=\"Beta\" members=\"1\">"));
 
         let seen_cursor = state.with_store(|s| {
-            s.get_session(&session_id)
+            s.get_session(&pubkey)
                 .unwrap()
                 .expect("session row")
                 .seen_cursor
@@ -162,29 +161,27 @@ mod tests {
         )
         .unwrap();
         let pubkey = keys.public_key().to_hex();
-        let session_id = state.with_store(|s| {
-            s.register_session(&RegisterSession {
+        state.with_store(|s| {
+            s.reserve_session(&RegisterSession {
+                pubkey: pubkey.clone(),
                 harness: "codex".into(),
-                external_id_kind: "pty_session".into(),
-                external_id: "pty-1".into(),
-                agent_pubkey: pubkey.clone(),
                 agent_slug: "codex".into(),
                 channel_h: "root".into(),
                 child_pid: None,
                 transcript_path: None,
-                resume_id: String::new(),
                 now: 1,
             })
-            .unwrap()
+            .unwrap();
+            s.put_session_locator("codex", crate::state::LOCATOR_PTY, "pty-1", &pubkey, 1)
+                .unwrap();
         });
         {
             let mut status = state.status.lock().unwrap();
             let out = status
                 .on_session_started(
-                    &session_id,
+                    &pubkey,
                     "test-host",
                     "codex",
-                    &pubkey,
                     ".",
                     BTreeSet::from(["root".to_string()]),
                     true,
@@ -207,8 +204,12 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(response["session_id"], session_id);
-        let rec = state.with_store(|s| s.get_session(&session_id).unwrap().unwrap());
+        assert!(response.get("session_id").is_none());
+        assert_eq!(
+            response["title"],
+            "Researching MCP improvements around resource allocation"
+        );
+        let rec = state.with_store(|s| s.get_session(&pubkey).unwrap().unwrap());
         assert_eq!(
             rec.work_topic,
             "Researching MCP improvements around resource allocation"

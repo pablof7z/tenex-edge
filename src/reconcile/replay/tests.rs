@@ -14,7 +14,7 @@ fn rejects_mixed_surface_scripts() {
         .step("two")
         .operation(InputFact::StatusDrive(
             crate::reconcile::StatusDrive::Tick {
-                session_id: "s1".into(),
+                pubkey: "s1".into(),
                 at: 1,
             },
         ))
@@ -56,14 +56,14 @@ fn turn_lifecycle_replay_accepts_canonical_turn_facts() {
     script
         .step("start")
         .operation(InputFact::TurnStarted {
-            session_id: "s1".into(),
+            pubkey: "s1".into(),
             at: 100,
         })
         .commit();
     script
         .step("end")
         .operation(InputFact::TurnEnded {
-            session_id: "s1".into(),
+            pubkey: "s1".into(),
             at: 130,
         })
         .commit();
@@ -80,7 +80,7 @@ fn cursor_replay_accepts_canonical_turn_check_facts() {
     script
         .step("first")
         .operation(InputFact::TurnCheckRequested {
-            session_id: "s1".into(),
+            pubkey: "s1".into(),
             observed_cursor: 10,
             working: true,
             at: 20,
@@ -89,7 +89,7 @@ fn cursor_replay_accepts_canonical_turn_check_facts() {
     script
         .step("stale")
         .operation(InputFact::TurnCheckRequested {
-            session_id: "s1".into(),
+            pubkey: "s1".into(),
             observed_cursor: 10,
             working: true,
             at: 21,
@@ -139,9 +139,8 @@ fn session_watch_replay_accepts_start_and_exit_facts() {
     script
         .step("start")
         .operation(InputFact::SessionStarted {
-            session_id: "s1".into(),
+            pubkey: "s1".into(),
             channel_h: Some("room".into()),
-            agent_pubkey: Some("pk".into()),
             pid: Some(42),
             at: 100,
         })
@@ -149,7 +148,7 @@ fn session_watch_replay_accepts_start_and_exit_facts() {
     script
         .step("exit")
         .operation(InputFact::ProcessExited {
-            session_id: Some("s1".into()),
+            pubkey: Some("s1".into()),
             pid: 42,
             at: 120,
         })

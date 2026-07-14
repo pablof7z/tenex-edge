@@ -80,7 +80,7 @@ pub struct HookContextReceipt {
     /// Hook kind label the daemon assigns (`turn_start` / `turn_check`).
     pub kind: String,
     /// The session this snapshot was rendered for.
-    pub session_id: String,
+    pub pubkey: String,
     /// The explicit seen-cursor input.
     pub cursor: i64,
     /// The explicit wall-clock input.
@@ -101,7 +101,7 @@ pub struct HookContextReceipt {
 impl HookContextReceipt {
     pub(super) fn new(
         kind: &str,
-        session_id: &str,
+        pubkey: &str,
         cursor: i64,
         now: i64,
         frame: FrameKind,
@@ -111,7 +111,7 @@ impl HookContextReceipt {
         Self {
             surface: "hook_context",
             kind: kind.to_string(),
-            session_id: session_id.to_string(),
+            pubkey: pubkey.to_string(),
             cursor,
             now,
             shape: Shape::from_cursor(cursor),
@@ -128,7 +128,7 @@ impl HookContextReceipt {
         serde_json::json!({
             "surface": self.surface,
             "kind": self.kind,
-            "session_id": self.session_id,
+            "pubkey": self.pubkey,
             "cursor": self.cursor,
             "now": self.now,
             "shape": self.shape.as_str(),

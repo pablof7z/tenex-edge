@@ -41,16 +41,12 @@ pub(super) struct HostDef {
     /// Walk process tree for an ancestor whose command contains this string.
     /// None = no watch-pid. Used by harnesses (e.g. Codex) that omit their PID.
     pid_search: Option<&'static str>,
-    /// When true, the hook echoes the daemon-minted canonical session id back on
-    /// stdout so a programmatic host (e.g. opencode) can adopt it for subsequent
-    /// hooks. Such hosts own NO harness-assigned id — the daemon decides identity
-    /// from their resume token / PTY endpoint / watched pid (registered as aliases),
-    /// so a missing harness id at session-start is normal, not malformed.
-    /// When false (Claude Code, Codex), an empty harness id is a fail-open no-op:
+    /// Whether this harness must supply its own native session locator. When true,
+    /// an empty locator is a fail-open no-op:
     /// those harnesses always supply their own id, so a missing one means a
     /// malformed payload, and reporting an anchorless observation would mint an
     /// orphan session that later turn-start/stop calls could never match.
-    echo_session_id: bool,
+    requires_harness_session: bool,
 }
 
 static HOOK_HOSTS: &[HostDef] = &[
@@ -62,7 +58,7 @@ static HOOK_HOSTS: &[HostDef] = &[
         transcript_field: Some("transcript_path"),
         output_format: HookOutputFormat::PlainText,
         pid_search: Some("claude"),
-        echo_session_id: false,
+        requires_harness_session: true,
     },
     HostDef {
         name: "codex",
@@ -79,16 +75,13 @@ static HOOK_HOSTS: &[HostDef] = &[
         transcript_field: Some("transcript_path"),
         output_format: HookOutputFormat::HookSpecificAdditionalContext,
         pid_search: Some("codex"),
-        echo_session_id: false,
+        requires_harness_session: true,
     },
     HostDef {
         // opencode is a programmatic TS plugin, not a stdin-JSON harness in the
         // usual sense: it pipes a small JSON payload to `hook` and reads stdout.
-        // It owns no harness-assigned session id, so it no longer mints a
-        // competing identity each start: it reports its resume token / PTY / PID
-        // as locators and the daemon resolves (and reattaches to) the canonical
-        // id, which the hook echoes back on stdout. It passes its own PID in the
-        // payload (no pid_search).
+        // Its initial startup has no session locator yet, so watch PID is enough.
+        // Subsequent lifecycle hooks carry opencode's own native session id.
         name: "opencode",
         agent_slug: "opencode",
         session_id_fields: &["session_id"],
@@ -96,7 +89,7 @@ static HOOK_HOSTS: &[HostDef] = &[
         transcript_field: Some("transcript_path"),
         output_format: HookOutputFormat::PlainText,
         pid_search: None,
-        echo_session_id: true,
+        requires_harness_session: false,
     },
     HostDef {
         // Grok Build (xAI) injects the session id via the GROK_SESSION_ID
@@ -111,7 +104,7 @@ static HOOK_HOSTS: &[HostDef] = &[
         transcript_field: None,
         output_format: HookOutputFormat::PlainText,
         pid_search: Some("grok"),
-        echo_session_id: false,
+        requires_harness_session: true,
     },
 ];
 
@@ -311,7 +304,7 @@ async fn hook_dispatch(
                 Some(sid.clone())
             };
 
-            if harness_session_id.is_none() && !host.echo_session_id && !has_pty_anchor {
+            if harness_session_id.is_none() && host.requires_harness_session && !has_pty_anchor {
                 // Fail open: a harness that owns its id but dropped it here sent a
                 // malformed payload — reporting an anchorless observation would
                 // mint an orphan session later hooks could never match.
@@ -326,7 +319,7 @@ async fn hook_dispatch(
                 return Ok(());
             }
 
-            let canonical = match report_observation(
+            if let Err(e) = report_observation(
                 host,
                 &agent_slug,
                 &cwd,
@@ -337,21 +330,8 @@ async fn hook_dispatch(
             )
             .await
             {
-                Ok(canonical) => canonical,
-                Err(e) => {
-                    eprintln!("[tenex-edge] session-start hook skipped: {e:#}");
-                    return Ok(());
-                }
-            };
-
-            if host.echo_session_id {
-                // Programmatic host with no id of its own: hand the daemon-minted
-                // canonical id back on stdout so the caller can adopt it for
-                // subsequent hooks.
-                let json = serde_json::json!({
-                    "session_id": canonical,
-                });
-                println!("{json}");
+                eprintln!("[tenex-edge] session-start hook skipped: {e:#}");
+                return Ok(());
             }
         }
         "session-end" => {

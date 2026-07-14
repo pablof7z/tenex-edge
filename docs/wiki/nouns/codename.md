@@ -11,5 +11,6 @@ source_refs:
 
 # codename
 
-`friendly_short_code(session_id)` is a deterministic human-readable code used in
-dashed session handles and member references for local or remote sessions.
+A deterministic human-readable component derived from the session pubkey and
+used to allocate the leased public handle. The complete handle (for example
+`quill-codex`) is an alias for the pubkey, not a second authoritative identity.

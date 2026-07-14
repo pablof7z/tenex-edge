@@ -119,7 +119,7 @@ enum ProbeAction {
     /// Live values for a surface (`status` | `subscriptions` | `turn_lifecycle` | `cursor` | `session_start` | `session_watch` | `outbox` | `hook_context`).
     State {
         surface: String,
-        /// Surface-specific handle; for `hook_context`, this is the session id.
+        /// Surface-specific handle; for `hook_context`, use an npub, hex pubkey, or handle.
         handle: Option<String>,
         /// Include verbose graph debug output when supported by the surface.
         #[arg(long)]

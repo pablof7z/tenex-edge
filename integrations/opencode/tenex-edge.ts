@@ -11,8 +11,7 @@ import { join } from "node:path"
 // all go through the single `hook` entry point (same as Claude Code / Codex) —
 // this plugin pipes a JSON payload on stdin and reads stdout back:
 //   session-start (hook)        → on first message of a session (spawns the
-//                   presence engine, watching opencode's PID so it reaps on exit;
-//                   the daemon generates the session id and returns it on stdout)
+//                   presence engine, watching opencode's PID so it reaps on exit)
 //   user-prompt-submit (hook)   → experimental.chat.messages.transform, on the
 //                   first model invocation of a user message (marks "working",
 //                   starts the distillation timer). Its stdout — self-identity,
@@ -98,8 +97,8 @@ export const TenexEdge: Plugin = async ({ client, directory }) => {
     return path
   }
 
-  // Fetch via the opencode client using the *opencode* session id (NOT the
-  // tenex-edge SID). Returns a temp transcript path, or undefined on any failure
+  // Fetch via the opencode client using the opencode-native session locator.
+  // Returns a temp transcript path, or undefined on any failure
   // so the caller proceeds without --transcript.
   async function fetchTranscript(ocSessionID: string): Promise<string | undefined> {
     try {
@@ -113,28 +112,12 @@ export const TenexEdge: Plugin = async ({ client, directory }) => {
   }
 
   // Start the session in the background (fire-and-forget) so plugin load NEVER
-  // blocks opencode startup. When it completes we record the session id + export
-  // it so the agent's own `tenex-edge` shell commands resolve to THIS session.
+  // blocks opencode startup.
   // Watch opencode's PID so the engine reaps + goes idle when opencode exits.
-  // No session id of our own — session-start generates one and returns it on
-  // stdout. We pass our PID so the engine reaps when opencode exits. The agent
+  // No native session locator exists at plugin startup. We pass our PID so the
+  // daemon has a typed lifecycle locator until the first turn. The agent
   // slug comes from the inherited TENEX_EDGE_AGENT env (default "opencode").
-  let SID = ""
-  runHook("session-start", { cwd: directory, pid: process.pid })
-    .then((out) => {
-      const trimmed = out.trim()
-      // The daemon returns JSON: {"session_id":"te-..."}
-      // Legacy/CLI path returns a bare session_id string. Handle both. We only
-      // need the session id; self-identity is rendered from the agent-instance
-      // label carried by `who`/turn context.
-      try {
-        SID = JSON.parse(trimmed).session_id ?? trimmed
-      } catch {
-        SID = trimmed
-      }
-      if (SID) process.env.TENEX_EDGE_SESSION = SID
-    })
-    .catch(() => {})
+  runHook("session-start", { cwd: directory, pid: process.pid }).catch(() => {})
 
   // Turn bracketing. The transform handler fires once per *model invocation*
   // (i.e. many times per user turn in an agentic loop), so turn-start is gated
@@ -170,23 +153,21 @@ export const TenexEdge: Plugin = async ({ client, directory }) => {
       //     checkpoint: non-destructive peek of new chat + sibling deltas,
       //     rate-limited by the daemon — exactly Claude Code's PostToolUse).
       let context = ""
-      if (SID && msgID && msgID !== lastTurnMsgID) {
+      if (ocSessionID && msgID && msgID !== lastTurnMsgID) {
         lastTurnMsgID = msgID
         const transcriptPath = await fetchTranscript(ocSessionID)
         // We deliberately omit `prompt`, so (unlike Claude Code / Codex) the
         // prompt is NOT published as a kind:1 OP — preserving prior behavior.
-        // Forward opencode's native session id as the resume token: it is what
-        // `opencode --session <id>` wants, and (unlike claude/codex) it differs
-        // from our synthetic `te-*` SID, so the daemon can't derive it itself.
+        // The opencode id is a harness locator and resume token, never identity.
         context = (
           await runHook("user-prompt-submit", {
-            session_id: SID,
+            session_id: ocSessionID,
             resume_id: ocSessionID,
             ...(transcriptPath ? { transcript_path: transcriptPath } : {}),
           })
         ).trim()
-      } else if (SID) {
-        context = (await runHook("post-tool-use", { session_id: SID })).trim()
+      } else if (ocSessionID) {
+        context = (await runHook("post-tool-use", { session_id: ocSessionID })).trim()
       }
 
       if (context) {
@@ -207,19 +188,17 @@ export const TenexEdge: Plugin = async ({ client, directory }) => {
     // handed the engine at turn-start, so when the engine re-reads it ~30s in
     // (and every 5 min) it reflects the work done so far this turn.
     "tool.execute.after": async (input: any, _output: any) => {
-      if (!SID) return
       const ocSessionID = String(input?.sessionID ?? ocSessionForTurn ?? "")
       if (!ocSessionID) return
       await fetchTranscript(ocSessionID)
     },
 
     // Turn finished: opencode emits session.idle when the assistant is done
-    // responding. Mark the session idle. session.idle carries the *opencode*
-    // session id, but the stop hook wants the tenex-edge SID (1:1 in this plugin).
+    // responding. Mark the session idle using opencode's native locator.
     event: async ({ event }: { event: any }) => {
-      if (!SID) return
       if (event?.type === "session.idle") {
-        await runHook("stop", { session_id: SID })
+        const ocSessionID = String(event?.properties?.sessionID ?? ocSessionForTurn ?? "")
+        if (ocSessionID) await runHook("stop", { session_id: ocSessionID })
       }
     },
   }

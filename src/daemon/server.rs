@@ -72,10 +72,10 @@ pub struct DaemonState {
     tail_tx: tokio::sync::broadcast::Sender<TailEvent>,
     open_clients: Mutex<u64>,
     shutdown: Notify,
-    /// Peer presence join/leave tracking, keyed by `(pubkey, session_id, channel)`.
-    /// A single session status can carry several `h` tags; each channel gets a
+    /// Peer presence join/leave tracking, keyed by `(pubkey, channel)`.
+    /// A single identity status can carry several `h` tags; each channel gets a
     /// tail-facing presence row.
-    peer_sessions: Mutex<HashMap<(String, String, String), PeerTracked>>,
+    peer_sessions: Mutex<HashMap<(String, String), PeerTracked>>,
     /// Bounded first-sight tracking of native event ids: the relay pool
     /// notifies once per matching subscription, so the same event arrives many
     /// times. Set + insertion-order queue, capped at SEEN_EVENTS_CAP.
@@ -89,7 +89,7 @@ pub struct DaemonState {
     /// same event collapse to ONE warm. Entries clear when the fetch completes, so
     /// a failed (offline) fetch is retried on the next sighting.
     warming: Mutex<std::collections::HashSet<String>>,
-    /// Last-seen (title, active) keyed by `(author_pubkey, session_id, channel)`
+    /// Last-seen (title, active) keyed by `(author_pubkey, channel)`
     /// for tail dedup. Tracking `active` too means an active→idle flip emits a
     /// tail event even though the persistent title text is unchanged.
     last_status: Mutex<HashMap<StatusTailKey, StatusTailSnapshot>>,
@@ -119,6 +119,9 @@ impl DaemonState {
     pub(crate) fn whitelisted_pubkeys(&self) -> &[String] {
         &self.cfg.whitelisted_pubkeys
     }
+    pub(crate) fn per_session_rooms(&self) -> bool {
+        self.cfg.per_session_rooms
+    }
     pub(crate) fn emit_delivery_failure(
         &self,
         channel: &str,
@@ -147,24 +150,14 @@ impl DaemonState {
             .get(pubkey)
             .map(|h| h.keys.clone())
     }
-    /// The read-side session identity for a hosted session (pubkey, agent slug,
-    /// session id, legacy alias). Prefers the bound `identities`-row projection.
+    /// The pubkey-owned read-side identity for a hosted session.
     pub(in crate::daemon) fn session_instance(
         &self,
         rec: &crate::state::Session,
     ) -> crate::identity::SessionIdentity {
-        self.with_store(|s| {
-            s.session_identity_for_session(&rec.session_id)
-                .ok()
-                .flatten()
-        })
-        .unwrap_or_else(|| {
-            crate::identity::SessionIdentity::fallback(
-                &rec.session_id,
-                rec.agent_slug.clone(),
-                rec.agent_pubkey.clone(),
-            )
-        })
+        self.with_store(|store| store.session_identity(&rec.pubkey))
+            .expect("session identity lookup failed")
+            .expect("live session is missing its identity projection")
     }
 }
 
@@ -221,9 +214,9 @@ use proposal::rpc_propose;
 use resolution::{resolve_session, resolve_session_inner, CallerAnchor, ResolveScope};
 use session_end::{rpc_session_end, rpc_session_kill};
 use session_pty_wrap::rpc_session_pty_wrap;
-use session_signing::{
-    mint_session_identity, retire_reclaimed_profile, validate_agent_identity_admission,
-    validate_launch_reservation, validate_live_session_identity, SessionIdentityInput,
+use session_signing::retire_reclaimed_profile;
+pub(crate) use session_signing::{
+    load_session_identity, prepare_session_identity, validate_live_session_identity,
 };
 use session_start::rpc_session_start;
 use status_publish::spawn_outbox_drainer;

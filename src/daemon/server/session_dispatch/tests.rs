@@ -6,27 +6,21 @@ const WRITER_PUBKEY: &str = "31d4c4950a12b978cee21f84f4f5703e700b2d77a1864877323
 
 fn caller_session(state: &Arc<DaemonState>, channels: &[&str]) -> crate::state::Session {
     state.with_store(|s| {
-        s.upsert_session_row(
-            "caller-session",
-            &RegisterSession {
-                harness: "codex".to_string(),
-                external_id_kind: "harness_session".to_string(),
-                external_id: "caller-session".to_string(),
-                agent_pubkey: "caller-pubkey".to_string(),
-                agent_slug: "codex".to_string(),
-                channel_h: channels.first().copied().unwrap_or("project1").to_string(),
-                child_pid: None,
-                transcript_path: None,
-                resume_id: String::new(),
-                now: 1,
-            },
-        )
+        s.reserve_session(&RegisterSession {
+            pubkey: "caller-pubkey".to_string(),
+            harness: "codex".to_string(),
+            agent_slug: "codex".to_string(),
+            channel_h: channels.first().copied().unwrap_or("project1").to_string(),
+            child_pid: None,
+            transcript_path: None,
+            now: 1,
+        })
         .unwrap();
         for (idx, channel) in channels.iter().enumerate().skip(1) {
-            s.join_session_channel("caller-session", channel, 2 + idx as u64)
+            s.join_session_channel("caller-pubkey", channel, 2 + idx as u64)
                 .unwrap();
         }
-        s.get_session("caller-session").unwrap().unwrap()
+        s.get_session("caller-pubkey").unwrap().unwrap()
     })
 }
 

@@ -84,7 +84,7 @@ impl HookContextReconciler {
     /// injected snapshot, so the two cannot drift.
     pub(crate) fn render_context(
         &mut self,
-        session_id: &str,
+        pubkey: &str,
         kind: &str,
         cursor: i64,
         now: i64,
@@ -97,7 +97,7 @@ impl HookContextReconciler {
         // empty baseline during setup followed by a Delta).
         let nodes = match self.nodes.take() {
             Some(nodes) => nodes,
-            None => build_nodes(&mut tx, session_id, &mut self.labels)?,
+            None => build_nodes(&mut tx, pubkey, &mut self.labels)?,
         };
         tx.set_input(nodes.cursor, cursor)?;
         tx.set_input(nodes.now, now)?;
@@ -149,7 +149,7 @@ impl HookContextReconciler {
         };
         let receipt = HookContextReceipt::new(
             kind,
-            session_id,
+            pubkey,
             cursor,
             now,
             frame_kind,
@@ -226,31 +226,31 @@ impl HookContextReconciler {
 /// inputs so one Baseline frame carries the actual snapshot.
 fn build_nodes(
     tx: &mut trellis_core::Transaction<'_, ()>,
-    session_id: &str,
+    pubkey: &str,
     labels: &mut NodeLabels,
 ) -> GraphResult<Nodes> {
     let scope = tx.create_scope("hook-context")?;
 
     let cursor = tx.input::<i64>("cursor")?;
-    labels.record(cursor.id(), format!("hook/{session_id}/cursor"));
+    labels.record(cursor.id(), format!("hook/{pubkey}/cursor"));
     tx.set_input(cursor, 0)?;
     let now = tx.input::<i64>("now")?;
-    labels.record(now.id(), format!("hook/{session_id}/now"));
+    labels.record(now.id(), format!("hook/{pubkey}/now"));
     tx.set_input(now, 0)?;
     let meta = tx.input::<MetaInput>("channel-meta")?;
-    labels.record(meta.id(), format!("hook/{session_id}/channel-meta"));
+    labels.record(meta.id(), format!("hook/{pubkey}/channel-meta"));
     tx.set_input(meta, MetaInput::default())?;
     let members = tx.input::<MembersInput>("members")?;
-    labels.record(members.id(), format!("hook/{session_id}/members"));
+    labels.record(members.id(), format!("hook/{pubkey}/members"));
     tx.set_input(members, MembersInput::default())?;
     let presence = tx.input::<PresenceInput>("presence")?;
-    labels.record(presence.id(), format!("hook/{session_id}/presence"));
+    labels.record(presence.id(), format!("hook/{pubkey}/presence"));
     tx.set_input(presence, PresenceInput::default())?;
     let messages = tx.input::<MessagesInput>("messages")?;
-    labels.record(messages.id(), format!("hook/{session_id}/messages"));
+    labels.record(messages.id(), format!("hook/{pubkey}/messages"));
     tx.set_input(messages, MessagesInput::default())?;
     let reactions = tx.input::<ReactionsInput>("reactions")?;
-    labels.record(reactions.id(), format!("hook/{session_id}/reactions"));
+    labels.record(reactions.id(), format!("hook/{pubkey}/reactions"));
     tx.set_input(reactions, ReactionsInput::default())?;
 
     let view = tx.derived(
@@ -279,7 +279,7 @@ fn build_nodes(
             ))
         },
     )?;
-    labels.record(view.id(), format!("hook/{session_id}/view"));
+    labels.record(view.id(), format!("hook/{pubkey}/view"));
 
     let output = tx.materialized_output(
         "hook-context-snapshot",

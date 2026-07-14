@@ -100,7 +100,7 @@ impl StatusReconciler {
         self.last
             .values()
             .map(|cmd| StatusStateRow {
-                session: cmd.session_id.clone(),
+                session: cmd.pubkey.clone(),
                 title: cmd.title.clone(),
                 activity: cmd.activity.clone(),
                 busy: cmd.busy,
@@ -181,7 +181,7 @@ mod tests {
         let chans: BTreeSet<String> = channels.iter().map(|s| s.to_string()).collect();
         let out = r
             .on_session_started(
-                id, "laptop", "coder", "pk1", ".", chans, true, title, activity, now,
+                id, "laptop", "coder", ".", chans, true, title, activity, now,
             )
             .unwrap();
         assert_eq!(out.effects.len(), 1, "startup opens");

@@ -94,7 +94,7 @@ fn script_surface(script: &DataTransactionScript<InputFact>) -> Result<ReplaySur
             matches!(
                 operation,
                 InputFact::ProcessExited {
-                    session_id: Some(_),
+                    pubkey: Some(_),
                     ..
                 }
             )
@@ -133,8 +133,7 @@ fn script_surface(script: &DataTransactionScript<InputFact>) -> Result<ReplaySur
                 }
                 InputFact::SessionStarted { .. } => ReplaySurface::SessionStart,
                 InputFact::ProcessExited {
-                    session_id: Some(_),
-                    ..
+                    pubkey: Some(_), ..
                 } => ReplaySurface::SessionWatch,
                 other => anyhow::bail!(
                     "replay capsule operation is not a supported surface drive fact: {other:?}"

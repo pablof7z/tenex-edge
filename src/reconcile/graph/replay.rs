@@ -35,14 +35,14 @@ impl ReplayState {
             }
         };
         match operation {
-            InputFact::SessionStarted { session_id, .. } => {
-                self.live_sessions.insert(session_id.clone());
+            InputFact::SessionStarted { pubkey, .. } => {
+                self.live_sessions.insert(pubkey.clone());
             }
             InputFact::ProcessExited {
-                session_id: Some(session_id),
+                pubkey: Some(pubkey),
                 ..
             } => {
-                self.live_sessions.remove(session_id);
+                self.live_sessions.remove(pubkey);
             }
             _ => {}
         }

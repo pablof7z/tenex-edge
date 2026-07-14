@@ -74,8 +74,8 @@ pub(crate) fn ephemeral_session_env() -> bool {
 
 /// The hosted PTY session this CLI invocation runs in. It is present in the
 /// harness env from process birth and is 1:1 with the session, so the daemon
-/// resolves it to the caller's canonical session. Native harness shells outside
-/// tenex-edge launch fall back to harness ids, watched pid, or channel scan.
+/// resolves its typed PTY locator to the caller's pubkey. Native harness shells
+/// fall back to native locators, watched pid, or channel scan.
 pub(crate) fn pty_session_env() -> Option<String> {
     std::env::var("TENEX_EDGE_PTY_SESSION")
         .ok()
@@ -89,16 +89,9 @@ pub(crate) fn caller_identity() -> serde_json::Value {
     context::InvocationContext::from_current_process().to_rpc_json()
 }
 
-/// Build RPC params = the caller-identity fields plus `extra` (which wins on any
-/// key collision, e.g. an explicit destination `group`).
+/// Build RPC params from caller identity plus explicit non-null overrides.
 pub(crate) fn rpc_params(extra: serde_json::Value) -> serde_json::Value {
-    let mut base = caller_identity();
-    if let (Some(b), Some(e)) = (base.as_object_mut(), extra.as_object()) {
-        for (k, v) in e {
-            b.insert(k.clone(), v.clone());
-        }
-    }
-    base
+    context::merge_rpc_params(caller_identity(), extra)
 }
 
 pub async fn run(cli: Cli) -> Result<()> {

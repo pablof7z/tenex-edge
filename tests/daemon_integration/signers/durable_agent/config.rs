@@ -32,12 +32,3 @@ pub(super) fn lease_count(db: &rusqlite::Connection, pubkey: &str) -> u64 {
     )
     .unwrap()
 }
-
-pub(super) fn durable_binding(db: &rusqlite::Connection, pubkey: &str) -> (String, bool) {
-    db.query_row(
-        "SELECT session_id, live FROM durable_agent_sessions WHERE pubkey=?1",
-        [pubkey],
-        |row| Ok((row.get(0)?, row.get(1)?)),
-    )
-    .unwrap()
-}

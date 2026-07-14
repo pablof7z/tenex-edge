@@ -187,11 +187,11 @@ mod tests {
 
         let text = targets::render_catalog();
         assert!(text.contains("validate target catalog"));
-        assert!(text.contains("status:<session>"));
+        assert!(text.contains("status:<pubkey>"));
         assert!(text.contains("readiness:<h>"));
         assert!(text.contains("readiness_attempt:<id>"));
-        assert!(text.contains("alias:<harness>:<kind>:<value>"));
-        assert!(text.contains("recipient:<event>:<pubkey>[:session]"));
+        assert!(text.contains("session:<pubkey>"));
+        assert!(text.contains("recipient:<event>:<pubkey>"));
         assert!(text.contains("delivery:<event>:<pubkey>"));
         assert!(text.contains("tenex-edge debug validate commit:<id>"));
 

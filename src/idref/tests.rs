@@ -48,11 +48,11 @@ fn agent_ref_from_is_bare_local_and_qualified_remote() {
 #[test]
 fn session_label_preserves_session_handle() {
     assert_eq!(
-        session_label("te-abc-0", "willow-echo-042-codex", "laptop"),
+        session_label("willow-echo-042-codex", "laptop"),
         "willow-echo-042-codex"
     );
-    assert_eq!(session_label("te-abc-0", "codex", "laptop"), "codex");
-    assert_eq!(session_label("te-abc-0", "", "laptop"), "te-abc-0");
+    assert_eq!(session_label("codex", "laptop"), "codex");
+    assert_eq!(session_label("", "laptop"), "");
 }
 
 #[test]

@@ -12,8 +12,8 @@ use super::{DeliveryAction, DeliveryCommand, DeliveryScanFact};
 #[derive(Clone, Copy)]
 pub(crate) struct SessionNodes {
     pending: InputNode<Vec<String>>,
-    pty_id: InputNode<Option<String>>,
-    pty_live: InputNode<bool>,
+    endpoint_id: InputNode<Option<String>>,
+    endpoint_live: InputNode<bool>,
     last_injected_at: InputNode<u64>,
     debounce_secs: InputNode<u64>,
     now: InputNode<u64>,
@@ -39,13 +39,13 @@ pub(crate) fn ensure_session(
     tx: &mut Transaction<'_, DeliveryCommand>,
     labels: &mut NodeLabels,
     sessions: &mut BTreeMap<String, SessionNodes>,
-    session_id: &str,
+    pubkey: &str,
 ) -> GraphResult<SessionNodes> {
-    if let Some(nodes) = sessions.get(session_id).copied() {
+    if let Some(nodes) = sessions.get(pubkey).copied() {
         return Ok(nodes);
     }
-    let nodes = stage_session(tx, labels, session_id)?;
-    sessions.insert(session_id.to_string(), nodes);
+    let nodes = stage_session(tx, labels, pubkey)?;
+    sessions.insert(pubkey.to_string(), nodes);
     Ok(nodes)
 }
 
@@ -56,8 +56,8 @@ pub(crate) fn stage_scan(
     seq: u64,
 ) -> GraphResult<()> {
     tx.set_input(nodes.pending, fact.pending_event_ids.clone())?;
-    tx.set_input(nodes.pty_id, fact.pty_id.clone())?;
-    tx.set_input(nodes.pty_live, fact.pty_live)?;
+    tx.set_input(nodes.endpoint_id, fact.endpoint_id.clone())?;
+    tx.set_input(nodes.endpoint_live, fact.endpoint_live)?;
     tx.set_input(nodes.last_injected_at, fact.last_injected_at.unwrap_or(0))?;
     tx.set_input(nodes.debounce_secs, fact.debounce_secs)?;
     tx.set_input(nodes.now, fact.at)?;
@@ -68,37 +68,37 @@ pub(crate) fn stage_scan(
 fn stage_session(
     tx: &mut Transaction<'_, DeliveryCommand>,
     labels: &mut NodeLabels,
-    session_id: &str,
+    pubkey: &str,
 ) -> GraphResult<SessionNodes> {
-    let scope = tx.create_scope(format!("delivery-{session_id}"))?;
+    let scope = tx.create_scope(format!("delivery-{pubkey}"))?;
     let pending = input(
         tx,
         labels,
-        session_id,
+        pubkey,
         "pending_event_ids",
         Vec::<String>::new(),
     )?;
-    let pty_id = input(tx, labels, session_id, "pty_id", None::<String>)?;
-    let pty_live = input(tx, labels, session_id, "pty_live", false)?;
-    let last = input(tx, labels, session_id, "last_injected_at", 0u64)?;
-    let debounce = input(tx, labels, session_id, "debounce_secs", 0u64)?;
-    let now = input(tx, labels, session_id, "now", 0u64)?;
-    let force = input(tx, labels, session_id, "force", false)?;
-    let seq = input(tx, labels, session_id, "request_seq", 0u64)?;
+    let endpoint_id = input(tx, labels, pubkey, "endpoint_id", None::<String>)?;
+    let endpoint_live = input(tx, labels, pubkey, "endpoint_live", false)?;
+    let last = input(tx, labels, pubkey, "last_injected_at", 0u64)?;
+    let debounce = input(tx, labels, pubkey, "debounce_secs", 0u64)?;
+    let now = input(tx, labels, pubkey, "now", 0u64)?;
+    let force = input(tx, labels, pubkey, "force", false)?;
+    let seq = input(tx, labels, pubkey, "request_seq", 0u64)?;
     let nodes = SessionNodes {
         pending,
-        pty_id,
-        pty_live,
+        endpoint_id,
+        endpoint_live,
         last_injected_at: last,
         debounce_secs: debounce,
         now,
         force,
         seq,
     };
-    let decision = decision_node(tx, labels, session_id, nodes)?;
-    let id = session_id.to_string();
+    let decision = decision_node(tx, labels, pubkey, nodes)?;
+    let id = pubkey.to_string();
     let coll = tx.map_collection::<String, Decision>(
-        format!("delivery-{session_id}-coll"),
+        format!("delivery-{pubkey}-coll"),
         DependencyList::new([decision.id()])?,
         move |ctx| {
             let current = ctx.derived(decision)?.clone();
@@ -109,7 +109,7 @@ fn stage_session(
             }
         },
     )?;
-    labels.record(coll.id(), format!("delivery/{session_id}/coll"));
+    labels.record(coll.id(), format!("delivery/{pubkey}/coll"));
     tx.map_resource_planner(coll, scope, plan_delivery)?;
     Ok(nodes)
 }
@@ -117,12 +117,12 @@ fn stage_session(
 fn input<T: Clone + PartialEq + Send + Sync + 'static>(
     tx: &mut Transaction<'_, DeliveryCommand>,
     labels: &mut NodeLabels,
-    session_id: &str,
+    pubkey: &str,
     name: &str,
     value: T,
 ) -> GraphResult<InputNode<T>> {
-    let node = tx.input::<T>(format!("delivery-{session_id}-{name}"))?;
-    labels.record(node.id(), format!("delivery/{session_id}/{name}"));
+    let node = tx.input::<T>(format!("delivery-{pubkey}-{name}"))?;
+    labels.record(node.id(), format!("delivery/{pubkey}/{name}"));
     tx.set_input(node, value)?;
     Ok(node)
 }
@@ -133,13 +133,13 @@ fn decision_node(
     id: &str,
     nodes: SessionNodes,
 ) -> GraphResult<trellis_core::DerivedNode<Decision>> {
-    let session_id = id.to_string();
+    let pubkey = id.to_string();
     let decision = tx.derived(
         format!("delivery-{id}-decision"),
         DependencyList::new([
             nodes.pending.id(),
-            nodes.pty_id.id(),
-            nodes.pty_live.id(),
+            nodes.endpoint_id.id(),
+            nodes.endpoint_live.id(),
             nodes.last_injected_at.id(),
             nodes.debounce_secs.id(),
             nodes.now.id(),
@@ -148,10 +148,10 @@ fn decision_node(
         ])?,
         move |ctx| {
             let command = decide(
-                &session_id,
+                &pubkey,
                 ctx.input(nodes.pending)?.clone(),
-                ctx.input(nodes.pty_id)?.clone(),
-                *ctx.input(nodes.pty_live)?,
+                ctx.input(nodes.endpoint_id)?.clone(),
+                *ctx.input(nodes.endpoint_live)?,
                 *ctx.input(nodes.last_injected_at)?,
                 *ctx.input(nodes.debounce_secs)?,
                 *ctx.input(nodes.now)?,
@@ -169,10 +169,10 @@ fn decision_node(
 
 #[allow(clippy::too_many_arguments)]
 fn decide(
-    session_id: &str,
+    pubkey: &str,
     event_ids: Vec<String>,
-    pty_id: Option<String>,
-    pty_live: bool,
+    endpoint_id: Option<String>,
+    endpoint_live: bool,
     last_injected_at: u64,
     debounce_secs: u64,
     now: u64,
@@ -181,21 +181,21 @@ fn decide(
     if event_ids.is_empty() {
         return None;
     }
-    let Some(pty_id) = pty_id else {
+    let Some(endpoint_id) = endpoint_id else {
         return Some(command(
-            session_id,
+            pubkey,
             DeliveryAction::DeferNoEndpoint,
             event_ids,
             None,
             None,
         ));
     };
-    if !pty_live {
+    if !endpoint_live {
         return Some(command(
-            session_id,
+            pubkey,
             DeliveryAction::ClearDeadEndpoint,
             event_ids,
-            Some(pty_id),
+            Some(endpoint_id),
             None,
         ));
     }
@@ -203,34 +203,34 @@ fn decide(
     if !force && last_injected_at > 0 && elapsed < debounce_secs {
         let retry_after = debounce_secs.saturating_sub(elapsed).max(1);
         return Some(command(
-            session_id,
+            pubkey,
             DeliveryAction::DeferDebounced,
             event_ids,
-            Some(pty_id),
+            Some(endpoint_id),
             Some(retry_after),
         ));
     }
     Some(command(
-        session_id,
+        pubkey,
         DeliveryAction::Inject,
         event_ids,
-        Some(pty_id),
+        Some(endpoint_id),
         None,
     ))
 }
 
 fn command(
-    session_id: &str,
+    pubkey: &str,
     action: DeliveryAction,
     event_ids: Vec<String>,
-    pty_id: Option<String>,
+    endpoint_id: Option<String>,
     retry_after_secs: Option<u64>,
 ) -> DeliveryCommand {
     DeliveryCommand {
-        session_id: session_id.to_string(),
+        pubkey: pubkey.to_string(),
         action,
         event_ids,
-        pty_id,
+        endpoint_id,
         retry_after_secs,
     }
 }

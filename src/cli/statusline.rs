@@ -63,7 +63,7 @@ pub(super) fn statusline(session: Option<String>) -> Result<()> {
         }
     };
 
-    let params = serde_json::json!({ "session": session_id });
+    let params = crate::cli::rpc_params(serde_json::json!({ "harness_session": session_id }));
     let v = match crate::daemon::blocking::call_no_spawn("statusline", params) {
         Ok(v) => v,
         Err(_) => {

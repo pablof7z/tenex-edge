@@ -3,53 +3,55 @@ use super::*;
 const CLAIM_GRACE_ENV: &str = "TENEX_EDGE_EPHEMERAL_GRACE_SECS";
 const DEFAULT_CLAIM_GRACE_SECS: u64 = 15 * 60;
 
-#[derive(serde::Deserialize)]
-pub(in crate::daemon::server) struct SessionEndParams {
-    session: String,
-}
-
 pub(in crate::daemon::server) async fn rpc_session_end(
     state: &Arc<DaemonState>,
     params: &serde_json::Value,
 ) -> Result<serde_json::Value> {
-    let p: SessionEndParams =
-        serde_json::from_value(params.clone()).context("parsing session_end params")?;
-    // `get_session` is alias-resolving, so the raw hook id (an alias) yields the
-    // canonical session row; every mutation below keys on `rec.session_id`.
-    let rec = state.with_store(|s| s.get_session(&p.session).ok().flatten());
-    let existed = rec.is_some();
-    if let Some(ref rec) = rec {
-        let ended_at = now_secs();
-        cancel_session(state, &rec.session_id);
+    let anchor = CallerAnchor::from_params(params);
+    let rec = resolve_session_inner(state, &anchor, ResolveScope::Strict).ok();
+    let Some(rec) = rec else {
+        return Ok(serde_json::json!({ "ended": false }));
+    };
+    let ended = end_runtime_generation(state, &rec.pubkey, rec.runtime_generation).await?;
+    Ok(serde_json::json!({ "ended": ended }))
+}
 
-        // Release the ordinal reservation + any derived signing key before marking
-        // the session dead.
-        record_ephemeral_claim(state, rec);
-        // Mark the bound identity dead but KEEP the row for route lookup; the
-        // explicit claim above controls whether a later mention may resume it.
-        state.with_store(|s| s.mark_identity_dead_for_session(&rec.session_id).ok());
-
-        // Mark the canonical session dead (alive=0, working=0). Its final published
-        // kind:30315 ages off via NIP-40 expiration.
-        state.with_store(|s| {
-            s.touch_session(&rec.session_id, ended_at).ok();
-            s.mark_dead(&rec.session_id).ok()
-        });
-        state.outbox_notify.notify_waiters();
-        state.emit_tail(TailEvent::Sess {
-            ts: ended_at,
-            channel: rec.channel_h.clone(),
-            agent: rec.agent_slug.clone(),
-            session: rec.session_id.clone(),
-            state: "end".into(),
-            rel_cwd: String::new(),
-        });
-        // Reconcile subscriptions: the session is now dead, so its scope is closed
-        // and any REQ it SOLELY owned is torn down with a real NIP-01 CLOSE. A
-        // channel another live session still holds stays open (refcounted).
-        super::subscriptions::reconcile_subs_logged(state, "session_end").await;
+/// End exactly one runtime incarnation. A callback from an older incarnation
+/// cannot retire a newer process that reused the same authoritative pubkey.
+pub(in crate::daemon::server) async fn end_runtime_generation(
+    state: &Arc<DaemonState>,
+    pubkey: &str,
+    runtime_generation: u64,
+) -> Result<bool> {
+    let Some(rec) = state.with_store(|store| store.get_session(pubkey))? else {
+        return Ok(false);
+    };
+    if rec.runtime_generation != runtime_generation || !rec.alive {
+        return Ok(false);
     }
-    Ok(serde_json::json!({ "ended": existed }))
+
+    let ended_at = now_secs();
+    cancel_session(state, pubkey);
+    record_ephemeral_claim(state, &rec);
+    let ended = state.with_store(|store| {
+        store.touch_session(pubkey, ended_at)?;
+        store.mark_dead_if_generation(pubkey, runtime_generation)
+    })?;
+    if !ended {
+        return Ok(false);
+    }
+
+    state.outbox_notify.notify_waiters();
+    state.emit_tail(TailEvent::Sess {
+        ts: ended_at,
+        channel: rec.channel_h.clone(),
+        agent: rec.agent_slug.clone(),
+        session: pubkey.to_string(),
+        state: "end".into(),
+        rel_cwd: String::new(),
+    });
+    super::subscriptions::reconcile_subs_logged(state, "session_end").await;
+    Ok(true)
 }
 
 #[derive(serde::Deserialize)]
@@ -68,32 +70,17 @@ pub(in crate::daemon::server) async fn rpc_session_kill(
 ) -> Result<serde_json::Value> {
     let p: SessionKillParams =
         serde_json::from_value(params.clone()).context("parsing session_kill params")?;
-    // Operator callers select by public identity. Self/lifecycle callers own a
-    // typed runtime locator, which remains a private fallback until the run
-    // spine is separated from session identity.
     let selector = p.session.as_deref().filter(|session| !session.is_empty());
     let public = selector
         .map(|session| state.with_store(|s| super::resolution::resolve_public_session(s, session)))
         .transpose()?
         .flatten();
-    let Some(rec) = public.or_else(|| {
-        selector.and_then(|session| state.with_store(|s| s.get_session(session).ok().flatten()))
-    }) else {
+    let Some(rec) = public else {
         return kill_unbound_endpoint(p.pty_id.as_deref(), p.revoke_memberships);
     };
 
-    let stop = stop_local_process(state, &rec);
-    let ended = rpc_session_end(
-        state,
-        &serde_json::json!({
-            "session": rec.session_id,
-        }),
-    )
-    .await?
-    .get("ended")
-    .and_then(serde_json::Value::as_bool)
-    .unwrap_or(false);
-
+    let stop = stop_local_process(state, &rec).await;
+    let ended = end_runtime_generation(state, &rec.pubkey, rec.runtime_generation).await?;
     let cleanup_failures = if p.revoke_memberships {
         revoke_operator_session(state, &rec).await
     } else {
@@ -108,10 +95,10 @@ pub(in crate::daemon::server) async fn rpc_session_kill(
             "cleanup_confirmed": cleanup_failures.is_empty(),
             "cleanup_failures": cleanup_failures,
         })),
-        Err(e) => Ok(serde_json::json!({
+        Err(error) => Ok(serde_json::json!({
             "killed": false,
             "ended": ended,
-            "reason": format!("{e:#}"),
+            "reason": format!("{error:#}"),
         })),
     }
 }
@@ -162,12 +149,11 @@ async fn revoke_operator_session(
 ) -> Vec<String> {
     let now = now_secs();
     let mut failures = Vec::new();
-    if let Err(error) =
-        state.with_store(|store| store.clear_session_claim_for_session(&rec.session_id))
+    if let Err(error) = state.with_store(|store| store.clear_session_claim_for_pubkey(&rec.pubkey))
     {
         failures.push(format!("session claim cleanup: {error:#}"));
     }
-    match state.session_signing_keys(&rec.agent_pubkey) {
+    match state.session_signing_keys(&rec.pubkey) {
         Ok(keys) => {
             crate::status_seam::drive(
                 &state.status,
@@ -180,29 +166,47 @@ async fn revoke_operator_session(
                     window_hash: None,
                     replay_fact: Some(crate::reconcile::InputFact::StatusDrive(
                         crate::reconcile::StatusDrive::SessionRevoked {
-                            session_id: rec.session_id.clone(),
+                            pubkey: rec.pubkey.clone(),
                             at: now,
                         },
                     )),
                 },
-                |status| status.on_session_revoked(&rec.session_id, now),
+                |status| status.on_session_revoked(&rec.pubkey, now),
             )
             .await;
             state.outbox_notify.notify_waiters();
         }
         Err(error) => failures.push(format!("status expiration: {error:#}")),
     }
-    failures.extend(
-        super::membership_cleanup::revoke_session_memberships(state, &rec.session_id).await,
-    );
+    failures
+        .extend(super::membership_cleanup::revoke_session_memberships(state, &rec.pubkey).await);
     failures
 }
 
-fn stop_local_process(state: &Arc<DaemonState>, rec: &crate::state::Session) -> Result<String> {
-    if let Some(pty_id) = pty_session_for_session(state, &rec.session_id) {
-        crate::pty::kill(&pty_id).with_context(|| format!("killing PTY session {pty_id}"))?;
-        state.with_store(|s| s.clear_pty_session(&rec.session_id).ok());
-        return Ok(format!("pty={pty_id}"));
+async fn stop_local_process(
+    state: &Arc<DaemonState>,
+    rec: &crate::state::Session,
+) -> Result<String> {
+    if let Some(locator) = endpoint_locator(state, &rec.pubkey) {
+        match locator.locator_kind.as_str() {
+            crate::state::LOCATOR_PTY => {
+                crate::pty::kill(&locator.locator_value)
+                    .with_context(|| format!("killing PTY endpoint {}", locator.locator_value))?;
+            }
+            crate::state::LOCATOR_ACP => {
+                use crate::session_host::transport::{EndpointRef, SessionTransport};
+                let transport = crate::session_host::transport::AcpTransport;
+                transport
+                    .kill(&EndpointRef {
+                        kind: crate::session_host::transport::TransportKind::Acp,
+                        endpoint_id: locator.locator_value.clone(),
+                    })
+                    .await?;
+            }
+            _ => {}
+        }
+        state.with_store(|store| store.clear_locator_kind(&rec.pubkey, &locator.locator_kind))?;
+        return Ok(format!("endpoint={}", locator.locator_value));
     }
     if let Some(pid) = rec.child_pid {
         nix::sys::signal::kill(
@@ -215,65 +219,53 @@ fn stop_local_process(state: &Arc<DaemonState>, rec: &crate::state::Session) -> 
     Ok(String::new())
 }
 
-fn pty_session_for_session(state: &Arc<DaemonState>, session_id: &str) -> Option<String> {
+fn endpoint_locator(
+    state: &Arc<DaemonState>,
+    pubkey: &str,
+) -> Option<crate::state::SessionLocator> {
     state
-        .with_store(|s| s.aliases_for_session(session_id))
-        .ok()
-        .and_then(|aliases| {
-            aliases
-                .into_iter()
-                .find(|a| a.external_id_kind == "pty_session")
-                .map(|a| a.external_id)
+        .with_store(|store| store.locators_for_pubkey(pubkey))
+        .ok()?
+        .into_iter()
+        .find(|locator| {
+            matches!(
+                locator.locator_kind.as_str(),
+                crate::state::LOCATOR_PTY | crate::state::LOCATOR_ACP
+            )
         })
 }
 
 fn record_ephemeral_claim(state: &Arc<DaemonState>, rec: &crate::state::Session) {
     if rec.channel_h.is_empty()
         || !crate::session_host::agent_supports_headless_exec(&rec.agent_slug)
+        || state
+            .with_store(|store| store.native_resume_locator(&rec.pubkey))
+            .ok()
+            .flatten()
+            .is_none()
     {
         return;
     }
-    let Some(identity) =
-        state.with_store(|s| s.identity_for_session(&rec.session_id).ok().flatten())
-    else {
-        return;
-    };
-    let native_id = super::pty_rpc::resume_token_for(rec)
-        .filter(|s| !s.is_empty())
-        .or_else(|| (!identity.native_id.is_empty()).then_some(identity.native_id.clone()));
-    let Some(native_id) = native_id else {
-        return;
-    };
-
     let now = now_secs();
     let claim = crate::state::session_claims::SessionClaim {
-        pubkey: identity.pubkey,
-        agent_slug: identity.agent_slug,
-        codename: identity.codename,
-        session_id: rec.session_id.clone(),
+        pubkey: rec.pubkey.clone(),
+        agent_slug: rec.agent_slug.clone(),
         channel_h: rec.channel_h.clone(),
-        native_id,
         harness: rec.harness.clone(),
         last_active_at: now,
         expires_at: now.saturating_add(claim_grace_secs()),
         owner_backend_pubkey: state.backend_pubkey().unwrap_or_default(),
         owner_host: state.host.clone(),
     };
-    if let Err(e) = state.with_store(|s| s.upsert_session_claim(&claim)) {
-        tracing::warn!(
-            session = %rec.session_id,
-            agent = %rec.agent_slug,
-            channel = %rec.channel_h,
-            error = %e,
-            "failed to record ephemeral session claim"
-        );
+    if let Err(error) = state.with_store(|store| store.upsert_session_claim(&claim)) {
+        tracing::warn!(pubkey = %rec.pubkey, error = %error, "failed to record session claim");
     }
 }
 
 fn claim_grace_secs() -> u64 {
     std::env::var(CLAIM_GRACE_ENV)
         .ok()
-        .and_then(|v| v.parse::<u64>().ok())
-        .filter(|v| *v > 0)
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
         .unwrap_or(DEFAULT_CLAIM_GRACE_SECS)
 }

@@ -149,12 +149,14 @@ pub async fn run() -> Result<()> {
         super::agent_roster::publish_backend_profile(&relay_state).await;
 
         // Proactively warm the profiles we already know we care about — the human
-        // operator(s) and every durable agent identity — so the first awareness
+        // operator(s) and every persisted local session pubkey — so the first awareness
         // renders them by name instead of raw hex. Members we learn about later are
         // warmed as their 3900x events arrive (see `warm_profiles` in the demux).
         {
             let mut known = relay_state.owners.clone();
-            known.extend(relay_state.with_store(|s| s.list_identity_pubkeys().unwrap_or_default()));
+            known.extend(
+                relay_state.with_store(|s| s.list_local_session_pubkeys().unwrap_or_default()),
+            );
             warm_profiles(&relay_state, known);
         }
 
@@ -203,8 +205,6 @@ pub(in crate::daemon::server) fn cleanup() {
     // an independent lock, causing two daemons to overlap and fight over state.db.
     // The lock is implicitly released when the process exits and the fd is closed.
 }
-
-// ── connection handling ──────────────────────────────────────────────────────
 
 pub(in crate::daemon::server) async fn serve_connection(
     state: Arc<DaemonState>,
@@ -369,5 +369,3 @@ pub(in crate::daemon::server) async fn handle_session_start<W: AsyncWriteExt + U
     };
     write_json(writer, &resp).await
 }
-
-// ── dispatch (one-shot verbs) ────────────────────────────────────────────────

@@ -27,11 +27,7 @@ pub(super) fn membership_evidence(
             .cloned();
         let membership_snapshot = store.has_channel_membership_snapshot(&parsed.channel_h)?;
         let profile = store.get_profile(&parsed.pubkey)?;
-        let identity = store.get_identity(&parsed.pubkey)?;
-        let session = match identity.as_ref().filter(|row| !row.session_id.is_empty()) {
-            Some(row) => store.get_session(&row.session_id)?,
-            None => None,
-        };
+        let session = store.get_session(&parsed.pubkey)?;
         Ok::<_, anyhow::Error>((
             channel,
             row,
@@ -39,28 +35,26 @@ pub(super) fn membership_evidence(
             members.iter().filter(|m| m.role == "admin").count(),
             membership_snapshot,
             profile,
-            identity,
             session,
         ))
     });
-    let (channel, row, member_count, admin_count, snapshot, profile, identity, session) =
-        match result {
-            Ok(v) => v,
-            Err(e) => {
-                return json!({
-                    "target": target,
-                    "kind": "membership",
-                    "channel_h": parsed.channel_h,
-                    "pubkey": parsed.pubkey,
-                    "require_admin": parsed.require_admin,
-                    "supported": true,
-                    "found": false,
-                    "error": e.to_string(),
-                    "summary": "membership evidence could not read durable state",
-                    "reason": e.to_string(),
-                });
-            }
-        };
+    let (channel, row, member_count, admin_count, snapshot, profile, session) = match result {
+        Ok(v) => v,
+        Err(e) => {
+            return json!({
+                "target": target,
+                "kind": "membership",
+                "channel_h": parsed.channel_h,
+                "pubkey": parsed.pubkey,
+                "require_admin": parsed.require_admin,
+                "supported": true,
+                "found": false,
+                "error": e.to_string(),
+                "summary": "membership evidence could not read durable state",
+                "reason": e.to_string(),
+            });
+        }
+    };
     let row_found = row.is_some();
     let role = row.as_ref().map(|m| m.role.as_str()).unwrap_or("");
     let role_satisfies = row_found && (!parsed.require_admin || role == "admin");
@@ -85,9 +79,6 @@ pub(super) fn membership_evidence(
         "profile_found": profile.is_some(),
         "profile_slug": profile.as_ref().map(|p| p.slug.as_str()).unwrap_or(""),
         "profile_name": profile.as_ref().map(|p| p.name.as_str()).unwrap_or(""),
-        "identity_found": identity.is_some(),
-        "identity_alive": identity.as_ref().is_some_and(|i| i.alive),
-        "identity_session_id": identity.as_ref().map(|i| i.session_id.as_str()).unwrap_or(""),
         "session_found": session.is_some(),
         "session_alive": session.as_ref().is_some_and(|s| s.alive),
         "summary": target::summary(&parsed.channel_h, &parsed.pubkey, parsed.require_admin, role, row_found, snapshot),

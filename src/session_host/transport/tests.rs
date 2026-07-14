@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "tests/live.rs"]
+mod live;
+
 #[test]
 fn transport_kind_strings() {
     assert_eq!(TransportKind::Pty.as_str(), "pty");
@@ -129,129 +132,6 @@ fn acp_transport_reports_acp_kind() {
     assert_eq!(AcpTransport.kind(), TransportKind::Acp);
 }
 
-/// LIVE: the launch dispatch selects `AcpTransport` for an acp-bundle agent and
-/// spawns a real `opencode acp` child. Gated so CI without opencode/auth skips
-/// it. Run with:
-///   TENEX_EDGE_RPC_LIVE=1 cargo test --lib -- --ignored \
-///     session_host::transport::transport_tests::live_launch_dispatch_spawns_opencode_acp
-#[tokio::test]
-#[ignore]
-async fn live_launch_dispatch_spawns_opencode_acp() {
-    if std::env::var("TENEX_EDGE_RPC_LIVE").ok().as_deref() != Some("1") {
-        eprintln!("skipping live test (set TENEX_EDGE_RPC_LIVE=1)");
-        return;
-    }
-    // harnesses.json maps opencode onto ACP so the *dispatch* resolves AcpTransport.
-    let home = std::env::temp_dir().join(format!("te-acp-launch-{}", std::process::id()));
-    std::fs::create_dir_all(&home).unwrap();
-    std::env::set_var("TENEX_EDGE_HOME", &home);
-    std::fs::write(
-        home.join("harnesses.json"),
-        r#"{ "opencode-acp": { "harness": "opencode", "transport": "acp" } }"#,
-    )
-    .unwrap();
-
-    // Dispatch resolves this bundle to the ACP variant; drive the concrete backend
-    // (the PTY path no longer exposes SessionTransport methods via the enum).
-    let transport = select_transport(Some("opencode-acp")).unwrap();
-    assert_eq!(transport.kind(), TransportKind::Acp);
-    let TransportImpl::Acp(acp) = transport else {
-        panic!("expected ACP transport for an acp bundle");
-    };
-
-    let cwd = home.join("work");
-    std::fs::create_dir_all(&cwd).unwrap();
-    let spec = LaunchSpec {
-        slug: "opencode-acp".into(),
-        bundle: Some("opencode-acp".into()),
-        root: "live".into(),
-        abs_path: cwd.to_string_lossy().into_owned(),
-        group: None,
-        ephemeral: true,
-        base_command: vec!["opencode".into()],
-    };
-    let endpoint = acp.launch(&spec).await.expect("launch opencode acp");
-    let ep = EndpointRef {
-        kind: endpoint.kind,
-        endpoint_id: endpoint.endpoint_id.clone(),
-    };
-    assert_eq!(endpoint.kind, TransportKind::Acp);
-    assert!(
-        endpoint.watch_pid.is_some(),
-        "acp launch must expose the child pid as watch_pid"
-    );
-    assert!(acp.is_live(&ep), "freshly launched child should be live");
-    acp.kill(&ep).await.unwrap();
-    std::env::remove_var("TENEX_EDGE_HOME");
-}
-
-/// LIVE: an ACP agent RECEIVES a delivered prompt. Launches a real `opencode acp`
-/// child, delivers a prompt via `AcpTransport::deliver` (the same call the
-/// transport-aware doorbell uses for ACP endpoints), then polls the captured
-/// transcript for assistant output — proof the prompt was actually received and
-/// answered. Gated so CI without opencode/auth skips it. Run with:
-///   TENEX_EDGE_RPC_LIVE=1 cargo test --lib -- --ignored \
-///     session_host::transport::transport_tests::live_acp_agent_receives_delivered_prompt
-#[tokio::test]
-#[ignore]
-async fn live_acp_agent_receives_delivered_prompt() {
-    if std::env::var("TENEX_EDGE_RPC_LIVE").ok().as_deref() != Some("1") {
-        eprintln!("skipping live test (set TENEX_EDGE_RPC_LIVE=1)");
-        return;
-    }
-    let home = std::env::temp_dir().join(format!("te-acp-deliver-{}", std::process::id()));
-    std::fs::create_dir_all(&home).unwrap();
-    std::env::set_var("TENEX_EDGE_HOME", &home);
-    std::fs::write(
-        home.join("harnesses.json"),
-        r#"{ "opencode-acp": { "harness": "opencode", "transport": "acp" } }"#,
-    )
-    .unwrap();
-
-    let transport = select_transport(Some("opencode-acp")).unwrap();
-    assert_eq!(transport.kind(), TransportKind::Acp);
-    let TransportImpl::Acp(acp) = transport else {
-        panic!("expected ACP transport for an acp bundle");
-    };
-    let cwd = home.join("work");
-    std::fs::create_dir_all(&cwd).unwrap();
-    let spec = LaunchSpec {
-        slug: "opencode-acp".into(),
-        bundle: Some("opencode-acp".into()),
-        root: "live".into(),
-        abs_path: cwd.to_string_lossy().into_owned(),
-        group: None,
-        ephemeral: true,
-        base_command: vec!["opencode".into()],
-    };
-    let endpoint = acp.launch(&spec).await.expect("launch opencode acp");
-    let ep = EndpointRef {
-        kind: endpoint.kind,
-        endpoint_id: endpoint.endpoint_id.clone(),
-    };
-
-    // `deliver` is fire-and-forget (returns before the turn completes); the reply
-    // streams back as `session/update` notifications the runtime folds into the
-    // transcript. Poll it for any assistant output.
-    acp.deliver(&ep, "Reply with the single word: pong", true)
-        .await
-        .expect("deliver prompt to acp child");
-    let mut got = String::new();
-    for _ in 0..120 {
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        got = super::acp::transcript_snapshot(&endpoint.endpoint_id).unwrap_or_default();
-        if !got.trim().is_empty() {
-            break;
-        }
-    }
-    acp.kill(&ep).await.unwrap();
-    std::env::remove_var("TENEX_EDGE_HOME");
-    assert!(
-        !got.trim().is_empty(),
-        "acp agent produced no output for the delivered prompt"
-    );
-}
-
 // ── defect #1: ACP resolves its harness from the BUNDLE, not the agent slug ────
 
 /// An agent whose slug differs from its harness bundle name resolves the correct
@@ -273,10 +153,11 @@ fn acp_resolves_harness_from_bundle_not_slug() {
         group: None,
         ephemeral: false,
         base_command: vec!["codex".into()],
+        pubkey: "33".repeat(32),
     };
     // The transport resolves from the BUNDLE name, never the slug.
     assert_eq!(super::acp::bundle_name(&spec), "codex-acp");
-    let scratch = std::env::temp_dir().join(format!("te-acp-bundle-{}", std::process::id()));
+    let scratch = std::env::temp_dir().join(format!("acp-bundle-{}", std::process::id()));
     let resolved = harness::resolve_with(&cfg, super::acp::bundle_name(&spec), &scratch)
         .expect("bundle resolves to its driver");
     assert_eq!(resolved.harness, Harness::Codex);
@@ -297,7 +178,7 @@ fn acp_resolves_harness_from_bundle_not_slug() {
 async fn acp_is_live_false_for_unknown_endpoint() {
     let ep = EndpointRef {
         kind: TransportKind::Acp,
-        endpoint_id: "te-acp-nope".into(),
+        endpoint_id: "acp-nope".into(),
     };
     assert!(!AcpTransport.is_live(&ep));
     // kill of an unregistered endpoint is a no-op, not an error.

@@ -207,7 +207,7 @@ fn member_view(
 ) -> MemberView {
     let profile = store.get_profile(pubkey).ok().flatten();
     let is_agent = pubkey == input.self_pubkey
-        || status.is_some_and(|row| !row.session_id.is_empty())
+        || status.is_some()
         || profile
             .as_ref()
             .is_some_and(|row| !row.agent_slug.is_empty());

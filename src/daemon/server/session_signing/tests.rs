@@ -1,156 +1,70 @@
 use super::*;
 
-#[tokio::test]
-async fn reconstructs_signer_from_pubkey_bound_material() {
-    let state = DaemonState::new_for_test().await;
-    let agent = crate::identity::AgentIdentity {
+fn ordinary_agent() -> crate::identity::AgentIdentity {
+    crate::identity::AgentIdentity {
         slug: "codex".into(),
         keys: Keys::generate(),
         commands: Vec::new(),
         per_session_key: true,
         harness: None,
-    };
-    let session_id = "opaque-runtime-row";
-    let minted = mint_session_identity(
-        &state,
-        session_id,
-        &agent,
-        "root",
-        SessionIdentityInput::new("native-resume", None),
-        None,
-    )
-    .unwrap();
-    let pubkey = minted.identity.pubkey.clone();
-    state.with_store(|store| {
-        store
-            .upsert_session_row(
-                session_id,
-                &crate::state::RegisterSession {
-                    harness: "codex".into(),
-                    external_id_kind: "harness_session".into(),
-                    external_id: "native-resume".into(),
-                    agent_pubkey: pubkey.clone(),
-                    agent_slug: "codex".into(),
-                    channel_h: "root".into(),
-                    child_pid: None,
-                    transcript_path: None,
-                    resume_id: "native-resume".into(),
-                    now: 1,
-                },
-            )
-            .unwrap();
-    });
+    }
+}
+
+#[tokio::test]
+async fn reconstructs_signer_from_pubkey_bound_material() {
+    let state = DaemonState::new_for_test().await;
+    let prepared = prepare_session_identity(&state, &ordinary_agent(), None).unwrap();
+    let pubkey = prepared.identity.pubkey.clone();
+    state
+        .with_store(|store| {
+            store.reserve_session(&crate::state::RegisterSession {
+                pubkey: pubkey.clone(),
+                harness: "codex".into(),
+                agent_slug: "codex".into(),
+                channel_h: "root".into(),
+                child_pid: None,
+                transcript_path: None,
+                now: 1,
+            })
+        })
+        .unwrap();
 
     let reconstructed = state.session_signing_keys(&pubkey).unwrap();
 
     assert_eq!(reconstructed.public_key().to_hex(), pubkey);
+    assert_eq!(
+        reconstructed.secret_key().to_secret_hex(),
+        prepared.keys.secret_key().to_secret_hex()
+    );
+}
+
+#[tokio::test]
+async fn fresh_preparations_get_distinct_pubkeys_and_handles() {
+    let state = DaemonState::new_for_test().await;
+    let agent = ordinary_agent();
+
+    let first = prepare_session_identity(&state, &agent, None).unwrap();
+    let second = prepare_session_identity(&state, &agent, None).unwrap();
+
+    assert_ne!(first.identity.pubkey, second.identity.pubkey);
+    assert_ne!(first.identity.handle, second.identity.handle);
+}
+
+#[tokio::test]
+async fn custom_handle_conflict_rolls_back_prepared_signer() {
+    let state = DaemonState::new_for_test().await;
+    let agent = ordinary_agent();
+    let first = prepare_session_identity(&state, &agent, Some("research")).unwrap();
+
+    let error = match prepare_session_identity(&state, &agent, Some("research")) {
+        Ok(_) => panic!("duplicate custom handle should be rejected"),
+        Err(error) => error,
+    };
+
+    assert!(error.to_string().contains("already in use"));
+    assert_eq!(first.identity.handle, "research-codex");
     assert!(state
-        .with_store(|store| store.session_signer_salt(&pubkey))
+        .with_store(|store| store.session_signer_salt(&first.identity.pubkey))
         .unwrap()
         .is_some());
-}
-
-#[tokio::test]
-async fn reasserted_runtime_reuses_the_pubkey_bound_signer_salt() {
-    let state = DaemonState::new_for_test().await;
-    let agent = crate::identity::AgentIdentity {
-        slug: "codex".into(),
-        keys: Keys::generate(),
-        commands: Vec::new(),
-        per_session_key: true,
-        harness: None,
-    };
-    let first = mint_session_identity(
-        &state,
-        "runtime-row",
-        &agent,
-        "root",
-        SessionIdentityInput::new("native-resume", None),
-        None,
-    )
-    .unwrap();
-    state.with_store(|store| {
-        store
-            .upsert_session_row(
-                "runtime-row",
-                &crate::state::RegisterSession {
-                    harness: "codex".into(),
-                    external_id_kind: "harness_session".into(),
-                    external_id: "native-resume".into(),
-                    agent_pubkey: first.identity.pubkey.clone(),
-                    agent_slug: "codex".into(),
-                    channel_h: "root".into(),
-                    child_pid: None,
-                    transcript_path: None,
-                    resume_id: "native-resume".into(),
-                    now: 1,
-                },
-            )
-            .unwrap();
-        store
-            .put_alias(
-                "codex",
-                "harness_session",
-                "native-resume",
-                "runtime-row",
-                1,
-            )
-            .unwrap();
-    });
-
-    let resumed = mint_session_identity(
-        &state,
-        "runtime-row",
-        &agent,
-        "root",
-        SessionIdentityInput::new("native-resume", None),
-        None,
-    )
-    .unwrap();
-
-    assert_eq!(resumed.identity.pubkey, first.identity.pubkey);
-    assert_eq!(
-        resumed.keys.secret_key().to_secret_hex(),
-        first.keys.secret_key().to_secret_hex()
-    );
-}
-
-#[tokio::test]
-async fn concurrent_first_registration_converges_on_one_pubkey() {
-    let state = DaemonState::new_for_test().await;
-    let agent = crate::identity::AgentIdentity {
-        slug: "codex".into(),
-        keys: Keys::generate(),
-        commands: Vec::new(),
-        per_session_key: true,
-        harness: None,
-    };
-    let barrier = Arc::new(std::sync::Barrier::new(2));
-    let launch = |state: Arc<DaemonState>,
-                  agent: crate::identity::AgentIdentity,
-                  barrier: Arc<std::sync::Barrier>| {
-        tokio::task::spawn_blocking(move || {
-            barrier.wait();
-            mint_session_identity(
-                &state,
-                "same-runtime-row",
-                &agent,
-                "root",
-                SessionIdentityInput::new("native-resume", None),
-                None,
-            )
-            .unwrap()
-        })
-    };
-    let first = launch(state.clone(), agent.clone(), barrier.clone());
-    let second = launch(state, agent, barrier);
-    let (first, second) = tokio::join!(first, second);
-    let first = first.unwrap();
-    let second = second.unwrap();
-
-    assert_eq!(first.identity.pubkey, second.identity.pubkey);
-    assert_eq!(
-        first.keys.secret_key().to_secret_hex(),
-        second.keys.secret_key().to_secret_hex()
-    );
 }

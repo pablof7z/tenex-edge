@@ -15,56 +15,40 @@ pub(in crate::daemon::server) fn resolve(store: &Store, selector: &str) -> Resul
     let Some(pubkey) = pubkey else {
         return Ok(None);
     };
-    store.session_for_pubkey(&pubkey)
+    store.get_session(&pubkey)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{Identity, RegisterSession};
+    use crate::state::{RegisterSession, LOCATOR_NATIVE_RESUME};
     use nostr_sdk::prelude::Keys;
 
     #[test]
     fn resolves_npub_hex_and_handle_but_not_private_runtime_id() {
         let store = Store::open_memory().unwrap();
         let pubkey = Keys::generate().public_key().to_hex();
-        let run_id = store
-            .register_session(&RegisterSession {
+        store
+            .reserve_session(&RegisterSession {
+                pubkey: pubkey.clone(),
                 harness: "codex".into(),
-                external_id_kind: "harness_session".into(),
-                external_id: "native-1".into(),
-                agent_pubkey: pubkey.clone(),
                 agent_slug: "codex".into(),
                 channel_h: "root".into(),
                 child_pid: None,
                 transcript_path: None,
-                resume_id: String::new(),
                 now: 1,
             })
             .unwrap();
         store
-            .upsert_identity(&Identity {
-                pubkey: pubkey.clone(),
-                agent_slug: "codex".into(),
-                codename: String::new(),
-                session_id: run_id.clone(),
-                channel_h: "root".into(),
-                native_id: "native-1".into(),
-                alive: true,
-                created_at: 1,
-            })
+            .put_session_locator("codex", LOCATOR_NATIVE_RESUME, "native-1", &pubkey, 1)
             .unwrap();
         let handle = store.allocate_handle(&pubkey, "codex", 1).unwrap().handle;
         let npub = crate::idref::npub(&pubkey).unwrap();
         let mentioned_handle = format!("@{handle}");
 
         for selector in [&pubkey, &npub, &handle, &mentioned_handle] {
-            assert_eq!(
-                resolve(&store, selector).unwrap().unwrap().session_id,
-                run_id
-            );
+            assert_eq!(resolve(&store, selector).unwrap().unwrap().pubkey, pubkey);
         }
-        assert!(resolve(&store, &run_id).unwrap().is_none());
-        assert!(resolve(&store, &run_id[..8]).unwrap().is_none());
+        assert!(resolve(&store, "native-1").unwrap().is_none());
     }
 }

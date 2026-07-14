@@ -1,6 +1,8 @@
 use super::*;
 use crate::state::{RecordMessage, RegisterSession, RelayEvent};
 
+const SELF_PUBKEY: &str = "1111111111111111111111111111111111111111111111111111111111111111";
+
 fn seed_session(state: &Arc<DaemonState>) -> Session {
     state
         .with_store(|store| {
@@ -8,26 +10,18 @@ fn seed_session(state: &Arc<DaemonState>) -> Session {
             store.upsert_channel("x", "x", "", "root", 2)?;
             store.upsert_channel("y", "y", "", "root", 3)?;
             store.upsert_channel("z", "z", "", "root", 4)?;
-            store.upsert_session_row(
-                "self-session",
-                &RegisterSession {
-                    harness: "codex".into(),
-                    external_id_kind: "harness_session".into(),
-                    external_id: "self-session".into(),
-                    agent_pubkey: "self-pubkey".into(),
-                    agent_slug: "self".into(),
-                    channel_h: "x".into(),
-                    child_pid: None,
-                    transcript_path: None,
-                    resume_id: String::new(),
-                    now: 1,
-                },
-            )?;
-            store.join_session_channel("self-session", "x", 1)?;
-            store.join_session_channel("self-session", "y", 2)?;
-            store
-                .get_session("self-session")?
-                .context("missing session")
+            store.reserve_session(&RegisterSession {
+                pubkey: SELF_PUBKEY.into(),
+                harness: "codex".into(),
+                agent_slug: "self".into(),
+                channel_h: "x".into(),
+                child_pid: None,
+                transcript_path: None,
+                now: 1,
+            })?;
+            store.join_session_channel(SELF_PUBKEY, "x", 1)?;
+            store.join_session_channel(SELF_PUBKEY, "y", 2)?;
+            store.get_session(SELF_PUBKEY)?.context("missing session")
         })
         .unwrap()
 }
@@ -97,7 +91,7 @@ async fn explicit_channel_filters_resolve_across_every_active_workspace() {
         .with_store(|store| {
             store.upsert_channel("other", "other", "", "", 5)?;
             store.upsert_channel("other-y", "y", "", "other", 6)?;
-            store.join_session_channel("self-session", "other-y", 7)?;
+            store.join_session_channel(SELF_PUBKEY, "other-y", 7)?;
             Ok::<(), anyhow::Error>(())
         })
         .unwrap();
@@ -116,7 +110,7 @@ async fn explicit_channel_filters_resolve_across_every_active_workspace() {
 async fn correlated_wait_skips_unrelated_chat_and_returns_exact_reply() {
     let state = DaemonState::new_for_test().await;
     let rec = seed_session(&state);
-    insert_chat(&state, "original", "x", "self-pubkey", "please reply", None);
+    insert_chat(&state, "original", "x", SELF_PUBKEY, "please reply", None);
     let mut cursor = state
         .with_store(|store| store.message_rowid("original"))
         .unwrap()
@@ -131,7 +125,7 @@ async fn correlated_wait_skips_unrelated_chat_and_returns_exact_reply() {
         &["x".into()],
         Some("original"),
         &filter,
-        &own_pubkeys(&state, &rec),
+        &own_pubkeys(&rec),
         &state.backend_pubkey().unwrap(),
     )
     .unwrap()
@@ -146,7 +140,7 @@ async fn ambient_wait_excludes_management_and_callers_own_chat() {
     let mut cursor = state
         .with_store(|store| store.latest_message_rowid())
         .unwrap();
-    insert_chat(&state, "self-chat", "x", "self-pubkey", "mine", None);
+    insert_chat(&state, "self-chat", "x", SELF_PUBKEY, "mine", None);
     insert_chat(
         &state,
         "management-chat",
@@ -164,7 +158,7 @@ async fn ambient_wait_excludes_management_and_callers_own_chat() {
         &["x".into()],
         None,
         &filter,
-        &own_pubkeys(&state, &rec),
+        &own_pubkeys(&rec),
         &state.backend_pubkey().unwrap(),
     )
     .unwrap()
@@ -214,7 +208,7 @@ async fn ambient_rpc_returns_first_new_chat_from_any_active_channel() {
             rpc_channel_wait(
                 &state,
                 &serde_json::json!({
-                    "session": "self-session",
+                    "session": SELF_PUBKEY,
                     "timeout_secs": 2,
                 }),
             )
@@ -244,7 +238,7 @@ async fn timeout_is_a_normal_structured_outcome() {
     let result = rpc_channel_wait(
         &state,
         &serde_json::json!({
-            "session": "self-session",
+            "session": SELF_PUBKEY,
             "timeout_secs": 1,
             "channels": ["x"],
         }),

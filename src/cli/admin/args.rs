@@ -106,7 +106,7 @@ pub(in crate::cli) enum ChannelAction {
         /// one joined channel exists.
         #[arg(long)]
         channel: Option<String>,
-        /// Explicit reader session id instead of resolving from the current
+        /// Public reader identity (npub, hex pubkey, or handle) instead of resolving from the current
         /// PTY/harness process or root scan.
         #[arg(long)]
         session: Option<String>,
@@ -131,7 +131,7 @@ pub(in crate::cli) enum ChannelAction {
         /// exactly one joined channel exists.
         #[arg(long)]
         channel: Option<String>,
-        /// Explicit sender session id instead of resolving from the current
+        /// Public sender identity (npub, hex pubkey, or handle) instead of resolving from the current
         /// PTY/harness process or root scan.
         #[arg(long)]
         session: Option<String>,
@@ -151,7 +151,7 @@ pub(in crate::cli) enum ChannelAction {
         message: Option<String>,
         #[arg(long = "message", value_name = "MESSAGE")]
         message_flag: Option<String>,
-        /// Explicit sender session id instead of resolving from the current
+        /// Public sender identity (npub, hex pubkey, or handle) instead of resolving from the current
         /// PTY/harness process or root scan.
         #[arg(long)]
         session: Option<String>,
@@ -169,7 +169,7 @@ pub(in crate::cli) enum ChannelAction {
         /// The reaction emoji (e.g. 👍 ✅ 👀 🎉) or `+`/`-`.
         #[arg(value_name = "EMOJI")]
         emoji: String,
-        /// Explicit reactor session id instead of resolving from the current
+        /// Public reactor identity (npub, hex pubkey, or handle) instead of resolving from the current
         /// PTY/harness process or root scan.
         #[arg(long)]
         session: Option<String>,
@@ -193,7 +193,7 @@ pub(in crate::cli) enum ChannelAction {
         /// empty channel.
         #[arg(long = "agent", value_name = "SLUG@BACKEND")]
         agents: Vec<String>,
-        /// Explicit session id to mutate instead of resolving the caller from
+        /// Public session identity (npub, hex pubkey, or handle) to mutate instead of resolving the caller from
         /// the current PTY/harness process.
         #[arg(long)]
         session: Option<String>,
@@ -205,7 +205,7 @@ pub(in crate::cli) enum ChannelAction {
         /// New durable channel description.
         #[arg(long, value_parser = crate::channel_about::parse_channel_about)]
         about: String,
-        /// Explicit session id to use as the channel-relative resolution anchor.
+        /// Public session identity (npub, hex pubkey, or handle) used as the channel-relative resolution anchor.
         #[arg(long)]
         session: Option<String>,
     },
@@ -234,7 +234,7 @@ pub(in crate::cli) enum ChannelAction {
     Join {
         /// Channel name, channel-relative path, or opaque channel `h` value.
         channel: String,
-        /// Explicit session id to mutate instead of resolving the caller from
+        /// Public session identity (npub, hex pubkey, or handle) to mutate instead of resolving the caller from
         /// the current PTY/harness process.
         #[arg(long)]
         session: Option<String>,
@@ -243,7 +243,7 @@ pub(in crate::cli) enum ChannelAction {
     Leave {
         /// Channel name, channel-relative path, or opaque channel `h` value.
         channel: String,
-        /// Explicit session id to mutate instead of resolving the caller from
+        /// Public session identity (npub, hex pubkey, or handle) to mutate instead of resolving the caller from
         /// the current PTY/harness process.
         #[arg(long)]
         session: Option<String>,
@@ -252,7 +252,7 @@ pub(in crate::cli) enum ChannelAction {
     Archive {
         /// Channel name, channel-relative path, or opaque channel `h` value.
         channel: String,
-        /// Explicit session id to use as the channel-relative resolution anchor.
+        /// Public session identity (npub, hex pubkey, or handle) used as the channel-relative resolution anchor.
         #[arg(long)]
         session: Option<String>,
     },
@@ -260,7 +260,7 @@ pub(in crate::cli) enum ChannelAction {
     Switch {
         /// Channel name, channel-relative path, or opaque channel `h` value.
         channel: String,
-        /// Explicit session id to mutate instead of resolving the caller from
+        /// Public session identity (npub, hex pubkey, or handle) to mutate instead of resolving the caller from
         /// the current PTY/harness process.
         #[arg(long)]
         session: Option<String>,

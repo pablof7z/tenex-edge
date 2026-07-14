@@ -141,7 +141,7 @@ async fn resume_target(
 ) -> bool {
     let session_pubkey = target.session_pubkey.as_deref().unwrap_or_default();
     let rec = match state
-        .with_store(|s| s.session_for_pubkey(session_pubkey))
+        .with_store(|s| s.get_session(session_pubkey))
         .ok()
         .flatten()
     {
@@ -155,9 +155,9 @@ async fn resume_target(
             return false;
         }
     };
-    let Some(resume_id) = super::pty_rpc::resume_token_for(&rec) else {
+    let Some(resume_id) = super::pty_rpc::resume_token_for(state, &rec) else {
         tracing::warn!(
-            session_id = %rec.session_id,
+            pubkey = %rec.pubkey,
             child = %op.child_h,
             "orchestration resume target has no harness resume token"
         );
@@ -175,7 +175,7 @@ async fn resume_target(
     {
         Ok(pty_id) => {
             tracing::info!(
-                session_id = %rec.session_id,
+                pubkey = %rec.pubkey,
                 slug = %rec.agent_slug,
                 child = %op.child_h,
                 pty_id = %pty_id,
@@ -185,7 +185,7 @@ async fn resume_target(
         }
         Err(e) => {
             tracing::error!(
-                session_id = %rec.session_id,
+                pubkey = %rec.pubkey,
                 slug = %rec.agent_slug,
                 child = %op.child_h,
                 error = %e,
