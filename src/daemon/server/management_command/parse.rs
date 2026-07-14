@@ -25,13 +25,14 @@ pub(super) fn parse_command(body: &str) -> Result<ManagementCommand> {
             Ok(ManagementCommand::ListSessions { all_channels: true })
         }
         [verb, id] if eq(verb, "kill") => {
-            let session_id = id.strip_prefix('$').unwrap_or(id).trim();
-            if session_id.is_empty() {
-                anyhow::bail!("kill requires a session id");
+            let selector = id.trim();
+            if selector.is_empty() {
+                anyhow::bail!("kill requires a session npub, hex pubkey, or current handle");
             }
-            Ok(ManagementCommand::Kill {
-                session_id: session_id.to_string(),
-            })
+            if selector.starts_with("te-") || selector.starts_with('$') {
+                anyhow::bail!("raw session ids are internal; use the npub, hex pubkey, or handle");
+            }
+            Ok(ManagementCommand::Kill { selector: selector.to_string() })
         }
         [verb, channel] if eq(verb, "archive") => {
             let channel = channel
@@ -48,7 +49,7 @@ pub(super) fn parse_command(body: &str) -> Result<ManagementCommand> {
         }
         [] => anyhow::bail!("empty management command"),
         _ => anyhow::bail!(
-            "unsupported management command; supported: add agent[@backend], list agents, list sessions, list all sessions, kill <session-id>, archive #channel"
+            "unsupported management command; supported: add agent[@backend], list agents, list sessions, list all sessions, kill <npub|hex|handle>, archive #channel"
         ),
     }
 }
@@ -164,7 +165,7 @@ mod tests {
             "list agents",
             "list sessions",
             "list all sessions",
-            "kill te-abc123",
+            "kill quill-codex",
             "archive #planning",
             // leading inline npub mention (the rendered p-tag) is stripped:
             "npub1qv7resh7tczrrrgwj2t0pwq5jp9r5t86l73gsnlfldfdsqqle2yqnqjwjs add coder",
@@ -179,8 +180,10 @@ mod tests {
         // First word is a verb → command-shaped (so it reaches the handler and
         // draws ONE explicit error), even though parse_command rejects it. The
         // loop is still broken because the agent's prose follow-up is not shaped.
-        assert!(is_command_shaped("kill")); // missing session id
+        assert!(is_command_shaped("kill")); // missing public selector
         assert!(parse_command("kill").is_err());
+        assert!(parse_command("kill te-abc123").is_err());
+        assert!(parse_command("kill $abc123").is_err());
         assert!(is_command_shaped("add coder@")); // malformed spec
         assert!(parse_command("add coder@").is_err());
     }
@@ -215,9 +218,9 @@ mod tests {
             ManagementCommand::ListSessions { all_channels: true }
         );
         assert_eq!(
-            parse_command("kill $abc123").unwrap(),
+            parse_command("kill quill-codex").unwrap(),
             ManagementCommand::Kill {
-                session_id: "abc123".to_string()
+                selector: "quill-codex".to_string()
             }
         );
         assert_eq!(

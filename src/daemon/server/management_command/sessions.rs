@@ -30,7 +30,7 @@ pub(super) fn list_sessions(state: &Arc<DaemonState>, scope_root: Option<&str>) 
         lines.push(format!(
             "- @{} ({}) [{}] {}: {} (last active {})",
             row.agent,
-            super::short(&row.session_id),
+            row.npub,
             row.channels.into_iter().collect::<Vec<_>>().join(", "),
             state_word,
             text,
@@ -42,7 +42,8 @@ pub(super) fn list_sessions(state: &Arc<DaemonState>, scope_root: Option<&str>) 
 
 #[derive(Debug, Clone)]
 struct SessionSummary {
-    session_id: String,
+    pubkey: String,
+    npub: String,
     agent: String,
     channels: BTreeSet<String>,
     title: String,
@@ -63,7 +64,7 @@ fn session_summaries_from_store(
         .map(|c| (c.channel_h.clone(), c))
         .collect::<HashMap<_, _>>();
     let scope = scope_root.map(|root| channel_subtree(&channels, root));
-    let mut rows: BTreeMap<(String, String), SessionSummary> = BTreeMap::new();
+    let mut rows: BTreeMap<String, SessionSummary> = BTreeMap::new();
     for status in store.list_status_sessions(None, None)? {
         if status.expiration < now {
             continue;
@@ -76,7 +77,7 @@ fn session_summaries_from_store(
         let label = channel_label_from_map(&channels, &status.channel_h);
         let profile = store.get_profile(&status.pubkey).ok().flatten();
         let agent = session_handle(&status, profile.as_ref());
-        let key = (status.pubkey.clone(), status.session_id.clone());
+        let key = status.pubkey.clone();
         rows.entry(key)
             .and_modify(|row| {
                 row.channels.insert(label.clone());
@@ -90,7 +91,9 @@ fn session_summaries_from_store(
             })
             .or_insert_with(|| {
                 let mut row = SessionSummary {
-                    session_id: status.session_id.clone(),
+                    pubkey: status.pubkey.clone(),
+                    npub: crate::idref::npub(&status.pubkey)
+                        .unwrap_or_else(|| status.pubkey.clone()),
                     agent,
                     channels: BTreeSet::new(),
                     title: status.title.clone(),
@@ -108,7 +111,7 @@ fn session_summaries_from_store(
         b.last_seen
             .cmp(&a.last_seen)
             .then_with(|| a.agent.cmp(&b.agent))
-            .then_with(|| a.session_id.cmp(&b.session_id))
+            .then_with(|| a.pubkey.cmp(&b.pubkey))
     });
     Ok(out)
 }
@@ -222,6 +225,7 @@ fn age(ts: u64, now: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nostr_sdk::prelude::Keys;
 
     fn status(pubkey: &str, session: &str, channel: &str, seen: u64) -> Status {
         Status {
@@ -241,6 +245,8 @@ mod tests {
     #[test]
     fn scoped_session_list_includes_descendants_and_dedups_sessions() {
         let store = Store::open_memory().unwrap();
+        let pk1 = Keys::generate().public_key().to_hex();
+        let pk2 = Keys::generate().public_key().to_hex();
         store.upsert_channel("root", "proj", "", "", 1).unwrap();
         store
             .upsert_channel("child", "planning", "", "root", 2)
@@ -250,21 +256,22 @@ mod tests {
             .unwrap();
         store.upsert_channel("other", "other", "", "", 4).unwrap();
         store
-            .upsert_profile("pk1", "coder@laptop", "coder", "laptop", false, 1)
+            .upsert_profile(&pk1, "coder@laptop", "coder", "laptop", false, 1)
             .unwrap();
         store
-            .upsert_status(&status("pk1", "s1", "root", 100))
+            .upsert_status(&status(&pk1, "private-run-a", "root", 100))
             .unwrap();
         store
-            .upsert_status(&status("pk1", "s1", "grandchild", 101))
+            .upsert_status(&status(&pk1, "private-run-b", "grandchild", 101))
             .unwrap();
         store
-            .upsert_status(&status("pk2", "s2", "other", 102))
+            .upsert_status(&status(&pk2, "other-run", "other", 102))
             .unwrap();
 
         let rows = session_summaries_from_store(&store, Some("root"), 110).unwrap();
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].session_id, "s1");
+        assert_eq!(rows[0].pubkey, pk1);
+        assert_eq!(rows[0].npub, crate::idref::npub(&pk1).unwrap());
         assert_eq!(
             rows[0].channels,
             BTreeSet::from(["proj".to_string(), "review".to_string()])

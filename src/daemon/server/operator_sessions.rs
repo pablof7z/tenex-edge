@@ -62,8 +62,11 @@ fn project_sessions(
         } else {
             "harness"
         };
+        let npub = crate::idref::npub(&rec.agent_pubkey)
+            .with_context(|| format!("invalid session pubkey {}", rec.agent_pubkey))?;
         rows.push(serde_json::json!({
-            "session_id": rec.session_id,
+            "pubkey": rec.agent_pubkey.clone(),
+            "npub": npub,
             "handle": identity.display_slug(),
             "agent": rec.agent_slug,
             "title": rec.title,
@@ -105,7 +108,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn projection_starts_from_alive_local_sessions_and_keeps_non_pty_rows() {
+    fn projection_exposes_public_identity_without_the_private_runtime_id() {
+        use nostr_sdk::prelude::Keys;
+
         let store = Store::open_memory().unwrap();
         store
             .upsert_channel("workspace", "tenex-edge", "", "", 1)
@@ -114,12 +119,13 @@ mod tests {
             .upsert_channel("room", "review", "", "workspace", 2)
             .unwrap();
         store.upsert_workspace("workspace", "/repo", 3).unwrap();
+        let pubkey = Keys::generate().public_key().to_hex();
         let id = store
             .register_session(&crate::state::RegisterSession {
                 harness: "codex".into(),
                 external_id_kind: "harness_session".into(),
                 external_id: "native-1".into(),
-                agent_pubkey: "pk-agent".into(),
+                agent_pubkey: pubkey.clone(),
                 agent_slug: "codex".into(),
                 channel_h: "room".into(),
                 child_pid: Some(42),
@@ -131,7 +137,12 @@ mod tests {
 
         let rows = project_sessions(&store, "laptop", &HashMap::new()).unwrap();
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0]["session_id"], id);
+        assert_eq!(rows[0]["pubkey"], pubkey);
+        assert_eq!(
+            rows[0]["npub"],
+            crate::idref::npub(&pubkey).expect("valid npub")
+        );
+        assert!(rows[0].get("session_id").is_none());
         assert_eq!(rows[0]["workspace"]["id"], "workspace");
         assert_eq!(rows[0]["workspace"]["path"], "/repo");
         assert_eq!(rows[0]["channels"][0]["name"], "review");

@@ -63,7 +63,13 @@ pub(in crate::daemon::server) async fn rpc_session_kill(
 ) -> Result<serde_json::Value> {
     let p: SessionKillParams =
         serde_json::from_value(params.clone()).context("parsing session_kill params")?;
-    let Some(rec) = state.with_store(|s| s.get_session(&p.session).ok().flatten()) else {
+    // Operator callers select by public identity. Self/lifecycle callers own a
+    // typed runtime locator, which remains a private fallback until the run
+    // spine is separated from session identity.
+    let public = state.with_store(|s| super::resolution::resolve_public_session(s, &p.session))?;
+    let Some(rec) =
+        public.or_else(|| state.with_store(|s| s.get_session(&p.session).ok().flatten()))
+    else {
         return Ok(serde_json::json!({
             "killed": false,
             "ended": false,

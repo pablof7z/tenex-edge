@@ -1,6 +1,9 @@
 use super::*;
 use crate::state::{Session, Store};
 
+mod public_session;
+pub(super) use public_session::resolve as resolve_public_session;
+
 /// Everything a caller knows about "which session am I" — one envelope, resolved
 /// by ONE function, so every in-session command identifies its session the same
 /// way every time.

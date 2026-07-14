@@ -69,15 +69,13 @@ fn session_kill_stops_pty_session_and_marks_offline() {
         v["pty_id"].as_str().unwrap().to_string()
     });
     let rec = wait_for_alive(&home, agent, &channel);
+    let selector = tenex_edge::idref::npub(&rec.agent_pubkey).expect("session npub");
 
     let killed = rt().block_on(async {
         let mut c = Client::connect_or_spawn().await.expect("connect");
-        c.call(
-            "session_kill",
-            serde_json::json!({ "session": &rec.session_id }),
-        )
-        .await
-        .expect("session_kill")
+        c.call("session_kill", serde_json::json!({ "session": &selector }))
+            .await
+            .expect("session_kill")
     });
     assert_eq!(killed["killed"].as_bool(), Some(true));
     assert_eq!(killed["ended"].as_bool(), Some(true));

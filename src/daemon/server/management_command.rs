@@ -17,7 +17,7 @@ enum ManagementCommand {
     Add { spec: String },
     ListAgents,
     ListSessions { all_channels: bool },
-    Kill { session_id: String },
+    Kill { selector: String },
     Archive { channel_ref: String },
 }
 
@@ -101,7 +101,7 @@ async fn execute_claimed(
         ManagementCommand::ListSessions { all_channels } => {
             sessions::list_sessions(state, (!all_channels).then_some(channel_h))
         }
-        ManagementCommand::Kill { session_id } => kill_session(state, &session_id).await,
+        ManagementCommand::Kill { selector } => kill_session(state, &selector).await,
         ManagementCommand::Archive { channel_ref } => {
             archive_named_channel(state, channel_h, &channel_ref).await
         }
@@ -123,8 +123,19 @@ async fn add_agent(state: &Arc<DaemonState>, channel_h: &str, spec: &str) -> Res
     ))
 }
 
-async fn kill_session(state: &Arc<DaemonState>, session_id: &str) -> Result<String> {
-    let rec = find_live_local_session(state, session_id)?;
+async fn kill_session(state: &Arc<DaemonState>, selector: &str) -> Result<String> {
+    let rec = state
+        .with_store(|s| super::resolution::resolve_public_session(s, selector))?
+        .with_context(|| {
+            format!("no local session matching {selector:?}; use its npub or current handle")
+        })?;
+    if !rec.alive {
+        anyhow::bail!("session {selector:?} is not running");
+    }
+    let public_label = state
+        .with_store(|s| s.handle_for_pubkey(&rec.agent_pubkey))?
+        .or_else(|| crate::idref::npub(&rec.agent_pubkey))
+        .unwrap_or_else(|| rec.agent_pubkey.clone());
     let stop_note = stop_local_process(state, &rec).await;
     let _ = super::rpc_session_end(
         state,
@@ -134,16 +145,9 @@ async fn kill_session(state: &Arc<DaemonState>, session_id: &str) -> Result<Stri
     )
     .await?;
     match stop_note {
-        Ok(note) => Ok(format!(
-            "mgmt ok: killed {} {}{}",
-            short(&rec.session_id),
-            rec.agent_slug,
-            note
-        )),
+        Ok(note) => Ok(format!("mgmt ok: killed @{public_label}{note}")),
         Err(e) => Ok(format!(
-            "mgmt ok: ended {} {}, but process stop failed: {e:#}",
-            short(&rec.session_id),
-            rec.agent_slug
+            "mgmt ok: ended @{public_label}, but process stop failed: {e:#}",
         )),
     }
 }
@@ -216,30 +220,6 @@ async fn publish_reply(
         .publish_chat_checked(&chat, &keys, &record)
         .await?;
     Ok(())
-}
-
-fn find_live_local_session(
-    state: &Arc<DaemonState>,
-    id_or_prefix: &str,
-) -> Result<crate::state::Session> {
-    state.with_store(|s| {
-        if let Some(rec) = s.get_session(id_or_prefix)? {
-            if rec.alive {
-                return Ok(rec);
-            }
-            anyhow::bail!("session {} is not running", rec.session_id);
-        }
-        let matches: Vec<_> = s
-            .list_alive_sessions()?
-            .into_iter()
-            .filter(|rec| rec.session_id.starts_with(id_or_prefix))
-            .collect();
-        match matches.as_slice() {
-            [one] => Ok(one.clone()),
-            [] => anyhow::bail!("no running local session matching {id_or_prefix:?}"),
-            _ => anyhow::bail!("session id {id_or_prefix:?} is ambiguous; use more characters"),
-        }
-    })
 }
 
 async fn stop_local_process(
