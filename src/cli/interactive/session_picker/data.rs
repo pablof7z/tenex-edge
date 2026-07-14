@@ -2,22 +2,33 @@ use anyhow::Result;
 use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(super) struct WorkspaceGroup {
+    pub(super) id: String,
+    pub(super) name: String,
+    pub(super) path: Option<String>,
+    pub(super) channels: Vec<ChannelRef>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(super) struct ChannelRef {
+    pub(super) id: String,
+    pub(super) name: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(super) struct SessionRow {
     pub(super) pubkey: String,
     pub(super) npub: String,
     pub(super) handle: String,
     pub(super) agent: String,
-    pub(super) workspace: String,
-    pub(super) workspace_id: String,
-    pub(super) channels: Vec<String>,
-    pub(super) channel_ids: Vec<String>,
+    pub(super) workspaces: Vec<WorkspaceGroup>,
     pub(super) title: String,
     pub(super) activity: String,
     pub(super) busy: bool,
     pub(super) last_seen: u64,
     pub(super) host: String,
     pub(super) harness: String,
-    pub(super) transport: String,
+    pub(super) pty_id: Option<String>,
     pub(super) pty_live: bool,
     pub(super) cwd: Option<String>,
 }
@@ -27,25 +38,33 @@ impl SessionRow {
         if input.is_empty() {
             return Some(0);
         }
-        let channels = self.channels.join(" ");
-        let channel_ids = self.channel_ids.join(" ");
-        let endpoint = if self.pty_live { "pty" } else { "headless" };
+        let workspaces = self
+            .workspaces
+            .iter()
+            .flat_map(|workspace| {
+                std::iter::once(workspace.id.as_str())
+                    .chain(std::iter::once(workspace.name.as_str()))
+                    .chain(workspace.path.as_deref())
+                    .chain(
+                        workspace
+                            .channels
+                            .iter()
+                            .flat_map(|channel| [channel.id.as_str(), channel.name.as_str()]),
+                    )
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
         [
             (self.handle.as_str(), 4_000),
             (self.agent.as_str(), 3_000),
             (self.title.as_str(), 1_000),
             (self.activity.as_str(), 1_000),
-            (self.workspace.as_str(), 2_000),
-            (self.workspace_id.as_str(), 1_500),
-            (channels.as_str(), 1_500),
-            (channel_ids.as_str(), 1_000),
+            (workspaces.as_str(), 2_000),
             (self.host.as_str(), 500),
             (self.harness.as_str(), 500),
-            (self.transport.as_str(), 500),
             (self.cwd.as_deref().unwrap_or_default(), 500),
             (self.npub.as_str(), 750),
             (self.pubkey.as_str(), 250),
-            (endpoint, 250),
         ]
         .into_iter()
         .filter_map(|(field, priority)| score_field(input, field, priority))
@@ -87,42 +106,60 @@ fn parse_row(value: &serde_json::Value) -> Option<SessionRow> {
     let pubkey = value["pubkey"].as_str()?.to_string();
     let npub = value["npub"].as_str()?.to_string();
     let endpoint = value.get("endpoint").filter(|value| !value.is_null());
-    let channels = value["channels"]
+    let workspaces = value["workspaces"]
         .as_array()
         .map(Vec::as_slice)
-        .unwrap_or(&[]);
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(parse_workspace)
+        .collect::<Vec<_>>();
+    let cwd = endpoint
+        .and_then(|endpoint| endpoint["cwd"].as_str())
+        .map(str::to_string)
+        .or_else(|| {
+            workspaces
+                .iter()
+                .find_map(|workspace| workspace.path.clone())
+        });
     Some(SessionRow {
         pubkey,
         npub,
         handle: value["handle"].as_str().unwrap_or("?").to_string(),
         agent: value["agent"].as_str().unwrap_or("?").to_string(),
-        workspace: value["workspace"]["name"]
-            .as_str()
-            .unwrap_or("")
-            .to_string(),
-        workspace_id: value["workspace"]["id"].as_str().unwrap_or("").to_string(),
-        channels: channels
-            .iter()
-            .filter_map(|channel| channel["name"].as_str().map(str::to_string))
-            .collect(),
-        channel_ids: channels
-            .iter()
-            .filter_map(|channel| channel["id"].as_str().map(str::to_string))
-            .collect(),
+        workspaces,
         title: value["title"].as_str().unwrap_or("").to_string(),
         activity: value["activity"].as_str().unwrap_or("").to_string(),
         busy: value["busy"].as_bool().unwrap_or(false),
         last_seen: value["last_seen"].as_u64().unwrap_or(0),
         host: value["host"].as_str().unwrap_or("").to_string(),
         harness: value["harness"].as_str().unwrap_or("").to_string(),
-        transport: value["transport"].as_str().unwrap_or("").to_string(),
+        pty_id: endpoint
+            .and_then(|endpoint| endpoint["pty_id"].as_str())
+            .map(str::to_string),
         pty_live: endpoint
             .and_then(|endpoint| endpoint["live"].as_bool())
             .unwrap_or(false),
-        cwd: endpoint
-            .and_then(|endpoint| endpoint["cwd"].as_str())
-            .or_else(|| value["workspace"]["path"].as_str())
-            .map(str::to_string),
+        cwd,
+    })
+}
+
+fn parse_workspace(value: &serde_json::Value) -> Option<WorkspaceGroup> {
+    Some(WorkspaceGroup {
+        id: value["id"].as_str()?.to_string(),
+        name: value["name"].as_str().unwrap_or("").to_string(),
+        path: value["path"].as_str().map(str::to_string),
+        channels: value["channels"]
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+            .iter()
+            .filter_map(|channel| {
+                Some(ChannelRef {
+                    id: channel["id"].as_str()?.to_string(),
+                    name: channel["name"].as_str().unwrap_or("").to_string(),
+                })
+            })
+            .collect(),
     })
 }
 
@@ -131,23 +168,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_and_formats_non_pty_session() {
+    fn parses_grouped_workspace_and_attach_endpoint() {
         let value = serde_json::json!({
             "sessions": [{
                 "pubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                 "npub": "npub1publicselector",
                 "handle": "opal-codex",
                 "agent": "codex",
-                "workspace": {"id": "root", "name": "tenex-edge", "path": "/repo"},
-                "channels": [{"id": "root", "name": "tenex-edge"}],
+                "workspaces": [{
+                    "id": "root", "name": "tenex-edge", "path": "/repo",
+                    "channels": [{"id": "root", "name": "tenex-edge"}]
+                }],
                 "title": "shipping the picker",
                 "activity": "running tests",
                 "busy": true,
                 "last_seen": 12,
                 "host": "laptop",
                 "harness": "codex",
-                "transport": "harness",
-                "endpoint": null
+                "endpoint": {"pty_id": "pty-1", "live": true, "cwd": "/repo"}
             }]
         });
 
@@ -163,6 +201,8 @@ mod tests {
         assert!(rows[0].busy);
         assert!(rows[0].fuzzy_score("npub1public").is_some());
         assert!(rows[0].fuzzy_score("repo").is_some());
-        assert!(rows[0].fuzzy_score("headless").is_some());
+        assert_eq!(rows[0].workspaces[0].name, "tenex-edge");
+        assert_eq!(rows[0].pty_id.as_deref(), Some("pty-1"));
+        assert!(rows[0].pty_live);
     }
 }

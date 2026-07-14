@@ -32,10 +32,7 @@ pub(super) async fn launch(request: PtyLaunchRequest) -> Result<()> {
 
     eprintln!("[tenex-edge pty] session: {pty_id}");
     eprintln!("[tenex-edge pty] detach: close this attach terminal");
-    eprintln!(
-        "[tenex-edge pty] reattach: tenex-edge pty attach {}",
-        pty_id
-    );
+    eprintln!("[tenex-edge pty] reattach: tenex-edge sessions");
     if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
         eprintln!("[tenex-edge pty] attach skipped: not running on a TTY");
         return Ok(());

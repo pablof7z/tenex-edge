@@ -7,6 +7,9 @@ use ratatui::{
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap},
 };
 
+mod workspace;
+use workspace::pane_title;
+
 pub(super) struct HookTailState {
     pub(super) root_filters: std::collections::BTreeSet<String>,
     pub(super) session_filter: Option<String>,
@@ -35,18 +38,8 @@ pub(super) fn render_hook_tail(
         ])
         .split(area);
 
-    let workspace_label: String = if state.root_filters.is_empty() {
-        "*".to_string()
-    } else {
-        state
-            .root_filters
-            .iter()
-            .cloned()
-            .collect::<Vec<_>>()
-            .join(",")
-    };
     let session = state.session_filter.as_deref().unwrap_or("*");
-    let title = Line::from(vec![
+    let mut title = vec![
         Span::styled(
             "tenex-edge debug hook-tail",
             Style::default()
@@ -54,7 +47,21 @@ pub(super) fn render_hook_tail(
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw("  workspace="),
-        Span::styled(workspace_label, Style::default().fg(Color::Yellow)),
+    ];
+    if state.root_filters.is_empty() {
+        title.push(Span::raw("*"));
+    } else {
+        for (index, root) in state.root_filters.iter().enumerate() {
+            if index > 0 {
+                title.push(Span::raw(","));
+            }
+            title.push(Span::styled(
+                root.clone(),
+                Style::default().fg(crate::console_style::workspace_ratatui_color(root)),
+            ));
+        }
+    }
+    title.extend([
         Span::raw("  session="),
         Span::styled(session, Style::default().fg(Color::Yellow)),
         Span::raw("  panes="),
@@ -63,7 +70,7 @@ pub(super) fn render_hook_tail(
             Style::default().fg(Color::Yellow),
         ),
     ]);
-    f.render_widget(Paragraph::new(title), chunks[0]);
+    f.render_widget(Paragraph::new(Line::from(title)), chunks[0]);
 
     if state.focus_mode {
         render_focus(f, chunks[1], snapshot, state);
@@ -194,16 +201,24 @@ fn render_root_popup(
             let checked = state.root_filters.contains(p);
             let focused = i == popup.cursor;
             let prefix = if checked { " [x] " } else { " [ ] " };
-            let style = if focused {
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD)
-            } else if checked {
-                Style::default().fg(Color::Green)
-            } else {
-                Style::default().fg(Color::White)
-            };
-            ListItem::new(format!("{}{}", prefix, p)).style(style)
+            let root_style = Style::default()
+                .fg(crate::console_style::workspace_ratatui_color(p))
+                .add_modifier(if focused {
+                    Modifier::BOLD
+                } else {
+                    Modifier::empty()
+                });
+            ListItem::new(Line::from(vec![
+                Span::styled(
+                    prefix,
+                    Style::default().fg(if checked {
+                        Color::Green
+                    } else {
+                        Color::DarkGray
+                    }),
+                ),
+                Span::styled(p.clone(), root_style),
+            ]))
         })
         .collect();
 
@@ -293,21 +308,6 @@ fn render_empty(f: &mut ratatui::Frame, area: Rect, snapshot: &HookTailSnapshot)
     );
 }
 
-fn pane_title(pane: &SessionPane) -> String {
-    let session_slug = if pane.agent.is_empty() {
-        pane.short.as_str()
-    } else {
-        pane.agent.as_str()
-    };
-    let workspace = pane.root.as_str();
-    let channels = if pane.channels.is_empty() {
-        pane.root.clone()
-    } else {
-        pane.channels.join(", ")
-    };
-    format!("{session_slug} / {workspace} / {channels}")
-}
-
 fn render_pane_grid(f: &mut ratatui::Frame, area: Rect, pane: &SessionPane, focused: bool) {
     let border_color = if focused {
         Color::Yellow
@@ -352,7 +352,8 @@ fn render_pane_focus(f: &mut ratatui::Frame, area: Rect, pane: &SessionPane, sel
         .take(inner_h)
         .map(|(i, l)| render_timeline_line(l, base_ts, i == selected))
         .collect();
-    let title = format!("{} ({}/{})", pane_title(pane), selected + 1, n);
+    let mut title = pane_title(pane);
+    title.push_span(Span::raw(format!(" ({}/{})", selected + 1, n)));
     f.render_widget(
         Paragraph::new(lines).block(
             Block::default()
@@ -461,19 +462,5 @@ fn even_constraints(n: usize) -> Vec<Constraint> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn pane_title_uses_session_workspace_and_active_channels() {
-        let pane = SessionPane {
-            short: "6a4ddbe6".into(),
-            root: "aaa".into(),
-            agent: "pearl-cliff-395-haiku".into(),
-            channels: vec!["aaa".into(), "dev".into()],
-            ..SessionPane::default()
-        };
-
-        assert_eq!(pane_title(&pane), "pearl-cliff-395-haiku / aaa / aaa, dev");
-    }
-}
+#[path = "render/tests.rs"]
+mod tests;

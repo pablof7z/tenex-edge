@@ -12,7 +12,12 @@ pub(super) fn append_other_roots(out: &mut String, other_roots: &[OtherRootSumma
         style("Other workspaces", color, HumanStyle::Header)
     );
     for root in other_roots {
-        let name = style(&root.root, color, HumanStyle::Root);
+        let painted = crate::console_style::paint_workspace(&root.root, &root.root, color);
+        let name = if color {
+            painted.bold().to_string()
+        } else {
+            painted
+        };
         let agents = root
             .agents
             .iter()
@@ -50,7 +55,6 @@ pub(super) fn append_other_roots(out: &mut String, other_roots: &[OtherRootSumma
 enum HumanStyle {
     Agent,
     Header,
-    Root,
 }
 
 fn style(text: &str, color: bool, style: HumanStyle) -> String {
@@ -60,7 +64,6 @@ fn style(text: &str, color: bool, style: HumanStyle) -> String {
     match style {
         HumanStyle::Agent => text.cyan().to_string(),
         HumanStyle::Header => text.bold().to_string(),
-        HumanStyle::Root => text.blue().bold().to_string(),
     }
 }
 

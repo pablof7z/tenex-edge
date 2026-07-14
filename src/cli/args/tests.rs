@@ -264,31 +264,21 @@ fn mcp_http_command_parses() {
 }
 
 #[test]
-fn mgmt_session_list_parses() {
-    let cli = Cli::try_parse_from(["tenex-edge", "mgmt", "session", "list"]).unwrap();
-    match cli.cmd {
-        Cmd::Mgmt {
-            action:
-                MgmtAction::Session {
-                    action: MgmtSessionAction::List,
-                },
-        } => {}
-        _ => panic!("expected mgmt session list command"),
-    }
+fn sessions_parses() {
+    let cli = Cli::try_parse_from(["tenex-edge", "sessions"]).unwrap();
+    assert!(matches!(cli.cmd, Cmd::Sessions));
 }
 
 #[test]
-fn mgmt_session_list_rejects_removed_refresh_flag() {
-    let err = parse_err(&[
-        "tenex-edge",
-        "mgmt",
-        "session",
-        "list",
-        "--refresh-secs",
-        "3",
-    ]);
-
-    assert_eq!(err.kind(), ErrorKind::UnknownArgument);
+fn removed_session_and_pty_command_trees_stay_unavailable() {
+    assert_eq!(
+        parse_err(&["tenex-edge", "mgmt", "session", "list"]).kind(),
+        ErrorKind::InvalidSubcommand
+    );
+    assert_eq!(
+        parse_err(&["tenex-edge", "pty", "list"]).kind(),
+        ErrorKind::InvalidSubcommand
+    );
 }
 
 #[test]
@@ -305,6 +295,10 @@ fn contextual_help_hides_who_from_agents() {
         .to_string();
 
     assert!(!help.contains("  who"), "agent help exposed who:\n{help}");
+    assert!(
+        !help.contains("  sessions"),
+        "agent help exposed sessions:\n{help}"
+    );
 }
 
 #[test]
@@ -314,4 +308,8 @@ fn contextual_help_shows_who_to_humans() {
         .to_string();
 
     assert!(help.contains("  who"), "human help omitted who:\n{help}");
+    assert!(
+        help.contains("  sessions"),
+        "human help omitted sessions:\n{help}"
+    );
 }

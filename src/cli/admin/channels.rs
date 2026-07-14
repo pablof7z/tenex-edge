@@ -141,7 +141,8 @@ pub async fn channels(action: ChannelAction) -> Result<()> {
         ChannelAction::Init { force } => {
             let cwd = std::env::current_dir().unwrap_or_default();
             let (slug, path) = crate::workspace::register_workspace(&cwd, force)?;
-            println!("initialized workspace {slug} at {}", path.display());
+            let workspace = crate::console_style::paint_stdout_workspace(&slug, &slug);
+            println!("initialized workspace {workspace} at {}", path.display());
         }
         // `--all-workspaces`: every top-level workspace on the relay.
         ChannelAction::List {
@@ -164,11 +165,13 @@ pub async fn channels(action: ChannelAction) -> Result<()> {
                 .unwrap_or(0);
             for p in workspaces {
                 let slug = p["slug"].as_str().unwrap_or("");
+                let padded = format!("{slug:<max_slug$}");
+                let slug = crate::console_style::paint_stdout_workspace(&padded, slug);
                 let about = p["about"].as_str().unwrap_or("");
                 if about.is_empty() {
                     println!("{slug}");
                 } else {
-                    println!("{slug:<max_slug$}  — {about}");
+                    println!("{slug}  — {about}");
                 }
             }
         }
@@ -180,7 +183,8 @@ pub async fn channels(action: ChannelAction) -> Result<()> {
             let rooms = v["rooms"].as_array().map(|a| a.as_slice()).unwrap_or(&[]);
             // Root of the tree is the root itself. Colorize ONLY on a real
             // terminal so piped output stays literal-`^slug$`-matchable.
-            println!("{}", parent.if_supports_color(Stdout, |s| s.bold()));
+            let parent_label = crate::console_style::paint_stdout_workspace(&parent, &parent);
+            println!("{}", parent_label.if_supports_color(Stdout, |s| s.bold()));
             if rooms.is_empty() {
                 println!("  (no channels)");
                 return Ok(());

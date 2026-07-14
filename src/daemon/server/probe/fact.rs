@@ -98,5 +98,6 @@ fn status_drive_kind(drive: &StatusDrive) -> &'static str {
         StatusDrive::ChannelsChanged { .. } => "StatusDrive::ChannelsChanged",
         StatusDrive::Tick { .. } => "StatusDrive::Tick",
         StatusDrive::SessionEnded { .. } => "StatusDrive::SessionEnded",
+        StatusDrive::SessionRevoked { .. } => "StatusDrive::SessionRevoked",
     }
 }

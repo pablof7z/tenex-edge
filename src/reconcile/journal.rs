@@ -22,6 +22,9 @@ use super::delivery::DeliveryScanFact;
 use super::session_start_facts::{SessionStartFailedFact, SessionStartRequestFact};
 use super::subscriptions::CoverageSnapshot;
 
+mod hook_context;
+pub use hook_context::HookContextRenderFact;
+
 /// A monotonic host timestamp (unix seconds), as tenex-edge already uses for
 /// `enqueued_at`, `turn_started_at`, `last_seen`, etc.
 pub type Timestamp = u64;
@@ -68,6 +71,12 @@ pub enum StatusDrive {
         session_id: String,
         at: Timestamp,
     },
+    /// An operator deliberately destroyed the session and requested immediate
+    /// public disappearance instead of the ordinary ended-session TTL.
+    SessionRevoked {
+        session_id: String,
+        at: Timestamp,
+    },
 }
 
 impl StatusDrive {
@@ -80,7 +89,8 @@ impl StatusDrive {
             | Self::TitleSet { at, .. }
             | Self::ChannelsChanged { at, .. }
             | Self::Tick { at, .. }
-            | Self::SessionEnded { at, .. } => *at,
+            | Self::SessionEnded { at, .. }
+            | Self::SessionRevoked { at, .. } => *at,
         }
     }
 }
@@ -100,20 +110,6 @@ pub struct StatusSessionStartedArgs {
     pub dispatch_event: Option<String>,
     pub at: Timestamp,
 }
-/// A frozen hook-context render input. `inputs_json` is the serde form of
-/// `fabric_context::ViewInputs`; it remains JSON here so the public `InputFact`
-/// type does not expose that private render-capture structure as API.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HookContextRenderFact {
-    pub session_id: String,
-    pub hook_kind: String,
-    pub cursor: i64,
-    pub now: i64,
-    pub force: bool,
-    pub emitted_text_hash: Option<String>,
-    pub inputs_json: serde_json::Value,
-}
-
 /// One canonical world-fact, appended to the input journal by the host.
 /// Serde keeps facts persistable/replayable in tests and capsules.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

@@ -145,6 +145,11 @@ fn stage_drive(
                 tx.set_input(nodes.arm, end_arm(*at, refresh_secs))?;
             }
         }
+        StatusDrive::SessionRevoked { session_id, .. } => {
+            if let Some(nodes) = sessions.get(session_id) {
+                tx.close_scope(nodes.scope)?;
+            }
+        }
     }
     Ok(())
 }

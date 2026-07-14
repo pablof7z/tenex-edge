@@ -3,12 +3,13 @@ use crate::cli::interactive::session_picker::data::SessionRow;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{backend::TestBackend, layout::Rect, Terminal, TerminalOptions, Viewport};
 
-fn choice(handle: &str, activity: &str) -> SessionChoice {
+fn choice(handle: &str, activity: &str, attachable: bool) -> SessionChoice {
     SessionChoice {
-        label: format!("@{handle}"),
         row: SessionRow {
             handle: handle.into(),
             activity: activity.into(),
+            pty_id: attachable.then(|| format!("pty-{handle}")),
+            pty_live: attachable,
             ..SessionRow::default()
         },
     }
@@ -19,26 +20,41 @@ fn key(code: KeyCode) -> KeyEvent {
 }
 
 #[test]
-fn viewport_is_exactly_half_height_when_the_picker_can_fit() {
-    assert_eq!(viewport_height(50), 25);
-    assert_eq!(viewport_height(31), 15);
-    assert_eq!(viewport_height(7), 7);
+fn picker_uses_the_terminal_height_and_counts_two_line_rows() {
+    assert_eq!(viewport_height(50), 50);
+    assert_eq!(viewport_height(1), 1);
+    assert_eq!(option_rows(12), 5);
+}
+
+#[test]
+fn enter_attaches_only_live_terminal_sessions() {
+    let mut attachable = PickerState::new(vec![choice("opal", "", true)]);
+    assert_eq!(
+        attachable.handle_key(key(KeyCode::Enter), 10),
+        Some(PickerExit::Attach(0))
+    );
+
+    let mut headless = PickerState::new(vec![choice("opal", "", false)]);
+    assert_eq!(headless.handle_key(key(KeyCode::Enter), 10), None);
+    assert!(headless.notice.as_deref().unwrap().contains("no live"));
+}
+
+#[test]
+fn shift_k_kills_the_highlighted_session_without_selection_state() {
+    let mut state = PickerState::new(vec![choice("one", "", true), choice("two", "", false)]);
+    state.handle_key(key(KeyCode::Down), 10);
+    let shift_k = KeyEvent::new(KeyCode::Char('K'), KeyModifiers::SHIFT);
+    assert_eq!(state.handle_key(shift_k, 10), Some(PickerExit::Kill(1)));
 }
 
 #[test]
 fn filtering_uses_hidden_fields_and_prefers_handle_matches() {
-    let cwd = SessionChoice {
-        label: "@opal".into(),
-        row: SessionRow {
-            handle: "opal".into(),
-            cwd: Some("/repo/edge".into()),
-            ..SessionRow::default()
-        },
-    };
+    let mut cwd = choice("opal", "", false);
+    cwd.row.cwd = Some("/repo/edge".into());
     let mut state = PickerState::new(vec![
         cwd,
-        choice("delta-codex", "ordinary work"),
-        choice("other-codex", "reviewing delta output"),
+        choice("delta-codex", "ordinary work", false),
+        choice("other-codex", "reviewing delta output", false),
     ]);
 
     for character in "rpedge".chars() {
@@ -56,23 +72,9 @@ fn filtering_uses_hidden_fields_and_prefers_handle_matches() {
 }
 
 #[test]
-fn selection_controls_never_create_selectable_filler_rows() {
-    let mut state = PickerState::new(vec![choice("one", ""), choice("two", "")]);
-    state.handle_key(key(KeyCode::Char(' ')), 20);
-    assert_eq!(state.selected, BTreeSet::from([0]));
-
-    state.handle_key(key(KeyCode::Right), 20);
-    assert_eq!(state.selected, BTreeSet::from([0, 1]));
-
-    state.handle_key(key(KeyCode::Left), 20);
-    assert!(state.selected.is_empty());
-    assert_eq!(state.window(20).count(), 2);
-}
-
-#[test]
-fn cursor_scrolls_inside_the_reserved_option_area() {
+fn cursor_scrolls_by_logical_two_line_items() {
     let choices = (0..8)
-        .map(|index| choice(&format!("session-{index}"), ""))
+        .map(|index| choice(&format!("session-{index}"), "", false))
         .collect();
     let mut state = PickerState::new(choices);
     for _ in 0..5 {
@@ -84,8 +86,8 @@ fn cursor_scrolls_inside_the_reserved_option_area() {
 }
 
 #[test]
-fn renderer_keeps_unused_option_rows_blank_in_fixed_height_frame() {
-    let state = PickerState::new(vec![choice("one", "working")]);
+fn renderer_gives_every_session_exactly_two_lines() {
+    let state = PickerState::new(vec![choice("one", "current activity", true)]);
     let backend = TestBackend::new(80, 12);
     let mut terminal = Terminal::with_options(
         backend,
@@ -95,11 +97,7 @@ fn renderer_keeps_unused_option_rows_blank_in_fixed_height_frame() {
     )
     .unwrap();
 
-    let completed = terminal
-        .draw(|frame| render::draw(frame, &state, "SESSION  STATE  CURRENT WORK"))
-        .unwrap();
-
-    assert_eq!(completed.area.height, 12);
+    let completed = terminal.draw(|frame| render::draw(frame, &state)).unwrap();
     let rows = completed
         .buffer
         .content()
@@ -107,8 +105,9 @@ fn renderer_keeps_unused_option_rows_blank_in_fixed_height_frame() {
         .map(|cells| cells.iter().map(|cell| cell.symbol()).collect::<String>())
         .collect::<Vec<_>>();
 
-    assert!(rows[0].starts_with("Select sessions to kill"));
-    assert!(rows[2].starts_with("❯ [ ] @one"));
+    assert!(rows[0].starts_with("Sessions"));
+    assert!(rows[1].starts_with("❯ ● @one"));
+    assert!(rows[2].starts_with("    (untitled)"));
     assert!(rows[3..11].iter().all(|row| row.trim().is_empty()));
-    assert!(rows[11].starts_with("type filter"));
+    assert!(rows[11].starts_with("enter attach"));
 }

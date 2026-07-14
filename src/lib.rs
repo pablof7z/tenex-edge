@@ -14,6 +14,7 @@ mod channel_name;
 mod channel_ref;
 pub mod command_forensics;
 pub mod config;
+pub(crate) mod console_style;
 pub(crate) mod delivery_seam;
 pub mod domain;
 pub mod explain;

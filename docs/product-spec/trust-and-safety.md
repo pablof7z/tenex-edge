@@ -53,9 +53,10 @@ later, much harder problem. (Tenet #5.) The household case (spouse's todo agent)
 end; "anyone on the internet's agent" is the far end and may never be fully safe.
 
 Within the fabric, trust is exactly NIP-29 channel membership. A machine's management key
-adds a session's pubkey as a member; a session is removed on clean end and after 10 minutes
-with no heartbeat (TTL prune). There is no durable per-agent or keystore identity conferring
-standing — being trusted in a channel *is* being a current member of it.
+adds a session's pubkey as a member. Ordinary end or heartbeat loss retains a 10-minute grace
+window before TTL pruning; an explicit human operator kill removes the session from every joined
+channel immediately. There is no durable per-agent or keystore identity conferring standing —
+being trusted in a channel *is* being a current member of it.
 
 ### 4. Human-in-the-loop at the boundary, by default
 Crossing the person boundary — especially *answering* a peer or *acting on* a peer's input —

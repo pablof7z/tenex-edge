@@ -2,6 +2,9 @@ use super::engine_lifecycle::pid_alive;
 use super::*;
 use std::collections::BTreeSet;
 
+mod revoke;
+pub(in crate::daemon::server) use revoke::revoke_session_memberships;
+
 /// Grace window after a locally managed session stops. During this window its
 /// channel membership remains and its final idle status stays visible; after the
 /// window, channel memberships are torn down.

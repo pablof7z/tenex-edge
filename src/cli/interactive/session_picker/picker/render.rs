@@ -8,20 +8,19 @@ use ratatui::{
 };
 
 const ACCENT: Color = Color::Indexed(45);
-const SUCCESS: Color = Color::Indexed(78);
 const MUTED: Color = Color::Indexed(245);
-const HELP: &str = "type filter · ↑↓ move · space toggle · → all · ← none · enter · esc";
+const ERROR: Color = Color::Indexed(203);
+const HELP: &str = "enter attach · ⇧K kill · type filter · ↑↓ move · esc";
 
-pub(super) fn draw(frame: &mut Frame<'_>, state: &PickerState, header: &str) {
+pub(super) fn draw(frame: &mut Frame<'_>, state: &PickerState) {
     let area = frame.area();
     frame.render_widget(Clear, area);
-    if area.height < 4 {
-        frame.render_widget(Paragraph::new("Select sessions to kill"), area);
+    if area.height < 3 {
+        frame.render_widget(Paragraph::new("Sessions"), area);
         return;
     }
 
-    let [title_area, header_area, options_area, help_area] = Layout::vertical([
-        Constraint::Length(1),
+    let [title_area, options_area, help_area] = Layout::vertical([
         Constraint::Length(1),
         Constraint::Min(1),
         Constraint::Length(1),
@@ -35,64 +34,36 @@ pub(super) fn draw(frame: &mut Frame<'_>, state: &PickerState, header: &str) {
     };
     frame.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled(
-                "Select sessions to kill",
-                Style::default().add_modifier(Modifier::BOLD),
-            ),
+            Span::styled("Sessions", Style::default().add_modifier(Modifier::BOLD)),
             Span::raw("  Filter: "),
             query,
-            Span::styled(
-                format!("  {} selected", state.selected.len()),
-                Style::default().fg(MUTED),
-            ),
         ])),
         title_area,
     );
-    frame.render_widget(
-        Paragraph::new(format!("      {header}")).style(Style::default().fg(MUTED)),
-        header_area,
-    );
 
-    let rows = usize::from(options_area.height);
+    let rows = usize::from(options_area.height / 2);
+    let content_width = usize::from(options_area.width.saturating_sub(4));
+    let now = crate::util::now_secs();
     let items = state
         .window(rows)
-        .map(|(visible_index, choice_index, choice)| {
+        .map(|(visible_index, choice)| {
             let focused = visible_index == state.cursor;
-            let prefix = if focused {
-                "❯"
-            } else if visible_index == state.offset && state.offset > 0 {
-                "↑"
-            } else if visible_index + 1 == state.offset + rows
-                && visible_index + 1 < state.visible.len()
-            {
-                "↓"
-            } else {
-                " "
-            };
-            let checked = state.selected.contains(&choice_index);
-            ListItem::new(Line::from(vec![
+            let [mut first, mut second] =
+                super::super::layout::lines(&choice.row, now, content_width, focused);
+            first.spans.insert(
+                0,
                 Span::styled(
-                    format!("{prefix} "),
+                    if focused { "❯ " } else { "  " },
                     Style::default().fg(if focused { ACCENT } else { MUTED }),
                 ),
-                Span::styled(
-                    if checked { "[x] " } else { "[ ] " },
-                    Style::default().fg(if checked { SUCCESS } else { MUTED }),
-                ),
-                Span::styled(
-                    choice.label.as_str(),
-                    if focused {
-                        Style::default().fg(ACCENT)
-                    } else {
-                        Style::default()
-                    },
-                ),
-            ]))
+            );
+            second.spans.insert(0, Span::raw("    "));
+            ListItem::new(vec![first, second])
         })
         .collect::<Vec<_>>();
     if items.is_empty() {
         frame.render_widget(
-            Paragraph::new("      No matching sessions").style(Style::default().fg(MUTED)),
+            Paragraph::new("  No matching sessions").style(Style::default().fg(MUTED)),
             options_area,
         );
     } else {
@@ -104,8 +75,13 @@ pub(super) fn draw(frame: &mut Frame<'_>, state: &PickerState, header: &str) {
     } else {
         format!("{}/{}", state.cursor + 1, state.visible.len())
     };
+    let footer = state
+        .notice
+        .as_ref()
+        .map(|notice| (notice.as_str(), ERROR))
+        .unwrap_or((HELP, MUTED));
     frame.render_widget(
-        Paragraph::new(format!("{HELP} · {position}")).style(Style::default().fg(MUTED)),
+        Paragraph::new(format!("{} · {position}", footer.0)).style(Style::default().fg(footer.1)),
         help_area,
     );
 }

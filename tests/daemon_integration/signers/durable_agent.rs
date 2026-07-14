@@ -47,7 +47,7 @@ fn durable_agent_reuses_key_rejects_concurrency_and_never_becomes_resumable() {
         assert!(!refused.status.success());
         let refused = String::from_utf8_lossy(&refused.stderr);
         assert!(refused.contains("channel(s)"), "{refused}");
-        assert!(refused.contains("pty attach") || refused.contains("tenex-edge mgmt session list"));
+        assert!(refused.contains("tenex-edge sessions"));
         assert!(refused.contains("channel add --session"), "{refused}");
 
         let original = read_agent_config(&home, slug);
