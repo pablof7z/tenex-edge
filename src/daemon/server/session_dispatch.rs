@@ -64,7 +64,7 @@ pub(super) async fn rpc_dispatch(
         &dispatch_target,
         &prose,
     )?;
-    let keys = state.session_signing_keys(&caller.agent_pubkey)?;
+    let keys = state.session_signing_keys(&caller.pubkey)?;
     let signed = state.transport.sign(builder, &keys).await?;
     let dispatch_event_id = signed.id.to_hex();
     state.transport.publish_event_checked(&signed).await?;
@@ -129,7 +129,7 @@ fn first_shared_channel(
     caller: &crate::state::Session,
     target_channels: &[String],
 ) -> Result<String> {
-    let joined = state.with_store(|s| s.list_session_joined_channels(&caller.session_id))?;
+    let joined = state.with_store(|s| s.list_session_joined_channels(&caller.pubkey))?;
     let joined_set: HashSet<&str> = joined.iter().map(|(h, _)| h.as_str()).collect();
     if let Some(ch) = target_channels
         .iter()
@@ -225,7 +225,7 @@ async fn send_dispatch_message(
     ack: &DispatchAck,
 ) -> Result<String> {
     let instance = state.session_instance(caller);
-    let keys = state.session_signing_keys(&caller.agent_pubkey)?;
+    let keys = state.session_signing_keys(&caller.pubkey)?;
     let chat = ChatMessage {
         from: instance.agent_ref(),
         channel: channel.to_string(),

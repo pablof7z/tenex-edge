@@ -87,12 +87,12 @@ async fn spawn_dispatched(
     .await
     {
         Ok(spawned) => {
-            grant_joined_channels(state, &spawned.session_id, &op.target.channels).await;
+            grant_joined_channels(state, &spawned.pubkey, &op.target.channels).await;
             tracing::info!(
                 slug = %slug,
                 workspace = %op.target.workspace,
                 pty_id = %spawned.pty_id,
-                session = %spawned.session_id,
+                pubkey = %spawned.pubkey,
                 "session dispatch: agent spawned"
             );
             true
@@ -104,21 +104,21 @@ async fn spawn_dispatched(
     }
 }
 
-async fn grant_joined_channels(state: &Arc<DaemonState>, session_id: &str, channels: &[String]) {
-    let Some(rec) = state.with_store(|s| s.get_session(session_id).ok().flatten()) else {
+async fn grant_joined_channels(state: &Arc<DaemonState>, pubkey: &str, channels: &[String]) {
+    let Some(rec) = state.with_store(|s| s.get_session(pubkey).ok().flatten()) else {
         return;
     };
     for channel in channels {
         let _ = ensure_subscription(state, channel).await;
         let confirmed = state
             .provider
-            .grant_member_confirmed(channel, &rec.agent_pubkey)
+            .grant_member_confirmed(channel, &rec.pubkey)
             .await;
         if !confirmed.is_confirmed() {
-            tracing::warn!(session = %session_id, channel = %channel, "session dispatch: membership was not confirmed");
+            tracing::warn!(pubkey, channel = %channel, "session dispatch: membership was not confirmed");
         }
         state.with_store(|s| {
-            let _ = s.join_session_channel(session_id, channel, now_secs());
+            let _ = s.join_session_channel(pubkey, channel, now_secs());
         });
     }
     state.outbox_notify.notify_waiters();
