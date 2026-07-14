@@ -47,7 +47,7 @@ pub(super) enum MemberKind {
 pub(super) struct MemberView {
     pub(super) kind: MemberKind,
     pub(super) name: String,
-    pub(super) state: String,
+    pub(super) state: crate::session_state::SessionState,
     pub(super) status: String,
     pub(super) seen: String,
 }

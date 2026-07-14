@@ -1,5 +1,5 @@
 use super::super::*;
-use super::note_explicit_chat_published;
+use super::{explicit_publish::note_explicit_chat_published, recipient_notice};
 use crate::fabric::provider::chat::{OutboundChatRecipient, OutboundChatRecord};
 use crate::state::{Message, Session};
 use crate::util::CHANNEL_MESSAGE_CHAR_LIMIT;
@@ -59,6 +59,9 @@ pub(in crate::daemon::server) async fn rpc_channel_reply(
         );
     }
     let body = reply_body(&original.author_pubkey, &expanded_message)?;
+    let recipient_reminders = state.with_store(|store| {
+        recipient_notice::reply_suspension_reminders(store, &original, now_secs())
+    })?;
     let chat = ChatMessage {
         from: instance.agent_ref(),
         channel: original.channel_h.clone(),
@@ -102,6 +105,7 @@ pub(in crate::daemon::server) async fn rpc_channel_reply(
         "reply_to": reply_to,
         "channel": original.channel_h,
         "mentioned_pubkey": original.author_pubkey,
+        "recipient_reminders": recipient_reminders,
     }))
 }
 

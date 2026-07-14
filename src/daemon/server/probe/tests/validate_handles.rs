@@ -121,6 +121,7 @@ fn seed_visible_path_state(state: &std::sync::Arc<DaemonState>) {
             ".",
             BTreeSet::from(["room".to_string()]),
             true,
+            true,
             "T",
             "reading",
             100,

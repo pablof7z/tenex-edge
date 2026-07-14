@@ -18,7 +18,7 @@ pub(in crate::fabric_context) struct StatusCap {
     pub(in crate::fabric_context) host: String,
     #[serde(default)]
     pub(in crate::fabric_context) slug: String,
-    pub(in crate::fabric_context) busy: bool,
+    pub(in crate::fabric_context) state: crate::session_state::SessionState,
     pub(in crate::fabric_context) activity: String,
     pub(in crate::fabric_context) title: String,
     pub(in crate::fabric_context) last_seen: u64,
@@ -101,7 +101,7 @@ pub(super) fn status_caps(
                 host: read::profile_host(store, &status.pubkey),
                 slug: status.slug,
                 pubkey: status.pubkey,
-                busy: status.busy,
+                state: status.state,
                 activity: status.activity,
                 title: status.title,
                 last_seen: status.last_seen,

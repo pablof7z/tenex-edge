@@ -27,11 +27,11 @@ fn validate_render_lists_status_evidence() {
             "relay_slug": "coder",
             "relay_title": "T",
             "relay_activity": "reading",
-            "relay_busy": true,
+            "relay_state": "working",
             "relay_expiration": 200,
             "graph_title": "T",
             "graph_activity": "reading",
-            "graph_busy": true,
+            "graph_state": "working",
             "graph_channels": ["room"],
             "channel_h": "room",
             "agent_slug": "coder",
@@ -46,7 +46,7 @@ fn validate_render_lists_status_evidence() {
 
     assert!(text.contains("status evidence"));
     assert!(text.contains("status/s1: graph=present session=alive"));
-    assert!(text.contains("published busy=true channels=room"));
+    assert!(text.contains("published state=working channels=room"));
     assert!(text.contains("local agent=coder harness=codex channel=room"));
     assert!(text.contains("relay status live=true rows=1 live_rows=1 channels=room"));
     assert!(text.contains("relay published pubkey=pk-peer slug=\"coder\""));

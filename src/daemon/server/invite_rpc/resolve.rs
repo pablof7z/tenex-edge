@@ -100,7 +100,7 @@ mod tests {
                 slug: "old-codex".into(),
                 title: String::new(),
                 activity: String::new(),
-                busy: false,
+                state: crate::session_state::SessionState::Idle,
                 last_seen: 1,
                 updated_at: 1,
                 expiration: 1,

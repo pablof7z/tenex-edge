@@ -42,12 +42,12 @@ fn acp_endpoint_id_would_read_dead_under_the_old_pty_probe() {
     assert!(!endpoint_is_live(TransportKind::Acp, acp_id));
 }
 
-/// `session_has_live_delivery_endpoint` gates the turn-context reachability
+/// `session_has_live_delivery_path` gates the turn-context reachability
 /// warning: no locator, or a locator whose endpoint is dead, both read as
 /// unavailable; only a PTY locator resolving to a live listener reads
 /// as available.
 #[test]
-fn session_has_live_delivery_endpoint_true_only_for_a_live_locator() {
+fn session_has_live_delivery_path_true_only_for_a_live_locator() {
     let store = crate::state::Store::open_memory().unwrap();
     store
         .reserve_session(&crate::state::RegisterSession {
@@ -63,7 +63,7 @@ fn session_has_live_delivery_endpoint_true_only_for_a_live_locator() {
     let rec = store.get_session("pk-probe").unwrap().unwrap();
 
     assert!(
-        !session_has_live_delivery_endpoint(&store, &rec),
+        !session_has_live_delivery_path(&store, &rec),
         "no locator at all must read as unavailable"
     );
 
@@ -79,7 +79,7 @@ fn session_has_live_delivery_endpoint_true_only_for_a_live_locator() {
         )
         .unwrap();
     assert!(
-        !session_has_live_delivery_endpoint(&store, &rec),
+        !session_has_live_delivery_path(&store, &rec),
         "a locator to a socket nobody is listening on must read as unavailable"
     );
 
@@ -95,7 +95,7 @@ fn session_has_live_delivery_endpoint_true_only_for_a_live_locator() {
         )
         .unwrap();
     assert!(
-        session_has_live_delivery_endpoint(&store, &rec),
+        session_has_live_delivery_path(&store, &rec),
         "a PTY locator resolving to a live listener must read as available"
     );
 }

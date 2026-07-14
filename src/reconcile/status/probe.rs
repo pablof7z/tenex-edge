@@ -24,7 +24,7 @@ pub struct StatusStateRow {
     pub session: String,
     pub title: String,
     pub activity: String,
-    pub busy: bool,
+    pub state: crate::session_state::SessionState,
     pub channels: Vec<String>,
 }
 
@@ -103,7 +103,7 @@ impl StatusReconciler {
                 session: cmd.pubkey.clone(),
                 title: cmd.title.clone(),
                 activity: cmd.activity.clone(),
-                busy: cmd.busy,
+                state: cmd.state,
                 channels: cmd.channels.clone(),
             })
             .collect()
@@ -181,7 +181,7 @@ mod tests {
         let chans: BTreeSet<String> = channels.iter().map(|s| s.to_string()).collect();
         let out = r
             .on_session_started(
-                id, "laptop", "coder", ".", chans, true, title, activity, now,
+                id, "laptop", "coder", ".", chans, true, true, title, activity, now,
             )
             .unwrap();
         assert_eq!(out.effects.len(), 1, "startup opens");

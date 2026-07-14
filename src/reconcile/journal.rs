@@ -14,8 +14,6 @@
 //! Variant docs name the real writer they eventually replace, so surface agents
 //! know which bespoke `Store` call becomes a fact-plus-plan pair.
 
-use std::collections::BTreeSet;
-
 use serde::{Deserialize, Serialize};
 
 use super::delivery::DeliveryScanFact;
@@ -24,91 +22,13 @@ use super::subscriptions::CoverageSnapshot;
 
 mod hook_context;
 pub use hook_context::HookContextRenderFact;
+mod status;
+pub use status::{StatusDrive, StatusSessionStartedArgs};
 
 /// A monotonic host timestamp (unix seconds), as tenex-edge already uses for
 /// `enqueued_at`, `turn_started_at`, `last_seen`, etc.
 pub type Timestamp = u64;
 
-/// The status-surface drive inputs needed to replay one committed transaction.
-///
-/// These are intentionally the existing `StatusReconciler` entrypoints captured
-/// as data. They are not durable product doctrine; later frontier slices can
-/// replace them with the smaller canonical lifecycle/distill journal facts once
-/// those facts become the first writer for the status surface.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum StatusDrive {
-    SessionStarted(StatusSessionStartedArgs),
-    TurnStarted {
-        pubkey: String,
-        at: Timestamp,
-    },
-    TurnEnded {
-        pubkey: String,
-        at: Timestamp,
-    },
-    DistillCompleted {
-        pubkey: String,
-        title: String,
-        activity: String,
-        window_hash: Option<String>,
-        at: Timestamp,
-    },
-    TitleSet {
-        pubkey: String,
-        title: String,
-        at: Timestamp,
-    },
-    ChannelsChanged {
-        pubkey: String,
-        channels: BTreeSet<String>,
-        at: Timestamp,
-    },
-    Tick {
-        pubkey: String,
-        at: Timestamp,
-    },
-    SessionEnded {
-        pubkey: String,
-        at: Timestamp,
-    },
-    /// An operator deliberately destroyed the session and requested immediate
-    /// public disappearance instead of the ordinary ended-session TTL.
-    SessionRevoked {
-        pubkey: String,
-        at: Timestamp,
-    },
-}
-
-impl StatusDrive {
-    pub fn at(&self) -> Timestamp {
-        match self {
-            Self::SessionStarted(args) => args.at,
-            Self::TurnStarted { at, .. }
-            | Self::TurnEnded { at, .. }
-            | Self::DistillCompleted { at, .. }
-            | Self::TitleSet { at, .. }
-            | Self::ChannelsChanged { at, .. }
-            | Self::Tick { at, .. }
-            | Self::SessionEnded { at, .. }
-            | Self::SessionRevoked { at, .. } => *at,
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct StatusSessionStartedArgs {
-    pub pubkey: String,
-    pub host: String,
-    pub slug: String,
-    pub rel_cwd: String,
-    pub channels: BTreeSet<String>,
-    pub working: bool,
-    pub title: String,
-    pub activity: String,
-    #[serde(default)]
-    pub dispatch_event: Option<String>,
-    pub at: Timestamp,
-}
 /// One canonical world-fact, appended to the input journal by the host.
 /// Serde keeps facts persistable/replayable in tests and capsules.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

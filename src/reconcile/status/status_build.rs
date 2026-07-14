@@ -12,13 +12,19 @@ pub(super) fn to_status(cmd: &StatusCommand, ttl_secs: u64, now: u64, expiring: 
         } else {
             cmd.activity.clone()
         },
-        busy: !expiring && cmd.busy,
-        rel_cwd: cmd.rel_cwd.clone(),
-        expires_at: Some(if expiring {
-            now
+        state: if expiring {
+            crate::session_state::SessionState::Offline
         } else {
-            now.saturating_add(ttl_secs)
-        }),
+            cmd.state
+        },
+        rel_cwd: cmd.rel_cwd.clone(),
+        expires_at: Some(
+            if expiring || cmd.state == crate::session_state::SessionState::Offline {
+                now
+            } else {
+                now.saturating_add(ttl_secs)
+            },
+        ),
         dispatch_event: cmd.dispatch_event.clone(),
     }
 }

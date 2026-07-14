@@ -15,6 +15,7 @@ fn status_handle_explains_last_command() {
         ".",
         BTreeSet::from(["room".to_string()]),
         true,
+        true,
         "T",
         "",
         100,

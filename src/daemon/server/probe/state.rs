@@ -29,7 +29,7 @@ pub(super) fn state_value(state: &Arc<DaemonState>, params: &Value) -> Result<Va
                         "resource_key": resource_key,
                         "title": row.title,
                         "activity": row.activity,
-                        "busy": row.busy,
+                        "state": row.state,
                         "channels": row.channels,
                     })
                 })
@@ -252,6 +252,7 @@ mod tests {
             ".",
             BTreeSet::from(["room".to_string()]),
             true,
+            true,
             "T",
             "reading",
             100,
@@ -261,7 +262,7 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].session, "s1");
         assert_eq!(rows[0].activity, "reading");
-        assert!(rows[0].busy);
+        assert_eq!(rows[0].state, crate::session_state::SessionState::Working);
     }
 
     #[test]

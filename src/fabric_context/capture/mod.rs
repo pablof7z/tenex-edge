@@ -92,7 +92,7 @@ pub(crate) struct MembersInput {
 }
 
 /// Presence/status rows (superset, updated_at DESC) with the fields the render
-/// keys on: busy/activity/title plus last_seen/updated_at/expiration.
+/// keys on: state/activity/title plus last_seen/updated_at/expiration.
 #[derive(Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct PresenceInput {
     pub(super) statuses: BTreeMap<String, Vec<StatusCap>>,

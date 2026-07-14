@@ -22,7 +22,7 @@ fn who_without_agent_anchor_returns_human_fabric_view_with_other_roots() {
             slug: "reviewer".to_string(),
             title: "Reviewing".to_string(),
             activity: String::new(),
-            busy: false,
+            state: tenex_edge::session_state::SessionState::Idle,
             last_seen: 1,
             updated_at: 1,
             expiration: 9_999_999_999,

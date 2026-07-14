@@ -178,7 +178,7 @@ async fn seed_session_with_thread_root_link() {
             host: "seed-host".into(),
             title: title.into(),
             activity: String::new(),
-            busy: false,
+            state: tenex_edge::session_state::SessionState::Idle,
             rel_cwd: "tenex-off".into(),
             expires_at: Some(base + 365 * 24 * 3600),
             dispatch_event: None,

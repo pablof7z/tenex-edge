@@ -83,6 +83,7 @@ fn stage_drive(
                 info,
                 args.channels.clone(),
                 args.working,
+                args.automatic_delivery,
                 &args.title,
                 &args.activity,
                 args.at / refresh_secs,
@@ -124,11 +125,18 @@ fn stage_drive(
                 tx.set_input(n.channels, channels.clone())
             })?;
         }
-        StatusDrive::Tick { pubkey, at } => {
-            mutate(sessions, refresh_secs, pubkey, *at, tx, |_tx, _n| Ok(()))?;
+        StatusDrive::Tick {
+            pubkey,
+            automatic_delivery,
+            at,
+        } => {
+            mutate(sessions, refresh_secs, pubkey, *at, tx, |tx, n| {
+                tx.set_input(n.automatic_delivery, *automatic_delivery)
+            })?;
         }
         StatusDrive::SessionEnded { pubkey, at } => {
             if let Some(nodes) = sessions.get(pubkey) {
+                tx.set_input(nodes.live, false)?;
                 tx.set_input(nodes.working, false)?;
                 tx.set_input(nodes.arm, end_arm(*at, refresh_secs))?;
             }
@@ -177,6 +185,7 @@ mod tests {
             rel_cwd: ".".into(),
             channels: BTreeSet::from(["room".into()]),
             working: true,
+            automatic_delivery: true,
             title: "T".into(),
             activity: "reading".into(),
             dispatch_event: None,
@@ -190,7 +199,9 @@ mod tests {
         assert_eq!(
             preview.labels.labels_for(&preview.result.changed_inputs),
             vec![
+                "status/pk/live",
                 "status/pk/working",
+                "status/pk/automatic-delivery",
                 "status/pk/title",
                 "status/pk/activity",
                 "status/pk/channels",

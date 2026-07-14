@@ -92,7 +92,7 @@ liveness/heartbeat machinery:
 - When the alive-session count drops to zero, start a **grace timer**
   (`TENEX_EDGE_DAEMON_GRACE_S`, default 120s). If no new `session-start` /
   client connection arrives before it fires, the daemon shuts down cleanly
-  (publishes idle/expired presence for any lingering state, drops the socket,
+  (publishes offline presence for any lingering state, drops the socket,
   releases the lock).
 - Any inbound client connection or `session-start` cancels the grace timer.
 

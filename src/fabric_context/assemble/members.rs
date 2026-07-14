@@ -25,11 +25,13 @@ pub(super) fn member_rows(inputs: &ViewInputs, channel: &str, now: u64) -> Vec<M
         .filter(|(pk, _)| !members.backend.contains(pk))
         .map(|(pk, _role)| {
             let status = status_map.get(&pk);
+            let state = status
+                .map(|s| s.state.observed(s.expiration >= now))
+                .unwrap_or(crate::session_state::SessionState::Offline);
             MemberRow {
                 reference: reference(inputs, &pk, status),
-                status: status
-                    .map(|s| status_text(s))
-                    .unwrap_or_else(|| "offline".to_string()),
+                state,
+                status: status.map(|s| status_text(s, state)).unwrap_or_default(),
                 seen: status
                     .map(|s| relative_time(s.last_seen, now))
                     .unwrap_or_else(|| "unknown".to_string()),

@@ -25,7 +25,7 @@ fn put_status(
             slug: "reviewer".into(),
             title: "Reviewing".into(),
             activity: activity.into(),
-            busy: true,
+            state: crate::session_state::SessionState::Working,
             last_seen: updated_at,
             updated_at,
             expiration,
@@ -86,7 +86,7 @@ fn delta_includes_other_workspace_root_and_descendant_presence_only() {
 }
 
 #[test]
-fn other_workspace_delta_rejects_stale_expired_and_self_statuses() {
+fn other_workspace_delta_reports_expiry_once_and_rejects_stale_and_self_statuses() {
     let store = seed_store();
     let rec = session(&store);
     add_workspace(&store);
@@ -98,8 +98,9 @@ fn other_workspace_delta_rejects_stale_expired_and_self_statuses() {
     let text = render_fabric_context(&store, input(Some(&rec), "root", 200, 300, false))
         .expect("current workspace activity should render");
     assert!(text.contains("current workspace work"), "{text}");
-    assert!(!text.contains("<workspace name=\"remote\""), "{text}");
+    assert!(text.contains("<workspace name=\"remote\""), "{text}");
     assert!(!text.contains("old work"), "{text}");
+    assert!(text.contains("state=\"offline\""), "{text}");
     assert!(!text.contains("expired work"), "{text}");
     assert!(!text.contains("self work"), "{text}");
 }

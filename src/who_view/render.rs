@@ -102,7 +102,7 @@ fn render_members(out: &mut String, members: &[MemberView], indent: usize) {
             out,
             "\n{child_pad}<{tag} name=\"@{}\" state=\"{}\"",
             attr(member.name.trim_start_matches('@')),
-            attr(&member.state)
+            member.state.as_str()
         );
         if !member.status.is_empty() {
             let _ = write!(out, " status=\"{}\"", attr(&member.status));

@@ -50,7 +50,7 @@ fn presence_delta_does_not_repeat_unchanged_descendants() {
             slug: "amber-reviewer".into(),
             title: "Reviewing".into(),
             activity: "checking tests".into(),
-            busy: true,
+            state: crate::session_state::SessionState::Working,
             last_seen: 250,
             updated_at: 250,
             expiration: 500,

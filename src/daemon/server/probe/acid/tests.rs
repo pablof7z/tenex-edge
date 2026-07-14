@@ -14,6 +14,7 @@ async fn status_acid_verifies_activity_cause_and_unrelated_hash() {
             ".",
             BTreeSet::from(["room".to_string()]),
             true,
+            true,
             "T",
             "reading",
             100,

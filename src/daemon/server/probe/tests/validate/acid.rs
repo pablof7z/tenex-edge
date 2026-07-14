@@ -12,12 +12,13 @@ async fn rpc_probe_validate_uses_arm_cause_for_status_refresh() {
             ".",
             BTreeSet::from(["room".to_string()]),
             false,
+            true,
             "T",
             "",
             100,
         )
         .unwrap();
-        r.on_tick("s1", 130).unwrap();
+        r.on_tick("s1", true, 130).unwrap();
     }
 
     let validation = rpc_probe(
@@ -57,12 +58,13 @@ async fn rpc_probe_validate_reports_acid_errors_inside_envelope() {
             ".",
             BTreeSet::from(["room".to_string()]),
             false,
+            true,
             "T",
             "",
             100,
         )
         .unwrap();
-        r.on_tick("s1", 130).unwrap();
+        r.on_tick("s1", true, 130).unwrap();
     }
 
     let validation = rpc_probe(
@@ -74,6 +76,7 @@ async fn rpc_probe_validate_reports_acid_errors_inside_envelope() {
                 "StatusDrive": {
                     "Tick": {
                         "pubkey": "s1",
+                        "automatic_delivery": true,
                         "at": 160
                     }
                 }

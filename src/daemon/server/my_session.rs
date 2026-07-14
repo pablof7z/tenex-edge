@@ -185,6 +185,7 @@ mod tests {
                     ".",
                     BTreeSet::from(["root".to_string()]),
                     true,
+                    true,
                     "",
                     "checking logs",
                     1,

@@ -162,6 +162,7 @@ fn seed_status_graph(state: &std::sync::Arc<DaemonState>, pubkey: &str, channel_
             ".",
             BTreeSet::from([channel_h.to_string()]),
             false,
+            true,
             "T",
             "",
             100,

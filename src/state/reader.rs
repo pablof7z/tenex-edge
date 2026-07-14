@@ -74,6 +74,10 @@ impl StoreReader<'_> {
         self.store.get_session(pubkey)
     }
 
+    pub(crate) fn has_live_delivery_path(self, session: &Session) -> bool {
+        crate::session_host::session_has_live_delivery_path(self.store, session)
+    }
+
     pub(crate) fn list_active_session_claims(self, now: u64) -> Result<Vec<SessionClaim>> {
         self.store.list_active_session_claims(now)
     }

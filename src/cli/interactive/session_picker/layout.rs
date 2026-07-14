@@ -6,8 +6,10 @@ use ratatui::{
 use unicode_width::UnicodeWidthStr;
 
 const ACCENT: Color = Color::Indexed(45);
-const BUSY: Color = Color::Indexed(78);
-const IDLE: Color = Color::Indexed(245);
+const WORKING: Color = Color::Indexed(78);
+const IDLE: Color = Color::Indexed(45);
+const SUSPENDED: Color = Color::Indexed(214);
+const OFFLINE: Color = Color::Indexed(245);
 const CHANNEL: Color = Color::Indexed(75);
 const MUTED: Color = Color::Indexed(245);
 
@@ -20,10 +22,7 @@ pub(super) fn lines(row: &SessionRow, now: u64, width: usize, focused: bool) -> 
     let padding = width.saturating_sub(fixed_width + scope_width).max(1);
 
     let mut first = vec![
-        Span::styled(
-            "● ",
-            Style::default().fg(if row.busy { BUSY } else { IDLE }),
-        ),
+        Span::styled("● ", Style::default().fg(state_color(row.state))),
         Span::styled(
             handle,
             if focused {
@@ -42,6 +41,15 @@ pub(super) fn lines(row: &SessionRow, now: u64, width: usize, focused: bool) -> 
         Line::from(first),
         Line::from(Span::styled(row.work(), Style::default().fg(MUTED))),
     ]
+}
+
+fn state_color(state: crate::session_state::SessionState) -> Color {
+    match state {
+        crate::session_state::SessionState::Working => WORKING,
+        crate::session_state::SessionState::Idle => IDLE,
+        crate::session_state::SessionState::Suspended => SUSPENDED,
+        crate::session_state::SessionState::Offline => OFFLINE,
+    }
 }
 
 fn scope_spans(workspaces: &[WorkspaceGroup]) -> Vec<Span<'static>> {
@@ -125,7 +133,7 @@ mod tests {
             }],
             title: "Implement session picker".into(),
             activity: "running tests".into(),
-            busy: true,
+            state: crate::session_state::SessionState::Working,
             last_seen: 98,
             ..SessionRow::default()
         };

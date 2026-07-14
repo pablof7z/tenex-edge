@@ -22,7 +22,11 @@ pub(super) fn pub_status(
             slug: slug.to_string(),
             title: title.to_string(),
             activity: activity.to_string(),
-            busy,
+            state: if busy {
+                crate::session_state::SessionState::Working
+            } else {
+                crate::session_state::SessionState::Idle
+            },
             last_seen: updated_at,
             updated_at,
             expiration: now + 90,

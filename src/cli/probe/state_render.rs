@@ -76,11 +76,7 @@ fn render_status_row(out: &mut String, r: &Value) {
         out,
         "  {:<24} {:<6} title={:?}  activity={:?}  channels={:?}",
         handle,
-        if r.get("busy").and_then(Value::as_bool) == Some(true) {
-            "busy"
-        } else {
-            "idle"
-        },
+        str_at(r, "state"),
         str_at(r, "title"),
         str_at(r, "activity"),
         strs(r, "channels"),

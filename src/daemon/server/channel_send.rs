@@ -6,15 +6,19 @@ use crate::util::CHANNEL_MESSAGE_CHAR_LIMIT;
 use anyhow::bail;
 
 mod body;
+mod explicit_publish;
 mod mention_guard;
 mod react;
 mod recipient;
+mod recipient_notice;
 mod reply;
 #[cfg(test)]
 mod tests;
 
+use explicit_publish::note_explicit_chat_published;
 pub(in crate::daemon::server) use react::rpc_channel_react;
 pub(in crate::daemon::server) use recipient::resolve_recipient;
+use recipient::TaggedRecipient;
 pub(in crate::daemon::server) use reply::rpc_channel_reply;
 
 #[derive(serde::Deserialize, Default)]
@@ -105,6 +109,8 @@ pub(in crate::daemon::server) async fn rpc_channel_send(
         .iter()
         .map(|target| target.label.clone())
         .collect::<Vec<_>>();
+    let recipient_reminders = state
+        .with_store(|store| recipient_notice::suspension_reminders(store, &tagged, now_secs()))?;
     let publish_scope = chat_publish_scope(
         &destination,
         pinned_destination.as_deref(),
@@ -269,22 +275,6 @@ pub(in crate::daemon::server) async fn rpc_channel_send(
         "channel": publish_scope,
         "mentioned_pubkeys": mentioned_pubkeys,
         "mentioned_labels": mentioned_labels,
+        "recipient_reminders": recipient_reminders,
     }))
-}
-
-pub(super) fn note_explicit_chat_published(state: &Arc<DaemonState>, pubkey: &str, at: u64) {
-    if let Err(e) = state.with_store(|s| s.mark_session_explicit_chat_published(pubkey, at)) {
-        tracing::warn!(
-            pubkey,
-            error = %e,
-            "channel_send: failed to persist explicit-publish marker; using in-memory auto-reply guard"
-        );
-    }
-    auto_reply::note_explicit_publish(pubkey);
-}
-
-pub(super) struct TaggedRecipient {
-    label: String,
-    pubkey: String,
-    channel: String,
 }

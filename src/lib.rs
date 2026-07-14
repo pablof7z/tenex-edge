@@ -31,6 +31,7 @@ pub mod logging;
 pub(crate) mod outbox_seam;
 pub mod profile;
 pub mod session;
+pub mod session_state;
 pub mod util;
 pub mod workspace;
 

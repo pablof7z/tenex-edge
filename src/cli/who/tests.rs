@@ -69,7 +69,11 @@ fn record_peer(
             slug: slug.to_string(),
             title: title.to_string(),
             activity: String::new(),
-            busy,
+            state: if busy {
+                crate::session_state::SessionState::Working
+            } else {
+                crate::session_state::SessionState::Idle
+            },
             last_seen: ts,
             updated_at: ts,
             expiration: ts + 90,
@@ -185,7 +189,7 @@ fn who_snapshot_hides_archived_channel_presence() {
             slug: "reviewer".to_string(),
             title: "done".to_string(),
             activity: String::new(),
-            busy: false,
+            state: crate::session_state::SessionState::Idle,
             last_seen: 1_000,
             updated_at: 1_000,
             expiration: 1_090,

@@ -54,7 +54,7 @@ fn endpoint_is_live(kind: TransportKind, endpoint_id: &str) -> bool {
 }
 
 /// Whether `session` has a live daemon-owned delivery endpoint.
-pub(crate) fn session_has_live_delivery_endpoint(
+pub(crate) fn session_has_live_delivery_path(
     store: &crate::state::Store,
     session: &crate::state::Session,
 ) -> bool {

@@ -165,7 +165,7 @@ fn status_materializes_and_reads_live() {
             make_tag(&["d", "status"]),
             make_tag(&["h", "proj"]),
             make_tag(&["title", "build"]),
-            make_tag(&["status", "busy"]),
+            make_tag(&["state", "working"]),
             make_tag(&["slug", "smith"]),
             make_tag(&["expiration", &exp.to_string()]),
         ],
@@ -176,7 +176,7 @@ fn status_materializes_and_reads_live() {
     }
     let raw = store.get_status(&pk, "proj").unwrap().unwrap();
     assert_eq!(raw.title, "build");
-    assert!(raw.busy);
+    assert_eq!(raw.state, crate::session_state::SessionState::Working);
     assert_eq!(
         store
             .live_status_for_channel("proj", exp - 1)

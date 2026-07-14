@@ -177,15 +177,16 @@ pub fn render_tail_event(
             channel,
             agent,
             text,
-            active,
+            state,
             ..
         } => {
             let cat = col!("stat ", magenta);
-            let label = match (text.is_empty(), *active) {
-                (true, true) => "working".to_string(),
-                (true, false) => "idle".to_string(),
-                (false, true) => text.clone(),
-                (false, false) => format!("{text} · idle"),
+            let label = if text.is_empty() {
+                state.to_string()
+            } else if state.is_working() {
+                text.clone()
+            } else {
+                format!("{text} · {state}")
             };
             format!("{ts_str}  {cat}  {}@{channel}  {label}", col!(agent, cyan))
         }

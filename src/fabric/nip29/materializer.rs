@@ -140,7 +140,7 @@ impl Nip29Materializer {
                 slug: slug.clone(),
                 title: st.title.clone(),
                 activity: st.activity.clone(),
-                busy: st.busy,
+                state: st.state,
                 last_seen: updated_at,
                 updated_at,
                 expiration: st.expires_at.unwrap_or(0),

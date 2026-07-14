@@ -32,7 +32,7 @@ fn member_row_shows_session_handle_without_role_for_peer_session() {
             slug: "amber-reviewer".into(),
             title: "Reviewing".into(),
             activity: String::new(),
-            busy: false,
+            state: crate::session_state::SessionState::Idle,
             last_seen: 90,
             updated_at: 90,
             expiration: 500,
@@ -43,11 +43,11 @@ fn member_row_shows_session_handle_without_role_for_peer_session() {
         .expect("context should render");
     // Self keeps its fallback slug ref; the peer session renders under its public handle.
     assert!(
-        text.contains("<member ref=\"@coder\" status=\""),
+        text.contains("<member ref=\"@coder\" state=\"offline\" status=\""),
         "got: {text}"
     );
     assert!(
-        text.contains("<member ref=\"@amber-reviewer\" status=\""),
+        text.contains("<member ref=\"@amber-reviewer\" state=\"idle\" status=\""),
         "got: {text}"
     );
     assert!(
@@ -63,6 +63,82 @@ fn member_row_shows_session_handle_without_role_for_peer_session() {
     let captured = capture_inputs(&store, &input(Some(&rec), "root", 0, 100, true));
     let trellis = render_view_text(&assemble::assemble_view(&captured, 0, 100));
     assert_eq!(trellis, text);
+}
+
+#[test]
+fn suspended_and_offline_deltas_match_both_render_paths() {
+    let store = seed_store();
+    let rec = session(&store);
+    let mut peer = Status {
+        pubkey: OTHER_PK.into(),
+        channel_h: "root".into(),
+        slug: "amber-reviewer".into(),
+        title: "Reviewing".into(),
+        activity: String::new(),
+        state: crate::session_state::SessionState::Suspended,
+        last_seen: 90,
+        updated_at: 90,
+        expiration: 120,
+    };
+    store.upsert_status(&peer).unwrap();
+
+    let suspended = render_fabric_context(&store, input(Some(&rec), "root", 80, 100, true))
+        .expect("suspended delta should render");
+    assert!(
+        suspended.contains("state=\"suspended\""),
+        "got: {suspended}"
+    );
+    let captured = capture_inputs(&store, &input(Some(&rec), "root", 80, 100, true));
+    assert_eq!(
+        render_view_text(&assemble::assemble_view(&captured, 80, 100)),
+        suspended
+    );
+
+    peer.state = crate::session_state::SessionState::Working;
+    peer.activity = "stale live activity".into();
+    peer.last_seen = 110;
+    peer.updated_at = 110;
+    store.upsert_status(&peer).unwrap();
+    let offline = render_fabric_context(&store, input(Some(&rec), "root", 120, 130, true))
+        .expect("expiry delta should render");
+    assert!(offline.contains("state=\"offline\""), "got: {offline}");
+    assert!(!offline.contains("stale live activity"), "got: {offline}");
+    let captured = capture_inputs(&store, &input(Some(&rec), "root", 120, 130, true));
+    assert_eq!(
+        render_view_text(&assemble::assemble_view(&captured, 120, 130)),
+        offline
+    );
+}
+
+#[test]
+fn heartbeat_without_state_change_produces_no_presence_delta() {
+    let store = seed_store();
+    let rec = session(&store);
+    let mut peer = Status {
+        pubkey: OTHER_PK.into(),
+        channel_h: "root".into(),
+        slug: "amber-reviewer".into(),
+        title: "Reviewing".into(),
+        activity: String::new(),
+        state: crate::session_state::SessionState::Suspended,
+        last_seen: 90,
+        updated_at: 90,
+        expiration: 180,
+    };
+    store.upsert_status(&peer).unwrap();
+    peer.last_seen = 150;
+    peer.updated_at = 150;
+    peer.expiration = 240;
+    store.upsert_status(&peer).unwrap();
+
+    let text = render_fabric_context(&store, input(Some(&rec), "root", 100, 160, true))
+        .expect("forced quiet delta should render");
+    assert!(!text.contains("<recent-presence>"), "got: {text}");
+    let captured = capture_inputs(&store, &input(Some(&rec), "root", 100, 160, true));
+    assert_eq!(
+        render_view_text(&assemble::assemble_view(&captured, 100, 160)),
+        text
+    );
 }
 
 /// Purge guard for the human-facing "project" -> "workspace" rename (#201): a
@@ -146,7 +222,7 @@ fn same_named_channels_under_different_workspaces_show_workspace_context() {
                 slug: slug.into(),
                 title: String::new(),
                 activity: activity.into(),
-                busy: true,
+                state: crate::session_state::SessionState::Working,
                 last_seen: 250,
                 updated_at: 250,
                 expiration: 500,

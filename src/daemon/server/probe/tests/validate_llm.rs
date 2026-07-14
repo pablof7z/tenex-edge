@@ -131,6 +131,7 @@ fn seed_status_graph(state: &std::sync::Arc<DaemonState>, pubkey: &str) {
             ".",
             BTreeSet::from(["room".to_string()]),
             false,
+            true,
             "T",
             "A",
             100,

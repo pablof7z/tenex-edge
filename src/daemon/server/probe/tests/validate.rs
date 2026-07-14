@@ -21,6 +21,7 @@ async fn rpc_probe_validate_checks_status_fact_and_capsule() {
             ".",
             BTreeSet::from(["room".to_string()]),
             true,
+            true,
             "T",
             "reading",
             1_700_000_010,
@@ -112,6 +113,7 @@ async fn rpc_probe_validate_checks_status_fact_and_capsule() {
                 "StatusDrive": {
                     "Tick": {
                         "pubkey": "s1",
+                        "automatic_delivery": true,
                         "at": 1_700_000_030
                     }
                 }
@@ -224,6 +226,7 @@ fn seed_replay_capsule(state: &std::sync::Arc<DaemonState>) {
         .step("tick")
         .operation(InputFact::StatusDrive(StatusDrive::Tick {
             pubkey: "missing".into(),
+            automatic_delivery: true,
             at: 1_700_000_010,
         }))
         .commit();

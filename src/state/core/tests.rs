@@ -48,7 +48,7 @@ fn table_samples_prefer_fresh_status_rows() {
                 slug: "agent".into(),
                 title: String::new(),
                 activity: String::new(),
-                busy: false,
+                state: crate::session_state::SessionState::Idle,
                 last_seen: updated_at,
                 updated_at,
                 expiration,

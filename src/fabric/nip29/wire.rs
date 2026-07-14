@@ -4,12 +4,12 @@
 //! |-------------|------|
 //! | Profile     | kind:0,     content `{"name": "sessionCode-agent"}`, `["host", host]`, optional `["agent-slug", slug]`, live agent `["workspace", root_h]`; backend profiles additionally carry `["backend"]` + one `["agent", slug, desc]` per managed agent |
 //! | Activity    | kind:1,     `["h", channel]` — social narrative (no inbox routing) |
-//! | Status      | kind:30315, content = live activity (may be empty when idle), `["d", "status"]`, one or more `["h", channel]`, `["title", title]` (always), `["status", "busy"\|"idle"]`, `["host", host]`, optional `["slug", slug]`, optional `["rel-cwd", rel]`, optional NIP-40 `["expiration", ts]` |
+//! | Status      | kind:30315, content = live activity (may be empty between turns), `["d", "status"]`, one or more `["h", channel]`, `["title", title]` (always), `["state", "working"\|"idle"\|"suspended"\|"offline"]`, `["host", host]`, optional `["slug", slug]`, optional `["rel-cwd", rel]`, optional NIP-40 `["expiration", ts]` |
 //! | AgentRoster | kind:30555, backend management-key signed, `["d", capability_slug]`, `["hostname", host]`, `["use-criteria", text]`, one or more root-channel `["h", channel]` |
 //! | Chat        | kind:9,     `["h", channel]`, repeated `["p", mentioned_pubkey]` |
 //!
 //! Status is the single self-contained per-agent signal: ONE kind:30315 event
-//! per author pubkey carries the whole live state (busy/idle, the
+//! per author pubkey carries the whole canonical live state, the
 //! live activity in the content, the persistent title, host, rel-cwd). It targets
 //! every channel the session is in with repeated `h` tags. The optional `slug`
 //! tag is a render hint only; the event signer remains the identity authority.
@@ -135,7 +135,7 @@ impl Nip29WireCodec {
                 host,
                 title,
                 activity,
-                busy,
+                state,
                 rel_cwd,
                 expires_at,
                 dispatch_event,
@@ -146,7 +146,7 @@ impl Nip29WireCodec {
                 let mut tags = vec![
                     tag(&["d", "status"])?,
                     tag(&["title", title])?,
-                    tag(&["status", if *busy { "busy" } else { "idle" }])?,
+                    tag(&["state", state.as_str()])?,
                     tag(&["host", host])?,
                 ];
                 for channel in channels {
@@ -247,7 +247,7 @@ impl Nip29WireCodec {
                     title: first_tag(event, "title").unwrap_or_default().to_string(),
                     // The live activity is the event content (empty when idle).
                     activity: event.content.clone(),
-                    busy: first_tag(event, "status") == Some("busy"),
+                    state: crate::session_state::SessionState::parse(first_tag(event, "state")?)?,
                     rel_cwd: first_tag(event, "rel-cwd").unwrap_or_default().to_string(),
                     // NIP-40 expiration → liveness clock. Absent → None.
                     expires_at: first_tag(event, "expiration").and_then(|s| s.parse().ok()),

@@ -14,6 +14,7 @@ use std::collections::HashSet;
 
 use super::capture::{EvCap, MsgBundle, StatusCap, ViewInputs};
 use super::model::*;
+use crate::session_state::semantic_change_at;
 use crate::util::relative_time;
 
 mod members;
@@ -178,13 +179,17 @@ fn presence_rows(inputs: &ViewInputs, channel: &str, cursor: u64, now: u64) -> V
         .map(Vec::as_slice)
         .unwrap_or_default()
         .iter()
-        .filter(|s| s.expiration >= now)
-        .filter(|s| s.updated_at > cursor)
+        .filter(|s| semantic_change_at(s.state, s.updated_at, s.expiration, now) > cursor)
+        .filter(|s| semantic_change_at(s.state, s.updated_at, s.expiration, now) <= now)
         .filter(|s| &s.pubkey != self_pubkey)
-        .map(|s| PresenceRow {
-            reference: presence_reference(inputs, s),
-            status: status_text(s),
-            seen: relative_time(s.last_seen, now),
+        .map(|s| {
+            let state = s.state.observed(s.expiration >= now);
+            PresenceRow {
+                reference: presence_reference(inputs, s),
+                state,
+                status: status_text(s, state),
+                seen: relative_time(s.last_seen, now),
+            }
         })
         .collect()
 }
@@ -201,13 +206,13 @@ fn presence_reference(inputs: &ViewInputs, status: &StatusCap) -> String {
         .unwrap_or_default()
 }
 
-fn status_text(status: &StatusCap) -> String {
-    if status.busy {
+fn status_text(status: &StatusCap, state: crate::session_state::SessionState) -> String {
+    if state.is_working() {
         return non_empty(&status.activity)
             .or_else(|| non_empty(&status.title))
-            .unwrap_or_else(|| "working".to_string());
+            .unwrap_or_default();
     }
-    non_empty(&status.title).unwrap_or_else(|| "idle".to_string())
+    non_empty(&status.title).unwrap_or_default()
 }
 
 fn non_empty(s: &str) -> Option<String> {
