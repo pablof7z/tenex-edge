@@ -12,7 +12,10 @@ use std::time::Duration;
 
 /// The compiled-in protocol version, bumped when client and daemon RPC
 /// contracts must agree.
-const PROTOCOL_VERSION_BASE: u32 = 64;
+// Attachment-bearing `channel_send` / `channel_reply` calls require daemon-side
+// upload and marker expansion. Older daemons deserialize and ignore the new
+// field, then publish the raw marker, so this must force a re-exec.
+const PROTOCOL_VERSION_BASE: u32 = 65;
 
 /// Effective protocol version. A client refuses to talk to a daemon whose
 /// protocol differs (older daemon → ask it to exit & respawn; newer daemon →
