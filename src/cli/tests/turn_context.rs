@@ -1,75 +1,10 @@
-use super::messaging::{format_envelope, EnvelopeView};
-use crate::state::{RegisterSession, Session, Status, Store};
+use crate::state::{RegisterSession, Store};
 use crate::turn_context::{assemble_turn_check_context, assemble_turn_start_context};
 use std::sync::Mutex;
 
-const BACKEND: &str = "pk-backend";
-
-/// Publish a relay_status (kind:30315) row — the single source awareness reads
-/// for "who is doing what here", local and remote alike.
-#[allow(clippy::too_many_arguments)]
-fn pub_status(
-    store: &Store,
-    pubkey: &str,
-    slug: &str,
-    title: &str,
-    activity: &str,
-    busy: bool,
-    updated_at: u64,
-    now: u64,
-) {
-    store
-        .upsert_status(&Status {
-            pubkey: pubkey.to_string(),
-            channel_h: "proj".to_string(),
-            slug: slug.to_string(),
-            title: title.to_string(),
-            activity: activity.to_string(),
-            busy,
-            last_seen: updated_at,
-            updated_at,
-            expiration: now + 90,
-        })
-        .unwrap();
-}
-
-/// Materialize the `proj` channel + roster so awareness has fabric context.
-fn seed_channel(store: &Store) {
-    // Opaque id "proj" with a distinct human name "main" (production ids are random, never the name).
-    store.upsert_channel("proj", "main", "", "", 1).unwrap();
-    store
-        .replace_channel_members("proj", &["pk-coder".to_string()], 1)
-        .unwrap();
-    store
-        .upsert_profile_with_agent_slug("pk-coder", "coder", "coder", "coder", "laptop", false, 1)
-        .unwrap();
-}
-
-fn test_session(_id: &str) -> Session {
-    Session {
-        pubkey: "pk-coder".to_string(),
-        runtime_generation: 1,
-        agent_slug: "coder".to_string(),
-        channel_h: "proj".to_string(),
-        harness: "claude-code".to_string(),
-        child_pid: None,
-        transcript_path: None,
-        alive: true,
-        created_at: 1,
-        last_seen: 1,
-        working: false,
-        turn_started_at: 0,
-        last_distill_at: 0,
-        work_topic: String::new(),
-        work_topic_set_at: 0,
-        seen_cursor: 0,
-        title: String::new(),
-        activity: String::new(),
-        distill_fail_streak: 0,
-        distill_notice_at: 0,
-        explicit_chat_published_at: 0,
-    }
-}
+#[path = "turn_context/fixtures.rs"]
+mod fixtures;
+use fixtures::{pub_status, seed_channel, test_session, BACKEND};
 
 /// turn_start returns None on a non-first turn with no inbox, chat, or peers.
 #[test]
@@ -410,57 +345,5 @@ fn turn_check_direct_mentions_surface_from_inbox() {
     assert!(s.is_event_handled("mention-1", "pk-coder").unwrap());
 }
 
-// ── envelope rendering (pure; unchanged by the persistence rewrite) ───────────
-
-fn view<'a>() -> EnvelopeView<'a> {
-    EnvelopeView {
-        from_slug: "amber-codex",
-        from_session: "sender-session-id",
-        host: "",
-        self_host: "my-box",
-        subject: "NIP-29 group creation failing",
-        branch: "features/oauth",
-        commit: "a1b2c3d",
-        dirty: 0,
-        id: "01234567",
-        sent_at: 1_000,
-        now: 1_180, // +3 min
-        body: "can you take a look?",
-    }
-}
-
-#[test]
-fn envelope_has_email_like_headers_then_body() {
-    let out = format_envelope(&view());
-    let lines: Vec<&str> = out.lines().collect();
-    assert_eq!(lines[0], "From: amber-codex");
-    assert!(lines[1].starts_with("Date: ") && lines[1].ends_with("(3 min ago)"));
-    assert_eq!(lines[2], "Subject: NIP-29 group creation failing");
-    assert_eq!(lines[3], "Branch: features/oauth (a1b2c3d)");
-    assert_eq!(lines[4], "ID: 01234567");
-    assert_eq!(lines[5], "--");
-    assert_eq!(lines[6], "can you take a look?");
-}
-
-#[test]
-fn dirty_count_and_remote_host_annotate() {
-    let mut v = view();
-    v.dirty = 1;
-    v.host = "prodBackend";
-    let out = format_envelope(&v);
-    assert!(out.contains("From: amber-codex"));
-    assert!(out.contains("Branch: features/oauth (a1b2c3d) [1 file dirty]"));
-    v.dirty = 3;
-    assert!(format_envelope(&v).contains("[3 files dirty]"));
-}
-
-#[test]
-fn subject_and_branch_lines_omitted_when_empty() {
-    let mut v = view();
-    v.subject = "";
-    v.branch = "";
-    let out = format_envelope(&v);
-    assert!(!out.contains("Subject:"));
-    assert!(!out.contains("Branch:"));
-    assert!(!out.contains("remote:"));
-}
+#[path = "turn_context/envelope.rs"]
+mod envelope;
