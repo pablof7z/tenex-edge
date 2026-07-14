@@ -4,6 +4,10 @@ use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+#[path = "harness/daemon.rs"]
+mod daemon;
+pub(crate) use daemon::stop_daemon;
+
 pub(crate) static ENV_LOCK: Mutex<()> = Mutex::new(());
 
 pub(crate) fn shared_relay_url() -> String {
@@ -279,30 +283,4 @@ pub(crate) fn pty_session_for_session(
         .into_iter()
         .find(|locator| locator.locator_kind == "pty")
         .map(|locator| locator.locator_value)
-}
-
-/// Stop the daemon by sending the version-skew please_exit and waiting for the
-/// socket to disappear (keeps tests from leaking daemons).
-pub(crate) fn stop_daemon(home: &Home) {
-    use std::io::{BufRead, BufReader, Write};
-    use std::os::unix::net::UnixStream;
-    if let Ok(stream) = UnixStream::connect(home.sock()) {
-        let mut w = stream.try_clone().unwrap();
-        let mut r = BufReader::new(stream);
-        let _ = writeln!(
-            w,
-            "{}",
-            serde_json::json!({"protocol": u32::MAX, "client_version": "t"})
-        );
-        let mut welcome = String::new();
-        let _ = r.read_line(&mut welcome);
-        let _ = writeln!(w, "{}", serde_json::json!({"protocol": u32::MAX}));
-        let mut resp = String::new();
-        let _ = r.read_line(&mut resp);
-    }
-    let deadline = Instant::now() + Duration::from_secs(3);
-    while Instant::now() < deadline && home.sock().exists() {
-        std::thread::sleep(Duration::from_millis(25));
-    }
-    let _ = std::fs::remove_file(home.dir.path().join("daemon.lock"));
 }

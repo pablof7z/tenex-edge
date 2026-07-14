@@ -28,8 +28,7 @@ fn session_start_runs_engine_and_records_alive_session() {
             .expect("session_start");
         v["pubkey"].as_str().unwrap().to_string()
     });
-    // The daemon writes the session under its sole public identity and keeps the
-    // harness-owned id only as a typed runtime locator.
+    // The public identity owns the row; the harness id is only a typed locator.
     let store = Store::open(&home.store_path()).unwrap();
     let rec = store
         .get_session(&pubkey)
@@ -46,7 +45,6 @@ fn session_start_runs_engine_and_records_alive_session() {
     assert!(rec.alive);
     assert_eq!(rec.agent_slug, "coder");
 
-    // `who` surfaces the same public identity.
     rt().block_on(async {
         let mut c = Client::connect_or_spawn().await.unwrap();
         let v = c
@@ -207,9 +205,8 @@ fn channel_send_stdin_enqueues_live_channel_chat_for_receiver() {
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
-    // `channel read` renders relay-materialized chat; the send above may not have
-    // propagated to the readable store yet, so poll the read until the body
-    // renders rather than asserting on a single racy read.
+    // Poll until the relay-materialized chat propagates to the readable store,
+    // rather than asserting on a single racy read.
     let mut read_stdout = String::new();
     assert!(
         wait_until(Duration::from_secs(10), || {

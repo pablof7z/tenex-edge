@@ -206,8 +206,6 @@ pub(in crate::daemon::server) fn cleanup() {
     // The lock is implicitly released when the process exits and the fd is closed.
 }
 
-// ── connection handling ──────────────────────────────────────────────────────
-
 pub(in crate::daemon::server) async fn serve_connection(
     state: Arc<DaemonState>,
     stream: UnixStream,
@@ -371,5 +369,3 @@ pub(in crate::daemon::server) async fn handle_session_start<W: AsyncWriteExt + U
     };
     write_json(writer, &resp).await
 }
-
-// ── dispatch (one-shot verbs) ────────────────────────────────────────────────
