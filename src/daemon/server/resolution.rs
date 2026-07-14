@@ -12,9 +12,7 @@ pub(super) use public_session::resolve as resolve_public_session;
 /// locator from process birth, recorded at session-start. Native harness shells
 /// outside tenex-edge launch use the
 /// watched harness process (`watch_pid`) as their exact anchor.
-/// `harness_session` covers harness-native ids (claude-code/codex report one via
-/// hooks; opencode does not). `cwd`+`agent`+`group` are the scan keys — used only
-/// outside `Strict`.
+/// `harness_session` covers harness-native resume locators reported by hooks.
 #[derive(Default, Clone, Copy)]
 pub(in crate::daemon::server) struct CallerAnchor<'a> {
     /// `--session` operator override: npub, hex pubkey, or current handle.
@@ -32,10 +30,6 @@ pub(in crate::daemon::server) struct CallerAnchor<'a> {
     /// harness-session lookup — a harness-native id is only unique WITHIN its
     /// harness. (`pty_session` needs no harness.)
     pub harness: Option<&'a str>,
-    /// Scan keys (used only in `Channel` scope).
-    pub cwd: Option<&'a str>,
-    pub agent: Option<&'a str>,
-    pub group: Option<&'a str>,
 }
 
 impl<'a> CallerAnchor<'a> {
@@ -59,9 +53,6 @@ impl<'a> CallerAnchor<'a> {
             harness_session: s("harness_session"),
             watch_pid: pid("watch_pid"),
             harness: s("harness"),
-            cwd: s("cwd"),
-            agent: s("agent"),
-            group: s("group"),
         }
     }
 }
@@ -100,11 +91,7 @@ pub(in crate::daemon::server) fn work_root_for(s: &Store, scope: &str) -> String
 ///   2. PTY session alias  (live only)
 ///   3. harness-session alias  (live only)
 ///   4. watch pid alias  (live only)
-///   5. cwd+agent scan  (only outside `Strict`)
-///
-/// The exact anchors (2,3) resolve through `alive_session_for_alias_kind`, which
-/// matches the alias KIND (not just the raw id) and never returns a dead row —
-/// so a stale endpoint/harness alias whose owner exited cannot bind a ghost.
+/// Typed locators never become public selectors and never return a dead row.
 pub(in crate::daemon::server) fn resolve_session_inner(
     state: &Arc<DaemonState>,
     anchor: &CallerAnchor,

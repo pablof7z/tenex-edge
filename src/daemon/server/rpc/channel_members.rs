@@ -166,8 +166,10 @@ fn resolve_add_channel(
     let root = match resolve_session_inner(state, &anchor, ResolveScope::Strict) {
         Ok(rec) => state.with_store(|s| root_channel(s, &rec.channel_h)),
         Err(_) => {
-            let cwd = anchor
-                .cwd
+            let cwd = params
+                .get("cwd")
+                .and_then(serde_json::Value::as_str)
+                .filter(|cwd| !cwd.is_empty())
                 .map(std::path::PathBuf::from)
                 .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
             crate::workspace::resolve(&cwd)

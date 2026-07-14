@@ -57,8 +57,7 @@ pub(in crate::daemon::server) async fn rpc_channel_send(
     let p: ChannelSendParams =
         serde_json::from_value(params.clone()).context("parsing channel_send params")?;
     mention_guard::check(&p.message, &p.tags, p.force)?;
-    let mut anchor = CallerAnchor::from_params(params);
-    anchor.group = None;
+    let anchor = CallerAnchor::from_params(params);
     let rec = resolve_session(state, &anchor)?;
     let target =
         resolve_chat_target_provisioning(state, &rec, p.channel.as_deref(), "channel send").await?;

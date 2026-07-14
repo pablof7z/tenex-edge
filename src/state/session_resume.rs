@@ -4,17 +4,6 @@ use super::sessions::{row_to_session, COLS};
 use super::*;
 
 impl Store {
-    pub(crate) fn session_row(&self, pubkey: &str) -> Result<Option<Session>> {
-        Ok(self
-            .conn
-            .query_row(
-                &format!("SELECT {COLS} FROM sessions WHERE pubkey=?1"),
-                [pubkey],
-                row_to_session,
-            )
-            .optional()?)
-    }
-
     /// Recent sessions that have exactly one native resume locator.
     pub fn list_resumable_sessions(&self, limit: u32) -> Result<Vec<Session>> {
         let mut stmt = self.conn.prepare(&format!(

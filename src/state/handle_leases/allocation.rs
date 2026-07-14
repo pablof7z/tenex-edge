@@ -4,6 +4,7 @@ use super::*;
 use rusqlite::{Transaction, TransactionBehavior};
 
 impl Store {
+    #[cfg(test)]
     pub(crate) fn reserve_handle_for_pubkey(
         &self,
         pubkey: &str,

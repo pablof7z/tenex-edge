@@ -111,18 +111,6 @@ impl Store {
             .execute("DELETE FROM session_claims WHERE pubkey=?1", [pubkey])?;
         Ok(())
     }
-
-    pub(crate) fn clear_session_claim_for_route(
-        &self,
-        pubkey: &str,
-        channel_h: &str,
-    ) -> Result<()> {
-        self.conn.execute(
-            "DELETE FROM session_claims WHERE pubkey=?1 AND channel_h=?2",
-            params![pubkey, channel_h],
-        )?;
-        Ok(())
-    }
 }
 
 #[cfg(test)]

@@ -301,7 +301,7 @@ async fn apply_delivery_effects(
         match effect {
             crate::reconcile::DeliveryEffect::Inject {
                 pubkey,
-                endpoint_id: endpoint_id,
+                endpoint_id,
                 event_ids,
             } => {
                 // Route the rendered mention to the transport hosting this
