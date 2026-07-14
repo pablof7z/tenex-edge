@@ -201,8 +201,8 @@ fn chat_routes_to_channel_sessions_and_skips_sender() {
     let sender_pk = sender.public_key().to_hex();
     let receiver_pk = receiver.public_key().to_hex();
 
-    let sender_sid = register(&store, &sender_pk, "proj", "sender-ext");
-    let receiver_sid = register(&store, &receiver_pk, "proj", "receiver-ext");
+    register(&store, &sender_pk, "proj", "sender-ext");
+    register(&store, &receiver_pk, "proj", "receiver-ext");
 
     // Without a p-tag the message is ambient chat: stored in relay_events
     // but does NOT route to any inbox (no doorbell).
@@ -220,7 +220,7 @@ fn chat_routes_to_channel_sessions_and_skips_sender() {
         &ambient_chat
     ));
     assert!(store
-        .peek_pending_for_session(&receiver_sid)
+        .peek_pending_for_pubkey(&receiver_pk)
         .unwrap()
         .is_empty());
 
@@ -232,10 +232,10 @@ fn chat_routes_to_channel_sessions_and_skips_sender() {
         vec![make_tag(&["h", "proj"]), make_tag(&["p", &receiver_pk])],
     );
     let mention_chat = ChatMessage {
-        from: crate::domain::AgentRef::new(sender_pk, String::new()),
+        from: crate::domain::AgentRef::new(sender_pk.clone(), String::new()),
         channel: "proj".into(),
         body: "ship it".into(),
-        mentioned_pubkeys: vec![receiver_pk],
+        mentioned_pubkeys: vec![receiver_pk.clone()],
     };
     assert!(Nip29Materializer::materialize_event(&store, &mention_event));
     assert!(Nip29Materializer::route_chat(
@@ -244,11 +244,11 @@ fn chat_routes_to_channel_sessions_and_skips_sender() {
         &mention_chat
     ));
 
-    let pending = store.peek_pending_for_session(&receiver_sid).unwrap();
+    let pending = store.peek_pending_for_pubkey(&receiver_pk).unwrap();
     assert_eq!(pending.len(), 1);
     assert_eq!(pending[0].body, "ship it");
     assert!(store
-        .peek_pending_for_session(&sender_sid)
+        .peek_pending_for_pubkey(&sender_pk)
         .unwrap()
         .is_empty());
     assert!(store.has_event(&mention_event.id.to_hex()).unwrap());
@@ -268,8 +268,8 @@ fn mention_to_one_ordinal_does_not_route_to_sibling_ordinal() {
     let ord1_pk = ord1.public_key().to_hex();
 
     // Both sessions are the same agent slug ("agent") in the same channel.
-    let ord0_sid = register(&store, &ord0_pk, "proj", "ord0-ext");
-    let ord1_sid = register(&store, &ord1_pk, "proj", "ord1-ext");
+    register(&store, &ord0_pk, "proj", "ord0-ext");
+    register(&store, &ord1_pk, "proj", "ord1-ext");
 
     // Mention p-tags ONLY one ordinal.
     let event = build(
@@ -282,20 +282,17 @@ fn mention_to_one_ordinal_does_not_route_to_sibling_ordinal() {
         from: crate::domain::AgentRef::new(sender_pk, String::new()),
         channel: "proj".into(),
         body: "hey one ordinal".into(),
-        mentioned_pubkeys: vec![ord0_pk],
+        mentioned_pubkeys: vec![ord0_pk.clone()],
     };
     assert!(Nip29Materializer::route_chat(&store, &event, &chat));
 
     assert_eq!(
-        store.peek_pending_for_session(&ord0_sid).unwrap().len(),
+        store.peek_pending_for_pubkey(&ord0_pk).unwrap().len(),
         1,
         "the p-tagged ordinal must receive the mention"
     );
     assert!(
-        store
-            .peek_pending_for_session(&ord1_sid)
-            .unwrap()
-            .is_empty(),
+        store.peek_pending_for_pubkey(&ord1_pk).unwrap().is_empty(),
         "the sibling ordinal must NOT receive a mention addressed to another ordinal"
     );
 }

@@ -40,7 +40,7 @@ pub(crate) fn assemble_turn_check(
     let mut read_failed = joined_read_failed;
     let direct_mentions = {
         let s = store.lock().expect("store mutex poisoned");
-        match take_inbox(&s, &rec.session_id, now) {
+        match take_inbox(&s, &rec.agent_pubkey, now) {
             Ok(rows) => rows,
             Err(e) => {
                 tracing::error!(

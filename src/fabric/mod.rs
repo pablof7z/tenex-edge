@@ -216,8 +216,8 @@ mod tests {
         let sender_pk = sender_keys.public_key().to_hex();
         let receiver_pk = receiver_keys.public_key().to_hex();
 
-        let sender_sid = register(&store, &sender_pk, "mychannel", "sender-ext");
-        let receiver_sid = register(&store, &receiver_pk, "mychannel", "receiver-ext");
+        register(&store, &sender_pk, "mychannel", "sender-ext");
+        register(&store, &receiver_pk, "mychannel", "receiver-ext");
         store.replace_channel_admins("mychannel", &[], 1).unwrap();
         store
             .replace_channel_members("mychannel", &[sender_pk.clone(), receiver_pk.clone()], 1)
@@ -244,7 +244,7 @@ mod tests {
             "ambient message must not wake inbox"
         );
         assert!(store
-            .peek_pending_for_session(&receiver_sid)
+            .peek_pending_for_pubkey(&receiver_pk)
             .unwrap()
             .is_empty());
         assert!(store.has_event(&ambient.id.to_hex()).unwrap());
@@ -268,12 +268,12 @@ mod tests {
             &store,
         );
         assert!(outcome2.wake_mentions, "mention should wake inbox");
-        let receiver_rows = store.peek_pending_for_session(&receiver_sid).unwrap();
+        let receiver_rows = store.peek_pending_for_pubkey(&receiver_pk).unwrap();
         assert_eq!(receiver_rows.len(), 1);
         assert_eq!(receiver_rows[0].body, "hey receiver, LGTM");
         assert!(
             store
-                .peek_pending_for_session(&sender_sid)
+                .peek_pending_for_pubkey(&sender_pk)
                 .unwrap()
                 .is_empty(),
             "sender session should not receive its own chat line"

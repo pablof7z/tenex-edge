@@ -36,6 +36,12 @@ pub(super) const DURABLE_TABLES: &[TableCoverage] = &[
         "identity:<pubkey> | agent:<slug> | backend:<label>",
         "local identity/session bindings",
     ),
+    row(
+        "event_claims",
+        "aggregate",
+        "table:event_claims",
+        "backend side-effect replay guards",
+    ),
     row("inbox", "direct", "inbox:<event>", "inbound delivery state"),
     row(
         "llm_calls",

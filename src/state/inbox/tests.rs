@@ -1,72 +1,29 @@
 use super::*;
 
-fn state_for(s: &Store, event_id: &str, target_key: &str) -> String {
+fn state_for(s: &Store, event_id: &str, target_pubkey: &str) -> String {
     s.conn
         .query_row(
-            "SELECT state FROM inbox WHERE event_id=?1 AND target_session=?2",
-            params![event_id, target_key],
+            "SELECT state FROM inbox WHERE event_id=?1 AND target_pubkey=?2",
+            params![event_id, target_pubkey],
             |r| r.get(0),
         )
         .unwrap()
 }
 
 #[test]
-fn orchestration_target_claim_retries_only_failed_targets() {
+fn inbox_event_prefix_lookup_can_filter_target_pubkey() {
     let s = Store::open_memory().unwrap();
-
-    assert!(s
-        .claim_orchestration_target("ev", "orchestration:backend:0:a", "admin", "child", "a", 10,)
-        .unwrap());
-    assert!(s
-        .claim_orchestration_target("ev", "orchestration:backend:1:b", "admin", "child", "b", 10,)
-        .unwrap());
-
-    s.retry_orchestration_target("ev", "orchestration:backend:0:a")
+    s.enqueue_inbox("evt-abc", "pk-1", "pk", "room", "one", 10)
         .unwrap();
-    s.complete_orchestration_target("ev", "orchestration:backend:1:b", 11)
+    s.enqueue_inbox("evt-abc", "pk-2", "pk", "room", "two", 11)
         .unwrap();
-
-    assert!(
-        s.claim_orchestration_target("ev", "orchestration:backend:0:a", "admin", "child", "a", 12,)
-            .unwrap(),
-        "failed target should be retryable"
-    );
-    assert!(
-        !s.claim_orchestration_target(
-            "ev",
-            "orchestration:backend:1:b",
-            "admin",
-            "child",
-            "b",
-            12,
-        )
-        .unwrap(),
-        "completed target should not be reprocessed"
-    );
-    assert_eq!(
-        state_for(&s, "ev", "orchestration:backend:0:a"),
-        "processing"
-    );
-    assert_eq!(
-        state_for(&s, "ev", "orchestration:backend:1:b"),
-        "delivered"
-    );
-}
-
-#[test]
-fn inbox_event_prefix_lookup_can_filter_target() {
-    let s = Store::open_memory().unwrap();
-    s.enqueue_inbox("evt-abc", "s1", "pk", "room", "one", 10)
-        .unwrap();
-    s.enqueue_inbox("evt-abc", "s2", "pk", "room", "two", 11)
-        .unwrap();
-    s.enqueue_inbox("evt-other", "s1", "pk", "room", "three", 12)
+    s.enqueue_inbox("evt-other", "pk-1", "pk", "room", "three", 12)
         .unwrap();
 
     let rows = s.inbox_by_event_prefix("evt-a").unwrap();
     assert_eq!(rows.len(), 2);
 
-    let row = s.inbox_by_event_prefix_and_target("evt-a", "s2").unwrap();
+    let row = s.inbox_by_event_prefix_and_target("evt-a", "pk-2").unwrap();
     assert_eq!(row.len(), 1);
     assert_eq!(row[0].body, "two");
 }
@@ -74,21 +31,83 @@ fn inbox_event_prefix_lookup_can_filter_target() {
 #[test]
 fn claim_pending_event_ids_claims_only_the_planned_rows() {
     let s = Store::open_memory().unwrap();
-    s.enqueue_inbox("evt-1", "s1", "pk", "room", "one", 10)
+    s.enqueue_inbox("evt-1", "pk-1", "pk", "room", "one", 10)
         .unwrap();
-    s.enqueue_inbox("evt-2", "s1", "pk", "room", "two", 11)
+    s.enqueue_inbox("evt-2", "pk-1", "pk", "room", "two", 11)
         .unwrap();
 
     let rows = s
-        .claim_pending_event_ids_for_session(&["evt-2".into()], "s1", 20)
+        .claim_pending_event_ids_for_pubkey(&["evt-2".into()], "pk-1", 20)
         .unwrap();
 
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].event_id, "evt-2");
-    assert_eq!(state_for(&s, "evt-1", "s1"), "pending");
-    assert_eq!(state_for(&s, "evt-2", "s1"), "delivered");
+    assert_eq!(state_for(&s, "evt-1", "pk-1"), "pending");
+    assert_eq!(state_for(&s, "evt-2", "pk-1"), "delivered");
     assert_eq!(
-        s.peek_pending_for_session("s1").unwrap()[0].event_id,
+        s.peek_pending_for_pubkey("pk-1").unwrap()[0].event_id,
         "evt-1"
     );
+}
+
+#[test]
+fn pending_event_survives_runtime_replacement() {
+    let s = Store::open_memory().unwrap();
+    upsert_runtime(&s, "run-old", "pk-agent", 10);
+    s.enqueue_inbox("evt", "pk-agent", "sender", "room", "hello", 11)
+        .unwrap();
+    s.mark_dead("run-old").unwrap();
+    upsert_runtime(&s, "run-new", "pk-agent", 12);
+
+    let replacement = s.get_session("run-new").unwrap().unwrap();
+    assert_eq!(replacement.session_id, "run-new");
+    let claimed = s
+        .claim_pending_for_pubkey(&replacement.agent_pubkey, 13)
+        .unwrap();
+    assert_eq!(claimed.len(), 1);
+    assert_eq!(claimed[0].event_id, "evt");
+}
+
+#[test]
+fn same_event_is_independent_per_pubkey() {
+    let s = Store::open_memory().unwrap();
+    assert!(s
+        .enqueue_inbox("evt", "pk-a", "sender", "room", "hello", 10)
+        .unwrap());
+    assert!(s
+        .enqueue_inbox("evt", "pk-b", "sender", "room", "hello", 10)
+        .unwrap());
+    assert!(!s
+        .enqueue_inbox("evt", "pk-a", "sender", "room", "hello", 10)
+        .unwrap());
+}
+
+#[test]
+fn runtime_id_cannot_be_used_as_inbox_identity() {
+    let s = Store::open_memory().unwrap();
+    upsert_runtime(&s, "run-one", "pk-agent", 10);
+    let error = s
+        .enqueue_inbox("evt", "run-one", "sender", "room", "hello", 11)
+        .unwrap_err();
+    assert!(error.to_string().contains("not runtime session id"));
+}
+
+fn upsert_runtime(store: &Store, session_id: &str, pubkey: &str, now: u64) {
+    store
+        .upsert_session_row(
+            session_id,
+            &crate::state::RegisterSession {
+                harness: "codex".into(),
+                external_id_kind: "harness_session".into(),
+                external_id: session_id.into(),
+                agent_pubkey: pubkey.into(),
+                agent_slug: "codex".into(),
+                channel_h: "room".into(),
+                child_pid: None,
+                transcript_path: None,
+                resume_id: String::new(),
+                now,
+            },
+        )
+        .unwrap();
 }

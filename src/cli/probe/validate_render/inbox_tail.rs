@@ -8,13 +8,12 @@ pub(super) fn render(out: &mut String, evidence: &Value) {
     let _ = writeln!(out, "inbox evidence");
     let _ = writeln!(
         out,
-        "  - event_prefix={} target={:?} rows={} events={} pending={} processing={} delivered={} failed={}",
+        "  - event_prefix={} target_pubkey={:?} rows={} events={} pending={} delivered={} failed={}",
         str_at(evidence, "event_prefix"),
-        str_at(evidence, "target_session"),
+        str_at(evidence, "target_pubkey"),
         int_at(evidence, "row_count"),
         int_at(evidence, "event_count"),
         int_at(evidence, "pending_count"),
-        int_at(evidence, "processing_count"),
         int_at(evidence, "delivered_count"),
         int_at(evidence, "failed_count")
     );
@@ -32,10 +31,9 @@ fn render_rows(out: &mut String, value: Option<&Value>) {
     for row in rows.iter().take(5) {
         let _ = writeln!(
             out,
-            "  - {} -> {} ({}) state={} channel={} session_alive={} body_len={}",
+            "  - {} -> {} state={} channel={} session_alive={} body_len={}",
             str_at(row, "event_id"),
-            str_at(row, "target_session"),
-            str_at(row, "target_kind"),
+            str_at(row, "target_pubkey"),
             str_at(row, "state"),
             str_at(row, "channel_h"),
             bool_at(row, "session_alive"),

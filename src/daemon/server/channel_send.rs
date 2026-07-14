@@ -211,7 +211,7 @@ pub(in crate::daemon::server) async fn rpc_channel_send(
             }
             let enqueued = match s.enqueue_inbox(
                 &event_id,
-                &target.session_id,
+                &target.agent_pubkey,
                 &from_pubkey,
                 &deliver_scope,
                 &body_to_send,

@@ -62,21 +62,26 @@ fn retention_prune_preserves_pending_outbox() {
 #[test]
 fn retention_prune_preserves_pending_inbox() {
     let s = Store::open_memory().unwrap();
-    let sid = s.register_session(&reg("claude-code", "x", "h1")).unwrap();
-    s.enqueue_inbox("pending", &sid, "from", "h1", "pending", 1)
+    s.register_session(&reg("claude-code", "x", "h1")).unwrap();
+    s.enqueue_inbox("pending", "pk-agent", "from", "h1", "pending", 1)
         .unwrap();
-    s.enqueue_inbox("old-done", &sid, "from", "h1", "old", 1)
+    s.enqueue_inbox("old-done", "pk-agent", "from", "h1", "old", 1)
         .unwrap();
-    s.enqueue_inbox("new-done", &sid, "from", "h1", "new", 1)
+    s.enqueue_inbox("new-done", "pk-agent", "from", "h1", "new", 1)
         .unwrap();
-    s.mark_delivered("old-done", &sid, 1).unwrap();
-    s.mark_delivered("new-done", &sid, 10).unwrap();
+    s.mark_delivered("old-done", "pk-agent", 1).unwrap();
+    s.mark_delivered("new-done", "pk-agent", 10).unwrap();
 
     let report = s.prune_retained_state_before(0, 5).unwrap();
 
     assert_eq!(report.delivered_inbox, 1);
-    assert_eq!(s.peek_pending_for_session(&sid).unwrap().len(), 1);
-    assert_eq!(s.recently_delivered_for_session(&sid, 0).unwrap().len(), 1);
+    assert_eq!(s.peek_pending_for_pubkey("pk-agent").unwrap().len(), 1);
+    assert_eq!(
+        s.recently_delivered_for_pubkey("pk-agent", 0)
+            .unwrap()
+            .len(),
+        1
+    );
     assert_eq!(count_rows(&s, "inbox"), 2);
 }
 

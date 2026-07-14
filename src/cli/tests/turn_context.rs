@@ -401,7 +401,7 @@ fn turn_check_direct_mentions_surface_from_inbox() {
     let newly = store
         .enqueue_inbox(
             "mention-1",
-            "sess-me",
+            "pk-coder",
             "pk-chat",
             "proj",
             "please review this now",
@@ -418,10 +418,10 @@ fn turn_check_direct_mentions_surface_from_inbox() {
     // Drained → marked delivered → not handled-as-pending again.
     let s = m.lock().unwrap();
     assert!(
-        s.peek_pending_for_session("sess-me").unwrap().is_empty(),
+        s.peek_pending_for_pubkey("pk-coder").unwrap().is_empty(),
         "delivered mention must not remain pending"
     );
-    assert!(s.is_event_handled("mention-1", "sess-me").unwrap());
+    assert!(s.is_event_handled("mention-1", "pk-coder").unwrap());
 }
 
 // ── envelope rendering (pure; unchanged by the persistence rewrite) ───────────

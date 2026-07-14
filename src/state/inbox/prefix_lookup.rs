@@ -10,25 +10,25 @@ impl Store {
         let mut stmt = self.conn.prepare(&format!(
             "SELECT {COLS} FROM inbox
              WHERE event_id LIKE ?1
-             ORDER BY created_at DESC, target_session ASC"
+             ORDER BY created_at DESC, target_pubkey ASC"
         ))?;
         let rows = stmt.query_map(params![pattern], row_to_inbox)?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    /// One inbound ledger row for an event prefix and exact target session.
+    /// One inbound ledger row for an event prefix and exact target pubkey.
     pub fn inbox_by_event_prefix_and_target(
         &self,
         prefix: &str,
-        target_session: &str,
+        target_pubkey: &str,
     ) -> Result<Vec<InboxRow>> {
         let pattern = format!("{}%", prefix.replace(['%', '_'], ""));
         let mut stmt = self.conn.prepare(&format!(
             "SELECT {COLS} FROM inbox
-             WHERE event_id LIKE ?1 AND target_session=?2
+             WHERE event_id LIKE ?1 AND target_pubkey=?2
              ORDER BY created_at DESC"
         ))?;
-        let rows = stmt.query_map(params![pattern, target_session], row_to_inbox)?;
+        let rows = stmt.query_map(params![pattern, target_pubkey], row_to_inbox)?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 }

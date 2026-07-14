@@ -4,18 +4,18 @@ use super::reg;
 #[test]
 fn inbox_idempotency_and_delivery() {
     let s = Store::open_memory().unwrap();
-    let sid = s.register_session(&reg("claude-code", "x", "h1")).unwrap();
+    s.register_session(&reg("claude-code", "x", "h1")).unwrap();
     assert!(s
-        .enqueue_inbox("ev1", &sid, "from", "h1", "hi", 100)
+        .enqueue_inbox("ev1", "pk-agent", "from", "h1", "hi", 100)
         .unwrap());
     // Duplicate is ignored (idempotent).
     assert!(!s
-        .enqueue_inbox("ev1", &sid, "from", "h1", "hi", 100)
+        .enqueue_inbox("ev1", "pk-agent", "from", "h1", "hi", 100)
         .unwrap());
-    assert!(s.is_event_handled("ev1", "x").unwrap());
-    assert_eq!(s.peek_pending_for_session("x").unwrap().len(), 1);
-    s.mark_delivered("ev1", "x", 200).unwrap();
-    assert!(s.peek_pending_for_session("x").unwrap().is_empty());
+    assert!(s.is_event_handled("ev1", "pk-agent").unwrap());
+    assert_eq!(s.peek_pending_for_pubkey("pk-agent").unwrap().len(), 1);
+    s.mark_delivered("ev1", "pk-agent", 200).unwrap();
+    assert!(s.peek_pending_for_pubkey("pk-agent").unwrap().is_empty());
 }
 
 #[test]

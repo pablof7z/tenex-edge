@@ -137,6 +137,29 @@ fn schema_v2_is_rejected_instead_of_preserving_session_id_derived_signers() {
 }
 
 #[test]
+fn schema_v3_is_rejected_instead_of_preserving_session_keyed_inbox() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("state.db");
+    {
+        let store = Store::open(&path).unwrap();
+        drop(store);
+        let conn = Connection::open(&path).unwrap();
+        conn.pragma_update(None, "user_version", 3).unwrap();
+        conn.execute("DROP TABLE event_claims", []).unwrap();
+    }
+
+    let error = match Store::open(&path) {
+        Ok(_) => panic!("schema v3 must be rejected"),
+        Err(error) => error,
+    };
+    assert!(error
+        .to_string()
+        .contains("schema version 3 is incompatible"));
+    let conn = Connection::open(&path).unwrap();
+    assert!(!table_exists(&conn, "event_claims"));
+}
+
+#[test]
 fn stamped_non_canonical_file_db_is_rejected() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("state.db");
@@ -158,7 +181,7 @@ fn stamped_non_canonical_file_db_is_rejected() {
         "#,
     )
     .unwrap();
-    conn.pragma_update(None, "user_version", 3u32).unwrap();
+    conn.pragma_update(None, "user_version", 4u32).unwrap();
     drop(conn);
 
     let err = match Store::open(&path) {

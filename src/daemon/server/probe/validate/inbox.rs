@@ -1,4 +1,4 @@
-//! Inbox target validation for inbound event delivery/orchestration rows.
+//! Inbox target validation for inbound event delivery rows.
 
 use super::report::{bool_at, int_at, str_at};
 use super::DaemonState;
@@ -8,25 +8,25 @@ use std::sync::Arc;
 
 pub(super) struct InboxTarget {
     event_prefix: String,
-    target_session: Option<String>,
+    target_pubkey: Option<String>,
 }
 
 pub(super) fn inbox_target(target: &str) -> Option<InboxTarget> {
     if let Some(rest) = target.strip_prefix("inbox:") {
-        let (event_prefix, target_session) = split_colon_target(rest)?;
+        let (event_prefix, target_pubkey) = split_colon_target(rest)?;
         return Some(InboxTarget {
             event_prefix: event_prefix.to_string(),
-            target_session: target_session.map(str::to_string),
+            target_pubkey: target_pubkey.map(str::to_string),
         });
     }
     let rest = target.strip_prefix("inbox/")?;
-    let (event_prefix, target_session) = match rest.split_once('/') {
+    let (event_prefix, target_pubkey) = match rest.split_once('/') {
         Some((event, target)) => (event, Some(target)),
         None => (rest, None),
     };
     (!event_prefix.trim().is_empty()).then(|| InboxTarget {
         event_prefix: event_prefix.to_string(),
-        target_session: target_session
+        target_pubkey: target_pubkey
             .filter(|target| !target.trim().is_empty())
             .map(str::to_string),
     })
@@ -38,22 +38,22 @@ pub(super) fn inbox_evidence(
     parsed: &InboxTarget,
 ) -> Value {
     let result = state.with_store(|store| {
-        let rows = match parsed.target_session.as_deref() {
-            Some(target_session) => {
-                store.inbox_by_event_prefix_and_target(&parsed.event_prefix, target_session)?
+        let rows = match parsed.target_pubkey.as_deref() {
+            Some(target_pubkey) => {
+                store.inbox_by_event_prefix_and_target(&parsed.event_prefix, target_pubkey)?
             }
             None => store.inbox_by_event_prefix(&parsed.event_prefix)?,
         };
+        let alive = store.list_alive_sessions()?;
         let session_rows = rows
             .iter()
             .map(|row| {
-                if synthetic_target(&row.target_session) {
-                    Ok(None)
-                } else {
-                    store.get_session(&row.target_session)
-                }
+                alive
+                    .iter()
+                    .find(|session| session.agent_pubkey == row.target_pubkey)
+                    .cloned()
             })
-            .collect::<anyhow::Result<Vec<_>>>()?;
+            .collect::<Vec<_>>();
         Ok::<_, anyhow::Error>((rows, session_rows))
     });
     let (rows, session_rows) = match result {
@@ -62,7 +62,7 @@ pub(super) fn inbox_evidence(
             return json!({
                 "target": target,
                 "event_prefix": parsed.event_prefix,
-                "target_session": parsed.target_session,
+                "target_pubkey": parsed.target_pubkey,
                 "kind": "inbox",
                 "supported": true,
                 "found": false,
@@ -87,18 +87,16 @@ pub(super) fn inbox_evidence(
     let ambiguous = distinct_events.len() > 1;
     let failed_count = rows.iter().filter(|row| failed_state(&row.state)).count();
     let pending_count = rows.iter().filter(|row| row.state == "pending").count();
-    let processing_count = rows.iter().filter(|row| row.state == "processing").count();
     let delivered_count = rows
         .iter()
         .filter(|row| delivered_state(&row.state))
         .count();
-    let ok =
-        found && !ambiguous && failed_count == 0 && pending_count == 0 && processing_count == 0;
+    let ok = found && !ambiguous && failed_count == 0 && pending_count == 0;
 
     json!({
         "target": target,
         "event_prefix": parsed.event_prefix,
-        "target_session": parsed.target_session,
+        "target_pubkey": parsed.target_pubkey,
         "kind": "inbox",
         "supported": true,
         "found": found,
@@ -106,13 +104,12 @@ pub(super) fn inbox_evidence(
         "event_count": distinct_events.len(),
         "row_count": rows.len(),
         "pending_count": pending_count,
-        "processing_count": processing_count,
         "delivered_count": delivered_count,
         "failed_count": failed_count,
         "rows": row_values,
         "ok": ok,
-        "summary": summary(&parsed.event_prefix, parsed.target_session.as_deref(), rows.len(), ambiguous, pending_count, processing_count, failed_count),
-        "reason": reason(found, ambiguous, pending_count, processing_count, failed_count),
+        "summary": summary(&parsed.event_prefix, parsed.target_pubkey.as_deref(), rows.len(), ambiguous, pending_count, failed_count),
+        "reason": reason(found, ambiguous, pending_count, failed_count),
     })
 }
 
@@ -155,8 +152,7 @@ fn split_colon_target(rest: &str) -> Option<(&str, Option<&str>)> {
 fn row_json(row: &crate::state::InboxRow, session: Option<&crate::state::Session>) -> Value {
     json!({
         "event_id": row.event_id,
-        "target_session": row.target_session,
-        "target_kind": target_kind(&row.target_session),
+        "target_pubkey": row.target_pubkey,
         "state": row.state,
         "from_pubkey": row.from_pubkey,
         "channel_h": row.channel_h,
@@ -170,27 +166,8 @@ fn row_json(row: &crate::state::InboxRow, session: Option<&crate::state::Session
     })
 }
 
-fn target_kind(target_session: &str) -> &'static str {
-    if target_session == "management" {
-        "management"
-    } else if target_session.starts_with("orchestration:") {
-        "orchestration"
-    } else if target_session.starts_with("offline-mention:") {
-        "offline_mention"
-    } else {
-        "session"
-    }
-}
-
-fn synthetic_target(target_session: &str) -> bool {
-    !matches!(target_kind(target_session), "session")
-}
-
 fn delivered_state(state: &str) -> bool {
-    matches!(
-        state,
-        "delivered" | "injected" | "echo_consumed" | "offline_handled"
-    )
+    matches!(state, "delivered" | "injected" | "echo_consumed")
 }
 
 fn failed_state(state: &str) -> bool {
@@ -209,14 +186,13 @@ fn body_preview(body: &str) -> String {
 
 fn summary(
     event_prefix: &str,
-    target_session: Option<&str>,
+    target_pubkey: Option<&str>,
     row_count: usize,
     ambiguous: bool,
     pending_count: usize,
-    processing_count: usize,
     failed_count: usize,
 ) -> String {
-    let suffix = target_session
+    let suffix = target_pubkey
         .map(|target| format!(" for `{target}`"))
         .unwrap_or_default();
     if row_count == 0 {
@@ -228,19 +204,13 @@ fn summary(
     if failed_count > 0 {
         return format!("inbox `{event_prefix}` has {failed_count} failed row(s){suffix}");
     }
-    if pending_count > 0 || processing_count > 0 {
+    if pending_count > 0 {
         return format!("inbox `{event_prefix}` has unfinished inbound row(s){suffix}");
     }
     format!("inbox `{event_prefix}` has {row_count} completed inbound row(s){suffix}")
 }
 
-fn reason(
-    found: bool,
-    ambiguous: bool,
-    pending_count: usize,
-    processing_count: usize,
-    failed_count: usize,
-) -> &'static str {
+fn reason(found: bool, ambiguous: bool, pending_count: usize, failed_count: usize) -> &'static str {
     if !found {
         "no inbound ledger row matched this event id prefix"
     } else if ambiguous {
@@ -249,8 +219,6 @@ fn reason(
         "one or more inbound rows records a failed/rejected state"
     } else if pending_count > 0 {
         "inbound event is queued but has not been delivered to the target yet"
-    } else if processing_count > 0 {
-        "orchestration/management target is still processing or its lease has not been retried"
     } else {
         ""
     }

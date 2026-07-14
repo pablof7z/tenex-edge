@@ -229,17 +229,31 @@ CREATE INDEX IF NOT EXISTS idx_session_claims_session ON session_claims(session_
 
 CREATE TABLE IF NOT EXISTS inbox (
     event_id        TEXT NOT NULL,
-    target_session  TEXT NOT NULL,
+    target_pubkey   TEXT NOT NULL,
     state           TEXT NOT NULL DEFAULT 'pending',
     from_pubkey     TEXT NOT NULL DEFAULT '',
     channel_h       TEXT NOT NULL DEFAULT '',
     body            TEXT NOT NULL DEFAULT '',
     created_at      INTEGER NOT NULL,
     delivered_at    INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (event_id, target_session)
+    PRIMARY KEY (event_id, target_pubkey)
 );
 CREATE INDEX IF NOT EXISTS idx_inbox_pending
-    ON inbox(target_session, state, created_at);
+    ON inbox(target_pubkey, state, created_at);
+
+CREATE TABLE IF NOT EXISTS event_claims (
+    event_id       TEXT NOT NULL,
+    claim_key      TEXT NOT NULL,
+    state          TEXT NOT NULL DEFAULT 'pending',
+    from_pubkey    TEXT NOT NULL DEFAULT '',
+    channel_h      TEXT NOT NULL DEFAULT '',
+    body           TEXT NOT NULL DEFAULT '',
+    created_at     INTEGER NOT NULL,
+    updated_at     INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (event_id, claim_key)
+);
+CREATE INDEX IF NOT EXISTS idx_event_claims_state
+    ON event_claims(state, updated_at);
 
 CREATE TABLE IF NOT EXISTS outbox (
     local_id     INTEGER PRIMARY KEY AUTOINCREMENT,

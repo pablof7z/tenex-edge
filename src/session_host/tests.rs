@@ -252,7 +252,7 @@ fn pending_message_prompt_contains_the_actual_message_body() {
     // Renderer shows the short sender pubkey.
     let row = crate::state::InboxRow {
         event_id: "abcdef123456".into(),
-        target_session: rec.session_id.clone(),
+        target_pubkey: rec.agent_pubkey.clone(),
         state: "pending".into(),
         from_pubkey: "pk-sender".into(),
         channel_h: "proj".into(),
@@ -284,7 +284,7 @@ fn whitelisted_human_mention_renders_bare_with_provenance() {
     let rec = sample_session();
     let row = crate::state::InboxRow {
         event_id: "ev-human".into(),
-        target_session: rec.session_id.clone(),
+        target_pubkey: rec.agent_pubkey.clone(),
         state: "pending".into(),
         from_pubkey: "human-pk".into(),
         channel_h: "channel-writer-test".into(),

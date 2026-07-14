@@ -13,17 +13,15 @@ fn validate_render_lists_inbox_evidence() {
         ],
         "inbox_evidence": {
             "event_prefix": "evt-in",
-            "target_session": null,
+            "target_pubkey": null,
             "row_count": 1,
             "event_count": 1,
             "pending_count": 0,
-            "processing_count": 0,
             "delivered_count": 1,
             "failed_count": 0,
             "rows": [{
                 "event_id": "evt-in",
-                "target_session": "s1",
-                "target_kind": "session",
+                "target_pubkey": "pk-agent",
                 "state": "delivered",
                 "channel_h": "room",
                 "session_alive": true,
@@ -37,5 +35,5 @@ fn validate_render_lists_inbox_evidence() {
 
     assert!(text.contains("inbox evidence"));
     assert!(text.contains("event_prefix=evt-in"));
-    assert!(text.contains("evt-in -> s1 (session) state=delivered"));
+    assert!(text.contains("evt-in -> pk-agent state=delivered"));
 }
