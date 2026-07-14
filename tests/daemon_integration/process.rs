@@ -1,6 +1,6 @@
 use crate::daemon_harness::*;
-use tenex_edge::daemon::client::Client;
-use tenex_edge::state::Store;
+use mosaico::daemon::client::Client;
+use mosaico::state::Store;
 
 #[path = "process/hooks.rs"]
 mod hooks;
@@ -214,7 +214,7 @@ fn invalid_cli_invocation_writes_command_log_only_when_enabled() {
         &home,
         args,
         &[(
-            tenex_edge::command_forensics::COMMAND_CALL_LOG_ENV,
+            mosaico::command_forensics::COMMAND_CALL_LOG_ENV,
             command_log_path.to_str().unwrap(),
         )],
     );
@@ -232,7 +232,7 @@ fn invalid_cli_invocation_writes_command_log_only_when_enabled() {
         .iter()
         .find(|v| v["phase"] == "received")
         .expect("received record");
-    assert_eq!(received["schema"], "tenex-edge.command-call.v1");
+    assert_eq!(received["schema"], "mosaico.command-call.v1");
     assert_eq!(received["command"]["subcommand"], "send-this-message");
     assert_eq!(
         received["command"]["explicit_session"],
@@ -458,19 +458,18 @@ fn turn_lifecycle_drives_pubkey_row_resolved_from_harness_locator() {
 fn run_cli_proto(home: &Home, args: &[&str], proto: Option<&str>) -> std::process::Output {
     let mut cmd = std::process::Command::new(bin());
     cmd.args(args)
-        .env_remove("TENEX_EDGE_AGENT")
-        .env_remove("TENEX_EDGE_AGENT_FALLBACK")
-        .env_remove("TENEX_EDGE_PUBKEY")
-        .env_remove("TENEX_EDGE_PTY_SESSION")
-        .env_remove("TENEX_EDGE_PTY_SOCKET")
-        .env_remove("TENEX_EDGE_CHANNEL")
-        .env_remove("TENEX_EDGE_EPHEMERAL")
-        .env("TENEX_EDGE_HOME", home.dir.path())
-        .env("TENEX_CONFIG", home.dir.path().join("config.json"))
-        .env("TENEX_EDGE_BIN", bin())
-        .env("TENEX_EDGE_DAEMON_GRACE_S", "30");
+        .env_remove("MOSAICO_AGENT")
+        .env_remove("MOSAICO_PUBKEY")
+        .env_remove("MOSAICO_PTY_SESSION")
+        .env_remove("MOSAICO_PTY_SOCKET")
+        .env_remove("MOSAICO_CHANNEL")
+        .env_remove("MOSAICO_EPHEMERAL")
+        .env("MOSAICO_HOME", home.dir.path())
+        .env("MOSAICO_CONFIG", home.dir.path().join("config.json"))
+        .env("MOSAICO_BIN", bin())
+        .env("MOSAICO_DAEMON_GRACE_S", "30");
     if let Some(p) = proto {
-        cmd.env("TENEX_EDGE_PROTOCOL", p);
+        cmd.env("MOSAICO_PROTOCOL", p);
     }
-    cmd.output().expect("run tenex-edge")
+    cmd.output().expect("run mosaico")
 }

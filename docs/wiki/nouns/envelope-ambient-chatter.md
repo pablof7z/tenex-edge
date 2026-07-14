@@ -9,4 +9,4 @@ source_refs:
 
 # envelope (ambient chatter)
 
-wrapped in `<tenex-edge>` tags, showing channel messages since session join/last turn with `<@name - Xm ago>` prefixes
+wrapped in `<mosaico>` tags, showing channel messages since session join/last turn with `<@name - Xm ago>` prefixes

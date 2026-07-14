@@ -41,7 +41,7 @@ impl Nip29Provider {
                     return GroupMutationOutcome::Rejected;
                 }
             };
-            match self.try_fetch_group_state(group).await {
+            match self.fetch_group_state(group).await {
                 Ok((_, roles, _)) => {
                     if roles.get(mgmt_pubkey).map(String::as_str) == Some("admin") {
                         self.with_store(|s| {
@@ -102,7 +102,7 @@ impl Nip29Provider {
             Err(e) => {
                 let s = e.to_string();
                 let outcome = classify_group_publish_error(&s);
-                let log_dir = crate::config::edge_home().join("logs");
+                let log_dir = crate::config::mosaico_home().join("logs");
                 let _ = crate::config::ensure_dir(&log_dir);
                 let path = log_dir.join("group-mgmt.log");
                 if let Ok(mut f) = std::fs::OpenOptions::new()
@@ -136,14 +136,14 @@ impl Nip29Provider {
                 Err(e) => {
                     tracing::error!(
                         error = %format!("{e:#}"),
-                        "configured tenexPrivateKey is not parseable"
+                        "configured mosaicoPrivateKey is not parseable"
                     );
                     None
                 }
             };
         }
 
-        match crate::config::ensure_tenex_private_key() {
+        match crate::config::ensure_mosaico_private_key() {
             Ok(nsec) => {
                 *self
                     .management_nsec
@@ -154,7 +154,7 @@ impl Nip29Provider {
                     Err(e) => {
                         tracing::error!(
                             error = %format!("{e:#}"),
-                            "persisted tenexPrivateKey is not parseable"
+                            "persisted mosaicoPrivateKey is not parseable"
                         );
                         None
                     }
@@ -163,7 +163,7 @@ impl Nip29Provider {
             Err(e) => {
                 tracing::error!(
                     error = %format!("{e:#}"),
-                    "failed to ensure tenexPrivateKey"
+                    "failed to ensure mosaicoPrivateKey"
                 );
                 None
             }

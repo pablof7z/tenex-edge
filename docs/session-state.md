@@ -6,7 +6,7 @@ below this boundary and must not appear in agent-facing output.
 | State | Contract |
 |---|---|
 | `working` | The session is online and mid-turn. |
-| `idle` | The session is online, between turns, and Tenex can automatically drive its attention. |
+| `idle` | The session is online, between turns, and Mosaico can automatically drive its attention. |
 | `suspended` | The session is online and between turns, but has no live automatic-delivery path. Mentions remain queued until manual resume. |
 | `offline` | The session is not live. |
 

@@ -34,7 +34,7 @@ pub fn spawn_session(args: SpawnSessionArgs) -> Result<LaunchMetadata> {
         .open(&log_path)
         .with_context(|| format!("opening {}", log_path.display()))?;
     let log_err = log.try_clone()?;
-    let bin = std::env::current_exe().context("locating current tenex-edge executable")?;
+    let bin = std::env::current_exe().context("locating current mosaico executable")?;
     let mut child = std::process::Command::new(bin);
     child
         .arg("__pty-supervisor")

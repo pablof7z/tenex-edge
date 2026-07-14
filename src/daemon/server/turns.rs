@@ -260,9 +260,17 @@ fn context_profile_pubkeys(
         pubkeys.extend(crate::profile::body_mention_pubkeys(&row.body));
     }
 
-    let channels = store
-        .list_session_joined_channels(&rec.pubkey)
-        .unwrap_or_else(|_| vec![(rec.channel_h.clone(), rec.created_at)]);
+    let channels = match store.list_session_joined_channels(&rec.pubkey) {
+        Ok(channels) => channels,
+        Err(error) => {
+            tracing::warn!(
+                session = %rec.pubkey,
+                %error,
+                "profile warming skipped because session channel membership lookup failed"
+            );
+            Vec::new()
+        }
+    };
     for (channel_h, _) in channels {
         for member in store.list_channel_members(&channel_h).unwrap_or_default() {
             pubkeys.push(member.pubkey);

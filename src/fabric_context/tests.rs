@@ -104,7 +104,7 @@ fn human_who_renderer_is_non_xml_and_terminal_friendly() {
     assert!(human.contains("offline"), "got: {human}");
     assert!(!human.contains(" member "), "got: {human}");
     assert!(!human.contains(" admin "), "got: {human}");
-    assert!(!human.contains("<tenex-edge>"), "got: {human}");
+    assert!(!human.contains("<mosaico>"), "got: {human}");
     assert!(!human.contains("<member"), "got: {human}");
 }
 
@@ -164,7 +164,7 @@ fn mention_rows_are_marked_important_and_truncated_with_recovery_id() {
     assert!(text.contains("<workspace name=\"root\" channel=\"root\""));
     assert!(!text.contains("<channel name=\"#root\""));
     assert!(text.contains("<message from=\"@reviewer\" id=\"mentio\">"));
-    assert!(text.contains("Reply via: `tenex-edge channel reply mentio --message \"hello world\"`"));
+    assert!(text.contains("Reply via: `mosaico channel reply mentio --message \"hello world\"`"));
     assert!(text.contains("Attachments: add `--attach label=/path/to/file`"));
     assert!(!text.contains("mention=\"true\""));
     assert!(!text.contains("truncated=\"true\""));
@@ -345,11 +345,7 @@ fn all_workspaces_factors_shared_agents_and_preserves_roster_deltas() {
 
     let roots = vec!["root".into(), "other".into()];
     let rendered = render_fabric_all_workspaces(&store, &roots, 100, "laptop", "");
-    assert_eq!(
-        rendered.matches("<tenex-edge>").count(),
-        1,
-        "got: {rendered}"
-    );
+    assert_eq!(rendered.matches("<mosaico>").count(), 1, "got: {rendered}");
     assert_eq!(
         rendered.matches("<available-agents>").count(),
         1,

@@ -29,7 +29,7 @@ pub(in crate::daemon::server) fn rpc_local_backend(
 ) -> Result<serde_json::Value> {
     let pubkey = state
         .backend_pubkey()
-        .ok_or_else(|| anyhow::anyhow!("no signing key (tenexPrivateKey) configured"))?;
+        .ok_or_else(|| anyhow::anyhow!("no signing key (mosaicoPrivateKey) configured"))?;
     Ok(serde_json::json!({ "pubkey": pubkey, "backend_label": state.host.clone() }))
 }
 

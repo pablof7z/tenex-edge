@@ -19,7 +19,7 @@ impl DaemonState {
             .with_store(|store| store.get_session(pubkey))?
             .with_context(|| format!("pubkey {pubkey:?} has no local runtime projection"))?;
         let agent = crate::identity::load_or_create(
-            &crate::config::edge_home(),
+            &crate::config::mosaico_home(),
             &session.agent_slug,
             crate::util::now_secs(),
         )?;

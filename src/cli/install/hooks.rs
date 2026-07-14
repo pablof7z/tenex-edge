@@ -5,9 +5,9 @@ use super::config::{self, Harness};
 const CODEX_ROOT_HOOK_EVENTS: &[&str] =
     &["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop"];
 
-/// Does a hook group contain a tenex-edge command for `host`?
+/// Does a hook group contain a mosaico command for `host`?
 fn group_is_ours(group: &serde_json::Value, host: &str) -> bool {
-    let needle = format!("tenex-edge harness hook {host} --type ");
+    let needle = format!("mosaico harness hook {host} --type ");
     group
         .get("hooks")
         .and_then(|h| h.as_array())
@@ -125,7 +125,7 @@ pub fn is_installed(h: &Harness) -> bool {
         "opencode" => {
             h.config_path.exists()
                 && std::fs::read_to_string(&h.config_path)
-                    .map(|s| s.contains("tenex-edge") && s.contains("opencode"))
+                    .map(|s| s.contains("mosaico") && s.contains("opencode"))
                     .unwrap_or(false)
         }
         "claude-code" | "codex" | "grok" => is_json_harness_installed(h),

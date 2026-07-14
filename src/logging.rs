@@ -1,14 +1,14 @@
 //! Daemon logging: colorised stdout + plain-text daemon.log, both live.
 //!
-//! When stdout is a terminal (`tenex-edge daemon` run directly) two layers are
+//! When stdout is a terminal (`mosaico daemon` run directly) two layers are
 //! installed: ANSI-coloured stdout and a plain-text file appended to daemon.log.
 //! When stdout is not a terminal (`daemon` spawned detached with stdout
 //! redirected to daemon.log) a single plain-text stdout layer suffices.
 //!
-//! Filter default: `tenex_edge=info`. Override with `RUST_LOG`.
+//! Filter default: `mosaico=info`. Override with `RUST_LOG`.
 //! Examples:
-//!   RUST_LOG=tenex_edge=debug   (include relay/nip29 trace)
-//!   RUST_LOG=tenex_edge=trace   (everything)
+//!   RUST_LOG=mosaico=debug   (include relay/nip29 trace)
+//!   RUST_LOG=mosaico=trace   (everything)
 
 use anyhow::Result;
 use std::fmt;
@@ -152,7 +152,7 @@ pub fn init_daemon_logging(log_path: &Path) -> Result<()> {
     use std::io::IsTerminal as _;
 
     let filter =
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("tenex_edge=info"));
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("mosaico=info"));
 
     if std::io::stdout().is_terminal() {
         let file = std::fs::OpenOptions::new()

@@ -10,4 +10,4 @@ source_refs:
 
 # agent identity [old model]
 
-Previously: identity is (agent, machine); the same slug on another machine is a different key, resolving to a durable Nostr keypair persisted under <edge_home>/agents/<slug>.json. Superseded by per-session pubkeys derived from the mgmt secret.
+Previously: identity is (agent, machine); the same slug on another machine is a different key, resolving to a durable Nostr keypair persisted under <mosaico_home>/agents/<slug>.json. Superseded by per-session pubkeys derived from the mgmt secret.

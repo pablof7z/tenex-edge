@@ -21,7 +21,7 @@ fn print_ambiguous(re_run_target: &str, channel: &str, v: &serde_json::Value) ->
     eprintln!("'{name}' is ambiguous — re-run with an exact channel:");
     if let Some(refs) = v["ambiguous"].as_array() {
         for r in refs.iter().filter_map(|r| r.as_str()) {
-            eprintln!("  tenex-edge channel add {re_run_target} {r}");
+            eprintln!("  mosaico channel add {re_run_target} {r}");
         }
     }
     std::process::exit(2);
@@ -140,15 +140,14 @@ mod tests {
 
     #[test]
     fn new_session_flag_stays_removed() {
-        let kind = parse_err("tenex-edge channel add --new-session reviewer ops");
+        let kind = parse_err("mosaico channel add --new-session reviewer ops");
         assert_eq!(kind, ErrorKind::UnknownArgument);
     }
 
     #[test]
     fn session_pull_accepts_handle_and_message() {
-        let a = parse_add(
-            "tenex-edge channel add --session @sable-grove-179-coder ops --message welcome",
-        );
+        let a =
+            parse_add("mosaico channel add --session @sable-grove-179-coder ops --message welcome");
         assert_eq!(a.session.as_deref(), Some("@sable-grove-179-coder"));
         assert_eq!(a.first.as_deref(), Some("ops"));
         assert_eq!(a.message.as_deref(), Some("welcome"));
@@ -156,7 +155,7 @@ mod tests {
 
     #[test]
     fn human_takes_two_positionals_and_admin() {
-        let a = parse_add("tenex-edge channel add npub1xyz ops --admin");
+        let a = parse_add("mosaico channel add npub1xyz ops --admin");
         assert_eq!(a.first.as_deref(), Some("npub1xyz"));
         assert_eq!(a.second.as_deref(), Some("ops"));
         assert!(a.admin && a.session.is_none());
@@ -164,7 +163,7 @@ mod tests {
 
     #[test]
     fn admin_conflicts_with_session_mode() {
-        let kind = parse_err("tenex-edge channel add --session @sable-grove-179-coder ops --admin");
+        let kind = parse_err("mosaico channel add --session @sable-grove-179-coder ops --admin");
         assert_eq!(kind, ErrorKind::ArgumentConflict);
     }
 

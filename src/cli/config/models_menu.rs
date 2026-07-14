@@ -10,12 +10,12 @@ use anyhow::Result;
 use inquire::{Confirm, Select, Text};
 use owo_colors::OwoColorize;
 
-/// Roles actually read anywhere in tenex-edge (via
+/// Roles actually read anywhere in mosaico (via
 /// `crate::llmconfig::resolve_role`) — keep this in sync with call sites
-/// (currently just `distill.rs`'s `edge-distillation` lookup). There's no
+/// (currently just `distill.rs`'s `mosaico-distillation` lookup). There's no
 /// free-text "new role" option: a role name the code never resolves does
 /// nothing, so inventing one is a dead end, not a feature.
-const KNOWN_ROLES: &[&str] = &["edge-distillation"];
+const KNOWN_ROLES: &[&str] = &["mosaico-distillation"];
 const CLAUDE_CLI_KEY: &str = "claude-cli";
 const CLAUDE_CLI_MODEL_SUGGESTIONS: &[&str] = &[
     "claude-sonnet-5",
@@ -74,7 +74,7 @@ fn print_roles(llms: &LlmsFile) {
     println!();
 }
 
-/// Offers only roles tenex-edge's own code resolves (`KNOWN_ROLES`), plus
+/// Offers only roles mosaico's own code resolves (`KNOWN_ROLES`), plus
 /// any already present in `llms.json` that aren't in that list (e.g. a role
 /// used by a sibling TENEX host sharing this file) — never a free-text
 /// entry, since an unresolved role name is inert.
@@ -88,7 +88,7 @@ fn pick_role(llms: &LlmsFile) -> Result<Option<String>> {
 
     prompted(
         Select::new("Which role?", choices)
-            .with_help_message("only roles tenex-edge's own code resolves are offered")
+            .with_help_message("only roles mosaico's own code resolves are offered")
             .prompt(),
     )
 }

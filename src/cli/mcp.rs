@@ -42,7 +42,7 @@ pub(super) struct McpArgs {
     /// Require OAuth for HTTP MCP requests.
     #[arg(long)]
     oauth: bool,
-    /// Public HTTPS origin for OAuth metadata, e.g. https://edge.f7z.io.
+    /// Public HTTPS origin for OAuth metadata, e.g. https://mosaico.f7z.io.
     #[arg(long)]
     public_url: Option<String>,
 }
@@ -148,11 +148,11 @@ fn initialize(params: &Value) -> Value {
             "tools": {},
         },
         "serverInfo": {
-            "name": "tenex-edge",
-            "title": "tenex-edge",
+            "name": "mosaico",
+            "title": "mosaico",
             "version": env!("CARGO_PKG_VERSION"),
         },
-        "instructions": "Use tenex-edge resources for channel awareness and tenex-edge tools for channel chat and membership operations.",
+        "instructions": "Use mosaico resources for channel awareness and mosaico tools for channel chat and membership operations.",
     })
 }
 

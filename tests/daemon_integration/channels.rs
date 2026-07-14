@@ -1,6 +1,6 @@
 use crate::daemon_harness::*;
-use tenex_edge::daemon::client::Client;
-use tenex_edge::state::Store;
+use mosaico::daemon::client::Client;
+use mosaico::state::Store;
 
 #[path = "channels/create.rs"]
 mod create;
@@ -31,10 +31,10 @@ mod session_rooms;
 
 /// A valid (throwaway) operator nsec for the local relay — the HUMAN's key.
 /// `userNsec` is ONLY used to sign user-prompt events; its pubkey is whitelisted
-/// so it's granted admin in every group (signed by `tenexPrivateKey`).
+/// so it's granted admin in every group (signed by `mosaicoPrivateKey`).
 const EXAMPLE_USER_NSEC: &str = "nsec1eulru7a67wt9ndqxv424kmgvd6uyd8defdxh7y9peut28f2p2vhs35m5h4";
 /// A valid (throwaway) backend seckey (hex) — distinct from the user's key, per
-/// doctrine: `userNsec` is the human, `tenexPrivateKey` is the backend. The
+/// doctrine: `userNsec` is the human, `mosaicoPrivateKey` is the backend. The
 /// backend is the management signer (group create/lock/put-user/etc.) and is
 /// automatically an admin of every group it creates.
 const EXAMPLE_BACKEND_SEC_HEX: &str =
@@ -66,7 +66,7 @@ fn write_config_with_backend_key(home: &Home, per_session_rooms: bool, backend_k
     // NIP-29 ownership/minting needs a NIP-29-aware relay; nak can't do it.
     // The user's pubkey is whitelisted (so it's granted admin in every group),
     // and the backend key signs group management. The two keys are ALWAYS
-    // distinct per doctrine: userNsec = human, tenexPrivateKey = backend.
+    // distinct per doctrine: userNsec = human, mosaicoPrivateKey = backend.
     let user_pk = pubkey_of(EXAMPLE_USER_NSEC);
     let cfg = home.dir.path().join("config.json");
     let mut body = serde_json::json!({
@@ -78,13 +78,13 @@ fn write_config_with_backend_key(home: &Home, per_session_rooms: bool, backend_k
         "perSessionRooms": per_session_rooms,
     });
     if let Some(key) = backend_key {
-        body["tenexPrivateKey"] = serde_json::Value::String(key.to_string());
+        body["mosaicoPrivateKey"] = serde_json::Value::String(key.to_string());
     }
     std::fs::write(&cfg, serde_json::to_string(&body).unwrap()).unwrap();
 }
 
 fn refresh_channel_members(channel: &str) {
-    let _ = tenex_edge::daemon::blocking::call(
+    let _ = mosaico::daemon::blocking::call(
         "channel_members",
         serde_json::json!({ "channel": channel }),
     );
@@ -121,11 +121,11 @@ async fn precreate_channel_group_as_user(channel: &str) {
     for (label, builder) in [
         (
             "9007 create-group",
-            tenex_edge::fabric::nip29::lifecycle::group_create(channel).unwrap(),
+            mosaico::fabric::nip29::lifecycle::group_create(channel).unwrap(),
         ),
         (
             "9002 lock-closed",
-            tenex_edge::fabric::nip29::lifecycle::group_lock_closed(channel).unwrap(),
+            mosaico::fabric::nip29::lifecycle::group_lock_closed(channel).unwrap(),
         ),
     ] {
         let signed = builder.sign_with_keys(&user_keys).unwrap();

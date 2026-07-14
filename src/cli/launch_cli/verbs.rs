@@ -80,26 +80,24 @@ pub(super) async fn launch(request: LaunchRequest) -> Result<()> {
 
 /// Resolve the launch channel shared by the PTY and ACP paths. `--channel ""`
 /// opens the interactive picker (TTY required); a bare launch defaults to the
-/// workspace channel; a name/id is resolved to its opaque `channel_h` (created if
-/// absent) BEFORE spawning, so TENEX_EDGE_CHANNEL and provisioning see one id.
+/// workspace channel; a name is resolved to its opaque `channel_h` (created if
+/// absent) BEFORE spawning, so MOSAICO_CHANNEL and provisioning see one id.
 async fn resolve_launch_channel(
     root: &str,
     agent: &str,
     channel: Option<String>,
 ) -> Result<Option<String>> {
     let want_picker = matches!(channel, Some(ref s) if s.is_empty());
-    let channel = if want_picker {
+    if want_picker {
         use std::io::IsTerminal;
         if !std::io::stdin().is_terminal() {
             anyhow::bail!(
                 "channel selection needs a TTY to open the interactive picker; \
-                 pass --channel <id> to scope into a specific channel non-interactively"
+                 pass --channel <name> to scope into a specific channel non-interactively"
             );
         }
-        Some(pick_channel(root, agent).await?)
-    } else {
-        channel
-    };
+        return Ok(Some(pick_channel(root, agent).await?));
+    }
     match channel {
         None => Ok(Some(root.to_string())),
         Some(name) if !name.is_empty() => {
@@ -162,9 +160,9 @@ async fn launch_acp_headless(
         .await
         .with_context(|| format!("headless ACP launch of agent {agent:?} failed"))?;
     let session = v["pty_id"].as_str().unwrap_or_default();
-    eprintln!("[tenex-edge acp] session: {session}");
+    eprintln!("[mosaico acp] session: {session}");
     eprintln!(
-        "[tenex-edge acp] headless agent launched; it responds to channel mentions (no PTY to attach)"
+        "[mosaico acp] headless agent launched; it responds to channel mentions (no PTY to attach)"
     );
     Ok(())
 }
@@ -224,7 +222,7 @@ async fn create_channel_interactive(
         .interact_text()?;
 
     // Resolve the local backend config label from the daemon so the picker uses
-    // the same backend identifier as `tenex-edge channel create --agent`.
+    // the same backend identifier as `mosaico channel create --agent`.
     let backend_v = super::super::daemon_call_async("local_backend", serde_json::json!({})).await?;
     let backend_label = backend_v["backend_label"]
         .as_str()

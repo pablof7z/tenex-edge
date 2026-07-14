@@ -9,4 +9,4 @@ source_refs:
 
 # RawConfig
 
-Mirror of the relevant fields in ~/.tenex-edge/config.json; unknown fields are ignored so tenex-edge coexists with TENEX's larger camelCase config.
+Mirror of the relevant fields in `~/.mosaico/config.json`; unknown fields are ignored.

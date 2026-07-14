@@ -24,7 +24,7 @@ pub(in crate::daemon::server) fn resolve_caller(
         &CallerAnchor::from_params(params),
         ResolveScope::Strict,
     )
-    .with_context(|| format!("{verb} must be run from within a tenex-edge agent session"))
+    .with_context(|| format!("{verb} must be run from within a mosaico agent session"))
 }
 
 /// Resolve `reference` in the caller's channel subtree, returning the channel

@@ -1,13 +1,13 @@
 use super::*;
+use mosaico::daemon::client::Client as DaemonClient;
+use mosaico::domain::{AgentRef, ChatMessage, DomainEvent};
+use mosaico::fabric::nip29::wire::Nip29WireCodec;
+use mosaico::identity;
+use mosaico::state::{Session, Store};
 use nostr_sdk::prelude::{Client as NostrClient, ClientOptions, Filter, Keys, Kind};
 use nostr_sdk::NostrSigner;
 use std::path::Path;
 use std::time::Duration;
-use tenex_edge::daemon::client::Client as DaemonClient;
-use tenex_edge::domain::{AgentRef, ChatMessage, DomainEvent};
-use tenex_edge::fabric::nip29::wire::Nip29WireCodec;
-use tenex_edge::identity;
-use tenex_edge::state::{Session, Store};
 
 fn add_workspace_mapping(home: &Home, channel: &str, path: &Path) {
     std::fs::create_dir_all(path).unwrap();
@@ -32,7 +32,7 @@ fn harness_command(native_session: &str, cwd: &Path, injected_log: &Path) -> Vec
     let hook_log = injected_log.with_extension("hook.log");
     let script = format!(
         "printf '{{\"session_id\":\"{}\",\"cwd\":{},\"pid\":%s}}\\n' \"$$\" \
-         | \"$TENEX_EDGE_BIN\" harness hook opencode --type session-start >{} 2>&1; \
+         | \"$MOSAICO_BIN\" harness hook opencode --type session-start >{} 2>&1; \
          while IFS= read -r line; do printf '%s\\n' \"$line\" >> {}; done",
         native_session,
         cwd_json,
@@ -43,18 +43,18 @@ fn harness_command(native_session: &str, cwd: &Path, injected_log: &Path) -> Vec
 }
 
 fn kill_pty(pty_id: &str) {
-    let _ = tenex_edge::pty::kill(pty_id);
+    let _ = mosaico::pty::kill(pty_id);
 }
 
 fn pty_diagnostics() -> String {
-    let rows = tenex_edge::pty::read_all_metadata();
+    let rows = mosaico::pty::read_all_metadata();
     let mut out = rows
         .iter()
         .map(|row| {
             format!(
                 "{} live={} command={}",
                 row.id,
-                tenex_edge::pty::is_live(&row.id),
+                mosaico::pty::is_live(&row.id),
                 row.command.join(" ")
             )
         })
@@ -231,7 +231,11 @@ fn operator_kind9_to_offline_local_agent_spawns_and_injects() {
         let add = c
             .call(
                 "channel_add_member",
-                serde_json::json!({"channel": channel, "pubkey": agent_pubkey}),
+                serde_json::json!({
+                    "channel": channel,
+                    "pubkey": agent_pubkey,
+                    "cwd": work_dir,
+                }),
             )
             .await
             .expect("channel_add_member offline agent");

@@ -68,7 +68,7 @@ async fn rpc_probe_validate_workspace_missing_binding_is_not_proven() {
 #[tokio::test]
 async fn rpc_probe_validate_workspace_fails_missing_path() {
     let state = DaemonState::new_for_test().await;
-    seed_workspace(&state, "proj", "", "/definitely/not/here/tenex-edge-test");
+    seed_workspace(&state, "proj", "", "/definitely/not/here/mosaico-test");
 
     let v = rpc_probe(
         &state,

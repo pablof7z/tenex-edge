@@ -1,7 +1,7 @@
 ---
 title: Croissant Test Relay
 slug: croissant-test-relay
-topic: tenex-edge
+topic: mosaico
 summary: Croissant is a local NIP-29 relay binary used for fully isolated, writable test relay environments
 tags:
   - capture

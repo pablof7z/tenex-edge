@@ -139,7 +139,7 @@ pub(crate) fn assemble_turn_start(
             warnings.push(
                 "This session cannot receive automatic steering while idle. \
                  Messages sent to you wait in your inbox until your next turn. \
-                 Run `tenex-edge my session pty-wrap-me --self` to make it \
+                 Run `mosaico my session pty-wrap-me --self` to make it \
                  steerable, or keep taking turns."
                     .to_string(),
             );
@@ -201,7 +201,7 @@ pub(crate) fn assemble_turn_start(
                 let name = crate::injection::channel_display(&s, &scope);
                 Some(format!(
                     "{n} message(s) in #{name} before you joined this session. \
-                     Run `tenex-edge channel read` to see them."
+                     Run `mosaico channel read` to see them."
                 ))
             } else {
                 None

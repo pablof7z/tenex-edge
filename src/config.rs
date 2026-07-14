@@ -1,8 +1,8 @@
-//! Device-level config + tenex-edge's own writable home.
+//! Device-level config + mosaico's own writable home.
 //!
-//! tenex-edge *reads* `~/.tenex-edge/config.json` (for `whitelistedPubkeys`,
+//! mosaico *reads* `~/.mosaico/config.json` (for `whitelistedPubkeys`,
 //! optional `relays`, and `backendName` as the host label) and keeps all of its
-//! own writable state under `~/.tenex-edge`.
+//! own writable state under `~/.mosaico`.
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
@@ -10,14 +10,14 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 mod management_key;
-pub(crate) use management_key::{ensure_tenex_private_key, generate_tenex_private_key};
+pub(crate) use management_key::{ensure_mosaico_private_key, generate_mosaico_private_key};
 
 pub const DEFAULT_RELAY: &str = "wss://nip29.f7z.io";
 pub const DEFAULT_INDEXER_RELAY: &str = "wss://purplepag.es";
-pub const ISOLATED_HOME_ACK_ENV: &str = "TENEX_EDGE_ISOLATED_HOME_OK";
+pub const ISOLATED_HOME_ACK_ENV: &str = "MOSAICO_ISOLATED_HOME_OK";
 const MISSING_HOME_MESSAGE: &str =
-    "neither TENEX_EDGE_HOME nor HOME is set: refusing to relocate keystore/config/state.db \
-     under ./.tenex-edge (would mint new agent identities and empty the trust whitelist)";
+    "neither MOSAICO_HOME nor HOME is set: refusing to relocate keystore/config/state.db \
+     under ./.mosaico (would mint new agent identities and empty the trust whitelist)";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
@@ -41,36 +41,36 @@ pub struct Config {
     /// backend identity. Its pubkey is added as an admin to every group we
     /// create and is the address the orchestration listener matches `add`
     /// tags against.
-    pub tenex_private_key: Option<String>,
-    /// Whether human-initiated sessions (no `TENEX_EDGE_CHANNEL` override) mint
+    pub mosaico_private_key: Option<String>,
+    /// Whether human-initiated sessions (no `MOSAICO_CHANNEL` override) mint
     /// their own per-session NIP-29 subgroup. Default `false`: such sessions
-    /// land in the bare root channel, and `tenex-edge launch` (without
+    /// land in the bare root channel, and `mosaico launch` (without
     /// `--channel`) opens the interactive channel picker instead of minting.
-    /// When `true`, the legacy behavior is restored (mint a per-session room).
+    /// When `true`, per-session rooms are enabled (mint a per-session room).
     pub per_session_rooms: bool,
 }
 
 impl Config {
     /// Key used as the HKDF IKM for per-session key derivation. The backend's
-    /// own key (`tenexPrivateKey`) — never the operator's `userNsec`.
+    /// own key (`mosaicoPrivateKey`) — never the operator's `userNsec`.
     pub fn session_ikm_nsec(&self) -> Option<&String> {
-        self.tenex_private_key.as_ref()
+        self.mosaico_private_key.as_ref()
     }
 
     /// Signer for NIP-29 group-management events (create/lock/put-user/
     /// put-admin/remove-user/edit-metadata). Always the backend's own
-    /// `tenexPrivateKey` — the operator's `userNsec` is no longer used for
+    /// `mosaicoPrivateKey` — the operator's `userNsec` is no longer used for
     /// group management. The operator's pubkey is instead *granted* the admin
     /// role by this signer (see `Nip29Provider::open_channel`).
     pub fn management_nsec(&self) -> Option<&String> {
-        self.tenex_private_key.as_ref()
+        self.mosaico_private_key.as_ref()
     }
 
-    /// This backend's own identity key. Always `tenexPrivateKey`; there is no
+    /// This backend's own identity key. Always `mosaicoPrivateKey`; there is no
     /// fallback to `userNsec` — the operator key is a human identity, not a
     /// backend identity.
     pub fn backend_nsec(&self) -> Option<&String> {
-        self.tenex_private_key.as_ref()
+        self.mosaico_private_key.as_ref()
     }
 
     /// The human operator's Nostr secret key. Used by
@@ -84,7 +84,7 @@ impl Config {
     }
 }
 
-/// Mirror of the relevant fields in `~/.tenex-edge/config.json`. Unknown fields are
+/// Mirror of the relevant fields in `~/.mosaico/config.json`. Unknown fields are
 /// ignored, so we coexist with TENEX's much larger (camelCase) config.
 #[derive(Debug, Deserialize)]
 struct RawConfig {
@@ -101,8 +101,8 @@ struct RawConfig {
     user_nsec: Option<String>,
     /// Backend's own signing key for group management, session derivation, and
     /// backend identity.
-    #[serde(default, rename = "tenexPrivateKey")]
-    tenex_private_key: Option<String>,
+    #[serde(default, rename = "mosaicoPrivateKey")]
+    mosaico_private_key: Option<String>,
     /// Opt-in: mint a per-session subgroup for human-initiated sessions.
     /// Defaults to `false` (use the root channel; `launch` opens the picker).
     #[serde(default, rename = "perSessionRooms")]
@@ -112,7 +112,7 @@ struct RawConfig {
 impl Config {
     /// Parse from a JSON string. Pure — the unit-testable core of `load`.
     pub fn from_json_str(s: &str, fallback_host: &str) -> Result<Self> {
-        let raw: RawConfig = serde_json::from_str(s).context("parsing tenex config json")?;
+        let raw: RawConfig = serde_json::from_str(s).context("parsing mosaico config json")?;
         let relays = if raw.relays.is_empty() {
             vec![DEFAULT_RELAY.to_string()]
         } else {
@@ -132,18 +132,18 @@ impl Config {
             indexer_relay,
             host,
             user_nsec: raw.user_nsec,
-            tenex_private_key: raw.tenex_private_key,
+            mosaico_private_key: raw.mosaico_private_key,
             per_session_rooms: raw.per_session_rooms,
         })
     }
 
-    /// Load from `~/.tenex-edge/config.json` (or `$TENEX_CONFIG` override).
+    /// Load from `~/.mosaico/config.json` (or `$MOSAICO_CONFIG` override).
     pub fn load() -> Result<Self> {
         let path = config_path();
         let s = std::fs::read_to_string(&path).map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 anyhow::anyhow!(
-                    "{} does not exist yet — run `tenex-edge install` to set it up",
+                    "{} does not exist yet — run `mosaico install` to set it up",
                     path.display()
                 )
             } else {
@@ -155,36 +155,33 @@ impl Config {
 }
 
 pub fn config_path() -> PathBuf {
-    select_config_path(std::env::var_os("TENEX_CONFIG"), edge_home())
+    select_config_path(std::env::var_os("MOSAICO_CONFIG"), mosaico_home())
 }
 
-fn select_config_path(tenex_config: Option<OsString>, edge_home: PathBuf) -> PathBuf {
-    match tenex_config {
+fn select_config_path(mosaico_config: Option<OsString>, mosaico_home: PathBuf) -> PathBuf {
+    match mosaico_config {
         Some(p) => PathBuf::from(p),
-        None => edge_home.join("config.json"),
+        None => mosaico_home.join("config.json"),
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EdgeHomeSelection {
-    pub edge_home: PathBuf,
-    pub default_edge_home: Option<PathBuf>,
-    pub tenex_edge_home_set: bool,
-    pub edge_home_is_default: bool,
+pub struct MosaicoHomeSelection {
+    pub mosaico_home: PathBuf,
+    pub default_mosaico_home: Option<PathBuf>,
+    pub mosaico_home_set: bool,
+    pub mosaico_home_is_default: bool,
 }
 
-/// tenex-edge's own writable root. Override with `$TENEX_EDGE_HOME` (tests use
-/// this for isolation). Default: `~/.tenex-edge`.
-pub fn edge_home() -> PathBuf {
-    edge_home_selection().edge_home
+/// mosaico's own writable root. Override with `$MOSAICO_HOME` (tests use
+/// this for isolation). Default: `~/.mosaico`.
+pub fn mosaico_home() -> PathBuf {
+    mosaico_home_selection().mosaico_home
 }
 
-pub fn edge_home_selection() -> EdgeHomeSelection {
-    select_edge_home(
-        std::env::var_os("TENEX_EDGE_HOME"),
-        std::env::var_os("HOME"),
-    )
-    .unwrap_or_else(|message| panic!("{message}"))
+pub fn mosaico_home_selection() -> MosaicoHomeSelection {
+    select_mosaico_home(std::env::var_os("MOSAICO_HOME"), std::env::var_os("HOME"))
+        .unwrap_or_else(|message| panic!("{message}"))
 }
 
 pub fn isolated_home_acknowledged() -> bool {
@@ -202,37 +199,37 @@ pub fn ensure_dir(p: &Path) -> Result<()> {
     Ok(())
 }
 
-fn select_edge_home(
-    tenex_edge_home: Option<OsString>,
+fn select_mosaico_home(
+    mosaico_home: Option<OsString>,
     home: Option<OsString>,
-) -> std::result::Result<EdgeHomeSelection, &'static str> {
-    let default_edge_home = home
+) -> std::result::Result<MosaicoHomeSelection, &'static str> {
+    let default_mosaico_home = home
         .filter(|h| !h.as_os_str().is_empty())
         .map(PathBuf::from)
-        .map(|h| h.join(".tenex-edge"));
+        .map(|h| h.join(".mosaico"));
 
-    if let Some(edge_home) = tenex_edge_home {
-        let edge_home = PathBuf::from(edge_home);
-        let edge_home_is_default = default_edge_home
+    if let Some(mosaico_home) = mosaico_home {
+        let mosaico_home = PathBuf::from(mosaico_home);
+        let mosaico_home_is_default = default_mosaico_home
             .as_ref()
-            .map(|default| default == &edge_home)
+            .map(|default| default == &mosaico_home)
             .unwrap_or(false);
-        return Ok(EdgeHomeSelection {
-            edge_home,
-            default_edge_home,
-            tenex_edge_home_set: true,
-            edge_home_is_default,
+        return Ok(MosaicoHomeSelection {
+            mosaico_home,
+            default_mosaico_home,
+            mosaico_home_set: true,
+            mosaico_home_is_default,
         });
     }
 
-    let Some(edge_home) = default_edge_home.clone() else {
+    let Some(mosaico_home) = default_mosaico_home.clone() else {
         return Err(MISSING_HOME_MESSAGE);
     };
-    Ok(EdgeHomeSelection {
-        edge_home,
-        default_edge_home,
-        tenex_edge_home_set: false,
-        edge_home_is_default: true,
+    Ok(MosaicoHomeSelection {
+        mosaico_home,
+        default_mosaico_home,
+        mosaico_home_set: false,
+        mosaico_home_is_default: true,
     })
 }
 

@@ -1,4 +1,4 @@
-# tenex-edge — Product Spec
+# mosaico — Product Spec
 
 > Working notes. Design-space altitude — the *what* and the *why*, not the *how*.
 > Mechanics (event kinds, daemons, lock algorithms) are deliberately out of scope here;
@@ -16,7 +16,7 @@ themselves, no matter which tool they happen to be running in.
 ## The thesis in three sentences
 
 Today the human is the integration layer between siloed apps: you manually carry context
-and decisions from one tool to the next. tenex-edge is the connective tissue that gives the
+and decisions from one tool to the next. mosaico is the connective tissue that gives the
 agents you already run — in any host, built by anyone — shared awareness and a way to
 address one another, so they discover each other, know each other's roles, route work
 between themselves and to you, and push information proactively across systems. The left
@@ -65,7 +65,7 @@ innermost (what), ending with the open questions.
 
 8. **[ecosystem.md](ecosystem.md)** — This is *not* greenfield. The fabric already exists:
    TENEX proper, the podcast-player agent (already on `relay.tenex.chat`), and
-   `proactive-context` (a local awareness board already wired into Claude Code). tenex-edge
+   `proactive-context` (a local awareness board already wired into Claude Code). mosaico
    is the on-ramp/customs office onto a network we already operate. *(draft)*
 
 9. **[trust-and-safety.md](trust-and-safety.md)** — The hard one. Crossing the person

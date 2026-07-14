@@ -15,8 +15,8 @@ pub(super) fn resolve_launch_command(
     command_name: Option<&str>,
     launch_args: &[String],
 ) -> Result<Vec<String>> {
-    let edge_home = crate::config::edge_home();
-    let agents = crate::identity::list_local_agents(&edge_home);
+    let mosaico_home = crate::config::mosaico_home();
+    let agents = crate::identity::list_local_agents(&mosaico_home);
     let commands = agents
         .iter()
         .find(|(slug, _, _, _)| slug == agent)
@@ -34,7 +34,7 @@ pub(super) fn resolve_launch_command(
     let suggestions = missing_command_suggestions(agent, &agents);
     let command = pick_missing_command(agent, suggestions, launch_args)?;
     crate::identity::add_local_agent_with_commands(
-        &edge_home,
+        &mosaico_home,
         agent,
         vec![command.clone()],
         crate::util::now_secs(),

@@ -6,13 +6,13 @@
 mod common;
 
 use common::TestRelay;
+use mosaico::domain::{AgentRef, DomainEvent, Profile, Status};
+use mosaico::fabric::nip29::wire::Nip29WireCodec;
+use mosaico::fabric::nostr_delivery::scope_filters;
+use mosaico::fabric::Scope;
+use mosaico::transport::Transport;
 use nostr_sdk::prelude::{Keys, RelayPoolNotification};
 use std::time::Duration;
-use tenex_edge::domain::{AgentRef, DomainEvent, Profile, Status};
-use tenex_edge::fabric::nip29::wire::Nip29WireCodec;
-use tenex_edge::fabric::nostr_delivery::scope_filters;
-use tenex_edge::fabric::Scope;
-use tenex_edge::transport::Transport;
 
 #[tokio::test]
 async fn publishes_and_decodes_all_event_types() {
@@ -23,7 +23,7 @@ async fn publishes_and_decodes_all_event_types() {
     let reader_keys = Keys::generate();
     let agent_pk = agent_keys.public_key().to_hex();
     let reader_pk = reader_keys.public_key().to_hex();
-    let channel = "tenex-edge".to_string();
+    let channel = "mosaico".to_string();
 
     // Reader subscribes FIRST (presence is ephemeral — must be listening live).
     let reader = Transport::connect(std::slice::from_ref(&relay.url), reader_keys)
@@ -67,7 +67,7 @@ async fn publishes_and_decodes_all_event_types() {
             host: "test-host".into(),
             title: "fixing the auth bug".into(),
             activity: "reading the diff".into(),
-            state: tenex_edge::session_state::SessionState::Working,
+            state: mosaico::session_state::SessionState::Working,
             rel_cwd: String::new(),
             expires_at: Some(1_900_000_000),
             dispatch_event: None,

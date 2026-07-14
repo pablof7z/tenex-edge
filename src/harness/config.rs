@@ -1,8 +1,8 @@
-//! `~/.tenex-edge/harnesses.json` loader + serde.
+//! `~/.mosaico/harnesses.json` loader + serde.
 //!
 //! The file is a map of **bundle name -> bundle spec**. A bundle is the
 //! user-facing name you spawn (`codex-acp`, `planner`, …); it binds a `harness`
-//! (which CLI) to a `transport` (how tenex-edge drives it) plus an opaque,
+//! (which CLI) to a `transport` (how mosaico drives it) plus an opaque,
 //! harness-specific `profile` object. Missing file => empty map (built-in
 //! bundles from the driver table still resolve); malformed JSON => hard error.
 
@@ -25,7 +25,7 @@ pub struct HarnessBundle {
     /// `"claude-code"` both resolve; `Harness::Unknown` is rejected.
     #[serde(with = "harness_serde")]
     pub harness: Harness,
-    /// How tenex-edge drives that CLI.
+    /// How mosaico drives that CLI.
     pub transport: Transport,
     /// Opaque, harness-specific tuning applied per the driver's
     /// `ProfileMechanism`. `None`/`{}` => no profile.
@@ -37,7 +37,7 @@ pub struct HarnessBundle {
     pub codex_config_profile: Option<String>,
 }
 
-/// How tenex-edge drives a CLI.
+/// How mosaico drives a CLI.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Transport {
@@ -63,10 +63,10 @@ impl Transport {
 }
 
 impl HarnessesConfig {
-    /// Load `<edge_home>/harnesses.json`. Absent file => empty map (fail-open on
+    /// Load `<mosaico_home>/harnesses.json`. Absent file => empty map (fail-open on
     /// the file). Malformed JSON => error (fail-loud on corruption).
     pub fn load() -> anyhow::Result<Self> {
-        let path = crate::config::edge_home().join("harnesses.json");
+        let path = crate::config::mosaico_home().join("harnesses.json");
         Self::load_from(&path)
     }
 

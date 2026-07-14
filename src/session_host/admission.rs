@@ -18,7 +18,7 @@ pub(super) fn reserve_fresh(
     session_name: Option<&str>,
 ) -> Result<Reservation> {
     let agent = crate::identity::load_or_create(
-        &crate::config::edge_home(),
+        &crate::config::mosaico_home(),
         slug,
         crate::util::now_secs(),
     )?;
@@ -54,7 +54,7 @@ pub(super) fn reserve_resume(
             format!("no local pubkey owns {harness} resume locator {native_resume:?}")
         })?;
     let agent = crate::identity::load_or_create(
-        &crate::config::edge_home(),
+        &crate::config::mosaico_home(),
         slug,
         crate::util::now_secs(),
     )?;

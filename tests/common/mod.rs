@@ -104,7 +104,7 @@ fn default_nip29_relay_bin(home: &str, lock_free_exists: bool) -> Result<PathBuf
              Refusing to fall back to {} because croissant's default LMDB build \
              leaks POSIX named semaphores under test-harness shutdown. Build an \
              MDB_NOLOCK croissant there, or set $NIP29_RELAY_BIN explicitly. \
-             See tenex-edge #329.",
+             See mosaico #329.",
             unsafe_default.display()
         ))
     }

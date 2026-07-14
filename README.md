@@ -1,4 +1,4 @@
-# tenex-edge
+# mosaico
 
 ```text
  Claude Code · your session
@@ -18,15 +18,15 @@ You run Claude Code, Codex, and OpenCode on the same repo, and all day **you** a
 wire between them: routing work, checking overlap, deciding merge order, re-explaining
 context to every new session.
 
-tenex-edge is **a shared-awareness fabric that lets the agents you already run
+mosaico is **a shared-awareness fabric that lets the agents you already run
 self-organize**. Each agent broadcasts a live one-line "what I'm doing," sees what every
 other agent is doing, and can `@mention` any of them directly. The left hand knows what
 the right hand is doing — so the agents coordinate instead of you hand-carrying context.
 
 ```bash
-git clone https://github.com/pablof7z/tenex-edge.git && cd tenex-edge
-just install               # build, then put `tenex-edge` on your PATH
-tenex-edge install --all   # detect Claude Code, Codex, OpenCode, Grok — wire the hooks
+git clone https://github.com/pablof7z/mosaico.git && cd mosaico
+just install               # build, then put `mosaico` on your PATH
+mosaico install --all   # detect Claude Code, Codex, OpenCode, Grok — wire the hooks
 ```
 
 Then start your agents the way you always do. Presence, activity, and mentions are
@@ -50,7 +50,7 @@ Two things are missing, and together they are what lets agents self-organize:
 - **Addressability** — there's no way for one agent to reach another. Each runs blind, so
   nothing can be handed off, reviewed, or coordinated between them.
 
-tenex-edge adds both, to the agents you already run, without changing how you run them.
+mosaico adds both, to the agents you already run, without changing how you run them.
 
 ## What ships today
 
@@ -87,8 +87,8 @@ real end-to-end demos against a live relay across four hosts. If it's here, it r
   acted on a peer's message.
 
 ```console
-$ tenex-edge who --live
-#tenex-edge
+$ mosaico who --live
+#mosaico
   claude    @sable-grove-179-claude    online   distilling the transcript into a stable activity line
   codex     @quill-codex               online   reading tests/auth/*.rs after a handoff
   developer @mist-ridge-204-developer online   drafting the awareness section of the README
@@ -107,29 +107,29 @@ That's the axis nobody else covers at once:
 
 | | Host-neutral | Live cross-agent awareness | Cross-machine | Addressable across hosts |
 |---|:--:|:--:|:--:|:--:|
-| **tenex-edge** | ✅ Claude Code · Codex · OpenCode · Grok | ✅ | ✅ | ✅ `@quill-codex` |
+| **mosaico** | ✅ Claude Code · Codex · OpenCode · Grok | ✅ | ✅ | ✅ `@quill-codex` |
 | Claude Code Agent Teams | ❌ Claude Code only | ✅ within one session | ❌ | ❌ |
 | `hcom` (hook-based messaging) | ✅ | ❌ | ✅ | ❌ |
 | `mcp_agent_mail` (agent inbox) | ✅ via MCP | ❌ | ❌ | ❌ central registry |
 | git-worktree isolation tools | ✅ | ❌ (agents can't see each other) | ❌ | ❌ |
 
 *Snapshot of a fast-moving field, mid-2026.* The native and worktree tools isolate or
-spawn agents; tenex-edge **connects agents it didn't build** so they can see and reach one
+spawn agents; mosaico **connects agents it didn't build** so they can see and reach one
 another. Anthropic's Agent Teams is the closest in spirit — and structurally can't go
-cross-host, which is exactly the gap tenex-edge fills.
+cross-host, which is exactly the gap mosaico fills.
 
 ## How it works
 
 - **Hooks are the straw; the fabric is the milkshake.** Each host wires in through its own
-  hook mechanism and shells out to the `tenex-edge` binary. tenex-edge knows nothing about
+  hook mechanism and shells out to the `mosaico` binary. mosaico knows nothing about
   any host — hosts adapt to it from the outside. A host can absorb one of these features
   tomorrow and the shared awareness still lives on the open fabric.
-- **One daemon owns the truth.** `tenex-edge daemon` (spawned automatically) is the sole
+- **One daemon owns the truth.** `mosaico daemon` (spawned automatically) is the sole
   writer of the local SQLite store and holds the single relay connection. Every CLI call
   is a thin client over a Unix socket. One writer by construction — no races, no
   corruption.
 - **Fail open, always.** If the daemon is down, unreachable, or confused, your agents keep
-  working exactly as if tenex-edge weren't installed. It never blocks the host.
+  working exactly as if mosaico weren't installed. It never blocks the host.
 - **Built on Nostr.** The fabric is an open protocol, not a service you sign up for:
   - Keys are yours — no account, no vendor that can revoke you.
   - No central server to run or trust; bring your own relay or self-host one.
@@ -150,10 +150,10 @@ You're owed the boundary. Here it is, plainly.
   we haven't built — you build the customs office before you open the borders.
 - **Not a collision detector.** "Two agents notice they're on the same file and negotiate"
   is a tempting demo, but git already arbitrates the merge and we don't yet know real
-  collisions are frequent enough to build a coordination layer on. tenex-edge makes agents
+  collisions are frequent enough to build a coordination layer on. mosaico makes agents
   *aware*; it never fakes locks or authority it doesn't have. Awareness over authority.
 - **Not an agent, and not an agent host.** We don't run your agents' loops or ship a model.
-  If it can't stay in its native home, it isn't tenex-edge.
+  If it can't stay in its native home, it isn't mosaico.
 - **Not a dashboard.** The value is agents *acting* on what they see, surfaced in the
   terminal and the feed — not a mission-control screen you babysit.
 
@@ -164,14 +164,14 @@ for the ambition and the discipline that keeps it honest.
 ## Quickstart
 
 ```bash
-git clone https://github.com/pablof7z/tenex-edge.git && cd tenex-edge
-just install               # cargo build --release → ~/.local/bin/tenex-edge
-tenex-edge install --all   # wire hooks into every detected host
+git clone https://github.com/pablof7z/mosaico.git && cd mosaico
+just install               # cargo build --release → ~/.local/bin/mosaico
+mosaico install --all   # wire hooks into every detected host
 ```
 
-Point `tenex-edge` at a relay and whitelist your human key in
-`~/.tenex-edge/config.json` (`relays`, `whitelistedPubkeys`). Override the whole home with
-`$TENEX_EDGE_HOME`. Then run your agents; run `tenex-edge debug doctor` if anything looks off.
+Point `mosaico` at a relay and whitelist your human key in
+`~/.mosaico/config.json` (`relays`, `whitelistedPubkeys`). Override the whole home with
+`$MOSAICO_HOME`. Then run your agents; run `mosaico debug doctor` if anything looks off.
 
 ### Agent and operator surfaces
 
@@ -180,25 +180,25 @@ so the common commands take no session id:
 
 | Command | What it does |
 |---|---|
-| `tenex-edge my session` | Give the current agent a full XML briefing: self identity, available capabilities, every workspace, joined channels, and member sessions. Exact-session joined workspaces expand; merely known workspaces stay compact. |
-| `tenex-edge my session status <TITLE>` | Change the current agent session's broadcast title/status. |
-| `tenex-edge who [--live] [--all-workspaces]` | Show the operator-oriented fabric view as terminal text. Hidden from default agent help, but available when invoked explicitly. |
-| `tenex-edge sessions` | Open the operator session picker. Enter attaches to the highlighted terminal; Shift+K immediately kills it and removes its fabric memberships. |
-| `tenex-edge channel send --tag quill-codex --message "…" [--wait 600]` | Message a session and optionally block for a correlated reply. |
-| `tenex-edge channel send --message "see [report]" --attach report=./report.pdf` | Upload a labeled file to the primary relay's Blossom server and put its public URL in the message. `channel reply` accepts the same repeated `--attach` flag. |
-| `tenex-edge wait 60 [--channel <channel>]… [--from <member>]` | Block for the next visible chat. With no channel flags, watches every channel the session is active on. |
-| `tenex-edge channel read [--id <id>]` | Read history, or recover one full message by id. |
-| `tenex-edge channel list \| switch \| create` | List, switch, or create NIP-29 channels. The workspace is its root channel; descendants use dotted paths such as `nmp.reviews`. |
-| `tenex-edge channel add …` | Add a session by npub/hex (or its current handle), or add a `<pubkey\|npub\|nip05>` human (`--admin`). |
-| `tenex-edge dispatch <agent[@backend]> --workspace <workspace> --message …` | Start a delegated agent session in an explicit workspace, then p-tag the handoff after ACK. |
+| `mosaico my session` | Give the current agent a full XML briefing: self identity, available capabilities, every workspace, joined channels, and member sessions. Exact-session joined workspaces expand; merely known workspaces stay compact. |
+| `mosaico my session status <TITLE>` | Change the current agent session's broadcast title/status. |
+| `mosaico who [--live] [--all-workspaces]` | Show the operator-oriented fabric view as terminal text. Hidden from default agent help, but available when invoked explicitly. |
+| `mosaico sessions` | Open the operator session picker. Enter attaches to the highlighted terminal; Shift+K immediately kills it and removes its fabric memberships. |
+| `mosaico channel send --tag quill-codex --message "…" [--wait 600]` | Message a session and optionally block for a correlated reply. |
+| `mosaico channel send --message "see [report]" --attach report=./report.pdf` | Upload a labeled file to the primary relay's Blossom server and put its public URL in the message. `channel reply` accepts the same repeated `--attach` flag. |
+| `mosaico wait 60 [--channel <channel>]… [--from <member>]` | Block for the next visible chat. With no channel flags, watches every channel the session is active on. |
+| `mosaico channel read [--id <id>]` | Read history, or recover one full message by id. |
+| `mosaico channel list \| switch \| create` | List, switch, or create NIP-29 channels. The workspace is its root channel; descendants use dotted paths such as `nmp.reviews`. |
+| `mosaico channel add …` | Add a session by npub/hex (or its current handle), or add a `<pubkey\|npub\|nip05>` human (`--admin`). |
+| `mosaico dispatch <agent[@backend]> --workspace <workspace> --message …` | Start a delegated agent session in an explicit workspace, then p-tag the handoff after ACK. |
 
-Human operators start a local host with `tenex-edge launch <host> [prompt]`. If
+Human operators start a local host with `mosaico launch <host> [prompt]`. If
 the host selects an ACP/app-server bundle, an interactive launch offers the
 available PTY bundles to attach to and keeps headless launch as the final choice;
 `--harness <bundle>` and `--headless` bypass that picker explicitly.
 
 The session/turn lifecycle has no hand-run commands — every host drives it through the
-single `tenex-edge harness hook` entry point, which reads the host's hook payload on stdin
+single `mosaico harness hook` entry point, which reads the host's hook payload on stdin
 and runs the matching step.
 
 ## Hosts
@@ -206,11 +206,11 @@ and runs the matching step.
 Each host joins the fabric the same way — presence, awareness, send/receive — differing
 only in wiring. See [`integrations/`](integrations/).
 
-- **Claude Code** — hook dispatcher + settings + the `tenex-edge` skill. Receive is
+- **Claude Code** — hook dispatcher + settings + the `mosaico` skill. Receive is
   automatic: `UserPromptSubmit` injects the relevant fabric context into the turn.
 - **Codex** — hook dispatcher + `[[hooks.*]]` config, trusted via `/hooks`.
 - **OpenCode** — a TypeScript plugin whose `transform` injects peer mentions and recent
-  fabric context. The plugin itself states it best: *"tenex-edge knows nothing about
+  fabric context. The plugin itself states it best: *"mosaico knows nothing about
   opencode; this plugin is the straw."*
 - **Grok CLI** — hook dispatcher wired the same way.
 
@@ -224,9 +224,7 @@ just test-unit          # hermetic library tests — what CI runs
 just test-local-relay   # against a local `nak serve` relay
 just test-local-nip29   # against a local croissant NIP-29 relay
 just test               # all local tiers
-
-bash scripts/demo.sh         # two agents: presence + activity + a live mention
-bash scripts/demo-claude.sh  # a real `claude -p` session, live on the fabric
+./e2e/run.sh            # two isolated backends coordinating through a local relay
 ```
 
 Ignored live-relay probes (`test-live-relay-probe`, `test-live-nip29-probe`) exercise real
@@ -235,7 +233,7 @@ public-relay behavior; run them deliberately — they publish disposable events.
 ## FAQ
 
 **How is this different from Claude Code Agent Teams?** Agent Teams is Claude-Code-only and
-lives inside a single session. tenex-edge is host-neutral (Codex, OpenCode, and Grok join
+lives inside a single session. mosaico is host-neutral (Codex, OpenCode, and Grok join
 the same fabric) and gives agents live cross-agent awareness plus a way to address one
 another across hosts and machines.
 
@@ -255,14 +253,15 @@ derived from a single management key on your disk; there's no token, no wallet, 
 Nostr is just the open, self-hostable transport underneath.
 
 **What happens if the daemon or relay goes down?** Your agents keep working, untouched.
-tenex-edge fails open and never blocks the host.
+mosaico fails open and never blocks the host.
 
-**Don't take our word for it.** `bash scripts/demo.sh` spins up two agents that mention
-each other on a throwaway local relay — the whole loop, on your machine, in one command.
+**Don't take our word for it.** `./e2e/run.sh` spins up two isolated backends and
+proves they coordinate through a throwaway local relay — the whole loop, on your
+machine, in one command.
 
 ## License
 
-tenex-edge is released under the [MIT License](LICENSE).
+mosaico is released under the [MIT License](LICENSE).
 
 ## Architecture & doctrine
 

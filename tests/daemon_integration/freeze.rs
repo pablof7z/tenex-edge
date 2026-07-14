@@ -1,7 +1,7 @@
 use crate::daemon_harness::*;
+use mosaico::daemon::client::Client;
+use mosaico::state::{Status, Store};
 use std::time::Duration;
-use tenex_edge::daemon::client::Client;
-use tenex_edge::state::{Status, Store};
 
 // ── Frozen regression guards (dedup, targeted/untargeted mention routing,
 //    39000/39002 idempotency, startup catch-up) and the threaded e2e. ───────────
@@ -27,7 +27,7 @@ fn rewrite_config_with_user_nsec(home: &Home) {
         "relays": [shared_nip29_relay_url()],
         "indexerRelay": shared_nip29_relay_url(),
         "userNsec": EXAMPLE_USER_NSEC,
-        "tenexPrivateKey": EXAMPLE_BACKEND_SEC_HEX,
+        "mosaicoPrivateKey": EXAMPLE_BACKEND_SEC_HEX,
         // This test asserts the minted per-session room parent, so opt into the
         // per-session-room feature (default off).
         "perSessionRooms": true,
@@ -247,7 +247,7 @@ fn freeze_peer_status_materializes_to_unified_presence_state() {
             slug: "peer".into(),
             title: "reviewing relay state".into(),
             activity: "checking 39002".into(),
-            state: tenex_edge::session_state::SessionState::Working,
+            state: mosaico::session_state::SessionState::Working,
             last_seen: 105,
             updated_at: 105,
             expiration: 1_000_000,
@@ -258,8 +258,5 @@ fn freeze_peer_status_materializes_to_unified_presence_state() {
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].pubkey, "peer-pubkey");
     assert_eq!(rows[0].title, "reviewing relay state");
-    assert_eq!(
-        rows[0].state,
-        tenex_edge::session_state::SessionState::Working
-    );
+    assert_eq!(rows[0].state, mosaico::session_state::SessionState::Working);
 }

@@ -10,7 +10,7 @@ pub(super) fn load_hook_tail_snapshot(
     let mut panes: BTreeMap<String, SessionPane> = BTreeMap::new();
     seed_live_sessions(&mut panes);
 
-    let home = crate::config::edge_home();
+    let home = crate::config::mosaico_home();
     let sessions_dir = home.join("sessions");
     let mut unscoped = Vec::new();
     if sessions_dir.is_dir() {
@@ -37,13 +37,9 @@ pub(super) fn load_hook_tail_snapshot(
                 unscoped.extend(cmd_unscoped);
             }
         }
-    } else {
-        // Legacy fallback: old monolithic files.
-        read_hook_log(&home.join("hook-calls.jsonl"), &mut panes, 20_000_000);
-        unscoped = read_command_log(&home.join("command-calls.jsonl"), &mut panes);
     }
     if let Some(path) = crate::command_forensics::configured_log_path() {
-        unscoped.extend(read_command_log(&path, &mut panes));
+        unscoped.extend(read_configured_command_log(&path, &mut panes));
     }
     enrich_panes_from_store(&mut panes);
 
@@ -196,19 +192,6 @@ fn read_session_hook_log(
     parse_hook_log(&raw, panes, session_hint);
 }
 
-/// Legacy: read the global hook log with a byte-limit tail.
-fn read_hook_log(
-    path: &std::path::Path,
-    panes: &mut BTreeMap<String, SessionPane>,
-    max_bytes: u64,
-) {
-    let raw = tail_read(path, max_bytes);
-    if raw.is_empty() {
-        return;
-    }
-    parse_hook_log(&raw, panes, None);
-}
-
 fn parse_hook_log(
     raw: &str,
     panes: &mut BTreeMap<String, SessionPane>,
@@ -220,7 +203,7 @@ fn parse_hook_log(
         let Ok(v) = serde_json::from_str::<Value>(line) else {
             continue;
         };
-        if v["schema"].as_str() != Some("tenex-edge.hook-call.v1") {
+        if v["schema"].as_str() != Some("mosaico.hook-call.v1") {
             continue;
         }
         let call_id = v["call_id"].as_str().unwrap_or("").to_string();
@@ -330,7 +313,7 @@ fn parse_hook_log(
 }
 
 /// Read a per-session command log. `_unscoped` accumulates across all sessions
-/// and can grow to gigabytes; tail-limit it the same way the legacy global file is.
+/// and can grow to gigabytes, so tail-limit it.
 fn read_session_command_log(
     path: &std::path::Path,
     panes: &mut BTreeMap<String, SessionPane>,
@@ -343,8 +326,8 @@ fn read_session_command_log(
     parse_command_log(&raw, panes, session_hint)
 }
 
-/// Legacy: read the global command log with a byte-limit tail.
-fn read_command_log(
+/// Read the explicitly configured command log with a byte-limit tail.
+fn read_configured_command_log(
     path: &std::path::Path,
     panes: &mut BTreeMap<String, SessionPane>,
 ) -> Vec<DebugLine> {
@@ -367,7 +350,7 @@ fn parse_command_log(
         let Ok(v) = serde_json::from_str::<Value>(line) else {
             continue;
         };
-        if v["schema"].as_str() != Some("tenex-edge.command-call.v1") {
+        if v["schema"].as_str() != Some("mosaico.command-call.v1") {
             continue;
         }
         let call_id = v["call_id"].as_str().unwrap_or("").to_string();
@@ -380,9 +363,8 @@ fn parse_command_log(
                     continue;
                 };
                 let root = command_root(start);
-                let agent = start["env"]["TENEX_EDGE_AGENT"]
+                let agent = start["env"]["MOSAICO_AGENT"]
                     .as_str()
-                    .or_else(|| start["env"]["TENEX_EDGE_AGENT_FALLBACK"].as_str())
                     .unwrap_or("")
                     .to_string();
                 let session = command_session(start)

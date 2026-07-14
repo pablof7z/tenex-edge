@@ -1,4 +1,4 @@
-//! Symlink the repo-local `skills/tenex-edge` skill into harness skill directories.
+//! Symlink the repo-local `skills/mosaico` skill into harness skill directories.
 
 use super::config::{claude_detected, home_dir};
 use super::InstallOpts;
@@ -6,8 +6,8 @@ use anyhow::{Context, Result};
 use owo_colors::OwoColorize;
 use std::path::{Path, PathBuf};
 
-const SKILL_REL: &str = "skills/tenex-edge";
-const SKILL_MARKER: &str = "name: tenex-edge";
+const SKILL_REL: &str = "skills/mosaico";
+const SKILL_MARKER: &str = "name: mosaico";
 
 #[derive(Debug, Clone)]
 struct SkillTarget {
@@ -23,7 +23,7 @@ enum SkillLink {
 }
 
 fn agents_skill_path(home: &Path) -> PathBuf {
-    home.join(".agents/skills/tenex-edge")
+    home.join(".agents/skills/mosaico")
 }
 
 fn skill_targets() -> Result<Vec<SkillTarget>> {
@@ -37,14 +37,14 @@ fn skill_targets() -> Result<Vec<SkillTarget>> {
     if claude_detected()? {
         targets.push(SkillTarget {
             label: "claude",
-            path: home.join(".claude/skills/tenex-edge"),
+            path: home.join(".claude/skills/mosaico"),
             link: SkillLink::AgentsSkill,
         });
     }
     Ok(targets)
 }
 
-/// Resolve `skills/tenex-edge` inside the tenex-edge repo checkout.
+/// Resolve `skills/mosaico` inside the mosaico repo checkout.
 fn skill_source_dir() -> Result<PathBuf> {
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let candidate = manifest.join(SKILL_REL);
@@ -68,7 +68,7 @@ fn skill_source_dir() -> Result<PathBuf> {
     }
 
     anyhow::bail!(
-        "cannot find {SKILL_REL} in the tenex-edge repo; run `tenex-edge install` from a repo checkout"
+        "cannot find {SKILL_REL} in the mosaico repo; run `mosaico install` from a repo checkout"
     );
 }
 
@@ -80,7 +80,7 @@ fn is_skill_tree(path: &Path) -> bool {
 }
 
 pub(super) fn print_status() -> Result<()> {
-    println!("{}", "tenex-edge skill status".bold());
+    println!("{}", "mosaico skill status".bold());
     let source = skill_source_dir().ok();
     if let Some(src) = &source {
         println!(
@@ -126,7 +126,7 @@ pub(super) fn selection_label() -> Result<String> {
         .join(", ");
     Ok(format!(
         "{:<18} {:<14} {}",
-        "tenex-edge skill".cyan().bold(),
+        "mosaico skill".cyan().bold(),
         status,
         detail.dimmed()
     ))
@@ -268,7 +268,7 @@ mod tests {
 
         install(&opts(false, false)).unwrap();
 
-        let link = temp.path().join(".agents/skills/tenex-edge");
+        let link = temp.path().join(".agents/skills/mosaico");
         assert!(link.is_symlink());
         assert_eq!(link.canonicalize().unwrap(), source);
     }
@@ -282,11 +282,11 @@ mod tests {
 
         install(&opts(false, false)).unwrap();
 
-        let link = temp.path().join(".claude/skills/tenex-edge");
+        let link = temp.path().join(".claude/skills/mosaico");
         assert!(link.is_symlink());
         assert_eq!(
             std::fs::read_link(&link).unwrap(),
-            temp.path().join(".agents/skills/tenex-edge")
+            temp.path().join(".agents/skills/mosaico")
         );
         assert_eq!(link.canonicalize().unwrap(), source);
     }
@@ -300,7 +300,7 @@ mod tests {
         install(&opts(false, false)).unwrap();
         install(&opts(false, true)).unwrap();
 
-        assert!(!temp.path().join(".agents/skills/tenex-edge").exists());
+        assert!(!temp.path().join(".agents/skills/mosaico").exists());
         assert!(source.join("SKILL.md").is_file());
     }
 
@@ -309,9 +309,9 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let stale = temp.path().join("stale-skill");
         std::fs::create_dir_all(&stale).unwrap();
-        std::fs::write(stale.join("SKILL.md"), "name: tenex-edge\nold").unwrap();
+        std::fs::write(stale.join("SKILL.md"), "name: mosaico\nold").unwrap();
 
-        let link = temp.path().join(".agents/skills/tenex-edge");
+        let link = temp.path().join(".agents/skills/mosaico");
         std::fs::create_dir_all(link.parent().unwrap()).unwrap();
         #[cfg(unix)]
         std::os::unix::fs::symlink(&stale, &link).unwrap();
@@ -328,9 +328,9 @@ mod tests {
     #[test]
     fn install_replaces_copied_tree_with_symlink() {
         let temp = tempfile::tempdir().unwrap();
-        let link = temp.path().join(".agents/skills/tenex-edge");
+        let link = temp.path().join(".agents/skills/mosaico");
         std::fs::create_dir_all(&link).unwrap();
-        std::fs::write(link.join("SKILL.md"), "name: tenex-edge\nold").unwrap();
+        std::fs::write(link.join("SKILL.md"), "name: mosaico\nold").unwrap();
 
         let _home = EnvGuard::set("HOME", temp.path());
         let source = skill_source_dir().unwrap();

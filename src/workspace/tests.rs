@@ -3,7 +3,7 @@ use crate::test_env::EnvGuard;
 
 fn isolated_home() -> (EnvGuard, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
-    let g = EnvGuard::set("TENEX_EDGE_HOME", dir.path());
+    let g = EnvGuard::set("MOSAICO_HOME", dir.path());
     (g, dir)
 }
 

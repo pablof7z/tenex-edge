@@ -48,7 +48,7 @@ fn launch_command_bootstraps_session_without_child_session_start_hook() {
         .map(|locator| locator.locator_value)
         .expect("launch must register its PTY locator before returning");
 
-    let _ = tenex_edge::pty::kill(&pty_id);
+    let _ = mosaico::pty::kill(&pty_id);
     stop_daemon(&home);
 }
 

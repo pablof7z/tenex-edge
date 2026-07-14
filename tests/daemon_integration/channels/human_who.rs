@@ -16,13 +16,13 @@ fn who_without_agent_anchor_returns_human_fabric_view_with_other_roots() {
         .upsert_profile("pk-reviewer", "reviewer", "reviewer", "test-host", false, 1)
         .unwrap();
     store
-        .upsert_status(&tenex_edge::state::Status {
+        .upsert_status(&mosaico::state::Status {
             pubkey: "pk-reviewer".to_string(),
             channel_h: other_root.clone(),
             slug: "reviewer".to_string(),
             title: "Reviewing".to_string(),
             activity: String::new(),
-            state: tenex_edge::session_state::SessionState::Idle,
+            state: mosaico::session_state::SessionState::Idle,
             last_seen: 1,
             updated_at: 1,
             expiration: 9_999_999_999,
@@ -52,7 +52,7 @@ fn who_without_agent_anchor_returns_human_fabric_view_with_other_roots() {
         assert!(human.contains("@reviewer"), "got: {human}");
         assert!(human.contains("1 agent"), "got: {human}");
         assert!(human.contains("Other work"), "got: {human}");
-        assert!(!human.contains("<tenex-edge>"), "got: {human}");
+        assert!(!human.contains("<mosaico>"), "got: {human}");
         assert!(v.get("fabric").is_none(), "who must not expose agent XML");
     });
 

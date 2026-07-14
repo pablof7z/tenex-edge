@@ -2,10 +2,10 @@ build:
     cargo build --release
 
 install: build
-    rm -f ~/.local/bin/tenex-edge
-    cp target/release/tenex-edge ~/.local/bin/tenex-edge
-    xattr -cr ~/.local/bin/tenex-edge
-    codesign --force --sign - ~/.local/bin/tenex-edge
+    rm -f ~/.local/bin/mosaico
+    cp target/release/mosaico ~/.local/bin/mosaico
+    xattr -cr ~/.local/bin/mosaico
+    codesign --force --sign - ~/.local/bin/mosaico
 
 lint:
     cargo clippy --all-targets -- -D warnings
@@ -21,7 +21,7 @@ test: test-all-local
 test-all-local: test-dev-scripts test-unit test-local-relay test-local-nip29
 
 test-dev-scripts:
-    bash skills/tenex-edge-dev/tests/scripts.sh
+    bash skills/mosaico-dev/tests/scripts.sh
 
 # Hermetic unit tests only. This is what CI runs.
 test-unit:
@@ -38,15 +38,15 @@ test-local-nip29:
     cargo test --test daemon_integration -- --test-threads=1
 
 test-live-relay-probe:
-    : "${TE_RELAY:?set TE_RELAY=wss://relay.tenex.chat}"
+    : "${MOSAICO_RELAY:?set MOSAICO_RELAY=wss://relay.tenex.chat}"
     cargo test --test relay_probe -- --ignored --nocapture
 
 test-live-nip29-probe:
-    : "${TE_NIP29_RELAY:?set TE_NIP29_RELAY=wss://nip29.f7z.io}"
+    : "${MOSAICO_NIP29_RELAY:?set MOSAICO_NIP29_RELAY=wss://nip29.f7z.io}"
     cargo test --test nip29_probe -- --ignored --nocapture
 
 test-live-seed-validation:
-    : "${TE_NIP29_RELAY:?set TE_NIP29_RELAY=wss://nip29.f7z.io}"
+    : "${MOSAICO_NIP29_RELAY:?set MOSAICO_NIP29_RELAY=wss://nip29.f7z.io}"
     cargo test --test seed_validation -- --ignored --nocapture
 
 fmt-check:

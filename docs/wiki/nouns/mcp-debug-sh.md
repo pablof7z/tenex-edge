@@ -9,4 +9,4 @@ source_refs:
 
 # mcp-debug.sh
 
-A scratchpad script that launches `tenex-edge mcp --http` fully detached from any agent-session identity (scrubbed env, reparented to launchd), fronts it with ngrok, and provides two independent traffic logs: app-level access-log JSON lines and ngrok's local inspector for full raw HTTP.
+A scratchpad script that launches `mosaico mcp --http` fully detached from any agent-session identity (scrubbed env, reparented to launchd), fronts it with ngrok, and provides two independent traffic logs: app-level access-log JSON lines and ngrok's local inspector for full raw HTTP.

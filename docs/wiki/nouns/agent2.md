@@ -10,4 +10,4 @@ source_refs:
 
 # agent2
 
-The claude2 profile launched via tenex-edge launch — expected to receive a live daemon-pushed, attributed mention from agent1 and reply back.
+The claude2 profile launched via mosaico launch — expected to receive a live daemon-pushed, attributed mention from agent1 and reply back.

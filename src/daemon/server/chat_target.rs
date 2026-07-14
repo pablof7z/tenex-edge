@@ -43,7 +43,7 @@ Pass one explicitly:\n{}",
                 command,
                 joined.len(),
                 refs.iter()
-                    .map(|r| format!("  tenex-edge {command} --channel {r}"))
+                    .map(|r| format!("  mosaico {command} --channel {r}"))
                     .collect::<Vec<_>>()
                     .join("\n")
             );
@@ -158,7 +158,7 @@ mod tests {
     }
 
     #[test]
-    fn explicit_chat_target_resolves_name_and_literal_id() {
+    fn explicit_chat_target_resolves_name_and_id_selector() {
         let store = Store::open_memory().unwrap();
         store.upsert_channel("root", "root", "", "", 1).unwrap();
         store
@@ -170,7 +170,7 @@ mod tests {
             "abcd1234"
         );
         assert_eq!(
-            resolve_chat_channel_ref(&store, "root", "abcd1234").unwrap(),
+            resolve_chat_channel_ref(&store, "root", "@abcd").unwrap(),
             "abcd1234"
         );
     }

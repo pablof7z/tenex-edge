@@ -3,18 +3,18 @@
 //! Terminal-injected mentions use a structured envelope:
 //!
 //! ```text
-//! <tenex-edge>
+//! <mosaico>
 //!   <channel ref="workspace.channel.qa">
 //!     <message from="@mist-ridge-204-developer" id="abc123">hello</message>
 //!   </channel>
 //!
-//!   Reply via: `tenex-edge channel reply abc123 --message "hello world"`
+//!   Reply via: `mosaico channel reply abc123 --message "hello world"`
 //!   Attachments: add `--attach label=/path/to/file` and reference `[label]` in the message.
-//! </tenex-edge>
+//! </mosaico>
 //! ```
 //!
 //! Publishing no longer happens automatically on the agent's behalf — the
-//! envelope carries an explicit reminder to respond via `tenex-edge channel
+//! envelope carries an explicit reminder to respond via `mosaico channel
 //! send`, since nothing mirrors the reply for it.
 //!
 //! Hook-delivered mentions and ambient channel activity are rendered by the
@@ -48,7 +48,7 @@ pub(crate) fn render_terminal_mention(
         return None;
     }
     let mut lines: Vec<String> = Vec::with_capacity(rows.len() * 3 + 4);
-    lines.push("<tenex-edge>".to_string());
+    lines.push("<mosaico>".to_string());
     for row in rows {
         push_agent_message(
             &mut lines,
@@ -62,7 +62,7 @@ pub(crate) fn render_terminal_mention(
         lines.push(String::new());
         push_reply_hint(&mut lines, &row.event_id);
     }
-    lines.push("</tenex-edge>".to_string());
+    lines.push("</mosaico>".to_string());
     Some(lines.join("\n"))
 }
 
@@ -75,11 +75,11 @@ pub(crate) fn render_agent_message(
     event_id: &str,
     body: &str,
 ) -> String {
-    let mut lines = vec!["<tenex-edge>".to_string()];
+    let mut lines = vec!["<mosaico>".to_string()];
     push_agent_message(&mut lines, channel_ref, from, event_id, body);
     lines.push(String::new());
     push_reply_hint(&mut lines, event_id);
-    lines.push("</tenex-edge>".to_string());
+    lines.push("</mosaico>".to_string());
     lines.join("\n")
 }
 
@@ -87,7 +87,7 @@ pub(crate) fn render_agent_message(
 /// convention. Channel refs document the exact start-time scope snapshot.
 pub(crate) fn render_agent_wait_timeout(seconds: u64, channels: &[&str]) -> String {
     let mut lines = vec![
-        "<tenex-edge>".to_string(),
+        "<mosaico>".to_string(),
         format!("  <wait outcome=\"timeout\" after=\"{seconds}s\">"),
     ];
     lines.extend(
@@ -96,7 +96,7 @@ pub(crate) fn render_agent_wait_timeout(seconds: u64, channels: &[&str]) -> Stri
             .map(|channel| format!("    <channel ref=\"{}\" />", esc_attr(channel))),
     );
     lines.push("  </wait>".to_string());
-    lines.push("</tenex-edge>".to_string());
+    lines.push("</mosaico>".to_string());
     lines.join("\n")
 }
 
@@ -120,7 +120,7 @@ fn push_agent_message(
 fn push_reply_hint(lines: &mut Vec<String>, event_id: &str) {
     let id = crate::util::short_id(event_id);
     lines.push(format!(
-        "  Reply via: `tenex-edge channel reply {} --message \"hello world\"`",
+        "  Reply via: `mosaico channel reply {} --message \"hello world\"`",
         esc_text(&id)
     ));
     lines.push(format!("  {}", crate::attachment::AGENT_HINT));

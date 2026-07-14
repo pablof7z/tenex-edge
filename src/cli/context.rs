@@ -15,7 +15,7 @@ pub(crate) struct InvocationContext {
 
 impl InvocationContext {
     pub(crate) fn from_current_process() -> Self {
-        let session = std::env::var("TENEX_EDGE_PUBKEY")
+        let session = std::env::var("MOSAICO_PUBKEY")
             .ok()
             .filter(|value| !value.is_empty());
         let pty_session = super::pty_session_env();

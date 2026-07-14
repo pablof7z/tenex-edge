@@ -13,13 +13,13 @@ fn parse_err(args: &[&str]) -> clap::Error {
 #[test]
 fn agent_add_workspace_flag_parses() {
     let cli = crate::cli::args::Cli::try_parse_from([
-        "tenex-edge",
+        "mosaico",
         "mgmt",
         "agent",
         "add",
         "reviewer",
         "--workspace",
-        "tenex-edge",
+        "mosaico",
     ])
     .expect("mgmt agent add --workspace parses");
 
@@ -34,7 +34,7 @@ fn agent_add_workspace_flag_parses() {
                 },
         } => {
             assert_eq!(slug, "reviewer");
-            assert_eq!(workspaces, vec!["tenex-edge".to_string()]);
+            assert_eq!(workspaces, vec!["mosaico".to_string()]);
         }
         _ => panic!("expected mgmt agent add command"),
     }
@@ -43,12 +43,12 @@ fn agent_add_workspace_flag_parses() {
 #[test]
 fn removed_agent_add_command_stays_unavailable() {
     let err = parse_err(&[
-        "tenex-edge",
+        "mosaico",
         "agent",
         "add",
         "reviewer",
         "--workspace",
-        "tenex-edge",
+        "mosaico",
     ]);
 
     assert_eq!(err.kind(), ErrorKind::InvalidSubcommand);
@@ -57,11 +57,11 @@ fn removed_agent_add_command_stays_unavailable() {
 #[test]
 fn channel_list_workspace_flags_parse() {
     let one = crate::cli::args::Cli::try_parse_from([
-        "tenex-edge",
+        "mosaico",
         "channel",
         "list",
         "--workspace",
-        "tenex-edge",
+        "mosaico",
     ])
     .expect("channel list --workspace parses");
     match one.cmd {
@@ -72,19 +72,15 @@ fn channel_list_workspace_flags_parse() {
                     workspaces,
                 },
         } => {
-            assert_eq!(workspace.as_deref(), Some("tenex-edge"));
+            assert_eq!(workspace.as_deref(), Some("mosaico"));
             assert!(!workspaces);
         }
         _ => panic!("expected channel list command"),
     }
 
-    let all = crate::cli::args::Cli::try_parse_from([
-        "tenex-edge",
-        "channel",
-        "list",
-        "--all-workspaces",
-    ])
-    .expect("channel list --all-workspaces parses");
+    let all =
+        crate::cli::args::Cli::try_parse_from(["mosaico", "channel", "list", "--all-workspaces"])
+            .expect("channel list --all-workspaces parses");
     match all.cmd {
         crate::cli::args::Cmd::Channel {
             action:
@@ -102,7 +98,7 @@ fn channel_list_workspace_flags_parse() {
 
 #[test]
 fn channel_create_help_shows_about_limit() {
-    let err = parse_err(&["tenex-edge", "channel", "create", "--help"]);
+    let err = parse_err(&["mosaico", "channel", "create", "--help"]);
     let help = err.to_string();
 
     assert!(help.contains("<PATH>"));
@@ -112,14 +108,7 @@ fn channel_create_help_shows_about_limit() {
 #[test]
 fn channel_create_about_rejects_more_than_80_chars() {
     let too_long = "a".repeat(crate::channel_about::CHANNEL_ABOUT_MAX_CHARS + 1);
-    let err = parse_err(&[
-        "tenex-edge",
-        "channel",
-        "create",
-        "ops",
-        "--about",
-        &too_long,
-    ]);
+    let err = parse_err(&["mosaico", "channel", "create", "ops", "--about", &too_long]);
 
     assert_eq!(err.kind(), ErrorKind::ValueValidation);
     assert!(
@@ -132,7 +121,7 @@ fn channel_create_about_rejects_more_than_80_chars() {
 #[test]
 fn channel_create_parses_hierarchical_path() {
     let cli = crate::cli::args::Cli::try_parse_from([
-        "tenex-edge",
+        "mosaico",
         "channel",
         "create",
         "epic.planning",
@@ -166,7 +155,7 @@ fn channel_create_parses_hierarchical_path() {
 
 #[test]
 fn channel_archive_parses_channel_reference() {
-    let cli = crate::cli::args::Cli::try_parse_from(["tenex-edge", "channel", "archive", "ops"])
+    let cli = crate::cli::args::Cli::try_parse_from(["mosaico", "channel", "archive", "ops"])
         .expect("channel archive parses");
 
     match cli.cmd {
@@ -184,7 +173,7 @@ fn channel_archive_parses_channel_reference() {
 #[test]
 fn channel_switch_accepts_explicit_session_anchor() {
     let cli = crate::cli::args::Cli::try_parse_from([
-        "tenex-edge",
+        "mosaico",
         "channel",
         "switch",
         "ops",
@@ -210,14 +199,14 @@ fn channel_switch_accepts_explicit_session_anchor() {
 
 #[test]
 fn removed_invite_command_stays_unavailable() {
-    let err = parse_err(&["tenex-edge", "invite", "--channel", "ops", "--agent", "x"]);
+    let err = parse_err(&["mosaico", "invite", "--channel", "ops", "--agent", "x"]);
     assert_eq!(err.kind(), ErrorKind::InvalidSubcommand);
 }
 
 #[test]
 fn channel_edit_about_parses() {
     let cli = crate::cli::args::Cli::try_parse_from([
-        "tenex-edge",
+        "mosaico",
         "channel",
         "edit",
         "epic.planning",
@@ -245,7 +234,7 @@ fn channel_edit_about_parses() {
 #[test]
 fn channel_edit_about_rejects_more_than_80_chars() {
     let too_long = "a".repeat(crate::channel_about::CHANNEL_ABOUT_MAX_CHARS + 1);
-    let err = parse_err(&["tenex-edge", "channel", "edit", "ops", "--about", &too_long]);
+    let err = parse_err(&["mosaico", "channel", "edit", "ops", "--about", &too_long]);
 
     assert_eq!(err.kind(), ErrorKind::ValueValidation);
     assert!(
@@ -257,7 +246,7 @@ fn channel_edit_about_rejects_more_than_80_chars() {
 
 #[test]
 fn channel_read_help_uses_channel_flag() {
-    let err = parse_err(&["tenex-edge", "channel", "read", "--help"]);
+    let err = parse_err(&["mosaico", "channel", "read", "--help"]);
     let help = err.to_string();
 
     assert!(help.contains("--channel <CHANNEL>"));
@@ -265,21 +254,16 @@ fn channel_read_help_uses_channel_flag() {
 
 #[test]
 fn channel_read_rejects_removed_alias() {
-    let err = parse_err(&["tenex-edge", "channel", "read", "--project", "tmp"]);
+    let err = parse_err(&["mosaico", "channel", "read", "--project", "tmp"]);
 
     assert_eq!(err.kind(), ErrorKind::UnknownArgument);
 }
 
 #[test]
 fn channel_read_channel_still_parses() {
-    let cli = crate::cli::args::Cli::try_parse_from([
-        "tenex-edge",
-        "channel",
-        "read",
-        "--channel",
-        "ops",
-    ])
-    .unwrap();
+    let cli =
+        crate::cli::args::Cli::try_parse_from(["mosaico", "channel", "read", "--channel", "ops"])
+            .unwrap();
 
     match cli.cmd {
         crate::cli::args::Cmd::Channel {
@@ -291,7 +275,7 @@ fn channel_read_channel_still_parses() {
 
 #[test]
 fn channel_read_alias_via_channels_is_removed() {
-    let err = parse_err(&["tenex-edge", "channels", "read", "--channel", "ops"]);
+    let err = parse_err(&["mosaico", "channels", "read", "--channel", "ops"]);
 
     assert_eq!(err.kind(), ErrorKind::InvalidSubcommand);
 }
@@ -299,7 +283,7 @@ fn channel_read_alias_via_channels_is_removed() {
 #[test]
 fn channel_reply_parses_short_id_and_message_flag() {
     let cli = crate::cli::args::Cli::try_parse_from([
-        "tenex-edge",
+        "mosaico",
         "channel",
         "reply",
         "abc123",
@@ -336,7 +320,7 @@ fn channel_reply_parses_short_id_and_message_flag() {
 #[test]
 fn channel_react_parses_id_emoji_and_session() {
     let cli = crate::cli::args::Cli::try_parse_from([
-        "tenex-edge",
+        "mosaico",
         "channel",
         "react",
         "abc123",

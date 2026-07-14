@@ -25,11 +25,11 @@ pub(in crate::daemon::server) fn engine_params_for(
         relays: cfg.relays.clone(),
         watch_pid,
         store_path: store_path(),
-        heartbeat: env_duration("TENEX_EDGE_HEARTBEAT_MS", Duration::from_secs(30)),
-        obs_interval: env_duration("TENEX_EDGE_OBS_MS", Duration::from_secs(5)),
+        heartbeat: env_duration("MOSAICO_HEARTBEAT_MS", Duration::from_secs(30)),
+        obs_interval: env_duration("MOSAICO_OBS_MS", Duration::from_secs(5)),
         status_ttl: status_ttl_duration(),
-        turn_first: Duration::from_secs(env_u64("TENEX_EDGE_TURN_FIRST_S", 30)),
+        turn_first: Duration::from_secs(env_u64("MOSAICO_TURN_FIRST_S", 30)),
         // 0 = disabled: status re-distill inside one long turn is opt-in.
-        turn_repeat: Duration::from_secs(env_u64("TENEX_EDGE_TURN_REPEAT_S", 0)),
+        turn_repeat: Duration::from_secs(env_u64("MOSAICO_TURN_REPEAT_S", 0)),
     }
 }

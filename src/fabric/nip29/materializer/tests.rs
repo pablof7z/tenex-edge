@@ -150,7 +150,6 @@ fn retired_profile_materializes_npub_without_recreating_handle() {
     assert_eq!(cached.slug, npub);
     assert_eq!(cached.agent_slug, "developer");
 }
-
 #[test]
 fn status_materializes_and_reads_live() {
     let store = Store::open_memory().unwrap();
@@ -166,6 +165,7 @@ fn status_materializes_and_reads_live() {
             make_tag(&["h", "proj"]),
             make_tag(&["title", "build"]),
             make_tag(&["state", "working"]),
+            make_tag(&["host", "laptop"]),
             make_tag(&["slug", "smith"]),
             make_tag(&["expiration", &exp.to_string()]),
         ],

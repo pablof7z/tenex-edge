@@ -16,7 +16,7 @@ pub(in crate::cli) enum DebugAction {
     /// target, channel/readiness/readiness_attempt target, commit target, fact,
     /// or replay capsule with explanations.
     Validate(ValidateArgs),
-    /// Live TUI for hook injections and tenex-edge command invocations.
+    /// Live TUI for hook injections and mosaico command invocations.
     HookTail {
         /// Filter panes/events to one or more workspaces (repeatable).
         #[arg(long = "workspace", value_name = "WORKSPACE")]
@@ -76,7 +76,7 @@ mod tests {
 
     #[test]
     fn debug_outbox_defaults_are_owned_by_debug_args() {
-        let cli = crate::cli::args::Cli::try_parse_from(["tenex-edge", "debug", "outbox"])
+        let cli = crate::cli::args::Cli::try_parse_from(["mosaico", "debug", "outbox"])
             .expect("debug outbox parses");
 
         match cli.cmd {

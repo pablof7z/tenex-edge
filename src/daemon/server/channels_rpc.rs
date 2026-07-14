@@ -136,7 +136,7 @@ pub(in crate::daemon::server) async fn rpc_channel_create(
     if let Some(existing) = state.with_store(|s| s.channel_id_for_name(&parent, &p.name))? {
         anyhow::bail!(
             "channel {:?} already exists under this parent (id {existing}). \
-Switch into it instead: tenex-edge channel switch {}",
+Switch into it instead: mosaico channel switch {}",
             p.name,
             p.name
         );
@@ -310,7 +310,7 @@ pub(in crate::daemon::server) async fn rpc_channel_edit(
         &CallerAnchor::from_params(params),
         ResolveScope::Strict,
     )
-    .context("channel edit must be run from within a tenex-edge agent session")?;
+    .context("channel edit must be run from within a mosaico agent session")?;
     let channel_h = match resolve_target_channel(state, &rec, &p.channel)? {
         TargetChannel::Unique(h) => h,
         TargetChannel::Ambiguous(v) => return Ok(v),

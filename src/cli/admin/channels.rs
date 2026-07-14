@@ -14,7 +14,7 @@ pub async fn channels(action: ChannelAction) -> Result<()> {
         eprintln!("'{name}' is ambiguous — re-run with an exact path:");
         if let Some(refs) = v["ambiguous"].as_array() {
             for r in refs.iter().filter_map(|r| r.as_str()) {
-                eprintln!("  tenex-edge channel {verb} {r}");
+                eprintln!("  mosaico channel {verb} {r}");
             }
         }
         std::process::exit(2);
@@ -126,7 +126,7 @@ pub async fn channels(action: ChannelAction) -> Result<()> {
                 eprintln!("'{name}' is ambiguous — re-run with an exact path:");
                 for r in refs.iter().filter_map(|r| r.as_str()) {
                     eprintln!(
-                        "  tenex-edge channel edit {} --about {}",
+                        "  mosaico channel edit {} --about {}",
                         shell_quote(r),
                         shell_quote(&about)
                     );

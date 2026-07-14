@@ -9,7 +9,7 @@ use crate::fabric::nip29::wire::{kind, KIND_CHAT, KIND_STATUS};
 use anyhow::Result;
 use nostr_sdk::prelude::*;
 
-pub const TE_OP_SESSION_DISPATCH: &str = "session.dispatch.v1";
+pub const MOSAICO_OP_SESSION_DISPATCH: &str = "session.dispatch.v1";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DispatchTarget {
@@ -36,7 +36,7 @@ pub fn build_session_dispatch_event(
 ) -> Result<EventBuilder> {
     let mut tags = vec![
         tag(&["h", route_channel])?,
-        tag(&["te-op", TE_OP_SESSION_DISPATCH])?,
+        tag(&["mosaico-op", MOSAICO_OP_SESSION_DISPATCH])?,
         tag(&["p", &target.backend_pubkey])?,
         tag(&["dispatch", &target.backend_pubkey, &target.slug])?,
         tag(&["workspace", &target.workspace])?,
@@ -53,7 +53,7 @@ pub fn parse_session_dispatch(event: &Event) -> Option<SessionDispatchOp> {
     if event.kind.as_u16() != KIND_CHAT {
         return None;
     }
-    let mut te_op = None;
+    let mut mosaico_op = None;
     let mut route_channels = Vec::new();
     let mut dispatches: Vec<(&str, &str)> = Vec::new();
     let mut workspace = None;
@@ -62,7 +62,7 @@ pub fn parse_session_dispatch(event: &Event) -> Option<SessionDispatchOp> {
     for t in event.tags.iter() {
         let s = t.as_slice();
         match s.first().map(String::as_str) {
-            Some("te-op") => te_op = s.get(1).map(String::as_str),
+            Some("mosaico-op") => mosaico_op = s.get(1).map(String::as_str),
             Some("h") => {
                 if let Some(v) = s.get(1) {
                     route_channels.push(v.as_str());
@@ -83,7 +83,7 @@ pub fn parse_session_dispatch(event: &Event) -> Option<SessionDispatchOp> {
         }
     }
 
-    if te_op != Some(TE_OP_SESSION_DISPATCH) {
+    if mosaico_op != Some(MOSAICO_OP_SESSION_DISPATCH) {
         return None;
     }
     let route_channel = match route_channels.as_slice() {

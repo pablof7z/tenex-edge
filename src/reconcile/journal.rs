@@ -25,7 +25,7 @@ pub use hook_context::HookContextRenderFact;
 mod status;
 pub use status::{StatusDrive, StatusSessionStartedArgs};
 
-/// A monotonic host timestamp (unix seconds), as tenex-edge already uses for
+/// A monotonic host timestamp (unix seconds), as mosaico already uses for
 /// `enqueued_at`, `turn_started_at`, `last_seen`, etc.
 pub type Timestamp = u64;
 

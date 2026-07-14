@@ -11,4 +11,4 @@ source_refs:
 
 An HTTP transport correlation token issued at MCP `initialize` time and
 returned in the `Mcp-Session-Id` response header. It identifies the transport
-conversation only; it is not a tenex-edge session identity or public selector.
+conversation only; it is not a mosaico session identity or public selector.

@@ -9,4 +9,4 @@ source_refs:
 
 # project
 
-Identified by a short slug resolved from a working directory via: (1) git repo name (shared across worktrees), (2) ~/.tenex-edge/projects.json slug→path map (the only way to register a non-git directory), or (3) Err(NoProject). No .tenex/project.json file exists; the map at ~/.tenex-edge/projects.json is the single source of truth for non-git projects.
+Identified by a short slug resolved from a working directory via: (1) git repo name (shared across worktrees), (2) `~/.mosaico/projects.json` slug→path map (the only way to register a non-git directory), or (3) `Err(NoProject)`. The map at `~/.mosaico/projects.json` is the single source of truth for non-git projects.

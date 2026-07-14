@@ -222,7 +222,7 @@ pub fn attach(id_or_path: &str) -> Result<()> {
     };
     let _ = stream.shutdown(std::net::Shutdown::Both);
     drop(terminal);
-    eprintln!("\r\n[tenex-edge pty detached: {detach_reason}]");
+    eprintln!("\r\n[mosaico pty detached: {detach_reason}]");
     attach_error.map_or(Ok(()), Err)
 }
 
@@ -247,7 +247,7 @@ fn is_disconnect(kind: ErrorKind) -> bool {
 }
 
 fn trace_bytes(label: &str, bytes: &[u8]) {
-    let Ok(path) = std::env::var("TENEX_EDGE_PTY_TRACE") else {
+    let Ok(path) = std::env::var("MOSAICO_PTY_TRACE") else {
         return;
     };
     let hex = bytes

@@ -48,7 +48,7 @@ fn channel_edit_updates_about_from_relay_truth() {
         c.call(
             "channel_edit",
             serde_json::json!({
-                "channel": "editable",
+                "channel": format!("@{child_h}"),
                 "about": "new about",
                 "harness": "claude-code",
                 "watch_pid": watch_pid,

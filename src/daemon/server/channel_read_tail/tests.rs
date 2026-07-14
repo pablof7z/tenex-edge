@@ -123,7 +123,7 @@ async fn chat_row_to_json_rewrites_nostr_mentions_in_body() {
 fn is_backend_row_true_when_author_is_flagged_backend() {
     let store = Store::open_memory().unwrap();
     store
-        .upsert_profile(BACKEND_PK, "laptop (tenex-edge)", "hub", "laptop", true, 1)
+        .upsert_profile(BACKEND_PK, "laptop (mosaico)", "hub", "laptop", true, 1)
         .unwrap();
     let mut msg = row("mgmt ok: 14 agent(s) on laptop".to_string());
     msg.author_pubkey = BACKEND_PK.to_string();
@@ -135,7 +135,7 @@ fn is_backend_row_true_when_author_is_flagged_backend() {
 fn is_backend_row_true_when_recipient_is_flagged_backend() {
     let store = Store::open_memory().unwrap();
     store
-        .upsert_profile(BACKEND_PK, "laptop (tenex-edge)", "hub", "laptop", true, 1)
+        .upsert_profile(BACKEND_PK, "laptop (mosaico)", "hub", "laptop", true, 1)
         .unwrap();
     let msg = row("list agents".to_string());
     store

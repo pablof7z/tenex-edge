@@ -46,7 +46,7 @@ mod tests {
     #[test]
     fn install_flags_parse_with_owner_args() {
         let cli = crate::cli::args::Cli::try_parse_from([
-            "tenex-edge",
+            "mosaico",
             "install",
             "--harness",
             "codex,claude-code",

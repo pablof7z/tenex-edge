@@ -1,6 +1,6 @@
 //! PROBE (ignored by default; run explicitly against the public relay):
 //!
-//!   TE_RELAY=wss://relay.tenex.chat \
+//!   MOSAICO_RELAY=wss://relay.tenex.chat \
 //!     cargo test --test relay_probe -- --ignored --nocapture
 //!
 //! Load-bearing question for the per-machine-daemon design: if ONE connection
@@ -9,7 +9,7 @@
 //! identity, then collapsing N per-agent connections into one breaks mention
 //! delivery for every agent except the one the connection authed as.
 //!
-//! This talks to a public relay (default wss://relay.tenex.chat, or $TE_RELAY)
+//! This talks to a public relay (default wss://relay.tenex.chat, or $MOSAICO_RELAY)
 //! and publishes disposable kind:1 probe events. It is not part of default CI or
 //! routine local regression tests.
 
@@ -17,7 +17,7 @@ use nostr_sdk::prelude::*;
 use std::time::Duration;
 
 fn relay_url() -> String {
-    std::env::var("TE_RELAY").unwrap_or_else(|_| "wss://relay.tenex.chat".to_string())
+    std::env::var("MOSAICO_RELAY").unwrap_or_else(|_| "wss://relay.tenex.chat".to_string())
 }
 
 #[tokio::test]
@@ -56,7 +56,7 @@ async fn one_authed_conn_receives_mentions_to_other_pubkeys() {
     sender.add_relay(&relay).await.expect("add relay (sender)");
     sender.connect().await;
     sender.wait_for_connection(Duration::from_secs(8)).await;
-    let marker = format!("te-probe-{}", key_c.public_key().to_hex());
+    let marker = format!("mosaico-probe-{}", key_c.public_key().to_hex());
     let builder = EventBuilder::new(Kind::from(1u16), &marker).tags([Tag::public_key(pk_b)]);
     sender
         .send_event_builder(builder)
@@ -124,7 +124,7 @@ async fn one_conn_publishes_events_signed_by_multiple_keys() {
         .await;
 
     // Publish an event SIGNED BY B over the A-authed connection via send_event.
-    let marker = format!("te-probe-multisign-{}", key_b.public_key().to_hex());
+    let marker = format!("mosaico-probe-multisign-{}", key_b.public_key().to_hex());
     let unsigned = EventBuilder::new(Kind::from(1u16), &marker).build(key_b.public_key());
     let signed = key_b.sign_event(unsigned).await.expect("sign with B");
     let res = daemon.send_event(&signed).await;

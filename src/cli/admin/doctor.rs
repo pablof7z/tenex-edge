@@ -12,15 +12,15 @@ pub async fn doctor() -> Result<()> {
 pub(super) fn render_doctor(v: &serde_json::Value) -> String {
     let mut out = String::new();
     if let Some(storage) = v["storage"].as_object() {
-        let home_mode = if storage_bool(storage, "tenex_edge_home_set", false) {
-            "TENEX_EDGE_HOME set"
+        let home_mode = if storage_bool(storage, "mosaico_home_set", false) {
+            "MOSAICO_HOME set"
         } else {
             "default"
         };
         writeln!(
             out,
-            "edge home: {} ({home_mode})",
-            storage_str(storage, "edge_home")
+            "mosaico home: {} ({home_mode})",
+            storage_str(storage, "mosaico_home")
         )
         .ok();
         writeln!(out, "config: {}", storage_str(storage, "config_path")).ok();
@@ -36,7 +36,7 @@ pub(super) fn render_doctor(v: &serde_json::Value) -> String {
         if storage_non_default_unacknowledged(storage) {
             writeln!(
                 out,
-                "warning: daemon is using a non-default edge home; set {}=1 to acknowledge an isolated home",
+                "warning: daemon is using a non-default mosaico home; set {}=1 to acknowledge an isolated home",
                 crate::config::ISOLATED_HOME_ACK_ENV
             )
             .ok();
@@ -93,7 +93,7 @@ fn storage_bool(
 fn storage_non_default_unacknowledged(
     storage: &serde_json::Map<String, serde_json::Value>,
 ) -> bool {
-    !storage_bool(storage, "edge_home_is_default", true)
+    !storage_bool(storage, "mosaico_home_is_default", true)
         && !storage_bool(storage, "isolated_home_acknowledged", false)
 }
 
@@ -102,19 +102,19 @@ mod tests {
     use super::*;
 
     fn doctor_json(
-        edge_home_is_default: bool,
+        mosaico_home_is_default: bool,
         isolated_home_acknowledged: bool,
     ) -> serde_json::Value {
         serde_json::json!({
             "storage": {
-                "edge_home": "/tmp/te",
+                "mosaico_home": "/tmp/te",
                 "config_path": "/tmp/te/config.json",
                 "socket_path": "/tmp/te/daemon.sock",
                 "lock_path": "/tmp/te/daemon.lock",
                 "state_db_path": "/tmp/te/state.db",
                 "daemon_log_path": "/tmp/te/daemon.log",
-                "tenex_edge_home_set": true,
-                "edge_home_is_default": edge_home_is_default,
+                "mosaico_home_set": true,
+                "mosaico_home_is_default": mosaico_home_is_default,
                 "isolated_home_acknowledged": isolated_home_acknowledged
             },
             "relays": ["wss://relay.example"],
@@ -138,7 +138,7 @@ mod tests {
     #[test]
     fn render_doctor_prints_storage_paths_and_home_mode() {
         let rendered = render_doctor(&doctor_json(true, false));
-        assert!(rendered.contains("edge home: /tmp/te (TENEX_EDGE_HOME set)"));
+        assert!(rendered.contains("mosaico home: /tmp/te (MOSAICO_HOME set)"));
         assert!(rendered.contains("config: /tmp/te/config.json"));
         assert!(rendered.contains("socket: /tmp/te/daemon.sock"));
         assert!(rendered.contains("lock: /tmp/te/daemon.lock"));
@@ -154,7 +154,7 @@ mod tests {
     #[test]
     fn render_doctor_warns_for_unacknowledged_non_default_home() {
         let rendered = render_doctor(&doctor_json(false, false));
-        assert!(rendered.contains("warning: daemon is using a non-default edge home"));
+        assert!(rendered.contains("warning: daemon is using a non-default mosaico home"));
         assert!(rendered.contains(crate::config::ISOLATED_HOME_ACK_ENV));
     }
 

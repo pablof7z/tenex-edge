@@ -25,8 +25,7 @@ enum HookOutputFormat {
 pub(super) struct HostDef {
     /// Canonical harness name used in --host.
     pub(super) name: &'static str,
-    /// Default agent slug (used when neither TENEX_EDGE_AGENT nor
-    /// TENEX_EDGE_AGENT_FALLBACK is set).
+    /// Default agent slug (used when `MOSAICO_AGENT` is not set).
     agent_slug: &'static str,
     /// JSON fields tried in order to extract the session id from stdin.
     session_id_fields: &'static [&'static str],
@@ -63,14 +62,7 @@ static HOOK_HOSTS: &[HostDef] = &[
     HostDef {
         name: "codex",
         agent_slug: "codex",
-        session_id_fields: &[
-            "session_id",
-            "sessionId",
-            "conversation_id",
-            "conversationId",
-            "thread_id",
-            "threadId",
-        ],
+        session_id_fields: &["session_id"],
         session_id_env: None,
         transcript_field: Some("transcript_path"),
         output_format: HookOutputFormat::HookSpecificAdditionalContext,
@@ -99,7 +91,7 @@ static HOOK_HOSTS: &[HostDef] = &[
         // there when the hook is invoked, so no special cwd handling is needed.
         name: "grok",
         agent_slug: "grok",
-        session_id_fields: &["session_id", "sessionId"],
+        session_id_fields: &["session_id"],
         session_id_env: Some("GROK_SESSION_ID"),
         transcript_field: None,
         output_format: HookOutputFormat::PlainText,
@@ -164,7 +156,7 @@ async fn hook_dispatch(
     call_log: &hook_forensics::HookCallLog,
 ) -> Result<()> {
     let Some(host) = find_hook_host(&host_name) else {
-        eprintln!("[tenex-edge] unknown host {host_name:?}; run `--host help` to list");
+        eprintln!("[mosaico] unknown host {host_name:?}; run `--host help` to list");
         call_log.note("unknown-host", serde_json::json!({ "host": host_name }));
         return Ok(());
     };
@@ -185,9 +177,9 @@ async fn hook_dispatch(
             }
         },
     };
-    // A slug from TENEX_EDGE_AGENT (set by `tenex-edge launch`) is always
+    // A slug from MOSAICO_AGENT (set by `mosaico launch`) is always
     // authoritative. Otherwise, look for a live ancestor directly running
-    // `claude --agent <name>` (bypassing `tenex-edge launch`) and treat it the
+    // `claude --agent <name>` (bypassing `mosaico launch`) and treat it the
     // same as if it had been launched under that identity — including, for a
     // brand-new slug, provisioning it with the real invocation as its spawn
     // command (see `report_observation`'s `provision_command`).
@@ -226,8 +218,8 @@ async fn hook_dispatch(
 
     // No known channel in this directory? Hooks must NOT disturb the agent:
     // exit 0 silently. The user will see the "no known channel" message when
-    // they run an explicit `tenex-edge` verb from this dir; a harness running
-    // here should just proceed without tenex-edge's fabric features.
+    // they run an explicit `mosaico` verb from this dir; a harness running
+    // here should just proceed without mosaico's fabric features.
     if crate::workspace::resolve(&cwd).is_err() {
         call_log.note(
             "no-channel",
@@ -265,7 +257,7 @@ async fn hook_dispatch(
             .unwrap_or(false)
     {
         eprintln!(
-            "[tenex-edge] session-id field(s) present but empty for host {} ({:?}); \
+            "[mosaico] session-id field(s) present but empty for host {} ({:?}); \
              fabric injection skipped this turn",
             host.name, host.session_id_fields
         );
@@ -281,7 +273,7 @@ async fn hook_dispatch(
 
     match hook_type.as_str() {
         "session-start" => {
-            let has_pty_anchor = std::env::var("TENEX_EDGE_PTY_SESSION")
+            let has_pty_anchor = std::env::var("MOSAICO_PTY_SESSION")
                 .ok()
                 .filter(|s| !s.is_empty())
                 .is_some();
@@ -330,7 +322,7 @@ async fn hook_dispatch(
             )
             .await
             {
-                eprintln!("[tenex-edge] session-start hook skipped: {e:#}");
+                eprintln!("[mosaico] session-start hook skipped: {e:#}");
                 return Ok(());
             }
         }
@@ -364,15 +356,15 @@ async fn hook_dispatch(
                 )
                 .await
                 {
-                    eprintln!("[tenex-edge] session reassert skipped: {e:#}");
+                    eprintln!("[mosaico] session reassert skipped: {e:#}");
                     // Don't silently drop awareness for the turn: hand the turn a
                     // visible degradation marker so the agent knows the fabric was
                     // temporarily unavailable rather than assuming a quiet channel.
                     degraded_notice = Some(
-                        "<tenex-edge>\n⚠ Fabric temporarily unavailable — this session could not be \
+                        "<mosaico>\n⚠ Fabric temporarily unavailable — this session could not be \
                          reasserted with the daemon, so your inbox and channel awareness for this \
                          turn may be incomplete. Do NOT assume the channel is quiet or that you have \
-                         no mentions.\n</tenex-edge>"
+                         no mentions.\n</mosaico>"
                             .to_string(),
                     );
                 }
@@ -406,7 +398,7 @@ async fn hook_dispatch(
         other => {
             // Fail open: unknown hook types are ignored so future harness
             // versions can add hooks without breaking this binary.
-            eprintln!("[tenex-edge] unrecognised hook type {other:?} for host {host_name}");
+            eprintln!("[mosaico] unrecognised hook type {other:?} for host {host_name}");
         }
     }
     Ok(())

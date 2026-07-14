@@ -59,6 +59,6 @@ fn pty_spawn_uses_requested_public_name_and_rejects_conflict() {
         "unexpected error: {error:#}"
     );
 
-    let _ = tenex_edge::pty::kill(&pty_id);
+    let _ = mosaico::pty::kill(&pty_id);
     stop_daemon(&home);
 }

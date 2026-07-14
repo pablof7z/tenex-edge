@@ -1,4 +1,4 @@
-//! Trellis reconciliation spine for the tenex-edge daemon.
+//! Trellis reconciliation spine for the mosaico daemon.
 //!
 //! Boundary principle: **Trellis owns decisions; the host owns observations
 //! and effects.** Canonical world-facts enter a [`Reconciler`]'s graph as
@@ -13,7 +13,7 @@
 //!
 //! This module is the additive foundation for Trellis adoption. It proves the
 //! pattern compiles against the real `trellis-core` API and that the
-//! full-recompute oracle and audit queries are usable from tenex-edge. The
+//! full-recompute oracle and audit queries are usable from mosaico. The
 //! surface reconcilers (real sessions/status/who/outbox planners) land on top
 //! of this spine later; nothing here changes existing daemon behavior yet.
 

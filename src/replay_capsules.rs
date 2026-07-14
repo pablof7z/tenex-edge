@@ -145,9 +145,9 @@ pub fn record_many(
 }
 
 pub fn enabled() -> bool {
-    std::env::var("TENEX_EDGE_REPLAY_CAPSULES")
+    std::env::var("MOSAICO_REPLAY_CAPSULES")
         .ok()
-        .or_else(|| std::env::var("TENEX_EDGE_HOOK_CALL_LOG").ok())
+        .or_else(|| std::env::var("MOSAICO_HOOK_CALL_LOG").ok())
         .as_deref()
         .map(gate_is_enabled)
         .unwrap_or(true)

@@ -79,7 +79,7 @@ pub(super) async fn publish_no_reply_notice(state: &Arc<DaemonState>, notice: No
         }
     };
     let now = now_secs();
-    let from = format!("{} (tenex-edge)", state.host);
+    let from = format!("{} (mosaico)", state.host);
     let chat = ChatMessage {
         from: AgentRef::new(keys.public_key().to_hex(), from.clone()),
         channel: notice.channel.to_string(),
@@ -147,12 +147,12 @@ fn no_reply_notice_body(notice: &NoReplyNotice<'_>) -> String {
         .unwrap_or(notice.agent_slug);
     if notice.outcome.failed_to_start() {
         format!(
-            "tenex-edge: agent {target} failed to start for your mention ({}).",
+            "mosaico: agent {target} failed to start for your mention ({}).",
             notice.outcome.detail()
         )
     } else {
         format!(
-            "tenex-edge: agent {target} exited without replying to your mention ({}).",
+            "mosaico: agent {target} exited without replying to your mention ({}).",
             notice.outcome.detail()
         )
     }

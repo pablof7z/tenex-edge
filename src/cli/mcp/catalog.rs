@@ -28,15 +28,15 @@ pub(super) fn requires_write(name: &str) -> bool {
 
 const SPECS: &[ToolSpec] = &[
     ToolSpec {
-        name: "tenex_edge.my_session",
-        description: "Read the current agent session and full tenex-edge awareness.",
+        name: "mosaico.my_session",
+        description: "Read the current agent session and full mosaico awareness.",
         props: &[],
         required: &[],
         read_only: true,
         destructive: false,
     },
     ToolSpec {
-        name: "tenex_edge.channel_list",
+        name: "mosaico.channel_list",
         description: "List channels under a channel.",
         props: &[Prop::new(
             "channel",
@@ -48,7 +48,7 @@ const SPECS: &[ToolSpec] = &[
         destructive: false,
     },
     ToolSpec {
-        name: "tenex_edge.channel_read",
+        name: "mosaico.channel_read",
         description: "Read recent messages from a channel.",
         props: &[
             Prop::new("channel", "string", "Optional channel destination."),
@@ -66,7 +66,7 @@ const SPECS: &[ToolSpec] = &[
         destructive: false,
     },
     ToolSpec {
-        name: "tenex_edge.channel_send",
+        name: "mosaico.channel_send",
         description: "Send a message to a channel.",
         props: &[
             Prop::new("message", "string", "Message body."),
@@ -89,7 +89,7 @@ const SPECS: &[ToolSpec] = &[
         destructive: false,
     },
     ToolSpec {
-        name: "tenex_edge.channel_create",
+        name: "mosaico.channel_create",
         description: "Create and join a task channel.",
         props: &[
             Prop::new("name", "string", "Human channel name."),
@@ -107,7 +107,7 @@ const SPECS: &[ToolSpec] = &[
         destructive: false,
     },
     ToolSpec {
-        name: "tenex_edge.react",
+        name: "mosaico.react",
         description: "React to a specific message with an emoji — a non-disruptive \
                       acknowledgement that never interrupts the target's turn. Prefer \
                       this over a chat reply for a bare ack (\"got it\", 👍, ✅).",
@@ -125,17 +125,17 @@ const SPECS: &[ToolSpec] = &[
         destructive: false,
     },
     channel_tool(
-        "tenex_edge.channel_join",
+        "mosaico.channel_join",
         "Join a channel for passive context.",
         false,
     ),
     channel_tool(
-        "tenex_edge.channel_leave",
+        "mosaico.channel_leave",
         "Leave a passively joined channel.",
         true,
     ),
     channel_tool(
-        "tenex_edge.channel_switch",
+        "mosaico.channel_switch",
         "Switch the active session channel.",
         true,
     ),
@@ -195,9 +195,9 @@ fn def(spec: &ToolSpec) -> Value {
 
 fn security_schemes(spec: &ToolSpec) -> Value {
     let scopes = if spec.read_only {
-        json!(["tenex:read"])
+        json!(["mosaico:read"])
     } else {
-        json!(["tenex:read", "tenex:write"])
+        json!(["mosaico:read", "mosaico:write"])
     };
     json!([{ "type": "oauth2", "scopes": scopes }])
 }
@@ -235,11 +235,11 @@ mod tests {
             .filter_map(|tool| tool["name"].as_str().map(str::to_string))
             .collect::<Vec<_>>();
 
-        assert!(names.contains(&"tenex_edge.channel_join".to_string()));
-        assert!(names.contains(&"tenex_edge.channel_send".to_string()));
-        assert!(names.contains(&"tenex_edge.my_session".to_string()));
-        assert!(!names.contains(&"tenex_edge.who".to_string()));
-        assert!(!names.contains(&"tenex_edge.channels_join".to_string()));
-        assert!(!names.contains(&"tenex_edge.chat_write".to_string()));
+        assert!(names.contains(&"mosaico.channel_join".to_string()));
+        assert!(names.contains(&"mosaico.channel_send".to_string()));
+        assert!(names.contains(&"mosaico.my_session".to_string()));
+        assert!(!names.contains(&"mosaico.who".to_string()));
+        assert!(!names.contains(&"mosaico.channels_join".to_string()));
+        assert!(!names.contains(&"mosaico.chat_write".to_string()));
     }
 }

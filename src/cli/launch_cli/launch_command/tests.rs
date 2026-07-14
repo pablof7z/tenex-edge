@@ -31,7 +31,7 @@ fn suggestions_adapt_other_agent_commands() {
 
 #[test]
 fn suggestions_ignore_old_singular_command_shape() {
-    let agents = vec![("legacy".to_string(), vec![], None, None)];
+    let agents = vec![("custom".to_string(), vec![], None, None)];
     assert!(agent_command_suggestions("newagent", &agents).is_empty());
 }
 

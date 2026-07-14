@@ -26,7 +26,7 @@ impl Nip29Provider {
     ) -> GroupMutationOutcome {
         for attempt in 0..6u32 {
             let outcome = self.nip29_remove_member_outcome(channel, pubkey).await;
-            match self.try_fetch_group_state(channel).await {
+            match self.fetch_group_state(channel).await {
                 Ok((_, roles, members)) => {
                     if !members.contains(pubkey) && !roles.contains_key(pubkey) {
                         self.with_store(|s| {
@@ -74,7 +74,7 @@ impl Nip29Provider {
             };
             // Confirm ONLY on a relay state we actually OBSERVED. A read-back
             // failure must never be promoted to "grant confirmed".
-            match self.try_fetch_group_state(channel).await {
+            match self.fetch_group_state(channel).await {
                 Ok((_, roles, members)) => {
                     let present = if want_admin {
                         roles.get(pubkey).map(String::as_str) == Some("admin")

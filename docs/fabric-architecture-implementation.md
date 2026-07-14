@@ -1,14 +1,13 @@
-# tenex-edge — Fabric Architecture Implementation Ladder
+# mosaico — Fabric Architecture Implementation Ladder
 
 Companion to [fabric-architecture.md](fabric-architecture.md). This file owns the phased refactor ladder and validation commands; the architecture principles remain in the canonical fabric document.
 
 ## 6. Implementation plan
 
-The refactor should be done in behavior-preserving slices. The first provider is
-not a new fabric; it is today's legacy-tag + NIP-29 behavior pulled behind the new
-seams. Do not start by deleting the current `Codec`/`Transport`/`Store` paths.
-Add the new read model, dual-write where necessary, cut readers over, then delete
-legacy access once tests prove the projections are authoritative.
+The refactor should be done in behavior-preserving slices around the NIP-29
+provider. Each slice updates the canonical read model, its readers, and its
+writers together, then deletes the surface it replaces. No slice introduces
+dual reads, dual writes, compatibility projections, or fallback tables.
 
 ### Guardrails
 
@@ -22,8 +21,8 @@ legacy access once tests prove the projections are authoritative.
 - Existing behavior is the regression oracle: same-machine local delivery,
   targeted session mentions, NIP-29 group create/lock/add, project metadata cache,
   relay-authoritative membership routing, and startup mention fetch must still work.
-- Keep legacy tables during cutover. The plan below adds canonical tables and
-  backfills/dual-writes before any old table is removed.
+- Delete replaced tables and accessors in the same slice that establishes their
+  canonical replacements. An incompatible schema fails loudly.
 
 ### Phase 0 - freeze current behavior
 
@@ -100,19 +99,16 @@ Accessors to add first:
 - `quarantine_inbound(native_event_id, project_id, reason, raw_envelope)`
 - `replay_quarantine(project_id/pubkey filter) -> Vec<RawEnvelopeRef>`
 
-Backfill rules:
+Initialization rules:
 
-- For every existing `relay_channels.channel_h`, `sessions.channel_h`,
-  `relay_status.channel_h`, and `relay_channel_members.channel_h`, create a
-  project with origin `(fabric='nip29', provider_instance=<relay set hash>,
-  native_project_key=<slug>)`.
-- Mirror `relay_channel_members` into `membership` with source by role.
-- Historical kind:9 `relay_events` are idempotently backfilled into `messages`
-  when the store opens. New inbound/outbound chat dual-writes immediately. When
-  dual-writing, preserve the event author's pubkey as the durable return address.
+- Create the canonical schema for a fresh supported store.
+- Reject incompatible or unstamped schemas instead of interpreting or upgrading
+  their rows.
+- Persist each inbound or outbound message once in `messages`, preserving the
+  event author's pubkey as the durable return address.
 
-Done when: the new tables can be created on an existing `state.db`, backfilled
-idempotently, and queried without changing CLI output.
+Done when: a fresh store contains only the canonical tables and all readers
+query them without changing CLI output.
 
 ### Phase 2 - split StoreReader and StoreWriter
 
@@ -145,12 +141,11 @@ Then move read assembly behind those methods:
 - `rpc_project_list` prefers local `projects` rows, using relay fetch only as a
   materialization refresh.
 
-Compatibility rule: if a read-model row is absent during rollout, readers may
-fall back to legacy tables. That fallback must be temporary and covered by a
-TODO naming the phase that removes it.
+Readers use only the canonical read-model methods. A missing row is represented
+as missing data; it never triggers a secondary-table read.
 
-Done when: every reader has a read-model method to call, even if some methods
-still bridge to legacy tables internally.
+Done when: every reader calls a canonical read-model method and no parallel
+table path exists.
 
 ### Phase 3 - extract raw Nostr delivery from the codec
 
@@ -231,8 +226,8 @@ Extraction order:
 3. Move profile materialization to `Nip29Materializer::materialize_profile`.
 4. Move presence/status upserts to `Nip29Materializer`.
 5. Move mention routing from `runtime::route_mention_into` into
-   `materialize_inbound_message`, while leaving a thin compatibility wrapper for
-   existing tests.
+   `materialize_inbound_message`, update its callers and tests, then delete the
+   replaced entry point.
 6. Move startup mention fetch through the same materializer path; it should not
    have a separate decode/route implementation.
 
@@ -317,15 +312,14 @@ Steps:
 5. Same-daemon hosted recipients are delivered by inserting message recipient
    rows using the final native id. Echo/fetch is idempotent through
    `native_event_id` + recipient uniqueness.
-6. `inbox` becomes either:
-   - a compatibility projection over `messages` + `message_recipients`, or
-   - a legacy table dual-written until turn injection is cut over.
+6. Turn injection reads `messages` + `message_recipients`; delete the replaced
+   `inbox` table and its accessors in the same slice.
 
 Done when: `inbox` and turn-start context can render from
 canonical message rows without losing the old delivered/seen semantics.
 
 
-### Phase 8 - remove legacy coupling
+### Phase 8 - remove replaced coupling
 
 Only after the cutover tests pass:
 
@@ -333,8 +327,7 @@ Only after the cutover tests pass:
 - Move NIP-29 group builders out of `src/fabric/nip29/wire.rs`.
 - Delete direct fabric handling from `daemon/server.rs`.
 - Remove direct reader dependence on `relay_profiles`, `relay_status`, `inbox`,
-  and `relay_channels`; keep tables only if they are compatibility views or
-  deliberately retained storage.
+  and `relay_channels`; delete every replaced table.
 - Replace `SubScope` with `Scope` everywhere.
 - Update docs/wiki pages after the source doc is correct.
 
@@ -352,16 +345,16 @@ Run this after each phase, broadening only when the phase touches more surface:
 3. `cargo test --test daemon_mechanics` for daemon/socket lifecycle changes.
 4. `cargo test --test daemon_integration` for daemon RPC, membership, routing,
    and delivery changes.
-5. `TE_RELAY=<relay> cargo test --test relay_probe -- --ignored --nocapture`
+5. `MOSAICO_RELAY=<relay> cargo test --test relay_probe -- --ignored --nocapture`
    only when validating public-relay shared-connection AUTH behavior.
-6. `TE_NIP29_RELAY=<relay> cargo test --test nip29_probe -- --ignored --nocapture`
+6. `MOSAICO_NIP29_RELAY=<relay> cargo test --test nip29_probe -- --ignored --nocapture`
    only when validating live NIP-29 lifecycle or membership materialization.
-7. `TE_NIP29_RELAY=<relay> cargo test --test seed_validation -- --ignored --nocapture`
+7. `MOSAICO_NIP29_RELAY=<relay> cargo test --test seed_validation -- --ignored --nocapture`
    only when seeding a reader app with a complete validation session.
 8. Manual smoke:
    - start two sessions in the same project;
-   - human `tenex-edge who` and agent `tenex-edge my session`;
-   - send a chat mention with `tenex-edge channel send --message "@<agent> ..."`;
+   - human `mosaico who` and agent `mosaico my session`;
+   - send a chat mention with `mosaico channel send --message "@<agent> ..."`;
    - verify the target receives the mention through its host hook or pty
      delivery path;
    - verify no duplicate after a fetch or hook-injected turn context;

@@ -106,7 +106,7 @@ impl TailEvent {
         TailEvent::Sync {
             ts,
             channel: channel.to_string(),
-            from: "tenex-edge".to_string(),
+            from: "mosaico".to_string(),
             to: agent.to_string(),
             state: "failed".to_string(),
             detail: Some(format!("session {session}: {}", detail.into())),
@@ -223,7 +223,7 @@ mod tests {
             } => {
                 assert_eq!(ts, 7);
                 assert_eq!(channel, "chan");
-                assert_eq!(from, "tenex-edge");
+                assert_eq!(from, "mosaico");
                 assert_eq!(to, "codex");
                 assert_eq!(state, "failed");
                 assert_eq!(detail.as_deref(), Some("session sid-1: endpoint vanished"));
@@ -236,9 +236,9 @@ mod tests {
     fn roundtrip_serialization() {
         let ev = TailEvent::Turn {
             ts: 1_700_000_000,
-            channel: "tenex-edge".into(),
+            channel: "mosaico".into(),
             agent: "claude".into(),
-            session: "te-abc-123".into(),
+            session: "mosaico-abc-123".into(),
             state: "working".into(),
             elapsed_s: None,
         };

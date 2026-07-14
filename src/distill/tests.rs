@@ -50,11 +50,11 @@ fn parse_labels_bare_line_is_title() {
 }
 
 /// Drive `distill_session` through the external-command seam. Both scenarios
-/// live in one test: `TENEX_EDGE_DISTILL_CMD` is process-global.
+/// live in one test: `MOSAICO_DISTILL_CMD` is process-global.
 #[tokio::test]
 async fn distill_session_via_command() {
     let mut env = crate::test_env::EnvGuard::set(
-        "TENEX_EDGE_DISTILL_CMD",
+        "MOSAICO_DISTILL_CMD",
         "cat >/dev/null; printf 'TITLE: Fix GitHub issue 1\\nNOW: reading the issue tracker\\n'",
     );
     let (got, err, _cap) = distill_session("user: fix github issue 1", None, "test-session").await;
@@ -64,7 +64,7 @@ async fn distill_session_via_command() {
     assert_eq!(got.activity, "reading the issue tracker");
 
     env.set_var(
-        "TENEX_EDGE_DISTILL_CMD",
+        "MOSAICO_DISTILL_CMD",
         "sed -n 's/^CURRENT TITLE: /TITLE: /p' | head -n1",
     );
     let (got, err, _cap) = distill_session(

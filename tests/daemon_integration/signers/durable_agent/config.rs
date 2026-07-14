@@ -5,7 +5,7 @@ fn path(home: &Home, slug: &str) -> std::path::PathBuf {
 }
 
 pub(super) fn configure_durable_agent(home: &Home, slug: &str) -> String {
-    let identity = tenex_edge::identity::load_or_create(home.dir.path(), slug, 1).unwrap();
+    let identity = mosaico::identity::load_or_create(home.dir.path(), slug, 1).unwrap();
     let mut config = read_agent_config(home, slug);
     config["perSessionKey"] = serde_json::json!(false);
     write_agent_config(home, slug, &config);

@@ -51,7 +51,7 @@ fn render_turn_working_no_color() {
         ts: TS,
         channel: "proj".into(),
         agent: "claude".into(),
-        session: "te-session-1".into(),
+        session: "mosaico-session-1".into(),
         state: "working".into(),
         elapsed_s: None,
     };
@@ -68,7 +68,7 @@ fn render_turn_idle_with_elapsed() {
         ts: TS,
         channel: "proj".into(),
         agent: "claude".into(),
-        session: "te-session-1".into(),
+        session: "mosaico-session-1".into(),
         state: "idle".into(),
         elapsed_s: Some(91),
     };
@@ -83,17 +83,17 @@ fn render_turn_idle_with_elapsed() {
 fn render_join_no_color() {
     let ev = TailEvent::Join {
         ts: TS,
-        channel: "tenex-edge".into(),
+        channel: "mosaico".into(),
         agent: "codex".into(),
         host: "tower".into(),
-        session: "te-peer-abc".into(),
+        session: "mosaico-peer-abc".into(),
         rel_cwd: ".".into(),
     };
     let line = render_tail_event(&ev, false, false, false, false);
     assert!(line.contains("join"), "category");
     assert!(line.contains("codex@tower"), "agent@backend-label");
     assert!(line.contains("online"), "verb");
-    assert!(line.contains("tenex-edge"), "channel");
+    assert!(line.contains("mosaico"), "channel");
 }
 
 #[test]
@@ -103,7 +103,7 @@ fn render_leave_formats_duration() {
         channel: "proj".into(),
         agent: "opencode".into(),
         host: "tower".into(),
-        session: "te-peer-def".into(),
+        session: "mosaico-peer-def".into(),
         online_s: 1020,
     };
     let line = render_tail_event(&ev, false, false, false, false);
@@ -119,7 +119,7 @@ fn render_failed_sync_includes_detail() {
     let ev = TailEvent::Sync {
         ts: TS,
         channel: "proj".into(),
-        from: "tenex-edge".into(),
+        from: "mosaico".into(),
         to: "codex".into(),
         state: "failed".into(),
         detail: Some("session sid-1: failed to read inbox".into()),
@@ -141,7 +141,7 @@ fn render_sess_start_no_color() {
         ts: TS,
         channel: "proj".into(),
         agent: "claude".into(),
-        session: "te-abc-999".into(),
+        session: "mosaico-abc-999".into(),
         state: "start".into(),
         rel_cwd: ".".into(),
     };
@@ -172,14 +172,11 @@ fn parse_since_zero_for_garbage() {
 }
 
 #[test]
-fn agent_env_prefers_active_over_fallback() {
+fn agent_env_accepts_only_non_empty_active_slug() {
     assert_eq!(
-        select_agent_env(Some("haiku".into()), Some("developer".into())).as_deref(),
+        select_agent_env(Some("haiku".into())).as_deref(),
         Some("haiku")
     );
-    assert_eq!(
-        select_agent_env(None, Some("developer".into())).as_deref(),
-        Some("developer")
-    );
-    assert_eq!(select_agent_env(Some(String::new()), None), None);
+    assert_eq!(select_agent_env(None), None);
+    assert_eq!(select_agent_env(Some(String::new())), None);
 }

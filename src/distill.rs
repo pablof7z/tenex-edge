@@ -8,8 +8,8 @@
 //! periodically) by watching turn state; this module only answers *what* the
 //! agent is doing given the transcript.
 //!
-//! Ordering: `$TENEX_EDGE_DISTILL_CMD` (explicit external-command override) →
-//! the `edge-distillation` role in `~/.tenex-edge/llms.json` dispatched by
+//! Ordering: `$MOSAICO_DISTILL_CMD` (explicit external-command override) →
+//! the `mosaico-distillation` role in `~/.mosaico/llms.json` dispatched by
 //! provider: `claude-cli` → native `claude` CLI binary; `openrouter`/`ollama` →
 //! native `rig` → `None`.
 
@@ -25,23 +25,23 @@ fn dlog(session_id: &str, msg: &str) {
 
 /// Pipes a context string to an external command's stdin; its stdout (first
 /// non-empty line) is the distilled intent. This is the LLM seam — point
-/// `$TENEX_EDGE_DISTILL_CMD` at any model CLI.
+/// `$MOSAICO_DISTILL_CMD` at any model CLI.
 pub struct CommandDistiller {
     pub command: String,
 }
 
 impl CommandDistiller {
-    /// Build from `$TENEX_EDGE_DISTILL_CMD`, if set.
+    /// Build from `$MOSAICO_DISTILL_CMD`, if set.
     pub fn from_env() -> Option<Self> {
-        std::env::var("TENEX_EDGE_DISTILL_CMD")
+        std::env::var("MOSAICO_DISTILL_CMD")
             .ok()
             .filter(|s| !s.trim().is_empty())
             .map(|command| Self { command })
     }
 
-    /// Resolve the active distiller command: `$TENEX_EDGE_DISTILL_CMD` if set.
+    /// Resolve the active distiller command: `$MOSAICO_DISTILL_CMD` if set.
     /// This is an **explicit override** — the default distiller is the native rig
-    /// path via the `edge-distillation` role (see [`distill_activity`]).
+    /// path via the `mosaico-distillation` role (see [`distill_activity`]).
     pub fn resolve() -> Option<Self> {
         Self::from_env()
     }
@@ -164,11 +164,11 @@ async fn complete_via_rig(
             let mut headers = reqwest::header::HeaderMap::new();
             headers.insert(
                 reqwest::header::HeaderName::from_static("http-referer"),
-                reqwest::header::HeaderValue::from_static("https://github.com/pablof7z/tenex-edge"),
+                reqwest::header::HeaderValue::from_static("https://github.com/pablof7z/mosaico"),
             );
             headers.insert(
                 reqwest::header::HeaderName::from_static("x-title"),
-                reqwest::header::HeaderValue::from_static("tenex-edge"),
+                reqwest::header::HeaderValue::from_static("mosaico"),
             );
             let client = rig::providers::openrouter::Client::builder()
                 .api_key(&resolved.api_key)
@@ -308,8 +308,8 @@ fn assemble(
 /// recent transcript in a **single** model call (see [`SESSION_SYSTEM_PROMPT`]).
 /// The `current_title` is fed back so the model keeps a still-accurate title
 /// (nudge-to-keep). Ordering:
-///   (a) `$TENEX_EDGE_DISTILL_CMD` set → external command (explicit override);
-///   (b) else the `edge-distillation` role resolves:
+///   (a) `$MOSAICO_DISTILL_CMD` set → external command (explicit override);
+///   (b) else the `mosaico-distillation` role resolves:
 ///         – provider = `claude-cli` → native `claude` CLI binary;
 ///         – provider = `openrouter`/`ollama` → native rig;
 ///   (c) else **nudge-to-keep**: retain the current title with an empty activity.
@@ -351,7 +351,7 @@ pub async fn distill_session(
     // (a) explicit external-command override. The command sees SESSION_SYSTEM_PROMPT
     // semantics by convention (it is the LLM seam); we parse its two-line output.
     if let Some(cmd) = CommandDistiller::resolve() {
-        dlog(session_id, "using TENEX_EDGE_DISTILL_CMD override");
+        dlog(session_id, "using MOSAICO_DISTILL_CMD override");
         if let Some(out) = cmd.summarize_full(&input) {
             if let Some(labels) = assemble(parse_labels(&out), current_title) {
                 let cap = capture("command", &cmd.command, &input, &out);
@@ -360,12 +360,12 @@ pub async fn distill_session(
         }
         dlog(session_id, "override produced no usable output");
     }
-    // (b) edge-distillation role — dispatch by provider.
+    // (b) mosaico-distillation role — dispatch by provider.
     let mut rig_error: Option<String> = None;
-    match crate::llmconfig::resolve_role("edge-distillation") {
+    match crate::llmconfig::resolve_role("mosaico-distillation") {
         None => dlog(
             session_id,
-            "edge-distillation role not resolved (check llms.json + providers.json)",
+            "mosaico-distillation role not resolved (check llms.json + providers.json)",
         ),
         Some(resolved) => {
             dlog(

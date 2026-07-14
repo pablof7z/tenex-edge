@@ -64,7 +64,7 @@ fn merge_hooks_preserves_foreign_groups_and_replaces_ours() {
                 {
                     "hooks": [{
                         "type": "command",
-                        "command": "tenex-edge harness hook codex --type old",
+                        "command": "mosaico harness hook codex --type old",
                         "timeout": 1
                     }]
                 }
@@ -87,7 +87,7 @@ fn merge_hooks_preserves_foreign_groups_and_replaces_ours() {
     assert!(groups.iter().any(|g| {
         g.pointer("/hooks/0/command")
             .and_then(|v| v.as_str())
-            .is_some_and(|c| c == "tenex-edge harness hook codex --type user-prompt-submit")
+            .is_some_and(|c| c == "mosaico harness hook codex --type user-prompt-submit")
     }));
 }
 
@@ -99,7 +99,7 @@ fn uninstall_removes_ours_and_empty_events_only() {
                 {
                     "hooks": [{
                         "type": "command",
-                        "command": "tenex-edge harness hook codex --type stop",
+                        "command": "mosaico harness hook codex --type stop",
                         "timeout": 30
                     }]
                 }
@@ -115,7 +115,7 @@ fn uninstall_removes_ours_and_empty_events_only() {
                 {
                     "hooks": [{
                         "type": "command",
-                        "command": "tenex-edge harness hook codex --type user-prompt-submit",
+                        "command": "mosaico harness hook codex --type user-prompt-submit",
                         "timeout": 30
                     }]
                 }

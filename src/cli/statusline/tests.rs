@@ -5,7 +5,7 @@ fn view() -> StatuslineView {
         agent: "amber-claude".into(),
         host: "Kubrick's Mac".into(),
         session_id: "some-long-uuid".into(),
-        work_root: "tenex-edge".into(),
+        work_root: "mosaico".into(),
         channel: "41yh4c028b76a".into(),
         channel_title: "support".into(),
         member_count: 4,
@@ -22,7 +22,7 @@ fn view() -> StatuslineView {
 fn renders_identity_root_session_title_status() {
     assert_eq!(
         render_statusline(&view(), false),
-        "amber-claude tenex-edge support [Refactoring the inbox] [writing tests]"
+        "amber-claude mosaico support [Refactoring the inbox] [writing tests]"
     );
 }
 

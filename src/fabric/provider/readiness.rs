@@ -99,13 +99,10 @@ fn ensure_channel_ready_inner<'a>(
         } else {
             vec![]
         };
-
         // A relay fetch FAILURE must never be read as "group absent" — that would
         // drive spurious group re-creation (fabrication-by-omission). Degrade
         // loudly without attempting to create anything.
-        let (group_exists, mut roles, members) = match provider
-            .try_fetch_group_state(ctx.channel)
-            .await
+        let (group_exists, mut roles, members) = match provider.fetch_group_state(ctx.channel).await
         {
             Ok(state) => state,
             Err(e) => {
@@ -118,7 +115,6 @@ fn ensure_channel_ready_inner<'a>(
             }
         };
         let mut repaired = false;
-
         if !group_exists {
             let created = if let Some(parent) = parent_hint {
                 // The subgroup's display NAME rides on the create publish (9002
@@ -188,7 +184,11 @@ fn ensure_channel_ready_inner<'a>(
                     );
                 }
                 for attempt in 0..6u32 {
-                    let roles_now = provider.fetch_group_roles(ctx.channel).await;
+                    let roles_now = provider.fetch_group_roles(ctx.channel).await.unwrap_or_else(|error| {
+                        tracing::warn!(channel = ctx.channel, attempt, error = %format!("{error:#}"),
+                            "ensure_channel_ready: admin state read-back failed");
+                        Default::default()
+                    });
                     if roles_now.get(&mgmt_pubkey).map(String::as_str) == Some("admin") {
                         break;
                     }

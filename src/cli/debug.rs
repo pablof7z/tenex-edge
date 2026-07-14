@@ -130,14 +130,14 @@ mod outbox_render_tests {
                     "kind": 9,
                     "pubkey": "0123456789abcdef",
                     "content": "hello from the fabric",
-                    "tags": [["h", "tenex-edge"]]
+                    "tags": [["h", "mosaico"]]
                 }).to_string(),
                 "enqueued_at": 100
             }]
         }));
         assert!(text.contains("local_id"));
         assert!(text.contains("abcdef123456..."));
-        assert!(text.contains("tenex-edge"));
+        assert!(text.contains("mosaico"));
         assert!(text.contains("relay rejected"));
         assert!(!text.contains("status outbox"));
     }
@@ -160,7 +160,7 @@ mod tests {
     #[test]
     fn command_session_uses_explicit_flag_only() {
         let v = serde_json::json!({
-            "env": {"TENEX_EDGE_PUBKEY": "env-pubkey"},
+            "env": {"MOSAICO_PUBKEY": "env-pubkey"},
             "command": {"explicit_session": "flag-session"},
             "process": {"cwd": "/tmp"}
         });
@@ -174,7 +174,7 @@ mod tests {
         assert_eq!(command_session(&v).as_deref(), Some("flag-session"));
 
         let v = serde_json::json!({
-            "env": {"TENEX_EDGE_PUBKEY": "env-pubkey"},
+            "env": {"MOSAICO_PUBKEY": "env-pubkey"},
             "command": {},
             "process": {"cwd": "/tmp"}
         });
@@ -182,8 +182,8 @@ mod tests {
     }
 
     #[test]
-    fn hook_session_accepts_codex_field_variants() {
-        let v = serde_json::json!({"conversation_id": "codex-session"});
+    fn hook_session_accepts_canonical_session_id() {
+        let v = serde_json::json!({"session_id": "codex-session"});
         assert_eq!(hook_session(&v).as_deref(), Some("codex-session"));
     }
 

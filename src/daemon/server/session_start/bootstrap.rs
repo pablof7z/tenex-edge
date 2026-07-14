@@ -143,7 +143,7 @@ mod tests {
             "env".to_string(),
             "-u".to_string(),
             "CLAUDE_CODE_SESSION_ID".to_string(),
-            "TENEX_EDGE_ORDINAL=1".to_string(),
+            "MOSAICO_ORDINAL=1".to_string(),
             "/usr/local/bin/codex".to_string(),
             "--yolo".to_string(),
         ];

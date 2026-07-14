@@ -9,5 +9,5 @@ source_refs:
 
 # orchestration-spawned session
 
-A session the backend launched or resumed with `TENEX_EDGE_CHANNEL` set to a
+A session the backend launched or resumed with `MOSAICO_CHANNEL` set to a
 target channel; it joins that channel as-is and does not mint a child room.

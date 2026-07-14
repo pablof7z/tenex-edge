@@ -39,7 +39,7 @@ fn secret_patterns() -> &'static Vec<Regex> {
                 Err(e) => {
                     // Runtime stays safe (we skip the broken pattern), but the
                     // `all_scrub_patterns_compile` test guarantees we never ship one.
-                    eprintln!("[tenex-edge] scrub: failed to compile pattern {p:?}: {e}");
+                    eprintln!("[mosaico] scrub: failed to compile pattern {p:?}: {e}");
                     None
                 }
             })
@@ -70,7 +70,7 @@ pub(super) fn scrub_unsigned(unsigned: &mut UnsignedEvent) {
     let scrubbed = scrub_secrets(&unsigned.content);
     if scrubbed != unsigned.content {
         eprintln!(
-            "[tenex-edge] redacted secret(s) from outgoing kind:{} event",
+            "[mosaico] redacted secret(s) from outgoing kind:{} event",
             unsigned.kind.as_u16()
         );
         unsigned.content = scrubbed;

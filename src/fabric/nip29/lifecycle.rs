@@ -96,7 +96,7 @@ pub fn group_remove_user(channel: &str, pubkey: &str) -> Result<EventBuilder> {
 /// permissions over the group (the relay lists it in kind:39001 with role=admin).
 /// Same wire shape as [`group_put_user`] but with the role label set to "admin".
 /// relay29 advertises the `admin`/`moderator` roles it accepts via kind:39003;
-/// "admin" is the role tenex-edge grants to every whitelisted human pubkey.
+/// "admin" is the role mosaico grants to every whitelisted human pubkey.
 pub fn group_put_admin(channel: &str, pubkey: &str) -> Result<EventBuilder> {
     Ok(EventBuilder::new(kind(KIND_GROUP_PUT_USER), "")
         .tags([h_tag(channel)?, tag(&["p", pubkey, "admin"])?])
@@ -143,19 +143,19 @@ mod tests {
 
     #[test]
     fn group_create_has_h_tag() {
-        let b = group_create("tenex-edge").unwrap();
+        let b = group_create("mosaico").unwrap();
         let ev = b.sign_with_keys(&Keys::generate()).unwrap();
         assert_eq!(ev.kind.as_u16(), KIND_GROUP_CREATE);
-        assert!(has_tag(&ev, "h", "tenex-edge"));
+        assert!(has_tag(&ev, "h", "mosaico"));
     }
 
     #[test]
     fn group_lock_closed_is_closed_and_public() {
-        let b = group_lock_closed("tenex-edge").unwrap();
+        let b = group_lock_closed("mosaico").unwrap();
         let ev = b.sign_with_keys(&Keys::generate()).unwrap();
         assert_eq!(ev.kind.as_u16(), KIND_GROUP_EDIT_METADATA);
-        assert!(has_tag(&ev, "h", "tenex-edge"));
-        assert!(has_tag(&ev, "name", "tenex-edge"));
+        assert!(has_tag(&ev, "h", "mosaico"));
+        assert!(has_tag(&ev, "name", "mosaico"));
         assert!(has_tag_name(&ev, "closed"));
         assert!(has_tag_name(&ev, "public"));
         // Must NOT be private — would blind the non-member daemon connection.
@@ -163,19 +163,19 @@ mod tests {
         assert!(has_tag(
             &ev,
             "picture",
-            "https://api.dicebear.com/10.x/stripes/svg?seed=tenex-edge"
+            "https://api.dicebear.com/10.x/stripes/svg?seed=mosaico"
         ));
     }
 
     #[test]
     fn group_create_subgroup_has_h_and_parent_tags() {
-        let b = group_create_subgroup("subgroup-support-a1b2c3d4", "tenex-edge").unwrap();
+        let b = group_create_subgroup("subgroup-support-a1b2c3d4", "mosaico").unwrap();
         let ev = b.sign_with_keys(&Keys::generate()).unwrap();
         assert_eq!(ev.kind.as_u16(), KIND_GROUP_CREATE);
         assert!(has_tag(&ev, "h", "subgroup-support-a1b2c3d4"));
         // The parent relationship must ride on the 9007 create (NIP #2319 relays
         // validate + re-emit it on 39000 from the create event).
-        assert!(has_tag(&ev, "parent", "tenex-edge"));
+        assert!(has_tag(&ev, "parent", "mosaico"));
     }
 
     #[test]
@@ -183,14 +183,14 @@ mod tests {
         let b = group_lock_closed_with_parent(
             "subgroup-support-a1b2c3d4",
             "subgroup support",
-            "tenex-edge",
+            "mosaico",
         )
         .unwrap();
         let ev = b.sign_with_keys(&Keys::generate()).unwrap();
         assert_eq!(ev.kind.as_u16(), KIND_GROUP_EDIT_METADATA);
         assert!(has_tag(&ev, "h", "subgroup-support-a1b2c3d4"));
         assert!(has_tag(&ev, "name", "subgroup support"));
-        assert!(has_tag(&ev, "parent", "tenex-edge"));
+        assert!(has_tag(&ev, "parent", "mosaico"));
         assert!(has_tag_name(&ev, "closed"));
         assert!(has_tag_name(&ev, "public"));
         // Must NOT be private — would blind the non-member daemon connection.
@@ -227,10 +227,10 @@ mod tests {
     #[test]
     fn group_put_user_tags_plain_member_without_role() {
         let member = Keys::generate().public_key().to_hex();
-        let b = group_put_user("tenex-edge", &member).unwrap();
+        let b = group_put_user("mosaico", &member).unwrap();
         let ev = b.sign_with_keys(&Keys::generate()).unwrap();
         assert_eq!(ev.kind.as_u16(), KIND_GROUP_PUT_USER);
-        assert!(has_tag(&ev, "h", "tenex-edge"));
+        assert!(has_tag(&ev, "h", "mosaico"));
         // Plain membership is just the pubkey. Role labels are elevated access
         // and make relays list the user in kind:39001.
         assert!(ev.tags.iter().any(|t| {
@@ -244,10 +244,10 @@ mod tests {
     #[test]
     fn group_remove_user_tags_member_without_role() {
         let member = Keys::generate().public_key().to_hex();
-        let b = group_remove_user("tenex-edge", &member).unwrap();
+        let b = group_remove_user("mosaico", &member).unwrap();
         let ev = b.sign_with_keys(&Keys::generate()).unwrap();
         assert_eq!(ev.kind.as_u16(), KIND_GROUP_REMOVE_USER);
-        assert!(has_tag(&ev, "h", "tenex-edge"));
+        assert!(has_tag(&ev, "h", "mosaico"));
         assert!(ev.tags.iter().any(|t| {
             let s = t.as_slice();
             s.first().map(String::as_str) == Some("p")
@@ -259,10 +259,10 @@ mod tests {
     #[test]
     fn group_put_admin_tags_admin_role() {
         let pk = Keys::generate().public_key().to_hex();
-        let b = group_put_admin("tenex-edge", &pk).unwrap();
+        let b = group_put_admin("mosaico", &pk).unwrap();
         let ev = b.sign_with_keys(&Keys::generate()).unwrap();
         assert_eq!(ev.kind.as_u16(), KIND_GROUP_PUT_USER);
-        assert!(has_tag(&ev, "h", "tenex-edge"));
+        assert!(has_tag(&ev, "h", "mosaico"));
         // p tag carries the pubkey with the "admin" role (not "member").
         assert!(ev.tags.iter().any(|t| {
             let s = t.as_slice();
@@ -277,13 +277,13 @@ mod tests {
         let keys = Keys::generate();
         let pk = keys.public_key().to_hex();
 
-        let member = group_put_user("tenex-edge", &pk)
+        let member = group_put_user("mosaico", &pk)
             .unwrap()
             .sign_with_keys(&keys)
             .unwrap();
         assert!(has_tag(&member, "p", &pk));
 
-        let admin = group_put_admin("tenex-edge", &pk)
+        let admin = group_put_admin("mosaico", &pk)
             .unwrap()
             .sign_with_keys(&keys)
             .unwrap();
@@ -294,7 +294,7 @@ mod tests {
                 && s.get(2).map(String::as_str) == Some("admin")
         }));
 
-        let remove = group_remove_user("tenex-edge", &pk)
+        let remove = group_remove_user("mosaico", &pk)
             .unwrap()
             .sign_with_keys(&keys)
             .unwrap();

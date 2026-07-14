@@ -439,7 +439,7 @@ fn stable_subscription_id(filter: &Filter) -> SubscriptionId {
     let json = serde_json::to_string(filter).unwrap_or_default();
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     json.hash(&mut hasher);
-    SubscriptionId::new(format!("te-{:016x}", hasher.finish()))
+    SubscriptionId::new(format!("mosaico-{:016x}", hasher.finish()))
 }
 
 #[cfg(test)]

@@ -41,7 +41,7 @@ pub(super) fn render_hook_tail(
     let session = state.session_filter.as_deref().unwrap_or("*");
     let mut title = vec![
         Span::styled(
-            "tenex-edge debug hook-tail",
+            "mosaico debug hook-tail",
             Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),

@@ -29,7 +29,7 @@ fn backend_profile_advertises_managed_agents_as_tags() {
     let keys = Keys::generate();
     let profile = crate::domain::Profile::backend_named(
         keys.public_key().to_hex(),
-        "laptop (tenex-edge)",
+        "laptop (mosaico)",
         "laptop",
         Vec::new(),
     )

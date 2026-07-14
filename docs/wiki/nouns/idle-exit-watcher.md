@@ -9,4 +9,4 @@ source_refs:
 
 # idle-exit watcher
 
-Background task that shuts the daemon down after it has had no open clients and no live sessions for a configurable grace period (default 120s, overridable via TENEX_EDGE_DAEMON_GRACE_S).
+Background task that shuts the daemon down after it has had no open clients and no live sessions for a configurable grace period (default 120s, overridable via MOSAICO_DAEMON_GRACE_S).

@@ -3,7 +3,7 @@ use nostr_sdk::prelude::{Event, JsonUtil, Kind, TagKind};
 
 use super::auth_types::AuthorizeForm;
 
-const NIP07_CONTENT: &str = "tenex-edge OAuth login";
+const NIP07_CONTENT: &str = "mosaico OAuth login";
 const NIP07_EVENT_MAX_BYTES: usize = 8192;
 const LOGIN_WINDOW_SECS: u64 = 300;
 const FUTURE_SKEW_SECS: u64 = 120;
@@ -92,7 +92,7 @@ mod tests {
     #[test]
     fn verifies_signed_login_event() {
         let keys = Keys::generate();
-        let public_url = "https://edge.f7z.io";
+        let public_url = "https://mosaico.f7z.io";
         let challenge = "challenge-1";
         let event = login_event(&keys, public_url, challenge);
         let pubkey = verify_login_event(
@@ -108,7 +108,7 @@ mod tests {
     #[test]
     fn rejects_wrong_challenge() {
         let keys = Keys::generate();
-        let public_url = "https://edge.f7z.io";
+        let public_url = "https://mosaico.f7z.io";
         let event = login_event(&keys, public_url, "challenge-1");
         let err = verify_login_event(
             &event.as_json(),

@@ -24,7 +24,7 @@ fn no_hook_command() -> Vec<String> {
     ]
 }
 
-fn wait_for_alive(home: &Home, agent: &str, channel: &str) -> tenex_edge::state::Session {
+fn wait_for_alive(home: &Home, agent: &str, channel: &str) -> mosaico::state::Session {
     let mut found = None;
     assert!(
         wait_until(Duration::from_secs(25), || {
@@ -69,7 +69,7 @@ fn session_kill_stops_pty_session_and_marks_offline() {
         v["pty_id"].as_str().unwrap().to_string()
     });
     let rec = wait_for_alive(&home, agent, &channel);
-    let selector = tenex_edge::idref::npub(&rec.pubkey).expect("session npub");
+    let selector = mosaico::idref::npub(&rec.pubkey).expect("session npub");
 
     let killed = rt().block_on(async {
         let mut c = Client::connect_or_spawn().await.expect("connect");
@@ -82,8 +82,8 @@ fn session_kill_stops_pty_session_and_marks_offline() {
 
     assert!(
         wait_until(Duration::from_secs(5), || {
-            !tenex_edge::pty::is_live(&pty_id)
-                && !tenex_edge::pty::read_all_metadata()
+            !mosaico::pty::is_live(&pty_id)
+                && !mosaico::pty::read_all_metadata()
                     .iter()
                     .any(|meta| meta.id == pty_id)
         }),

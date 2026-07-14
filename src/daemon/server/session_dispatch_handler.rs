@@ -15,7 +15,19 @@ pub(super) async fn handle_session_dispatch(
     }
 
     let signer = event.pubkey.to_hex();
-    let (_exists, roles, members) = state.provider.fetch_group_state(&op.route_channel).await;
+    let (_exists, roles, members) = match state.provider.fetch_group_state(&op.route_channel).await
+    {
+        Ok(state) => state,
+        Err(error) => {
+            tracing::warn!(
+                event_id = %&event_id[..event_id.len().min(8)],
+                channel = %op.route_channel,
+                error = %format!("{error:#}"),
+                "session dispatch rejected: route-channel membership could not be verified"
+            );
+            return;
+        }
+    };
     if !roles.contains_key(&signer) && !members.contains(&signer) {
         tracing::warn!(
             event_id = %&event_id[..event_id.len().min(8)],
@@ -71,8 +83,8 @@ async fn spawn_dispatched(
     op: &crate::fabric::nip29::session_dispatch::SessionDispatchOp,
 ) -> bool {
     let slug = &op.target.slug;
-    let edge = config::edge_home();
-    if let Err(e) = crate::identity::load_or_create(&edge, slug, now_secs()) {
+    let mosaico_home = config::mosaico_home();
+    if let Err(e) = crate::identity::load_or_create(&mosaico_home, slug, now_secs()) {
         tracing::error!(slug = %slug, error = %e, "session dispatch: failed to mint agent identity");
         return false;
     }

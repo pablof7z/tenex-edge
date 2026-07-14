@@ -145,7 +145,7 @@ fn explicit_who_and_my_session_accept_the_exact_anchor() {
             .await
             .expect("my session should accept the exact watched-process anchor");
         let fabric = briefing["fabric"].as_str().expect("agent briefing");
-        assert!(fabric.contains("<tenex-edge>"), "got: {fabric}");
+        assert!(fabric.contains("<mosaico>"), "got: {fabric}");
         assert!(
             fabric.contains(&format!("channel=\"{current_channel}\"")),
             "got: {fabric}"
@@ -222,12 +222,11 @@ fn channel_membership_commands_use_watch_pid_as_exact_session_anchor() {
             .expect("switch should resolve by watched process");
         assert_eq!(switched["channel"].as_str(), Some(parent_h.as_str()));
         assert_eq!(switched["prev_channel"].as_str(), Some(child_h.as_str()));
-
         let joined = c
             .call(
                 "channel_join",
                 serde_json::json!({
-                    "channel": &child_h,
+                    "channel": format!("@{child_h}"),
                     "harness": "claude-code",
                     "watch_pid": watch_pid,
                     "agent": "coder",
@@ -243,7 +242,7 @@ fn channel_membership_commands_use_watch_pid_as_exact_session_anchor() {
             .call(
                 "channel_leave",
                 serde_json::json!({
-                    "channel": &child_h,
+                    "channel": format!("@{child_h}"),
                     "harness": "claude-code",
                     "watch_pid": watch_pid,
                     "agent": "coder",

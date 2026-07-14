@@ -34,7 +34,7 @@ fn first_turn_renders_awareness_snapshot_not_session_code() {
     let text = assemble_turn_start_context(&m, &rec, BACKEND, "laptop", 0)
         .expect("first-turn intro expected");
     assert!(
-        text.contains("<tenex-edge>"),
+        text.contains("<mosaico>"),
         "first turn should render fabric awareness; got: {text:?}"
     );
     assert!(
@@ -126,7 +126,7 @@ fn ended_turn_with_cursor_uses_delta_not_snapshot() {
     )
     .expect("fresh chat past the cursor must surface");
     assert!(
-        text.contains("<tenex-edge>") && text.contains("<chatter>"),
+        text.contains("<mosaico>") && text.contains("<chatter>"),
         "ended turn should render a delta, got: {text:?}"
     );
     assert!(

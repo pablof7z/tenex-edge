@@ -3,7 +3,7 @@ use anyhow::{Context, Result};
 use crate::identity::LaunchCommand;
 
 pub(super) struct SpawnDef {
-    /// Harness slug (matches agent_slug / TENEX_EDGE_AGENT).
+    /// Harness slug (matches agent_slug / MOSAICO_AGENT).
     pub(super) slug: &'static str,
     /// Command to run (first word of the exec, plus args).
     command: &'static [&'static str],
@@ -184,11 +184,11 @@ pub(super) fn build_headless_command(
     }
 }
 
-/// Returns `(slug, display_command, byline)` tuples for agents tenex-edge has
+/// Returns `(slug, display_command, byline)` tuples for agents mosaico has
 /// an identity for.
 pub fn spawnable_agents() -> Vec<(String, String, Option<String>)> {
-    let edge_home = crate::config::edge_home();
-    let agents = crate::identity::list_local_agents(&edge_home);
+    let mosaico_home = crate::config::mosaico_home();
+    let agents = crate::identity::list_local_agents(&mosaico_home);
     tracing::debug!(count = agents.len(), "spawnable_agents: agents in store");
     let result: Vec<(String, String, Option<String>)> = agents
         .into_iter()
@@ -209,8 +209,8 @@ pub fn spawnable_agents() -> Vec<(String, String, Option<String>)> {
 /// The first configured `commands` entry takes priority, with SPAWN_DEFS as
 /// fallback. The removed singular `command` field is intentionally ignored.
 pub(super) fn resolve_spawn_entry(slug: &str) -> Result<(Vec<String>, Option<serde_json::Value>)> {
-    let edge_home = crate::config::edge_home();
-    let entry = crate::identity::list_local_agents(&edge_home)
+    let mosaico_home = crate::config::mosaico_home();
+    let entry = crate::identity::list_local_agents(&mosaico_home)
         .into_iter()
         .find(|(s, _, _, _)| s == slug);
     let (file_cmd, agent_def) = entry
@@ -218,7 +218,7 @@ pub(super) fn resolve_spawn_entry(slug: &str) -> Result<(Vec<String>, Option<ser
         .unwrap_or((None, None));
     let base = file_cmd
         .or_else(|| builtin_spawn_command_for_slug(slug))
-        .with_context(|| format!("no harness command for agent {slug:?}: add a \"commands\" field to ~/.tenex-edge/agents/{slug}.json"))?;
+        .with_context(|| format!("no harness command for agent {slug:?}: add a \"commands\" field to ~/.mosaico/agents/{slug}.json"))?;
     Ok((base, agent_def))
 }
 

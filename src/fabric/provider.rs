@@ -20,8 +20,6 @@ use crate::fabric::{NostrEventCodec, RawEnvelope};
 use crate::state::Store;
 use crate::transport::Transport;
 use anyhow::Result;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -45,15 +43,13 @@ pub struct Nip29Provider {
     pub store: Arc<Mutex<Store>>,
     /// Same Arc as `DaemonState.transport` — used for lifecycle publishes only.
     pub transport: Arc<Transport>,
-    /// Backend management signing key (`tenexPrivateKey`). Missing keys are
+    /// Backend management signing key (`mosaicoPrivateKey`). Missing keys are
     /// generated and persisted by the shared readiness/provisioning path.
     management_nsec: Mutex<Option<String>>,
     /// Human operator key (`userNsec`) for self-granting the management key.
     pub user_nsec: Option<String>,
     /// Whitelisted human pubkeys (hex) that should hold admin in owned groups.
     pub whitelisted_pubkeys: Vec<String>,
-    /// Stable hash of the sorted relay URL set.
-    pub provider_instance: String,
     /// TTL'd in-process cache of which channels are known-ready.
     pub readiness: Arc<ChannelReadiness>,
 }
@@ -65,11 +61,9 @@ impl Nip29Provider {
         management_nsec: Option<String>,
         user_nsec: Option<String>,
         whitelisted_pubkeys: Vec<String>,
-        relays: &[String],
     ) -> Self {
         let delivery = NostrDelivery::new(transport.clone());
         let wire = Nip29WireCodec;
-        let provider_instance = derive_provider_instance(relays);
         Self {
             delivery,
             wire,
@@ -78,7 +72,6 @@ impl Nip29Provider {
             management_nsec: Mutex::new(management_nsec),
             user_nsec,
             whitelisted_pubkeys,
-            provider_instance,
             readiness: Arc::new(ChannelReadiness::default()),
         }
     }
@@ -190,9 +183,9 @@ impl Nip29Provider {
     /// Connectivity probe: publish a uniquely-tagged throwaway note and read it back.
     pub async fn doctor_probe(&self) -> (String, String) {
         use nostr_sdk::prelude::{Alphabet, EventBuilder, Filter, Kind, SingleLetterTag, Tag};
-        let t = format!("te-doctor-{}", crate::util::now_secs());
+        let t = format!("mosaico-doctor-{}", crate::util::now_secs());
         let publish = async {
-            let builder = EventBuilder::new(Kind::from(1u16), format!("tenex-edge doctor {t}"))
+            let builder = EventBuilder::new(Kind::from(1u16), format!("mosaico doctor {t}"))
                 .tags([Tag::parse(["h", &t])?]);
             self.transport.publish_builder_checked(builder).await
         }
@@ -236,15 +229,4 @@ impl Nip29Provider {
         let g = self.store.lock().expect("store mutex poisoned");
         f(&g)
     }
-}
-
-/// Derive a stable `provider_instance` string from the relay URL set.
-fn derive_provider_instance(relays: &[String]) -> String {
-    let mut sorted: Vec<&str> = relays.iter().map(String::as_str).collect();
-    sorted.sort_unstable();
-    sorted.dedup();
-    let joined = sorted.join("|");
-    let mut h = DefaultHasher::new();
-    joined.hash(&mut h);
-    format!("{:016x}", h.finish())
 }

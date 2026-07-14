@@ -13,15 +13,15 @@ pub(super) async fn call(params: &Value) -> Result<Value> {
         .cloned()
         .unwrap_or_else(|| json!({}));
     let result = match name.as_str() {
-        "tenex_edge.my_session" => my_session().await,
-        "tenex_edge.channel_list" => channel_list(&args).await,
-        "tenex_edge.channel_read" => channel_read(&args).await,
-        "tenex_edge.channel_send" => channel_send(&args).await,
-        "tenex_edge.react" => react(&args).await,
-        "tenex_edge.channel_create" => channel_create(&args).await,
-        "tenex_edge.channel_join" => channel_mutation("channel_join", &args).await,
-        "tenex_edge.channel_leave" => channel_mutation("channel_leave", &args).await,
-        "tenex_edge.channel_switch" => channel_mutation("channel_switch", &args).await,
+        "mosaico.my_session" => my_session().await,
+        "mosaico.channel_list" => channel_list(&args).await,
+        "mosaico.channel_read" => channel_read(&args).await,
+        "mosaico.channel_send" => channel_send(&args).await,
+        "mosaico.react" => react(&args).await,
+        "mosaico.channel_create" => channel_create(&args).await,
+        "mosaico.channel_join" => channel_mutation("channel_join", &args).await,
+        "mosaico.channel_leave" => channel_mutation("channel_leave", &args).await,
+        "mosaico.channel_switch" => channel_mutation("channel_switch", &args).await,
         other => anyhow::bail!("unknown tool: {other}"),
     };
     Ok(match result {

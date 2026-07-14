@@ -28,8 +28,8 @@ pub(in crate::daemon::server) async fn publish_local_agent_roster(
     remove_slug: Option<&str>,
 ) -> Result<RosterPublishReport> {
     let root_channels = state.with_store(root_channels);
-    let edge_home = crate::config::edge_home();
-    let local_agents = crate::identity::list_local_agents(&edge_home);
+    let mosaico_home = crate::config::mosaico_home();
+    let local_agents = crate::identity::list_local_agents(&mosaico_home);
     let mut failed = Vec::new();
     let mut published = 0usize;
     let mut removed = 0usize;
@@ -77,10 +77,10 @@ pub(in crate::daemon::server) async fn publish_backend_profile(state: &Arc<Daemo
     let Some(backend_keys) = state.provider.management_keys() else {
         return;
     };
-    let agents = crate::identity::list_advertised_agents(&crate::config::edge_home());
+    let agents = crate::identity::list_advertised_agents(&crate::config::mosaico_home());
     let profile = crate::domain::Profile::backend_named(
         backend_keys.public_key().to_hex(),
-        format!("{} (tenex-edge)", state.host),
+        format!("{} (mosaico)", state.host),
         state.host.clone(),
         state.owners.clone(),
     )

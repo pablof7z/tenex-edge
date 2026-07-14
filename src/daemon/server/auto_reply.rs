@@ -2,7 +2,7 @@
 //! an explicit `channel send`.
 //!
 //! A hosted agent receives a kind:9 mention typed into its PTY, runs its turn,
-//! and is expected to reply by invoking `tenex-edge channel send`. Some agents
+//! and is expected to reply by invoking `mosaico channel send`. Some agents
 //! finish the turn by printing a final answer to their own transcript and stop,
 //! publishing nothing — so from the channel's perspective they never responded.
 //!

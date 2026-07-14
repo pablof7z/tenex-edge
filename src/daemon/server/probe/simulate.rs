@@ -2,7 +2,7 @@
 //! The daemon-held graph is not mutated; callers get the would-be resource plan
 //! and changed labels before any host effect is allowed to run.
 
-use super::{required_str, DaemonState};
+use super::DaemonState;
 use crate::reconcile::journal::{InputFact, StatusDrive};
 use crate::reconcile::labels::{key_path, NodeLabels};
 use crate::reconcile::status::probe::would_publish;
@@ -16,9 +16,7 @@ const STATUS_KIND: u64 = 30315;
 mod session_surfaces;
 
 pub(super) fn simulate_value(state: &Arc<DaemonState>, params: &Value) -> Result<Value> {
-    let Some(fact) = fact_param(params)? else {
-        return simulate_legacy_status(state, params);
-    };
+    let fact = fact_param(params)?;
     let Some(inferred) = infer_surface(&fact) else {
         return Ok(super::fact::unsupported_simulation(&fact));
     };
@@ -147,49 +145,16 @@ fn simulate_subscription_fact(state: &Arc<DaemonState>, fact: InputFact) -> Resu
     }))
 }
 
-fn simulate_legacy_status(state: &Arc<DaemonState>, params: &Value) -> Result<Value> {
-    let surface = params
-        .get("surface")
-        .and_then(Value::as_str)
-        .unwrap_or("status");
-    if surface != "status" {
-        return Err(anyhow::anyhow!(
-            "probe simulate: `{surface}` requires --fact <InputFact-json>"
-        ));
-    }
-    let session = required_str(params, "session")?;
-    let title = params.get("title").and_then(Value::as_str);
-    let activity = params.get("activity").and_then(Value::as_str);
-    let now = params.get("now").and_then(Value::as_u64);
-
-    let mut r = state.status.lock().expect("status mutex poisoned");
-    let revision_before = r.revision();
-    let plan = r.preview_on_distill(session, title, activity, now)?;
-    let revision_after = r.revision();
-    let fact = json!({ "kind": "legacy-distill", "pubkey": session,
-        "title": title, "activity": activity, "now": now });
-    Ok(plan_value(PlanJson {
-        surface: "status",
-        fact,
-        labels: r.labels(),
-        plan: &plan,
-        revision_before,
-        revision_after,
-        wire_kind: Some(STATUS_KIND),
-        would_publish: Some(would_publish(&plan)),
-    }))
-}
-
-fn fact_param(params: &Value) -> Result<Option<InputFact>> {
-    let Some(raw) = params.get("fact") else {
-        return Ok(None);
-    };
+fn fact_param(params: &Value) -> Result<InputFact> {
+    let raw = params
+        .get("fact")
+        .context("probe simulate requires `fact`")?;
     let fact = match raw {
-        Value::Null => return Ok(None),
+        Value::Null => anyhow::bail!("probe simulate requires a non-null `fact`"),
         Value::String(s) => serde_json::from_str(s).context("probe simulate: invalid fact JSON")?,
         value => serde_json::from_value(value.clone()).context("probe simulate: invalid fact")?,
     };
-    Ok(Some(fact))
+    Ok(fact)
 }
 
 fn infer_surface(fact: &InputFact) -> Option<&'static str> {

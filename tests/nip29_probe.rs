@@ -1,13 +1,13 @@
 //! PROBE (ignored by default; run explicitly against the live NIP-29 relay):
 //!
-//!   TE_NIP29_RELAY=<relay> cargo test --test nip29_probe -- --ignored --nocapture
+//!   MOSAICO_NIP29_RELAY=<relay> cargo test --test nip29_probe -- --ignored --nocapture
 //!
 //! Gates the "daemon owns NIP-29 groups" feature. The relay's exact rules are the
 //! only real unknown and the codebase can't answer them — this asks the relay
-//! directly (default wss://nip29.f7z.io, or $TE_NIP29_RELAY). It walks the full
+//! directly (default wss://nip29.f7z.io, or $MOSAICO_NIP29_RELAY). It walks the full
 //! create → add-member → write lifecycle and reports, in order:
 //!
-//! Publishes disposable `te-probe-*` groups and kind:1 events, can be
+//! Publishes disposable `mosaico-probe-*` groups and kind:1 events, can be
 //! rate-limited, and is not part of default CI or routine local regression tests.
 //!
 //!   1. Does 9007 honor a CLIENT-CHOSEN group id via the `h` tag, or does the
@@ -110,14 +110,14 @@ async fn nip29_group_lifecycle() {
     let member_c = connect(member.clone(), &relay).await;
     let outsider_c = connect(outsider.clone(), &relay).await;
 
-    let m_marker = format!("te-probe-member-{}", slug);
+    let m_marker = format!("mosaico-probe-member-{}", slug);
     let m_note = EventBuilder::new(Kind::from(KIND_NOTE), &m_marker)
         .tags([h_tag(&slug)])
         .build(member.public_key());
     let m_note = member.sign_event(m_note).await.unwrap();
     publish(&member_c, &m_note, "member kind:1 into group").await;
 
-    let o_marker = format!("te-probe-outsider-{}", slug);
+    let o_marker = format!("mosaico-probe-outsider-{}", slug);
     let o_note = EventBuilder::new(Kind::from(KIND_NOTE), &o_marker)
         .tags([h_tag(&slug)])
         .build(outsider.public_key());
@@ -165,14 +165,14 @@ async fn nip29_group_lifecycle() {
     publish(&admin_c, &edit, "9002 edit-metadata closed+public").await;
     tokio::time::sleep(Duration::from_millis(900)).await;
 
-    let m2 = format!("te-probe-member2-{slug}");
+    let m2 = format!("mosaico-probe-member2-{slug}");
     let m2e = EventBuilder::new(Kind::from(KIND_NOTE), &m2)
         .tags([h_tag(&slug)])
         .build(member.public_key());
     let m2e = member.sign_event(m2e).await.unwrap();
     let member_write_after_lock = publish(&member_c, &m2e, "member kind:1 AFTER lock").await;
 
-    let o2 = format!("te-probe-outsider2-{slug}");
+    let o2 = format!("mosaico-probe-outsider2-{slug}");
     let o2e = EventBuilder::new(Kind::from(KIND_NOTE), &o2)
         .tags([h_tag(&slug)])
         .build(outsider.public_key());
@@ -196,7 +196,7 @@ async fn nip29_group_lifecycle() {
     .await;
     let non_member_can_read = rnotes
         .iter()
-        .any(|e| e.content.starts_with("te-probe-member"));
+        .any(|e| e.content.starts_with("mosaico-probe-member"));
     eprintln!(
         "[probe] Q6 => non-member (daemon-key) CAN read closed+public group: {non_member_can_read}"
     );
@@ -209,7 +209,7 @@ async fn nip29_group_lifecycle() {
     // the whole feature is broken. `reader_c` is authed as a non-member (the daemon
     // stand-in); we publish a member-signed note and an admin-signed 9000 over it.
     eprintln!("\n[probe] ----- Q7: writes signed by X over a NON-member connection -----");
-    let m3 = format!("te-probe-member3-{slug}");
+    let m3 = format!("mosaico-probe-member3-{slug}");
     let m3e = EventBuilder::new(Kind::from(KIND_NOTE), &m3)
         .tags([h_tag(&slug)])
         .build(member.public_key());

@@ -5,7 +5,7 @@
 //! equals the parent group id) so every backend already in the parent sees it. A
 //! `kind:9` has a single routing `h`, so the child group id travels separately in
 //! an `h-target` tag. All semantics live in the structured tags; the prose content
-//! is advisory and is IGNORED by receivers — a plain `kind:9` with no `te-op` tag
+//! is advisory and is IGNORED by receivers — a plain `kind:9` with no `mosaico-op` tag
 //! is just chat and parses to `None`.
 
 use crate::fabric::nip29::wire::{kind, KIND_CHAT};
@@ -13,8 +13,8 @@ use anyhow::Result;
 use nostr_sdk::prelude::*;
 use std::collections::HashMap;
 
-/// Marker `te-op` value identifying the add-agents orchestration event.
-pub const TE_OP_ADD_AGENTS: &str = "subgroup.add-agents.v2";
+/// Marker `mosaico-op` value identifying the add-agents orchestration event.
+pub const MOSAICO_OP_ADD_AGENTS: &str = "subgroup.add-agents.v2";
 
 fn tag(parts: &[&str]) -> Result<Tag> {
     Ok(Tag::parse(parts.iter().copied())?)
@@ -24,7 +24,7 @@ fn tag(parts: &[&str]) -> Result<Tag> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AddTarget {
     pub backend_pubkey: String,
-    /// Agent identity slug (the `~/.tenex-edge/agents/*.json` filename stem).
+    /// Agent identity slug (the `~/.mosaico/agents/*.json` filename stem).
     pub slug: String,
     /// Optional permanent session pubkey to resume instead of spawning fresh.
     pub session_pubkey: Option<String>,
@@ -36,7 +36,7 @@ pub struct AddTarget {
 /// parent group receive it. The child group id travels in an `h-target` tag.
 ///
 /// Tags, in order:
-///   `["h", parent_h]`, `["te-op", TE_OP_ADD_AGENTS]`, `["parent", parent_h]`,
+///   `["h", parent_h]`, `["mosaico-op", MOSAICO_OP_ADD_AGENTS]`, `["parent", parent_h]`,
 ///   `["h-target", child_h]`, one `["p", backend_pubkey]` per DISTINCT backend
 ///   (deduped, sorted for stable order), then one `["add", backend_pubkey,
 ///   slug, optional-session-pubkey]` per entry in `adds` (input order preserved).
@@ -49,7 +49,7 @@ pub fn build_add_agents_event(
 ) -> Result<EventBuilder> {
     let mut tags: Vec<Tag> = vec![
         tag(&["h", parent_h])?,
-        tag(&["te-op", TE_OP_ADD_AGENTS])?,
+        tag(&["mosaico-op", MOSAICO_OP_ADD_AGENTS])?,
         tag(&["parent", parent_h])?,
         tag(&["h-target", child_h])?,
     ];
@@ -91,7 +91,7 @@ pub struct AddAgentsOp {
 /// Returns `Some` only if the event is well-formed:
 ///
 /// - `kind == 9`
-/// - has `["te-op", TE_OP_ADD_AGENTS]` (this is what makes a prose-only kind:9
+/// - has `["mosaico-op", MOSAICO_OP_ADD_AGENTS]` (this is what makes a prose-only kind:9
 ///   ignored)
 /// - the single routing `["h", _]` equals the single `["parent", _]`
 /// - exactly one `["h-target", _]`
@@ -103,7 +103,7 @@ pub fn parse_orchestration(event: &Event) -> Option<AddAgentsOp> {
         return None;
     }
 
-    let mut te_op: Option<&str> = None;
+    let mut mosaico_op: Option<&str> = None;
     let mut h_vals: Vec<&str> = Vec::new();
     let mut parent_vals: Vec<&str> = Vec::new();
     let mut target_vals: Vec<&str> = Vec::new();
@@ -112,7 +112,7 @@ pub fn parse_orchestration(event: &Event) -> Option<AddAgentsOp> {
     for t in event.tags.iter() {
         let s = t.as_slice();
         match s.first().map(String::as_str) {
-            Some("te-op") => te_op = s.get(1).map(String::as_str),
+            Some("mosaico-op") => mosaico_op = s.get(1).map(String::as_str),
             Some("h") => {
                 if let Some(v) = s.get(1) {
                     h_vals.push(v.as_str());
@@ -142,7 +142,7 @@ pub fn parse_orchestration(event: &Event) -> Option<AddAgentsOp> {
     }
 
     // Must be tagged as an add-agents orchestration event.
-    if te_op != Some(TE_OP_ADD_AGENTS) {
+    if mosaico_op != Some(MOSAICO_OP_ADD_AGENTS) {
         return None;
     }
     // Exactly one routing h and one parent, and they must match.
@@ -259,7 +259,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_none_for_plain_chat_without_te_op() {
+    fn parse_none_for_plain_chat_without_mosaico_op() {
         // A prose-only kind:9 chat message must be ignored.
         let ev = sign(
             EventBuilder::new(kind(KIND_CHAT), "just chatting")
@@ -270,12 +270,12 @@ mod tests {
     }
 
     #[test]
-    fn parse_none_for_different_te_op() {
+    fn parse_none_for_different_mosaico_op() {
         let ev = sign(
             EventBuilder::new(kind(KIND_CHAT), "x")
                 .tags([
                     tag(&["h", "p"]).unwrap(),
-                    tag(&["te-op", "subgroup.remove-agents.v1"]).unwrap(),
+                    tag(&["mosaico-op", "subgroup.remove-agents.v1"]).unwrap(),
                     tag(&["parent", "p"]).unwrap(),
                     tag(&["h-target", "c"]).unwrap(),
                     tag(&["add", "bk", "r"]).unwrap(),
@@ -291,7 +291,7 @@ mod tests {
             EventBuilder::new(kind(KIND_CHAT), "x")
                 .tags([
                     tag(&["h", "other-group"]).unwrap(),
-                    tag(&["te-op", TE_OP_ADD_AGENTS]).unwrap(),
+                    tag(&["mosaico-op", MOSAICO_OP_ADD_AGENTS]).unwrap(),
                     tag(&["parent", "p"]).unwrap(),
                     tag(&["h-target", "c"]).unwrap(),
                     tag(&["add", "bk", "r"]).unwrap(),
@@ -307,7 +307,7 @@ mod tests {
             EventBuilder::new(kind(KIND_CHAT), "x")
                 .tags([
                     tag(&["h", "p"]).unwrap(),
-                    tag(&["te-op", TE_OP_ADD_AGENTS]).unwrap(),
+                    tag(&["mosaico-op", MOSAICO_OP_ADD_AGENTS]).unwrap(),
                     tag(&["parent", "p"]).unwrap(),
                     tag(&["add", "bk", "r"]).unwrap(),
                 ])
@@ -322,7 +322,7 @@ mod tests {
             EventBuilder::new(kind(KIND_CHAT), "x")
                 .tags([
                     tag(&["h", "p"]).unwrap(),
-                    tag(&["te-op", TE_OP_ADD_AGENTS]).unwrap(),
+                    tag(&["mosaico-op", MOSAICO_OP_ADD_AGENTS]).unwrap(),
                     tag(&["parent", "p"]).unwrap(),
                     tag(&["h-target", "c1"]).unwrap(),
                     tag(&["h-target", "c2"]).unwrap(),
@@ -339,7 +339,7 @@ mod tests {
             EventBuilder::new(kind(KIND_CHAT), "x")
                 .tags([
                     tag(&["h", "p"]).unwrap(),
-                    tag(&["te-op", TE_OP_ADD_AGENTS]).unwrap(),
+                    tag(&["mosaico-op", MOSAICO_OP_ADD_AGENTS]).unwrap(),
                     tag(&["parent", "p"]).unwrap(),
                     tag(&["h-target", "c"]).unwrap(),
                 ])
@@ -355,7 +355,7 @@ mod tests {
             EventBuilder::new(kind(1), "x")
                 .tags([
                     tag(&["h", "p"]).unwrap(),
-                    tag(&["te-op", TE_OP_ADD_AGENTS]).unwrap(),
+                    tag(&["mosaico-op", MOSAICO_OP_ADD_AGENTS]).unwrap(),
                     tag(&["parent", "p"]).unwrap(),
                     tag(&["h-target", "c"]).unwrap(),
                     tag(&["add", "bk", "r"]).unwrap(),

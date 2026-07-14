@@ -1,4 +1,4 @@
-//! tenex-edge — citizenship for your agents.
+//! mosaico — citizenship for your agents.
 //!
 //! A host-neutral substrate: durable agent identity + awareness + messaging on
 //! the Nostr fabric. Nothing here knows about any host (no `pc`, no `claude`);

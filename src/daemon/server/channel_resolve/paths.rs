@@ -13,9 +13,7 @@ pub(super) fn canonical_segments(root: &str, reference: &str) -> Vec<String> {
     segments
 }
 
-/// A copy-pasteable channel reference for diagnostics and ambiguity reruns:
-/// relative name path when unique, or `@<id-prefix>` when only the id can
-/// distinguish the channel.
+/// A copy-pasteable canonical channel path for diagnostics and ambiguity reruns.
 pub(in crate::daemon::server) fn channel_reference_for(
     store: &crate::state::Store,
     channel_h: &str,
@@ -25,25 +23,14 @@ pub(in crate::daemon::server) fn channel_reference_for(
         return crate::channel_ref::full_channel_ref(store, channel_h);
     }
     let paths = subtree_paths(store, &root);
-    let Some((id, segments)) = paths.iter().find(|(id, _)| id == channel_h) else {
+    let Some((_, segments)) = paths.iter().find(|(id, _)| id == channel_h) else {
         return channel_id_reference(channel_h);
     };
-    channel_reference_from_paths(&paths, &root, id, segments)
+    canonical_channel_reference(&root, segments)
 }
 
-pub(super) fn channel_reference_from_paths(
-    paths: &[(String, Vec<String>)],
-    root: &str,
-    id: &str,
-    segs: &[String],
-) -> String {
-    let path = segs.join(".");
-    let path_unique = paths.iter().filter(|(_, s)| s.join(".") == path).count() == 1;
-    if path_unique && !path.is_empty() {
-        format!("{root}.{path}")
-    } else {
-        channel_id_reference(id)
-    }
+pub(super) fn canonical_channel_reference(root: &str, segs: &[String]) -> String {
+    format!("{root}.{}", segs.join("."))
 }
 
 fn channel_id_reference(id: &str) -> String {
@@ -80,6 +67,38 @@ pub(super) fn subtree_paths(store: &crate::state::Store, root: &str) -> Vec<(Str
             child_path.push(name.to_lowercase());
             out.push((c.channel_h.clone(), child_path.clone()));
             stack.push((c.channel_h.clone(), child_path));
+        }
+    }
+    out
+}
+
+/// Every channel id in `root`'s subtree, including channels below unnamed
+/// session rooms. Explicit `@<prefix>` selectors must not inherit the
+/// human-name path filter.
+pub(super) fn subtree_ids(store: &crate::state::Store, root: &str) -> Vec<String> {
+    let channels = store.list_channels().unwrap_or_default();
+    let mut by_parent: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for channel in channels {
+        by_parent
+            .entry(channel.parent)
+            .or_default()
+            .push(channel.channel_h);
+    }
+
+    let mut out = vec![root.to_string()];
+    let mut stack = vec![root.to_string()];
+    let mut guard = 0usize;
+    while let Some(id) = stack.pop() {
+        guard += 1;
+        if guard > 10_000 {
+            break;
+        }
+        let Some(children) = by_parent.get(&id) else {
+            continue;
+        };
+        for child in children {
+            out.push(child.clone());
+            stack.push(child.clone());
         }
     }
     out

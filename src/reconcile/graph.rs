@@ -1,6 +1,6 @@
 //! A thin [`Reconciler`] wrapping a `trellis_core::Graph`.
 //!
-//! This is the minimal, REAL proof-of-life for Trellis in tenex-edge. It wires
+//! This is the minimal, REAL proof-of-life for Trellis in mosaico. It wires
 //! one input, one derived node, one set-collection, and one resource planner
 //! that emits open/close commands for a trivial [`ResourceKey`], all committed
 //! through a transaction that returns a `TransactionResult` receipt.

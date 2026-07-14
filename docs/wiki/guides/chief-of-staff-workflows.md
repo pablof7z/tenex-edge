@@ -31,7 +31,7 @@ The chief-of-staff agent maintains six available workflows: bug report triage, f
 
 ## Bug Report Triage
 
-The bug report triage workflow takes an informal bug flag (symptom/project, not repo/file), identifies the right repo, checks tenex-edge for prior context, searches existing issues to avoid dupes, then files an evidence-backed GitHub issue plus a durable record in `everything/investigations/` (and a decision entry if judgment is needed). <!-- [^4d78f-35497] -->
+The bug report triage workflow takes an informal bug flag (symptom/project, not repo/file), identifies the right repo, checks mosaico for prior context, searches existing issues to avoid dupes, then files an evidence-backed GitHub issue plus a durable record in `everything/investigations/` (and a decision entry if judgment is needed). <!-- [^4d78f-35497] -->
 
 ## Feature Request Triage
 

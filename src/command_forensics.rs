@@ -6,8 +6,8 @@ use std::io::Write as _;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const LOG_SCHEMA: &str = "tenex-edge.command-call.v1";
-pub const COMMAND_CALL_LOG_ENV: &str = "TENEX_EDGE_COMMAND_CALL_LOG";
+const LOG_SCHEMA: &str = "mosaico.command-call.v1";
+pub const COMMAND_CALL_LOG_ENV: &str = "MOSAICO_COMMAND_CALL_LOG";
 
 pub struct CommandCallLog {
     path: Option<PathBuf>,

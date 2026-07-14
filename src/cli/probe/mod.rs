@@ -1,4 +1,4 @@
-//! `tenex-edge probe` — hidden diagnostic surface over the reconciler frontier
+//! `mosaico probe` — hidden diagnostic surface over the reconciler frontier
 //! (frontier design §4). A thin client: it forwards a verb + params to the
 //! daemon's `probe` RPC and renders the JSON it returns. `--json` (global) emits
 //! the raw daemon JSON instead of the human view.
@@ -68,25 +68,9 @@ enum ProbeAction {
         /// The surface to simulate (`status` | `subscriptions` | `session_watch` | ...).
         #[arg(default_value = "status")]
         surface: String,
-        /// Exact serde JSON for `InputFact`; preferred over the status shorthand.
+        /// Exact serde JSON for `InputFact`.
         #[arg(long, value_name = "JSON")]
-        fact: Option<String>,
-        /// Session whose status the legacy shorthand applies to.
-        #[arg(long)]
-        session: Option<String>,
-        /// Legacy status shorthand: distilled live-activity line to set.
-        #[arg(long)]
-        activity: Option<String>,
-        /// Legacy status shorthand: distilled title to set.
-        #[arg(long)]
-        title: Option<String>,
-        /// Unix **seconds** (NOT millis) — the reconciler's clock unit. When set,
-        /// re-arms the TTL bucket (`now / refresh_secs`) exactly as a real distill
-        /// would; passing millis lands in the wrong bucket and fabricates a
-        /// spurious TTL refresh in the previewed plan. Omit to preview only the
-        /// content change.
-        #[arg(long)]
-        now: Option<u64>,
+        fact: String,
     },
     /// Compare a live preview or replay capsule against a counterfactual fact.
     Diff {
@@ -154,23 +138,11 @@ impl ProbeAction {
                     "export_trace": export_trace.is_some(),
                 }),
             )),
-            ProbeAction::Simulate {
-                surface,
-                fact,
-                session,
-                activity,
-                title,
-                now,
-            } => {
-                let fact = fact
-                    .as_deref()
-                    .map(serde_json::from_str::<Value>)
-                    .transpose()?;
+            ProbeAction::Simulate { surface, fact } => {
+                let fact = serde_json::from_str::<Value>(fact)?;
                 Ok((
                     "simulate".into(),
-                    json!({ "verb": "simulate", "surface": surface, "fact": fact,
-                            "session": session, "activity": activity, "title": title,
-                            "now": now }),
+                    json!({ "verb": "simulate", "surface": surface, "fact": fact }),
                 ))
             }
             ProbeAction::Diff {

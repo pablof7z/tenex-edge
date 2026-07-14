@@ -56,13 +56,13 @@ pub(super) async fn serve(args: super::McpArgs) -> Result<()> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
     let local = listener.local_addr()?;
     eprintln!(
-        "[tenex-edge] MCP HTTP listening on http://{}:{}{}",
+        "[mosaico] MCP HTTP listening on http://{}:{}{}",
         local.ip(),
         local.port(),
         path
     );
     eprintln!(
-        "[tenex-edge] ChatGPT requires HTTPS; tunnel this endpoint and use https://<host>{path}"
+        "[mosaico] ChatGPT requires HTTPS; tunnel this endpoint and use https://<host>{path}"
     );
     axum::serve(listener, app)
         .await
@@ -110,12 +110,12 @@ async fn post_mcp(
 
 async fn root_health(headers: HeaderMap) -> impl IntoResponse {
     log_http_event("root", &headers, None, &Value::Null);
-    Json(json!({ "ok": true, "name": "tenex-edge MCP", "mcp": "/mcp" }))
+    Json(json!({ "ok": true, "name": "mosaico MCP", "mcp": "/mcp" }))
 }
 
 async fn get_mcp(State(state): State<HttpState>, headers: HeaderMap) -> impl IntoResponse {
     log_http_event("sse_get", &headers, None, &Value::Null);
-    if let Err(response) = state.require_auth(&headers, "tenex:read") {
+    if let Err(response) = state.require_auth(&headers, "mosaico:read") {
         return *response;
     }
     let rx = state.subscriptions.tx.subscribe();
@@ -166,10 +166,10 @@ fn required_scope(method: &str, params: &Value) -> &'static str {
             .and_then(Value::as_str)
             .unwrap_or_default();
         if super::catalog::requires_write(tool) {
-            return "tenex:write";
+            return "mosaico:write";
         }
     }
-    "tenex:read"
+    "mosaico:read"
 }
 
 async fn dispatch_http(state: &HttpState, method: &str, params: &Value, id: Value) -> Value {
@@ -242,7 +242,7 @@ async fn run_subscription(uri: String, channel: Option<String>, tx: broadcast::S
     }
     .await;
     if let Err(err) = stream_result {
-        eprintln!("[tenex-edge mcp] HTTP subscription ended: {err:#}");
+        eprintln!("[mosaico mcp] HTTP subscription ended: {err:#}");
     }
 }
 

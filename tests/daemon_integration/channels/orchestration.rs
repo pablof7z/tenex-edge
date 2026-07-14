@@ -1,6 +1,6 @@
 use super::*;
 
-/// An orchestration-spawned session (the backend set `TENEX_EDGE_CHANNEL` to add
+/// An orchestration-spawned session (the backend set `MOSAICO_CHANNEL` to add
 /// this agent to a task subgroup) joins that group as-is and does NOT mint a
 /// child room. Guards the discriminator boundary.
 #[test]

@@ -6,8 +6,8 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
 
-const MY_SESSION_URI: &str = "tenex-edge://my/session";
-const STATUS_PREFIX: &str = "tenex-edge://channels/status/";
+const MY_SESSION_URI: &str = "mosaico://my/session";
+const STATUS_PREFIX: &str = "mosaico://channels/status/";
 
 #[derive(Clone, Default)]
 pub(super) struct Subscriptions {
@@ -37,7 +37,7 @@ pub(super) fn list() -> Value {
     let mut resources = vec![resource(
         MY_SESSION_URI,
         "my-session",
-        "Current agent session and full tenex-edge awareness",
+        "Current agent session and full mosaico awareness",
     )];
     if let Some(channel) = super::super::channel_env() {
         resources.push(resource(
@@ -52,10 +52,10 @@ pub(super) fn list() -> Value {
 pub(super) fn templates() -> Value {
     json!({
         "resourceTemplates": [{
-            "uriTemplate": "tenex-edge://channels/status/{channel}",
+            "uriTemplate": "mosaico://channels/status/{channel}",
             "name": "channel-status",
             "title": "Channel Status",
-            "description": "Current roster, activity, and fabric context for a tenex-edge channel.",
+            "description": "Current roster, activity, and fabric context for a mosaico channel.",
             "mimeType": "application/json"
         }]
     })
@@ -146,7 +146,7 @@ async fn run_subscription(uri: String, channel: Option<String>, writer: SharedWr
     }
     .await;
     if let Err(err) = stream_result {
-        eprintln!("[tenex-edge mcp] subscription for {uri} ended: {err:#}");
+        eprintln!("[mosaico mcp] subscription for {uri} ended: {err:#}");
     }
     writer_task.abort();
 }
@@ -161,7 +161,7 @@ fn parse_uri(uri: &str) -> Result<ResourceUri> {
             return Ok(ResourceUri::ChannelStatus(channel.to_string()));
         }
     }
-    anyhow::bail!("unsupported tenex-edge MCP resource URI: {uri}")
+    anyhow::bail!("unsupported mosaico MCP resource URI: {uri}")
 }
 
 fn resource(uri: &str, name: &str, description: &str) -> Value {
@@ -210,7 +210,7 @@ mod tests {
             ResourceUri::MySession
         ));
         assert!(matches!(
-            parse_uri("tenex-edge://channels/status/root/task").unwrap(),
+            parse_uri("mosaico://channels/status/root/task").unwrap(),
             ResourceUri::ChannelStatus(channel) if channel == "root/task"
         ));
     }

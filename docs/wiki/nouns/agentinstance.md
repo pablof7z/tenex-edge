@@ -11,5 +11,5 @@ source_refs:
 
 Read-side session identity projected as pubkey, agent slug, leased public name,
 and current runtime locator. The pubkey is authoritative; the other fields are
-display or local lifecycle metadata. See [Tenex-Edge Agent
-Identity](../guides/tenex-edge-agent-identity.md).
+display or local lifecycle metadata. See [Mosaico Agent
+Identity](../guides/mosaico-agent-identity.md).

@@ -124,7 +124,7 @@ fn determinism_and_replay() {
     b.assert_oracle().unwrap();
 
     assert_eq!(out_a.text, out_b.text, "snapshot bytes must be identical");
-    assert!(out_a.text.as_ref().unwrap().contains("<tenex-edge>"));
+    assert!(out_a.text.as_ref().unwrap().contains("<mosaico>"));
     assert_eq!(out_a.receipt, out_b.receipt, "receipts must be identical");
     assert_eq!(out_a.receipt.frame, FrameKind::Baseline);
 }
@@ -230,11 +230,10 @@ fn presence_change_attributed_to_presence_input() {
     );
 }
 
-/// Regression: the produced snapshot equals what the OLD `build_view`
-/// (`render_fabric_context`) produced for the same state — for BOTH the full and
-/// delta shapes. The graph derivation is a faithful, byte-exact port.
+/// Regression: the reconciled snapshot equals the canonical store-backed
+/// `render_fabric_context` result for both full and delta shapes.
 #[test]
-fn equivalence_with_legacy_build_view() {
+fn equivalence_with_store_render() {
     let store = seed_store();
     let rec = session(&store);
     chat(&store, "m-old", "root", 100, "old root note", "[]");
@@ -255,7 +254,7 @@ fn equivalence_with_legacy_build_view() {
         r.assert_oracle().unwrap();
         assert_eq!(
             out.text, oracle,
-            "reconciler snapshot must match legacy build_view at cursor={cursor}"
+            "reconciler snapshot must match store render at cursor={cursor}"
         );
     }
 }

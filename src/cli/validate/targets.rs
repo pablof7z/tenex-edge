@@ -1,4 +1,4 @@
-//! Local catalog for `tenex-edge debug validate --targets`.
+//! Local catalog for `mosaico debug validate --targets`.
 
 use serde_json::{json, Value};
 
@@ -13,127 +13,127 @@ const TARGET_FORMS: &[TargetForm] = &[
     TargetForm {
         target: "all",
         proves: "oracle, host seams, resource accounting, and live-session consistency",
-        example: "tenex-edge debug validate all",
+        example: "mosaico debug validate all",
     },
     TargetForm {
         target: "state:<surface> | status | subscriptions | hook_context | turn_lifecycle | cursor | delivery | session_start | session_watch | outbox",
         proves: "surface state, oracle status, seams, resource drift, and live rows",
-        example: "tenex-edge debug validate state:status",
+        example: "mosaico debug validate state:status",
     },
     TargetForm {
         target: "coverage | validation_coverage | inventory",
         proves: "durable table inventory, validation target families, and uncovered ledgers",
-        example: "tenex-edge debug validate coverage",
+        example: "mosaico debug validate coverage",
     },
     TargetForm {
         target: "table:<name> | ledger:<name>",
         proves: "one durable table's presence, row count, columns, target family, sample handles, and meaning",
-        example: "tenex-edge debug validate table:messages",
+        example: "mosaico debug validate table:messages",
     },
     TargetForm {
         target: "lookup:<value> | find:<value> | id:<value> | <raw-id-or-nip19>",
         proves: "durable identifier matches for raw ids, hex pubkeys, and NIP-19 npub/nprofile/note/nevent handles, plus concrete validation handles to run next",
-        example: "tenex-edge debug validate <event-id-or-npub>",
+        example: "mosaico debug validate <event-id-or-npub>",
     },
     TargetForm {
         target: "status:<pubkey>",
         proves: "status graph, local session row, relay status rows, and channel agreement",
-        example: "tenex-edge debug validate status:<pubkey>",
+        example: "mosaico debug validate status:<pubkey>",
     },
     TargetForm {
         target: "sub:<channel> | sub/<h|d|p>/<id>",
         proves: "subscription resources, owners, refcounts, planner causes, and receipts",
-        example: "tenex-edge debug validate sub:<channel>",
+        example: "mosaico debug validate sub:<channel>",
     },
     TargetForm {
         target: "hook:<session>[@time] | hook_context:<session>",
         proves: "hook render graph, receipt match, session channel, and roster/channel invariants",
-        example: "tenex-edge debug validate hook:<session>",
+        example: "mosaico debug validate hook:<session>",
     },
     TargetForm {
         target: "turn:<session> | turn_lifecycle:<session> | cursor:<session> | cur:<session>",
         proves: "live Trellis projection agrees with the local session row",
-        example: "tenex-edge debug validate turn:<session>",
+        example: "mosaico debug validate turn:<session>",
     },
     TargetForm {
         target: "session_start:<session> | watch:<session> | session_watch:<session>",
         proves: "advisory launch/watch state, host-effect intent, failures, pid liveness",
-        example: "tenex-edge debug validate session_start:<session>",
+        example: "mosaico debug validate session_start:<session>",
     },
     TargetForm {
         target: "outbox:<id>",
         proves: "Trellis outbox projection, durable queue row, relay outcome, and errors",
-        example: "tenex-edge debug validate outbox:<id>",
+        example: "mosaico debug validate outbox:<id>",
     },
     TargetForm {
         target: "channel:<h> | readiness:<h> | channel_ready:<h>",
         proves: "relay channel metadata, member/admin invariants, readiness attempts, subscriptions",
-        example: "tenex-edge debug validate readiness:<channel>",
+        example: "mosaico debug validate readiness:<channel>",
     },
     TargetForm {
         target: "readiness_attempt:<id> | provider_attempt:<id>",
         proves: "one provider readiness decision, its outcome/reason, and current channel corroboration",
-        example: "tenex-edge debug validate readiness_attempt:<id>",
+        example: "mosaico debug validate readiness_attempt:<id>",
     },
     TargetForm {
         target: "awareness:<h> | who:<h>",
         proves: "confirmed channel roster, active members, sessions, aliases, and identity rows",
-        example: "tenex-edge debug validate awareness:<channel>",
+        example: "mosaico debug validate awareness:<channel>",
     },
     TargetForm {
         target: "session:<pubkey> | joined:<pubkey>[:channel] | session_channel:<pubkey>",
         proves: "local session, current channel binding, joined channel, and active subscriptions",
-        example: "tenex-edge debug validate joined:<pubkey>",
+        example: "mosaico debug validate joined:<pubkey>",
     },
     TargetForm {
         target: "alias:<harness>:<kind>:<value> | harness_session:<harness>:<id> | resume:<harness>:<id> | pty_session:<id> | watch_pid:<pid>",
         proves: "session alias resolution, canonical session binding, and live-session surfaces",
-        example: "tenex-edge debug validate pty_session:<id>",
+        example: "mosaico debug validate pty_session:<id>",
     },
     TargetForm {
         target: "identity:<pubkey> | profile:<pubkey> | pubkey:<pubkey> | agent:<slug> | backend:<label>",
         proves: "profile rows, local identities, bound sessions, and membership/admin channels",
-        example: "tenex-edge debug validate agent:codex",
+        example: "mosaico debug validate agent:codex",
     },
     TargetForm {
         target: "workspace:<channel>",
         proves: "channel workspace binding and local filesystem path validity",
-        example: "tenex-edge debug validate workspace:<channel>",
+        example: "mosaico debug validate workspace:<channel>",
     },
     TargetForm {
         target: "member:<channel>:<pubkey> | admin:<channel>:<pubkey>",
         proves: "member/admin row, role, profile/session context, and membership snapshot absence",
-        example: "tenex-edge debug validate admin:<channel>:<pubkey>",
+        example: "mosaico debug validate admin:<channel>:<pubkey>",
     },
     TargetForm {
         target: "membership_snapshot:<channel> | roster:<channel>",
         proves: "admin/member snapshot hydration, high-water marks, roster counts, and admin presence",
-        example: "tenex-edge debug validate membership_snapshot:<channel>",
+        example: "mosaico debug validate membership_snapshot:<channel>",
     },
     TargetForm {
         target: "message:<id> | msg:<id> | event:<id>",
         proves: "message/event materialization, receipts, relay event state, and outbox state",
-        example: "tenex-edge debug validate event:<event>",
+        example: "mosaico debug validate event:<event>",
     },
     TargetForm {
         target: "recipient:<event>:<pubkey>[:session] | delivery:<event>:<pubkey>",
         proves: "recipient edge presence, delivery timestamp, profile/session context, and exclusions",
-        example: "tenex-edge debug validate recipient:<event>:<pubkey>",
+        example: "mosaico debug validate recipient:<event>:<pubkey>",
     },
     TargetForm {
         target: "inbox:<event> | quarantine:<event>",
         proves: "inbound processing or quarantine state, errors, and local materialization",
-        example: "tenex-edge debug validate inbox:<event>",
+        example: "mosaico debug validate inbox:<event>",
     },
     TargetForm {
         target: "llm:<id> | txn:<surface>:<id> | receipt:<id> | commit:<id> | trellis_commit:<id>",
         proves: "durable Trellis receipts, LLM call evidence, transaction commits, and ledger payloads",
-        example: "tenex-edge debug validate commit:<id>",
+        example: "mosaico debug validate commit:<id>",
     },
     TargetForm {
         target: "capsule:<id> | planner:<label> | --fact JSON | --cause LABEL",
         proves: "replay capsules, planner-label classification, dry-run simulation, and acid checks",
-        example: "tenex-edge debug validate --fact '{\"StatusDrive\":{\"Tick\":{\"session_id\":\"s1\",\"at\":1}}}'",
+        example: "mosaico debug validate --fact '{\"StatusDrive\":{\"Tick\":{\"session_id\":\"s1\",\"at\":1}}}'",
     },
 ];
 

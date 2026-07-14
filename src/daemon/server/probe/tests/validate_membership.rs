@@ -68,7 +68,7 @@ async fn rpc_probe_validate_member_absence_fails_when_snapshot_hydrated() {
 }
 
 #[tokio::test]
-async fn rpc_probe_validate_optimistic_member_passes_with_limitation_before_snapshot() {
+async fn rpc_probe_validamosaico_optimistic_member_passes_with_limitation_before_snapshot() {
     let state = DaemonState::new_for_test().await;
     state
         .with_store(|s| {

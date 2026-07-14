@@ -48,7 +48,7 @@ mod tests {
     #[test]
     fn dispatch_parses_repeated_channels() {
         let cli = crate::cli::args::Cli::try_parse_from([
-            "tenex-edge",
+            "mosaico",
             "dispatch",
             "codex@backend2",
             "--workspace",

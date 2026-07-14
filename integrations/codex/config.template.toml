@@ -1,35 +1,35 @@
 # Copy these hook entries into ~/.codex/config.toml, or into a trusted
-# <repo>/.codex/config.toml. tenex-edge must be on PATH (or set TENEX_EDGE_BIN).
+# <repo>/.codex/config.toml. mosaico must be on PATH (or set MOSAICO_BIN).
 
 [[hooks.SessionStart]]
 matcher = "startup|resume"
 
 [[hooks.SessionStart.hooks]]
 type = "command"
-command = 'tenex-edge harness hook codex --type session-start'
+command = 'mosaico harness hook codex --type session-start'
 timeout = 5
-statusMessage = "Starting tenex-edge"
+statusMessage = "Starting mosaico"
 
 [[hooks.UserPromptSubmit]]
 
 [[hooks.UserPromptSubmit.hooks]]
 type = "command"
-command = 'tenex-edge harness hook codex --type user-prompt-submit'
+command = 'mosaico harness hook codex --type user-prompt-submit'
 timeout = 5
-statusMessage = "tenex-edge turn start"
+statusMessage = "mosaico turn start"
 
 [[hooks.PostToolUse]]
 
 [[hooks.PostToolUse.hooks]]
 type = "command"
-command = 'tenex-edge harness hook codex --type post-tool-use'
+command = 'mosaico harness hook codex --type post-tool-use'
 timeout = 5
-statusMessage = "tenex-edge turn check"
+statusMessage = "mosaico turn check"
 
 [[hooks.Stop]]
 
 [[hooks.Stop.hooks]]
 type = "command"
-command = 'tenex-edge harness hook codex --type stop'
+command = 'mosaico harness hook codex --type stop'
 timeout = 5
-statusMessage = "tenex-edge turn end"
+statusMessage = "mosaico turn end"

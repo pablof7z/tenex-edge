@@ -1,4 +1,4 @@
-//! The canonical reference helpers for tenex-edge identities.
+//! The canonical reference helpers for mosaico identities.
 //!
 //! User-facing session identity is **`sessionCode-agent`** (for example
 //! `willow-echo-042-codex`). Backend-qualified agent references (`agent@backend-label`)

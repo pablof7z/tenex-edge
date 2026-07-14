@@ -26,7 +26,7 @@ impl DaemonState {
             indexer_relay: String::new(),
             host: "test-host".into(),
             user_nsec: None,
-            tenex_private_key: Some(backend_key.clone()),
+            mosaico_private_key: Some(backend_key.clone()),
             per_session_rooms: false,
         };
         let host = cfg.host.clone();
@@ -43,7 +43,6 @@ impl DaemonState {
             Some(backend_key),
             None,
             Vec::new(),
-            &cfg.relays,
         ));
         Arc::new(DaemonState {
             store,

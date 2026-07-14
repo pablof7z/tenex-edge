@@ -9,4 +9,4 @@ source_refs:
 
 # management_nsec
 
-The backend's own tenexPrivateKey used for group-management operations (put-admin/remove-user/edit-metadata); the operator's userNsec is no longer used for group management
+The backend's own mosaicoPrivateKey used for group-management operations (put-admin/remove-user/edit-metadata); the operator's userNsec is no longer used for group management

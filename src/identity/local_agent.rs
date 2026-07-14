@@ -13,7 +13,7 @@ pub type SpawnAgentEntry = (
     Option<String>,
 );
 
-/// A local agent as listed by `tenex-edge mgmt agent list`: its slug, hex pubkey, and
+/// A local agent as listed by `mosaico mgmt agent list`: its slug, hex pubkey, and
 /// configured harness launch commands. Distinct from `list_local_agents` (which
 /// the spawn path uses) in that it also surfaces the pubkey for the operator.
 #[derive(Debug, Clone)]
@@ -29,8 +29,8 @@ pub struct LocalAgent {
 /// Every agent in the local keystore (their hex pubkeys). Your own fleet trusts
 /// itself automatically, so agents on one device see each other without the
 /// operator having to pre-whitelist keys that are generated on first use.
-pub fn list_local_pubkeys(edge_home: &Path) -> Vec<String> {
-    let dir = agents_dir(edge_home);
+pub fn list_local_pubkeys(mosaico_home: &Path) -> Vec<String> {
+    let dir = agents_dir(mosaico_home);
     let mut out = Vec::new();
     if let Ok(entries) = std::fs::read_dir(&dir) {
         for e in entries.flatten() {
@@ -64,8 +64,8 @@ pub fn list_local_pubkeys(edge_home: &Path) -> Vec<String> {
 /// All agents in the local keystore with their configured harness commands and
 /// display byline. Used by the spawn machinery: commands from the agent file
 /// take priority over SPAWN_DEFS.
-pub fn list_local_agents(edge_home: &Path) -> Vec<SpawnAgentEntry> {
-    let dir = agents_dir(edge_home);
+pub fn list_local_agents(mosaico_home: &Path) -> Vec<SpawnAgentEntry> {
+    let dir = agents_dir(mosaico_home);
     let mut out = Vec::new();
     if let Ok(entries) = std::fs::read_dir(&dir) {
         for e in entries.flatten() {
@@ -105,8 +105,8 @@ pub fn list_local_agents(edge_home: &Path) -> Vec<SpawnAgentEntry> {
 /// The invitable roster as `(slug, byline, created_at)`, sorted by slug. The
 /// `created_at` lets the awareness delta surface only agents that became
 /// available since a session's last turn.
-pub fn list_invitable_agents(edge_home: &Path) -> Vec<(String, Option<String>, u64)> {
-    let dir = agents_dir(edge_home);
+pub fn list_invitable_agents(mosaico_home: &Path) -> Vec<(String, Option<String>, u64)> {
+    let dir = agents_dir(mosaico_home);
     let mut out = Vec::new();
     if let Ok(entries) = std::fs::read_dir(&dir) {
         for e in entries.flatten() {
@@ -142,16 +142,16 @@ pub fn list_invitable_agents(edge_home: &Path) -> Vec<(String, Option<String>, u
 /// the exact set advertised to clients. Both the backend kind:0 `agent` tags and
 /// the kind:30555 roster are built from this, so an add-agent picker's slug
 /// round-trips through the `add <slug>` management command.
-pub fn list_advertised_agents(edge_home: &Path) -> Vec<(String, String)> {
-    list_local_agents(edge_home)
+pub fn list_advertised_agents(mosaico_home: &Path) -> Vec<(String, String)> {
+    list_local_agents(mosaico_home)
         .into_iter()
         .map(|(slug, _commands, _agent_def, byline)| (slug, byline.unwrap_or_default()))
         .collect()
 }
 
 /// Every agent in the local keystore, with slug + pubkey + commands, sorted by slug.
-pub fn list_local_agent_details(edge_home: &Path) -> Vec<LocalAgent> {
-    let dir = agents_dir(edge_home);
+pub fn list_local_agent_details(mosaico_home: &Path) -> Vec<LocalAgent> {
+    let dir = agents_dir(mosaico_home);
     let mut out = Vec::new();
     if let Ok(entries) = std::fs::read_dir(&dir) {
         for e in entries.flatten() {
@@ -191,7 +191,7 @@ pub fn list_local_agent_details(edge_home: &Path) -> Vec<LocalAgent> {
 /// command. Returns the resolved identity and whether the keypair was newly
 /// created (`true`) or already existed (`false`).
 pub fn add_local_agent(
-    edge_home: &Path,
+    mosaico_home: &Path,
     slug: &str,
     command: Option<Vec<String>>,
     now: u64,
@@ -200,18 +200,18 @@ pub fn add_local_agent(
         .and_then(LaunchCommand::default)
         .into_iter()
         .collect();
-    add_local_agent_with_commands(edge_home, slug, commands, now)
+    add_local_agent_with_commands(mosaico_home, slug, commands, now)
 }
 
 pub(crate) fn add_local_agent_with_commands(
-    edge_home: &Path,
+    mosaico_home: &Path,
     slug: &str,
     commands: Vec<LaunchCommand>,
     now: u64,
 ) -> Result<(AgentIdentity, bool)> {
     validate_slug(slug)?;
     let commands = commands::normalize_commands(commands);
-    let path = key_path(edge_home, slug);
+    let path = key_path(mosaico_home, slug);
     if path.exists() {
         let s = std::fs::read_to_string(&path)
             .with_context(|| format!("reading key {}", path.display()))?;
@@ -249,8 +249,8 @@ pub(crate) fn add_local_agent_with_commands(
         per_session_key: true,
         harness: None,
     };
-    std::fs::create_dir_all(agents_dir(edge_home))
-        .with_context(|| format!("creating {}", agents_dir(edge_home).display()))?;
+    std::fs::create_dir_all(agents_dir(mosaico_home))
+        .with_context(|| format!("creating {}", agents_dir(mosaico_home).display()))?;
     let body = serde_json::to_string_pretty(&stored)?;
     atomic_write(&path, &body)?;
     Ok((
@@ -268,17 +268,17 @@ pub(crate) fn add_local_agent_with_commands(
 /// The configured harness bundle name for `slug`, if the agent opted into one.
 /// `None` means the built-in PTY spawn (unchanged behavior). A missing or
 /// unreadable keystore file is treated as "no bundle" (fail-open to PTY).
-pub fn agent_harness_bundle(edge_home: &Path, slug: &str) -> Option<String> {
-    let path = key_path(edge_home, slug);
+pub fn agent_harness_bundle(mosaico_home: &Path, slug: &str) -> Option<String> {
+    let path = key_path(mosaico_home, slug);
     let s = std::fs::read_to_string(&path).ok()?;
     let stored: StoredKey = serde_json::from_str(&s).ok()?;
     stored.harness.filter(|h| !h.trim().is_empty())
 }
 
 /// Set the local "when to use this agent" byline for an existing agent.
-pub fn set_local_agent_byline(edge_home: &Path, slug: &str, byline: Option<String>) -> Result<()> {
+pub fn set_local_agent_byline(home: &Path, slug: &str, byline: Option<String>) -> Result<()> {
     validate_slug(slug)?;
-    let path = key_path(edge_home, slug);
+    let path = key_path(home, slug);
     if !path.exists() {
         bail!("no such local agent: {slug}");
     }
@@ -293,11 +293,10 @@ pub fn set_local_agent_byline(edge_home: &Path, slug: &str, byline: Option<Strin
     atomic_write(&path, &body)?;
     Ok(())
 }
-
 /// Soft-delete the keystore file so a mistaken removal is recoverable.
-pub fn remove_local_agent(edge_home: &Path, slug: &str) -> Result<Option<PathBuf>> {
+pub fn remove_local_agent(mosaico_home: &Path, slug: &str) -> Result<Option<PathBuf>> {
     validate_slug(slug)?;
-    let path = key_path(edge_home, slug);
+    let path = key_path(mosaico_home, slug);
     if !path.exists() {
         return Ok(None);
     }

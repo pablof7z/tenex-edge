@@ -4,11 +4,11 @@
 # This intentionally does not run in CI. It calls installed Claude/Codex CLIs
 # and may spend account quota. Run only when explicitly requested:
 #
-#   TENEX_EDGE_REAL_HEADLESS_E2E=1 scripts/e2e-headless-resume.sh
+#   MOSAICO_REAL_HEADLESS_E2E=1 scripts/e2e-headless-resume.sh
 set -euo pipefail
 
-if [ "${TENEX_EDGE_REAL_HEADLESS_E2E:-}" != "1" ]; then
-  echo "SKIP: set TENEX_EDGE_REAL_HEADLESS_E2E=1 to run real Claude/Codex calls"
+if [ "${MOSAICO_REAL_HEADLESS_E2E:-}" != "1" ]; then
+  echo "SKIP: set MOSAICO_REAL_HEADLESS_E2E=1 to run real Claude/Codex calls"
   exit 0
 fi
 
@@ -84,7 +84,7 @@ run_claude() {
     --output-format json \
     --tools "" \
     --max-budget-usd "${CLAUDE_MAX_BUDGET_USD:-0.05}" \
-    "Reply exactly: tenex-edge-claude-fresh" </dev/null >"$fresh")
+    "Reply exactly: mosaico-claude-fresh" </dev/null >"$fresh")
   local fresh_id
   fresh_id="$(native_id "$fresh")"
   test "$fresh_id" = "$session_id"
@@ -94,7 +94,7 @@ run_claude() {
     --output-format json \
     --tools "" \
     --max-budget-usd "${CLAUDE_MAX_BUDGET_USD:-0.05}" \
-    "Reply exactly: tenex-edge-claude-resume" </dev/null >"$resumed")
+    "Reply exactly: mosaico-claude-resume" </dev/null >"$resumed")
   local resumed_id
   resumed_id="$(native_id "$resumed")"
   test "$resumed_id" = "$session_id"
@@ -110,7 +110,7 @@ run_codex() {
     --json \
     --skip-git-repo-check \
     --sandbox read-only \
-    "Reply exactly: tenex-edge-codex-fresh" </dev/null >"$fresh")
+    "Reply exactly: mosaico-codex-fresh" </dev/null >"$fresh")
   local session_id
   session_id="$(native_id "$fresh")"
 
@@ -119,14 +119,14 @@ run_codex() {
     --skip-git-repo-check \
     --sandbox read-only \
     resume "$session_id" \
-    "Reply exactly: tenex-edge-codex-resume" </dev/null >"$resumed")
+    "Reply exactly: mosaico-codex-resume" </dev/null >"$resumed")
   local resumed_id
   resumed_id="$(native_id "$resumed")"
   test "$resumed_id" = "$session_id"
   echo "PASS: codex headless native resume id round trip ($session_id)"
 }
 
-echo "tenex-edge: $ROOT"
+echo "mosaico: $ROOT"
 run_claude
 run_codex
 echo "ALL REAL HEADLESS CHECKS PASSED"

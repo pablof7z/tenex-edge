@@ -10,4 +10,4 @@ source_refs:
 
 # live lab
 
-The replacement mindset for the old scripted e2e — validates tenex-edge changes in a real, inspectable local environment with host relay, container backends, real auth, live agent UIs, and observability surfaces.
+The replacement mindset for the old scripted e2e — validates mosaico changes in a real, inspectable local environment with host relay, container backends, real auth, live agent UIs, and observability surfaces.

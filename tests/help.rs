@@ -1,12 +1,11 @@
 use std::process::Command;
 
 fn human_help(args: &[&str]) -> String {
-    let output = Command::new(env!("CARGO_BIN_EXE_tenex-edge"))
+    let output = Command::new(env!("CARGO_BIN_EXE_mosaico"))
         .args(args)
-        .env_remove("TENEX_EDGE_AGENT")
-        .env_remove("TENEX_EDGE_AGENT_FALLBACK")
+        .env_remove("MOSAICO_AGENT")
         .output()
-        .expect("run tenex-edge help");
+        .expect("run mosaico help");
 
     assert!(output.status.success(), "help failed: {output:?}");
     String::from_utf8(output.stdout).expect("help is UTF-8")

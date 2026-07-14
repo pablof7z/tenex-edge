@@ -1,4 +1,4 @@
-# tenex-edge: per-machine daemon design
+# mosaico: per-machine daemon design
 
 Status: implemented. Implements the architecture change
 from **per-session process** to **one per-machine daemon** that solely owns
@@ -7,13 +7,11 @@ and peer pruning.
 
 ## 1. Why
 
-Today every Claude Code / Codex / OpenCode session spawns its own detached
-engine (`tenex-edge __run-session`), and **every** CLI invocation (`who`,
-`chat`, `who`, `turn-start`, …) opens its **own** `rusqlite`
-connection to the single SQLite file at `~/.tenex-edge/state.db`. Under ~16
-concurrent per-session writers this corrupted `state.db` (a real incident).
-Root cause: many independent processes each believe they own the db, and N
-sessions also mean N independent relay connections.
+The earlier per-session process model let every agent session and CLI invocation
+open its own `rusqlite` connection to `~/.mosaico/state.db`. Under about 16
+concurrent writers this corrupted `state.db` in a real incident. The root cause
+was multiple independent processes treating the same database as theirs to own,
+alongside one relay connection per session.
 
 The fix: collapse to **one daemon per machine** that is the sole owner of the
 db and the (single) relay connection. Every CLI invocation and every
@@ -31,19 +29,12 @@ Claude channel adapter shell out to these verbs and parse their stdout).
    local-relay integration baseline. Current test tiers are documented in the
    README: CI uses `just test-unit`; local relay integrations use `just test`;
    public-relay probes are ignored and run only by explicit command.
-1. **WAL stopgap** — `src/state.rs` only. `journal_mode=WAL` (already present),
-   add `synchronous=NORMAL`, keep `busy_timeout=5000`. No FK pragma (no FK
-   constraints in the schema). This is the bandage so the *still-running*
-   multi-writer code stops corrupting during development. Stays (harmless) after
-   the daemon is sole writer. **Done.**
-2. **Daemon + single writer** — introduce the UDS daemon, spawn-if-absent,
-   lock/socket/stale-reclaim/version-handshake, and the RPC protocol. CLI verbs
-   become thin RPC clients. The daemon owns one `Store`. **Done.**
-3. **Engine + relay relocation** — move the per-session engine
-   (`runtime::run_session`) **into** the daemon as a per-session async task, and
-   collapse the relay connection(s) to **one** shared `Transport` inside the
-   daemon. `__run-session` (the detached subprocess) is removed; `session_start`
-   is a daemon RPC that spawns an in-process `SessionTask`. **Done.**
+1. `src/state.rs` uses `journal_mode=WAL`, `synchronous=NORMAL`, and
+   `busy_timeout=5000`.
+2. The UDS daemon owns startup locking, socket reclamation, the version
+   handshake, and one `Store`; CLI verbs are thin RPC clients.
+3. Per-session engines run as daemon-owned async tasks over one shared
+   `Transport`; `session_start` spawns an in-process `SessionTask`.
 
 ## 3. Process model
 
@@ -51,7 +42,7 @@ Claude channel adapter shell out to these verbs and parse their stdout).
               ┌──────────────────────────── machine ────────────────────────────┐
               │                                                                   │
   hook /      │   ┌─────────────┐   UDS    ┌──────────────────────────────────┐  │
-  CLI    ───▶ │   │ thin client │ ───────▶ │  tenex-edge daemon (single proc) │  │
+  CLI    ───▶ │   │ thin client │ ───────▶ │  mosaico daemon (single proc) │  │
  (one-shot)   │   │ (CLI verb)  │ ◀─────── │                                  │  │
               │   └─────────────┘  JSON    │  • owns state.db (one Store)     │  │   one
               │                            │  • owns ONE relay Transport ─────┼──┼──▶ relay
@@ -62,24 +53,23 @@ Claude channel adapter shell out to these verbs and parse their stdout).
               └───────────────────────────────────────────────────────────────────┘
 ```
 
-- The daemon is a normal `tenex-edge` invocation: `tenex-edge daemon` (hidden
-  subcommand, like today's `__run-session`).
+- The daemon is a normal `mosaico` invocation: `mosaico daemon`.
 - The daemon runs the **tokio multi-thread runtime** (already how `main` builds
   it). It holds exactly one `Store` (single SQLite connection → one writer by
   construction) and one `Transport` (one relay connection).
-- Per-session work that today lives in a detached process becomes a tokio task
-  inside the daemon (`SessionTask`), keyed by a private run key.
+- Per-session work runs as a tokio task inside the daemon (`SessionTask`), keyed
+  by a private run key.
 
 ### Spawn-if-absent
 
 Any invocation that needs state does `Daemon::connect_or_spawn()`:
 
-1. Try to `connect()` to `$TENEX_EDGE_HOME/daemon.sock` (default base
-   `~/.tenex-edge`).
+1. Try to `connect()` to `$MOSAICO_HOME/daemon.sock` (default base
+   `~/.mosaico`).
 2. If that succeeds → return the client.
 3. If it fails (no listener, or stale socket) → acquire the startup lock (§4),
    re-check (another racer may have just bound), and if still absent, **spawn**
-   the daemon (double-fork / `setsid`, detach stdio → `~/.tenex-edge/daemon.log`),
+   the daemon (double-fork / `setsid`, detach stdio → `~/.mosaico/daemon.log`),
    then poll-connect with a short timeout.
 
 ### Idle exit
@@ -90,7 +80,7 @@ liveness/heartbeat machinery:
 - A session is "alive" when its `SessionTask` is running (it ends on `watch_pid`
   death, `session-end` RPC, or SIGTERM-equivalent intent).
 - When the alive-session count drops to zero, start a **grace timer**
-  (`TENEX_EDGE_DAEMON_GRACE_S`, default 120s). If no new `session-start` /
+  (`MOSAICO_DAEMON_GRACE_S`, default 120s). If no new `session-start` /
   client connection arrives before it fires, the daemon shuts down cleanly
   (publishes offline presence for any lingering state, drops the socket,
   releases the lock).
@@ -101,7 +91,7 @@ sessions briefly come and go.
 
 ## 4. Socket, lock, stale-reclaim, version handshake
 
-Files (all under `$TENEX_EDGE_HOME`, default `~/.tenex-edge`):
+Files (all under `$MOSAICO_HOME`, default `~/.mosaico`):
 
 | file          | role                                                        |
 |---------------|-------------------------------------------------------------|
@@ -226,30 +216,21 @@ it drops a `tail` subscription forwarder.
 ## 6. RPC surface
 
 The full method catalog lives in [daemon-rpc-surface.md](daemon-rpc-surface.md). The daemon design here keeps the process, ownership, and lifecycle model.
-## 7. How the engine relocates inside the daemon
+## 7. Engine ownership inside the daemon
 
-Today: `session-start` writes a session row then forks `tenex-edge
-__run-session …`, a separate process that opens its own `Store` and `Transport`
-and runs `runtime::run_session`.
+The `session_start` RPC makes the daemon spawn a tokio task running
+`runtime::run_session`:
 
-After: `session_start` RPC → the daemon spawns a tokio task running (a refactor
-of) `runtime::run_session`, but:
-
-- It uses the daemon's **shared** `Store` (passed as `Arc<Mutex<Store>>` or via a
-  single-owner actor — see §8) instead of opening its own.
+- It uses the daemon's **shared** `Store` through the ownership model in §8.
 - It uses the daemon's **shared** `Transport`. The daemon maintains **one** relay
   connection and **one** union subscription (trusted authors ∪ all live session
   owners, per-project as needed). Incoming relay events are demuxed once,
-  daemon-side, and routed to the right session chat queue(s) — replacing today's
-  per-engine `handle_incoming`. Mentions route via the existing
+  daemon-side, and routed to the right session chat queue(s). Mentions route via the
   `compute_targets` / `route_mention` logic over all alive sessions.
 - Presence/status/activity publishing, heartbeats, turn-driven distillation, and
   `watch_pid` death detection all move into the per-session task, but publish
   through the shared `Transport`.
-- Peer-staleness pruning becomes a single daemon-level periodic task (today each
-  engine prunes; now once).
-- `__run-session` (the subcommand and the detached-fork code in `session_start`)
-  is removed. `detach()` moves to daemon spawning only.
+- Peer-staleness pruning is a single daemon-level periodic task.
 
 `EngineParams` is reused largely as-is, minus `store_path` (the task gets the
 shared store) and with the transport injected.
@@ -286,7 +267,7 @@ The daemon hosts several agent identities at once (`claude@`, `codex@`,
 identity is one pubkey, with at most one active runtime. The whole premise of
 the migration is **one relay connection** for all of them. Two facts had to hold
 for that to be correct; both were probed against the live `relay.tenex.chat` (see
-`tests/relay_probe.rs`; run explicitly with `TE_RELAY=<relay>` and `--ignored`):
+`tests/relay_probe.rs`; run explicitly with `MOSAICO_RELAY=<relay>` and `--ignored`):
 
 1. **Cross-pubkey delivery.** A connection authenticated (NIP-42) as agent A
    *does* receive events p-tagged to a different agent B. The relay does **not**
@@ -347,10 +328,10 @@ re-exec can, hence reconciliation.)
 
 ## 8d. Clientful-but-sessionless connections vs idle-exit (§3)
 
-`tail` and `who --live` hold a client connection open
+The streaming `tail` RPC and `who --live` hold a client connection open
 without owning a session. Decision: **an open client connection cancels the
 idle-grace timer** (the daemon counts "live sessions + open client connections"
-for liveness). So a lone `tail` keeps the daemon up; when it disconnects and no
+for liveness). So a lone tail-stream client keeps the daemon up; when it disconnects and no
 sessions remain, the grace timer starts. This avoids live readers being silently
 killed by an idle-exit mid-stream.
 

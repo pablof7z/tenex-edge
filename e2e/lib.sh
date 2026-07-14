@@ -1,40 +1,38 @@
 # shellcheck shell=bash
-# e2e/lib.sh — shared configuration + helpers for the tenex-edge end-to-end rig.
+# e2e/lib.sh — shared configuration + helpers for the mosaico end-to-end rig.
 #
 # Sourced by run.sh / teardown.sh. Everything here is parameterizable via env so
 # the same rig can later be pointed at new features (e.g. subgroup task rooms).
 #
-# A "backend" is one fully isolated tenex-edge install: its own daemon, socket,
+# A "backend" is one fully isolated mosaico install: its own daemon, socket,
 # state.db, agent keystore, config.json and identity key. Two backends on one
 # machine talk ONLY through the local relay — there is no shared filesystem
 # state between them. That is what makes this a real multi-backend test.
 
 set -euo pipefail
 
-# ── hermetic env: scrub the caller's live tenex-edge session identity ─────────
+# ── hermetic env: scrub the caller's live mosaico session identity ─────────
 #
-# The rig may be run from INSIDE a live tenex-edge agent session (a developer or
+# The rig may be run from INSIDE a live mosaico agent session (a developer or
 # an agent driving it from a hooked shell). That parent process exports its own
-# session identity — TENEX_EDGE_CHANNEL, TENEX_EDGE_AGENT, the harness session id
+# session identity — MOSAICO_CHANNEL, MOSAICO_AGENT, the harness session id
 # — and the auto-spawned isolated daemon inherits the client's environment
-# wholesale. A leaked TENEX_EDGE_CHANNEL is the worst offender: a bare
+# wholesale. A leaked MOSAICO_CHANNEL is the worst offender: a bare
 # `session-start` (no channel) would then scope the isolated backend into the
-# CALLER's channel name, minting a spurious child group under the test project
-# (observed: a `name=<caller-channel>` 39000 with `parent=<test-project>`).
+# CALLER's channel name, minting a spurious child group under the test workspace
+# (observed: a `name=<caller-channel>` 39000 with `parent=<test-workspace>`).
 #
 # Unset these ONCE here, at source time, BEFORE any run-*.sh applies its own
-# intentional per-call prefixes (e.g. `TENEX_EDGE_CHANNEL=<room> edge ...` in
-# run-ordinal.sh). Scrubbing per-call inside `edge()` would instead clobber those
-# deliberate values — this is why the scrub lives at harness entry, not in edge().
-# TENEX_EDGE_HOME/CONFIG/DIR are re-set per call by `edge()`; unsetting the
+# intentional per-call prefixes (e.g. `MOSAICO_CHANNEL=<room> mosaico ...` in
+# run-ordinal.sh). Scrubbing per-call inside `mosaico()` would instead clobber those
+# deliberate values — this is why the scrub lives at harness entry, not in mosaico().
+# MOSAICO_HOME and MOSAICO_CONFIG are re-set per call by `mosaico()`; unsetting the
 # ambient ones keeps any stray un-wrapped invocation off the caller's real home.
-unset TENEX_EDGE_CHANNEL \
-      TENEX_EDGE_AGENT \
-      TENEX_EDGE_AGENT_FALLBACK \
+unset MOSAICO_CHANNEL \
+      MOSAICO_AGENT \
       CLAUDE_CODE_SESSION_ID \
-      TENEX_EDGE_HOME \
-      TENEX_CONFIG \
-      TENEX_DIR 2>/dev/null || true
+      MOSAICO_HOME \
+      MOSAICO_CONFIG 2>/dev/null || true
 
 # ── tunables (override from the environment) ─────────────────────────────────
 
@@ -56,27 +54,27 @@ default_nip29_relay_dir() {
 : "${NIP29_RELAY_DIR:=$(default_nip29_relay_dir)}"
 : "${NIP29_RELAY_BIN:=${NIP29_RELAY_DIR}/croissant}"
 
-# The tenex-edge binary under test: this worktree's debug build, resolved
+# The mosaico binary under test: this worktree's debug build, resolved
 # relative to this file so the rig works from any cwd. Override ONLY with the
-# dedicated E2E_TENEX_EDGE_BIN — NOT $TENEX_EDGE_BIN, which tenex-edge itself
+# dedicated E2E_MOSAICO_BIN — NOT $MOSAICO_BIN, which mosaico itself
 # reads as the daemon-spawn override and is commonly exported in a dev shell
 # (pointing at the installed binary). Defaulting to that would silently test the
 # wrong binary.
 E2E_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${E2E_DIR}/.." && pwd)"
-TENEX_EDGE_BIN="${E2E_TENEX_EDGE_BIN:-${REPO_ROOT}/target/debug/tenex-edge}"
+MOSAICO_BIN="${E2E_MOSAICO_BIN:-${REPO_ROOT}/target/debug/mosaico}"
 
 # Scratch root for ALL ephemeral state (relay data, backend homes, logs, pids).
 # Wiped by teardown.sh. Kept out of the repo tree.
-: "${E2E_WORK:=${TMPDIR:-/tmp}/tenex-edge-e2e}"
+: "${E2E_WORK:=${TMPDIR:-/tmp}/mosaico-e2e}"
 
-# The project the smoke test drives. A plain slug — the daemon creates a NIP-29
+# The workspace the smoke test drives. A plain slug — the daemon creates a NIP-29
 # group with this as its `h`/`d` id on first session-start.
-: "${E2E_PROJECT:=e2e-demo}"
+: "${E2E_WORKSPACE:=e2e-demo}"
 
 # Turn on verbose daemon logging in both backends.
-: "${TENEX_EDGE_DEBUG:=1}"
-export TENEX_EDGE_DEBUG
+: "${MOSAICO_DEBUG:=1}"
+export MOSAICO_DEBUG
 
 # ── derived paths ────────────────────────────────────────────────────────────
 
@@ -85,16 +83,14 @@ RELAY_LOG="${E2E_WORK}/relay.log"
 RELAY_PIDFILE="${E2E_WORK}/relay.pid"
 KEYS_DIR="${E2E_WORK}/keys"
 
-# Per-backend home: $E2E_WORK/<name>/{config.json, edge/, tenex/}
+# Per-backend home: $E2E_WORK/<name>/{config.json, mosaico/}
 backend_root() { echo "${E2E_WORK}/$1"; }
 backend_config() { echo "$(backend_root "$1")/config.json"; }
-backend_edge_home() { echo "$(backend_root "$1")/edge"; }
-backend_tenex_dir() { echo "$(backend_root "$1")/tenex"; }
+backend_mosaico_home() { echo "$(backend_root "$1")/mosaico"; }
 backend_pidfile() { echo "$(backend_root "$1")/daemon.pid"; }
-# Project working dir lives under the backend's tenex dir so the two backends
-# resolve the SAME project slug from backend-local project maps while keeping
-# independent checkouts (no shared git root that could collapse the slug).
-backend_project_dir() { echo "$(backend_root "$1")/work/${E2E_PROJECT}"; }
+# Each backend uses an independent checkout path so workspace-root discovery does
+# not collapse both installs onto one shared git root.
+backend_workspace_dir() { echo "$(backend_root "$1")/work/${E2E_WORKSPACE}"; }
 
 # ── colored logging ──────────────────────────────────────────────────────────
 
@@ -167,23 +163,37 @@ backend_seckey() {
 }
 backend_pubkey() { nak key public "$(backend_seckey "$1")"; }
 
-# ── tenex-edge invocation with a backend's isolated environment ──────────────
+# ── mosaico invocation with a backend's isolated environment ──────────────
 
-# Run the tenex-edge binary as backend <name>: points TENEX_CONFIG / TENEX_DIR /
-# TENEX_EDGE_HOME at that backend's private tree. The daemon, when auto-spawned
+# Run the mosaico binary as backend <name>: points MOSAICO_CONFIG and
+# MOSAICO_HOME at that backend's private tree. The daemon, when auto-spawned
 # by this client call, inherits exactly these vars (Command keeps the env), so
 # the backend's daemon is bound to the same isolated home.
-edge() {
+mosaico() {
   local name="$1"; shift
-  # `env -u TENEX_EDGE_BIN`: scrub any inherited daemon-spawn override so the
+  # `env -u MOSAICO_BIN`: scrub any inherited daemon-spawn override so the
   # auto-spawned daemon re-execs THIS binary via current_exe(), not whatever the
-  # dev shell exported. The client process is ${TENEX_EDGE_BIN} explicitly.
-  env -u TENEX_EDGE_BIN \
-    TENEX_CONFIG="$(backend_config "$name")" \
-    TENEX_DIR="$(backend_tenex_dir "$name")" \
-    TENEX_EDGE_HOME="$(backend_edge_home "$name")" \
-    TENEX_EDGE_DEBUG="${TENEX_EDGE_DEBUG}" \
-    "${TENEX_EDGE_BIN}" "$@"
+  # dev shell exported. The client process is ${MOSAICO_BIN} explicitly.
+  env -u MOSAICO_BIN \
+    MOSAICO_CONFIG="$(backend_config "$name")" \
+    MOSAICO_HOME="$(backend_mosaico_home "$name")" \
+    MOSAICO_DEBUG="${MOSAICO_DEBUG}" \
+    "${MOSAICO_BIN}" "$@"
+}
+
+record_backend_daemon_pid() {
+  local name="$1" pid
+  pid="$(pgrep -n -f "${MOSAICO_BIN} daemon" || true)"
+  [[ -n "${pid}" ]] && echo "${pid}" >"$(backend_pidfile "${name}")"
+}
+
+# Hooks deliberately never spawn a daemon. Start the isolated backend through a
+# normal client RPC before driving hook input, then record its exact daemon PID
+# for teardown.
+start_backend_daemon() {
+  local name="$1"
+  mosaico "${name}" channel list --all-workspaces >/dev/null
+  record_backend_daemon_pid "${name}"
 }
 
 # ── relay liveness ───────────────────────────────────────────────────────────
@@ -196,7 +206,7 @@ relay_up() {
 
 wait_for() {
   # wait_for <desc> <timeout-secs> <shell-snippet>
-  # The snippet is eval'd in THIS shell each poll, so it can use the `edge`
+  # The snippet is eval'd in THIS shell each poll, so it can use the `mosaico`
   # helper function (which a `bash -c` child shell would not inherit). Returns 0
   # as soon as the snippet succeeds; dies on timeout.
   local desc="$1" timeout="$2" snippet="$3"

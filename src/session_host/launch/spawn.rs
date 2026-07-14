@@ -222,7 +222,7 @@ fn resolve_source(slug: &str, source: SpawnSource) -> Result<ResolvedSource> {
         }),
         SpawnSource::PtyBundle(bundle) => {
             let id = crate::pty::new_endpoint_id(slug);
-            let scratch = crate::config::edge_home()
+            let scratch = crate::config::mosaico_home()
                 .join("harness-profiles")
                 .join(&id);
             let resolved = crate::harness::resolve(&bundle, &scratch)

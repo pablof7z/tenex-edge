@@ -52,7 +52,7 @@ result: {"outcome": "message", "waited_secs": 4, "channels": ["channel-ref", ...
       | {"outcome": "timeout", "timeout_secs": 60, "channels": ["channel-ref", ...]}
 ```
 
-One blocking, agent-only read primitive backs both top-level `tenex-edge wait`
+One blocking, agent-only read primitive backs both top-level `mosaico wait`
 and `channel send --wait`. Ambient waits capture the exact caller session's
 daemon-local message-arrival cursor and active-channel set before subscribing,
 then return the first new visible kind:9 row. Repeated explicit channels narrow
@@ -61,7 +61,7 @@ that active set; `from` narrows the author.
 Correlated send waits start at the outbound message cursor and require the
 reply's native `e` tag to reference that event. Backend-management traffic and
 the caller's own messages are excluded. Timeout is a successful RPC outcome.
-The CLI renders both outcomes through the canonical `<tenex-edge>` agent
+The CLI renders both outcomes through the canonical `<mosaico>` agent
 envelope and exposes no JSON/human mode.
 
 ## `channel_reply`

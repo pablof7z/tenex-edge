@@ -11,7 +11,7 @@ fn wait_seconds_rejects_zero_and_non_numbers() {
 #[test]
 fn top_level_wait_parses_repeated_channels_and_author() {
     let cli = crate::cli::args::Cli::try_parse_from([
-        "tenex-edge",
+        "mosaico",
         "wait",
         "60",
         "--channel",
@@ -35,7 +35,7 @@ fn top_level_wait_parses_repeated_channels_and_author() {
 
 #[test]
 fn top_level_wait_without_channels_parses_as_active_channel_union() {
-    let cli = crate::cli::args::Cli::try_parse_from(["tenex-edge", "wait", "10"]).unwrap();
+    let cli = crate::cli::args::Cli::try_parse_from(["mosaico", "wait", "10"]).unwrap();
     match cli.cmd {
         crate::cli::args::Cmd::Wait(args) => assert!(args.channels.is_empty()),
         _ => panic!("expected wait command"),
@@ -44,8 +44,7 @@ fn top_level_wait_without_channels_parses_as_active_channel_union() {
 
 #[test]
 fn wait_has_no_json_mode() {
-    let error = match crate::cli::args::Cli::try_parse_from(["tenex-edge", "wait", "10", "--json"])
-    {
+    let error = match crate::cli::args::Cli::try_parse_from(["mosaico", "wait", "10", "--json"]) {
         Err(error) => error,
         Ok(_) => panic!("wait must keep one agent-native output mode"),
     };
@@ -53,14 +52,14 @@ fn wait_has_no_json_mode() {
 }
 
 #[test]
-fn agent_native_wait_renderers_use_one_tenex_edge_envelope() {
+fn agent_native_wait_renderers_use_one_mosaico_envelope() {
     let message = crate::injection::render_agent_message("root.x", "agent5", "abcdef123", "done");
-    assert!(message.starts_with("<tenex-edge>"));
+    assert!(message.starts_with("<mosaico>"));
     assert!(message.contains("<channel ref=\"root.x\">"));
     assert!(message.contains("<message from=\"@agent5\" id=\"abcdef\">done</message>"));
 
     let timeout = crate::injection::render_agent_wait_timeout(60, &["root.x", "root.y"]);
-    assert!(timeout.starts_with("<tenex-edge>"));
+    assert!(timeout.starts_with("<mosaico>"));
     assert!(timeout.contains("<wait outcome=\"timeout\" after=\"60s\">"));
     assert!(timeout.contains("<channel ref=\"root.y\" />"));
 }

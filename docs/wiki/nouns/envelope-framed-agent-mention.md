@@ -9,4 +9,4 @@ source_refs:
 
 # envelope (framed agent mention)
 
-pty+agent format: `[tenex-edge mention] <@agent1> Hello @developer` pasted as a real turn
+pty+agent format: `[mosaico mention] <@agent1> Hello @developer` pasted as a real turn

@@ -51,7 +51,7 @@ runtime would make us TENEX again and betray the premise. We connect; we don't h
 ### 7. Hosts are interchangeable; never bet the product on one
 We integrate with whatever hosts exist, at whatever depth each allows, and we advertise the
 tier honestly rather than faking parity. We never make the product *mean nothing* without one
-specific host. **Test:** if "tenex-edge" silently means "works on Claude Code only," we've
+specific host. **Test:** if "mosaico" silently means "works on Claude Code only," we've
 narrowed to a single straw.
 
 ### 8. Coordination is an experiment, not a pillar
@@ -68,7 +68,7 @@ later; it is never the center of gravity. **Test:** if the demo is "look at this
 we built theater.
 
 ### 10. Fail open, never block the host
-As a guest, we degrade gracefully. If tenex-edge is unhealthy, unreachable, or confused, the
+As a guest, we degrade gracefully. If mosaico is unhealthy, unreachable, or confused, the
 host's own work proceeds unimpeded. We never make someone's editor wait on our daemon being
 happy. **Test:** kill the fabric mid-session — the host should be exactly as usable as
 without us.

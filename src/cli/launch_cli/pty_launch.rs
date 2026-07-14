@@ -30,11 +30,11 @@ pub(super) async fn launch(request: PtyLaunchRequest) -> Result<()> {
         .as_str()
         .context("pty_spawn did not return pty_socket")?;
 
-    eprintln!("[tenex-edge pty] session: {pty_id}");
-    eprintln!("[tenex-edge pty] detach: close this attach terminal");
-    eprintln!("[tenex-edge pty] reattach: tenex-edge sessions");
+    eprintln!("[mosaico pty] session: {pty_id}");
+    eprintln!("[mosaico pty] detach: close this attach terminal");
+    eprintln!("[mosaico pty] reattach: mosaico sessions");
     if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
-        eprintln!("[tenex-edge pty] attach skipped: not running on a TTY");
+        eprintln!("[mosaico pty] attach skipped: not running on a TTY");
         return Ok(());
     }
     crate::pty::attach(socket)
@@ -78,7 +78,7 @@ mod tests {
         let params = pty_spawn_params(
             &PtyLaunchRequest {
                 agent: "codex".into(),
-                root: "tenex-edge".into(),
+                root: "mosaico".into(),
                 channel: Some("design".into()),
                 session_name: Some("forensic".into()),
                 source: CommandSource::Command(vec!["codex".into(), "--yolo".into()]),
@@ -91,7 +91,7 @@ mod tests {
             params,
             serde_json::json!({
                 "agent": "codex",
-                "root": "tenex-edge",
+                "root": "mosaico",
                 "launch": { "kind": "pty-command", "argv": ["codex", "--yolo"] },
                 "args": [],
                 "cwd": "/tmp/project",
@@ -107,7 +107,7 @@ mod tests {
         let params = pty_spawn_params(
             &PtyLaunchRequest {
                 agent: "reviewer".into(),
-                root: "tenex-edge".into(),
+                root: "mosaico".into(),
                 channel: None,
                 session_name: None,
                 source: CommandSource::Bundle("codex-yolo".into()),

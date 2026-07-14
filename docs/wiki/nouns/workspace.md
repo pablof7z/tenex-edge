@@ -11,4 +11,4 @@ source_refs:
 
 # workspace
 
-The machine+path binding concept that replaces 'project' in the full wording purge. The <project name> hook wrapper becomes <workspace name>; the project_roots table becomes workspace_roots; crate::project becomes crate::workspace. A workspace binding is an attribute a channel may carry.
+A workspace is a root channel with a machine-local path binding. Hook context renders it as `<workspace channel="…">`; descendants are nested channels within that workspace.

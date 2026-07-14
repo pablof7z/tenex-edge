@@ -192,18 +192,6 @@ async fn rpc_probe_reflects_driven_state_for_every_verb() {
     assert_eq!(replay["asserted"], true);
     assert_eq!(replay["steps"], 1);
 
-    let sim = rpc_probe(
-        &state,
-        &json!({
-            "verb": "simulate", "surface": "status", "session": "s1",
-            "activity": "compiling", "title": null, "now": null, "fact": null,
-        }),
-    )
-    .unwrap();
-    assert_eq!(sim["would_publish"], true);
-    assert_eq!(sim["commands"][0]["op"], "Replace");
-    assert_eq!(sim["revision_before"], sim["revision_after"]);
-
     let fact = InputFact::StatusDrive(StatusDrive::DistillCompleted {
         pubkey: "s1".into(),
         title: "T".into(),
@@ -211,6 +199,15 @@ async fn rpc_probe_reflects_driven_state_for_every_verb() {
         window_hash: Some("sha256:w2".into()),
         at: 1_700_000_020,
     });
+    let sim = rpc_probe(
+        &state,
+        &json!({ "verb": "simulate", "surface": "status", "fact": fact }),
+    )
+    .unwrap();
+    assert_eq!(sim["would_publish"], true);
+    assert_eq!(sim["commands"][0]["op"], "Replace");
+    assert_eq!(sim["revision_before"], sim["revision_after"]);
+
     let diff = rpc_probe(
         &state,
         &json!({ "verb": "diff", "surface": "status", "fact": fact, "capsule": null }),

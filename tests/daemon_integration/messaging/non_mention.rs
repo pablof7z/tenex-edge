@@ -1,7 +1,7 @@
 use crate::daemon_harness::*;
+use mosaico::daemon::client::Client;
+use mosaico::state::Store;
 use std::time::Duration;
-use tenex_edge::daemon::client::Client;
-use tenex_edge::state::Store;
 
 /// A chat message with NO `@mention` (no p-tag) must NOT route to any session's
 /// inbox — it stays in relay_events as ambient context only, never ringing the
@@ -64,8 +64,8 @@ fn non_mention_chat_does_not_route_to_inbox() {
         &["channel", "send"],
         &format!("{body}\n"),
         &[
-            ("TENEX_EDGE_AGENT", "ambient-sender"),
-            ("TENEX_EDGE_PUBKEY", &sender_pubkey),
+            ("MOSAICO_AGENT", "ambient-sender"),
+            ("MOSAICO_PUBKEY", &sender_pubkey),
         ],
         std::path::Path::new("/tmp"),
     );

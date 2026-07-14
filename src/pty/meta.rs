@@ -16,25 +16,25 @@ pub struct LaunchMetadata {
 }
 
 pub fn session_dir() -> PathBuf {
-    crate::config::edge_home().join("pty")
+    crate::config::mosaico_home().join("pty")
 }
 
 pub fn session_socket(id: &str) -> PathBuf {
-    socket_dir_for(&crate::config::edge_home(), current_uid()).join(format!("{id}.sock"))
+    socket_dir_for(&crate::config::mosaico_home(), current_uid()).join(format!("{id}.sock"))
 }
 
-fn socket_dir_for(edge_home: &std::path::Path, uid: u32) -> PathBuf {
+fn socket_dir_for(mosaico_home: &std::path::Path, uid: u32) -> PathBuf {
     #[cfg(unix)]
     {
         PathBuf::from("/tmp")
-            .join(format!("tenex-edge-pty-{uid}"))
-            .join(edge_home_hash(edge_home))
+            .join(format!("mosaico-pty-{uid}"))
+            .join(mosaico_home_hash(mosaico_home))
     }
     #[cfg(not(unix))]
     {
         std::env::temp_dir()
-            .join(format!("tenex-edge-pty-{uid}"))
-            .join(edge_home_hash(edge_home))
+            .join(format!("mosaico-pty-{uid}"))
+            .join(mosaico_home_hash(mosaico_home))
     }
 }
 
@@ -48,9 +48,9 @@ fn current_uid() -> u32 {
     0
 }
 
-fn edge_home_hash(edge_home: &std::path::Path) -> String {
+fn mosaico_home_hash(mosaico_home: &std::path::Path) -> String {
     let mut hash = 0xcbf29ce484222325_u64;
-    for byte in edge_home.to_string_lossy().as_bytes() {
+    for byte in mosaico_home.to_string_lossy().as_bytes() {
         hash ^= u64::from(*byte);
         hash = hash.wrapping_mul(0x100000001b3);
     }
@@ -146,13 +146,14 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn socket_path_stays_short_for_long_edge_home() {
+    fn socket_path_stays_short_for_long_mosaico_home() {
         use std::os::unix::ffi::OsStrExt;
 
-        let edge_home = std::path::Path::new(
-            "/var/folders/kx/13lj0yd976x0tn90z1ntqbn80000gn/T/tenex-edge-e2e/edge-b/edge",
+        let mosaico_home = std::path::Path::new(
+            "/var/folders/kx/13lj0yd976x0tn90z1ntqbn80000gn/T/mosaico-e2e/mosaico-b/mosaico",
         );
-        let path = super::socket_dir_for(edge_home, 501).join("testing-lead-1783399436-28334.sock");
+        let path =
+            super::socket_dir_for(mosaico_home, 501).join("testing-lead-1783399436-28334.sock");
 
         assert!(path.as_os_str().as_bytes().len() < 100);
     }

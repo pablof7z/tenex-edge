@@ -26,9 +26,33 @@ pub(super) async fn handle_orchestration(
     }
 
     let signer = event.pubkey.to_hex();
-    let parent_roles = state.provider.fetch_group_roles(&op.parent).await;
-    let authorized = is_authorized(&parent_roles, &signer) || {
-        let child_roles = state.provider.fetch_group_roles(&op.child_h).await;
+    let parent_roles = match state.provider.fetch_group_roles(&op.parent).await {
+        Ok(roles) => roles,
+        Err(error) => {
+            tracing::warn!(
+                event_id = %&event_id[..event_id.len().min(8)],
+                parent = %op.parent,
+                error = %format!("{error:#}"),
+                "orchestration rejected: parent admin state could not be verified"
+            );
+            return;
+        }
+    };
+    let authorized = if is_authorized(&parent_roles, &signer) {
+        true
+    } else {
+        let child_roles = match state.provider.fetch_group_roles(&op.child_h).await {
+            Ok(roles) => roles,
+            Err(error) => {
+                tracing::warn!(
+                    event_id = %&event_id[..event_id.len().min(8)],
+                    child = %op.child_h,
+                    error = %format!("{error:#}"),
+                    "orchestration rejected: child admin state could not be verified"
+                );
+                return;
+            }
+        };
         is_authorized(&child_roles, &signer)
     };
     if !authorized {
@@ -202,8 +226,8 @@ async fn spawn_target(
     target: &crate::fabric::nip29::orchestration::AddTarget,
 ) -> bool {
     let slug = &target.slug;
-    let edge = config::edge_home();
-    let id = match crate::identity::load_or_create(&edge, slug, now_secs()) {
+    let mosaico_home = config::mosaico_home();
+    let id = match crate::identity::load_or_create(&mosaico_home, slug, now_secs()) {
         Ok(id) => {
             tracing::info!(slug = %slug, child = %op.child_h, "loading local derivation root for orchestration target");
             id

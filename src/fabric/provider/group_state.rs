@@ -5,33 +5,8 @@ use std::time::Duration;
 
 impl Nip29Provider {
     /// Fetch the relay's live state for `group`: `(exists, roles, members)`.
-    ///
-    /// Legacy 3-tuple surface kept for callers that cannot distinguish a relay
-    /// fetch failure from genuine absence. A transport error is logged loudly and
-    /// surfaced here as `(false, empty, empty)` — but provisioning decisions MUST
-    /// use [`try_fetch_group_state`] instead, so a fetch failure never masquerades
-    /// as "group absent" and triggers spurious re-creation (relay-projection rule).
-    pub async fn fetch_group_state(
-        &self,
-        group: &str,
-    ) -> (bool, HashMap<String, String>, HashSet<String>) {
-        match self.try_fetch_group_state(group).await {
-            Ok(state) => state,
-            Err(e) => {
-                tracing::error!(
-                    group,
-                    error = %format!("{e:#}"),
-                    "fetch_group_state: relay fetch failed — returning empty state; DO NOT treat as group-absent"
-                );
-                (false, HashMap::new(), HashSet::new())
-            }
-        }
-    }
-
-    /// Like [`fetch_group_state`] but surfaces a relay/transport fetch failure as
-    /// `Err`, so the provisioning path can degrade WITHOUT attempting group
-    /// creation. `Ok((false, ..))` means the group is genuinely absent on the relay.
-    pub(in crate::fabric::provider) async fn try_fetch_group_state(
+    /// A transport failure remains distinct from genuine relay absence.
+    pub(crate) async fn fetch_group_state(
         &self,
         group: &str,
     ) -> Result<(bool, HashMap<String, String>, HashSet<String>)> {
@@ -92,8 +67,8 @@ impl Nip29Provider {
     }
 
     /// Convenience: just the role map (kind:39001) for `group`.
-    pub async fn fetch_group_roles(&self, group: &str) -> HashMap<String, String> {
-        self.fetch_group_state(group).await.1
+    pub(crate) async fn fetch_group_roles(&self, group: &str) -> Result<HashMap<String, String>> {
+        Ok(self.fetch_group_state(group).await?.1)
     }
 
     /// The `parent` group id declared in `group`'s relay-authored kind:39000 metadata.

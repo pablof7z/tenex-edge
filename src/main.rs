@@ -1,6 +1,6 @@
 use clap::Parser;
-use tenex_edge::cli::{self, Cli};
-use tenex_edge::command_forensics::CommandCallLog;
+use mosaico::cli::{self, Cli};
+use mosaico::command_forensics::CommandCallLog;
 
 fn main() {
     // rig-core's reqwest pulls a second rustls crypto provider (aws-lc-rs)
@@ -25,7 +25,7 @@ fn main() {
     // same context-sensitive help: operator commands (`who`, `mgmt`, `launch`)
     // are shown only outside an agent context. Internal/debug commands stay
     // hidden; use `--all` for those. Only intercept top-level help so subcommand
-    // help (`tenex-edge who --help`, etc.) still goes through clap normally.
+    // help (`mosaico who --help`, etc.) still goes through clap normally.
     if argv.len() == 1 || matches!(argv.get(1).map(String::as_str), Some("--help" | "-h")) {
         cli::print_help_contextual();
         std::process::exit(0);
@@ -44,14 +44,14 @@ fn main() {
         Ok(rt) => rt,
         Err(e) => {
             command_log.finish_runtime_error(&format!("failed to start runtime: {e}"));
-            eprintln!("tenex-edge: failed to start runtime: {e}");
+            eprintln!("mosaico: failed to start runtime: {e}");
             std::process::exit(1);
         }
     };
     let result = rt.block_on(cli::run(cli));
     command_log.finish_result(&result);
     if let Err(e) = result {
-        eprintln!("tenex-edge: {e:#}");
+        eprintln!("mosaico: {e:#}");
         std::process::exit(1);
     }
 }

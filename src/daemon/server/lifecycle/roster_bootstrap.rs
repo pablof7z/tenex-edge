@@ -97,7 +97,9 @@ mod tests {
         store.upsert_channel("one", "wrong", "", "", 1).unwrap();
         store.upsert_channel("two", "two", "", "", 1).unwrap();
         store.upsert_channel("remote", "remote", "", "", 1).unwrap();
-        store.upsert_channel("bound", "wrong", "", "", 1).unwrap();
+        store
+            .upsert_channel("bound", "also-wrong", "", "", 1)
+            .unwrap();
         store.upsert_workspace("bound", "/work/bound", 1).unwrap();
         store
             .upsert_channel_member("one", "backend", "admin", 1)

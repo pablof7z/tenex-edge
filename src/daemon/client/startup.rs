@@ -6,7 +6,7 @@ use super::*;
 /// Ensure a daemon is listening. Under the startup lock: re-check the socket,
 /// reclaim a stale one, then spawn a detached daemon and poll-connect.
 pub(super) async fn spawn_daemon_if_absent() -> Result<()> {
-    config::ensure_dir(&config::edge_home())?;
+    config::ensure_dir(&config::mosaico_home())?;
 
     let mut noted_wait = false;
     let mut spawned_child: Option<std::process::Child> = None;
@@ -16,7 +16,7 @@ pub(super) async fn spawn_daemon_if_absent() -> Result<()> {
             return Ok(());
         }
         if let Some(lock) = StartupLock::try_acquire()? {
-            eprintln!("[tenex-edge] starting daemon...");
+            eprintln!("[mosaico] starting daemon...");
             let sock = socket_path();
             if sock.exists() {
                 let _ = std::fs::remove_file(&sock);
@@ -28,7 +28,7 @@ pub(super) async fn spawn_daemon_if_absent() -> Result<()> {
             break;
         }
         if !noted_wait {
-            eprintln!("[tenex-edge] waiting for daemon to finish startup...");
+            eprintln!("[mosaico] waiting for daemon to finish startup...");
             noted_wait = true;
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -51,7 +51,7 @@ pub(super) async fn spawn_daemon_if_absent() -> Result<()> {
             }
         }
         if !noted_ready {
-            eprintln!("[tenex-edge] waiting for daemon to answer RPCs...");
+            eprintln!("[mosaico] waiting for daemon to answer RPCs...");
             noted_ready = true;
         }
         tokio::time::sleep(Duration::from_millis(100)).await;

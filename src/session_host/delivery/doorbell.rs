@@ -111,7 +111,7 @@ async fn apply_delivery_effects(
                 match result {
                     Ok(true) => {
                         record_message_injection(&pubkey);
-                        if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
+                        if std::env::var("MOSAICO_DEBUG").is_ok() {
                             eprintln!(
                                 "[{}] pending messages delivered to endpoint {endpoint_id} for {pubkey}",
                                 kind.as_str()
@@ -143,7 +143,7 @@ async fn apply_delivery_effects(
 fn schedule_delivery_retry(state: Arc<DaemonState>, pubkey: String, delay_secs: u64) {
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_secs(delay_secs.max(1))).await;
-        if std::env::var("TENEX_EDGE_DEBUG").is_ok() {
+        if std::env::var("MOSAICO_DEBUG").is_ok() {
             eprintln!("[pty] retrying deferred delivery for {pubkey}");
         }
         ring_doorbells(state);

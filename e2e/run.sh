@@ -1,26 +1,26 @@
 #!/usr/bin/env bash
-# e2e/run.sh — boot a local NIP-29 relay + two isolated tenex-edge backends
+# e2e/run.sh — boot a local NIP-29 relay + two isolated mosaico backends
 # and prove they communicate THROUGH the relay with existing functionality.
 #
 # Pipeline:
 #   0. teardown any previous run (idempotent)
 #   1. build the NIP-29 relay if needed; start it on ws://127.0.0.1:$RELAY_PORT
 #   2. mint keypairs for backend-a and backend-b
-#   3. write each backend's isolated config.json + project registration
+#   3. write each backend's isolated config.json + workspace registration
 #   4. SMOKE TEST:
-#        a. backend-a drives a session-start in the project dir
+#        a. backend-a drives a session-start in the workspace dir
 #           → daemon-a publishes kind:9007 create-group + 9000 put-user to relay
 #        b. backend-b runs `channel list --all-workspaces`
 #           → daemon-b fetches kind:39000 from the relay and sees the group
 #      Backend B learning about A's group is only possible via the shared relay:
 #      the two backends share NO filesystem state.
 #
-# Tunables: see e2e/lib.sh (RELAY_PORT, E2E_PROJECT, E2E_WORK, TENEX_EDGE_BIN…).
+# Tunables: see e2e/lib.sh (RELAY_PORT, E2E_WORKSPACE, E2E_WORK, MOSAICO_BIN…).
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
 require_nak
-[[ -x "${TENEX_EDGE_BIN}" ]] || die "tenex-edge binary not found at ${TENEX_EDGE_BIN} (run: cargo build)"
+[[ -x "${MOSAICO_BIN}" ]] || die "mosaico binary not found at ${MOSAICO_BIN} (run: cargo build)"
 
 # ── 0. clean slate ───────────────────────────────────────────────────────────
 log "step 0: tearing down any previous run"
@@ -39,7 +39,7 @@ mkdir -p "${RELAY_DATA}"
 # OWNER_PUBLIC_KEY must be a valid hex pubkey; we use backend-a's so it is also
 # the relay's "owner" for the web UI. It does NOT grant event-publishing rights
 # (the relay validates group writes by NIP-29 admin membership, not by owner).
-OWNER_PK="$(backend_pubkey edge-a)"
+OWNER_PK="$(backend_pubkey mosaico-a)"
 log "starting relay on ${RELAY_WS} (data: ${RELAY_DATA})"
 # Launch the relay through nohup so follow-up scripts can reuse the live relay in
 # ordinary shells. `env` execs the relay, so $! still tracks the long-lived
@@ -72,24 +72,23 @@ dim "  relay owner pubkey : ${OWNER_PK}"
 
 # ── 2. keypairs ──────────────────────────────────────────────────────────────
 log "step 2: backend keypairs"
-A_SK="$(backend_seckey edge-a)"; A_PK="$(backend_pubkey edge-a)"
-B_SK="$(backend_seckey edge-b)"; B_PK="$(backend_pubkey edge-b)"
-ok  "edge-a pubkey ${A_PK}"
-ok  "edge-b pubkey ${B_PK}"
+A_SK="$(backend_seckey mosaico-a)"; A_PK="$(backend_pubkey mosaico-a)"
+B_SK="$(backend_seckey mosaico-b)"; B_PK="$(backend_pubkey mosaico-b)"
+ok  "mosaico-a pubkey ${A_PK}"
+ok  "mosaico-b pubkey ${B_PK}"
 
-# ── 3. per-backend config + project registration ─────────────────────────────
+# ── 3. per-backend config + workspace registration ─────────────────────────────
 log "step 3: writing isolated configs"
 write_backend() {
   local name="$1" sk="$2"
-  local root edge tdir cfg proj
-  root="$(backend_root "$name")"; edge="$(backend_edge_home "$name")"
-  tdir="$(backend_tenex_dir "$name")"; cfg="$(backend_config "$name")"
-  proj="$(backend_project_dir "$name")"
-  mkdir -p "${edge}" "${tdir}" "${proj}"
+  local mosaico cfg workspace_dir
+  mosaico="$(backend_mosaico_home "$name")"; cfg="$(backend_config "$name")"
+  workspace_dir="$(backend_workspace_dir "$name")"
+  mkdir -p "${mosaico}" "${workspace_dir}"
 
   # Both backends' pubkeys are whitelisted on BOTH so each is a trusted admin on
-  # every group. relays: only the local NIP-29 relay. tenexPrivateKey = this
-  # backend's own identity (its pubkey becomes a group admin via open_project).
+  # every group. relays: only the local NIP-29 relay. mosaicoPrivateKey = this
+  # backend's own identity (its pubkey becomes a root-channel admin).
   cat >"${cfg}" <<JSON
 {
   "whitelistedPubkeys": ["${A_PK}", "${B_PK}"],
@@ -97,101 +96,92 @@ write_backend() {
   "indexerRelay": "${RELAY_WS}",
   "backendName": "${name}",
   "userNsec": "${sk}",
-  "tenexPrivateKey": "${sk}"
+  "mosaicoPrivateKey": "${sk}"
 }
 JSON
 
-  # Register each isolated checkout in its backend-local project map so both
+  # Register each isolated checkout in its backend-local workspace map so both
   # backends resolve the same slug independent of any git root.
-  ( cd "${proj}" && edge "${name}" channel init --force >/dev/null )
+  ( cd "${workspace_dir}" && mosaico "${name}" channel init --force >/dev/null )
   dim "  ${name}: config=${cfg}"
-  dim "          edge_home=${edge}  project_dir=${proj}"
+  dim "          mosaico_home=${mosaico}  workspace_dir=${workspace_dir}"
 }
-write_backend edge-a "${A_SK}"
-write_backend edge-b "${B_SK}"
+write_backend mosaico-a "${A_SK}"
+write_backend mosaico-b "${B_SK}"
 ok "configs written (both whitelist both pubkeys; relays=[${RELAY_WS}])"
-
-# Record daemon pids the first time each backend's daemon is auto-spawned, so
-# teardown can stop them. We can't know the pid before the spawn, so we snapshot
-# the newest daemon after the first call below.
-snapshot_daemon_pid() {
-  local name="$1"
-  local pid; pid="$(pgrep -n -f "${TENEX_EDGE_BIN} daemon" || true)"
-  [[ -n "$pid" ]] && echo "$pid" >"$(backend_pidfile "$name")"
-}
 
 # ── 4. smoke test ────────────────────────────────────────────────────────────
 log "step 4: smoke test — two backends through one relay"
 
-# 4a. backend-a: drive a claude-code session-start in the project dir. This is
+# 4a. backend-a: drive a claude-code session-start in the workspace dir. This is
 #     the real production trigger for group creation: the session_start RPC
-#     calls open_project, which publishes 9007 create-group then 9000 put-user.
-log "4a: backend-a session-start (creates NIP-29 group '${E2E_PROJECT}')"
-A_PROJ="$(backend_project_dir edge-a)"
+#     opens the workspace root channel, publishing create-group and membership events.
+log "4a: backend-a session-start (creates NIP-29 group '${E2E_WORKSPACE}')"
+A_WORKSPACE_DIR="$(backend_workspace_dir mosaico-a)"
 A_SESSION="e2e-a-$(date +%s)"
 session_start_payload() { printf '{"session_id":"%s","cwd":"%s"}' "$1" "$2"; }
+start_backend_daemon mosaico-a
 (
-  cd "${A_PROJ}"
-  echo "$(session_start_payload "${A_SESSION}" "${A_PROJ}")" \
-    | TENEX_EDGE_AGENT=claude edge edge-a harness hook claude-code --type session-start
-) || die "backend-a session-start failed (see $(backend_edge_home edge-a)/daemon.log)"
-snapshot_daemon_pid edge-a
+  cd "${A_WORKSPACE_DIR}"
+  echo "$(session_start_payload "${A_SESSION}" "${A_WORKSPACE_DIR}")" \
+    | MOSAICO_AGENT=claude mosaico mosaico-a harness hook claude-code --type session-start
+) || die "backend-a session-start failed (see $(backend_mosaico_home mosaico-a)/daemon.log)"
 ok "backend-a session-start completed"
 
 # Confirm A's own daemon created the group (sanity: the publisher sees it).
-log "4a-check: backend-a sees its own project"
-wait_for_soft "backend-a channel_list --all-workspaces to include ${E2E_PROJECT}" 20 \
-  "edge edge-a channel list --all-workspaces 2>/dev/null | grep -q '${E2E_PROJECT}'" || true
-if edge edge-a channel list --all-workspaces 2>/dev/null | grep -q "${E2E_PROJECT}"; then
-  ok "backend-a channel list --all-workspaces shows '${E2E_PROJECT}'"
+log "4a-check: backend-a sees its own workspace"
+wait_for_soft "backend-a channel_list --all-workspaces to include ${E2E_WORKSPACE}" 20 \
+  "mosaico mosaico-a channel list --all-workspaces 2>/dev/null | grep -q '${E2E_WORKSPACE}'" || true
+if mosaico mosaico-a channel list --all-workspaces 2>/dev/null | grep -q "${E2E_WORKSPACE}"; then
+  ok "backend-a channel list --all-workspaces shows '${E2E_WORKSPACE}'"
 else
-  warn "backend-a does not yet list the project; dumping its view:"
-  edge edge-a channel list --all-workspaces 2>&1 | sed 's/^/    /' || true
+  warn "backend-a does not yet list the workspace; dumping its view:"
+  mosaico mosaico-a channel list --all-workspaces 2>&1 | sed 's/^/    /' || true
 fi
 
 # Independent confirmation the group really landed on the relay: query the relay
-# directly for the relay-authored kind:39000 metadata event with d=<project>.
-log "4a-relay: querying the relay directly for kind:39000 d=${E2E_PROJECT}"
-if wait_for_soft "relay kind:39000 metadata for ${E2E_PROJECT}" 20 \
-     "nak_req_contains '\"kind\":39000' -k 39000 -d '${E2E_PROJECT}' '${RELAY_WS}'"; then
-  ok "relay holds kind:39000 metadata for '${E2E_PROJECT}' (group exists on the relay)"
+# directly for the relay-authored kind:39000 metadata event with d=<workspace>.
+log "4a-relay: querying the relay directly for kind:39000 d=${E2E_WORKSPACE}"
+if wait_for_soft "relay kind:39000 metadata for ${E2E_WORKSPACE}" 20 \
+     "nak_req_contains '\"kind\":39000' -k 39000 -d '${E2E_WORKSPACE}' '${RELAY_WS}'"; then
+  ok "relay holds kind:39000 metadata for '${E2E_WORKSPACE}' (group exists on the relay)"
 else
-  warn "no kind:39000 yet on the relay for '${E2E_PROJECT}':"
-  nak req -k 39000 -d "${E2E_PROJECT}" "${RELAY_WS}" 2>&1 | sed 's/^/    /' || true
+  warn "no kind:39000 yet on the relay for '${E2E_WORKSPACE}':"
+  nak req -k 39000 -d "${E2E_WORKSPACE}" "${RELAY_WS}" 2>&1 | sed 's/^/    /' || true
 fi
 
 # 4b. backend-b: a SEPARATE install with its own daemon + db. If it can list the
-#     project, the only path the knowledge took was A → relay → B.
+#     workspace, the only path the knowledge took was A → relay → B.
 log "4b: backend-b channel list --all-workspaces (must observe A's group via the relay)"
 B_OK=0
-if wait_for_soft "backend-b channel_list --all-workspaces to include ${E2E_PROJECT}" 25 \
-     "edge edge-b channel list --all-workspaces 2>/dev/null | grep -q '${E2E_PROJECT}'"; then
+if wait_for_soft "backend-b channel_list --all-workspaces to include ${E2E_WORKSPACE}" 25 \
+     "mosaico mosaico-b channel list --all-workspaces 2>/dev/null | grep -q '${E2E_WORKSPACE}'"; then
   B_OK=1
 fi
-snapshot_daemon_pid edge-b
+record_backend_daemon_pid mosaico-b
 
 echo
 log "backend-b channel list --all-workspaces:"
-edge edge-b channel list --all-workspaces 2>&1 | sed 's/^/    /' || true
+mosaico mosaico-b channel list --all-workspaces 2>&1 | sed 's/^/    /' || true
 echo
 
 if [[ "${B_OK}" == "1" ]]; then
-  ok "PASS — backend-b observed backend-a's group '${E2E_PROJECT}' through ${RELAY_WS}"
+  ok "PASS — backend-b observed backend-a's group '${E2E_WORKSPACE}' through ${RELAY_WS}"
 else
-  die "backend-b never saw the group — backends are NOT communicating via the relay (logs: $(backend_edge_home edge-b)/daemon.log)"
+  die "backend-b never saw the group — backends are NOT communicating via the relay (logs: $(backend_mosaico_home mosaico-b)/daemon.log)"
 fi
 
 cat <<SUMMARY
 
 ${_c_green}=== smoke test PASSED ===${_c_reset}
   relay        ${RELAY_WS}   (pid $(cat "${RELAY_PIDFILE}"), log ${RELAY_LOG})
-  backend-a    home=$(backend_edge_home edge-a)
-  backend-b    home=$(backend_edge_home edge-b)
-  project      ${E2E_PROJECT}
+  backend-a    home=$(backend_mosaico_home mosaico-a)
+  backend-b    home=$(backend_mosaico_home mosaico-b)
+  workspace      ${E2E_WORKSPACE}
 
 Inspect:
-  edge() helper is in lib.sh; e.g.
-    TENEX_CONFIG=$(backend_config edge-b) TENEX_EDGE_HOME=$(backend_edge_home edge-b) ${TENEX_EDGE_BIN} channel list --all-workspaces
+  mosaico() helper is in lib.sh; e.g.
+    MOSAICO_CONFIG=$(backend_config mosaico-b) MOSAICO_HOME=$(backend_mosaico_home mosaico-b) ${MOSAICO_BIN} channel list --all-workspaces
   relay events:
     nak req -k 39000 ${RELAY_WS}
 Tear down:
