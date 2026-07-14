@@ -185,6 +185,7 @@ so the common commands take no session id:
 | `tenex-edge who [--live] [--all-workspaces]` | Show the operator-oriented fabric view as terminal text. Hidden from default agent help, but available when invoked explicitly. |
 | `tenex-edge sessions` | Open the operator session picker. Enter attaches to the highlighted terminal; Shift+K immediately kills it and removes its fabric memberships. |
 | `tenex-edge channel send --tag quill-codex --message "…" [--wait 600]` | Message a session and optionally block for a correlated reply. |
+| `tenex-edge channel send --message "see [report]" --attach report=./report.pdf` | Upload a labeled file to the primary relay's Blossom server and put its public URL in the message. `channel reply` accepts the same repeated `--attach` flag. |
 | `tenex-edge wait 60 [--channel <channel>]… [--from <member>]` | Block for the next visible chat. With no channel flags, watches every channel the session is active on. |
 | `tenex-edge channel read [--id <id>]` | Read history, or recover one full message by id. |
 | `tenex-edge channel list \| switch \| create` | List, switch, or create NIP-29 channels. The workspace is its root channel; descendants use dotted paths such as `nmp.reviews`. |

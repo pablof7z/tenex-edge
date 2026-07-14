@@ -226,6 +226,7 @@ fn render_mention_message(out: &mut String, message: &MessageRow, pad: &str) {
         "\n{pad}Reply via: `tenex-edge channel reply {} --message \"hello world\"`",
         esc_text(&short)
     );
+    let _ = write!(out, "\n{pad}{}", crate::attachment::AGENT_HINT);
     let _ = write!(
         out,
         "\n{pad}Ack-only? `tenex-edge channel react {} 👍` — never interrupts. \

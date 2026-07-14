@@ -22,6 +22,8 @@ pub(in crate::daemon::server) use reply::rpc_channel_reply;
 pub(in crate::daemon::server) struct ChannelSendParams {
     message: String,
     #[serde(default)]
+    attachments: Vec<crate::attachment::Attachment>,
+    #[serde(default)]
     tags: Vec<String>,
     #[serde(default)]
     force: bool,
@@ -108,7 +110,20 @@ pub(in crate::daemon::server) async fn rpc_channel_send(
         pinned_destination.as_deref(),
         tagged.first().map(|target| target.channel.as_str()),
     );
-    let body_to_send = body::format_tagged_body(&p.message, &tagged)?;
+
+    // Attachments and chat are signed by the same session identity. Uploads
+    // finish before the NIP-29 event is built, so all consumers see final URLs.
+    let instance = state.session_instance(&rec);
+    let chat_signing_keys = state.session_signing_keys(&rec.pubkey)?;
+    let from_pubkey = instance.pubkey.clone();
+    let expanded_message = crate::attachment::upload_and_expand(
+        &p.message,
+        &p.attachments,
+        &state.cfg.relays,
+        &chat_signing_keys,
+    )
+    .await?;
+    let body_to_send = body::format_tagged_body(&expanded_message, &tagged)?;
     if !p.long_message && body_to_send.chars().count() > CHANNEL_MESSAGE_CHAR_LIMIT {
         bail!(
             "your message is too long; keep it under {CHANNEL_MESSAGE_CHAR_LIMIT} characters or pass --long-message"
@@ -119,11 +134,6 @@ pub(in crate::daemon::server) async fn rpc_channel_send(
     // with the locally-seeded row and the primary-key de-dupe preserves the wrong
     // scope.
     let deliver_scope = publish_scope.clone();
-
-    // Sign + label from the session's own minted identity.
-    let instance = state.session_instance(&rec);
-    let chat_signing_keys = state.session_signing_keys(&rec.pubkey)?;
-    let from_pubkey = instance.pubkey.clone();
 
     let chat = ChatMessage {
         from: instance.agent_ref(),

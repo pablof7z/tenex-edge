@@ -165,6 +165,7 @@ fn mention_rows_are_marked_important_and_truncated_with_recovery_id() {
     assert!(!text.contains("<channel name=\"#root\""));
     assert!(text.contains("<message from=\"@reviewer\" id=\"mentio\">"));
     assert!(text.contains("Reply via: `tenex-edge channel reply mentio --message \"hello world\"`"));
+    assert!(text.contains("Attachments: add `--attach label=/path/to/file`"));
     assert!(!text.contains("mention=\"true\""));
     assert!(!text.contains("truncated=\"true\""));
     assert!(text.contains("<important>"));

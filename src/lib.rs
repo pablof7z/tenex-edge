@@ -9,6 +9,7 @@
 //!   config / identity / channel are leaf utilities.
 
 mod applog;
+mod attachment;
 mod channel_about;
 mod channel_name;
 mod channel_ref;

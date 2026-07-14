@@ -12,6 +12,10 @@ fn accepts_repeated_tags_and_explicit_session_anchor() {
         "agent1",
         "--tag",
         "agent2",
+        "--attach",
+        "diagram=out/diagram.png",
+        "--attach",
+        "logs=out/build.log",
         "--force",
         "--channel",
         "ops",
@@ -27,6 +31,7 @@ fn accepts_repeated_tags_and_explicit_session_anchor() {
             action:
                 ChannelAction::Send {
                     message,
+                    attachments,
                     tags,
                     force,
                     channel,
@@ -36,6 +41,13 @@ fn accepts_repeated_tags_and_explicit_session_anchor() {
                 },
         } => {
             assert_eq!(message.as_deref(), Some("hello"));
+            assert_eq!(attachments.len(), 2);
+            assert_eq!(attachments[0].label, "diagram");
+            assert_eq!(
+                attachments[0].path,
+                std::path::PathBuf::from("out/diagram.png")
+            );
+            assert_eq!(attachments[1].label, "logs");
             assert_eq!(tags, vec!["agent1", "agent2"]);
             assert!(force);
             assert_eq!(channel.as_deref(), Some("ops"));

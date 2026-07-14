@@ -119,6 +119,14 @@ pub(in crate::cli) enum ChannelAction {
         message: Option<String>,
         #[arg(long = "message", value_name = "MESSAGE")]
         message_flag: Option<String>,
+        /// Upload a file to Blossom and replace every `[LABEL]` in the message
+        /// with its public URL. Repeat for multiple attachments.
+        #[arg(
+            long = "attach",
+            value_name = "LABEL=FILE",
+            value_parser = crate::attachment::parse_spec
+        )]
+        attachments: Vec<crate::attachment::Attachment>,
         /// Agent to tag in the message. Repeat to tag multiple agents. The
         /// visible `nostr:npub...` address prefix is added automatically.
         #[arg(long = "tag", value_name = "AGENT")]
@@ -151,6 +159,14 @@ pub(in crate::cli) enum ChannelAction {
         message: Option<String>,
         #[arg(long = "message", value_name = "MESSAGE")]
         message_flag: Option<String>,
+        /// Upload a file to Blossom and replace every `[LABEL]` in the message
+        /// with its public URL. Repeat for multiple attachments.
+        #[arg(
+            long = "attach",
+            value_name = "LABEL=FILE",
+            value_parser = crate::attachment::parse_spec
+        )]
+        attachments: Vec<crate::attachment::Attachment>,
         /// Public sender identity (npub, hex pubkey, or handle) instead of resolving from the current
         /// PTY/harness process or root scan.
         #[arg(long)]

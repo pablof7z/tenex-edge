@@ -3218,6 +3218,7 @@ dependencies = [
  "hmac",
  "inquire",
  "libc",
+ "mime_guess",
  "nix 0.29.0",
  "nostr-sdk",
  "owo-colors",
