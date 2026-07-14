@@ -155,52 +155,6 @@ pub fn is_harness_envelope(text: &str) -> bool {
     text.trim_start().starts_with('<')
 }
 
-/// A session identifier. Wraps the raw id stored in SQLite. `Display` preserves
-/// the raw id for correlation only; user-facing identity belongs to the agent
-/// instance label, not a generated session alias.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-#[serde(transparent)]
-pub struct SessionId(String);
-
-impl SessionId {
-    pub fn new(s: impl Into<String>) -> Self {
-        Self(s.into())
-    }
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-    pub fn into_string(self) -> String {
-        self.0
-    }
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-}
-
-impl std::fmt::Display for SessionId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl From<String> for SessionId {
-    fn from(s: String) -> Self {
-        Self(s)
-    }
-}
-
-impl From<&str> for SessionId {
-    fn from(s: &str) -> Self {
-        Self(s.to_owned())
-    }
-}
-
-impl AsRef<str> for SessionId {
-    fn as_ref(&self) -> &str {
-        &self.0
-    }
-}
-
 /// Convert a human-readable host label (e.g. "pablos' laptop") into a URL-safe
 /// slug (e.g. "pablos-laptop"). This is only for legacy/local normalization
 /// needs; public agent/backend labels preserve config.json `backendName`.
@@ -336,13 +290,6 @@ mod tests {
         assert!(!is_harness_envelope("fix the bug in <Foo/> please"));
         assert!(!is_harness_envelope("plain text prompt"));
         assert!(!is_harness_envelope(""));
-    }
-
-    #[test]
-    fn session_id_display_preserves_raw_id() {
-        let sid = SessionId::from("local-session");
-        assert_eq!(sid.to_string(), "local-session");
-        assert_eq!(sid.as_str(), "local-session");
     }
 
     #[test]
