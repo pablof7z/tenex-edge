@@ -92,7 +92,7 @@ async fn kill_selected(selected: Vec<SessionChoice>) -> Result<()> {
     for choice in selected {
         let result = crate::cli::daemon_call_async(
             "session_kill",
-            serde_json::json!({ "session": choice.row.session_id }),
+            serde_json::json!({ "session": choice.row.npub }),
         )
         .await;
         match result {

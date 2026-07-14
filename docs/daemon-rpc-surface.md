@@ -252,11 +252,11 @@ Returns live portable PTY session state known to the daemon.
 ### `operator_sessions`
 Returns the canonical local control projection consumed by `tenex-edge mgmt
 session list`. It starts from alive rows in the daemon-owned `sessions` table,
-so every result has an exact local canonical session id and local kill
-authority. Each row joins its public handle, agent/harness state, joined
-channels, workspace and filesystem binding, local host, and optional PTY
-endpoint metadata. Remote relay-only status rows are intentionally excluded;
-they remain observable through `who` and cannot be killed by this machine.
+but exposes only `pubkey`, `npub`, and the current public `handle`; the private
+runtime row id never crosses this RPC boundary. Each row joins agent/harness
+state, joined channels, workspace and filesystem binding, local host, and
+optional PTY endpoint metadata. Remote relay-only status rows are intentionally
+excluded; they remain observable through `who` and cannot be killed by this machine.
 
 ### `pty_send`
 Sends keystrokes or text to a portable PTY session.

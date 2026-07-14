@@ -3,7 +3,8 @@ use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(super) struct SessionRow {
-    pub(super) session_id: String,
+    pub(super) pubkey: String,
+    pub(super) npub: String,
     pub(super) handle: String,
     pub(super) agent: String,
     pub(super) workspace: String,
@@ -42,7 +43,8 @@ impl SessionRow {
             (self.harness.as_str(), 500),
             (self.transport.as_str(), 500),
             (self.cwd.as_deref().unwrap_or_default(), 500),
-            (self.session_id.as_str(), 250),
+            (self.npub.as_str(), 750),
+            (self.pubkey.as_str(), 250),
             (endpoint, 250),
         ]
         .into_iter()
@@ -82,14 +84,16 @@ fn rows_from_value(value: &serde_json::Value) -> Vec<SessionRow> {
 }
 
 fn parse_row(value: &serde_json::Value) -> Option<SessionRow> {
-    let session_id = value["session_id"].as_str()?.to_string();
+    let pubkey = value["pubkey"].as_str()?.to_string();
+    let npub = value["npub"].as_str()?.to_string();
     let endpoint = value.get("endpoint").filter(|value| !value.is_null());
     let channels = value["channels"]
         .as_array()
         .map(Vec::as_slice)
         .unwrap_or(&[]);
     Some(SessionRow {
-        session_id,
+        pubkey,
+        npub,
         handle: value["handle"].as_str().unwrap_or("?").to_string(),
         agent: value["agent"].as_str().unwrap_or("?").to_string(),
         workspace: value["workspace"]["name"]
@@ -130,7 +134,8 @@ mod tests {
     fn parses_and_formats_non_pty_session() {
         let value = serde_json::json!({
             "sessions": [{
-                "session_id": "s1",
+                "pubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "npub": "npub1publicselector",
                 "handle": "opal-codex",
                 "agent": "codex",
                 "workspace": {"id": "root", "name": "tenex-edge", "path": "/repo"},
@@ -148,10 +153,15 @@ mod tests {
 
         let rows = rows_from_value(&value);
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].session_id, "s1");
+        assert_eq!(
+            rows[0].pubkey,
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        );
+        assert_eq!(rows[0].npub, "npub1publicselector");
         assert_eq!(rows[0].handle, "opal-codex");
         assert_eq!(rows[0].title, "shipping the picker");
         assert!(rows[0].busy);
+        assert!(rows[0].fuzzy_score("npub1public").is_some());
         assert!(rows[0].fuzzy_score("repo").is_some());
         assert!(rows[0].fuzzy_score("headless").is_some());
     }

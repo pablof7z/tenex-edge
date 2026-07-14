@@ -1,4 +1,4 @@
-use super::resolve::{local_session, remote_session};
+use super::resolve::remote_session;
 use super::wait::{wait_local_session_online, wait_remote_session_online};
 use super::*;
 
@@ -8,7 +8,9 @@ pub(super) async fn invite_session(
     work_root: &str,
     selector: &str,
 ) -> Result<serde_json::Value> {
-    if let Some(rec) = local_session(state, selector) {
+    if let Some(rec) =
+        state.with_store(|s| super::super::resolution::resolve_public_session(s, selector))?
+    {
         if rec.alive {
             if let Some(pty_id) = live_pty_for_session(state, &rec) {
                 return pull_live_session(state, channel_h, &rec, &pty_id).await;
