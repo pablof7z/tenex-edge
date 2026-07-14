@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use std::sync::Arc;
 
 mod spawn;
-pub(crate) use spawn::{spawn_agent, SpawnRequest};
+pub(crate) use spawn::{spawn_agent, SpawnRequest, SpawnSource};
 pub use spawn::{spawn_dispatched_ephemeral_agent, spawn_ephemeral_agent, DispatchedSpawn};
 
 /// Resolve which transport hosts `slug`, from its configured harness bundle. An
@@ -98,13 +98,15 @@ async fn open_agent_session(
     session_name: Option<&str>,
     ephemeral: bool,
     durable_reservation: Option<String>,
+    pty_launch: Option<PtyLaunchSpec>,
 ) -> Result<crate::pty::LaunchMetadata> {
     match transport {
         // PTY path: byte-identical to the pre-wiring `open_agent_session` body,
         // including the durable_reservation the supervisor holds until exit.
         TransportImpl::Pty(_) => {
+            let pty_launch = pty_launch.unwrap_or_default();
             let meta = crate::pty::spawn_session(crate::pty::SpawnSessionArgs {
-                id: None,
+                id: pty_launch.id,
                 agent: slug.to_string(),
                 root: root.to_string(),
                 cwd: std::path::PathBuf::from(abs_path),
@@ -113,8 +115,8 @@ async fn open_agent_session(
                 ephemeral,
                 durable_reservation,
                 command: command.to_vec(),
-                env: Vec::new(),
-                env_remove: Vec::new(),
+                env: pty_launch.env,
+                env_remove: pty_launch.env_remove,
             })?;
             Ok(meta)
         }
@@ -188,6 +190,7 @@ pub async fn resume_agent_in_channel(
                 None,
                 false,
                 None,
+                None,
             )
             .await?
         }
@@ -231,4 +234,11 @@ pub async fn resume_agent_in_channel(
         return Err(e.context("registering resumed hosted session"));
     }
     Ok(pty_id)
+}
+
+#[derive(Default)]
+struct PtyLaunchSpec {
+    id: Option<String>,
+    env: Vec<(String, String)>,
+    env_remove: Vec<String>,
 }

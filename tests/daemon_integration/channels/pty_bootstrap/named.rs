@@ -22,7 +22,7 @@ fn pty_spawn_uses_requested_public_name_and_rejects_conflict() {
                     "channel": &channel,
                     "cwd": &work_dir,
                     "session_name": session_name,
-                    "base_command": no_hook_command(),
+                    "launch": {"kind": "pty-command", "argv": no_hook_command()},
                 }),
             )
             .await
@@ -51,7 +51,7 @@ fn pty_spawn_uses_requested_public_name_and_rejects_conflict() {
                 "channel": &channel,
                 "cwd": &work_dir,
                 "session_name": session_name,
-                "base_command": no_hook_command(),
+                "launch": {"kind": "pty-command", "argv": no_hook_command()},
             }),
         )
         .await

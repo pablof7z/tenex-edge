@@ -221,7 +221,6 @@ async fn spawn_target(
         slug,
         &work_root,
         Vec::new(),
-        None,
         Some(&op.child_h),
         None,
     )

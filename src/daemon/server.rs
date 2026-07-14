@@ -37,7 +37,6 @@ mod operator_sessions;
 mod orchestration_handler;
 mod pty_rpc;
 mod rpc;
-pub(crate) use rpc::agents::{rpc_agent_launch_preflight, rpc_agent_launch_release};
 mod session_dispatch;
 mod session_dispatch_handler;
 mod session_records;
@@ -283,8 +282,7 @@ async fn dispatch(state: &Arc<DaemonState>, req: &Request) -> Response {
         "channel_add_member" => rpc::rpc_channel_add_member(state, &req.params).await,
         "channel_remove_member" => rpc::rpc_channel_remove_member(state, &req.params).await,
         "operator_sessions" => operator_sessions::rpc_operator_sessions(state),
-        "agent_launch_preflight" => rpc::rpc_agent_launch_preflight(state, &req.params),
-        "agent_launch_release" => rpc::rpc_agent_launch_release(state, &req.params),
+        "pty_supervisor_exit" => rpc::rpc_pty_supervisor_exit(state, &req.params).await,
         "agent_roster_publish" => rpc_agent_roster_publish(state, &req.params).await,
         "debug_outbox" => rpc_debug_outbox(state, &req.params),
         "channel_create" => rpc_channel_create(state, &req.params).await,

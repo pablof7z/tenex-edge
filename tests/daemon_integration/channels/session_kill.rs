@@ -61,7 +61,7 @@ fn session_kill_stops_pty_session_and_marks_offline() {
                     "root": &channel,
                     "channel": &channel,
                     "cwd": &work_dir,
-                    "base_command": no_hook_command(),
+                    "launch": {"kind": "pty-command", "argv": no_hook_command()},
                 }),
             )
             .await

@@ -8,8 +8,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-#[path = "supervisor/reservation.rs"]
-mod reservation;
+#[path = "supervisor/session_exit.rs"]
+mod session_exit;
 
 const BACKLOG_LIMIT: usize = 256 * 1024;
 
@@ -26,7 +26,7 @@ pub struct SupervisorArgs {
 }
 
 pub fn run_supervisor(args: SupervisorArgs) -> Result<()> {
-    let _reservation_guard = reservation::DurableReservationGuard;
+    let _session_exit_guard = session_exit::SessionExitGuard::new(args.id.clone());
     if args.command.is_empty() {
         bail!("pty supervisor command must not be empty");
     }

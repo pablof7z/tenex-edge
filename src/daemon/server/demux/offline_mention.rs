@@ -198,7 +198,6 @@ pub(super) async fn handle(
         &agent_slug,
         &work_root,
         Vec::new(),
-        None,
         Some(channel),
         None,
     )
