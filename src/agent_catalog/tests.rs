@@ -26,7 +26,7 @@ developer_instructions = "Review like an owner"
     );
     write(
         &home.path().join(".config/opencode/agents/researcher.md"),
-        "---\ndescription: Finds primary evidence\nmode: subagent\n---\nPrompt",
+        "---\ndescription: Finds primary evidence\nmode: primary\n---\nPrompt",
     );
 
     let catalog = AgentCatalog::discover(&roots(home.path()), &[]).unwrap();
@@ -170,4 +170,46 @@ fn claude_and_opencode_use_their_native_agent_selector() {
             }
         );
     }
+}
+
+#[test]
+fn claude_discovers_nested_agents_and_requires_frontmatter_name() {
+    let home = TempDir::new().unwrap();
+    write(
+        &home.path().join(".claude/agents/review/security-agent.md"),
+        "---\nname: security\ndescription: Finds vulnerabilities\n---\nPrompt",
+    );
+    let catalog = AgentCatalog::discover(&roots(home.path()), &[]).unwrap();
+    assert!(catalog.resolve("security", None, None).is_ok());
+
+    write(
+        &home.path().join(".claude/agents/nameless.md"),
+        "---\ndescription: Missing identity\n---\nPrompt",
+    );
+    let error = AgentCatalog::discover(&roots(home.path()), &[]).unwrap_err();
+    assert!(error.to_string().contains("requires \"name\""));
+}
+
+#[test]
+fn opencode_uses_filename_and_excludes_non_root_agents() {
+    let home = TempDir::new().unwrap();
+    let dir = home.path().join(".config/opencode/agents");
+    write(
+        &dir.join("root-role.md"),
+        "---\nname: ignored-name\ndescription: Root role\nmode: primary\n---\nPrompt",
+    );
+    write(
+        &dir.join("worker.md"),
+        "---\ndescription: Delegated only\nmode: subagent\n---\nPrompt",
+    );
+    write(
+        &dir.join("retired.md"),
+        "---\ndescription: Disabled\ndisable: true\n---\nPrompt",
+    );
+
+    let catalog = AgentCatalog::discover(&roots(home.path()), &[]).unwrap();
+    assert!(catalog.resolve("root-role", None, None).is_ok());
+    assert!(catalog.resolve("ignored-name", None, None).is_err());
+    assert!(catalog.resolve("worker", None, None).is_err());
+    assert!(catalog.resolve("retired", None, None).is_err());
 }
