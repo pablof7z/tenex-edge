@@ -1,0 +1,105 @@
+use super::*;
+use tempfile::TempDir;
+
+fn write(path: &Path, body: &str) {
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, body).unwrap();
+}
+
+fn roots(home: &Path) -> DiscoveryRoots {
+    DiscoveryRoots::for_user_home(home)
+}
+
+#[test]
+fn discovers_supported_global_profiles_without_mosaico_agent_json() {
+    let home = TempDir::new().unwrap();
+    write(
+        &home.path().join(".codex/agents/reviewer.toml"),
+        r#"name = "reviewer"
+description = "Reviews correctness"
+developer_instructions = "Review like an owner"
+"#,
+    );
+    write(
+        &home.path().join(".claude/agents/designer.md"),
+        "---\nname: designer\ndescription: Designs interfaces\n---\nPrompt",
+    );
+    write(
+        &home.path().join(".config/opencode/agents/researcher.md"),
+        "---\ndescription: Finds primary evidence\nmode: subagent\n---\nPrompt",
+    );
+
+    let catalog = AgentCatalog::discover(&roots(home.path()), &[]).unwrap();
+    let capabilities = catalog.capabilities(None);
+    assert_eq!(
+        capabilities
+            .iter()
+            .map(|capability| capability.slug.as_str())
+            .collect::<Vec<_>>(),
+        vec!["designer", "researcher", "reviewer"]
+    );
+    assert_eq!(
+        catalog.resolve("reviewer", None, None).unwrap().harness,
+        Harness::Codex
+    );
+}
+
+#[test]
+fn workspace_profile_overrides_global_profile_for_same_harness() {
+    let home = TempDir::new().unwrap();
+    let workspace = TempDir::new().unwrap();
+    write(
+        &home.path().join(".codex/agents/reviewer.toml"),
+        "name='reviewer'\ndescription='global'\ndeveloper_instructions='global'",
+    );
+    let local = workspace.path().join(".codex/agents/reviewer.toml");
+    write(
+        &local,
+        "name='reviewer'\ndescription='workspace'\ndeveloper_instructions='local'",
+    );
+
+    let catalog =
+        AgentCatalog::discover(&roots(home.path()), &[workspace.path().to_path_buf()]).unwrap();
+    let global = catalog.resolve("reviewer", None, None).unwrap();
+    assert_eq!(global.use_criteria, "global");
+    let scoped = catalog
+        .resolve("reviewer", Some(workspace.path()), None)
+        .unwrap();
+    assert_eq!(scoped.path, local);
+    assert_eq!(scoped.use_criteria, "workspace");
+}
+
+#[test]
+fn duplicate_harness_implementations_require_explicit_binding() {
+    let home = TempDir::new().unwrap();
+    write(
+        &home.path().join(".codex/agents/reviewer.toml"),
+        "name='reviewer'\ndescription='review'\ndeveloper_instructions='review'",
+    );
+    write(
+        &home.path().join(".claude/agents/reviewer.md"),
+        "---\nname: reviewer\ndescription: review\n---\nReview",
+    );
+    let catalog = AgentCatalog::discover(&roots(home.path()), &[]).unwrap();
+
+    let error = catalog.resolve("reviewer", None, None).unwrap_err();
+    assert!(error.to_string().contains("multiple harnesses"));
+    assert_eq!(
+        catalog
+            .resolve("reviewer", None, Some(Harness::ClaudeCode))
+            .unwrap()
+            .harness,
+        Harness::ClaudeCode
+    );
+}
+
+#[test]
+fn rejects_malformed_native_profiles_without_guessing() {
+    let home = TempDir::new().unwrap();
+    write(
+        &home.path().join(".codex/agents/broken.toml"),
+        "name='broken'\ndescription='missing instructions'",
+    );
+    let error = AgentCatalog::discover(&roots(home.path()), &[]).unwrap_err();
+    assert!(error.to_string().contains("developer_instructions"));
+}

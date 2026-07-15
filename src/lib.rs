@@ -8,6 +8,7 @@
 //!   cli -> runtime -> { domain, codec, transport, state, distill }
 //!   config / identity / channel are leaf utilities.
 
+pub mod agent_catalog;
 mod applog;
 mod attachment;
 mod channel_about;
