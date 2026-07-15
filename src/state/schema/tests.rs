@@ -1,6 +1,8 @@
 use crate::state::Store;
 use rusqlite::Connection;
 
+mod migration;
+
 fn columns(conn: &Connection, table: &str) -> Vec<String> {
     conn.prepare(&format!("PRAGMA table_info({table})"))
         .unwrap()
