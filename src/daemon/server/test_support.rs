@@ -52,6 +52,7 @@ impl DaemonState {
             host,
             started_at,
             owners,
+            agent_catalog: Mutex::new(crate::agent_catalog::AgentCatalog::default()),
             hosted: Mutex::new(HashMap::new()),
             sessions: Mutex::new(HashMap::new()),
             subscribed_root_channels: Mutex::new(Vec::new()),

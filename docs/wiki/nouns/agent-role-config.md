@@ -10,8 +10,10 @@ source_refs:
 
 # agent role config
 
-The set of role configs on this machine, stored under
-`<mosaico_home>/agents/<slug>.json`. Each file describes a role (harness, provider,
-model) that can be launched locally — it holds no identity key. Session keys are
-derived per session from the machine's management key, and channel membership is
-governed separately by the NIP-29 group member list.
+Launchable roles come from native Codex, Claude Code, and OpenCode agent
+definitions plus optional Mosaico overrides under
+`<mosaico_home>/agents/<slug>.json`. Native definitions are monitored globally
+and per bound workspace, so they need no duplicate JSON. An explicit JSON binds
+an ambiguous role to a harness bundle or requests a config profile or durable
+`perSessionKey:false` identity. Ordinary session keys are derived from the
+machine's management key and are not stored in agent JSON.

@@ -25,8 +25,10 @@ pub use local_agent::{
 #[serde(deny_unknown_fields)]
 struct StoredKey {
     slug: String,
-    secret_key: String, // hex
-    public_key: String, // hex
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    secret_key: Option<String>, // hex; durable agents only
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    public_key: Option<String>, // hex; durable agents only
     created_at: u64,
     /// One-line "when to use this agent" note, surfaced in `my session`'s
     /// capability inventory.
@@ -61,16 +63,30 @@ impl StoredKey {
 #[derive(Debug, Clone)]
 pub struct AgentIdentity {
     pub slug: String,
-    pub keys: Keys,
+    pub keys: Option<Keys>,
     pub per_session_key: bool,
     pub harness: String,
     pub profile: Option<String>,
 }
 
 impl AgentIdentity {
-    pub fn pubkey_hex(&self) -> String {
-        self.keys.public_key().to_hex()
+    pub fn pubkey_hex(&self) -> Option<String> {
+        self.keys.as_ref().map(|keys| keys.public_key().to_hex())
     }
+
+    pub fn per_session(slug: &str, harness: &str) -> Self {
+        Self {
+            slug: slug.to_string(),
+            keys: None,
+            per_session_key: true,
+            harness: harness.to_string(),
+            profile: None,
+        }
+    }
+}
+
+pub fn is_configured(mosaico_home: &Path, slug: &str) -> bool {
+    key_path(mosaico_home, slug).is_file()
 }
 
 fn agents_dir(mosaico_home: &Path) -> PathBuf {
@@ -109,11 +125,13 @@ pub fn load_or_create(
     if path.exists() {
         let s = std::fs::read_to_string(&path)
             .with_context(|| format!("reading key {}", path.display()))?;
-        let stored: StoredKey =
+        let mut stored: StoredKey =
             serde_json::from_str(&s).with_context(|| format!("parsing key {}", path.display()))?;
-        let keys = Keys::parse(&stored.secret_key)
-            .with_context(|| format!("parsing secret key for {slug}"))?;
-        tracing::debug!(slug, pubkey = %&stored.public_key[..8], "agent key loaded");
+        let keys = stored.identity_keys()?;
+        if stored.drop_redundant_session_key() {
+            atomic_write(&path, &serde_json::to_string_pretty(&stored)?)?;
+            tracing::info!(slug, path = %path.display(), "removed redundant per-session agent key");
+        }
         return Ok(AgentIdentity {
             slug: slug.to_string(),
             keys,
@@ -123,11 +141,10 @@ pub fn load_or_create(
         });
     }
 
-    let keys = Keys::generate();
     let stored = StoredKey {
         slug: slug.to_string(),
-        secret_key: keys.secret_key().to_secret_hex(),
-        public_key: keys.public_key().to_hex(),
+        secret_key: None,
+        public_key: None,
         created_at: now,
         byline: None,
         per_session_key: true,
@@ -138,10 +155,10 @@ pub fn load_or_create(
         .with_context(|| format!("creating {}", agents_dir(mosaico_home).display()))?;
     let body = serde_json::to_string_pretty(&stored)?;
     atomic_write(&path, &body)?;
-    tracing::info!(slug, pubkey = %&stored.public_key[..8], path = %path.display(), "agent key created");
+    tracing::info!(slug, path = %path.display(), "keyless agent configuration created");
     Ok(AgentIdentity {
         slug: slug.to_string(),
-        keys,
+        keys: None,
         per_session_key: stored.per_session_key,
         harness: stored.harness,
         profile: stored.profile,
@@ -155,10 +172,13 @@ pub fn load(mosaico_home: &Path, slug: &str) -> Result<AgentIdentity> {
     let path = key_path(mosaico_home, slug);
     let s = std::fs::read_to_string(&path)
         .with_context(|| format!("reading configured agent {}", path.display()))?;
-    let stored: StoredKey =
+    let mut stored: StoredKey =
         serde_json::from_str(&s).with_context(|| format!("parsing agent {}", path.display()))?;
-    let keys = Keys::parse(&stored.secret_key)
-        .with_context(|| format!("parsing secret key for {slug}"))?;
+    let keys = stored.identity_keys()?;
+    if stored.drop_redundant_session_key() {
+        atomic_write(&path, &serde_json::to_string_pretty(&stored)?)?;
+        tracing::info!(slug, path = %path.display(), "removed redundant per-session agent key");
+    }
     Ok(AgentIdentity {
         slug: stored.slug,
         keys,
@@ -166,6 +186,40 @@ pub fn load(mosaico_home: &Path, slug: &str) -> Result<AgentIdentity> {
         harness: stored.harness,
         profile: stored.profile,
     })
+}
+
+impl StoredKey {
+    fn identity_keys(&self) -> Result<Option<Keys>> {
+        if self.per_session_key {
+            return Ok(None);
+        }
+        let secret = self
+            .secret_key
+            .as_deref()
+            .context("perSessionKey:false requires secret_key")?;
+        let public = self
+            .public_key
+            .as_deref()
+            .context("perSessionKey:false requires public_key")?;
+        let keys = Keys::parse(secret)
+            .with_context(|| format!("parsing durable secret key for {:?}", self.slug))?;
+        if keys.public_key().to_hex() != public {
+            anyhow::bail!(
+                "durable agent {:?} public_key does not match secret_key",
+                self.slug
+            );
+        }
+        Ok(Some(keys))
+    }
+
+    fn drop_redundant_session_key(&mut self) -> bool {
+        if !self.per_session_key || (self.secret_key.is_none() && self.public_key.is_none()) {
+            return false;
+        }
+        self.secret_key = None;
+        self.public_key = None;
+        true
+    }
 }
 
 fn validate_config_name(field: &str, value: &str) -> Result<String> {

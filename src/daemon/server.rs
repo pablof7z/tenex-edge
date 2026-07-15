@@ -24,6 +24,7 @@ use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::Notify;
+mod agent_discovery;
 mod agent_roster;
 pub(crate) mod auto_reply;
 mod background;
@@ -46,9 +47,7 @@ use management_command::{handle_management_command, is_management_command_for_ba
 use orchestration_handler::handle_orchestration;
 use session_dispatch_handler::handle_session_dispatch;
 use session_records::{HostedAgent, PeerTracked, SessionHandle, StatusTailKey, StatusTailSnapshot};
-
-/// Shared daemon state. Store guards are held only across synchronous rusqlite
-/// calls, never across `.await`. One process + one connection = one writer.
+/// Shared daemon state. Store guards span synchronous rusqlite calls, never `.await`.
 pub struct DaemonState {
     store: Arc<Mutex<Store>>,
     transport: Arc<Transport>,
@@ -57,6 +56,7 @@ pub struct DaemonState {
     host: String,
     started_at: u64,
     owners: Vec<String>,
+    agent_catalog: Mutex<crate::agent_catalog::AgentCatalog>,
     hosted: Mutex<HashMap<String, HostedAgent>>,
     sessions: Mutex<HashMap<String, SessionHandle>>,
     subscribed_root_channels: Mutex<Vec<String>>,

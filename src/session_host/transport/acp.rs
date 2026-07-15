@@ -63,12 +63,8 @@ impl AcpTransport {
     )> {
         let cwd = std::path::PathBuf::from(&spec.abs_path);
         let bundle = bundle_name(spec);
-        // Profile placement (defect #5): a CwdSettingsFile profile must land where
-        // the harness actually reads it. The claude-agent-acp adapter reads
-        // `<cwd>/.claude/settings.json` and ignores `--settings`, so its profile
-        // scratch dir MUST be the session cwd — an out-of-tree scratch would never
-        // be consulted. opencode instead reads `OPENCODE_CONFIG` (pointed at an
-        // out-of-tree scratch), so it stays there and never clobbers a repo file.
+        // Claude ACP reads its profile from cwd; OpenCode reads `OPENCODE_CONFIG`
+        // from isolated scratch. Both reach the harness without clobbering files.
         let cfg = HarnessesConfig::load()?;
         let harness_kind = harness::bundle_harness_with(&cfg, bundle)
             .with_context(|| format!("resolving harness for bundle {bundle:?}"))?;
@@ -79,8 +75,12 @@ impl AcpTransport {
                 .join("harness-profiles")
                 .join(&spec.slug)
         };
-        let resolved = harness::resolve_with(&cfg, bundle, spec.profile.as_deref(), &scratch)
+        let mut resolved = harness::resolve_with(&cfg, bundle, spec.profile.as_deref(), &scratch)
             .with_context(|| format!("resolving harness bundle {bundle:?}"))?;
+        if let Some(native_agent) = &spec.native_agent {
+            harness::apply_native_agent(&mut resolved, native_agent, &scratch)
+                .with_context(|| format!("applying native agent {:?}", spec.slug))?;
+        }
         if !matches!(resolved.transport, Transport::Acp | Transport::AppServer) {
             anyhow::bail!(
                 "harness bundle {bundle:?} is transport {} — not an RPC transport",
