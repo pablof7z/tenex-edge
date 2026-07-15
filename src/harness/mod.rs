@@ -112,7 +112,11 @@ pub fn apply_native_agent(
             if resolved.harness != Harness::Codex {
                 anyhow::bail!("Codex custom-agent activation requires a Codex bundle");
             }
-            codex_profile::plan_custom_agent(agent, &codex_profile::source_home()?, scratch)?
+            if resolved.transport == Transport::AppServer {
+                ProfilePlan::default()
+            } else {
+                codex_profile::plan_custom_agent(agent, &codex_profile::source_home()?, scratch)?
+            }
         }
     };
     resolved.base_argv.extend(plan.extra_argv.iter().cloned());

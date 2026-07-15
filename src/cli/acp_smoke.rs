@@ -188,7 +188,7 @@ async fn run_app_server(
             .unwrap_or(&serde_json::Value::Null),
     );
     let thread_id = client
-        .thread_start(cwd)
+        .thread_start(cwd, None, None)
         .await
         .map_err(|e| anyhow::anyhow!("thread/start: {e}"))?;
     println!("[acp-smoke] thread/start -> {thread_id}");

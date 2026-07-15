@@ -60,13 +60,19 @@ impl AppServerClient {
             .await
     }
 
-    /// `thread/start {cwd}` -> result.thread.id.
-    pub async fn thread_start(&self, cwd: &Path) -> Result<String, RpcError> {
+    /// Start a thread, optionally applying a resolved Codex custom agent at the
+    /// app-server's native instruction/config boundary.
+    pub async fn thread_start(
+        &self,
+        cwd: &Path,
+        developer_instructions: Option<&str>,
+        config: Option<&serde_json::Value>,
+    ) -> Result<String, RpcError> {
         let v = self
             .handle
             .request_timeout(
                 "thread/start",
-                serde_json::json!({ "cwd": cwd.to_string_lossy() }),
+                thread_start_params(cwd, developer_instructions, config),
                 RPC_TIMEOUT,
             )
             .await?;
@@ -140,5 +146,58 @@ impl AppServerClient {
             )
             .await
             .map(|_| ())
+    }
+}
+
+fn thread_start_params(
+    cwd: &Path,
+    developer_instructions: Option<&str>,
+    config: Option<&serde_json::Value>,
+) -> serde_json::Value {
+    let mut params = serde_json::json!({ "cwd": cwd.to_string_lossy() });
+    let object = params.as_object_mut().expect("thread/start params object");
+    if let Some(instructions) = developer_instructions {
+        object.insert(
+            "developerInstructions".to_string(),
+            serde_json::Value::String(instructions.to_string()),
+        );
+    }
+    if let Some(config) = config {
+        object.insert("config".to_string(), config.clone());
+    }
+    params
+}
+
+#[cfg(test)]
+mod tests {
+    use super::thread_start_params;
+
+    #[test]
+    fn custom_agent_uses_native_thread_start_fields() {
+        let cwd = std::path::Path::new("/workspace");
+        let config = serde_json::json!({
+            "model": "gpt-5.4",
+            "model_reasoning_effort": "high"
+        });
+
+        assert_eq!(
+            thread_start_params(cwd, Some("Review carefully"), Some(&config)),
+            serde_json::json!({
+                "cwd": "/workspace",
+                "developerInstructions": "Review carefully",
+                "config": {
+                    "model": "gpt-5.4",
+                    "model_reasoning_effort": "high"
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn default_thread_start_omits_agent_fields() {
+        assert_eq!(
+            thread_start_params(std::path::Path::new("/workspace"), None, None),
+            serde_json::json!({ "cwd": "/workspace" })
+        );
     }
 }

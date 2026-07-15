@@ -29,6 +29,8 @@ use tokio::sync::mpsc;
 #[path = "acp/registry.rs"]
 mod registry;
 use registry::{register_child, registry};
+#[path = "acp/thread_start_agent.rs"]
+mod thread_start_agent;
 
 pub struct AcpTransport;
 
@@ -163,15 +165,7 @@ impl AcpTransport {
                     .map_err(|e| anyhow::anyhow!("ACP session/new: {e}"))?
             }
             Dialect::AppServer => {
-                let client = AppServerClient::new(handle.clone());
-                client
-                    .initialize("mosaico", env!("CARGO_PKG_VERSION"))
-                    .await
-                    .map_err(|e| anyhow::anyhow!("app-server initialize: {e}"))?;
-                client
-                    .thread_start(&cwd)
-                    .await
-                    .map_err(|e| anyhow::anyhow!("app-server thread/start: {e}"))?
+                thread_start_agent::open(&handle, &cwd, spec.native_agent.as_ref()).await?
             }
         };
         let endpoint_id = Self::endpoint_id(&spec.slug);
