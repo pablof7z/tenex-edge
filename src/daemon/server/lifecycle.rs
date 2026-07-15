@@ -80,6 +80,7 @@ pub async fn run() -> Result<()> {
         host,
         started_at,
         owners,
+        agent_catalog: Mutex::new(crate::agent_catalog::AgentCatalog::default()),
         hosted: Mutex::new(HashMap::new()),
         sessions: Mutex::new(HashMap::new()),
         subscribed_root_channels: Mutex::new(Vec::new()),
@@ -140,6 +141,10 @@ pub async fn run() -> Result<()> {
         relay_state.transport.warmup().await;
         tracing::info!("relay warmup complete; opening subscriptions");
 
+        if let Err(error) = relay_state.refresh_agent_catalog() {
+            tracing::warn!(error = %format!("{error:#}"), "native agent discovery failed");
+        }
+
         // Publish the backend's own kind:0 so it is identifiable on the relay by
         // Nostr clients, advertising the managed agents as `agent` tags. Best-effort:
         // failure deferred to next restart / roster change. Intentionally NOT stored
@@ -160,6 +165,7 @@ pub async fn run() -> Result<()> {
         }
 
         roster_bootstrap::publish_startup_roster(&relay_state).await;
+        super::agent_discovery::spawn_monitor(relay_state.clone());
         membership_cleanup::cleanup_dead_local_sessions(&relay_state);
         roster_bootstrap::seed_spawn_on_mention_coverage(&relay_state);
 

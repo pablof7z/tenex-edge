@@ -24,6 +24,7 @@ use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::Notify;
+mod agent_discovery;
 mod agent_roster;
 pub(crate) mod auto_reply;
 mod background;
@@ -57,6 +58,7 @@ pub struct DaemonState {
     host: String,
     started_at: u64,
     owners: Vec<String>,
+    agent_catalog: Mutex<crate::agent_catalog::AgentCatalog>,
     hosted: Mutex<HashMap<String, HostedAgent>>,
     sessions: Mutex<HashMap<String, SessionHandle>>,
     subscribed_root_channels: Mutex<Vec<String>>,
