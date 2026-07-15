@@ -66,7 +66,7 @@ impl DiscoveryRoots {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AgentCatalog {
     profiles: Vec<NativeAgentProfile>,
 }
@@ -113,6 +113,7 @@ impl AgentCatalog {
             )?;
         }
         profiles.sort_by(|a, b| profile_key(a).cmp(&profile_key(b)));
+        validate_unique_sources(&profiles)?;
         Ok(Self { profiles })
     }
 
@@ -206,6 +207,31 @@ fn profile_key(profile: &NativeAgentProfile) -> (String, String, String) {
         profile.harness.as_str().to_string(),
         profile.path.to_string_lossy().into_owned(),
     )
+}
+
+fn validate_unique_sources(profiles: &[NativeAgentProfile]) -> Result<()> {
+    let mut seen = BTreeMap::<(String, String, String), &Path>::new();
+    for profile in profiles {
+        let scope = match &profile.scope {
+            AgentScope::Global => String::from("global"),
+            AgentScope::Workspace(root) => root.to_string_lossy().into_owned(),
+        };
+        let key = (
+            scope,
+            profile.harness.as_str().to_string(),
+            profile.slug.clone(),
+        );
+        if let Some(first) = seen.insert(key, &profile.path) {
+            anyhow::bail!(
+                "duplicate {} agent {:?} in the same scope: {} and {}",
+                profile.harness.as_str(),
+                profile.slug,
+                first.display(),
+                profile.path.display()
+            );
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

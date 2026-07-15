@@ -103,3 +103,16 @@ fn rejects_malformed_native_profiles_without_guessing() {
     let error = AgentCatalog::discover(&roots(home.path()), &[]).unwrap_err();
     assert!(error.to_string().contains("developer_instructions"));
 }
+
+#[test]
+fn rejects_duplicate_names_within_one_harness_scope() {
+    let home = TempDir::new().unwrap();
+    for file in ["first.toml", "second.toml"] {
+        write(
+            &home.path().join(".codex/agents").join(file),
+            "name='reviewer'\ndescription='review'\ndeveloper_instructions='review'",
+        );
+    }
+    let error = AgentCatalog::discover(&roots(home.path()), &[]).unwrap_err();
+    assert!(error.to_string().contains("duplicate codex agent"));
+}
