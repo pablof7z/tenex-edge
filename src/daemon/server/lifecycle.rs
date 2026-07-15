@@ -133,23 +133,18 @@ pub async fn run() -> Result<()> {
         }
     });
 
-    // Relay startup runs off the accept path; store-only RPCs respond immediately. We warm up
-    // the connection (await connectivity + NIP-42 auth) BEFORE opening any
+    // Relay startup runs off the accept path, so store-only RPCs respond immediately. Warm up the
+    // connection (await connectivity + NIP-42 auth) BEFORE opening any
     // subscription — a REQ opened pre-auth on an auth-gated relay never delivers.
     let relay_state = state.clone();
     tokio::spawn(async move {
         relay_state.transport.warmup().await;
         tracing::info!("relay warmup complete; opening subscriptions");
+        super::agent_discovery::start_monitor(relay_state.clone());
 
-        if let Err(error) = relay_state.refresh_agent_catalog() {
-            tracing::warn!(error = %format!("{error:#}"), "native agent discovery failed");
-        }
-
-        // Publish the backend's own kind:0 so it is identifiable on the relay by
-        // Nostr clients, advertising the managed agents as `agent` tags. Best-effort:
-        // failure deferred to next restart / roster change. Intentionally NOT stored
-        // in the hosted set — the echo must NOT appear in `who` or be injected into
-        // agent turn-context.
+        // Publish the backend kind:0 with its managed-agent tags. It is intentionally
+        // absent from hosted state so the echo never reaches `who` or agent context.
+        // Failure is best-effort and deferred to the next roster change or restart.
         super::agent_roster::publish_backend_profile(&relay_state).await;
 
         // Proactively warm the profiles we already know we care about — the human
@@ -165,7 +160,6 @@ pub async fn run() -> Result<()> {
         }
 
         roster_bootstrap::publish_startup_roster(&relay_state).await;
-        super::agent_discovery::spawn_monitor(relay_state.clone());
         membership_cleanup::cleanup_dead_local_sessions(&relay_state);
         roster_bootstrap::seed_spawn_on_mention_coverage(&relay_state);
 

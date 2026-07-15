@@ -141,4 +141,35 @@ mod tests {
         ));
         assert!(!mosaico_home.join("agents/reviewer.json").exists());
     }
+
+    #[tokio::test]
+    async fn installed_opencode_agent_resolves_to_native_agent_argv() {
+        let home = tempfile::tempdir().unwrap();
+        let mosaico_home = home.path().join("mosaico");
+        let mut env = EnvGuard::set("MOSAICO_HOME", &mosaico_home);
+        env.set_var("MOSAICO_ISOLATED_HOME_OK", "1");
+        env.set_var("HOME", home.path());
+        write(
+            &mosaico_home.join("harnesses.json"),
+            r#"{"opencode-pty":{"harness":"opencode","transport":"pty","args":["--verbose"]}}"#,
+        );
+        write(
+            &home.path().join(".config/opencode/agents/new-profile.md"),
+            "---\ndescription: Handles backend changes\n---\nWork carefully",
+        );
+        let workspace = home.path().join("work");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let state = DaemonState::new_for_test().await;
+        state.refresh_agent_catalog().unwrap();
+
+        let source = resolve_agent_source(&state, "new-profile", &workspace).unwrap();
+        assert_eq!(source.bundle, "opencode-pty");
+        assert_eq!(
+            source.command,
+            ["opencode", "--verbose", "--agent", "new-profile"]
+        );
+        assert!(source.identity.per_session_key);
+        assert!(source.identity.keys.is_none());
+        assert!(!mosaico_home.join("agents/new-profile.json").exists());
+    }
 }

@@ -57,14 +57,18 @@ mosaico adds both, to the agents you already run, without changing how you run t
 Everything in this section is implemented and tested — `cargo test --lib` is green, with
 real end-to-end demos against a live relay across four hosts. If it's here, it runs.
 
-- **A permanent identity and short handle for every session.** By default, each session mints its own
-  cryptographic keypair and publishes under the shortest available leased handle, such as
+- **A permanent identity and short handle for every session.** By default, each session derives its
+  own cryptographic keypair and publishes under the shortest available leased handle, such as
   `@quill-codex`. Its npub is the permanent resume identity; the handle is a reclaimable
   human alias used for live addressing. The one secret on the
   machine is a management key; default session keys derive from it, so sessions are
-  recoverable and resumable without storing anything. Agents configured with
+  recoverable and resumable without storing per-session keys. Agents configured with
   `perSessionKey: false` instead reuse the key persisted in their agent JSON, publish
   under the bare agent slug, allow one live session on the backend, and always start fresh.
+- **Installed harness agents are available automatically.** Mosaico monitors global and
+  workspace-local Codex, Claude Code, and OpenCode agent directories and advertises valid
+  profiles in the backend roster. A compatible `harnesses.json` bundle is still required,
+  but ordinary native profiles do not need a duplicate Mosaico agent JSON.
 - **Presence and liveness.** Every agent on the repo broadcasts that it's alive; dead
   ones fall off on their own after a short heartbeat timeout.
 - **A live activity line.** Each turn, an LLM distills the running transcript into one

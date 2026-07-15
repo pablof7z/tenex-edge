@@ -63,12 +63,8 @@ impl AcpTransport {
     )> {
         let cwd = std::path::PathBuf::from(&spec.abs_path);
         let bundle = bundle_name(spec);
-        // Profile placement (defect #5): a CwdSettingsFile profile must land where
-        // the harness actually reads it. The claude-agent-acp adapter reads
-        // `<cwd>/.claude/settings.json` and ignores `--settings`, so its profile
-        // scratch dir MUST be the session cwd — an out-of-tree scratch would never
-        // be consulted. opencode instead reads `OPENCODE_CONFIG` (pointed at an
-        // out-of-tree scratch), so it stays there and never clobbers a repo file.
+        // Claude ACP reads its profile from cwd; OpenCode reads `OPENCODE_CONFIG`
+        // from isolated scratch. Both reach the harness without clobbering files.
         let cfg = HarnessesConfig::load()?;
         let harness_kind = harness::bundle_harness_with(&cfg, bundle)
             .with_context(|| format!("resolving harness for bundle {bundle:?}"))?;

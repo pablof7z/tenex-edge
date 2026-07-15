@@ -47,9 +47,7 @@ use management_command::{handle_management_command, is_management_command_for_ba
 use orchestration_handler::handle_orchestration;
 use session_dispatch_handler::handle_session_dispatch;
 use session_records::{HostedAgent, PeerTracked, SessionHandle, StatusTailKey, StatusTailSnapshot};
-
-/// Shared daemon state. Store guards are held only across synchronous rusqlite
-/// calls, never across `.await`. One process + one connection = one writer.
+/// Shared daemon state. Store guards span synchronous rusqlite calls, never `.await`.
 pub struct DaemonState {
     store: Arc<Mutex<Store>>,
     transport: Arc<Transport>,

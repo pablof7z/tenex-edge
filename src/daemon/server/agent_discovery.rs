@@ -61,7 +61,10 @@ fn discover(roots: &DiscoveryRoots, mut workspaces: Vec<PathBuf>) -> Result<Agen
     AgentCatalog::discover(roots, &workspaces)
 }
 
-pub(super) fn spawn_monitor(state: Arc<DaemonState>) {
+pub(super) fn start_monitor(state: Arc<DaemonState>) {
+    if let Err(error) = state.refresh_agent_catalog() {
+        tracing::warn!(error = %format!("{error:#}"), "native agent discovery failed");
+    }
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(REFRESH_INTERVAL);
         interval.tick().await;

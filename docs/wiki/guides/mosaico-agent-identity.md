@@ -32,6 +32,11 @@ Agents configured with `perSessionKey:false` are the explicit durable exception:
 they sign with the key in `<mosaico_home>/agents/<slug>.json` and may reuse that
 pubkey across sequential runs, with at most one active run at a time.
 
+Ordinary `perSessionKey:true` agents store no secret or public key in agent JSON.
+Existing redundant key fields are removed when such a config is loaded. Native
+harness profiles discovered without a Mosaico agent JSON use this ordinary
+per-session identity path as well.
+
 ## Agent/Session Handle
 
 Each ordinary session publishes a kind:0 profile with a leased public handle.
@@ -48,8 +53,9 @@ membership is presence, not the definition of the session's identity.
 
 ## Roster vs. Members
 
-The roster (`available-agents`) is the set of role configs on the machine — the
-*types* you can add to a channel. Channel *members* are concrete sessions,
+The roster (`available-agents`) is the set of explicit role configs plus valid
+native Codex, Claude Code, and OpenCode profiles installed on the machine or in
+the bound workspace — the *types* you can add to a channel. Channel *members* are concrete sessions,
 rendered by their dashed public handles. Adding a role to a channel spawns a
 new session; that session is what becomes a member.
 

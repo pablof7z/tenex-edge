@@ -114,7 +114,7 @@ impl AgentCatalog {
                 &mut profiles,
             )?;
         }
-        profiles.sort_by(|a, b| profile_key(a).cmp(&profile_key(b)));
+        profiles.sort_by_key(profile_key);
         validate_unique_sources(&profiles)?;
         Ok(Self { profiles })
     }
