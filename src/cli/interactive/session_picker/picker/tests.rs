@@ -10,6 +10,7 @@ fn choice(handle: &str, activity: &str, attachable: bool) -> SessionChoice {
             activity: activity.into(),
             pty_id: attachable.then(|| format!("pty-{handle}")),
             pty_live: attachable,
+            transport: if attachable { "pty".into() } else { "harness".into() },
             ..SessionRow::default()
         },
     }
@@ -37,6 +38,23 @@ fn enter_attaches_only_live_terminal_sessions() {
     let mut headless = PickerState::new(vec![choice("opal", "", false)]);
     assert_eq!(headless.handle_key(key(KeyCode::Enter), 10), None);
     assert!(headless.notice.as_deref().unwrap().contains("no live"));
+}
+
+#[test]
+fn enter_on_acp_session_reports_no_harness_terminal() {
+    let row = SessionRow {
+        handle: "delta-claude".into(),
+        transport: "acp".into(),
+        ..SessionRow::default()
+    };
+    let mut state = PickerState::new(vec![SessionChoice { row }]);
+    assert_eq!(state.handle_key(key(KeyCode::Enter), 10), None);
+    let notice = state.notice.as_deref().unwrap();
+    assert!(notice.contains("ACP"), "notice should mention ACP: {notice}");
+    assert!(
+        notice.contains("without a harness") || notice.contains("no harness"),
+        "notice should mention harness: {notice}"
+    );
 }
 
 #[test]

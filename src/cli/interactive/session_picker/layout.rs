@@ -14,6 +14,7 @@ const CHANNEL: Color = Color::Indexed(75);
 const MUTED: Color = Color::Indexed(245);
 
 pub(super) fn lines(row: &SessionRow, now: u64, width: usize, focused: bool) -> [Line<'static>; 2] {
+    let greyed = row.transport == "acp";
     let handle = format!("@{}", row.handle);
     let scope = scope_spans(&row.workspaces);
     let scope_width = scope.iter().map(|span| span.content.width()).sum::<usize>();
@@ -27,6 +28,8 @@ pub(super) fn lines(row: &SessionRow, now: u64, width: usize, focused: bool) -> 
             handle,
             if focused {
                 Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+            } else if greyed {
+                Style::default().fg(MUTED).add_modifier(Modifier::DIM)
             } else {
                 Style::default().add_modifier(Modifier::BOLD)
             },
@@ -37,9 +40,14 @@ pub(super) fn lines(row: &SessionRow, now: u64, width: usize, focused: bool) -> 
     first.push(Span::raw(" ".repeat(padding)));
     first.push(Span::styled(age, Style::default().fg(MUTED)));
 
+    let work_style = if greyed {
+        Style::default().fg(MUTED).add_modifier(Modifier::DIM)
+    } else {
+        Style::default().fg(MUTED)
+    };
     [
         Line::from(first),
-        Line::from(Span::styled(row.work(), Style::default().fg(MUTED))),
+        Line::from(Span::styled(row.work(), work_style)),
     ]
 }
 

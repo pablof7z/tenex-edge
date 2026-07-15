@@ -1,6 +1,7 @@
 //! Canonical local-session projection for the operator session picker.
 
 use super::*;
+use crate::session_host::transport::SessionTransport;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 #[derive(Clone)]
@@ -8,6 +9,11 @@ struct OperatorEndpoint {
     metadata: crate::pty::LaunchMetadata,
     live: bool,
 }
+
+const TRANSPORT_PTY: &str = "pty";
+const TRANSPORT_ACP: &str = "acp";
+const TRANSPORT_PROCESS: &str = "process";
+const TRANSPORT_HARNESS: &str = "harness";
 
 pub(super) fn rpc_operator_sessions(state: &Arc<DaemonState>) -> Result<serde_json::Value> {
     let endpoints = crate::pty::read_all_metadata()
@@ -48,9 +54,9 @@ fn project_sessions(
             .into_iter()
             .map(|(root_id, channel_ids)| workspace_value(store, &root_id, &channel_ids, &channels))
             .collect::<Result<Vec<_>>>()?;
-        let endpoint = store
-            .locators_for_pubkey(&rec.pubkey)?
-            .into_iter()
+        let locators = store.locators_for_pubkey(&rec.pubkey)?;
+        let pty_endpoint = locators
+            .iter()
             .find(|locator| locator.locator_kind == crate::state::LOCATOR_PTY)
             .and_then(|locator| endpoints.get(&locator.locator_value))
             .map(|endpoint| {
@@ -63,12 +69,29 @@ fn project_sessions(
                     "command": meta.command,
                 })
             });
-        let transport = if endpoint.is_some() {
-            "pty"
+        let acp_endpoint_id = locators
+            .iter()
+            .find(|locator| locator.locator_kind == crate::state::LOCATOR_ACP)
+            .map(|locator| locator.locator_value.clone());
+        let acp_live = acp_endpoint_id
+            .as_deref()
+            .map(|endpoint_id| {
+                crate::session_host::transport::AcpTransport.is_live(
+                    &crate::session_host::transport::EndpointRef {
+                        kind: crate::session_host::transport::TransportKind::Acp,
+                        endpoint_id: endpoint_id.to_string(),
+                    },
+                )
+            })
+            .unwrap_or(false);
+        let transport = if pty_endpoint.is_some() {
+            TRANSPORT_PTY
+        } else if acp_endpoint_id.is_some() {
+            TRANSPORT_ACP
         } else if rec.child_pid.is_some() {
-            "process"
+            TRANSPORT_PROCESS
         } else {
-            "harness"
+            TRANSPORT_HARNESS
         };
         let npub = crate::idref::npub(&rec.pubkey)
             .with_context(|| format!("invalid session pubkey {}", rec.pubkey))?;
@@ -86,7 +109,9 @@ fn project_sessions(
             "transport": transport,
             "child_pid": rec.child_pid,
             "workspaces": workspaces,
-            "endpoint": endpoint,
+            "endpoint": pty_endpoint,
+            "acp_endpoint_id": acp_endpoint_id,
+            "acp_live": acp_live,
         }));
     }
     let mut unbound = endpoints

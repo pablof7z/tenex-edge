@@ -32,9 +32,20 @@ pub(super) struct SessionRow {
     pub(super) pty_id: Option<String>,
     pub(super) pty_live: bool,
     pub(super) cwd: Option<String>,
+    pub(super) transport: String,
 }
 
 impl SessionRow {
+    /// Whether this row can be attached to from the picker.
+    /// ACP sessions have no PTY socket, so there is nothing to attach to.
+    fn is_acp(&self) -> bool {
+        self.transport == "acp"
+    }
+
+    pub(super) fn attachable(&self) -> bool {
+        self.pty_id.is_some() && self.pty_live && !self.is_acp()
+    }
+
     pub(super) fn fuzzy_score(&self, input: &str) -> Option<i64> {
         if input.is_empty() {
             return Some(0);
@@ -144,6 +155,7 @@ fn parse_row(value: &serde_json::Value) -> Option<SessionRow> {
             .and_then(|endpoint| endpoint["live"].as_bool())
             .unwrap_or(false),
         cwd,
+        transport: value["transport"].as_str().unwrap_or("").to_string(),
     })
 }
 
@@ -248,5 +260,35 @@ mod tests {
         assert_eq!(rows[0].handle, "codex");
         assert_eq!(rows[0].pty_id.as_deref(), Some("pty-orphan"));
         assert!(rows[0].pty_live);
+    }
+
+    #[test]
+    fn acp_transport_rows_are_not_attachable() {
+        let value = serde_json::json!({
+            "sessions": [{
+                "pubkey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "npub": "npub1acpselector",
+                "handle": "delta-claude",
+                "agent": "claude-code",
+                "workspaces": [{
+                    "id": "root", "name": "mosaico", "path": "/repo",
+                    "channels": [{"id": "root", "name": "mosaico"}]
+                }],
+                "title": "claude --yolo",
+                "activity": "/repo",
+                "state": "working",
+                "last_seen": 5,
+                "host": "laptop",
+                "harness": "claude-code",
+                "transport": "acp",
+                "endpoint": null
+            }]
+        });
+
+        let rows = rows_from_value(&value);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].transport, "acp");
+        assert!(!rows[0].attachable(), "ACP rows must not be attachable");
+        assert!(rows[0].pty_id.is_none());
     }
 }
