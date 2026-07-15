@@ -119,6 +119,31 @@ fn codex_app_server_stages_named_profile() {
 }
 
 #[test]
+fn codex_app_server_keeps_custom_agent_out_of_staged_profile() {
+    let cfg: HarnessesConfig =
+        serde_json::from_str(r#"{"codex-rpc":{"harness":"codex","transport":"app-server"}}"#)
+            .unwrap();
+    let scratch = scratch();
+    let mut resolved = resolve_with(&cfg, "codex-rpc", None, scratch.path()).unwrap();
+
+    apply_native_agent(
+        &mut resolved,
+        &crate::agent_catalog::NativeAgentActivation::CodexRoot(
+            crate::agent_catalog::CodexRootConfig {
+                developer_instructions: "Review like an owner".into(),
+                config: toml::from_str("model='gpt-5.4'").unwrap(),
+            },
+        ),
+        scratch.path(),
+    )
+    .unwrap();
+
+    assert!(resolved.profile.extra_env.is_empty());
+    assert!(resolved.profile.files.is_empty());
+    assert!(!scratch.path().join("codex-home/config.toml").exists());
+}
+
+#[test]
 fn unsupported_profile_pair_fails_loud() {
     let cfg: HarnessesConfig =
         serde_json::from_str(r#"{"claude-rpc":{"harness":"claude","transport":"acp"}}"#).unwrap();

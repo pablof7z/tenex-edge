@@ -20,7 +20,7 @@ use super::{
 use crate::harness::{self, config::HarnessesConfig, Transport};
 use crate::rpc_harness::{
     spawn_config_from_driver, AcpClient, AppServerClient, Callbacks, Dialect, RpcHandle,
-    SessionUpdate,
+    SessionUpdate, ThreadStartConfig,
 };
 use crate::session::Harness;
 use anyhow::{Context, Result};
@@ -168,8 +168,17 @@ impl AcpTransport {
                     .initialize("mosaico", env!("CARGO_PKG_VERSION"))
                     .await
                     .map_err(|e| anyhow::anyhow!("app-server initialize: {e}"))?;
+                let custom_agent = match spec.native_agent.as_ref() {
+                    Some(crate::agent_catalog::NativeAgentActivation::CodexRoot(agent)) => {
+                        Some(ThreadStartConfig {
+                            developer_instructions: &agent.developer_instructions,
+                            config: &agent.config,
+                        })
+                    }
+                    _ => None,
+                };
                 client
-                    .thread_start(&cwd)
+                    .thread_start(&cwd, custom_agent)
                     .await
                     .map_err(|e| anyhow::anyhow!("app-server thread/start: {e}"))?
             }

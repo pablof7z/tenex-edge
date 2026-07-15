@@ -18,6 +18,12 @@ pub struct AppServerClient {
     pub handle: RpcHandle,
 }
 
+/// Custom-agent settings applied when creating a Codex root thread.
+pub struct ThreadStartConfig<'a> {
+    pub developer_instructions: &'a str,
+    pub config: &'a toml::Table,
+}
+
 /// Outcome of a completed app-server turn.
 #[derive(Debug, Clone)]
 pub struct TurnOutcome {
@@ -60,13 +66,17 @@ impl AppServerClient {
             .await
     }
 
-    /// `thread/start {cwd}` -> result.thread.id.
-    pub async fn thread_start(&self, cwd: &Path) -> Result<String, RpcError> {
+    /// `thread/start {cwd,developerInstructions?,config?}` -> result.thread.id.
+    pub async fn thread_start(
+        &self,
+        cwd: &Path,
+        custom_agent: Option<ThreadStartConfig<'_>>,
+    ) -> Result<String, RpcError> {
         let v = self
             .handle
             .request_timeout(
                 "thread/start",
-                serde_json::json!({ "cwd": cwd.to_string_lossy() }),
+                thread_start_params(cwd, custom_agent),
                 RPC_TIMEOUT,
             )
             .await?;
@@ -140,5 +150,71 @@ impl AppServerClient {
             )
             .await
             .map(|_| ())
+    }
+}
+
+fn thread_start_params(
+    cwd: &Path,
+    custom_agent: Option<ThreadStartConfig<'_>>,
+) -> serde_json::Value {
+    let mut params = serde_json::json!({ "cwd": cwd.to_string_lossy() });
+    if let Some(custom_agent) = custom_agent {
+        let object = params
+            .as_object_mut()
+            .expect("thread/start params are an object");
+        object.insert(
+            "developerInstructions".to_string(),
+            serde_json::Value::String(custom_agent.developer_instructions.to_string()),
+        );
+        object.insert(
+            "config".to_string(),
+            serde_json::to_value(custom_agent.config)
+                .expect("validated custom-agent TOML serializes to JSON"),
+        );
+    }
+    params
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn thread_start_payload_carries_custom_agent_instructions_and_config() {
+        let config = toml::toml! {
+            model = "gpt-5.4"
+            model_reasoning_effort = "high"
+            [sandbox_workspace_write]
+            network_access = true
+        };
+
+        let payload = thread_start_params(
+            Path::new("/workspace"),
+            Some(ThreadStartConfig {
+                developer_instructions: "Review like an owner",
+                config: &config,
+            }),
+        );
+
+        assert_eq!(
+            payload,
+            serde_json::json!({
+                "cwd": "/workspace",
+                "developerInstructions": "Review like an owner",
+                "config": {
+                    "model": "gpt-5.4",
+                    "model_reasoning_effort": "high",
+                    "sandbox_workspace_write": { "network_access": true }
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn thread_start_payload_without_custom_agent_stays_cwd_only() {
+        assert_eq!(
+            thread_start_params(Path::new("/workspace"), None),
+            serde_json::json!({ "cwd": "/workspace" })
+        );
     }
 }
