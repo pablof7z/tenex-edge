@@ -149,6 +149,7 @@ mod tests {
         let mut env = EnvGuard::set("MOSAICO_HOME", &mosaico_home);
         env.set_var("MOSAICO_ISOLATED_HOME_OK", "1");
         env.set_var("HOME", home.path());
+        env.set_var("XDG_CONFIG_HOME", home.path().join(".config"));
         write(
             &mosaico_home.join("harnesses.json"),
             r#"{"opencode-pty":{"harness":"opencode","transport":"pty","args":["--verbose"]}}"#,
