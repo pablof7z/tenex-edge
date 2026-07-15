@@ -8,7 +8,8 @@ impl Store {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("creating parent dir for {}", path.display()))?;
         }
-        let conn = Connection::open(path).with_context(|| format!("opening {}", path.display()))?;
+        let mut conn =
+            Connection::open(path).with_context(|| format!("opening {}", path.display()))?;
         // WAL + busy timeout + relaxed sync: the per-machine daemon is the sole
         // writer, but every CLI invocation still opens this file to read. WAL lets
         // readers proceed without blocking the writer; the busy timeout absorbs the
@@ -40,7 +41,7 @@ impl Store {
             .context("setting synchronous=NORMAL")?;
         conn.busy_timeout(std::time::Duration::from_secs(5))
             .context("setting busy_timeout")?;
-        schema::initialize_file(&conn, path)?;
+        schema::initialize_file(&mut conn, path)?;
         let store = Self { conn };
         store.backfill_messages_from_relay_events()?;
         Ok(store)

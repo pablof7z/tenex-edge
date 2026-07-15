@@ -13,7 +13,8 @@ mod version;
 
 use ddl::SCHEMA;
 
-pub(super) fn initialize_file(conn: &Connection, path: &Path) -> Result<()> {
+pub(super) fn initialize_file(conn: &mut Connection, path: &Path) -> Result<()> {
+    version::migrate_legacy_v5(conn, path, SCHEMA)?;
     version::check(conn, path)?;
     if has_user_tables(conn)? {
         validate_canonical(conn, Some(path))?;
