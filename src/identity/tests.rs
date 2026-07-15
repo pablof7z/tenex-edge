@@ -3,23 +3,27 @@ use super::*;
 mod byline;
 
 #[test]
-fn generates_then_reloads_same_key() {
+fn creates_then_reloads_keyless_agent_config() {
     let dir = tempfile::tempdir().unwrap();
     let a = load_or_create(dir.path(), "coder", "yolo-claude", Some("reviewer"), 100).unwrap();
     let b = load_or_create(dir.path(), "coder", "ignored", None, 200).unwrap();
-    assert_eq!(a.pubkey_hex(), b.pubkey_hex());
-    assert_eq!(
-        a.keys.secret_key().to_secret_hex(),
-        b.keys.secret_key().to_secret_hex()
-    );
+    assert!(a.keys.is_none());
+    assert!(b.keys.is_none());
+    let stored: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(dir.path().join("agents/coder.json")).unwrap(),
+    )
+    .unwrap();
+    assert!(stored.get("secret_key").is_none());
+    assert!(stored.get("public_key").is_none());
 }
 
 #[test]
-fn distinct_slugs_get_distinct_keys() {
+fn distinct_ordinary_slugs_do_not_get_persisted_keys() {
     let dir = tempfile::tempdir().unwrap();
     let a = load_or_create(dir.path(), "coder", "codex", None, 1).unwrap();
     let b = load_or_create(dir.path(), "reviewer", "claude", None, 1).unwrap();
-    assert_ne!(a.pubkey_hex(), b.pubkey_hex());
+    assert!(a.pubkey_hex().is_none());
+    assert!(b.pubkey_hex().is_none());
 }
 
 #[test]
@@ -45,24 +49,49 @@ fn per_session_key_defaults_true_and_can_select_durable_mode() {
     let path = dir.path().join("agents").join("coder.json");
     let mut config: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let keys = Keys::generate();
     config["perSessionKey"] = serde_json::json!(false);
+    config["secret_key"] = serde_json::json!(keys.secret_key().to_secret_hex());
+    config["public_key"] = serde_json::json!(keys.public_key().to_hex());
     std::fs::write(&path, serde_json::to_string_pretty(&config).unwrap()).unwrap();
 
     let durable = load_or_create(dir.path(), "coder", "ignored", None, 2).unwrap();
     assert!(!durable.per_session_key);
-    assert_eq!(default.pubkey_hex(), durable.pubkey_hex());
+    assert!(default.pubkey_hex().is_none());
+    assert_eq!(durable.pubkey_hex(), Some(keys.public_key().to_hex()));
+}
+
+#[test]
+fn loading_ordinary_agent_scrubs_legacy_redundant_key_fields() {
+    let dir = tempfile::tempdir().unwrap();
+    load_or_create(dir.path(), "coder", "codex", None, 1).unwrap();
+    let path = dir.path().join("agents/coder.json");
+    let keys = Keys::generate();
+    let mut config: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    config["secret_key"] = serde_json::json!(keys.secret_key().to_secret_hex());
+    config["public_key"] = serde_json::json!(keys.public_key().to_hex());
+    std::fs::write(&path, serde_json::to_string_pretty(&config).unwrap()).unwrap();
+
+    let loaded = load(dir.path(), "coder").unwrap();
+    assert!(loaded.keys.is_none());
+    let scrubbed: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    assert!(scrubbed.get("secret_key").is_none());
+    assert!(scrubbed.get("public_key").is_none());
 }
 
 #[test]
 fn add_local_agent_creates_then_is_idempotent() {
     let dir = tempfile::tempdir().unwrap();
     let (a, created) = add_local_agent(dir.path(), "coder", "codex", Some("reviewer"), 1).unwrap();
-    assert!(created, "first add mints a fresh key");
+    assert!(created, "first add creates the launch config");
     assert!(dir.path().join("agents").join("coder.json").exists());
 
     let (b, created2) = add_local_agent(dir.path(), "coder", "yolo-claude", None, 2).unwrap();
     assert!(!created2, "re-adding an existing slug does not recreate");
-    assert_eq!(a.pubkey_hex(), b.pubkey_hex());
+    assert!(a.pubkey_hex().is_none());
+    assert!(b.pubkey_hex().is_none());
     assert_eq!(b.harness, "yolo-claude");
     assert_eq!(b.profile, None);
 }

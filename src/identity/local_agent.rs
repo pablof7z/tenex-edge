@@ -3,7 +3,6 @@ use super::{
     validate_slug, AgentIdentity, StoredKey,
 };
 use anyhow::{bail, Context, Result};
-use nostr_sdk::prelude::*;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18,7 +17,7 @@ pub struct AgentLaunchConfig {
 #[derive(Debug, Clone)]
 pub struct LocalAgent {
     pub slug: String,
-    pub pubkey: String,
+    pub pubkey: Option<String>,
     pub per_session_key: bool,
     pub harness: String,
     pub profile: Option<String>,
@@ -41,7 +40,13 @@ pub fn list_local_pubkeys(mosaico_home: &Path) -> Vec<String> {
             // read/parse failure is loud at error! before we skip it.
             match std::fs::read_to_string(&path) {
                 Ok(s) => match serde_json::from_str::<StoredKey>(&s) {
-                    Ok(k) => out.push(k.public_key),
+                    Ok(k) => {
+                        if !k.per_session_key {
+                            if let Some(public_key) = k.public_key {
+                                out.push(public_key);
+                            }
+                        }
+                    }
                     Err(e) => tracing::error!(
                         path = %path.display(),
                         error = %e,
@@ -197,8 +202,10 @@ pub fn add_local_agent(
             .with_context(|| format!("reading key {}", path.display()))?;
         let mut stored: StoredKey =
             serde_json::from_str(&s).with_context(|| format!("parsing key {}", path.display()))?;
-        let keys = Keys::parse(&stored.secret_key)
-            .with_context(|| format!("parsing secret key for {slug}"))?;
+        let keys = stored.identity_keys()?;
+        if stored.drop_redundant_session_key() {
+            tracing::info!(slug, path = %path.display(), "removed redundant per-session agent key");
+        }
         stored.harness = harness;
         stored.profile = profile;
         let body = serde_json::to_string_pretty(&stored)?;
@@ -215,11 +222,10 @@ pub fn add_local_agent(
         ));
     }
 
-    let keys = Keys::generate();
     let stored = StoredKey {
         slug: slug.to_string(),
-        secret_key: keys.secret_key().to_secret_hex(),
-        public_key: keys.public_key().to_hex(),
+        secret_key: None,
+        public_key: None,
         created_at: now,
         byline: None,
         per_session_key: true,
@@ -233,7 +239,7 @@ pub fn add_local_agent(
     Ok((
         AgentIdentity {
             slug: slug.to_string(),
-            keys,
+            keys: None,
             per_session_key: stored.per_session_key,
             harness: stored.harness,
             profile: stored.profile,

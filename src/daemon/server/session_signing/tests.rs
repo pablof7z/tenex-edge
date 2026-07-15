@@ -3,7 +3,7 @@ use super::*;
 fn ordinary_agent() -> crate::identity::AgentIdentity {
     crate::identity::AgentIdentity {
         slug: "codex".into(),
-        keys: Keys::generate(),
+        keys: None,
         per_session_key: true,
         harness: "codex".into(),
         profile: None,

@@ -33,7 +33,9 @@ pub(crate) fn validate_live_session_identity(
             .public_key()
             .to_hex()
     } else {
-        agent.pubkey_hex()
+        agent
+            .pubkey_hex()
+            .context("durable agent has no configured key")?
     };
     if session.pubkey != expected {
         anyhow::bail!(
@@ -92,12 +94,17 @@ pub(crate) fn prepare_session_identity(
                 agent.slug
             );
         }
-        let pubkey = agent.pubkey_hex();
+        let pubkey = agent
+            .pubkey_hex()
+            .context("durable agent has no configured key")?;
         if state.with_store(|store| store.is_derived_session_pubkey(&pubkey))? {
             anyhow::bail!("durable pubkey {pubkey} already has derived signer material");
         }
         return Ok(PreparedIdentity {
-            keys: agent.keys.clone(),
+            keys: agent
+                .keys
+                .clone()
+                .context("durable agent has no configured key")?,
             identity: crate::identity::SessionIdentity::durable_agent(pubkey, agent.slug.clone()),
             reclaimed_pubkey: None,
         });

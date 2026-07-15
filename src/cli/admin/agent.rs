@@ -44,7 +44,10 @@ pub async fn agent(action: AgentAction) -> Result<()> {
                 "{} {} {}",
                 verb,
                 slug.bold(),
-                pubkey_short(&id.pubkey_hex()).cyan()
+                id.pubkey_hex()
+                    .map(|pubkey| pubkey_short(&pubkey))
+                    .unwrap_or_else(|| "per-session".to_string())
+                    .cyan()
             );
             println!("  harness: {}", id.harness.dimmed());
             println!(
