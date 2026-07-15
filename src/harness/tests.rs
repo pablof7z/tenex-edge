@@ -169,3 +169,27 @@ fn native_selector_uses_only_supported_driver_cells() {
     .unwrap();
     assert_eq!(resolved.base_argv, ["claude", "--agent", "reviewer"]);
 }
+
+#[test]
+fn codex_app_server_defers_custom_agent_to_thread_start() {
+    let cfg: HarnessesConfig =
+        serde_json::from_str(r#"{"codex-rpc":{"harness":"codex","transport":"app-server"}}"#)
+            .unwrap();
+    let scratch = scratch();
+    let mut resolved = resolve_with(&cfg, "codex-rpc", None, scratch.path()).unwrap();
+    apply_native_agent(
+        &mut resolved,
+        &crate::agent_catalog::NativeAgentActivation::CodexRoot(
+            crate::agent_catalog::CodexRootConfig {
+                developer_instructions: "Review carefully".into(),
+                config: toml::from_str("model = 'gpt-5.4'").unwrap(),
+            },
+        ),
+        scratch.path(),
+    )
+    .unwrap();
+
+    assert_eq!(resolved.base_argv, ["codex", "app-server"]);
+    assert!(resolved.profile.files.is_empty());
+    assert!(resolved.profile.codex_home.is_none());
+}
