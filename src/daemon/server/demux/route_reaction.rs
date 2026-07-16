@@ -50,7 +50,11 @@ pub(super) async fn publish_eye_reaction(state: &Arc<DaemonState>, event: &Event
             return;
         }
     };
-    if let Err(e) = state.transport.publish_signed(builder, &mgmt_keys).await {
+    if let Err(e) = state
+        .nmp
+        .publish_group_builder(builder, &mgmt_keys, false)
+        .await
+    {
         tracing::warn!(
             event_id = %&event_id[..8],
             channel = %channel_h,

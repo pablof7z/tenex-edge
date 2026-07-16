@@ -1,5 +1,5 @@
 use crate::state::{RegisterSession, Store};
-use crate::turn_context::{assemble_turn_check_context, assemble_turn_start_context};
+use crate::turn_context::{assemble_turn_check_context, render_turn_start_text_for_test};
 use std::sync::Mutex;
 
 #[path = "turn_context/fixtures.rs"]
@@ -16,7 +16,7 @@ fn quiet_non_first_turn_only_renders_output_mode_notice() {
     rec.seen_cursor = crate::util::now_secs();
     let m = Mutex::new(store);
 
-    let ctx = assemble_turn_start_context(
+    let ctx = render_turn_start_text_for_test(
         &m, &rec, BACKEND, "laptop", /* prev_turn_started_at */ 42,
     );
     let text = ctx.expect("headed-mode notice expected");
@@ -31,7 +31,7 @@ fn first_turn_renders_awareness_snapshot_not_session_code() {
     let rec = test_session("sess-intro");
     let m = Mutex::new(store);
 
-    let text = assemble_turn_start_context(&m, &rec, BACKEND, "laptop", 0)
+    let text = render_turn_start_text_for_test(&m, &rec, BACKEND, "laptop", 0)
         .expect("first-turn intro expected");
     assert!(
         text.contains("<mosaico>"),
@@ -89,7 +89,7 @@ fn first_turn_snapshot_uses_bound_instance_identity() {
     let rec = store.get_session("pk-coder1").unwrap().unwrap();
     let m = Mutex::new(store);
 
-    let text = assemble_turn_start_context(&m, &rec, BACKEND, "laptop", 0)
+    let text = render_turn_start_text_for_test(&m, &rec, BACKEND, "laptop", 0)
         .expect("first-turn intro expected");
     assert!(
         text.contains("Agent: coder · Session: @willow-vale-071-coder · Backend: laptop"),
@@ -121,7 +121,7 @@ fn ended_turn_with_cursor_uses_delta_not_snapshot() {
     rec.seen_cursor = 150;
     let m = Mutex::new(store);
 
-    let text = assemble_turn_start_context(
+    let text = render_turn_start_text_for_test(
         &m, &rec, BACKEND, "laptop", /* turn_end cleared this */ 0,
     )
     .expect("fresh chat past the cursor must surface");
@@ -150,7 +150,7 @@ fn first_turn_warns_when_session_has_no_live_pty_endpoint() {
     let rec = test_session("sess-no-pty");
     let m = Mutex::new(store);
 
-    let text = assemble_turn_start_context(&m, &rec, BACKEND, "laptop", 0)
+    let text = render_turn_start_text_for_test(&m, &rec, BACKEND, "laptop", 0)
         .expect("first-turn intro expected");
     assert!(
         text.contains("This session cannot receive automatic steering while idle."),
@@ -180,7 +180,7 @@ fn first_turn_omits_pty_warning_when_session_has_a_live_endpoint() {
         .unwrap();
     let m = Mutex::new(store);
 
-    let text = assemble_turn_start_context(&m, &rec, BACKEND, "laptop", 0)
+    let text = render_turn_start_text_for_test(&m, &rec, BACKEND, "laptop", 0)
         .expect("first-turn intro expected");
     assert!(
         !text.contains("This session cannot receive automatic steering while idle."),

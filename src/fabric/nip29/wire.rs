@@ -63,10 +63,6 @@ fn tag(parts: &[&str]) -> Result<Tag> {
     Ok(Tag::parse(parts.iter().copied())?)
 }
 
-pub(crate) fn h_filter(f: Filter, channel: &str) -> Filter {
-    f.custom_tag(SingleLetterTag::lowercase(Alphabet::H), channel)
-}
-
 fn h_tag(channel: &str) -> Result<Tag> {
     tag(&["h", channel])
 }

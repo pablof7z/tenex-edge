@@ -12,10 +12,7 @@ mod render;
 mod tests;
 mod tree;
 
-pub(crate) use capture::{
-    capture_inputs, MembersInput, MessagesInput, MetaInput, PresenceInput, ReactionsInput,
-    ViewInputs,
-};
+pub(crate) use capture::{capture_inputs, ViewInputs};
 pub(crate) use messages::{is_backend_pubkey, p_tag_pubkeys};
 pub(crate) use model::FabricView;
 
@@ -23,9 +20,7 @@ use human_render::{render_human_view, render_human_views};
 use render::render_view;
 
 /// Stringify an already-derived [`FabricView`] into the exact `<mosaico>`
-/// snapshot agents see. The Trellis reconciler derives the view from declared
-/// inputs and hands it here, so the "how it is produced" changes while the
-/// rendered bytes do not.
+/// snapshot agents see.
 pub(crate) fn render_view_text(view: &FabricView) -> String {
     render_view(view)
 }

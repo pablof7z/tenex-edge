@@ -1,7 +1,7 @@
 //! The stamped persistence schema.
 //! Six `relay_*` tables are materialized caches and may be dropped/rebuilt from
 //! relay state. The remaining local tables are non-rebuildable daemon state:
-//! runtime bindings and locators, inbox/outbox, event claims, channel
+//! runtime bindings and locators, inbox, event claims, channel
 //! reservations, and workspace roots.
 use anyhow::{Context, Result};
 use rusqlite::Connection;
@@ -12,6 +12,32 @@ mod ddl;
 mod version;
 
 use ddl::SCHEMA;
+
+const CANONICAL_TABLES: &[&str] = &[
+    "channel_readiness_attempts",
+    "channel_resolution_intents",
+    "event_claims",
+    "handle_leases",
+    "inbox",
+    "message_recipients",
+    "messages",
+    "receipts",
+    "relay_agent_roster",
+    "relay_channel_member_sets",
+    "relay_channel_members",
+    "relay_channels",
+    "relay_event_quarantine",
+    "relay_events",
+    "relay_profiles",
+    "relay_reactions",
+    "relay_status",
+    "session_channels",
+    "session_claims",
+    "session_locators",
+    "session_signers",
+    "sessions",
+    "workspace_roots",
+];
 
 pub(super) fn initialize_file(conn: &mut Connection, path: &Path) -> Result<()> {
     version::check(conn, path)?;
@@ -31,9 +57,9 @@ pub(super) fn initialize_memory(conn: &Connection) -> Result<()> {
 }
 
 fn validate_canonical(conn: &Connection, path: Option<&Path>) -> Result<()> {
+    ensure_only_tables(conn, CANONICAL_TABLES, path)?;
     ensure_table(conn, "workspace_roots", path)?;
     ensure_absent_table(conn, "project_roots", path)?;
-    ensure_table(conn, "trellis_replay_capsules", path)?;
     ensure_table(conn, "session_signers", path)?;
     ensure_table(conn, "session_locators", path)?;
     ensure_absent_table(conn, "session_aliases", path)?;
@@ -74,7 +100,6 @@ fn validate_canonical(conn: &Connection, path: Option<&Path>) -> Result<()> {
     )?;
     ensure_columns(conn, "relay_profiles", &["agent_slug"], &[], path)?;
     ensure_columns(conn, "relay_status", &["state"], &["busy"], path)?;
-    ensure_columns(conn, "outbox", &["next_attempt_at"], &[], path)?;
     ensure_table(conn, "event_claims", path)?;
     ensure_columns(
         conn,
@@ -122,7 +147,13 @@ fn validate_canonical(conn: &Connection, path: Option<&Path>) -> Result<()> {
     ensure_columns(
         conn,
         "sessions",
-        &["pubkey", "runtime_generation", "explicit_chat_published_at"],
+        &[
+            "pubkey",
+            "runtime_generation",
+            "work_root",
+            "readiness_parent",
+            "explicit_chat_published_at",
+        ],
         &[
             "session_id",
             "agent_pubkey",
@@ -151,6 +182,26 @@ fn validate_canonical(conn: &Connection, path: Option<&Path>) -> Result<()> {
         path,
     )?;
     Ok(())
+}
+
+fn ensure_only_tables(conn: &Connection, canonical: &[&str], path: Option<&Path>) -> Result<()> {
+    let mut stmt = conn.prepare(
+        "SELECT name FROM sqlite_master \
+         WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+    )?;
+    let actual = stmt
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<BTreeSet<_>>>()?;
+    let expected = canonical.iter().copied().map(str::to_string).collect();
+    if actual == expected {
+        return Ok(());
+    }
+    let unexpected = actual.difference(&expected).cloned().collect::<Vec<_>>();
+    let missing = expected.difference(&actual).cloned().collect::<Vec<_>>();
+    bail_non_canonical(
+        path,
+        format!("table set differs; unexpected={unexpected:?}, missing={missing:?}"),
+    )
 }
 
 fn ensure_table(conn: &Connection, table: &str, path: Option<&Path>) -> Result<()> {

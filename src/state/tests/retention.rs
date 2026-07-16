@@ -42,24 +42,6 @@ fn unstamped_existing_schema_fails_loudly() {
 }
 
 #[test]
-fn retention_prune_preserves_pending_outbox() {
-    let s = Store::open_memory().unwrap();
-    let pending = s.enqueue_outbox("{\"pending\":true}", 1).unwrap();
-    let old_done = s.enqueue_outbox("{\"old\":true}", 1).unwrap();
-    let new_done = s.enqueue_outbox("{\"new\":true}", 10).unwrap();
-    s.apply_outbox_projection(old_done, "published", None, false)
-        .unwrap();
-    s.apply_outbox_projection(new_done, "published", None, false)
-        .unwrap();
-
-    let report = s.prune_retained_state_before(0, 5).unwrap();
-
-    assert_eq!(report.published_outbox, 1);
-    assert_eq!(s.peek_outbox(10, u64::MAX).unwrap()[0].local_id, pending);
-    assert_eq!(count_rows(&s, "outbox"), 2);
-}
-
-#[test]
 fn retention_prune_preserves_pending_inbox() {
     let s = Store::open_memory().unwrap();
     s.reserve_session(&reg("claude-code", "x", "h1")).unwrap();

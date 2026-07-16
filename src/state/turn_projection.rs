@@ -1,8 +1,7 @@
 use super::*;
 
 impl Store {
-    /// Apply the Trellis-derived local turn projection. The graph decides the
-    /// values; this method only writes them to the canonical row.
+    /// Apply the canonical local turn projection.
     pub fn apply_turn_projection(
         &self,
         pubkey: &str,
@@ -28,13 +27,18 @@ impl Store {
         Ok(())
     }
 
-    /// Apply the Trellis-derived cursor transition. The cursor graph decides
-    /// whether a render request advances; this method only writes the result.
-    pub fn apply_cursor_projection(&self, pubkey: &str, seen_cursor: u64) -> Result<()> {
-        self.conn.execute(
-            "UPDATE sessions SET seen_cursor=?2 WHERE pubkey=?1",
-            params![pubkey, seen_cursor],
-        )?;
-        Ok(())
+    /// Atomically advance the awareness cursor if the caller still observes the
+    /// canonical value it read. Returns false when another hook already advanced
+    /// it or the session row disappeared.
+    pub fn advance_cursor_if_current(
+        &self,
+        pubkey: &str,
+        expected: u64,
+        seen_cursor: u64,
+    ) -> Result<bool> {
+        Ok(self.conn.execute(
+            "UPDATE sessions SET seen_cursor=?3 WHERE pubkey=?1 AND seen_cursor=?2",
+            params![pubkey, expected, seen_cursor],
+        )? == 1)
     }
 }

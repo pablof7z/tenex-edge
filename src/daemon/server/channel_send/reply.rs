@@ -1,6 +1,6 @@
 use super::super::*;
 use super::{explicit_publish::note_explicit_chat_published, recipient_notice};
-use crate::fabric::provider::chat::{OutboundChatRecipient, OutboundChatRecord};
+use crate::fabric::provider::chat::OutboundChatRecord;
 use crate::state::{Message, Session};
 use crate::util::CHANNEL_MESSAGE_CHAR_LIMIT;
 use anyhow::{bail, Context, Result};
@@ -76,9 +76,6 @@ pub(in crate::daemon::server) async fn rpc_channel_reply(
             &keys,
             &OutboundChatRecord {
                 channel_h: original.channel_h.clone(),
-                body: body.clone(),
-                recipients: vec![OutboundChatRecipient::new(original.author_pubkey.clone())],
-                created_at: Some(now_secs()),
                 direction: "outbound",
             },
         )

@@ -19,6 +19,7 @@ pub async fn run() -> Result<()> {
         config = %storage.config_path.display(),
         socket = %storage.socket_path.display(),
         state_db = %storage.state_db_path.display(),
+        nmp_store = %storage.nmp_store_path.display(),
         daemon_log = %storage.daemon_log_path.display(),
         lock = %storage.lock_path.display(),
         mosaico_home_set = storage.mosaico_home_set,
@@ -29,8 +30,8 @@ pub async fn run() -> Result<()> {
     let cfg = Config::load().context("loading config")?;
     let host = cfg.host.clone();
     let owners = cfg.whitelisted_pubkeys.clone();
-    let started_at = now_secs();
-    // One relay connection. AUTH identity is irrelevant to delivery (verified:
+    // The narrow direct client handles profile indexer copies and one-shot
+    // fetches outside NMP. Its AUTH identity is irrelevant to delivery (verified:
     // an A-authed connection receives events p-tagged to B), so authenticate
     // with the backend's own key (`mosaicoPrivateKey`) rather than minting a
     // separate identity — a fresh keystore file would land in the same
@@ -40,15 +41,9 @@ pub async fn run() -> Result<()> {
         .backend_nsec()
         .and_then(|nsec| Keys::parse(nsec).ok())
         .unwrap_or_else(Keys::generate);
-    // The indexer relay is added with full READ+WRITE flags (see
-    // `Transport::write_relay_urls` doc) and targeted explicitly for kind:0
-    // profile publishes via `publish_event_to`. It MUST stay OUT of
-    // `write_relay_urls` (the broadcast target for every other publish): the
-    // indexer (purplepag.es) rejects all NIP-29 kinds ("blocked: kind 9000 is
-    // not allowed"), and that rejection would pollute `assert_relay_accepted`'s
-    // joined-reason verdict whenever the main relay also returned a benign
-    // rejection — turning recoverable NIP-29 states into permanent
-    // `ChannelGate::Degraded`.
+    // The indexer is a direct-client target only for kind:0 profile copies and
+    // one-shot lookups. NIP-29 group writes are composed and routed by NMP, so
+    // the indexer can never receive or reject them accidentally.
     let indexer = if cfg.relays.contains(&cfg.indexer_relay) {
         None
     } else {
@@ -65,8 +60,14 @@ pub async fn run() -> Result<()> {
         "relay pool connected"
     );
     let store = Arc::new(Mutex::new(Store::open(&store_path())?));
+    let nmp = Arc::new(crate::nmp_host::NmpHost::open(
+        &cfg.relays,
+        Some(&cfg.indexer_relay),
+        Some(&storage.nmp_store_path),
+    )?);
     let provider = Arc::new(Nip29Provider::new(
         transport.clone(),
+        nmp.clone(),
         store.clone(),
         cfg.management_nsec().cloned(),
         cfg.user_nsec().cloned(),
@@ -76,22 +77,17 @@ pub async fn run() -> Result<()> {
         store,
         transport,
         provider,
+        nmp,
         cfg,
         host,
-        started_at,
         owners,
         agent_catalog: Mutex::new(crate::agent_catalog::AgentCatalog::default()),
         hosted: Mutex::new(HashMap::new()),
         sessions: Mutex::new(HashMap::new()),
         subscribed_root_channels: Mutex::new(Vec::new()),
-        subs: Mutex::new(crate::reconcile::SubscriptionReconciler::new().expect("subs")),
+        subs: Mutex::new(crate::reconcile::SubscriptionReconciler::new()),
+        subscription_sync: tokio::sync::Mutex::new(()),
         status: Arc::new(Mutex::new(StatusReconciler::for_ttl(status_ttl_duration()))),
-        delivery: Mutex::new(crate::reconcile::DeliveryReconciler::new()),
-        turn_lifecycle: Mutex::new(crate::reconcile::TurnLifecycleReconciler::new()),
-        cursor: Mutex::new(crate::reconcile::CursorReconciler::new()),
-        session_start: Mutex::new(crate::reconcile::SessionStartReconciler::new()),
-        session_watch: Mutex::new(crate::reconcile::Reconciler::new().expect("session_watch")),
-        outbox: Arc::new(Mutex::new(crate::reconcile::OutboxReconciler::new())),
         hook_contexts: Mutex::new(HashMap::new()),
         tail_tx: tokio::sync::broadcast::channel(512).0,
         open_clients: Mutex::new(0),
@@ -104,14 +100,11 @@ pub async fn run() -> Result<()> {
         seen_profiles: Mutex::new(std::collections::HashSet::new()),
         warming: Mutex::new(std::collections::HashSet::new()),
         last_status: Mutex::new(HashMap::new()),
-        outbox_notify: Notify::new(),
     });
 
     // These tolerate a not-yet-connected relay, so they start now.
     spawn_demux(state.clone());
     spawn_pruner(state.clone());
-    spawn_trellis_oracle_sampler(state.clone());
-    spawn_outbox_drainer(state.clone());
 
     let accept_state = state.clone();
     let accept = tokio::spawn(async move {
@@ -133,9 +126,8 @@ pub async fn run() -> Result<()> {
         }
     });
 
-    // Relay startup runs off the accept path, so store-only RPCs respond immediately. Warm up the
-    // connection (await connectivity + NIP-42 auth) BEFORE opening any
-    // subscription — a REQ opened pre-auth on an auth-gated relay never delivers.
+    // Relay startup runs off the accept path, so store-only RPCs respond immediately.
+    // Warm the narrow direct connection before profile copies and fetches.
     let relay_state = state.clone();
     tokio::spawn(async move {
         relay_state.transport.warmup().await;
@@ -163,15 +155,16 @@ pub async fn run() -> Result<()> {
         membership_cleanup::cleanup_dead_local_sessions(&relay_state);
         roster_bootstrap::seed_spawn_on_mention_coverage(&relay_state);
 
-        // Seed the daemon-lifetime kind:9000 discovery REQ plus the refcounted
-        // per-entity #h / #p / group-state REQs. No kind:0 is subscribed — a
+        // Seed the daemon-lifetime kind:9000 discovery observation plus the
+        // refcounted per-entity #h / #p / group-state observations. No kind:0 is
+        // observed live — a
         // put-user p-tag triggers an on-demand profile fetch in the demux.
-        if let Err(e) = resubscribe(&relay_state).await {
-            tracing::warn!(error = %e, "initial resubscribe failed");
+        if let Err(e) = sync_subscriptions(&relay_state).await {
+            tracing::warn!(error = %e, "initial subscription sync failed");
         }
 
-        // Revive sessions a previous daemon left behind + (re)open their channel
-        // subscriptions. Subscriptions go out post-auth.
+        // Revive sessions a previous daemon left behind and reconcile their NMP
+        // observations.
         reconcile_sessions(&relay_state).await;
         // Re-adopted sessions may already have inbox rows from before the daemon
         // restart. Session start rings these rows, but reconciliation does not;
@@ -189,6 +182,7 @@ pub async fn run() -> Result<()> {
     tracing::info!("daemon shutting down");
     accept.abort();
     cleanup();
+    state.nmp.shutdown();
     state.transport.shutdown().await;
     drop(lock);
     Ok(())

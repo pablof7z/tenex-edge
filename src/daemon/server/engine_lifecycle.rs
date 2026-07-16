@@ -1,7 +1,7 @@
 use super::*;
 
 mod params;
-mod session_watch;
+mod reconcile_context;
 #[cfg(test)]
 mod tests;
 
@@ -14,7 +14,6 @@ pub(in crate::daemon::server) async fn spawn_session(
     let pubkey = params.identity.pubkey.clone();
     let runtime_generation = params.runtime_generation;
     let channel = params.channel.clone();
-    let watch_pid = params.watch_pid;
 
     tracing::info!(
         agent = %params.identity.slug,
@@ -27,8 +26,14 @@ pub(in crate::daemon::server) async fn spawn_session(
     let cancel = Arc::new(Notify::new());
     {
         let mut sessions = state.sessions.lock().unwrap();
-        if sessions.contains_key(&pubkey) {
-            anyhow::bail!("pubkey {pubkey} already has an active runtime");
+        if let Some(previous) = sessions.get(&pubkey) {
+            if previous.runtime_generation >= runtime_generation {
+                anyhow::bail!("pubkey {pubkey} already has an active runtime");
+            }
+            // The store has already admitted a newer generation. Retain a
+            // cancellation permit for the old engine even if it is still in
+            // startup I/O and has not reached its select loop yet.
+            previous.cancel.notify_one();
         }
         sessions.insert(
             pubkey.clone(),
@@ -56,17 +61,13 @@ pub(in crate::daemon::server) async fn spawn_session(
         }
     });
 
-    session_watch::started(state, &pubkey, &channel, watch_pid, "spawn-session");
-
     let st = state.clone();
     let task_pubkey = pubkey.clone();
     let provider = state.provider.clone();
     let store = state.store.clone();
     let status = state.status.clone();
-    let outbox = state.outbox.clone();
     tokio::spawn(async move {
-        let res =
-            runtime::run_session_in_daemon(params, provider, store, cancel, status, outbox).await;
+        let res = runtime::run_session_in_daemon(params, provider, store, cancel, status).await;
         if let Err(e) = res {
             tracing::warn!(pubkey = %task_pubkey, runtime_generation, error = %e, "session task exited with error");
         }
@@ -86,7 +87,6 @@ pub(in crate::daemon::server) async fn spawn_session(
             tracing::debug!(pubkey = %task_pubkey, runtime_generation, "ignoring stale runtime teardown");
             return;
         }
-        session_watch::exited(&st, &task_pubkey, watch_pid, "engine-exit");
         match st.with_store(|s| s.mark_dead_if_generation(&task_pubkey, runtime_generation)) {
             Ok(true) => {}
             Ok(false) => tracing::debug!(
@@ -122,7 +122,10 @@ pub(in crate::daemon::server) fn prune_hosted(state: &Arc<DaemonState>) {
 
 pub(in crate::daemon::server) fn cancel_session(state: &Arc<DaemonState>, pubkey: &str) -> bool {
     if let Some(h) = state.sessions.lock().unwrap().get(pubkey) {
-        h.cancel.notify_waiters();
+        // `notify_one` retains a permit when the engine is still doing startup
+        // I/O; `notify_waiters` would lose cancellation before `notified()` is
+        // first polled and leave a dead generation occupying the runtime map.
+        h.cancel.notify_one();
         true
     } else {
         false
@@ -142,7 +145,6 @@ pub(in crate::daemon::server) fn cancel_session(state: &Arc<DaemonState>, pubkey
 /// (`ChannelGate::Degraded`) or a spawn hiccup — no longer reap a live session;
 /// correctness on a not-yet-ready channel is upheld by the send-time gate.
 pub(in crate::daemon::server) async fn reconcile_sessions(state: &Arc<DaemonState>) {
-    let now = now_secs();
     let snaps = state.with_store(|s| s.list_alive_sessions().unwrap_or_default());
     tracing::info!(
         session_count = snaps.len(),
@@ -173,7 +175,6 @@ pub(in crate::daemon::server) async fn reconcile_sessions(state: &Arc<DaemonStat
                     }
                 }
             });
-            session_watch::exited_at(state, &pubkey, snap.child_pid, now, "reconcile-dead-pid");
             continue;
         }
         tracing::info!(
@@ -205,12 +206,10 @@ pub(in crate::daemon::server) async fn reconcile_sessions(state: &Arc<DaemonStat
 
         // Re-establish membership + the group-state subscription through the one
         // channel-provisioning primitive. The scope may be a top-level channel
-        // (root channel) or a subgroup; its stored parent (if any) is the
-        // readiness gate's parent_hint. Idempotent: the relay_channel* cache
-        // persists across restarts, so already-ready channels fast-path.
-        let parent_hint = state
-            .with_store(|s| s.channel_parent(&snap.channel_h).ok().flatten())
-            .filter(|p| !p.is_empty());
+        // (root channel) or a subgroup. Relay-authored parent state wins; the
+        // admission-time immediate parent is retained only for a restart before
+        // metadata materializes. Idempotent ready channels still fast-path.
+        let parent_hint = reconcile_context::parent_hint(state, &snap);
         let gate = state
             .provider
             .ensure_channel_ready(crate::fabric::nip29::readiness::ChannelCtx {
@@ -239,7 +238,7 @@ pub(in crate::daemon::server) async fn reconcile_sessions(state: &Arc<DaemonStat
         if let Err(e) = ensure_subscription(state, &snap.channel_h).await {
             tracing::warn!(channel = %snap.channel_h, error = %e, "ensure_subscription failed during reconcile");
         }
-        let workspace = state.with_store(|s| resolution::work_root_for(s, &snap.channel_h));
+        let workspace = reconcile_context::workspace(state, &snap);
         let ep = engine_params_for(
             &state.cfg,
             identity,
@@ -264,8 +263,6 @@ pub(in crate::daemon::server) async fn reconcile_sessions(state: &Arc<DaemonStat
             );
         }
     }
-    // Any registration/end transitions above enqueued publishes.
-    state.outbox_notify.notify_waiters();
 }
 
 // Single source of truth for pid liveness (defect #17). The `pid > 0` guard

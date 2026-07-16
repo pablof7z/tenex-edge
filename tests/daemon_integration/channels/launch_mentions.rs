@@ -211,6 +211,8 @@ async fn publish_user_kind9(channel: &str, body: &str, mentioned_pubkey: &str) -
     signed.id.to_hex()
 }
 
+#[path = "launch_mentions/fixtures.rs"]
+mod fixtures;
 #[path = "launch_mentions/working.rs"]
 mod working;
 
@@ -230,14 +232,12 @@ fn operator_kind9_to_offline_local_agent_spawns_and_injects() {
     let _path = install_opencode_shim(&home, &native_session, &work_dir, &log);
     identity::add_local_agent(home.dir.path(), agent, "offline-test", None, 1)
         .expect("add local agent");
-    // Seed an offline profile so the mention resolves the p-tagged pubkey to this
-    // agent. With no native id to resume, the handler falls through to a fresh
-    // spawn (a new session that mints its own pubkey).
-    let agent_pubkey = Keys::generate().public_key().to_hex();
-    Store::open(&home.store_path())
-        .unwrap()
-        .upsert_profile_with_agent_slug(&agent_pubkey, agent, agent, agent, "test-host", false, 1)
-        .expect("seed offline profile");
+    // Seed the dead local session whose old pubkey is being mentioned. The
+    // profile resolves that pubkey to the configured agent; the session row is
+    // the durable proof that the target belongs to this backend. With no native
+    // id to resume, the handler falls through to a fresh spawn (a new session
+    // that mints its own pubkey).
+    let agent_pubkey = fixtures::seed_dormant_local_session(&home, &channel, agent);
 
     rt().block_on(async {
         let mut c = DaemonClient::connect_or_spawn().await.expect("connect");

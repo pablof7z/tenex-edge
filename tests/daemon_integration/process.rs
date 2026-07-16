@@ -6,6 +6,8 @@ use mosaico::state::Store;
 mod hooks;
 #[path = "process/statusline.rs"]
 mod statusline;
+#[path = "process/who.rs"]
+mod who;
 
 #[test]
 fn sixteen_concurrent_writers_no_corruption_single_writer() {
@@ -291,71 +293,6 @@ fn claude_user_prompt_submit_reasserts_missing_session() {
         .expect("revived session row");
     assert!(rec.alive);
     assert_eq!(rec.agent_slug, "claude");
-
-    stop_daemon(&home);
-}
-
-#[test]
-fn who_all_workspaces_uses_unified_fabric_render_not_old_table() {
-    // Regression for the divergence the user flagged live: `who --all-workspaces`
-    // must render through the SAME fabric pipeline as single-channel `who`
-    // (one channel block per workspace), not the old flat markdown table.
-    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let home = Home::new().with_backend_key();
-    rt().block_on(async {
-        let mut c = Client::connect_or_spawn().await.expect("connect");
-        c.call("ping", serde_json::json!({})).await.expect("ping");
-    });
-
-    // Register a second channel alongside the default "tmp" -> /tmp mapping.
-    let second_dir = tempfile::tempdir().unwrap();
-    let workspace_map = serde_json::json!({ "tmp": "/tmp", "proj2": second_dir.path() });
-    std::fs::write(
-        home.dir.path().join("workspaces.json"),
-        serde_json::to_string(&workspace_map).unwrap(),
-    )
-    .unwrap();
-
-    let out = run_cli_stdin(
-        &home,
-        &["harness", "hook", "opencode", "--type", "session-start"],
-        r#"{"cwd":"/tmp","session_id":"sid-tmp"}"#,
-    );
-    assert!(out.status.success(), "session-start (tmp) failed");
-
-    let payload = serde_json::json!({
-        "cwd": second_dir.path().display().to_string(),
-        "session_id": "sid-proj2",
-    })
-    .to_string();
-    let out = run_cli_stdin_with_env_in_dir(
-        &home,
-        &["harness", "hook", "opencode", "--type", "session-start"],
-        &payload,
-        &[],
-        second_dir.path(),
-    );
-    assert!(out.status.success(), "session-start (proj2) failed");
-
-    let out = run_cli(&home, &["who", "--all-workspaces"]);
-    assert!(
-        out.status.success(),
-        "who --all-workspaces failed: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    let who = String::from_utf8_lossy(&out.stdout);
-    assert!(
-        !who.contains("| Agent | Host | Title | Status |"),
-        "who --all-workspaces still uses the old markdown table renderer:\n{who}"
-    );
-    assert!(
-        who.contains("opencode"),
-        "who --all-workspaces missing agent:\n{who}"
-    );
-    assert!(
-        who.contains("tmp") && who.contains("proj2"),
-        "who --all-workspaces missing a channel block:\n{who}"
-    );
 
     stop_daemon(&home);
 }

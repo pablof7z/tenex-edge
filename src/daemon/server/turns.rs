@@ -53,14 +53,8 @@ pub(in crate::daemon::server) async fn rpc_turn_start(
         .as_deref()
         .filter(|x| !x.is_empty())
         .map(str::to_string);
-    turn_lifecycle::drive_turn_started(
-        state,
-        turn_lifecycle::seed_from_session(&before),
-        now,
-        transcript_ref,
-    )
-    .context("applying turn_start lifecycle projection")?;
-    state.outbox_notify.notify_waiters();
+    turn_lifecycle::drive_turn_started(state, &before, now, transcript_ref)
+        .context("applying turn_start lifecycle projection")?;
 
     let rec = state
         .with_store(|s| s.get_session(&before.pubkey).ok().flatten())
@@ -95,13 +89,8 @@ pub(in crate::daemon::server) async fn rpc_turn_start(
     );
     let audit = turn.receipt.to_json();
     record_hook_receipt(state, &turn);
-    cursor::drive_cursor_request(
-        state,
-        "turn_start",
-        cursor::seed_from_session(&rec),
-        cursor::fact_from_session(&rec, turn.receipt.now.max(0) as u64, true),
-    )
-    .context("applying cursor turn_start projection")?;
+    cursor::drive_cursor_request(state, &rec, turn.receipt.now.max(0) as u64, true)
+        .context("applying cursor turn_start projection")?;
     let context = turn
         .text
         .map(serde_json::Value::String)
@@ -126,16 +115,6 @@ fn record_hook_receipt(state: &Arc<DaemonState>, turn: &crate::turn_context::Tur
     };
     state.with_store(|s| {
         crate::instrument::record_receipt(s, row);
-        if let Some(fact) = turn.replay_fact.clone() {
-            crate::replay_capsules::record(
-                s,
-                "hook_context",
-                &r.kind,
-                Some(&r.pubkey),
-                fact,
-                created_at,
-            );
-        }
     });
 }
 
@@ -145,13 +124,8 @@ pub(in crate::daemon::server) async fn rpc_turn_check(
 ) -> Result<serde_json::Value> {
     let rec = resolve_session(state, &CallerAnchor::from_params(params))?;
     let now = now_secs();
-    let delta_since = cursor::drive_cursor_request(
-        state,
-        "turn_check",
-        cursor::seed_from_session(&rec),
-        cursor::fact_from_session(&rec, now, rec.working),
-    )
-    .context("applying cursor turn_check projection")?;
+    let delta_since = cursor::drive_cursor_request(state, &rec, now, rec.working)
+        .context("applying cursor turn_check projection")?;
     schedule_context_profile_warm(state.clone(), rec.clone(), delta_since.unwrap_or(now));
     let turn = crate::turn_context::assemble_turn_check(
         &state.store,
@@ -193,10 +167,9 @@ pub(in crate::daemon::server) async fn rpc_turn_end(
         .unwrap_or((false, 0));
     let now = now_secs();
     if let Some(rec) = pre.as_ref() {
-        turn_lifecycle::drive_turn_ended(state, turn_lifecycle::seed_from_session(rec), now)
+        turn_lifecycle::drive_turn_ended(state, rec)
             .context("applying turn_end lifecycle projection")?;
     }
-    state.outbox_notify.notify_waiters();
 
     let rec = state.with_store(|s| s.get_session(&p.harness_session).ok().flatten());
 

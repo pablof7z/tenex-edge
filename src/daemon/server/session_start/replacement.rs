@@ -29,9 +29,10 @@ pub(super) fn retire_conflicting_pid_runtime(
     if !old.alive || old.agent_slug != agent_slug {
         return Ok(());
     }
-    let old_work_root = state.with_store(|store| {
-        crate::daemon::server::resolution::work_root_for(store, &old.channel_h)
-    });
+    let old_work_root = state
+        .with_store(|store| store.root_channel_of(&old.channel_h).ok().flatten())
+        .or_else(|| (!old.work_root.is_empty()).then(|| old.work_root.clone()))
+        .unwrap_or_else(|| old.channel_h.clone());
     if old_work_root != new_work_root {
         return Ok(());
     }

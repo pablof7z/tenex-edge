@@ -1,8 +1,7 @@
 use crate::daemon::server::DaemonState;
 use crate::daemon::tail_event::TailEvent;
 use crate::domain::{AgentRef, ChatMessage};
-use crate::fabric::provider::chat::{OutboundChatRecipient, OutboundChatRecord};
-use crate::util::now_secs;
+use crate::fabric::provider::chat::OutboundChatRecord;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -78,7 +77,6 @@ pub(super) async fn publish_no_reply_notice(state: &Arc<DaemonState>, notice: No
             return;
         }
     };
-    let now = now_secs();
     let from = format!("{} (mosaico)", state.host);
     let chat = ChatMessage {
         from: AgentRef::new(keys.public_key().to_hex(), from.clone()),
@@ -92,13 +90,6 @@ pub(super) async fn publish_no_reply_notice(state: &Arc<DaemonState>, notice: No
     };
     let record = OutboundChatRecord {
         channel_h: notice.channel.to_string(),
-        body: body.clone(),
-        recipients: notice
-            .requester_pubkey
-            .map(OutboundChatRecipient::new)
-            .into_iter()
-            .collect(),
-        created_at: Some(now),
         direction: "outbound",
     };
     let published = match state

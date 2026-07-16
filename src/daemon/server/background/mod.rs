@@ -8,7 +8,5 @@
 //! Pure function movement — behavior is byte-identical to the pre-split file.
 
 mod pruner;
-mod trellis_oracle;
 
 pub(super) use pruner::spawn_pruner;
-pub(super) use trellis_oracle::spawn_trellis_oracle_sampler;

@@ -3,8 +3,11 @@ use crate::fabric::nip29::readiness::{ChannelCtx, ChannelGate};
 use std::future::Future;
 use std::pin::Pin;
 
+mod ancestry;
 mod attempt;
 mod verify;
+
+pub(super) use ancestry::stored_parent_hint;
 
 impl Nip29Provider {
     /// Ensure `ctx.channel` exists on the relay and has `ctx.expect_member`.
@@ -18,7 +21,24 @@ impl Nip29Provider {
             attempt::record(self, &ctx, "degraded", "empty channel id");
             return ChannelGate::Degraded;
         }
-        ensure_channel_ready_inner(self, ctx).await
+        let parent_hint = match ancestry::resolved_parent_hint(self, ctx.channel, ctx.parent_hint) {
+            Ok(parent) => parent,
+            Err(error) => {
+                return attempt::degraded(
+                    self,
+                    &ctx,
+                    format!("resolving channel ancestry failed: {error:#}"),
+                );
+            }
+        };
+        let normalized = ChannelCtx {
+            channel: ctx.channel,
+            expect_member: ctx.expect_member,
+            parent_hint: parent_hint.as_deref(),
+            name: ctx.name,
+            repair_whitelisted_admins: ctx.repair_whitelisted_admins,
+        };
+        ensure_channel_ready_inner(self, normalized).await
     }
 }
 
@@ -66,36 +86,12 @@ fn ensure_channel_ready_inner<'a>(
         let mgmt_pubkey = mgmt_keys.public_key().to_hex();
 
         let parent_admins: Vec<String> = if let Some(parent) = parent_hint {
-            let grandparent = provider
-                .with_store(|s| s.channel_parent(parent).unwrap_or(None))
-                .filter(|p| !p.is_empty());
-            let parent_ctx = ChannelCtx {
-                channel: parent,
-                expect_member: &mgmt_pubkey,
-                parent_hint: grandparent.as_deref(),
-                name: None,
-                repair_whitelisted_admins: ctx.repair_whitelisted_admins,
-            };
-            let parent_gate = ensure_channel_ready_inner(provider, parent_ctx).await;
-            if matches!(parent_gate, ChannelGate::Degraded) {
-                eprintln!(
-                    "[daemon] ensure_channel_ready: parent {:?} is degraded; aborting for {:?}",
-                    parent, ctx.channel
-                );
-                return attempt::degraded(
-                    provider,
-                    &ctx,
-                    format!("parent channel {parent} readiness degraded"),
-                );
+            match ancestry::ensure_parent(provider, &ctx, parent, &mgmt_pubkey).await {
+                Ok(admins) => admins,
+                Err(error) => {
+                    return attempt::degraded(provider, &ctx, error.to_string());
+                }
             }
-            provider.with_store(|s| {
-                s.list_channel_members(parent)
-                    .unwrap_or_default()
-                    .into_iter()
-                    .filter(|m| m.role == "admin")
-                    .map(|m| m.pubkey)
-                    .collect()
-            })
         } else {
             vec![]
         };

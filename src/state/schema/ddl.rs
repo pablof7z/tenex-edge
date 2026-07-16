@@ -146,6 +146,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     runtime_generation INTEGER NOT NULL,
     agent_slug        TEXT NOT NULL DEFAULT '',
     channel_h         TEXT NOT NULL DEFAULT '',
+    work_root         TEXT NOT NULL DEFAULT '',
+    readiness_parent  TEXT NOT NULL DEFAULT '',
     harness           TEXT NOT NULL DEFAULT '',
     child_pid         INTEGER,
     transcript_path   TEXT,
@@ -229,21 +231,6 @@ CREATE TABLE IF NOT EXISTS event_claims (
 CREATE INDEX IF NOT EXISTS idx_event_claims_state
     ON event_claims(state, updated_at);
 
-CREATE TABLE IF NOT EXISTS outbox (
-    local_id     INTEGER PRIMARY KEY AUTOINCREMENT,
-    event_json   TEXT NOT NULL,
-    state        TEXT NOT NULL DEFAULT 'pending',
-    retries      INTEGER NOT NULL DEFAULT 0,
-    last_error   TEXT,
-    enqueued_at  INTEGER NOT NULL,
-    -- Earliest wall-clock second this row may be (re)attempted. 0 = due now.
-    -- Set to now+backoff on a failed publish so a wedged relay can't induce a
-    -- retry storm; the drainer's peek gates on it.
-    next_attempt_at INTEGER NOT NULL DEFAULT 0
-);
-CREATE INDEX IF NOT EXISTS idx_outbox_pending
-    ON outbox(state, next_attempt_at, local_id);
-
 CREATE TABLE IF NOT EXISTS workspace_roots (
     channel_h   TEXT PRIMARY KEY,
     abs_path    TEXT NOT NULL,
@@ -272,19 +259,4 @@ CREATE TABLE IF NOT EXISTS receipts (
 );
 CREATE INDEX IF NOT EXISTS idx_receipts_surface ON receipts(surface, created_at);
 CREATE INDEX IF NOT EXISTS idx_receipts_artifact_ref ON receipts(artifact_ref);
-CREATE TABLE IF NOT EXISTS trellis_commits (id INTEGER PRIMARY KEY AUTOINCREMENT, surface TEXT NOT NULL, transaction_id INTEGER NOT NULL, revision INTEGER NOT NULL, mode TEXT NOT NULL DEFAULT '', trigger_kind TEXT NOT NULL, trigger_ref TEXT NOT NULL DEFAULT '', changed_inputs_json TEXT NOT NULL DEFAULT '[]', changed_derived_json TEXT NOT NULL DEFAULT '[]', changed_collections_json TEXT NOT NULL DEFAULT '[]', resource_commands_json TEXT NOT NULL DEFAULT '[]', output_frames_json TEXT NOT NULL DEFAULT '[]', command_count INTEGER NOT NULL DEFAULT 0, output_count INTEGER NOT NULL DEFAULT 0, effect_count INTEGER NOT NULL DEFAULT 0, suppressed_count INTEGER NOT NULL DEFAULT 0, noop INTEGER NOT NULL DEFAULT 0, oracle_status TEXT, oracle_error TEXT, duration_us INTEGER NOT NULL DEFAULT 0, graph_nodes INTEGER NOT NULL DEFAULT 0, graph_resources INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
-CREATE INDEX IF NOT EXISTS idx_trellis_commits_surface ON trellis_commits(surface, created_at);
-
-CREATE TABLE IF NOT EXISTS trellis_replay_capsules (
-    id             INTEGER PRIMARY KEY AUTOINCREMENT,
-    surface        TEXT NOT NULL,
-    trigger_kind   TEXT NOT NULL,
-    trigger_ref    TEXT NOT NULL DEFAULT '',
-    script_json    TEXT NOT NULL,
-    script_bytes   INTEGER NOT NULL,
-    format_version INTEGER NOT NULL DEFAULT 1,
-    created_at     INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_trellis_replay_capsules_surface
-    ON trellis_replay_capsules(surface, created_at);
 "#;

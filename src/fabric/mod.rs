@@ -1,17 +1,15 @@
-//! Fabric abstraction layer — Phase 4: materializer extracted from server.rs.
+//! Fabric abstraction layer around NMP I/O and provider materialization.
 //!
-//! Layering intent (see docs/fabric-architecture.md §Phase 3/4):
-//!   Delivery    (subscribe, publish)  ← NostrDelivery
+//! Layering intent:
+//!   Acquisition + durable group writes ← NMP
 //!   NostrEventCodec (encode, decode)  ← Nip29WireCodec
 //!   Materializer (store writes)       ← materialize()
-//!   Transport                         ← (private detail of NostrDelivery)
+//!   Profile indexer + one-shot reads   ← Transport
 
 mod admission;
 pub(crate) mod group_management;
 pub mod nip29;
-pub mod nostr_delivery;
 pub mod provider;
-pub(crate) mod subscriptions;
 
 /// Raw envelope currently emitted by the Nostr delivery path.
 ///
@@ -22,14 +20,6 @@ pub enum RawEnvelope {
     Nostr(nostr_sdk::Event),
 }
 
-/// Subscription scope that Delivery implementations convert into wire-level
-/// filters. Transport-agnostic.
-#[derive(Debug, Clone, Default)]
-pub struct Scope {
-    pub authors: Vec<String>,
-    pub channel: Option<String>,
-}
-
 /// Encode/decode between `DomainEvent` and Nostr event envelopes.
 ///
 /// The return type is `nostr_sdk::EventBuilder`, so this boundary is explicitly
@@ -37,13 +27,6 @@ pub struct Scope {
 pub trait NostrEventCodec {
     fn encode(&self, ev: &crate::domain::DomainEvent) -> anyhow::Result<nostr_sdk::EventBuilder>;
     fn decode(&self, env: &RawEnvelope) -> Option<crate::domain::DomainEvent>;
-}
-
-/// Shell trait for Delivery implementations — subscribe is inherent on
-/// `NostrDelivery` (avoids async-fn-in-trait / async_trait machinery).
-/// Full trait surface (publish, fetch, notifications, etc.) is Phase 5.
-pub trait Delivery {
-    fn name(&self) -> &'static str;
 }
 
 // ── Materializer output ───────────────────────────────────────────────────────

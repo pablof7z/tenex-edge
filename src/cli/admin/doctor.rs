@@ -3,7 +3,7 @@ use super::*;
 // ── doctor ───────────────────────────────────────────────────────────────────
 
 pub async fn doctor() -> Result<()> {
-    // The daemon owns the single relay connection, so it performs the probe.
+    // The daemon owns relay I/O, so it performs the probe.
     let v = daemon_call_async("doctor", serde_json::json!({})).await?;
     print!("{}", render_doctor(&v));
     Ok(())
@@ -27,6 +27,7 @@ pub(super) fn render_doctor(v: &serde_json::Value) -> String {
         writeln!(out, "socket: {}", storage_str(storage, "socket_path")).ok();
         writeln!(out, "lock: {}", storage_str(storage, "lock_path")).ok();
         writeln!(out, "state db: {}", storage_str(storage, "state_db_path")).ok();
+        writeln!(out, "NMP store: {}", storage_str(storage, "nmp_store_path")).ok();
         writeln!(
             out,
             "daemon log: {}",
@@ -51,28 +52,7 @@ pub(super) fn render_doctor(v: &serde_json::Value) -> String {
     }
     writeln!(out, "publish: {}", v["publish"].as_str().unwrap_or("?")).ok();
     writeln!(out, "read-back: {}", v["readback"].as_str().unwrap_or("?")).ok();
-    render_trellis_summary(v, &mut out);
     out
-}
-
-fn render_trellis_summary(v: &serde_json::Value, out: &mut String) {
-    let Some(rows) = v["trellis"]["surfaces"].as_array() else {
-        return;
-    };
-    writeln!(out, "trellis:").ok();
-    for row in rows {
-        let surface = row["surface"].as_str().unwrap_or("?");
-        let mode = row["mode"].as_str().unwrap_or("?");
-        let oracle = row["oracle_status"].as_str().unwrap_or("unknown");
-        let suppressed = row["suppressed_count"].as_i64().unwrap_or(0);
-        let unchanged = row["hook_unchanged_frames"].as_i64().unwrap_or(0);
-        let extra = if surface == "hook_context" {
-            format!("{unchanged} unchanged frames today")
-        } else {
-            format!("{suppressed} suppressed publishes today")
-        };
-        writeln!(out, "{surface:<14} {mode:<13} oracle {oracle:<7} {extra}").ok();
-    }
 }
 
 fn storage_str<'a>(storage: &'a serde_json::Map<String, serde_json::Value>, key: &str) -> &'a str {
@@ -112,6 +92,7 @@ mod tests {
                 "socket_path": "/tmp/te/daemon.sock",
                 "lock_path": "/tmp/te/daemon.lock",
                 "state_db_path": "/tmp/te/state.db",
+                "nmp_store_path": "/tmp/te/nmp.redb",
                 "daemon_log_path": "/tmp/te/daemon.log",
                 "mosaico_home_set": true,
                 "mosaico_home_is_default": mosaico_home_is_default,
@@ -121,17 +102,6 @@ mod tests {
             "probe_pubkey": "abc",
             "publish": "ok",
             "readback": "ok",
-            "trellis": {
-                "since": 1,
-                "surfaces": [
-                    { "surface": "status", "mode": "authoritative",
-                      "oracle_status": "green", "suppressed_count": 7,
-                      "hook_unchanged_frames": 0, "commits": 9 },
-                    { "surface": "hook_context", "mode": "authoritative",
-                      "oracle_status": "unknown", "suppressed_count": 0,
-                      "hook_unchanged_frames": 3, "commits": 3 }
-                ]
-            }
         })
     }
 
@@ -143,11 +113,8 @@ mod tests {
         assert!(rendered.contains("socket: /tmp/te/daemon.sock"));
         assert!(rendered.contains("lock: /tmp/te/daemon.lock"));
         assert!(rendered.contains("state db: /tmp/te/state.db"));
+        assert!(rendered.contains("NMP store: /tmp/te/nmp.redb"));
         assert!(rendered.contains("daemon log: /tmp/te/daemon.log"));
-        assert!(rendered
-            .contains("status         authoritative oracle green   7 suppressed publishes today"));
-        assert!(rendered
-            .contains("hook_context   authoritative oracle unknown 3 unchanged frames today"));
         assert!(!rendered.contains("warning:"));
     }
 

@@ -243,8 +243,8 @@ fn message_rows_show_p_tag_recipients_and_rewrite_nostr_mentions() {
     assert!(!text.contains("nostr:npub"), "got: {text}");
 
     let captured = capture_inputs(&store, &input(Some(&rec), "root", 200, 300, false));
-    let trellis = render_view_text(&assemble::assemble_view(&captured, 200, 300));
-    assert_eq!(trellis, text);
+    let rendered = render_view_text(&assemble::assemble_view(&captured, 200, 300));
+    assert_eq!(rendered, text);
 }
 
 #[test]
@@ -278,8 +278,8 @@ fn missing_channels_are_warned_not_rendered() {
     assert!(!direct.contains("<members>"));
 
     let captured = capture_inputs(&store, &input(Some(&rec), "ghost", 0, 100, false));
-    let trellis = render_view_text(&assemble::assemble_view(&captured, 0, 100));
-    assert_eq!(trellis, direct);
+    let rendered = render_view_text(&assemble::assemble_view(&captured, 0, 100));
+    assert_eq!(rendered, direct);
 }
 
 #[test]
@@ -393,6 +393,6 @@ fn quiet_forced_delta_renders_no_new_activity_note() {
 
     // Parity: the pure capture→assemble path renders identically.
     let captured = capture_inputs(&store, &input(Some(&rec), "root", 200, 300, true));
-    let trellis = render_view_text(&assemble::assemble_view(&captured, 200, 300));
-    assert_eq!(trellis, text);
+    let rendered = render_view_text(&assemble::assemble_view(&captured, 200, 300));
+    assert_eq!(rendered, text);
 }

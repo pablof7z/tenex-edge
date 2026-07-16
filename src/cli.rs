@@ -31,12 +31,10 @@ mod launch_cli;
 mod mcp;
 mod messaging;
 mod my;
-mod probe;
 mod pty;
 mod session;
 mod statusline;
 mod turn;
-mod validate;
 mod who;
 
 #[cfg(test)]
@@ -120,7 +118,6 @@ pub async fn run(cli: Cli) -> Result<()> {
             None => crate::daemon::server::run().await,
         },
         Cmd::Debug { action } => debug::debug(action).await,
-        Cmd::Probe(args) => probe::probe(args).await,
         Cmd::PtySupervisor(args) => pty::pty_supervisor(args),
         Cmd::Install(args) => install::install(args).await,
         Cmd::AcpSmoke(args) => acp_smoke::acp_smoke(args).await,

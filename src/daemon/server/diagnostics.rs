@@ -15,7 +15,6 @@ pub(in crate::daemon::server) async fn rpc_doctor(
         "probe_pubkey": probe,
         "publish": publish,
         "readback": readback,
-        "trellis": super::probe::doctor_summary(state)?,
     }))
 }
 
@@ -83,42 +82,6 @@ pub(in crate::daemon::server) fn log_nip29_role_decision(
         reason,
         "nip29 role decision"
     );
-}
-
-pub(in crate::daemon::server) fn rpc_debug_outbox(
-    state: &Arc<DaemonState>,
-    params: &serde_json::Value,
-) -> Result<serde_json::Value> {
-    #[derive(serde::Deserialize)]
-    struct P {
-        #[serde(default = "default_debug_outbox_limit")]
-        limit: u64,
-    }
-    let p: P = serde_json::from_value(params.clone()).unwrap_or(P {
-        limit: default_debug_outbox_limit(),
-    });
-    // The outbox is now a generic signed-event publish queue (raw event_json),
-    // not status-specific snapshots — dump the pending queue rows verbatim.
-    // Debug dump: show every pending row regardless of retry backoff window.
-    let rows = state.with_store(|s| s.peek_outbox(p.limit as u32, u64::MAX))?;
-    let rows = rows
-        .into_iter()
-        .map(|r| {
-            serde_json::json!({
-                "local_id": r.local_id,
-                "state": r.state,
-                "retries": r.retries,
-                "last_error": r.last_error,
-                "enqueued_at": r.enqueued_at,
-                "event_json": r.event_json,
-            })
-        })
-        .collect::<Vec<_>>();
-    Ok(serde_json::json!({ "rows": rows }))
-}
-
-pub(in crate::daemon::server) fn default_debug_outbox_limit() -> u64 {
-    50
 }
 
 /// `explain <handle>`: resolve a `scheme:value` handle against the receipts

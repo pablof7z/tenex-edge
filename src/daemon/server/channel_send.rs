@@ -1,7 +1,7 @@
 use super::chat_target::resolve_chat_target_provisioning;
 use super::resolution::work_root_for;
 use super::*;
-use crate::fabric::provider::chat::{OutboundChatRecipient, OutboundChatRecord};
+use crate::fabric::provider::chat::OutboundChatRecord;
 use crate::util::CHANNEL_MESSAGE_CHAR_LIMIT;
 use anyhow::bail;
 
@@ -154,12 +154,6 @@ pub(in crate::daemon::server) async fn rpc_channel_send(
             &chat_signing_keys,
             &OutboundChatRecord {
                 channel_h: deliver_scope.clone(),
-                body: body_to_send.clone(),
-                recipients: tagged
-                    .iter()
-                    .map(|target| OutboundChatRecipient::new(target.pubkey.clone()))
-                    .collect(),
-                created_at: Some(now_secs()),
                 direction: "outbound",
             },
         )

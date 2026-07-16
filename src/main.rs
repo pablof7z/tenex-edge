@@ -3,10 +3,18 @@ use mosaico::cli::{self, Cli};
 use mosaico::command_forensics::CommandCallLog;
 
 fn main() {
+    let argv = std::env::args().collect::<Vec<_>>();
+    // Harness callbacks are latency-sensitive and explicitly fail open. When
+    // no daemon socket exists, return before Clap, Tokio, TLS, hook forensics,
+    // or process discovery page in the full application. Require the complete
+    // hook shape so malformed/manual invocations still receive normal errors.
+    if inactive_hook_fast_path(&argv) {
+        return;
+    }
+
     // Select the crypto provider before the first TLS handshake.
     let _ = rustls::crypto::ring::default_provider().install_default();
 
-    let argv = std::env::args().collect::<Vec<_>>();
     let command_log = CommandCallLog::start(&argv);
 
     // `--help --all` (in any order) prints the full help with hidden subcommands
@@ -52,4 +60,16 @@ fn main() {
         eprintln!("mosaico: {e:#}");
         std::process::exit(1);
     }
+}
+
+fn inactive_hook_fast_path(argv: &[String]) -> bool {
+    let is_hook = argv.get(1).map(String::as_str) == Some("harness")
+        && argv.get(2).map(String::as_str) == Some("hook")
+        && argv
+            .get(3)
+            .is_some_and(|host| !host.is_empty() && host != "help")
+        && argv
+            .windows(2)
+            .any(|pair| pair[0] == "--type" && !pair[1].is_empty());
+    is_hook && !mosaico::daemon::socket_path().exists()
 }

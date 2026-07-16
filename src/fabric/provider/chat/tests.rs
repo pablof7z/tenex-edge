@@ -2,13 +2,19 @@ use super::*;
 use crate::domain::AgentRef;
 use crate::state::Store;
 use crate::transport::Transport;
+use nostr_sdk::prelude::{EventBuilder, Kind};
 use std::sync::{Arc, Mutex};
 
 async fn offline_provider() -> Nip29Provider {
-    let transport = Arc::new(Transport::connect(&[], Keys::generate()).await.unwrap());
+    let transport = Arc::new(
+        Transport::connect_with_indexer(&[], None, Keys::generate())
+            .await
+            .unwrap(),
+    );
+    let nmp = Arc::new(crate::nmp_host::NmpHost::open(&[], None, None).unwrap());
     let store = Arc::new(Mutex::new(Store::open_memory().unwrap()));
     let mgmt = Keys::generate().secret_key().to_secret_hex();
-    Nip29Provider::new(transport, store, Some(mgmt), None, Vec::new())
+    Nip29Provider::new(transport, nmp, store, Some(mgmt), None, Vec::new())
 }
 
 fn chat() -> ChatMessage {
@@ -111,9 +117,6 @@ async fn local_relay_event_preserves_signed_reply_tags() {
         &signed,
         &OutboundChatRecord {
             channel_h: "chan".into(),
-            body: "root cause was a retry storm".into(),
-            recipients: Vec::new(),
-            created_at: Some(signed.created_at.as_secs()),
             direction: "outbound",
         },
         &signed.id.to_hex(),
@@ -135,4 +138,65 @@ async fn local_relay_event_preserves_signed_reply_tags() {
         "local relay row must preserve channel h tag: {:?}",
         tags
     );
+}
+
+#[test]
+fn local_seed_projects_the_canonical_signed_content() {
+    let store = Store::open_memory().unwrap();
+    let signed = EventBuilder::new(Kind::from(9u16), "wire-redacted")
+        .tags([Tag::parse(["h", "chan"]).unwrap()])
+        .sign_with_keys(&Keys::generate())
+        .unwrap();
+    let record = OutboundChatRecord {
+        channel_h: "chan".into(),
+        direction: "outbound",
+    };
+
+    seed_chat_read_models(
+        &store,
+        &signed,
+        &record,
+        &signed.id.to_hex(),
+        signed.created_at.as_secs(),
+        "test",
+    );
+
+    assert_eq!(
+        store
+            .get_event(&signed.id.to_hex())
+            .unwrap()
+            .unwrap()
+            .content,
+        signed.content
+    );
+    assert_eq!(
+        store
+            .get_message(&signed.id.to_hex())
+            .unwrap()
+            .unwrap()
+            .body,
+        signed.content
+    );
+}
+
+#[test]
+fn signed_chat_group_is_exact_and_unambiguous() {
+    let keys = Keys::generate();
+    let exact = EventBuilder::new(Kind::from(9u16), "hello")
+        .tags([Tag::parse(["h", "chan"]).unwrap()])
+        .sign_with_keys(&keys)
+        .unwrap();
+    assert_eq!(signed_group(&exact).unwrap(), "chan");
+
+    let ambiguous = EventBuilder::new(Kind::from(9u16), "hello")
+        .tags([
+            Tag::parse(["h", "chan-a"]).unwrap(),
+            Tag::parse(["h", "chan-b"]).unwrap(),
+        ])
+        .sign_with_keys(&keys)
+        .unwrap();
+    assert!(signed_group(&ambiguous)
+        .unwrap_err()
+        .to_string()
+        .contains("exactly one"));
 }

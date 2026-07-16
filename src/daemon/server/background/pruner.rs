@@ -24,7 +24,6 @@ pub fn spawn_pruner(state: Arc<DaemonState>) {
                 Ok(report) if report.total() > 0 => tracing::debug!(
                     relay_events = report.relay_events,
                     delivered_inbox = report.delivered_inbox,
-                    published_outbox = report.published_outbox,
                     "pruned retained state"
                 ),
                 Ok(_) => {}

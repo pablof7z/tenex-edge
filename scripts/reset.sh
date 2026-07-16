@@ -56,6 +56,7 @@ sleep 0.5
 
 echo "==> Wiping local state..."
 rm -f "$MOSAICO_HOME_DIR/state.db" "$MOSAICO_HOME_DIR/state.db-shm" "$MOSAICO_HOME_DIR/state.db-wal"
+rm -f "$MOSAICO_HOME_DIR/nmp.redb"
 rm -f "$MOSAICO_HOME_DIR/daemon.sock" "$MOSAICO_HOME_DIR/daemon.lock" "$MOSAICO_HOME_DIR/daemon.log"
 rm -rf "$MOSAICO_HOME_DIR/sessions"
 echo "    kept:"

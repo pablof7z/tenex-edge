@@ -63,7 +63,7 @@ fn first_turn_pre_join_history_compact_notice() {
         let id = register(&s, SELF_PK, ch, 100); // session starts at t=100
         s.get_session(&id).unwrap().unwrap()
     };
-    let ctx = super::assemble_turn_start_context(&m, &rec, "", "", 0).unwrap_or_default();
+    let ctx = super::render_turn_start_text_for_test(&m, &rec, "", "", 0).unwrap_or_default();
     assert!(
         ctx.contains("3 message(s)") && ctx.contains("before you joined"),
         "pre-join history should be announced as a compact count; got:\n{ctx}"
@@ -91,7 +91,7 @@ fn first_turn_post_join_chat_shown_as_ambient() {
         let s = m.lock().unwrap();
         insert_chat(&s, ch, OTHER_PK, now + 10, "post-join-message");
     }
-    let ctx = super::assemble_turn_start_context(&m, &rec, "", "", 0).unwrap_or_default();
+    let ctx = super::render_turn_start_text_for_test(&m, &rec, "", "", 0).unwrap_or_default();
     assert!(
         ctx.contains("post-join-message"),
         "post-join chat should appear in ambient; got:\n{ctx}"
@@ -114,7 +114,7 @@ fn first_turn_empty_channel_no_context() {
         s.get_session(&id).unwrap().unwrap()
     };
     // No events at all — should return None (no context blocks).
-    let ctx = super::assemble_turn_start_context(&m, &rec, "", "", 0);
+    let ctx = super::render_turn_start_text_for_test(&m, &rec, "", "", 0);
     assert!(
         ctx.is_none()
             || ctx
@@ -140,7 +140,7 @@ fn first_turn_self_authored_pre_join_events_count_for_notice() {
         let id = register(&s, SELF_PK, ch, 100);
         s.get_session(&id).unwrap().unwrap()
     };
-    let ctx = super::assemble_turn_start_context(&m, &rec, "", "", 0).unwrap_or_default();
+    let ctx = super::render_turn_start_text_for_test(&m, &rec, "", "", 0).unwrap_or_default();
     assert!(
         ctx.contains("1 message(s)") && ctx.contains("before you joined"),
         "self-authored pre-join messages should count toward notice; got:\n{ctx}"
@@ -166,13 +166,15 @@ fn second_turn_ambient_gates_on_seen_cursor() {
     // First turn: consumes pre-join notice.
     {
         let rec = m.lock().unwrap().get_session(&sid).unwrap().unwrap();
-        let _ = super::assemble_turn_start_context(&m, &rec, "", "", 0);
+        let _ = super::render_turn_start_text_for_test(&m, &rec, "", "", 0);
     }
     // Manually peg the cursor at t=150 so the second turn only sees t>150.
-    m.lock()
-        .unwrap()
-        .apply_cursor_projection(&sid, 150)
-        .unwrap();
+    let store = m.lock().unwrap();
+    let expected = store.get_session(&sid).unwrap().unwrap().seen_cursor;
+    assert!(store
+        .advance_cursor_if_current(&sid, expected, 150)
+        .unwrap());
+    drop(store);
     // Event after the cursor — should appear in the second turn.
     {
         let s = m.lock().unwrap();
@@ -180,7 +182,7 @@ fn second_turn_ambient_gates_on_seen_cursor() {
     }
     let rec2 = m.lock().unwrap().get_session(&sid).unwrap().unwrap();
     assert_eq!(rec2.seen_cursor, 150, "cursor must be 150 for this test");
-    let ctx2 = super::assemble_turn_start_context(&m, &rec2, "", "", 0).unwrap_or_default();
+    let ctx2 = super::render_turn_start_text_for_test(&m, &rec2, "", "", 0).unwrap_or_default();
     assert!(
         ctx2.contains("second-turn-event"),
         "second turn must show messages since cursor; got:\n{ctx2}"
@@ -219,7 +221,7 @@ fn inbox_mention_surfaces_in_turn_context() {
         .unwrap();
     }
     let rec = m.lock().unwrap().get_session(&sid).unwrap().unwrap();
-    let ctx = super::assemble_turn_start_context(&m, &rec, "", "", 0).unwrap_or_default();
+    let ctx = super::render_turn_start_text_for_test(&m, &rec, "", "", 0).unwrap_or_default();
     assert!(
         ctx.contains("hey do the thing"),
         "inbox mention must appear in turn context; got:\n{ctx}"
@@ -257,7 +259,7 @@ fn ambient_and_mention_both_in_first_turn_context() {
         .unwrap();
     }
     let rec = m.lock().unwrap().get_session(&sid).unwrap().unwrap();
-    let ctx = super::assemble_turn_start_context(&m, &rec, "", "", 0).unwrap_or_default();
+    let ctx = super::render_turn_start_text_for_test(&m, &rec, "", "", 0).unwrap_or_default();
     assert!(
         ctx.contains("start working on X"),
         "direct mention must appear; got:\n{ctx}"

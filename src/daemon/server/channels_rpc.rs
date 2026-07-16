@@ -226,7 +226,10 @@ Switch into it instead: mosaico channel switch {}",
     // way; an unset `about` skips the publish.
     if !p.about.trim().is_empty() {
         let builder = crate::fabric::nip29::lifecycle::group_edit_metadata(&child_h, &p.about)?;
-        let _ = state.transport.publish_signed(builder, &mgmt_keys).await;
+        let _ = state
+            .nmp
+            .publish_group_builder(builder, &mgmt_keys, false)
+            .await;
         // Re-read the relay's now-updated kind:39000 so the `about` lands in the
         // cache from relay truth, not a local write.
         let _ = state.provider.fetch_and_materialize_channel(&child_h).await;
@@ -253,16 +256,13 @@ Switch into it instead: mosaico channel switch {}",
     } else {
         let prose = generate_orchestration_prose(&adds);
         let builder = build_add_agents_event(&parent, &child_h, &adds, &prose)?;
-        let signed = state.transport.sign(builder, &mgmt_keys).await?;
+        let signed = state.nmp.sign_event(builder, &mgmt_keys).await?;
         let oid = signed.id.to_hex();
-        // Checked publish: the bare `publish_event` resolves `Ok` even when every
-        // relay rejected the kind:9 (NIP-29 `blocked` / rate-limited), so reporting
-        // `orchestration_event_id` off it would advertise a channel whose
-        // orchestration event was silently dropped — backends would never receive
-        // the add-agents directive. `publish_event_checked` turns a relay rejection
-        // into a hard error so `channel_create` fails loudly instead of lying
-        // about success.
-        state.transport.publish_event_checked(&signed).await?;
+        // Require an NMP relay acknowledgement before reporting the orchestration
+        // id. A durable local acceptance alone cannot prove that backends will
+        // receive the add-agents directive; relay rejection must fail channel
+        // creation loudly.
+        state.nmp.publish_group_event(&signed, true).await?;
 
         // Local fast-path: relays don't reliably echo to the publishing connection,
         // so drive the same listener directly for roles targeted at THIS backend.
@@ -319,8 +319,8 @@ pub(in crate::daemon::server) async fn rpc_channel_edit(
     let mgmt_keys = state.management_keys()?;
     let builder = crate::fabric::nip29::lifecycle::group_edit_metadata(&channel_h, &p.about)?;
     let event_id = state
-        .transport
-        .publish_signed_checked(builder, &mgmt_keys)
+        .nmp
+        .publish_group_builder(builder, &mgmt_keys, true)
         .await?;
     let confirmed = wait_for_channel_about(state, &channel_h, &p.about).await;
     if !confirmed {

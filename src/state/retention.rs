@@ -7,12 +7,11 @@ pub const COMPLETED_LEDGER_RETENTION_SECS: u64 = 7 * 24 * 60 * 60;
 pub struct RetentionPruneReport {
     pub relay_events: usize,
     pub delivered_inbox: usize,
-    pub published_outbox: usize,
 }
 
 impl RetentionPruneReport {
     pub fn total(self) -> usize {
-        self.relay_events + self.delivered_inbox + self.published_outbox
+        self.relay_events + self.delivered_inbox
     }
 }
 
@@ -39,14 +38,9 @@ impl Store {
                AND delivered_at > 0 AND delivered_at < ?1",
             params![completed_ledgers_before],
         )?;
-        let published_outbox = self.conn.execute(
-            "DELETE FROM outbox WHERE state='published' AND enqueued_at < ?1",
-            params![completed_ledgers_before],
-        )?;
         Ok(RetentionPruneReport {
             relay_events,
             delivered_inbox,
-            published_outbox,
         })
     }
 }

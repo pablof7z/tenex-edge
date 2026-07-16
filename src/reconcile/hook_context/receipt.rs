@@ -1,9 +1,6 @@
-//! The plain, Trellis-FREE receipt the daemon persists and the `explain` CLI can
-//! replay. It is sourced from `why_output_frame` / `why_changed` — the render's
-//! OWN dependency trace — so it CANNOT drift from the snapshot the way the old
-//! hand-rolled `turn_start_audit` did: the explanation IS the derivation.
-
-use trellis_core::OutputFrameKind;
+//! The plain receipt the daemon persists for the `explain` CLI. It is built
+//! from the same inputs and rendered text as the snapshot, so explanation and
+//! output cannot drift apart.
 
 /// The full-vs-delta shape, decided purely by the `cursor` input.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -31,48 +28,30 @@ impl Shape {
     }
 }
 
-/// The output-frame kind that carried this snapshot, mirrored as plain data.
+/// Whether this render established a baseline, changed it, or left it intact.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FrameKind {
-    /// First snapshot for the graph.
+    /// First snapshot for this session.
     Baseline,
     /// A change delta over the previous snapshot.
     Delta,
-    /// A forced discontinuity.
-    Rebaseline,
-    /// The snapshot was cleared.
-    Clear,
     /// Nothing was emitted (inputs unchanged).
     Unchanged,
 }
 
 impl FrameKind {
-    pub(super) fn from_output_kind(kind: Option<&OutputFrameKind>) -> Self {
-        match kind {
-            Some(OutputFrameKind::Baseline(_)) => FrameKind::Baseline,
-            Some(OutputFrameKind::Delta(_)) => FrameKind::Delta,
-            Some(OutputFrameKind::Rebaseline(..)) => FrameKind::Rebaseline,
-            Some(OutputFrameKind::Clear(_)) => FrameKind::Clear,
-            None => FrameKind::Unchanged,
-        }
-    }
-
     fn as_str(self) -> &'static str {
         match self {
             FrameKind::Baseline => "baseline",
             FrameKind::Delta => "delta",
-            FrameKind::Rebaseline => "rebaseline",
-            FrameKind::Clear => "clear",
             FrameKind::Unchanged => "unchanged",
         }
     }
 }
 
-/// Graph-sourced receipt for one hook-context render. Everything here is derived
-/// from the SAME dependency trace that produced the bytes, so it answers "why is
-/// @X shown as working / why did workspace.channel appear / why this shape"
-/// without any
-/// re-derivation that could diverge from the render.
+/// Receipt for one hook-context render. Everything here is calculated during
+/// the render itself, so it can answer why the snapshot changed without a
+/// second derivation that could diverge from the rendered bytes.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HookContextReceipt {
     /// Instrumentation surface tag (`hook_context`).
@@ -87,19 +66,19 @@ pub struct HookContextReceipt {
     pub now: i64,
     /// Full vs delta, attributable to the `cursor` input.
     pub shape: Shape,
-    /// The output-frame kind that carried this snapshot.
+    /// The relationship between this render and the previous snapshot.
     pub frame: FrameKind,
     /// Whether a snapshot was injected (non-empty and/or forced).
     pub emitted: bool,
     /// Rendered snapshot byte length (0 when suppressed).
     pub bytes: usize,
-    /// Canonical input labels the graph attributes this frame to (e.g. `presence`,
-    /// `cursor`, `now`) — the "why did the snapshot change" answer.
+    /// Changed input labels (e.g. `presence`, `cursor`, `now`) that explain why
+    /// the snapshot changed.
     pub input_causes: Vec<String>,
 }
 
 impl HookContextReceipt {
-    pub(super) fn new(
+    pub(crate) fn new(
         kind: &str,
         pubkey: &str,
         cursor: i64,

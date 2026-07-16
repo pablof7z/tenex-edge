@@ -2,8 +2,8 @@
 
 Status: implemented. Implements the architecture change
 from **per-session process** to **one per-machine daemon** that solely owns
-`state.db`, the relay connection, chat delivery, presence, NIP-29 membership cache,
-and peer pruning.
+`state.db`, NMP acquisition and durable group publication, chat delivery, presence,
+NIP-29 membership cache, and peer pruning.
 
 ## 1. Why
 
@@ -11,13 +11,14 @@ The earlier per-session process model let every agent session and CLI invocation
 open its own `rusqlite` connection to `~/.mosaico/state.db`. Under about 16
 concurrent writers this corrupted `state.db` in a real incident. The root cause
 was multiple independent processes treating the same database as theirs to own,
-alongside one relay connection per session.
+alongside one relay stack per session.
 
 The fix: collapse to **one daemon per machine** that is the sole owner of the
-db and the (single) relay connection. Every CLI invocation and every
+database and relay-facing clients. Every CLI invocation and every
 per-session engine becomes a **thin client** that talks to the daemon over a
 Unix domain socket. One writer by construction → corruption window goes to
-zero; N relay connections collapse to one.
+zero; N per-session network stacks collapse to one daemon-owned acquisition and
+provider stack.
 
 This is a pure-internal change: **external CLI behavior and output are
 preserved** (the Python hooks in `integrations/` and the parallel
@@ -33,8 +34,9 @@ Claude channel adapter shell out to these verbs and parse their stdout).
    `busy_timeout=5000`.
 2. The UDS daemon owns startup locking, socket reclamation, the version
    handshake, and one `Store`; CLI verbs are thin RPC clients.
-3. Per-session engines run as daemon-owned async tasks over one shared
-   `Transport`; `session_start` spawns an in-process `SessionTask`.
+3. Per-session engines run as daemon-owned async tasks. The daemon's NMP host
+   owns relay acquisition and group publication; `session_start` spawns an
+   in-process `SessionTask`.
 
 ## 3. Process model
 
@@ -45,8 +47,9 @@ Claude channel adapter shell out to these verbs and parse their stdout).
   CLI    ───▶ │   │ thin client │ ───────▶ │  mosaico daemon (single proc) │  │
  (one-shot)   │   │ (CLI verb)  │ ◀─────── │                                  │  │
               │   └─────────────┘  JSON    │  • owns state.db (one Store)     │  │   one
-              │                            │  • owns ONE relay Transport ─────┼──┼──▶ relay
-              │                            │  • per-session async tasks       │  │  (NIP-42)
+              │                            │  • owns NMP reads + writes ──────┼──┼──▶ relays
+              │                            │  • profile indexer / fetch edge  │  │
+              │                            │  • per-session async tasks       │  │
               │                            │  • chat / presence / pruning     │  │
               │                            │  • NIP-29 membership cache       │  │
               │                            └──────────────────────────────────┘  │
@@ -56,7 +59,9 @@ Claude channel adapter shell out to these verbs and parse their stdout).
 - The daemon is a normal `mosaico` invocation: `mosaico daemon`.
 - The daemon runs the **tokio multi-thread runtime** (already how `main` builds
   it). It holds exactly one `Store` (single SQLite connection → one writer by
-  construction) and one `Transport` (one relay connection).
+  construction), one NMP engine for acquisition, account signing, durable group
+  writes, receipts, and retries, plus one narrow direct client for kind:0 indexer
+  copies, the doctor probe, and one-shot fetches.
 - Per-session work runs as a tokio task inside the daemon (`SessionTask`), keyed
   by a private run key.
 
@@ -182,9 +187,8 @@ lines (see streaming, below) terminated by an `end` frame.
 
 `id` correlates responses to requests (allows pipelining; in practice each thin
 CLI client issues one request and exits). The **streaming** shape (`item`* then
-`end`) is built in from the start — `tail` needs server-push, and the
-future `subscribe --json` verb the host adapters will want is the same
-machinery. One-shot verbs simply emit a single `ok` and no `item`/`end`.
+`end`) exists because `tail` needs server-push. One-shot verbs simply emit a
+single `ok` and no `item`/`end`.
 
 ### Why the streaming framing matters (the key design call)
 
@@ -205,7 +209,7 @@ Walking each verb's true I/O shape:
 | `tail`             | **stream**           | daemon pushes decoded fabric events until disconnect |
 
 `tail` forces the protocol beyond simple req/resp: the client cannot open its own relay
-  subscription anymore (the daemon owns the single relay connection), so the
+  observation anymore (the daemon owns NMP acquisition), so the
   daemon must stream decoded events to the client as they arrive, indefinitely,
   until the client disconnects (Ctrl-C). This is what makes the `item`*/`end`
   streaming shape mandatory rather than optional.
@@ -222,18 +226,21 @@ The `session_start` RPC makes the daemon spawn a tokio task running
 `runtime::run_session`:
 
 - It uses the daemon's **shared** `Store` through the ownership model in §8.
-- It uses the daemon's **shared** `Transport`. The daemon maintains **one** relay
-  connection and **one** union subscription (trusted authors ∪ all live session
-  owners, per-project as needed). Incoming relay events are demuxed once,
-  daemon-side, and routed to the right session chat queue(s). Mentions route via the
-  `compute_targets` / `route_mention` logic over all alive sessions.
+- It declares per-session and per-channel live-query demand through the daemon's
+  shared NMP host. NMP owns relay planning, connection repair, deduplication,
+  and observation lifetimes. Incoming canonical additions cross a bounded,
+  backpressured single-consumer channel into the materializer; relay bursts can
+  slow observation drains but cannot silently drop read-model updates. Events
+  are demuxed once, daemon-side, and routed to the right session chat queue(s).
+  Mentions route via the `compute_targets` / `route_mention` logic over all alive
+  sessions.
 - Presence/status publishing, heartbeats, and `watch_pid` death detection all
-  move into the per-session task, but publish
-  through the shared `Transport`.
+  run in the per-session task. Group writes are signed and submitted through the
+  shared NMP host.
 - Peer-staleness pruning is a single daemon-level periodic task.
 
 `EngineParams` is reused largely as-is, minus `store_path` (the task gets the
-shared store) and with the transport injected.
+shared store) and with the daemon provider/NMP host injected.
 
 ## 8. State ownership & the single-writer guarantee
 
@@ -253,46 +260,35 @@ construction — that is the whole point. Concurrency model inside the daemon:
   from today's code and already guarantees one writer. Revisit the actor shape
   only if lock contention shows up (unlikely at this call frequency).
 
-- The relay `Transport` is shared (`Arc<Transport>`); its methods are already
-  `&self` and internally synchronized by `nostr-sdk`.
+- The NMP engine owns live queries, relay acquisition, local account capabilities,
+  group-write routing, durable receipts, and retries. The direct `Transport` is
+  shared only for kind:0 indexer copies, the doctor probe, and one-shot resolution
+  fetches.
 
-Because there is exactly one process with exactly one connection, the
+Because there is exactly one writer process, the
 multi-writer corruption class is eliminated regardless of WAL (WAL stays as
 defense-in-depth + a small perf win).
 
-## 8a. Multi-agent on ONE connection (verified empirically)
+## 8a. Multi-agent relay ownership
 
 The daemon hosts several agent identities at once (`claude@`, `codex@`,
 `opencode@`, and sequential runtime incarnations of durable agents). Each
-identity is one pubkey, with at most one active runtime. The whole premise of
-the migration is **one relay connection** for all of them. Two facts had to hold
-for that to be correct; both were probed against the live `relay.tenex.chat` (see
-`tests/relay_probe.rs`; run explicitly with `MOSAICO_RELAY=<relay>` and `--ignored`):
+identity is one pubkey, with at most one active runtime. NMP observes the union of
+their live-query demands and registers each local signer capability by pubkey.
+Ordinary group writes carry an explicit per-write identity override, so changing
+one account never retargets another session's accepted write. Neither client is
+owned by an individual session. Two original transport facts remain useful
+protocol evidence:
 
 1. **Cross-pubkey delivery.** A connection authenticated (NIP-42) as agent A
    *does* receive events p-tagged to a different agent B. The relay does **not**
-   scope REQ delivery to the connection's authed identity. → A single shared
-   subscription (union of all hosted pubkeys / projects) delivers every hosted
-   agent's mentions. ✅ `one_authed_conn_receives_mentions_to_other_pubkeys`
-2. **Multi-key publish.** An event **pre-signed by B** can be published over the
-   A-authed connection (`client.send_event(&signed_by_b)`) and lands under B's
-   authorship. → The daemon signs each outgoing event with the *originating
-   agent's* `Keys` and sends it over the one connection. ✅
-   `one_conn_publishes_events_signed_by_multiple_keys`
-
-**Transport change required.** `Transport::connect` binds one `Keys` as the
-connection signer (used for AUTH — fine, AUTH identity is irrelevant to
-delivery per fact 1). But `publish_builder` signs with that one signer, which is
-wrong for a multi-agent daemon. Add:
-
-```rust
-// sign with a specific agent's keys, publish over the shared connection
-pub async fn publish_signed(&self, builder: EventBuilder, keys: &Keys) -> Result<EventId>;
-```
-
-The daemon picks the AUTH identity once (any one hosted agent key, or a stable
-daemon key) and then `publish_signed`s each event with its true author. The
-codec/wire output is unchanged.
+   scope ordinary event delivery to the connection's authed identity. NMP's
+   current Mosaico demands are explicitly public and pinned to configured hosts.
+2. **Multi-key publish.** NMP freezes the draft author at acceptance, selects the
+   exact registered capability named by the write override, validates the signed
+   result, and routes it to the NIP-29 host. Paths that immediately seed an exact
+   local read-model row use NMP's serialized sign-only operation first, then hand
+   that same signed event back to NMP as the durable payload.
 
 ## 8b. Demux + routing for multiple local agents (correctness)
 
@@ -360,10 +356,12 @@ channels, and member sessions. There is no agent renderer or XML branch under
   the process that touches the relay, so the install must run on its path too
   (it already runs in `main` before dispatch; `daemon` goes through `main`).
 - **Identical standard-Nostr wire output** — the codec seam
-  (`fabric::nip29::wire`) is untouched; the daemon publishes the same builders.
-- **Relay NIP-42 AUTH warm-up fetch** before any subscribe — `Transport::connect`
-  already does the `kind:0 limit 1` warm-up; the daemon connects once and that
-  warm-up runs once, before its union subscription.
+  (`fabric::nip29::wire`) remains the event-shape authority; group writes route
+  through NMP.
+- **Narrow direct-client warm-up** remains for profile/indexer copies, the
+  doctor probe, and bounded one-shot reads. It does not own live acquisition or
+  ordinary group writes. NMP authorization policy is not required by the current
+  public group-query/write configuration.
 - **NIP-29 membership semantics** — group creation, owner admin backfill, and
   agent member admission remain provider-owned and relay-authoritative. Local
   allow/block files are not part of the active NIP-29 path.
@@ -385,11 +383,3 @@ channels, and member sessions. There is no agent renderer or XML branch under
   original-corruption regression repro so the thing we're fixing stays asserted.
 - Keep the unit and local-relay integration suites green. Public-relay probes
   stay explicit because they publish disposable data to the configured relay.
-
-## 11. Follow-ups (out of scope here, noted for the host adapters)
-
-- `subscribe --json` streaming verb (same `item`*/`end` machinery as `tail`,
-  but emitting structured JSON events instead of rendered lines) — the channel
-  adapters will want it.
-- Optional: a `daemon-status` / `doctor --daemon` verb to report daemon pid,
-  uptime, alive-session count.

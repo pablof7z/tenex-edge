@@ -1,9 +1,6 @@
 //! Pure fabric-view derivation. It reads only the frozen [`ViewInputs`] plus the
-//! two explicit
-//! inputs — the seen `cursor` and the wall-clock `now`. No store, no ambient
-//! time. This is the function the Trellis reconciler runs inside a derived node,
-//! so `why_changed`/`why_output_frame` attribute the snapshot to exactly these
-//! inputs and it replays byte-for-byte from the same inputs.
+//! two explicit inputs — the seen `cursor` and the wall-clock `now`. No store,
+//! no ambient time, so the same inputs produce the same output byte-for-byte.
 //!
 //! The full-vs-delta SHAPE decision keys on `cursor` (`cursor == 0` → full
 //! members/descendant tree; `cursor > 0` → changed descendants and presence);

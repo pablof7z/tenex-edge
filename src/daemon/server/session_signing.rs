@@ -170,8 +170,6 @@ pub(in crate::daemon::server) async fn retire_reclaimed_profile(
         state.owners.clone(),
     );
     let domain = crate::domain::DomainEvent::Profile(profile);
-    let event = state.provider.encode(&domain)?.sign_with_keys(&keys)?;
-    let event_json = serde_json::to_string(&event)?;
     state.with_store(|store| {
         store.upsert_profile_with_agent_slug(
             pubkey,
@@ -182,12 +180,10 @@ pub(in crate::daemon::server) async fn retire_reclaimed_profile(
             false,
             now_secs(),
         )?;
-        store.enqueue_outbox(&event_json, now_secs())?;
         Ok::<_, anyhow::Error>(())
     })?;
-    state.outbox_notify.notify_waiters();
     if let Err(error) = state.provider.publish(&domain, &keys).await {
-        tracing::warn!(pubkey, %error, "reclaimed handle retirement profile queued for retry");
+        tracing::warn!(pubkey, %error, "reclaimed handle retirement profile submission failed");
     }
     Ok(())
 }

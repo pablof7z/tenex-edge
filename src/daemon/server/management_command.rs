@@ -2,7 +2,7 @@ use super::channel_resolve::{resolve_channel_ref, root_channel, ChannelResolutio
 use super::resolution::work_root_for;
 use super::*;
 use crate::domain::{AgentRef, ChatMessage};
-use crate::fabric::provider::chat::{OutboundChatRecipient, OutboundChatRecord};
+use crate::fabric::provider::chat::OutboundChatRecord;
 use anyhow::{Context, Result};
 use nostr_sdk::prelude::Event;
 
@@ -209,9 +209,6 @@ async fn publish_reply(
     };
     let record = OutboundChatRecord {
         channel_h: channel_h.to_string(),
-        body: body.to_string(),
-        recipients: vec![OutboundChatRecipient::new(requester)],
-        created_at: None,
         direction: "outbound",
     };
     state

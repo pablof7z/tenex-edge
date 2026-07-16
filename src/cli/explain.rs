@@ -7,7 +7,7 @@ use serde_json::Value;
 #[derive(Args)]
 pub(super) struct ExplainArgs {
     /// The artifact handle: `event:<id>`, `session:<id>[@<ts>]`,
-    /// `hook:<id>[@<ts>]`, `txn:<surface>:<id>[@<ts>]`, or `sub:<channel>`.
+    /// or `hook:<id>[@<ts>]`.
     pub(super) handle: String,
     /// Emit the raw receipt record as JSON instead of the human view.
     #[arg(long)]

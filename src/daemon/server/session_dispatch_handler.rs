@@ -133,5 +133,4 @@ async fn grant_joined_channels(state: &Arc<DaemonState>, pubkey: &str, channels:
             let _ = s.join_session_channel(pubkey, channel, now_secs());
         });
     }
-    state.outbox_notify.notify_waiters();
 }

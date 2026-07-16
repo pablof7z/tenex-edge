@@ -1,4 +1,4 @@
-//! The daemon process: sole owner of state.db AND the single relay connection.
+//! The daemon process: sole owner of state.db, NMP acquisition, and provider I/O.
 //!
 //! Started as the hidden daemon subcommand by a thin client's spawn-if-absent
 use super::client::StartupLock;
@@ -17,7 +17,7 @@ use crate::state::{InboxRow, Store};
 use crate::transport::Transport;
 use crate::util::{now_secs, pubkey_short};
 use anyhow::{Context, Result};
-use nostr_sdk::prelude::{Event, Keys, RelayMessage, RelayPoolNotification};
+use nostr_sdk::prelude::{Event, Keys};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -41,7 +41,7 @@ mod rpc;
 mod session_dispatch;
 mod session_dispatch_handler;
 mod session_records;
-use background::{spawn_pruner, spawn_trellis_oracle_sampler};
+use background::spawn_pruner;
 use demux::{spawn_demux, warm_profiles};
 use management_command::{handle_management_command, is_management_command_for_backend};
 use orchestration_handler::handle_orchestration;
@@ -52,23 +52,18 @@ pub struct DaemonState {
     store: Arc<Mutex<Store>>,
     transport: Arc<Transport>,
     provider: Arc<Nip29Provider>,
+    nmp: Arc<crate::nmp_host::NmpHost>,
     cfg: Config,
     host: String,
-    started_at: u64,
     owners: Vec<String>,
     agent_catalog: Mutex<crate::agent_catalog::AgentCatalog>,
     hosted: Mutex<HashMap<String, HostedAgent>>,
     sessions: Mutex<HashMap<String, SessionHandle>>,
     subscribed_root_channels: Mutex<Vec<String>>,
     subs: Mutex<crate::reconcile::SubscriptionReconciler>,
+    subscription_sync: tokio::sync::Mutex<()>,
     status: Arc<Mutex<crate::reconcile::StatusReconciler>>,
-    delivery: Mutex<crate::reconcile::DeliveryReconciler>,
-    turn_lifecycle: Mutex<crate::reconcile::TurnLifecycleReconciler>,
-    cursor: Mutex<crate::reconcile::CursorReconciler>,
-    session_start: Mutex<crate::reconcile::SessionStartReconciler>,
-    session_watch: Mutex<crate::reconcile::Reconciler>,
-    outbox: Arc<Mutex<crate::reconcile::OutboxReconciler>>,
-    hook_contexts: crate::turn_context::HookContextGraphs,
+    hook_contexts: crate::turn_context::HookContextStates,
     tail_tx: tokio::sync::broadcast::Sender<TailEvent>,
     open_clients: Mutex<u64>,
     shutdown: Notify,
@@ -93,8 +88,6 @@ pub struct DaemonState {
     /// for tail dedup. Tracking `active` too means an active→idle flip emits a
     /// tail event even though the persistent title text is unchanged.
     last_status: Mutex<HashMap<StatusTailKey, StatusTailSnapshot>>,
-    /// Wakes the status-outbox drainer the instant a transition enqueues a publish.
-    outbox_notify: Notify,
 }
 
 impl DaemonState {
@@ -173,14 +166,12 @@ mod cursor;
 mod diagnostics;
 mod engine_lifecycle;
 mod lifecycle;
-mod probe;
 mod profile_rpc;
 mod resolution;
 mod session_end;
 mod session_pty_wrap;
 mod session_signing;
 pub(crate) mod session_start;
-mod status_publish;
 mod statusline;
 mod subscriptions;
 #[cfg(test)]
@@ -200,8 +191,8 @@ use channels_rpc::{
     rpc_channel_list,
 };
 use diagnostics::{
-    log_nip29_role_decision, refresh_channel_members_cache, rpc_debug_outbox, rpc_doctor,
-    rpc_explain, rpc_local_backend,
+    log_nip29_role_decision, refresh_channel_members_cache, rpc_doctor, rpc_explain,
+    rpc_local_backend,
 };
 use engine_lifecycle::{cancel_session, engine_params_for, reconcile_sessions, spawn_session};
 pub use lifecycle::run;
@@ -216,9 +207,8 @@ pub(crate) use session_signing::{
     load_session_identity, prepare_session_identity, PreparedIdentity,
 };
 use session_start::rpc_session_start;
-use status_publish::spawn_outbox_drainer;
 use statusline::rpc_statusline;
-use subscriptions::{ensure_subscription, replay_channel_chat, resubscribe};
+use subscriptions::{ensure_subscription, replay_channel_chat, sync_subscriptions};
 use turns::{rpc_turn_check, rpc_turn_end, rpc_turn_start};
 use who::rpc_who;
 
@@ -245,7 +235,6 @@ async fn dispatch(state: &Arc<DaemonState>, req: &Request) -> Response {
         "turn_end" => rpc_turn_end(state, &req.params).await,
         "doctor" => rpc_doctor(state).await,
         "explain" => rpc_explain(state, &req.params),
-        "probe" => probe::rpc_probe(state, &req.params),
         "local_backend" => rpc_local_backend(state),
         "root_channels" => rpc::rpc_root_channels(state).await,
         "channel_members" => rpc::rpc_channel_members(state, &req.params).await,
@@ -254,7 +243,6 @@ async fn dispatch(state: &Arc<DaemonState>, req: &Request) -> Response {
         "operator_sessions" => operator_sessions::rpc_operator_sessions(state),
         "pty_supervisor_exit" => rpc::rpc_pty_supervisor_exit(state, &req.params).await,
         "agent_roster_publish" => rpc_agent_roster_publish(state, &req.params).await,
-        "debug_outbox" => rpc_debug_outbox(state, &req.params),
         "channel_create" => rpc_channel_create(state, &req.params).await,
         "channel_edit" => rpc_channel_edit(state, &req.params).await,
         "channel_resolve" => rpc_channel_resolve(state, &req.params).await,

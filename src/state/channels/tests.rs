@@ -80,4 +80,11 @@ fn channel_resolution_intent_reuses_reserved_id_for_name() {
             .as_deref(),
         Some("a1b2c3d4")
     );
+    assert_eq!(
+        store
+            .channel_resolution_parent("a1b2c3d4")
+            .unwrap()
+            .as_deref(),
+        Some("channel")
+    );
 }

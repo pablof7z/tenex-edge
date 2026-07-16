@@ -8,6 +8,12 @@ fn hooks_fail_open_without_spawning_daemon() {
         !home.sock().exists(),
         "precondition: daemon must be stopped"
     );
+    // Keep this a hook-path latency assertion rather than a macOS debug-binary
+    // cold-page-fault assertion. NMP materially increases the debug executable;
+    // one non-hook process warms the image without creating the daemon.
+    let warm = run_cli(&home, &["--help"]);
+    assert!(warm.status.success(), "debug binary warmup failed");
+    assert!(!home.sock().exists(), "warmup must not spawn the daemon");
 
     let payload = r#"{"cwd":"/tmp","session_id":"s-no-daemon"}"#;
     let cases = [

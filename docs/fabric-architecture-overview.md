@@ -1,6 +1,6 @@
 # mosaico — Fabric Architecture (overview)
 
-> The one-page version. For the schema, capabilities, and migration plan, see
+> The one-page version. For the schema and implementation boundaries, see
 > [`fabric-architecture.md`](./fabric-architecture.md).
 
 ## The one idea
@@ -24,8 +24,10 @@ flowchart LR
   online, what are they doing, which threads, which messages, who do I reply to.*
   Every one is a query against the store. None of them know or care which fabric
   is in play.
-- **A Provider** is the swap-seam. It subscribes to its fabric, decodes, decides
-  what's allowed in, and writes canonical rows. Swapping fabrics means swapping
+- **A Provider** is the swap-seam. It declares acquisition demand to the wire
+  substrate, decodes canonical events, decides what's allowed in, and writes
+  canonical rows. For Nostr, NMP owns the live queries, signing, durable writes,
+  receipts, retries, and connection lifecycle. Swapping fabrics means swapping
   the Provider — nothing a reader touches changes.
 
 ## Two faces, one contract
@@ -75,14 +77,9 @@ alias. Runtime incarnations may change between the original message and the
 reply, so they are selected only at delivery time and never stored on the
 message.
 
-## What stays open
+## Boundary to preserve
 
-- **Threads** are a store concept the Provider *derives* (no fabric has them
-  natively); how a thread is keyed consistently across fabrics is unsettled.
-- **Identity hand-off** (e.g. MLS's invite/accept) has no nostr analogue and may
-  need its own step.
-- **Write timing** — does a sent message appear locally at once, or only once the
-  fabric confirms it?
-
-These are details. The spine — *read from the store, hide the fabric on the write
-side* — is the part to hold onto.
+Derived entities such as threads belong in the read model, while provider-specific
+identity hand-offs stay in provider lifecycle code. Outbound rows become canonical
+only after the fabric accepts the write. The spine is unchanged: *read from the
+store, hide the fabric on the write side*.

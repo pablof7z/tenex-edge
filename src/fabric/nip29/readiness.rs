@@ -44,6 +44,22 @@ pub enum ChannelGate {
     Degraded,
 }
 
+/// Resolve a soft host-local parent hint without overriding relay truth.
+/// `Some("")` is an observed root channel and therefore suppresses fallback;
+/// only absent relay metadata may use the pending host context.
+pub(crate) fn effective_parent_hint(
+    relay_parent: Option<String>,
+    pending_parent: Option<&str>,
+    channel: &str,
+) -> Option<String> {
+    match relay_parent {
+        Some(parent) => (!parent.is_empty()).then_some(parent),
+        None => pending_parent
+            .filter(|parent| !parent.is_empty() && *parent != channel)
+            .map(str::to_string),
+    }
+}
+
 struct ChannelSlot {
     verified_at: Option<Instant>,
 }
@@ -142,6 +158,23 @@ mod tests {
         assert!(!readiness.check("chan-a", "alice").0);
         assert!(!readiness.check("chan-a", "bob").0);
         assert!(readiness.check("chan-b", "alice").0);
+    }
+
+    #[test]
+    fn relay_parent_state_precedes_pending_host_context() {
+        assert_eq!(
+            effective_parent_hint(Some("relay-parent".into()), Some("host-parent"), "room"),
+            Some("relay-parent".into())
+        );
+        assert_eq!(
+            effective_parent_hint(Some(String::new()), Some("host-parent"), "room"),
+            None,
+            "an observed relay root must suppress the fallback"
+        );
+        assert_eq!(
+            effective_parent_hint(None, Some("host-parent"), "room"),
+            Some("host-parent".into())
+        );
     }
 
     /// The invite RPC's `ensure_backend_admin` wraps its readiness future in a

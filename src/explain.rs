@@ -24,14 +24,6 @@ pub enum Handle {
     Session { id: String, at: Option<i64> },
     /// A hook-context render for a session, optionally at a timestamp.
     Hook { id: String, at: Option<i64> },
-    /// A reconciler transaction on a surface (`txn:<surface>:<id>[@<ts>]`).
-    Txn {
-        surface: String,
-        id: i64,
-        at: Option<i64>,
-    },
-    /// A subscription channel (`sub:<channel>`).
-    Sub { channel: String },
 }
 
 /// Parse a `scheme:value` handle. Event ids and session ids never contain a
@@ -51,21 +43,7 @@ pub fn parse_handle(s: &str) -> Result<Handle> {
             let (id, at) = split_at(value)?;
             Handle::Hook { id, at }
         }
-        "txn" => {
-            let (surface, raw_id) = value
-                .split_once(':')
-                .context("txn handle must be txn:<surface>:<id>")?;
-            let (id, at) = split_at(raw_id)?;
-            Handle::Txn {
-                surface: surface.to_string(),
-                id: id.parse().context("txn id must be an integer")?,
-                at,
-            }
-        }
-        "sub" => Handle::Sub {
-            channel: value.to_string(),
-        },
-        other => bail!("unknown handle scheme `{other}` (event|session|hook|txn|sub)"),
+        other => bail!("unknown handle scheme `{other}` (event|session|hook)"),
     })
 }
 
@@ -108,22 +86,6 @@ pub fn explain(store: &Store, handle: &Handle) -> Result<Value> {
             };
             Ok(record("hook", rows))
         }
-        Handle::Txn { surface, id, at } => {
-            let mut rows = store.receipts_for_surface_transaction(surface, *id)?;
-            select_near(&mut rows, *at);
-            if at.is_some() {
-                rows.truncate(1);
-            }
-            Ok(record("txn", rows))
-        }
-        Handle::Sub { channel } => {
-            let rows: Vec<ReceiptRow> = store
-                .latest_receipts_for_surface("subscriptions", SCAN_LIMIT)?
-                .into_iter()
-                .filter(|r| r.commands.contains(channel) || r.changed_summary.contains(channel))
-                .collect();
-            Ok(record("sub", rows.into_iter().take(1).collect()))
-        }
     }
 }
 
@@ -135,11 +97,12 @@ fn receipt_pubkey(r: &ReceiptRow) -> Option<String> {
         .map(str::to_string)
 }
 
-/// Order rows by proximity to `at` (nearest first); by newest first when absent.
+/// Order receipts by proximity to `at`; use newest-first when no timestamp is
+/// supplied.
 fn select_near(rows: &mut [ReceiptRow], at: Option<i64>) {
     match at {
-        Some(ts) => rows.sort_by_key(|r| (r.created_at - ts).abs()),
-        None => rows.sort_by_key(|r| std::cmp::Reverse(r.created_at)),
+        Some(ts) => rows.sort_by_key(|row| (row.created_at - ts).abs()),
+        None => rows.sort_by_key(|row| std::cmp::Reverse(row.created_at)),
     }
 }
 
@@ -151,7 +114,7 @@ fn record(kind: &str, receipts: Vec<ReceiptRow>) -> Value {
     })
 }
 
-/// A receipt row as plain JSON (Trellis-free; the CLI renders it).
+/// A receipt row as plain JSON for the CLI renderer.
 pub fn receipt_json(r: &ReceiptRow) -> Value {
     json!({
         "id": r.id,

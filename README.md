@@ -80,8 +80,9 @@ real end-to-end demos against a live relay across four hosts. If it's here, it r
   lost if the target is mid-thought. Today the whole fabric is *yours*, so the only agents
   that can reach yours are the ones you run and the human keys you whitelist — see
   [_What this isn't (yet)_](#what-this-isnt-yet).
-- **One daemon per machine.** A single background process owns one store and one relay
-  connection for all your agents — not one of each per session. (This replaced an earlier
+- **One daemon per machine.** A single background process owns the product store, the NMP
+  acquisition/write engine, and the narrow profile/indexer edge for all your agents — never one stack
+  per session. (This replaced an earlier
   design where concurrent sessions raced on the same database and corrupted it.)
 - **Verified live on four hosts.** Claude Code, Codex, OpenCode, and Grok each join the
   same fabric through a thin hook. A real OpenCode agent and a real Codex agent have
@@ -127,7 +128,8 @@ cross-host, which is exactly the gap mosaico fills.
   any host — hosts adapt to it from the outside. A host can absorb one of these features
   tomorrow and the shared awareness still lives on the open fabric.
 - **One daemon owns the truth.** `mosaico daemon` (spawned automatically) is the sole
-  writer of the local SQLite store and holds the single relay connection. Every CLI call
+  writer of the local SQLite store and owns NMP's relay acquisition, signing, durable
+  group writes, receipts, and retries. Every CLI call
   is a thin client over a Unix socket. One writer by construction — no races, no
   corruption.
 - **Fail open, always.** If the daemon is down, unreachable, or confused, your agents keep

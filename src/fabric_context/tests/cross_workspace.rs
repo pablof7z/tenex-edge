@@ -1,5 +1,5 @@
 use super::*;
-use crate::reconcile::hook_context::HookContextReconciler;
+use crate::reconcile::hook_context::HookContextState;
 
 fn add_workspace(store: &Store) {
     store
@@ -67,11 +67,8 @@ fn delta_includes_other_workspace_root_and_descendant_presence_only() {
         render_view_text(&assemble::assemble_view(&captured, 200, 300)),
         text
     );
-    let mut reconciler = HookContextReconciler::new();
-    let outcome = reconciler
-        .render_context("sess", "turn_start", 200, 300, captured)
-        .unwrap();
-    reconciler.assert_oracle().unwrap();
+    let mut state = HookContextState::default();
+    let outcome = state.render_context("sess", "turn_start", 200, 300, captured);
     assert_eq!(outcome.text.as_deref(), Some(text.as_str()));
     let human =
         render_fabric_context_human(&store, input(Some(&rec), "root", 200, 300, false), false)

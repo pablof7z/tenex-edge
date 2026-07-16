@@ -1,20 +1,9 @@
-//! Mention delivery reconciler: the single authority that decides whether a
-//! pending inbox row should be pasted into a PTY now, deferred, or cleaned up.
+//! Pure mention-delivery policy.
 
-mod model;
-pub(crate) mod replay;
 #[cfg(test)]
 mod tests;
 
-use std::collections::BTreeMap;
-
 use serde::{Deserialize, Serialize};
-use trellis_core::{Graph, GraphResult, ResourceCommand, ResourceCommandCause, TransactionResult};
-
-use crate::reconcile::journal::Timestamp;
-use crate::reconcile::labels::{key_path, NodeLabels};
-
-use model::{delivery_key, ensure_session, opts, stage_scan, SessionNodes};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeliveryScanFact {
@@ -22,10 +11,10 @@ pub struct DeliveryScanFact {
     pub pending_event_ids: Vec<String>,
     pub endpoint_id: Option<String>,
     pub endpoint_live: bool,
-    pub last_injected_at: Option<Timestamp>,
+    pub last_injected_at: Option<u64>,
     pub debounce_secs: u64,
     pub force: bool,
-    pub at: Timestamp,
+    pub at: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -48,7 +37,7 @@ impl DeliveryAction {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DeliveryCommand {
+pub struct DeliveryDecision {
     pub pubkey: String,
     pub action: DeliveryAction,
     pub event_ids: Vec<String>,
@@ -72,186 +61,80 @@ pub enum DeliveryEffect {
     },
 }
 
-pub struct DeliveryOutcome {
-    pub effects: Vec<DeliveryEffect>,
-    pub result: TransactionResult<DeliveryCommand>,
+pub fn decide(fact: &DeliveryScanFact) -> Option<DeliveryDecision> {
+    if fact.pending_event_ids.is_empty() {
+        return None;
+    }
+    let Some(endpoint_id) = fact.endpoint_id.clone() else {
+        return Some(decision(fact, DeliveryAction::DeferNoEndpoint, None, None));
+    };
+    if !fact.endpoint_live {
+        return Some(decision(
+            fact,
+            DeliveryAction::ClearDeadEndpoint,
+            Some(endpoint_id),
+            None,
+        ));
+    }
+    let last = fact.last_injected_at.unwrap_or(0);
+    let elapsed = fact.at.saturating_sub(last);
+    if !fact.force && last > 0 && elapsed < fact.debounce_secs {
+        return Some(decision(
+            fact,
+            DeliveryAction::DeferDebounced,
+            Some(endpoint_id),
+            Some(fact.debounce_secs.saturating_sub(elapsed).max(1)),
+        ));
+    }
+    Some(decision(
+        fact,
+        DeliveryAction::Inject,
+        Some(endpoint_id),
+        None,
+    ))
 }
 
-pub struct DeliveryPreview {
-    pub result: TransactionResult<DeliveryCommand>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DeliveryStateRow {
-    pub session: String,
-    pub action: String,
-    pub event_ids: Vec<String>,
-    pub endpoint_id: Option<String>,
-    pub retry_after_secs: Option<u64>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DeliveryWhy {
-    pub resource_key: String,
-    pub last_kind: String,
-    pub cause: String,
-    pub input_causes: Vec<String>,
-}
-
-#[derive(Clone)]
-pub struct DeliveryReconciler {
-    graph: Graph<DeliveryCommand>,
-    sessions: BTreeMap<String, SessionNodes>,
-    labels: NodeLabels,
-    last: BTreeMap<String, DeliveryCommand>,
-    next_seq: u64,
-}
-
-impl Default for DeliveryReconciler {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl DeliveryReconciler {
-    pub fn new() -> Self {
-        Self {
-            graph: Graph::<DeliveryCommand>::new_with_command_type(),
-            sessions: BTreeMap::new(),
-            labels: NodeLabels::new(),
-            last: BTreeMap::new(),
-            next_seq: 0,
-        }
-    }
-
-    pub fn labels(&self) -> &NodeLabels {
-        &self.labels
-    }
-
-    pub fn revision(&self) -> u64 {
-        self.graph.revision().get()
-    }
-
-    pub fn graph_node_count(&self) -> usize {
-        self.graph.nodes().count()
-    }
-
-    pub fn scan(&mut self, fact: DeliveryScanFact) -> GraphResult<DeliveryOutcome> {
-        let seq = self.next_seq + 1;
-        let result = self.stage(&fact, seq, false)?;
-        self.next_seq = seq;
-        let effects = self.translate(&result);
-        Ok(DeliveryOutcome { effects, result })
-    }
-
-    pub fn preview_scan(&mut self, fact: &DeliveryScanFact) -> GraphResult<DeliveryPreview> {
-        let result = self.stage(fact, self.next_seq + 1, true)?;
-        Ok(DeliveryPreview { result })
-    }
-
-    pub fn state_rows(&self) -> Vec<DeliveryStateRow> {
-        self.last
-            .values()
-            .map(|cmd| DeliveryStateRow {
-                session: cmd.pubkey.clone(),
-                action: cmd.action.as_str().to_string(),
-                event_ids: cmd.event_ids.clone(),
-                endpoint_id: cmd.endpoint_id.clone(),
-                retry_after_secs: cmd.retry_after_secs,
+pub fn effects(decision: Option<&DeliveryDecision>) -> Vec<DeliveryEffect> {
+    let Some(decision) = decision else {
+        return Vec::new();
+    };
+    match decision.action {
+        DeliveryAction::Inject => decision
+            .endpoint_id
+            .clone()
+            .map(|endpoint_id| DeliveryEffect::Inject {
+                pubkey: decision.pubkey.clone(),
+                endpoint_id,
+                event_ids: decision.event_ids.clone(),
             })
-            .collect()
+            .into_iter()
+            .collect(),
+        DeliveryAction::DeferDebounced => decision
+            .retry_after_secs
+            .map(|delay_secs| DeliveryEffect::RetryAfter {
+                pubkey: decision.pubkey.clone(),
+                delay_secs,
+            })
+            .into_iter()
+            .collect(),
+        DeliveryAction::ClearDeadEndpoint => vec![DeliveryEffect::ClearDeadEndpoint {
+            pubkey: decision.pubkey.clone(),
+        }],
+        DeliveryAction::DeferNoEndpoint => Vec::new(),
     }
+}
 
-    pub fn explain_delivery(&self, id: &str) -> Option<DeliveryWhy> {
-        let why = self.graph.why_resource_command(&delivery_key(id))?;
-        Some(DeliveryWhy {
-            resource_key: key_path(&delivery_key(id)),
-            last_kind: format!("{:?}", why.kind),
-            cause: self.cause_label(&why.cause),
-            input_causes: self.labels.labels_for(&why.input_causes),
-        })
-    }
-
-    pub fn assert_oracle(&self) -> GraphResult<()> {
-        self.graph.assert_incremental_equals_full()?;
-        Ok(())
-    }
-
-    fn stage(
-        &mut self,
-        fact: &DeliveryScanFact,
-        seq: u64,
-        preview: bool,
-    ) -> GraphResult<TransactionResult<DeliveryCommand>> {
-        let mut sessions = self.sessions.clone();
-        let mut labels = self.labels.clone();
-        let mut tx = self.graph.begin_transaction_with_options(opts())?;
-        let nodes = ensure_session(&mut tx, &mut labels, &mut sessions, &fact.pubkey)?;
-        stage_scan(&mut tx, &nodes, fact, seq)?;
-        let result = if preview { tx.preview()? } else { tx.commit()? };
-        if !preview {
-            self.sessions = sessions;
-            self.labels = labels;
-        }
-        Ok(result)
-    }
-
-    fn translate(&mut self, result: &TransactionResult<DeliveryCommand>) -> Vec<DeliveryEffect> {
-        let mut effects = Vec::new();
-        for resource in result.resource_plan.commands() {
-            let command = match resource {
-                ResourceCommand::Open { command, .. }
-                | ResourceCommand::Replace { command, .. }
-                | ResourceCommand::Refresh { command, .. } => command,
-                ResourceCommand::Close { key, .. } => {
-                    if let Some(sid) = key.segment(1) {
-                        self.last.remove(sid);
-                    }
-                    continue;
-                }
-            };
-            self.last.insert(command.pubkey.clone(), command.clone());
-            match command.action {
-                DeliveryAction::Inject => {
-                    if let Some(endpoint_id) = command.endpoint_id.clone() {
-                        effects.push(DeliveryEffect::Inject {
-                            pubkey: command.pubkey.clone(),
-                            endpoint_id,
-                            event_ids: command.event_ids.clone(),
-                        });
-                    }
-                }
-                DeliveryAction::DeferDebounced => {
-                    if let Some(delay_secs) = command.retry_after_secs {
-                        effects.push(DeliveryEffect::RetryAfter {
-                            pubkey: command.pubkey.clone(),
-                            delay_secs,
-                        });
-                    }
-                }
-                DeliveryAction::ClearDeadEndpoint => {
-                    effects.push(DeliveryEffect::ClearDeadEndpoint {
-                        pubkey: command.pubkey.clone(),
-                    });
-                }
-                DeliveryAction::DeferNoEndpoint => {}
-            }
-        }
-        effects
-    }
-
-    fn cause_label(&self, cause: &ResourceCommandCause) -> String {
-        match cause {
-            ResourceCommandCause::Planner { collection } => format!(
-                "planner: {}",
-                self.labels
-                    .label_of(*collection)
-                    .map(str::to_string)
-                    .unwrap_or_else(|| format!("node:{}", collection.get()))
-            ),
-            ResourceCommandCause::ScopeClosed { scope } => {
-                format!("scope-closed: {}", scope.get())
-            }
-        }
+fn decision(
+    fact: &DeliveryScanFact,
+    action: DeliveryAction,
+    endpoint_id: Option<String>,
+    retry_after_secs: Option<u64>,
+) -> DeliveryDecision {
+    DeliveryDecision {
+        pubkey: fact.pubkey.clone(),
+        action,
+        event_ids: fact.pending_event_ids.clone(),
+        endpoint_id,
+        retry_after_secs,
     }
 }

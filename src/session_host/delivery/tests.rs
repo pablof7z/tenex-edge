@@ -109,55 +109,51 @@ fn headless_mode_separates_output_visibility_from_reachability() {
     assert!(headless_for_endpoint(TransportKind::Acp, true, false));
 }
 
-/// The reconciler is transport-neutral: it plans an `Inject` carrying the
+/// The delivery policy is transport-neutral: it plans an `Inject` carrying the
 /// endpoint id regardless of transport (`apply_delivery_effects` then routes that
 /// id by kind — ACP deliver vs. PTY inject). Confirm a live ACP endpoint id with
 /// pending rows yields an `Inject` carrying that id, while a dead endpoint is
 /// cleared — the same decision for PTY and ACP.
 #[test]
-fn reconciler_plans_inject_for_live_endpoint_and_clears_dead() {
-    use crate::reconcile::delivery::{DeliveryEffect, DeliveryReconciler, DeliveryScanFact};
+fn policy_plans_inject_for_live_endpoint_and_clears_dead() {
+    use crate::reconcile::delivery::{decide, effects, DeliveryEffect, DeliveryScanFact};
 
-    let mut r = DeliveryReconciler::new();
-    let live = r
-        .scan(DeliveryScanFact {
-            pubkey: "sess-live".into(),
-            pending_event_ids: vec!["evt-1".into()],
-            endpoint_id: Some("acp-live".into()),
-            endpoint_live: true,
-            last_injected_at: None,
-            debounce_secs: 20,
-            force: true,
-            at: 100,
-        })
-        .unwrap();
+    let live_decision = decide(&DeliveryScanFact {
+        pubkey: "sess-live".into(),
+        pending_event_ids: vec!["evt-1".into()],
+        endpoint_id: Some("acp-live".into()),
+        endpoint_live: true,
+        last_injected_at: None,
+        debounce_secs: 20,
+        force: true,
+        at: 100,
+    })
+    .unwrap();
+    let live = effects(Some(&live_decision));
     assert!(
         matches!(
-            live.effects.as_slice(),
+            live.as_slice(),
             [DeliveryEffect::Inject { endpoint_id, .. }] if endpoint_id == "acp-live"
         ),
         "live ACP endpoint should yield Inject carrying the endpoint id, got {:?}",
-        live.effects
+        live
     );
 
-    let dead = r
-        .scan(DeliveryScanFact {
-            pubkey: "sess-dead".into(),
-            pending_event_ids: vec!["evt-2".into()],
-            endpoint_id: Some("acp-dead".into()),
-            endpoint_live: false,
-            last_injected_at: None,
-            debounce_secs: 20,
-            force: true,
-            at: 100,
-        })
-        .unwrap();
+    let dead_decision = decide(&DeliveryScanFact {
+        pubkey: "sess-dead".into(),
+        pending_event_ids: vec!["evt-2".into()],
+        endpoint_id: Some("acp-dead".into()),
+        endpoint_live: false,
+        last_injected_at: None,
+        debounce_secs: 20,
+        force: true,
+        at: 100,
+    })
+    .unwrap();
+    let dead = effects(Some(&dead_decision));
     assert!(
-        matches!(
-            dead.effects.as_slice(),
-            [DeliveryEffect::ClearDeadEndpoint { .. }]
-        ),
+        matches!(dead.as_slice(), [DeliveryEffect::ClearDeadEndpoint { .. }]),
         "dead endpoint should be cleared, got {:?}",
-        dead.effects
+        dead
     );
 }

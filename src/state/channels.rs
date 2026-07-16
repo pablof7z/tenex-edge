@@ -96,6 +96,20 @@ impl Store {
             .optional()?)
     }
 
+    /// Immediate parent retained while a named channel's relay metadata is
+    /// still pending. This is a readiness hint, not materialized channel truth.
+    pub fn channel_resolution_parent(&self, channel_h: &str) -> Result<Option<String>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT parent FROM channel_resolution_intents
+                 WHERE channel_h=?1 ORDER BY created_at DESC LIMIT 1",
+                [channel_h],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?)
+    }
+
     pub fn reserve_channel_resolution_intent(
         &self,
         parent: &str,

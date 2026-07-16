@@ -21,14 +21,12 @@ impl Nip29Provider {
         keys: &Keys,
     ) -> Result<String> {
         let builder = self.wire.encode(&DomainEvent::Reaction(reaction.clone()))?;
-        let signed = self.transport.sign(builder, keys).await?;
+        let signed = self.nmp.sign_event(builder, keys).await?;
 
         let channel = reaction.channel.as_str();
         if !channel.is_empty() {
             let reactor_pubkey = signed.pubkey.to_hex();
-            let parent = self
-                .with_store(|s| s.channel_parent(channel).unwrap_or(None))
-                .filter(|p| !p.is_empty());
+            let parent = super::readiness::stored_parent_hint(self, channel)?;
             let ctx = ChannelCtx {
                 channel,
                 expect_member: &reactor_pubkey,
@@ -43,7 +41,7 @@ impl Nip29Provider {
             }
         }
 
-        let event_id = self.transport.publish_event_checked(&signed).await?;
+        let event_id = self.nmp.publish_group_event(&signed, true).await?;
         // Seed locally through the single materializer writer.
         self.with_store(|store| {
             crate::fabric::materialize(&RawEnvelope::Nostr(signed.clone()), store);
