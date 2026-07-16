@@ -1,6 +1,0 @@
-{
-  "id": "4d656-84dba",
-  "ts": "2026-07-10T13:33:59Z",
-  "session": "4d65680c-ded1-47cd-a59a-4966eebe8eda",
-  "text": "- **`src/cli/mcp.rs`**: stdio call site passes `None` (unchanged behavior there, as agreed)."
-}

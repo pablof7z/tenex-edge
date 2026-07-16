@@ -1,6 +1,0 @@
-{
-  "id": "b07a5-50304",
-  "ts": "2026-06-29T10:35:11Z",
-  "session": "b07a57a3-67a1-4c44-a8fc-58a1bb97860a",
-  "text": "**Bug 2 (the hang):** The new daemon starts, binds its socket, then hangs in `Store::open` because the old daemon still holds state.db. `cleanup()` deletes the lock *file* but the old daemon's flock stays on the deleted inode — so `try_acquire()` on the new file succeeds and two daemons race. Let me fix both.\n\nAssistant: Now the hang. The problem is `cleanup()` removes the lock *file* before the old daemon releases the flock, so the new daemon can acquire a fresh lock on a new file and race. Fix: don't delete the lock file in `cleanup()` — the flock persists until the process exits anyway:\n\nAssistant: Now `open_lock_file` needs to handle the case where the file exists from a previous run — which it already does (`truncate(false)`). And `try_acquire` will correctly block until the old daemon's process exits and the flock is released. No more racing. [...] **Summary of both fixes:**\n1. `config_path()` now calls `edge_home()` → `TENEX_EDGE_HOME` respected for config loading everywhere\n2. `cleanup()` no longer deletes the lock file → flock stays on the same inode until the old daemon actually exits, preventing the two-daemon race over state.db\n"
-}

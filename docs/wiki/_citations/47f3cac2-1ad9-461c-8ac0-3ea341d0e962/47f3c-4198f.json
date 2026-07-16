@@ -1,6 +1,0 @@
-{
-  "id": "47f3c-4198f",
-  "ts": "2026-06-29T10:52:14Z",
-  "session": "47f3cac2-1ad9-461c-8ac0-3ea341d0e962",
-  "text": "| **Orchestration** | Auth rejection (warn), parent mismatch (warn), already-claimed (debug), identity mint, spawn outcome | [...]      - `handle_orchestration`: replaced debug-gated and unconditional `eprintln!` with tracing::warn (auth rejection, parent mismatch), tracing::debug (already claimed), tracing::info (identity mint, spawn success), tracing::error (spawn failure)"
-}

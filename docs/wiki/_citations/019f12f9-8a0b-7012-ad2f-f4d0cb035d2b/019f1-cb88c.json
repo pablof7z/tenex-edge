@@ -1,6 +1,0 @@
-{
-  "id": "019f1-cb88c",
-  "ts": "2026-06-29T10:52:32Z",
-  "session": "019f12f9-8a0b-7012-ad2f-f4d0cb035d2b",
-  "text": "| `tenex-edge-store-read-model` | SQLite/read-model ownership: `relay_*` rebuildable caches vs local state, single daemon writer, store-as-reader-contract, and future `StoreReader`/`StoreWriter` direction. Source anchors: [src/state/schema.rs](/Users/pablofernandez/src/tenex-edge/src/state/schema.rs), issue `#50`. |"
-}

@@ -1,6 +1,0 @@
-{
-  "id": "019f6-45c8d",
-  "ts": "2026-07-14T13:09:56Z",
-  "session": "019f606f-1d25-76d1-95da-a7bb383cbe6d",
-  "text": "Assistant: There’s an important bit of archaeology: the code already accepts slash-separated *relative* channel paths in some resolvers, while canonical display was later deliberately changed back to dotted workspace-rooted refs. So this is not really “add slash support”; it’s “make slash paths the one public addressing language and remove the split-brain dotted output.” I’m checking whether any signed/persisted data actually stores the human ref or only opaque channel IDs.\n\nAssistant: The wire/storage model makes this cheaper than it first sounds: Nostr and SQLite store opaque channel IDs plus parent IDs, not `/workspace/channel` strings. So there’s no relay-data migration. The blast radius is still broad, but it’s a public grammar/rendering migration rather than an identity migration. One contract detail I’m validating now is how an absolute channel path should interact with the existing `--workspace` option. [...] The good news: persisted and Nostr state use opaque channel IDs plus parent IDs. This requires no relay/DB identity migration—only a comprehensive public grammar migration."
-}

@@ -1,6 +1,0 @@
-{
-  "id": "d39d3-b6337",
-  "ts": "2026-06-29T10:46:11Z",
-  "session": "d39d3357-06d0-418a-bdbe-f288a9f9670f",
-  "text": "4. **Deterministic ownership of direct mentions** in the dual-delivery case (a pty session also fires hooks): the hooks path (`assemble_turn_start_context`) should skip the mention block when the session has a **live pty pane** (paste owns it) and render **only** ambient ④. In practice the paste drains the inbox first so it mostly self-dedups, but gating on \"no live pane\" makes the *format* deterministic instead of race-dependent."
-}

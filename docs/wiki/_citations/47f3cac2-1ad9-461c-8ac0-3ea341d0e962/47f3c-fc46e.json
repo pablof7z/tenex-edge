@@ -1,6 +1,0 @@
-{
-  "id": "47f3c-fc46e",
-  "ts": "2026-06-29T10:52:14Z",
-  "session": "47f3cac2-1ad9-461c-8ac0-3ea341d0e962",
-  "text": "Assistant: Now downgrade the `first-sight` log for status heartbeats (kind:30315) to debug — they're too noisy at info: [...] - `first-sight` for kind:30315 status heartbeats downgraded to `debug` — they fired every 30s per peer [...]    - **Status heartbeat noise**: kind:30315 events fire every ~30s; downgraded `first-sight` log for them to `debug` only. [...]    **demux.rs**: Changed `first-sight` log to `tracing::debug!` for kind:30315 (status heartbeats that fire every 30s), keeping `tracing::info!` for other event kinds."
-}

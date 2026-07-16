@@ -1,6 +1,0 @@
-{
-  "id": "019f1-9229d",
-  "ts": "2026-06-29T10:52:10Z",
-  "session": "019f12f9-8a0b-7012-ad2f-f4d0cb035d2b",
-  "text": "| `tenex-edge-identity-routing` | The high-risk current identity model: durable ordinal identities, `AgentInstance`, base vs ordinal keys, agent-label routing, raw session IDs as internal-only handles, and removal of codenames. Source anchors: [src/identity.rs](/Users/pablofernandez/src/tenex-edge/src/identity.rs), [docs/wiki/guides/tenex-edge-agent-identity.md](/Users/pablofernandez/src/tenex-edge/docs/wiki/guides/tenex-edge-agent-identity.md), issues `#98` and `#99`. |"
-}

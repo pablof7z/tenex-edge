@@ -1,6 +1,0 @@
-{
-  "id": "019f6-1a8a4",
-  "ts": "2026-07-14T13:09:56Z",
-  "session": "019f606f-1d25-76d1-95da-a7bb383cbe6d",
-  "text": "- If `--workspace` accompanies an absolute `--channel`, either forbid the combination or require matching roots. I prefer forbidding it. [...] There’s also a real launch bug hiding here: current `launch --workspace workspace2` still forwards workspace1’s cwd and can record it as workspace2’s path. Absolute resolution must select both the fabric root and that workspace’s local directory; if workspace2 has no local binding, fail loudly."
-}

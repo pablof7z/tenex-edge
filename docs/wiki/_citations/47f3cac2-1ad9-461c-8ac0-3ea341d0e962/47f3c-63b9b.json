@@ -1,6 +1,0 @@
-{
-  "id": "47f3c-63b9b",
-  "ts": "2026-06-29T10:52:14Z",
-  "session": "47f3cac2-1ad9-461c-8ac0-3ea341d0e962",
-  "text": "- `[daemon] pty_spawn:` pre-provisioning → routed through tracing as `info` (visible, formatted) [...]    - **`src/daemon/server/pty_rpc.rs`**\n     - `could not resolve identity` → `tracing::warn!(slug, error, \"pty_spawn: could not resolve identity\")`\n     - Already live concurrent instance → `tracing::info!(slug, scope, pubkey, \"pty_spawn: launching concurrent instance\")`\n     - Pre-provisioning channel → `tracing::info!(slug, scope, pubkey, \"pty_spawn: pre-provisioning channel\")`\n     - Channel provisioning timeout → `tracing::warn!(scope, \"pty_spawn: channel provisioning timed out; proceeding\")`"
-}

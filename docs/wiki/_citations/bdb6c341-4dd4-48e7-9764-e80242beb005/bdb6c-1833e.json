@@ -1,6 +1,0 @@
-{
-  "id": "bdb6c-1833e",
-  "ts": "2026-07-03T07:33:32Z",
-  "session": "bdb6c341-4dd4-48e7-9764-e80242beb005",
-  "text": "- @-mentioning someone from a subchannel they're not in works and reads as what it is: a cross-channel mention, using your existing `@slug@backend` addressing. Replying/joining is the explicit `invite`/`switch` you already locked in decision (C) — no membership side-effects from mentions."
-}

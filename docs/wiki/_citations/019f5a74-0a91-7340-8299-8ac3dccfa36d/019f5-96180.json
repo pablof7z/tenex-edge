@@ -1,6 +1,0 @@
-{
-  "id": "019f5-96180",
-  "ts": "2026-07-13T10:25:10Z",
-  "session": "019f5a74-0a91-7340-8299-8ac3dccfa36d",
-  "text": "The daemon should also establish the subscription before publishing/querying, then backfill from an exact `(created_at, event_id)` cursor. That closes the fast-reply race and deduplicates relay re-delivery."
-}

@@ -1,6 +1,0 @@
-{
-  "id": "b20ef-a739c",
-  "ts": "2026-06-29T10:50:59Z",
-  "session": "b20ef4ab-0b54-4770-a549-4ed195c0035e",
-  "text": "Assistant: Now add the `rehome_session_to_channel` helper and refactor `rpc_channels_switch` to use it: [...] After `channels create` provisions the new room, the daemon now re-homes the creating agent's session into it — the same route-scope + identity move that `channels switch` performs. I extracted that logic into a shared `rehome_session_to_channel` helper so create and switch can't drift apart. The brand-new room needs none of the switch path's occupancy/membership guards (the creator is its only member and no other session can already sign for it there), so the auto-switch is unconditional for genuine agent sessions. The CLI prints `switched to it`."
-}

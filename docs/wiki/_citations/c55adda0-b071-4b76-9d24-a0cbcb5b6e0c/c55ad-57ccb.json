@@ -1,6 +1,0 @@
-{
-  "id": "c55ad-57ccb",
-  "ts": "2026-06-29T10:53:01Z",
-  "session": "c55adda0-b071-4b76-9d24-a0cbcb5b6e0c",
-  "text": "unnamed channels are useless -- should be skipped -- there's literally no use for an agent to know this [...] Assistant: The cleanest fix is to add a helper `is_named_channel` and filter in `other_active_channel_lines`. A channel is unnamed if its name is empty or equals its own id: [...] Assistant: Clean. Unnamed channels are now filtered out of \"Other active channels\" before the take(5) cap, so they never appear in the awareness block."
-}

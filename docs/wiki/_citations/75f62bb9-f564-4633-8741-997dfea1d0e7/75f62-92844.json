@@ -1,6 +1,0 @@
-{
-  "id": "75f62-92844",
-  "ts": "2026-07-03T09:03:48Z",
-  "session": "75f62bb9-f564-4633-8741-997dfea1d0e7",
-  "text": "1. **Name the tools, always.** \"Claude Code @mentions Codex\" — never \"your AI agents collaborate.\" Named tools are this audience's trust currency. Kill: \"AI teammates,\" \"your agent workforce.\" [...] Works: concrete verbs (see, mention, message, stop clobbering), specific proof (\"a real opencode agent and a real codex agent messaged each other on relay.tenex.chat\"), naming the exact host tools (Claude Code, Codex, OpenCode — not \"AI assistants\"), honest scoping/caveats (this crowd rewards \"here's what this doesn't do yet\"), terminal/code-block-first demonstration."
-}

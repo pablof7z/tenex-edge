@@ -1,6 +1,0 @@
-{
-  "id": "019f5-9a893",
-  "ts": "2026-07-13T08:55:57Z",
-  "session": "019f5a74-0a91-7340-8299-8ac3dccfa36d",
-  "text": "- Expand every workspace/channel the session has joined; keep merely known workspaces compact.\n- Make `who` always human-formatted, never XML, and never cursor-mutating. Agent invocation should fail with guidance to use `my session`."
-}

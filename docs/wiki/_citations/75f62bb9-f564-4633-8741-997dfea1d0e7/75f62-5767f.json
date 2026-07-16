@@ -1,6 +1,0 @@
-{
-  "id": "75f62-5767f",
-  "ts": "2026-07-03T09:04:28Z",
-  "session": "75f62bb9-f564-4633-8741-997dfea1d0e7",
-  "text": "6. **Never say Nostr, crypto, or decentralized above the architecture section.** Above the fold the mechanism is described by its properties: \"self-owned keys on your disk, no central server to run or trust, works even if a relay dies.\" The word \"Nostr\" appears exactly once, in \"How it works,\" framed as: open protocol, self-hostable, no vendor lock-in. [...] 3. **\"Nostr / crypto / decentralized\" never appears above the architecture section** (crypto dev mindshare is collapsing and \"Nostr + AI agent\" is already colonized by token plays). Above the fold it's described by properties — *keys on your disk, no central server, works if a relay dies*. Nostr is revealed once, as a credibility signal in \"How it works.\" [...] **Beat 5 — How it works.** Hooks (\"the plugin is just the straw — tenex-edge knows nothing about the host\"), the daemon, SQLite, fail-open design, the corruption war story in one sentence. **\"Built on Nostr\" is revealed here and only here**, as three property bullets, then the protocol name. The single permitted use of \"citizenship for your agents\" closes this section."
-}

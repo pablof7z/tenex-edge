@@ -1,6 +1,0 @@
-{
-  "id": "019f5-c547a",
-  "ts": "2026-07-13T10:25:10Z",
-  "session": "019f5a74-0a91-7340-8299-8ac3dccfa36d",
-  "text": "Success uses the existing agent envelope:\n\n```xml\n<tenex-edge>\n  <channel ref=\"x\">\n    <message from=\"@agent5\" id=\"abc123\">finished the work</message>\n  </channel>\n</tenex-edge>\n```"
-}

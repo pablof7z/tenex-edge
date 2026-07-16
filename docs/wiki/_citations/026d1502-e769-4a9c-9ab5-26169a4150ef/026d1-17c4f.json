@@ -1,6 +1,0 @@
-{
-  "id": "026d1-17c4f",
-  "ts": "2026-07-03T11:12:02Z",
-  "session": "026d1502-e769-4a9c-9ab5-26169a4150ef",
-  "text": "User: use inquirer crate -- make it called `tenex-edge config` -- one of the menu options is configuring providers, another is configuring models (with model listing from the different providers (i.e. list the models from the configured ollama endpoint (somtimes localhost, could be anything, could be sometimes ollama cloud, etc) -- or the openrouter models -- with fuzzy search, etc a REAL good UX"
-}

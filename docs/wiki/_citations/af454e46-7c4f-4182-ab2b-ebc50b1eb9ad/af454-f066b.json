@@ -1,6 +1,0 @@
-{
-  "id": "af454-f066b",
-  "ts": "2026-07-10T14:08:15Z",
-  "session": "af454e46-7c4f-4182-ab2b-ebc50b1eb9ad",
-  "text": "Assistant: CI checks are still running (fmt/lint/test + integration), so merging right now would bypass them. Given this repo's history uses standard merge commits (not squash), I'll enable auto-merge so it merges automatically once checks pass, rather than forcing it through now."
-}

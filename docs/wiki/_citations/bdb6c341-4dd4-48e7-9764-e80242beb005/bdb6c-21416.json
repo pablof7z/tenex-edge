@@ -1,6 +1,0 @@
-{
-  "id": "bdb6c-21416",
-  "ts": "2026-07-03T07:33:28Z",
-  "session": "bdb6c341-4dd4-48e7-9764-e80242beb005",
-  "text": "## 4. Don't change the relay contract at all.\n\nEvery channel is still a NIP-29 group with a parent hint — that's already true. The migration is purely local: wherever daemon/CLI/hook code branches on \"is this a project or a channel,\" replace with \"does this node have a workspace binding\" or \"is parent empty,\" whichever the call site actually means. My bet is most call sites mean one of those two and the word \"project\" was papering over which. [...] - **No big-bang rename.** `relay_*` tables are relay-sourced projections — leave them. This is a local-state and rendering refactor."
-}

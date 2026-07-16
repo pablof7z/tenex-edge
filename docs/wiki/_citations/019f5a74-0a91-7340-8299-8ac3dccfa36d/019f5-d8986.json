@@ -1,6 +1,0 @@
-{
-  "id": "019f5-d8986",
-  "ts": "2026-07-13T08:54:38Z",
-  "session": "019f5a74-0a91-7340-8299-8ac3dccfa36d",
-  "text": "Plans are not durable understanding and must not survive as reference documentation after they have been implemented, executed, or invalidated. When a plan completes, remove it or collapse it to the smallest live follow-up. Any lasting knowledge learned from the work belongs in durable documentation instead — `docs/product-spec/` for product doctrine, `docs/fabric-architecture*.md` and the design docs under `docs/` for architecture, and `docs/wiki/` for source-backed synthesis. [...] - **Do not create new top-level planning files.** No `PLAN.md`, `TODO.md`, `ROADMAP.md`, `NEXT.md`, or `STATUS.md` at the repo root or directly under `docs/`. New tactical detail belongs in a GitHub issue. [...] - **Do not duplicate state across files.** A violation or feature tracked in GitHub Issues is not also restated in a separate plan file. Single source of truth per fact. [...] - **Correct docs in place; do not layer superseding corrections.** When a doc is wrong, edit the authoritative document. Do not add an appendix or \"revision\" section whose job is to contradict the original while leaving the wrong text intact."
-}

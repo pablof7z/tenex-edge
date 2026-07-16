@@ -1,6 +1,0 @@
-{
-  "id": "019f1-61aa9",
-  "ts": "2026-06-29T10:55:48Z",
-  "session": "019f12f9-8a0b-7012-ad2f-f4d0cb035d2b",
-  "text": "User: that's way too much -- we only need a skill for agents that inhabit a tenex-edge fabric so they understand the mental model\n\nAssistant: Agreed. One skill is enough: `tenex-edge-citizen`. [...] Assistant: Yes. The skill should teach “how to be a good fabric citizen,” with commands as a small appendix.\n\nI’d shape it as one skill: `tenex-edge-citizen`."
-}

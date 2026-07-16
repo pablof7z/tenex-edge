@@ -1,6 +1,0 @@
-{
-  "id": "d39d3-c1f19",
-  "ts": "2026-06-29T10:46:31Z",
-  "session": "d39d3357-06d0-418a-bdbe-f288a9f9670f",
-  "text": "I'm not completelyy sure on what the output we should should look like across the combinations (i.e. pty-wrapped [meaning we can inject user messages at any point and whatever the agent responds is automatically published on the channel] vs hooks-only [the agent must explicitly call tenex-edge write chat], background chatter vs directed mentions) when to show the message id (perhaps never, since all we use the message id for is to know who to reply to, so maybe we just let the agent respond naturall with `tenex-edge chat write \"@pablo hello\" [...] ## On the message-id\n\nYour instinct is right: **drop it from the envelope.** The id only exists to target a reply, and replies target by `@name` (`tenex-edge chat write \"@pablo …\"`), which the agent already has from the speaker prefix. Keep `tenex-edge chat reply <id>` available for true NIP-10 threading, but don't advertise it in the envelope — an agent that wants to thread can pull the id from `tenex-edge chat read`. This removes the noisiest line (`(message id: cd4db37e)`) from every block.\n [...] 3. yes, drop the message id"
-}

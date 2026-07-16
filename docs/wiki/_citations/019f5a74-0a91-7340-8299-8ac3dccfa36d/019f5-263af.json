@@ -1,6 +1,0 @@
-{
-  "id": "019f5-263af",
-  "ts": "2026-07-13T10:25:10Z",
-  "session": "019f5a74-0a91-7340-8299-8ac3dccfa36d",
-  "text": "The implementation needs one important substrate change. Replies already carry the original event ID in an `e` tag, but the canonical message model and live tail currently discard that relationship. We should preserve `reply_to` in the message read model and expose it through the dedicated wait stream. Correlation must never be inferred from timestamps, bodies, or “the next message from that person.”"
-}

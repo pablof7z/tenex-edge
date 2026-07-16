@@ -1,6 +1,0 @@
-{
-  "id": "bd868-06e51",
-  "ts": "2026-06-29T10:54:20Z",
-  "session": "bd8689c8-4a5f-45b3-9dbe-758baec2a2f4",
-  "text": "- `args.rs:468` → `/// Filter panes/events to a session id (or prefix).` (drop \"or codename\").\n- `cli.rs:6` → remove `session_codename` from the import list (pending §1/§2 deletions making it unused at this scope). [...] Assistant: Now the Resume and HookTail help text mentioning codename:\n"
-}

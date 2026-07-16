@@ -1,6 +1,0 @@
-{
-  "id": "47f3c-e88ec",
-  "ts": "2026-06-29T10:52:14Z",
-  "session": "47f3cac2-1ad9-461c-8ac0-3ea341d0e962",
-  "text": "   - Log level strategy: ERROR=unrecoverable, WARN=recoverable-unexpected, INFO=consequential-single, DEBUG=high-frequency/expected\n   - NIP-29 / Nostr relay protocol, ordinal identity allocation (`smith`, `smith1`, `smith2`, ...)\n   - `RUST_LOG` env var as the filter override (default `tenex_edge=info`)"
-}

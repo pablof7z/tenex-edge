@@ -1,6 +1,0 @@
-{
-  "id": "bd868-16cba",
-  "ts": "2026-06-29T10:58:31Z",
-  "session": "bd8689c8-4a5f-45b3-9dbe-758baec2a2f4",
-  "text": "**Doc updates needed:** README.md:90 + 118 (replace `@<codename>` targeting vocabulary with `@<agent-label>`), daemon-rpc-surface.md:23–27 (drop the `codename` field from the example + delete the explainer paragraph, matching the §2 hook change), tail-v2-design.md:48–49 (delete/replace the codename definition). The `docs/wiki/...json` transcripts are out of scope for normative edits. [...] - **docs** (me) ✅ — README, daemon-rpc-surface, tail-v2-design\n"
-}

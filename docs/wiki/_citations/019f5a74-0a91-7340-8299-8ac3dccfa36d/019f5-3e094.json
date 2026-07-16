@@ -1,6 +1,0 @@
-{
-  "id": "019f5-3e094",
-  "ts": "2026-07-13T10:25:03Z",
-  "session": "019f5a74-0a91-7340-8299-8ac3dccfa36d",
-  "text": "- `K` confirm and kill the selected sessions—or the current row when none are selected.\n- Exact selected count and handles in the confirmation. [...] - Exact-ID batch killing with double-`K` confirmation [...] Assistant: The live smoke now matches the intended interaction: compact one-line rows, inline fuzzy filtering, Space toggles checkboxes, Enter summarizes the selection, and the kill confirmation defaults to No. I also verified cancellation leaves the terminal in normal mode and performed no kill. I’m at the full repository gates now."
-}

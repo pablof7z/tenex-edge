@@ -1,6 +1,0 @@
-{
-  "id": "47f3c-0b6d2",
-  "ts": "2026-06-29T10:52:14Z",
-  "session": "47f3cac2-1ad9-461c-8ac0-3ea341d0e962",
-  "text": "| **Session lifecycle** | `session_start` hook received, stale session cancelled (with reason: same_pid/same_pane), re-assert (engine already running), session engine spawned with agent+channel+session, session engine exited | [...]    - **`src/daemon/server/session_start.rs`**\n     - Added `tracing::debug!(agent, harness, channel, \"session_start hook received\")` after harness is inferred\n     - Stale session cancellation: added `tracing::info!` with reason (same_pid/same_pane)\n     - Idempotent re-assert: added `tracing::info!(agent, session, channel, \"session re-assert: engine already running\")`\n     - `ensure_channel_ready` timeout: removed debug-gate, → `tracing::warn!`\n     - Subscription failure: `tracing::warn!` replacing debug-gated `eprintln!`\n     - Final session started: `tracing::info!(agent, channel, session, codename, harness, \"session started\")`"
-}

@@ -1,6 +1,0 @@
-{
-  "id": "019f5-905b0",
-  "ts": "2026-07-13T10:25:03Z",
-  "session": "019f5a74-0a91-7340-8299-8ac3dccfa36d",
-  "text": "- `Space` toggle selection.\n- `a` toggle all visible search results.\n- `↑/↓` and `j/k` navigation. [...] - `Space` selection, `a` select visible, `u` clear\n- Exact-ID batch killing with double-`K` confirmation [...] Assistant: I found the mismatch in code: it explicitly enters the alternate screen and carries pane attachment/input forwarding—far beyond the checklist interaction you described. The correction will delete that whole session-TUI layer and use the repository’s existing `inquire` prompt stack: type-to-filter, arrows to move, Space to toggle, Enter to submit, then an explicit kill confirmation."
-}

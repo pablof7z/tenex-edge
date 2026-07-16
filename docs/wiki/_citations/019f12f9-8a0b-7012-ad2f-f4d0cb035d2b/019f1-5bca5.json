@@ -1,6 +1,0 @@
-{
-  "id": "019f1-5bca5",
-  "ts": "2026-06-29T10:55:48Z",
-  "session": "019f12f9-8a0b-7012-ad2f-f4d0cb035d2b",
-  "text": "**Mechanics Appendix**\nKeep this short:\n\n```md\nRead context:\n- Use hook-injected snapshot first.\n- Use `tenex-edge chat read` if recent room context is needed.\n- Use `tenex-edge who` only if awareness is missing.\n\nCoordinate:\n- `tenex-edge chat write --message \"...\"`\n- `tenex-edge invite <agent>`\n\nChannels:\n- `tenex-edge channels list`\n- `tenex-edge channels switch <channel>`\n- `tenex-edge channels create --name \"...\"`\n```"
-}

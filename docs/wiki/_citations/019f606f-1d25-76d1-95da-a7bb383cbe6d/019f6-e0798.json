@@ -1,6 +1,0 @@
-{
-  "id": "019f6-e0798",
-  "ts": "2026-07-14T13:09:56Z",
-  "session": "019f606f-1d25-76d1-95da-a7bb383cbe6d",
-  "text": "- Reject dotted refs outright—no compatibility aliases.\n- Don’t implement filesystem semantics yet: reject `.`, `..`, `//`, and trailing `/`. [...] - Don’t implement filesystem semantics yet: reject `.`, `..`, `//`, and trailing `/`."
-}

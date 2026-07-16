@@ -1,6 +1,0 @@
-{
-  "id": "019f1-11045",
-  "ts": "2026-06-29T10:51:56Z",
-  "session": "019f12f9-8a0b-7012-ad2f-f4d0cb035d2b",
-  "text": "- **Never commit code reviews.** AI/codex review dumps and post-merge review notes must not be committed. Promote actionable findings into a GitHub issue or a durable doc, then discard the review."
-}

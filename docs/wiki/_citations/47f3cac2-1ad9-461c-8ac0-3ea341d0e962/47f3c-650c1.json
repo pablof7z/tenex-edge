@@ -1,6 +1,0 @@
-{
-  "id": "47f3c-650c1",
-  "ts": "2026-06-29T10:52:14Z",
-  "session": "47f3cac2-1ad9-461c-8ac0-3ea341d0e962",
-  "text": "| **Reconcile** | Session count on restart, each dead session (warn with pid), each revived session (info) | [...]      - `reconcile_sessions`: added count log at entry; dead session → `tracing::warn!`; reviving → `tracing::info!`; replaced debug-gated `eprintln!` for signer/admission/subscription failures with `tracing::warn!`"
-}

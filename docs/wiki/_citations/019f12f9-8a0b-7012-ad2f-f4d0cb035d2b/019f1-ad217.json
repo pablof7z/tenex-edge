@@ -1,6 +1,0 @@
-{
-  "id": "019f1-ad217",
-  "ts": "2026-06-29T10:52:52Z",
-  "session": "019f12f9-8a0b-7012-ad2f-f4d0cb035d2b",
-  "text": "Each skill should keep `SKILL.md` short and put volatile details in `reference/` files. For this repo, I’d also add small scripts/resources to `tenex-edge-verification`, such as a command that prints current help, LOC offenders, and known test prerequisites, because command/docs drift is already visible."
-}

@@ -1,6 +1,0 @@
-{
-  "id": "bd868-12ead",
-  "ts": "2026-06-29T10:54:20Z",
-  "session": "bd8689c8-4a5f-45b3-9dbe-758baec2a2f4",
-  "text": "Assistant: Now `runtime.rs` `slog` filename — use the raw session_id instead of a codename:\n [...] - **slog filename** (me) ✅ — raw `session_id`\n- **pty resume** (me) ✅ — `resume_by_codename` deleted; raw-id exact+prefix only"
-}

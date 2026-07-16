@@ -1,6 +1,0 @@
-{
-  "id": "019f5-cec0a",
-  "ts": "2026-07-14T11:51:45Z",
-  "session": "019f5fec-4248-78b1-8d8f-8aa1238afb9c",
-  "text": "group the channels it's on by workspace (in case the agent is in channels of multiple workspaces) [...] ❯ ● @nova-codex   tenex-edge: #ideas #skills-work · skills: #skill-dev   2m\n    Session title — current activity\n```\n\nWhere:\n\n- `●` is the color-only state badge—no `working`, `idle`, or `PTY` text.\n- Each workspace name has a deterministic color derived from its canonical workspace ID.\n- Channels are grouped as `workspace: #channel #channel`. [...] I would display active and passively joined channels equally for now, avoiding another marker or label."
-}

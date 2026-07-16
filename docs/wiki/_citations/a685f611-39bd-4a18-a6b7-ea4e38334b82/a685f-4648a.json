@@ -1,6 +1,0 @@
-{
-  "id": "a685f-4648a",
-  "ts": "2026-07-03T11:02:45Z",
-  "session": "a685f611-39bd-4a18-a6b7-ea4e38334b82",
-  "text": "Assistant: I ssh'd into the relay box (`pablo@157.180.102.242`, host `kind2`) and found the service: `nip29-f7z-io.service`, running the `croissant` NIP-29 relay (WorkingDir `/opt/nip29-f7z-io`, port 3336). Here's what the investigation turned up: [...] **The relay never says this. It's not the relay.**\n- `journalctl -u nip29-f7z-io.service` around 10:49–10:52 (and across the entire retained history) has zero lines containing \"write action\", \"reject\", \"disabled\", \"readonly\", or any OK-false verdict. Croissant only logs accepted incoming `EVENT`/`REQ`/`CLOSE` traffic (`→` lines) — nothing from your bursts of publishes even shows up as received, let alone rejected.\n- I `strings`'d the relay binary itself (`/opt/nip29-f7z-io/croissant`) for the literal phrase \"write action\" — not present. The relay-side settings.json also has no maintenance/read-only toggle."
-}

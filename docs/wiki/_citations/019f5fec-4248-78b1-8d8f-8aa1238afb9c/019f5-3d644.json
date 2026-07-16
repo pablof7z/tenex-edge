@@ -1,6 +1,0 @@
-{
-  "id": "019f5-3d644",
-  "ts": "2026-07-14T11:51:45Z",
-  "session": "019f5fec-4248-78b1-8d8f-8aa1238afb9c",
-  "text": "User: single kill -- when I'm hover that row just let me press shift+k and it should insta kill it -- do show me color output, what's their session title is, channels it's active on, etc -- it should insta-kill such that it gets removed from the channels it's active on immediately instead of the 10m wait [...] Controls:\n\n- `Enter`: attach, when a live PTY exists\n- `Shift+K`: immediately kill the highlighted session—no confirmation\n- Type: fuzzy filter\n- `↑`/`↓`: move\n- `Esc`: exit"
-}

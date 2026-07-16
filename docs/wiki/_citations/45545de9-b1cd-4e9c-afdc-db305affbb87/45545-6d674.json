@@ -1,6 +1,0 @@
-{
-  "id": "45545-6d674",
-  "ts": "2026-07-10T13:22:18Z",
-  "session": "45545de9-b1cd-4e9c-afdc-db305affbb87",
-  "text": "**Give ChatGPT / Grok this URL:** `https://b43b8bcb7bd4.ngrok.app/mcp`\n\nIt's live now — no auth required yet (started without `--oauth`; say the word if ChatGPT's connector setup insists on OAuth and I'll restart with `--oauth --public-url https://b43b8bcb7bd4.ngrok.app`)."
-}

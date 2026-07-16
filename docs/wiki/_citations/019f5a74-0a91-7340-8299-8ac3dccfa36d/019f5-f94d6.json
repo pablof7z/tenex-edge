@@ -1,6 +1,0 @@
-{
-  "id": "019f5-f94d6",
-  "ts": "2026-07-13T10:25:10Z",
-  "session": "019f5a74-0a91-7340-8299-8ac3dccfa36d",
-  "text": "no --json needed -- these commands are always for agents and should always use the coherent format that agents see throughout tenex-edge stuff [...] - No `--json`, tables, or alternate formats."
-}

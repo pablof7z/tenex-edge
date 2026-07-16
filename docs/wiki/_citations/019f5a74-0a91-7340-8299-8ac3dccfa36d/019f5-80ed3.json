@@ -1,6 +1,0 @@
-{
-  "id": "019f5-80ed3",
-  "ts": "2026-07-13T10:25:11Z",
-  "session": "019f5a74-0a91-7340-8299-8ac3dccfa36d",
-  "text": "This changes my earlier exit-code recommendation: because timeout is an expected agent outcome, it should exit `0`. Actual daemon, identity, or channel-resolution failures remain nonzero. `channel send --wait` should print no intermediate “sent” line—only the reply envelope or timeout envelope."
-}

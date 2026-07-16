@@ -1,6 +1,0 @@
-{
-  "id": "019f5-65fcc",
-  "ts": "2026-07-14T11:51:45Z",
-  "session": "019f5fec-4248-78b1-8d8f-8aa1238afb9c",
-  "text": "Assistant: Recovery reasserted 39 live endpoints through the new schema; four older live supervisors have no preserved start envelope, so the current DB-only projection still hides them. That is a genuine ownership bug in the just-merged implementation: attachability comes from the supervisor registry, so the picker must include live registry endpoints even when enrichment state is absent. I’m fixing that narrow fallback now and will run it through the same PR/CI/install loop.\n\nAssistant: The fallback is now implemented as a narrow overlay: DB-backed rows still own identity, busy/idle, title, grouped memberships, and confirmed cleanup; any additional live supervisor appears as an attachable minimally enriched row instead of disappearing. Direct endpoint kill is allowed for that fallback but explicitly reports that fabric cleanup cannot be confirmed without a current identity record. [...] - Live unbound supervisors remain selectable after state rollovers."
-}

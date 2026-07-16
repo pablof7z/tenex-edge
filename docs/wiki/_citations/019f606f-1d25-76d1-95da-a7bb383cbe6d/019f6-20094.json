@@ -1,6 +1,0 @@
-{
-  "id": "019f6-20094",
-  "ts": "2026-07-14T13:10:03Z",
-  "session": "019f606f-1d25-76d1-95da-a7bb383cbe6d",
-  "text": "User: how about we ditch name=\"tenex-edge\"? isn't it redundant with the channel name?\n [...] Assistant: Yes—drop the redundant workspace `name`. Keep `channel` because it identifies the workspace/current scope:"
-}

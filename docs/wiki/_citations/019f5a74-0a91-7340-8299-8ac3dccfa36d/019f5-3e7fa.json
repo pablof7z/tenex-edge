@@ -1,6 +1,0 @@
-{
-  "id": "019f5-3e7fa",
-  "ts": "2026-07-13T08:55:43Z",
-  "session": "019f5a74-0a91-7340-8299-8ac3dccfa36d",
-  "text": "I recommend “all sessions” mean all locally owned/manageable sessions. Remote sessions remain visible through human `who`; the local management UI should not imply it can kill them."
-}

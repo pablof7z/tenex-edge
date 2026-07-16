@@ -1,6 +1,0 @@
-{
-  "id": "75f62-d3547",
-  "ts": "2026-07-03T08:27:15Z",
-  "session": "75f62bb9-f564-4633-8741-997dfea1d0e7",
-  "text": "- resolves/mints a durable **Nostr keypair** for `(agent-slug, machine)` — `src/identity.rs` — stored at `~/.tenex-edge/agents/<slug>.json` [...] Plus: identity = (agent, machine) tuple (confirmed shipped, matches your memory [[tenex-edge-m1-decisions]]); Nostr/NIP-29 chosen for sovereignty property, explicitly flagged as a live open question (Q6: \"is Nostr the right substrate, or a constraint we're rationalizing?\")."
-}

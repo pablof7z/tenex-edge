@@ -1,6 +1,0 @@
-{
-  "id": "af454-63cf7",
-  "ts": "2026-07-10T14:08:11Z",
-  "session": "af454e46-7c4f-4182-ab2b-ebc50b1eb9ad",
-  "text": "Assistant: Clean. Now let's check the daemon_integration test suite (excluded from CI, per your notes) for any similarly-affected assertions, since those tests reference `friendly_short_code` heavily already."
-}

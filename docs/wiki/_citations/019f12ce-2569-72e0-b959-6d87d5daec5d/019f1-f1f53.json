@@ -1,6 +1,0 @@
-{
-  "id": "019f1-f1f53",
-  "ts": "2026-06-29T10:28:27Z",
-  "session": "019f12ce-2569-72e0-b959-6d87d5daec5d",
-  "text": "whoami should probably not exist and instead should be shown on `tenex-edge who` when run by an agent (i.e. we show the agent who they are and in what channel they are on)\n"
-}

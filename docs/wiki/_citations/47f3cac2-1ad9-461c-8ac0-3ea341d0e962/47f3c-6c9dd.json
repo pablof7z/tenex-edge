@@ -1,6 +1,0 @@
-{
-  "id": "47f3c-6c9dd",
-  "ts": "2026-06-29T10:52:14Z",
-  "session": "47f3cac2-1ad9-461c-8ac0-3ea341d0e962",
-  "text": "| **Demux/routing** | Every event (debug: kind+id+from), first-sight gate (info), duplicate delivery (debug), offline-agent-mention dispatch, orchestration dispatch, spawn-on-mention full decision tree | [...]    - **`src/daemon/server/demux.rs`**\n     - `handle_incoming`: replaced `eprintln!` with `tracing::debug!(kind, id, from, \"incoming event\")`\n     - First-sight logic: `tracing::info!` for most kinds, but `tracing::debug!` for kind:30315 status heartbeats (added `is_heartbeat` check)\n     - Added offline-agent-mention dispatch log at `tracing::info!`\n     - Added orchestration dispatch log at `tracing::info!`\n     - `handle_offline_agent_mention`: replaced all `eprintln!` with structured tracing (has_alive→debug, resume→info, resume fail→warn, not-member→debug, ordinal provisioning→info, mgmt add_member fail→warn, no path→warn, spawning→info, spawn outcome→info/warn)\n     - `handle_orchestration`: replaced debug-gated and unconditional `eprintln!` with tracing::warn (auth rejection, parent mismatch), tracing::debug (already claimed), tracing::info (identity mint, spawn success), tracing::error (spawn failure)"
-}

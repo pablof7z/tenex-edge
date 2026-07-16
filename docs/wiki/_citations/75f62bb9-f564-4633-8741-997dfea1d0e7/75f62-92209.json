@@ -1,6 +1,0 @@
-{
-  "id": "75f62-92209",
-  "ts": "2026-07-03T09:14:41Z",
-  "session": "75f62bb9-f564-4633-8741-997dfea1d0e7",
-  "text": "Assistant: Now I have an exact, accurate command surface — including a critical catch: the `tail` command was **removed** (there's a test asserting it's gone), yet the current README still advertises it. The live view is `who --live`. Install path is `just install` then `tenex-edge install --all`. Let me confirm the repo remote so links are correct, then write.\n\nAssistant: Everything is verified. Repo is `github.com/pablof7z/tenex-edge`. Writing the new README now — proof-first hero, pain in the subhead, identity as beat two, honest \"what this isn't yet,\" Nostr revealed only in architecture, `tail` claim removed. [...] \n**1. `README.md` — rewritten from scratch** (in repo, replacing the old one). Follows the committed 7-beat arc: proof hero → the pain in their words → what ships today (present-tense, tested only) → why identity is the foundation + an honest comparison table vs. Agent Teams / hcom / mcp_agent_mail → how it works (Nostr revealed here) → *what this isn't yet* → quickstart/commands/FAQ. Every claim is grounded in the code-verified brief. I also **killed a stale claim**: the old README advertised a `tail` command that has since been removed (there's a test asserting it's gone) — replaced with `who --live`.\n"
-}

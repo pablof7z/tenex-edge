@@ -1,6 +1,0 @@
-{
-  "id": "47f3c-2d7ce",
-  "ts": "2026-06-29T10:52:14Z",
-  "session": "47f3cac2-1ad9-461c-8ac0-3ea341d0e962",
-  "text": "| **Identity/ordinals** | Agent key loaded (debug), agent key created (info with path), ordinal slot allocated (info with label e.g. `smith2`), ordinal released, preferred ordinal occupied (warn) | [...]    - **`src/identity.rs`**\n     - Key loaded from disk: `tracing::debug!(slug, pubkey = %&stored.public_key[..8], \"agent key loaded\")`\n     - Key created first time: `tracing::info!(slug, pubkey = %&stored.public_key[..8], path = %path.display(), \"agent key created\")`\n\n   - **`src/daemon/server/session_signer.rs`**\n     - `select_and_reserve`: reassert path → `tracing::debug!(session, agent, h, ordinal, \"ordinal reasserted\")`; preferred ordinal occupied → `tracing::warn!` with preferred value; fresh allocation → `tracing::info!(session, agent, h, ordinal, label, \"ordinal slot allocated\")`\n     - `release`: collect freed slots before retain, then `tracing::info!(session, h, ordinal, \"ordinal slot released\")` for each"
-}

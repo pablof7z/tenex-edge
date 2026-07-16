@@ -1,6 +1,0 @@
-{
-  "id": "019f5-81b01",
-  "ts": "2026-07-14T11:51:45Z",
-  "session": "019f5fec-4248-78b1-8d8f-8aa1238afb9c",
-  "text": "User: titles are long -- let's make each row two lines instead of one\n\nAssistant: Agreed. I’m updating the exploration to make every session a fixed two-line item, with identity/scope on the first line and the long title/activity on the second. [...] Assistant: Agreed. Each session becomes a fixed two-line item:\n\n```text\n❯ @nova-codex  WORKING  PTY  just now  tenex-edge · #ideas · #skills-work\n    Hide human-only who command from agent sessions — watching CI and preparing release\n```\n\nThe highlight and `Shift+K` target both lines as one item. I’d also expand the picker beyond its current half-terminal height so the two-line layout still shows enough sessions. [...] The highlight and `Shift+K` target both lines as one item. I’d also expand the picker beyond its current half-terminal height so the two-line layout still shows enough sessions."
-}

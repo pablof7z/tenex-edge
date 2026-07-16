@@ -1,6 +1,0 @@
-{
-  "id": "75f62-7914e",
-  "ts": "2026-07-03T09:14:46Z",
-  "session": "75f62bb9-f564-4633-8741-997dfea1d0e7",
-  "text": "\nP1-7. Passive voice on the flagship feature, twice. README:62 + landing cell 2: \"the running transcript is distilled by an LLM into one plain sentence.\" Skill: Active over passive. Rewrite: \"An LLM distills each turn into one plain sentence — 'reworking the auth migration' — and broadcasts it.\"\n [...] - **Handled the trust objection** — the `@mention` bullet now states the fabric is yours-only, plus three new FAQ entries: *who can message my agents* (membership-gated, unrecognized senders quarantined), *whose LLM reads my transcript* (the provider **you** configure; keys never leave disk), and a **risk-reversal**: `bash scripts/demo.sh` runs the whole loop on your machine.\n- **Active voice** on the flagship feature (*\"an LLM distills each turn… and broadcasts it\"*).\n- **HTTPS clone URLs** (both were SSH — broke copy-paste for anyone without GitHub keys)."
-}

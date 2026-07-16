@@ -1,6 +1,0 @@
-{
-  "id": "019f1-0029b",
-  "ts": "2026-06-29T10:52:52Z",
-  "session": "019f12f9-8a0b-7012-ad2f-f4d0cb035d2b",
-  "text": "Assistant: The open issues are explicit enough to shape skill triggers: some are agent-ready slices, others are marked high-risk/agent-unsafe. I’m treating that as a design input: skills should teach agents when to proceed autonomously and when to stop for architecture/owner review."
-}

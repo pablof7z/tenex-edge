@@ -1,6 +1,0 @@
-{
-  "id": "019f5-8ad63",
-  "ts": "2026-07-13T08:54:24Z",
-  "session": "019f5a74-0a91-7340-8299-8ac3dccfa36d",
-  "text": "## No Backwards Compatibility\n\nThis repository does **not** preserve backwards compatibility. Removed surfaces\nmust be removed completely: no hidden aliases, parser aliases, legacy flags,\nold subcommands, fallback JSON keys, duplicate MCP/tool names, stale e2e\ncommands, compatibility wrappers, or docs that continue teaching the old form.\n\nIf you find backwards-compatibility behavior, kill it immediately in the same\nchange. If a requested change would require adding a compatibility shim, do not\nadd it; change the caller, script, doc, or owning layer to the current contract\ninstead. Compatibility is drift, and drift is a bug."
-}

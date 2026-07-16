@@ -1,6 +1,0 @@
-{
-  "id": "019f5-bcdd4",
-  "ts": "2026-07-13T08:54:38Z",
-  "session": "019f5a74-0a91-7340-8299-8ac3dccfa36d",
-  "text": "- **A `// TODO:` comment is not a plan.** If it represents work to be done, it belongs in a GitHub issue. If it represents a known limitation or durable decision, it belongs in the architecture/design doc or wiki article that owns the concept."
-}

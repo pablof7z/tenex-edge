@@ -1,6 +1,0 @@
-{
-  "id": "75f62-eddb2",
-  "ts": "2026-07-03T09:04:28Z",
-  "session": "75f62bb9-f564-4633-8741-997dfea1d0e7",
-  "text": "**Beat 2 — The pain, in their words (3-4 sentences max).** \"Agent A refactors a function. Agent B, unaware, edits the same function. You route the work, check the overlap, decide the merge order, tell each one what to retry. The more agents you run, the worse it gets.\" Then the turn: \"The agents aren't the bottleneck. The bus between them is — and the bus is you.\""
-}

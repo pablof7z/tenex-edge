@@ -1,6 +1,0 @@
-{
-  "id": "47f3c-e1cf4",
-  "ts": "2026-06-29T10:52:14Z",
-  "session": "47f3cac2-1ad9-461c-8ac0-3ea341d0e962",
-  "text": "   - **`src/daemon/server/background/idle.rs`**\n     - Grace period start: `tracing::info!(grace_secs, \"daemon idle; starting grace-period countdown\")`\n     - Exit: `tracing::info!(\"grace period elapsed; daemon exiting\")`"
-}

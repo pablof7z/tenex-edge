@@ -1,6 +1,0 @@
-{
-  "id": "026d1-fc99d",
-  "ts": "2026-07-03T11:12:02Z",
-  "session": "026d1502-e769-4a9c-9ab5-26169a4150ef",
-  "text": "2. **Errors recover in place, never dead-end**: every fetch failure is one `✗ what/where/why` line plus a Retry / Edit-provider / Back select that inlines the fix and auto-retries. Includes the \"reachable but not actually Ollama\" case. Empty-provider entry to Models offers to jump straight into add-provider; after adding a provider, offer to assign a role immediately."
-}

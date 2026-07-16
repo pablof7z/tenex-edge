@@ -1,6 +1,0 @@
-{
-  "id": "019f1-85a20",
-  "ts": "2026-06-29T10:51:21Z",
-  "session": "019f12f9-8a0b-7012-ad2f-f4d0cb035d2b",
-  "text": "- Keep hand-authored source and documentation files under **300 lines of code** where practical (soft limit).\n- Treat **500 lines of code** as a hard ceiling for hand-authored files.\n- When a code file crosses the 500-LOC hard limit, refactor by splitting responsibilities along **domain boundaries** — cohesive ownership — not by moving arbitrary chunks to a sibling file.\n- Inline tests that inflate a source file's LOC belong in a nested test module (e.g., a `tests` submodule or `tests.rs`), so the implementation stays under the soft target."
-}

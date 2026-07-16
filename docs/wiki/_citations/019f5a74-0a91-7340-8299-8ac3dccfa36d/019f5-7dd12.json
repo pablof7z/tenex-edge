@@ -1,6 +1,0 @@
-{
-  "id": "019f5-7dd12",
-  "ts": "2026-07-13T08:55:43Z",
-  "session": "019f5a74-0a91-7340-8299-8ac3dccfa36d",
-  "text": "- `K` confirm and kill the selected sessions—or the current row when none are selected.\n- Exact selected count and handles in the confirmation. [...] - Exact-ID batch killing with double-`K` confirmation"
-}

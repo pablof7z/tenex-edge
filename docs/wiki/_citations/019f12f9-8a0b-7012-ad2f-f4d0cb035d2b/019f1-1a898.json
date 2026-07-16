@@ -1,6 +1,0 @@
-{
-  "id": "019f1-1a898",
-  "ts": "2026-06-29T10:55:48Z",
-  "session": "019f12f9-8a0b-7012-ad2f-f4d0cb035d2b",
-  "text": "2. agents don't see raw pubkeys ever, so mentioning by their agent name is their only possible way forward -- no need to clarify [...] - Mention agents by their visible agent label, such as `@haiku` or `@haiku1`, not by raw pubkey or old session codenames."
-}

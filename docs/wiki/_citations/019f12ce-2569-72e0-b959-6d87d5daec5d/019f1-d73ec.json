@@ -1,6 +1,0 @@
-{
-  "id": "019f1-d73ec",
-  "ts": "2026-06-29T10:28:27Z",
-  "session": "019f12ce-2569-72e0-b959-6d87d5daec5d",
-  "text": "who -> duplicate agent names shouldn't ever exist in the same channel (that's why we have the cardinals!)\n\nanything that displays it should use the `agentName{index}` instead"
-}

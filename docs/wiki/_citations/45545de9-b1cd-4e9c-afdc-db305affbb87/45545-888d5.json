@@ -1,6 +1,0 @@
-{
-  "id": "45545-888d5",
-  "ts": "2026-07-10T13:22:18Z",
-  "session": "45545de9-b1cd-4e9c-afdc-db305affbb87",
-  "text": "Assistant: Everything works end to end: server is fully detached (`ppid=1`), no `TENEX_EDGE_*` identity leaked in, and the access log captures method/tool/headers/clientInfo per request. [...] - `mcp-debug.sh log [n]` — the app's own access log (method, tool name, resource URI, `clientInfo`, sanitized headers) at `.../scratchpad/mcp-debug/mcp-server.log`"
-}

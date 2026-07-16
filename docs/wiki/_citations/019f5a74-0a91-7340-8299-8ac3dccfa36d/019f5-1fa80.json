@@ -1,6 +1,0 @@
-{
-  "id": "019f5-1fa80",
-  "ts": "2026-07-13T08:55:31Z",
-  "session": "019f5a74-0a91-7340-8299-8ac3dccfa36d",
-  "text": "Assistant: This now has a clean three-surface model:\n\n```text\ntenex-edge who                 Human, read-only fabric overview\ntenex-edge my session          Agent, full self/session briefing\ntenex-edge mgmt session list   Human, interactive local session control\n```"
-}

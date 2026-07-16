@@ -1,6 +1,0 @@
-{
-  "id": "019f5-a7eb2",
-  "ts": "2026-07-13T08:55:48Z",
-  "session": "019f5a74-0a91-7340-8299-8ac3dccfa36d",
-  "text": "I'm actually thinking that perhaps we should remove agent's use of `who` and move it to `tenex-edge my session` or something like that that shows them a brief of who they are, the\n  workspace they are running from, the channels they've joined, the workspaces, agents, etc, etc, --- like the full gimmick. [...] User: listing sessions should be part of what `tenex-edge my session` or whatever we call it ends up being since sessions = members in a tenex-edge channel [...] Assistant: Agreed and recorded. The ownership model is now:\n\n- Agent capabilities belong in the fabric briefing.\n- Sessions belong beneath their channel membership.\n- `agents list-sessions` should not remain a separate inventory surface. [...] - `agents list-sessions` should not remain a separate inventory surface. [...] - `my session` should reuse the existing full agent projection: self, available capabilities, workspaces, joined channels, and channel members.\n- Do not add a separate `<sessions>` list—channel `<members>` already are the sessions. Keep available agent capabilities separate. [...] - Make `my session` a pure read that does not advance the hook cursor."
-}
