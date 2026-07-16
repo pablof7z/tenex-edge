@@ -65,6 +65,7 @@ pub(in crate::daemon::server) async fn rpc_pty_spawn(
     Ok(serde_json::json!({
         "pty_id": meta.id,
         "pty_socket": meta.socket,
+        "transport": endpoint_kind,
         "handle": handle,
         "agent": p.agent,
         "root": p.root,

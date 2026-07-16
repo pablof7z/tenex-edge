@@ -26,6 +26,65 @@ fn launch_no_hook(home: &Home, agent: &str, channel: &str, mode: &str) {
 }
 
 #[test]
+fn launch_command_resolves_discovered_claude_profile_without_agent_json() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let home = Home::new();
+    write_config(&home, false);
+
+    let channel = unique_session("launch-native-claude");
+    let work_dir = home.dir.path().join(&channel);
+    add_workspace_mapping(&home, &channel, &work_dir);
+    let profile = home.dir.path().join(".claude/agents/writing-partner.md");
+    std::fs::create_dir_all(profile.parent().unwrap()).unwrap();
+    std::fs::write(
+        &profile,
+        "---\nname: writing-partner\ndescription: Helps shape written work\n---\nWrite carefully\n",
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(
+        home.dir.path().join("bin/opencode"),
+        home.dir.path().join("bin/claude"),
+    )
+    .unwrap();
+    std::fs::write(
+        home.dir.path().join("harnesses.json"),
+        r#"{"claude-pty":{"harness":"claude-code","transport":"pty","args":["forever"]}}"#,
+    )
+    .unwrap();
+
+    let isolated_home = home.dir.path().to_string_lossy().into_owned();
+    let out = run_cli_with_env_in_dir(
+        &home,
+        &["launch", "writing-partner"],
+        &[("HOME", &isolated_home)],
+        &work_dir,
+    );
+    assert!(
+        out.status.success(),
+        "native Claude launch failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("Launched "),
+        "launch did not report its public handle: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(!home.dir.path().join("agents/writing-partner.json").exists());
+
+    let meta = mosaico::pty::read_all_metadata()
+        .into_iter()
+        .find(|meta| meta.agent == "writing-partner")
+        .expect("launched writing-partner PTY metadata");
+    assert_eq!(
+        meta.command,
+        ["claude", "forever", "--agent", "writing-partner"]
+    );
+    let cleanup = PtyCleanup(meta.id);
+    drop(cleanup);
+    stop_daemon(&home);
+}
+
+#[test]
 fn launch_command_bootstraps_session_without_child_session_start_hook() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let home = Home::new();

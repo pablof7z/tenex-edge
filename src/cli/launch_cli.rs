@@ -2,7 +2,7 @@
 
 mod args;
 mod existing;
-mod pty_launch;
+mod fresh;
 pub mod verbs;
 
 // Re-export public items for external callers (cli.rs)

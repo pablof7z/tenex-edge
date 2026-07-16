@@ -5,8 +5,8 @@ use anyhow::{Context as _, Result};
 
 /// Attach or resume a named session, or launch a fresh harness if it is unknown.
 ///
-/// A fresh launch spawns an independent portable-pty supervisor, starts the
-/// selected harness inside it, then attaches the current terminal.
+/// A fresh launch delegates agent discovery and transport selection to the
+/// daemon, then attaches PTY sessions or reports headless RPC sessions.
 pub(super) async fn launch(request: LaunchRequest) -> Result<()> {
     if super::existing::launch_if_known(&request).await? {
         return Ok(());
@@ -23,21 +23,8 @@ pub(super) async fn launch(request: LaunchRequest) -> Result<()> {
         None => crate::workspace::resolve_or_bail(&std::env::current_dir().unwrap_or_default())?,
     };
 
-    let launch = crate::identity::agent_launch_config(&crate::config::mosaico_home(), &agent)?;
-    let cfg = crate::harness::HarnessesConfig::load()?;
-    let transport = crate::harness::bundle_transport_with(&cfg, &launch.harness)?;
-    if matches!(
-        transport,
-        crate::harness::Transport::Acp | crate::harness::Transport::AppServer
-    ) {
-        let channel = resolve_launch_channel(&root, &agent, channel).await?;
-        return launch_acp_headless(agent, root, channel, session_name, prompt).await;
-    }
-    if transport == crate::harness::Transport::HeadlessExec {
-        anyhow::bail!("agent {agent:?} uses a headless-exec bundle and cannot be attached");
-    }
     let channel = resolve_launch_channel(&root, &agent, channel).await?;
-    super::pty_launch::launch(super::pty_launch::PtyLaunchRequest {
+    super::fresh::launch(super::fresh::FreshLaunchRequest {
         agent,
         root,
         channel,
@@ -93,44 +80,6 @@ fn channel_resolve_params(root: &str, name: &str, agent: &str) -> serde_json::Va
         "agent": agent,
         "create_if_absent": true,
     })
-}
-
-/// Launch a headless ACP/app-server agent through the daemon. The daemon opens
-/// and registers the RPC child (so the doorbell delivery path can reach it),
-/// synthesizes the launch argv from the harness bundle, appends `extra_args`, and
-/// — if an opening prompt was given — opens the session on it. There is no TTY to
-/// attach; the agent thereafter responds to channel mentions.
-async fn launch_acp_headless(
-    agent: String,
-    root: String,
-    channel: Option<String>,
-    session_name: Option<String>,
-    prompt: Option<String>,
-) -> Result<()> {
-    let cwd = std::env::current_dir()
-        .ok()
-        .map(|p| p.to_string_lossy().to_string());
-    // Admission (the durable-agent reservation) is handled daemon-side by
-    // `spawn_agent`, so no client-side preflight reservation is taken here.
-    let mut params = serde_json::json!({
-        "agent": agent,
-        "root": root,
-        "channel": channel,
-        "session_name": session_name,
-        "cwd": cwd,
-    });
-    if let Some(prompt) = prompt.filter(|s| !s.is_empty()) {
-        params["prompt"] = serde_json::Value::String(prompt);
-    }
-    let v = super::super::daemon_call_async("pty_spawn", params)
-        .await
-        .with_context(|| format!("headless ACP launch of agent {agent:?} failed"))?;
-    let session = v["pty_id"].as_str().unwrap_or_default();
-    eprintln!("[mosaico acp] session: {session}");
-    eprintln!(
-        "[mosaico acp] headless agent launched; it responds to channel mentions (no PTY to attach)"
-    );
-    Ok(())
 }
 
 /// Fetch all rooms under `root` and present an interactive fuzzy picker.
