@@ -41,15 +41,12 @@ fn cli_my_session_status_sets_the_exact_pty_session_title() {
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("Session status set"));
-    assert!(stdout.contains("automatic distillation paused for 30 minutes"));
 
     let rec = Store::open(&home.store_path())
         .unwrap()
         .get_session(&pubkey)
         .unwrap()
         .expect("session row");
-    assert_eq!(rec.work_topic, title);
-    assert!(rec.work_topic_set_at > 0);
     assert_eq!(rec.title, title);
 
     assert!(

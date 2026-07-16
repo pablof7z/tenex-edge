@@ -9,7 +9,6 @@ pub struct StatusCommand {
     pub pubkey: String,
     pub channels: Vec<String>,
     pub title: String,
-    pub activity: String,
     pub state: SessionState,
     pub host: String,
     pub slug: String,

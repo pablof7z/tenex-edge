@@ -1,6 +1,5 @@
 use super::*;
-use crate::instrument::{changed_summary_json, window_hash};
-use crate::state::llm_calls::NewLlmCall;
+use crate::instrument::changed_summary_json;
 use crate::state::receipts::NewReceipt;
 use crate::state::RegisterSession;
 use serde_json::json;
@@ -23,12 +22,9 @@ async fn rpc_probe_validate_checks_status_fact_and_capsule() {
             true,
             true,
             "T",
-            "reading",
             1_700_000_010,
         )
         .unwrap();
-        r.on_distill("s1", "T", "reviewing the PR", 1_700_000_010)
-            .unwrap();
     }
     state
         .with_store(|s| {
@@ -42,7 +38,7 @@ async fn rpc_probe_validate_checks_status_fact_and_capsule() {
                 now: 1_700_000_010,
             })?;
             s.set_working("s1", true, 1_700_000_010)?;
-            s.set_session_distill("s1", "T", "reviewing the PR", 1_700_000_010)?;
+            s.set_session_title("s1", "T")?;
             Ok::<(), anyhow::Error>(())
         })
         .unwrap();
@@ -81,11 +77,9 @@ async fn rpc_probe_validate_checks_status_fact_and_capsule() {
             "target": "status:s1",
             "fact": {
                 "StatusDrive": {
-                    "DistillCompleted": {
+                    "Tick": {
                         "pubkey": "s1",
-                        "title": "T",
-                        "activity": "compiling",
-                        "window_hash": "sha256:w2",
+                        "automatic_delivery": true,
                         "at": 1_700_000_020
                     }
                 }
@@ -95,13 +89,13 @@ async fn rpc_probe_validate_checks_status_fact_and_capsule() {
     )
     .unwrap();
     assert_eq!(validation["ok"], true);
-    assert_eq!(validation["verdict"], "passed");
+    assert_eq!(validation["verdict"], "passed_with_limitations");
     assert_eq!(validation["surface"], "status");
     assert_check_status(&validation, "oracle", "passed");
     assert_check_status(&validation, "seams", "passed");
     assert_check_status(&validation, "why", "passed");
     assert_check_status(&validation, "simulate", "passed");
-    assert_check_status(&validation, "acid", "passed");
+    assert_check_status(&validation, "acid", "not_proven");
     let seams_summary = check_row(&validation, "seams")["summary"].as_str().unwrap();
     assert!(seams_summary.contains("status seam is authoritative"));
 
@@ -148,26 +142,13 @@ async fn rpc_probe_validate_checks_status_fact_and_capsule() {
 #[tokio::test]
 async fn rpc_probe_validate_explains_published_artifact_handles() {
     let state = DaemonState::new_for_test().await;
-    let wh = window_hash("transcript slice");
     state
         .with_store(|s| {
-            s.record_llm_call(&NewLlmCall {
-                pubkey: "s1".into(),
-                window_hash: wh.clone(),
-                provider: "ollama".into(),
-                model: "glm".into(),
-                system_prompt: "system".into(),
-                transcript_slice: "transcript slice".into(),
-                raw_response: "TITLE: T\nNOW: A".into(),
-                parsed_title: Some("T".into()),
-                parsed_activity: Some("A".into()),
-                created_at: 1_700_000_010,
-            })?;
             s.record_receipt(&NewReceipt {
                 surface: "status".into(),
                 transaction_id: 7,
                 revision: 3,
-                changed_summary: changed_summary_json(&[], &[], &[], Some("s1"), Some(&wh)),
+                changed_summary: changed_summary_json(&[], &[], &[], Some("s1")),
                 commands: r#"[{"kind":"replace","key":"status/s1"}]"#.into(),
                 artifact_ref: Some("evt-status".into()),
                 created_at: 1_700_000_011,
@@ -188,7 +169,6 @@ async fn rpc_probe_validate_explains_published_artifact_handles() {
     assert_check_status(&v, "explain", "passed");
     assert_check_status(&v, "resource_accounting", "passed");
     assert_eq!(v["explain"]["receipts"][0]["transaction_id"], 7);
-    assert_eq!(v["explain"]["llm_call"]["parsed_activity"], "A");
 
     let session = rpc_probe(
         &state,

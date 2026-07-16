@@ -33,7 +33,7 @@ pub(in crate::daemon::server) async fn ensure_session_room(
     let _ = ensure_subscription(state, room_h).await;
 
     // The channel `name` is set ONLY at create (or explicit edit) — never from a
-    // session's distilled title — so there is no room auto-rename here.
+    // session's agent-supplied title — so there is no room auto-rename here.
 
     !matches!(gate, crate::fabric::nip29::readiness::ChannelGate::Degraded)
 }

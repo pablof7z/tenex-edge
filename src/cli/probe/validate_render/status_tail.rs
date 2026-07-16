@@ -23,11 +23,10 @@ pub(super) fn render(out: &mut String, evidence: &Value) {
         if bool_at(evidence, "graph_found") {
             let _ = writeln!(
                 out,
-                "  - published state={} channels={} title=\"{}\" activity=\"{}\"",
+                "  - published state={} channels={} title=\"{}\"",
                 str_at(evidence, "graph_state"),
                 channels(evidence),
-                str_at(evidence, "graph_title"),
-                str_at(evidence, "graph_activity")
+                str_at(evidence, "graph_title")
             );
         }
         if bool_at(evidence, "session_row_found") {

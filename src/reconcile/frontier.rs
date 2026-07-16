@@ -88,7 +88,7 @@ static REGISTRATIONS: [SurfaceRegistration; 9] = [
         facts: &[
             "session lifecycle",
             "turn lifecycle",
-            "distill result",
+            "agent title",
             "heartbeat tick",
             "channel membership",
         ],

@@ -1,8 +1,8 @@
 //! Target-specific evidence collection for non-Trellis validation targets.
 use super::report::bool_at;
 use super::{
-    awareness, channel, commit, coverage, cursor, event, hook_context, inbox, joined, llm,
-    membership, message, outbox, quarantine, readiness_attempt, recipient, session, session_start,
+    awareness, channel, commit, coverage, cursor, event, hook_context, inbox, joined, membership,
+    message, outbox, quarantine, readiness_attempt, recipient, session, session_start,
     session_watch, status, subscription, turn, workspace, DaemonState,
 };
 use serde_json::Value;
@@ -24,7 +24,6 @@ pub(super) struct TargetChecks {
     pub(super) recipient_evidence: Option<Value>,
     pub(super) readiness_attempt_evidence: Option<Value>,
     pub(super) hook_context_evidence: Option<Value>,
-    pub(super) llm_evidence: Option<Value>,
     pub(super) txn_evidence: Option<Value>,
     pub(super) receipt_evidence: Option<Value>,
     pub(super) subscription_evidence: Option<Value>,
@@ -78,7 +77,6 @@ impl TargetChecks {
                 .map(|id| readiness_attempt::readiness_attempt_evidence(state, target, id)),
             hook_context_evidence: hook_context::hook_context_target(target)
                 .map(|id| hook_context::hook_context_evidence(state, target, id)),
-            llm_evidence: llm::llm_target(target).map(|id| llm::llm_evidence(state, target, id)),
             txn_evidence: super::txn::txn_target(target).map(|txn| {
                 super::txn::txn_evidence(state, target, &txn.surface, txn.transaction_id, txn.at)
             }),
@@ -119,7 +117,6 @@ impl TargetChecks {
             || self.recipient_evidence.is_some()
             || self.readiness_attempt_evidence.is_some()
             || self.hook_context_evidence.is_some()
-            || self.llm_evidence.is_some()
             || self.txn_evidence.is_some()
             || self.receipt_evidence.is_some()
             || self.subscription_evidence.is_some()
@@ -214,9 +211,6 @@ impl TargetChecks {
         }
         if let Some(v) = &self.hook_context_evidence {
             hook_context::push_hook_context_check(checks, limitations, v);
-        }
-        if let Some(v) = &self.llm_evidence {
-            llm::push_llm_check(checks, limitations, v);
         }
         if let Some(v) = &self.txn_evidence {
             super::txn::push_txn_check(checks, limitations, v);

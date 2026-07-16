@@ -13,7 +13,6 @@ fn view() -> StatuslineView {
         working: true,
         title: "Refactoring the inbox".into(),
         activity: "writing tests".into(),
-        distill_error: None,
         error: None,
     }
 }
@@ -56,13 +55,6 @@ fn membership_gap_is_loud() {
     assert!(render_statusline(&v, false).contains("⚠ not in channel support"));
     v.member_count = 0;
     assert!(!render_statusline(&v, false).contains("not in channel"));
-}
-
-#[test]
-fn distill_error_flashes_red() {
-    let mut v = view();
-    v.distill_error = Some("LLM rate-limited".into());
-    assert!(render_statusline(&v, false).contains("⚠ distill: LLM rate-limited"));
 }
 
 #[test]

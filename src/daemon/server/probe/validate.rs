@@ -25,7 +25,6 @@ mod inbox;
 mod input;
 mod joined;
 mod label;
-mod llm;
 mod lookup;
 mod membership;
 mod message;

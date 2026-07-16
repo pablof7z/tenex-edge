@@ -9,7 +9,6 @@ const SAMPLE_TABLES: &[&str] = &[
     "channel_resolution_intents",
     "event_claims",
     "inbox",
-    "llm_calls",
     "message_recipients",
     "messages",
     "outbox",
@@ -67,7 +66,6 @@ fn columns_for_table(table: &str) -> &'static [&'static str] {
         "channel_resolution_intents" => &["parent", "name", "channel_h"],
         "event_claims" => &["event_id", "claim_key", "state"],
         "inbox" => &["event_id", "target_pubkey", "state"],
-        "llm_calls" => &["id", "pubkey", "provider", "model"],
         "message_recipients" => &["message_id", "recipient_pubkey"],
         "messages" => &[
             "message_id",
@@ -101,7 +99,6 @@ fn sample_target(table: &str, row: &Value) -> Option<Value> {
         "channel_resolution_intents" => format!("channel:{}", text(row, "channel_h")?),
         "event_claims" => "table:event_claims".to_string(),
         "inbox" => format!("inbox:{}", text(row, "event_id")?),
-        "llm_calls" => format!("llm:{}", int(row, "id")?),
         "message_recipients" => recipient_target(row)?,
         "messages" => format!("message:{}", text(row, "message_id")?),
         "outbox" => format!("outbox:{}", int(row, "local_id")?),

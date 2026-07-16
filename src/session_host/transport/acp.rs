@@ -324,14 +324,6 @@ impl SessionTransport for AcpTransport {
     }
 }
 
-/// A snapshot of the captured assistant transcript for an ACP endpoint, if it is
-/// still registered. Used by the status distiller for RPC-hosted sessions.
-pub fn transcript_snapshot(endpoint_id: &str) -> Option<String> {
-    let reg = registry().lock().unwrap();
-    let child = reg.get(endpoint_id)?;
-    child.runtime.lock().ok().map(|rt| rt.transcript())
-}
-
 #[cfg(test)]
 #[path = "acp_reaper_tests.rs"]
 mod acp_reaper_tests;

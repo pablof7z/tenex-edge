@@ -5,7 +5,6 @@ pub(super) fn status_replay_seed_pubkey(fact: &InputFact) -> Option<&str> {
         InputFact::StatusDrive(StatusDrive::SessionStarted(_)) => None,
         InputFact::StatusDrive(StatusDrive::TurnStarted { pubkey, .. })
         | InputFact::StatusDrive(StatusDrive::TurnEnded { pubkey, .. })
-        | InputFact::StatusDrive(StatusDrive::DistillCompleted { pubkey, .. })
         | InputFact::StatusDrive(StatusDrive::TitleSet { pubkey, .. })
         | InputFact::StatusDrive(StatusDrive::ChannelsChanged { pubkey, .. })
         | InputFact::StatusDrive(StatusDrive::Tick { pubkey, .. })

@@ -17,16 +17,15 @@ fn status_handle_explains_last_command() {
         true,
         true,
         "T",
-        "",
         100,
     )
     .unwrap();
-    r.on_distill("s1", "T", "compiling", 100).unwrap();
+    r.on_title_set("s1", "Compiling", 100).unwrap();
 
     let why = r.explain_status("s1").unwrap();
     assert_eq!(why.resource_key, "status/s1");
     assert_eq!(why.last_kind, "Replace");
-    assert!(why.input_causes.iter().any(|l| l == "status/s1/activity"));
+    assert!(why.input_causes.iter().any(|l| l == "status/s1/title"));
 }
 
 /// `sub:` explain surfaces owners + refcount + the labeled cause.

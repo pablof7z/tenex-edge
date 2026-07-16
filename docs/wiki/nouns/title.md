@@ -9,4 +9,5 @@ source_refs:
 
 # [title]
 
-The channel's title on the relay — the kind:39000 `name` tag for a task channel, or the distilled session title for a per-session room.
+The channel's title on the relay — the kind:39000 `name` tag for a task channel —
+or the one-line session title declared by its owning agent.

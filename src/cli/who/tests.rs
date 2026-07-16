@@ -41,10 +41,8 @@ fn register_local_in(
 
 /// Set a session's local pre-publish draft title. Local rows fall back to this
 /// when no kind:30315 has been published yet.
-fn seed_draft_title(store: &Store, session_id: &str, title: &str, ts: u64) {
-    store
-        .set_session_distill(session_id, title, "", ts)
-        .unwrap();
+fn seed_draft_title(store: &Store, session_id: &str, title: &str, _ts: u64) {
+    store.set_session_title(session_id, title).unwrap();
 }
 
 /// Record a peer (or our own published) status as a kind:30315 in `relay_status`,

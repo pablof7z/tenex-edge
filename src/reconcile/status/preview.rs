@@ -41,19 +41,6 @@ pub(super) fn status_drive_from_fact(fact: &InputFact) -> Option<StatusDrive> {
             pubkey: pubkey.clone(),
             at: *at,
         }),
-        InputFact::DistillCompleted {
-            pubkey,
-            window_hash,
-            title,
-            activity,
-            at,
-        } => Some(StatusDrive::DistillCompleted {
-            pubkey: pubkey.clone(),
-            title: title.clone(),
-            activity: activity.clone(),
-            window_hash: Some(window_hash.clone()),
-            at: *at,
-        }),
         _ => None,
     }
 }
@@ -85,7 +72,6 @@ fn stage_drive(
                 args.working,
                 args.automatic_delivery,
                 &args.title,
-                &args.activity,
                 args.at / refresh_secs,
             )?;
         }
@@ -97,18 +83,6 @@ fn stage_drive(
         StatusDrive::TurnEnded { pubkey, at } => {
             mutate(sessions, refresh_secs, pubkey, *at, tx, |tx, n| {
                 tx.set_input(n.working, false)
-            })?;
-        }
-        StatusDrive::DistillCompleted {
-            pubkey,
-            title,
-            activity,
-            at,
-            ..
-        } => {
-            mutate(sessions, refresh_secs, pubkey, *at, tx, |tx, n| {
-                tx.set_input(n.title, title.clone())?;
-                tx.set_input(n.activity, activity.clone())
             })?;
         }
         StatusDrive::TitleSet { pubkey, title, at } => {
@@ -187,7 +161,6 @@ mod tests {
             working: true,
             automatic_delivery: true,
             title: "T".into(),
-            activity: "reading".into(),
             dispatch_event: None,
             at: 100,
         }));
@@ -203,7 +176,6 @@ mod tests {
                 "status/pk/working",
                 "status/pk/automatic-delivery",
                 "status/pk/title",
-                "status/pk/activity",
                 "status/pk/channels",
                 "status/pk/arm",
             ]

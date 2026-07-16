@@ -2,44 +2,6 @@ use super::*;
 use serde_json::json;
 
 #[test]
-fn acp_agent_message_chunk_text_is_captured() {
-    let params = json!({
-        "sessionId": "ses_1",
-        "update": {
-            "sessionUpdate": "agent_message_chunk",
-            "content": { "type": "text", "text": "hello " }
-        }
-    });
-    assert_eq!(
-        extract_assistant_text("session/update", &params).as_deref(),
-        Some("hello ")
-    );
-}
-
-#[test]
-fn tool_call_updates_are_ignored() {
-    let params = json!({
-        "update": { "sessionUpdate": "tool_call", "toolCallId": "tc_1" }
-    });
-    assert_eq!(extract_assistant_text("session/update", &params), None);
-}
-
-#[test]
-fn non_update_methods_yield_no_text() {
-    let params = json!({ "content": { "type": "text", "text": "x" } });
-    assert_eq!(extract_assistant_text("initialize", &params), None);
-}
-
-#[test]
-fn app_server_message_delta_is_captured() {
-    let params = json!({ "role": "assistant", "delta": { "text": "world" } });
-    assert_eq!(
-        extract_assistant_text("turn/output", &params).as_deref(),
-        Some("world")
-    );
-}
-
-#[test]
 fn turn_id_extracted_from_common_spellings() {
     assert_eq!(
         extract_turn_id(&json!({ "turnId": "t1" })).as_deref(),
@@ -57,9 +19,9 @@ fn turn_id_extracted_from_common_spellings() {
 }
 
 #[test]
-fn runtime_tracks_turn_lifecycle_and_transcript() {
+fn runtime_tracks_turn_lifecycle() {
     let mut rt = AcpRuntime::default();
-    // A turn starts and streams text.
+    // A turn starts and may stream updates without changing its identity.
     rt.note_update("turn/started", &json!({ "turnId": "t9" }));
     rt.note_update(
         "session/update",
@@ -67,7 +29,6 @@ fn runtime_tracks_turn_lifecycle_and_transcript() {
                              "content": { "type": "text", "text": "abc" } } }),
     );
     assert_eq!(rt.steer_state(), SteerState::Ready("t9".into()));
-    assert_eq!(rt.transcript(), "abc");
     // The turn ends: no longer steerable.
     rt.note_update("turn/completed", &json!({ "turnId": "t9" }));
     assert_eq!(rt.steer_state(), SteerState::Idle);

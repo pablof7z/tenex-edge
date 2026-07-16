@@ -60,23 +60,23 @@ fn seams_render_lists_modes_and_risks() {
 fn simulate_render_would_publish() {
     let v = json!({
         "verb":"simulate","surface":"status",
-        "fact":{"kind":"distill","activity":"reviewing the PR","title":null},
+        "fact":{"kind":"title","title":"Reviewing the PR"},
         "would_publish": true, "would_effect": true,
         "commands":[{"op":"Replace","resource":"status/s1","kind":30315,"publish":true}],
-        "changed":["status/s1/activity"],
+        "changed":["status/s1/title"],
     });
     let text = render_simulate(&v);
     assert!(text.contains("nothing is applied"));
-    assert!(text.contains("activity=\"reviewing the PR\""));
+    assert!(text.contains("title=\"Reviewing the PR\""));
     assert!(text.contains("WOULD PUBLISH  kind:30315  (Replace status/s1)"));
-    assert!(text.contains("changed:  status/s1/activity"));
+    assert!(text.contains("changed:  status/s1/title"));
 }
 
 #[test]
 fn simulate_render_no_change() {
     let v = json!({
         "verb":"simulate","surface":"status",
-        "fact":{"kind":"distill","activity":"reading","title":null},
+        "fact":{"kind":"title","title":"Reviewing the PR"},
         "would_publish": false, "would_effect": false, "commands": [], "changed": [],
     });
     let text = render_simulate(&v);
@@ -137,7 +137,7 @@ fn diff_render_shows_hashes_and_fields() {
 fn acid_render_shows_verdicts() {
     let v = json!({
         "verb":"acid","handle":"status:s1","surface":"status",
-        "cause":"status/s1/activity","necessary":true,"unrelated_stable":true,"ok":true,
+        "cause":"status/s1/title","necessary":true,"unrelated_stable":true,"ok":true,
         "original_hash":"sha256:o","removed_hash":"sha256:r","unrelated_hash":"sha256:u"
     });
     let text = render_acid(&v);
@@ -166,10 +166,10 @@ fn why_status_render_shows_cause() {
     let v = json!({
         "verb":"why","handle":"status:s1","kind":"status","found":true,
         "resource_key":"status/s1","last_kind":"Replace",
-        "cause":"planner: status/s1/coll","input_causes":["status/s1/activity"],
+        "cause":"planner: status/s1/coll","input_causes":["status/s1/title"],
     });
     let text = render_why(&v);
-    assert!(text.contains("caused by: status/s1/activity"));
+    assert!(text.contains("caused by: status/s1/title"));
 }
 
 #[test]
@@ -183,13 +183,13 @@ fn why_not_found_is_clean() {
 #[test]
 fn state_status_render_lists_sessions() {
     let v = json!({"verb":"state","surface":"status","rows":[
-        {"session":"s1","title":"T","activity":"reading","state":"working","channels":["room"]}
+        {"session":"s1","title":"T","state":"working","channels":["room"]}
     ]});
     let text = render_state(&v);
     assert!(text.contains("state status  (live)"));
     assert!(text.contains("status/s1"));
     assert!(text.contains("working"));
-    assert!(text.contains("activity=\"reading\""));
+    assert!(text.contains("title=\"T\""));
 }
 
 #[test]

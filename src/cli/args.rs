@@ -1,7 +1,6 @@
 use clap::{Args, Command, CommandFactory, Parser, Subcommand};
 
 use super::admin::{AgentAction, ChannelAction};
-use super::config::ConfigArgs;
 use super::debug::DebugAction;
 use super::dispatch::DispatchArgs;
 use super::harness::HarnessAction;
@@ -166,8 +165,6 @@ pub(super) enum MgmtAction {
         #[command(subcommand)]
         action: AgentAction,
     },
-    /// Interactively configure model providers and role-to-model assignments.
-    Config(ConfigArgs),
 }
 
 #[cfg(test)]

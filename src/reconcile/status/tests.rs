@@ -10,7 +10,6 @@ fn chans<const N: usize>(items: [&str; N]) -> BTreeSet<String> {
 fn seeded(
     working: bool,
     title: &str,
-    activity: &str,
     channels: BTreeSet<String>,
     now: u64,
 ) -> (StatusReconciler, ResourceLedger<StatusCommand>) {
@@ -18,7 +17,7 @@ fn seeded(
     let mut ledger = ResourceLedger::new();
     let out = r
         .on_session_started(
-            "pk1", "laptop", "coder", ".", channels, working, true, title, activity, now,
+            "pk1", "laptop", "coder", ".", channels, working, true, title, now,
         )
         .unwrap();
     ledger.apply_result(&out.result);
@@ -42,17 +41,16 @@ fn publishes(effects: &[StatusEffect]) -> Vec<(&Status, PublishReason)> {
 /// publish command. This is the dedup the old five-trigger path never had.
 #[test]
 fn identical_state_commit_is_deduped() {
-    let (mut r, mut ledger) = seeded(true, "T", "", chans(["room"]), 100);
+    let (mut r, mut ledger) = seeded(true, "Old", chans(["room"]), 100);
 
-    // First distill: activity changes → exactly one publish.
-    let first = r.on_distill("pk1", "T", "reading", 100).unwrap();
+    let first = r.on_title_set("pk1", "New", 100).unwrap();
     ledger.apply_result(&first.result);
     r.assert_oracle().unwrap();
     assert_eq!(publishes(&first.effects).len(), 1);
 
-    // Committing the IDENTICAL state again (same title/activity, same tick bucket)
+    // Committing the identical title again in the same tick bucket
     // must emit NOTHING — the graph change-detection swallows it.
-    let second = r.on_distill("pk1", "T", "reading", 100).unwrap();
+    let second = r.on_title_set("pk1", "New", 100).unwrap();
     ledger.apply_result(&second.result);
     r.assert_oracle().unwrap();
     assert!(
@@ -65,34 +63,34 @@ fn identical_state_commit_is_deduped() {
     ledger.assert_no_duplicate_close().unwrap();
 }
 
-/// A distill that changes activity publishes exactly one status with the new
-/// content, and the receipt attributes the command to the `activity` input.
+/// An agent title change publishes exactly one status and attributes the command
+/// to the title input.
 #[test]
-fn distill_change_publishes_and_attributes_to_activity() {
-    let (mut r, mut ledger) = seeded(true, "T", "", chans(["room"]), 100);
-    let activity_node = r.activity_input("pk1").unwrap();
+fn title_change_publishes_and_attributes_to_title() {
+    let (mut r, mut ledger) = seeded(true, "Old", chans(["room"]), 100);
+    let title_node = r.title_input("pk1").unwrap();
 
-    let out = r.on_distill("pk1", "T", "compiling", 100).unwrap();
+    let out = r.on_title_set("pk1", "New", 100).unwrap();
     ledger.apply_result(&out.result);
     r.assert_oracle().unwrap();
 
     let pubs = publishes(&out.effects);
     assert_eq!(pubs.len(), 1, "one publish for the content change");
-    assert_eq!(pubs[0].0.activity, "compiling");
+    assert_eq!(pubs[0].0.title, "New");
     assert_eq!(pubs[0].1, PublishReason::Changed);
 
     let why = r.why_command("pk1").expect("a command was emitted for pk1");
     assert_eq!(why.kind, ResourceCommandKind::Replace);
     assert!(
-        why.input_causes.contains(&activity_node),
-        "publish attributed to the activity input: {:?}",
+        why.input_causes.contains(&title_node),
+        "publish attributed to the title input: {:?}",
         why.input_causes
     );
 }
 
 #[test]
-fn manual_title_change_publishes_title_without_clearing_activity() {
-    let (mut r, mut ledger) = seeded(true, "Old", "checking logs", chans(["room"]), 100);
+fn manual_title_change_publishes_title() {
+    let (mut r, mut ledger) = seeded(true, "Old", chans(["room"]), 100);
 
     let out = r
         .on_title_set("pk1", "Testing status updates and awareness", 100)
@@ -103,14 +101,14 @@ fn manual_title_change_publishes_title_without_clearing_activity() {
     let pubs = publishes(&out.effects);
     assert_eq!(pubs.len(), 1, "one publish for the title change");
     assert_eq!(pubs[0].0.title, "Testing status updates and awareness");
-    assert_eq!(pubs[0].0.activity, "checking logs");
+    assert!(pubs[0].0.activity.is_empty());
     assert_eq!(pubs[0].1, PublishReason::Changed);
 }
 
 /// Turn-end flips the session to idle: exactly one publish, activity cleared.
 #[test]
 fn turn_end_flips_to_idle_one_publish() {
-    let (mut r, mut ledger) = seeded(true, "T", "writing", chans(["room"]), 100);
+    let (mut r, mut ledger) = seeded(true, "T", chans(["room"]), 100);
 
     let out = r.on_turn_end("pk1", 100).unwrap();
     ledger.apply_result(&out.result);
@@ -126,7 +124,7 @@ fn turn_end_flips_to_idle_one_publish() {
 /// Ending a session publishes an immediately-expiring offline status.
 #[test]
 fn session_end_emits_offline_status_expiring_now() {
-    let (mut r, mut ledger) = seeded(true, "T", "busy", chans(["room"]), 100);
+    let (mut r, mut ledger) = seeded(true, "T", chans(["room"]), 100);
 
     let out = r.on_session_ended("pk1", 200).unwrap();
     ledger.apply_result(&out.result);
@@ -150,7 +148,7 @@ fn session_end_emits_offline_status_expiring_now() {
 
 #[test]
 fn session_end_rearms_ttl_even_when_already_idle() {
-    let (mut r, mut ledger) = seeded(false, "T", "", chans(["room"]), 100);
+    let (mut r, mut ledger) = seeded(false, "T", chans(["room"]), 100);
 
     let out = r.on_session_ended("pk1", 100).unwrap();
     ledger.apply_result(&out.result);
@@ -165,7 +163,7 @@ fn session_end_rearms_ttl_even_when_already_idle() {
 
 #[test]
 fn operator_revoke_expires_status_now_and_closes_the_session_row() {
-    let (mut r, mut ledger) = seeded(true, "T", "busy", chans(["room"]), 100);
+    let (mut r, mut ledger) = seeded(true, "T", chans(["room"]), 100);
 
     let out = r.on_session_revoked("pk1", 123).unwrap();
     ledger.apply_result(&out.result);
@@ -185,7 +183,7 @@ fn operator_revoke_expires_status_now_and_closes_the_session_row() {
 
 #[test]
 fn forgetting_stale_session_closes_local_graph_without_publish() {
-    let (mut r, ledger) = seeded(false, "T", "", chans(["room"]), 100);
+    let (mut r, ledger) = seeded(false, "T", chans(["room"]), 100);
 
     r.forget_session("pk1").unwrap();
     r.assert_oracle().unwrap();
@@ -206,7 +204,7 @@ fn forgetting_stale_session_closes_local_graph_without_publish() {
 /// (fixes the stale-h-tag bug — the old path never retracted).
 #[test]
 fn channel_leave_corrects_h_tags() {
-    let (mut r, mut ledger) = seeded(true, "T", "x", chans(["a", "b"]), 100);
+    let (mut r, mut ledger) = seeded(true, "T", chans(["a", "b"]), 100);
 
     let out = r.on_channels_changed("pk1", chans(["a"]), 100).unwrap();
     ledger.apply_result(&out.result);
@@ -227,7 +225,7 @@ fn channel_leave_corrects_h_tags() {
 /// no-op. Proves the SINGLE refresh cadence subsumes both old timers.
 #[test]
 fn tick_rearms_without_content_change_and_is_the_single_path() {
-    let (mut r, mut ledger) = seeded(true, "T", "x", chans(["room"]), 0);
+    let (mut r, mut ledger) = seeded(true, "T", chans(["room"]), 0);
 
     // Cross into the next 30s refresh bucket → one refresh (content unchanged).
     let out = r.on_tick("pk1", true, 30).unwrap();

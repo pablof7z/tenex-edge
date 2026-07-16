@@ -1,14 +1,11 @@
-//! Read the recent conversation from a Claude Code (or compatible) transcript
-//! JSONL, so the distiller summarizes what the agent is *actually doing* from the
-//! conversation — exactly like `pc` consumes `transcript_path` — rather than
-//! guessing intent from isolated tool names.
+//! Read final assistant output from a Claude Code (or compatible) transcript
+//! JSONL for explicit chat auto-publishing.
 //!
 //! Transcript lines look like:
 //!   {"type":"user","message":{"role":"user","content":"..."| [blocks]}, ...}
 //!   {"type":"assistant","message":{"role":"assistant","content":[{type:text,text},{type:tool_use,name,input}]}}
 //!   {"type":"response_item","payload":{"type":"message","role":"assistant","content":[{type:output_text,text}]}}
-//! We extract recent user prompts + assistant text + tool uses, skipping
-//! tool-result noise, and return a compact chronological snippet.
+//! We extract assistant text while skipping tool-result noise.
 
 use serde_json::Value;
 use std::fs::File;
@@ -32,46 +29,6 @@ fn tail_lines(path: &Path) -> Option<Vec<String>> {
         lines.remove(0);
     }
     Some(lines)
-}
-
-/// A compact, chronological snippet of the last `max_msgs` user/assistant turns,
-/// capped at `max_chars`. `None` if the file is unreadable/empty.
-pub fn read_recent(path: &Path, max_msgs: usize, max_chars: usize) -> Option<String> {
-    let lines = tail_lines(path)?;
-
-    let mut msgs: Vec<String> = Vec::new();
-    for line in &lines {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let Ok(v) = serde_json::from_str::<Value>(line) else {
-            continue;
-        };
-
-        // Three accepted shapes:
-        //  - Claude Code: top-level `type` ("user"/"assistant"), content nested
-        //    under `message.content` (string or block array).
-        //  - Flat (opencode plugin, like pc): top-level `role` + `content` string.
-        //  - Codex rollout JSONL: top-level `response_item`, message nested
-        //    under `payload` with `input_text`/`output_text` blocks.
-        let Some((role, content)) = message_record(&v) else {
-            continue;
-        };
-
-        let body = extract(content, role);
-        if !body.trim().is_empty() {
-            let who = if role == "user" { "User" } else { "Assistant" };
-            msgs.push(format!("{who}: {}", truncate(&body, 400)));
-        }
-    }
-
-    if msgs.is_empty() {
-        return None;
-    }
-    let tail: Vec<String> = msgs.iter().rev().take(max_msgs).rev().cloned().collect();
-    let joined = tail.join("\n");
-    Some(cap_tail(&joined, max_chars))
 }
 
 /// The text of the LAST assistant message in the transcript, capped at
@@ -136,7 +93,7 @@ fn extract(content: Option<&Value>, _role: &str) -> String {
         Some(Value::Array(blocks)) => {
             let mut parts = Vec::new();
             for b in blocks {
-                // tool_use, tool_result, and others are noise for distillation.
+                // tool_use, tool_result, and other blocks are not reply text.
                 if matches!(
                     b.get("type").and_then(|x| x.as_str()),
                     Some("text" | "input_text" | "output_text")
@@ -157,16 +114,6 @@ fn truncate(s: &str, n: usize) -> String {
         s.to_string()
     } else {
         s.chars().take(n).collect()
-    }
-}
-
-/// Keep the *last* `n` chars (char-boundary safe) — the most recent context.
-fn cap_tail(s: &str, n: usize) -> String {
-    let chars: Vec<char> = s.chars().collect();
-    if chars.len() <= n {
-        s.to_string()
-    } else {
-        chars[chars.len() - n..].iter().collect()
     }
 }
 

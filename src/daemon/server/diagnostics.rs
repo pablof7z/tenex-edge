@@ -121,8 +121,8 @@ pub(in crate::daemon::server) fn default_debug_outbox_limit() -> u64 {
     50
 }
 
-/// `explain <handle>`: resolve a `scheme:value` handle against the receipts +
-/// llm_calls ledgers. The store is daemon-owned, so the CLI reaches the pure
+/// `explain <handle>`: resolve a `scheme:value` handle against the receipts
+/// ledger. The store is daemon-owned, so the CLI reaches the pure
 /// [`crate::explain`] engine through this one RPC (like `who`).
 pub(in crate::daemon::server) fn rpc_explain(
     state: &Arc<DaemonState>,

@@ -101,7 +101,6 @@ pub(in crate::daemon::server) async fn sync_subscriptions(state: &Arc<DaemonStat
                 &result.changed_derived_nodes,
                 &result.changed_collection_nodes,
                 None,
-                None,
             ),
             commands: crate::instrument::commands_json(result.resource_plan.commands()),
             artifact_ref: None,

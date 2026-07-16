@@ -47,7 +47,6 @@ async fn rpc_probe_validate_reports_malformed_explain_handles_inside_envelope() 
 
     let cases = [
         ("event:", "event handle id must be non-empty"),
-        ("llm:not-an-id", "llm handle id must be an integer"),
         ("txn::1", "txn handle surface must be non-empty"),
         ("txn:not-a-surface:1", "not a known validation surface"),
         ("txn:status:not-an-id", "txn id must be an integer"),

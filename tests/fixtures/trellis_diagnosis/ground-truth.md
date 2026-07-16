@@ -20,6 +20,6 @@ collapse, not relay behavior.
 Ground truth: status publishes are content/TTL deduped. A tick in the same TTL
 bucket with unchanged status content must emit no second status command.
 
-Expected counterfactual signal: changing only unused metadata, such as a distill
+Expected counterfactual signal: changing only unused metadata, such as an input
 window hash, must not change the status artifact. A publish on unchanged content
-identifies the root cause as disabled status dedup, not LLM output drift.
+identifies the root cause as disabled status dedup, not status-content drift.

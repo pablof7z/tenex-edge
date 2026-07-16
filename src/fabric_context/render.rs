@@ -66,11 +66,11 @@ fn render_self(out: &mut String, row: Option<&SelfRow>) {
         esc_text(&row.agent),
         esc_text(&row.host)
     );
-    if !row.work_topic.is_empty() {
+    if !row.title.is_empty() {
         let _ = write!(
             out,
             "\n  Current title: \"{}\"\n  [if your title drifted you can update it]",
-            esc_text(&row.work_topic)
+            esc_text(&row.title)
         );
     }
 }

@@ -10,7 +10,7 @@ pub(super) use empty::empty_handle_evidence;
 pub(super) fn explain_handle_parse_error(target: Option<&str>) -> Option<Value> {
     let target = target?;
     let (scheme, _) = target.split_once(':')?;
-    if !matches!(scheme, "event" | "llm" | "session" | "hook" | "txn" | "sub") {
+    if !matches!(scheme, "event" | "session" | "hook" | "txn" | "sub") {
         return None;
     }
     match crate::explain::parse_handle(target) {
@@ -199,7 +199,7 @@ pub(super) fn surface_from_explain_handle(handle: &Handle) -> Option<&str> {
         Handle::Hook { .. } => Some("hook_context"),
         Handle::Session { .. } => Some("status"),
         Handle::Sub { .. } => Some("subscriptions"),
-        Handle::Event(_) | Handle::Llm(_) => None,
+        Handle::Event(_) => None,
     }
 }
 

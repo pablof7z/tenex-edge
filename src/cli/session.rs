@@ -65,12 +65,12 @@ pub(super) fn session(action: SessionAction) -> Result<()> {
 }
 
 fn status(args: SessionStatusArgs) -> Result<()> {
-    let title = crate::work_topic::normalize(&args.title)?;
+    let title = crate::session_title::normalize(&args.title)?;
     crate::daemon::blocking::call(
         "my_session_status",
         crate::cli::rpc_params(serde_json::json!({ "title": title })),
     )?;
-    println!("Session status set: \"{title}\" (automatic distillation paused for 30 minutes)");
+    println!("Session status set: \"{title}\"");
     Ok(())
 }
 

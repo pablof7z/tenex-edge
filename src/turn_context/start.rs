@@ -61,7 +61,6 @@ pub(crate) fn assemble_turn_start(
     let self_pubkey = self_instance.pubkey.clone();
     let now = now_secs();
     let mut warnings: Vec<String> = Vec::new();
-    super::distill_notice::push_heads_up(store, rec, now, &mut warnings);
     super::headless::push_mode_notice(hook_contexts, store, rec, true, &mut warnings);
 
     let (joined, joined_read_failed) = {

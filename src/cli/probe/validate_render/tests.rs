@@ -8,7 +8,6 @@ mod event;
 mod hook_context;
 mod inbox;
 mod joined;
-mod llm;
 mod membership;
 mod outbox;
 mod quarantine;

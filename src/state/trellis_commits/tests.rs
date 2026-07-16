@@ -9,7 +9,7 @@ fn commit(surface: &str, noop: i64, commands: i64, created_at: i64) -> NewCommit
         mode: "authoritative".into(),
         trigger_kind: "tick".into(),
         trigger_ref: "s1".into(),
-        changed_inputs_json: r#"["status/s1/activity"]"#.into(),
+        changed_inputs_json: r#"["status/s1/title"]"#.into(),
         changed_derived_json: r#"["status/s1/content"]"#.into(),
         changed_collections_json: "[]".into(),
         resource_commands_json: "[]".into(),
@@ -46,7 +46,7 @@ fn record_then_latest_orders_newest_first_and_filters_surface() {
     assert_eq!(rows[0].suppressed_count, 1);
     assert_eq!(rows[0].graph_resources, 2);
     assert_eq!(rows[2].created_at, 1_000);
-    assert_eq!(rows[0].changed_inputs_json, r#"["status/s1/activity"]"#);
+    assert_eq!(rows[0].changed_inputs_json, r#"["status/s1/title"]"#);
 }
 
 #[test]

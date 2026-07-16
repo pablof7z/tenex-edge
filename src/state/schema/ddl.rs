@@ -154,14 +154,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     last_seen         INTEGER NOT NULL DEFAULT 0,
     working           INTEGER NOT NULL DEFAULT 0,
     turn_started_at   INTEGER NOT NULL DEFAULT 0,
-    last_distill_at   INTEGER NOT NULL DEFAULT 0,
-    work_topic        TEXT NOT NULL DEFAULT '',
-    work_topic_set_at INTEGER NOT NULL DEFAULT 0,
     seen_cursor       INTEGER NOT NULL DEFAULT 0,
     title             TEXT NOT NULL DEFAULT '',
-    activity          TEXT NOT NULL DEFAULT '',
-    distill_fail_streak INTEGER NOT NULL DEFAULT 0,
-    distill_notice_at   INTEGER NOT NULL DEFAULT 0,
     explicit_chat_published_at INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_alive
@@ -266,20 +260,6 @@ CREATE TABLE IF NOT EXISTS channel_resolution_intents (
 
 CREATE TABLE IF NOT EXISTS channel_readiness_attempts (id INTEGER PRIMARY KEY AUTOINCREMENT, channel_h TEXT NOT NULL, expect_member TEXT NOT NULL DEFAULT '', parent_hint TEXT, name TEXT, source TEXT NOT NULL DEFAULT '', outcome TEXT NOT NULL DEFAULT '', reason TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_channel_readiness_attempts_channel ON channel_readiness_attempts(channel_h, created_at);
-CREATE TABLE IF NOT EXISTS llm_calls (
-    id               INTEGER PRIMARY KEY AUTOINCREMENT,
-    pubkey           TEXT NOT NULL,
-    window_hash      TEXT NOT NULL,
-    provider         TEXT NOT NULL,
-    model            TEXT NOT NULL,
-    system_prompt    TEXT NOT NULL,
-    transcript_slice TEXT NOT NULL,
-    raw_response     TEXT NOT NULL,
-    parsed_title     TEXT, parsed_activity TEXT,
-    created_at       INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_llm_calls_pubkey ON llm_calls(pubkey, created_at);
-CREATE INDEX IF NOT EXISTS idx_llm_calls_window_hash ON llm_calls(window_hash);
 CREATE TABLE IF NOT EXISTS receipts (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     surface          TEXT NOT NULL,

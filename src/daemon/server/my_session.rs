@@ -56,10 +56,10 @@ pub(in crate::daemon::server) async fn rpc_my_session_status(
 ) -> Result<serde_json::Value> {
     let p: MySessionStatusParams =
         serde_json::from_value(params.clone()).context("my session status params")?;
-    let title = crate::work_topic::normalize(&p.title)?;
+    let title = crate::session_title::normalize(&p.title)?;
     let rec = resolve_caller(state, params, "my session status")?;
     let set_at = now_secs();
-    state.with_store(|s| s.set_session_work_topic(&rec.pubkey, &title, set_at))?;
+    state.with_store(|s| s.set_session_title(&rec.pubkey, &title))?;
     let keys = state.session_signing_keys(&rec.pubkey)?;
     crate::status_seam::drive(
         &state.status,
@@ -69,17 +69,13 @@ pub(in crate::daemon::server) async fn rpc_my_session_status(
         &state.outbox,
         crate::status_seam::DriveMeta {
             trigger: "manual_title",
-            window_hash: None,
             replay_fact: Some(status_fact!(title, rec.pubkey, title, set_at)),
         },
         |r| r.on_title_set(&rec.pubkey, &title, set_at),
     )
     .await;
     state.outbox_notify.notify_waiters();
-    Ok(serde_json::json!({
-        "title": title,
-        "distill_paused_until": set_at.saturating_add(crate::work_topic::DISTILL_PAUSE_SECS),
-    }))
+    Ok(serde_json::json!({ "title": title }))
 }
 
 #[cfg(test)]
@@ -187,7 +183,6 @@ mod tests {
                     true,
                     true,
                     "",
-                    "checking logs",
                     1,
                 )
                 .unwrap();
@@ -212,11 +207,6 @@ mod tests {
         );
         let rec = state.with_store(|s| s.get_session(&pubkey).unwrap().unwrap());
         assert_eq!(
-            rec.work_topic,
-            "Researching MCP improvements around resource allocation"
-        );
-        assert!(rec.work_topic_set_at > 0);
-        assert_eq!(
             rec.title,
             "Researching MCP improvements around resource allocation"
         );
@@ -235,9 +225,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rejects_topics_over_fifteen_words() {
+    async fn rejects_titles_over_fifteen_words() {
         let state = DaemonState::new_for_test().await;
-        let title = vec!["word"; crate::work_topic::MAX_WORDS + 1].join(" ");
+        let title = vec!["word"; crate::session_title::MAX_WORDS + 1].join(" ");
         let err = rpc_my_session_status(&state, &serde_json::json!({ "title": title }))
             .await
             .unwrap_err();

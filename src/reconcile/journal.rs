@@ -8,8 +8,7 @@
 //!
 //! Fields are the MINIMAL identifying + summary data a reconciler needs. Bulky
 //! payloads stay out: a captured transcript window enters as a `window_hash`
-//! (a stable content pointer), and a distillation enters as its short `title`
-//! and `activity` strings — never the transcript text or raw event body.
+//! (a stable content pointer), never the transcript text or raw event body.
 //!
 //! Variant docs name the real writer they eventually replace, so surface agents
 //! know which bespoke `Store` call becomes a fact-plus-plan pair.
@@ -103,24 +102,6 @@ pub enum InputFact {
         at: Timestamp,
     },
 
-    /// A distillation completed for a previously captured transcript window.
-    ///
-    /// Carries only the distilled `title`/`activity` summary strings.
-    /// Replaces `state::sessions::Store::set_session_distill(id, title,
-    /// activity, last_distill_at)`.
-    DistillCompleted {
-        /// Session that was distilled.
-        pubkey: String,
-        /// The transcript window this distillation summarizes.
-        window_hash: String,
-        /// Distilled human-readable title.
-        title: String,
-        /// Distilled current-activity summary.
-        activity: String,
-        /// When the distillation completed.
-        at: Timestamp,
-    },
-
     /// A turn ended for a session (the agent stopped working).
     ///
     /// Replaces `state::sessions::Store::set_working(id, working = false, ..)`.
@@ -206,7 +187,6 @@ impl InputFact {
             Self::SessionStarted { at, .. }
             | Self::TurnStarted { at, .. }
             | Self::TranscriptWindowCaptured { at, .. }
-            | Self::DistillCompleted { at, .. }
             | Self::TurnEnded { at, .. }
             | Self::RelayEventObserved { at, .. }
             | Self::OutboxEnqueueApplied { at, .. }

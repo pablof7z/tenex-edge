@@ -33,7 +33,6 @@ failure; do not paste a code or print credential contents.
 The runner and `host-auth.bash` are the source of truth, but the relevant host
 families are:
 
-- mosaico provider config, especially `providers.json` and `llms.json`
 - Codex auth/config state
 - Claude credential and settings state, including the `Claude Code-credentials`
   Keychain item on macOS when available

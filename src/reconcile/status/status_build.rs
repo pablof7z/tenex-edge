@@ -7,11 +7,7 @@ pub(super) fn to_status(cmd: &StatusCommand, ttl_secs: u64, now: u64, expiring: 
         channels: cmd.channels.clone(),
         host: cmd.host.clone(),
         title: cmd.title.clone(),
-        activity: if expiring {
-            String::new()
-        } else {
-            cmd.activity.clone()
-        },
+        activity: String::new(),
         state: if expiring {
             crate::session_state::SessionState::Offline
         } else {

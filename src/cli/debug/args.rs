@@ -9,8 +9,7 @@ use std::time::Duration;
 pub(in crate::cli) enum DebugAction {
     /// Diagnose daemon relay and storage-path configuration.
     Doctor,
-    /// Explain a published artifact: the reconciler receipt + the exact LLM
-    /// inputs (system prompt, transcript slice, model, raw response) behind it.
+    /// Explain a published artifact using its reconciler receipt.
     Explain(ExplainArgs),
     /// Validate a surface, handle, event/message/recipient target, awareness
     /// target, channel/readiness/readiness_attempt target, commit target, fact,

@@ -29,8 +29,8 @@ just install               # build, then put `mosaico` on your PATH
 mosaico install --all   # detect Claude Code, Codex, OpenCode, Grok — wire the hooks
 ```
 
-Then start your agents the way you always do. Presence, activity, and mentions are
-automatic from the first turn.
+Then start your agents the way you always do. Presence, working state, and mentions
+are automatic from the first turn; each agent can set its own status title.
 
 ---
 
@@ -71,11 +71,9 @@ real end-to-end demos against a live relay across four hosts. If it's here, it r
   but ordinary native profiles do not need a duplicate Mosaico agent JSON.
 - **Presence and liveness.** Every agent on the repo broadcasts that it's alive; dead
   ones fall off on their own after a short heartbeat timeout.
-- **A live activity line.** Each turn, an LLM distills the running transcript into one
-  plain sentence — *"reworking the auth migration"* — and broadcasts it (using the LLM
-  provider *you* configure — OpenRouter, a local model, or your own `claude` CLI). The
-  other agents (and you) see what everyone is doing without polling or reading a single
-  transcript.
+- **Agent-owned status.** Every session publishes working/idle presence and can declare
+  its own one-line title with `mosaico my session status <title>`. Other agents see that
+  status without Mosaico reading or summarizing the transcript.
 - **`@mention` delivered as a real turn.** Address a session by its dashed public handle from
   inside Claude Code and the message lands in its live terminal as a genuine conversational
   turn — host to host. Every mention is also filed in a per-session inbox, so nothing is
@@ -93,7 +91,7 @@ real end-to-end demos against a live relay across four hosts. If it's here, it r
 ```console
 $ mosaico who --live
 #mosaico
-  claude    @sable-grove-179-claude    online   distilling the transcript into a stable activity line
+  claude    @sable-grove-179-claude    online   fixing the schema migration
   codex     @quill-codex               online   reading tests/auth/*.rs after a handoff
   developer @mist-ridge-204-developer online   drafting the awareness section of the README
 ```
@@ -249,11 +247,6 @@ identities on it are the agents you run and the human keys you list in
 `whitelistedPubkeys`. Inbound is gated by group membership; an unrecognized sender is
 quarantined, not delivered. Letting *other people's* agents in is the cross-person work we
 haven't built yet (see _What this isn't_).
-
-**Where do my transcript summaries go, and whose LLM does the distilling?** The one-line
-activity is produced by the LLM provider *you* configure (`providers.json` / `llms.json` —
-OpenRouter, a local model, or your own `claude` CLI) and published to the relays *you*
-choose. Your keys never leave your disk.
 
 **Do I need to know Nostr, or hold any crypto?** No. Each session signs with a keypair
 derived from a single management key on your disk; there's no token, no wallet, no chain.

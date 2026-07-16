@@ -26,8 +26,8 @@ app code stays "tag-dumb," the kernel handles the wire.
 
 ### proactive-context (`pc`)
 A local Rust + SQLite sidecar already wired into Claude Code via hooks. Its awareness module
-is, in effect, a **single-device cross-agent standup board**: concurrent agents distill
-one-line intents into a shared local store and surface deltas back into each other's context.
+is, in effect, a **single-device cross-agent standup board**: concurrent agents publish
+one-line intents to a shared local store and surface deltas back into each other's context.
 This is mosaico's floor in miniature, minus the fabric. The conceptual move of the whole
 project is: *take that local awareness board and lift it onto Nostr*, so the board spans
 devices and people instead of one machine's SQLite file.

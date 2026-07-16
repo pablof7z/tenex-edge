@@ -14,8 +14,8 @@ import { join } from "node:path"
 //                   presence engine, watching opencode's PID so it reaps on exit)
 //   user-prompt-submit (hook)   → experimental.chat.messages.transform, on the
 //                   first model invocation of a user message (marks "working",
-//                   starts the distillation timer). Its stdout — self-identity,
-//                   project chat, peer roster, all assembled by
+//                   captures the transcript path). Its stdout — self-identity,
+//                   workspace chat, peer roster, all assembled by
 //                   the shared Rust hook — is injected verbatim into the turn.
 //   post-tool-use (hook)        → experimental.chat.messages.transform, on later
 //                   model invocations of the same message (mid-turn checkpoint:
@@ -25,11 +25,8 @@ import { join } from "node:path"
 // The plugin never builds context strings itself: the hook is the single source
 // of truth, identical to Claude Code / Codex. We pipe its stdout into the turn.
 //
-// Distillation is turn-bracketed, not tool-driven: the engine reads the
-// transcript ~30s after turn-start (then every 5 min until turn-end). opencode
-// has no transcript file, so we keep a temp JSONL snapshot fresh — rewriting it
-// at turn-start and again on every tool.execute.after — so the path handed to
-// the engine always reflects the recent conversation.
+// opencode has no transcript file, so we keep a temp JSONL snapshot fresh for
+// the daemon's transcript-backed auto-reply path.
 //
 // mosaico knows nothing about opencode; this plugin is the straw.
 // Env: MOSAICO_BIN (path), MOSAICO_AGENT (slug, default "opencode").
@@ -62,16 +59,15 @@ export const Mosaico: Plugin = async ({ client, directory }) => {
     })
   }
 
-  // ── transcript extraction (opencode-specific; the binary just reads a path) ──
+  // ── transcript extraction (opencode-specific; the daemon reads a path) ──────
   // opencode has no transcript file: the conversation lives in the SDK message
   // store. So — exactly like pc — fetch recent messages, flatten the text parts
   // to a flat {role,content} JSONL temp file, and hand that path to the engine,
-  // which distills the agent's *intent* from the real conversation. The temp
+  // which can recover the latest assistant response for auto-replies. The temp
   // path is deterministic per opencode session (mosaico-oc-<ocSID>.jsonl), so we
   // rewrite it in place to keep it fresh as the turn progresses (at turn-start
   // and on each tool.execute.after) — the path the engine holds stays valid.
-  // `_mosaicoInjected` parts (our own peer briefings) are filtered out so they
-  // don't pollute the distiller context.
+  // `_mosaicoInjected` parts (our own peer briefings) are filtered out.
   function partsToText(parts: any[]): string {
     return (parts ?? [])
       .filter((p) => p?.type === "text" && !p?._mosaicoInjected && typeof p?.text === "string")
@@ -121,9 +117,8 @@ export const Mosaico: Plugin = async ({ client, directory }) => {
 
   // Turn bracketing. The transform handler fires once per *model invocation*
   // (i.e. many times per user turn in an agentic loop), so turn-start is gated
-  // to fire only when the latest user message id changes — otherwise we'd reset
-  // the engine's 30s distillation timer on every tool round-trip and never
-  // distill. We also remember the opencode session id so we can keep the
+  // to fire only when the latest user message id changes. We also remember the
+  // opencode session id so we can keep the
   // transcript snapshot fresh on tool.execute.after (which has no message id).
   let lastTurnMsgID = ""
   let ocSessionForTurn = ""
@@ -182,11 +177,7 @@ export const Mosaico: Plugin = async ({ client, directory }) => {
       }
     },
 
-    // Keep the transcript snapshot fresh DURING the turn. We don't call the CLI
-    // here — distillation is turn-bracketed, not tool-driven. We just rewrite
-    // the same deterministic temp JSONL path (per opencode session) that we
-    // handed the engine at turn-start, so when the engine re-reads it ~30s in
-    // (and every 5 min) it reflects the work done so far this turn.
+    // Keep the transcript snapshot fresh during the turn for auto-replies.
     "tool.execute.after": async (input: any, _output: any) => {
       const ocSessionID = String(input?.sessionID ?? ocSessionForTurn ?? "")
       if (!ocSessionID) return

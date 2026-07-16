@@ -1,7 +1,7 @@
 use super::{scope::work_root_for, WhoRow, WhoSource};
 use crate::state::{Session, Status, StoreReader};
 
-/// Build a local-session row. Title/activity/state prefer the agent's own status.
+/// Build a local-session row. Relay-confirmed agent-supplied status wins when present.
 pub(super) fn local_row(store: StoreReader<'_>, s: &Session, local_host: &str, now: u64) -> WhoRow {
     let instance = local_instance(store, s);
     let live = store
@@ -9,14 +9,15 @@ pub(super) fn local_row(store: StoreReader<'_>, s: &Session, local_host: &str, n
         .ok()
         .flatten()
         .filter(|st| st.expiration == 0 || st.expiration >= now);
-    let title = live.map(|st| st.title).unwrap_or_else(|| s.title.clone());
     let fresh = now.saturating_sub(s.last_seen) <= crate::session::STATUS_TTL_SECS;
     let state = crate::session_state::SessionState::classify(
         fresh,
         s.working,
         store.has_live_delivery_path(s),
     );
-    let activity = live_activity(state.is_working(), s.activity.clone());
+    let (title, activity) = live
+        .map(|st| (st.title, live_activity(state.is_working(), st.activity)))
+        .unwrap_or_else(|| (s.title.clone(), String::new()));
     let work_root = work_root_for(store, &s.channel_h);
     WhoRow {
         source: WhoSource::Local,

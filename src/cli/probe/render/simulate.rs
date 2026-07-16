@@ -70,9 +70,6 @@ pub(in crate::cli::probe) fn render_simulate(v: &Value) -> String {
 
 fn fact_line(fact: &Value) -> String {
     let mut parts = Vec::new();
-    if let Some(a) = fact.get("activity").and_then(Value::as_str) {
-        parts.push(format!("activity={a:?}"));
-    }
     if let Some(t) = fact.get("title").and_then(Value::as_str) {
         parts.push(format!("title={t:?}"));
     }

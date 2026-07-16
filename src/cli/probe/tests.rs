@@ -76,10 +76,10 @@ fn acid_action_projects_rpc_params() {
     let action = ProbeAction::Acid {
         handle: "status:s1".into(),
         fact: r#"{"StatusDrive":{"Tick":{"pubkey":"s1","at":1}}}"#.into(),
-        cause: Some("status/s1/activity".into()),
+        cause: Some("status/s1/title".into()),
     };
     let (verb, params) = action.to_rpc().unwrap();
     assert_eq!(verb, "acid");
     assert_eq!(params["handle"], "status:s1");
-    assert_eq!(params["cause"], "status/s1/activity");
+    assert_eq!(params["cause"], "status/s1/title");
 }

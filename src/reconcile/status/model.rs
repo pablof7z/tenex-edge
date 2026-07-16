@@ -6,8 +6,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use trellis_core::{
-    AuditExplanationLevel, DependencyList, Graph, GraphResult, InputNode, MapDiff, NodeId,
-    PlanContext, PlanError, ResourceKey, ResourcePlan, ScopeId, Transaction, TransactionOptions,
+    AuditExplanationLevel, DependencyList, Graph, GraphResult, InputNode, MapDiff, PlanContext,
+    PlanError, ResourceKey, ResourcePlan, ScopeId, Transaction, TransactionOptions,
     TransactionResult,
 };
 
@@ -28,12 +28,11 @@ pub(super) struct StaticInfo {
 /// The change-detected half of a session's status. Deliberately EXCLUDES the
 /// NIP-40 expiration — TTL re-arm is tracked by `arm` — so an idle heartbeat is
 /// never mistaken for a content change. Mirrors the exact wire semantics of the
-/// old `status_for`: idle clears the live activity; the title always survives.
+/// current wire semantics: the agent-supplied title always survives.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct StatusContent {
     pub channels: Vec<String>,
     pub title: String,
-    pub activity: String,
     pub state: crate::session_state::SessionState,
 }
 
@@ -55,11 +54,8 @@ pub(super) struct SessionNodes {
     pub working: InputNode<bool>,
     pub automatic_delivery: InputNode<bool>,
     pub title: InputNode<String>,
-    pub activity: InputNode<String>,
     pub channels: InputNode<BTreeSet<String>>,
     pub arm: InputNode<u64>,
-    /// Exposed so instrumentation can attribute a publish to the activity fact.
-    pub activity_id: NodeId,
 }
 
 /// Resource identity for a session's status: `status/<pubkey>`.
@@ -68,7 +64,7 @@ pub(super) fn status_key(id: &str) -> ResourceKey {
 }
 
 /// Transaction options with dependency-path audit so a command can be attributed
-/// to the exact input fact (e.g. `activity`) that produced it.
+/// to the exact input fact (e.g. `title`) that produced it.
 pub(super) fn opts() -> TransactionOptions {
     TransactionOptions::default().with_audit_explanations(AuditExplanationLevel::DependencyPaths)
 }
@@ -79,7 +75,6 @@ fn command_of(id: &str, v: &StatusValue) -> StatusCommand {
         pubkey: id.to_string(),
         channels: v.content.channels.clone(),
         title: v.content.title.clone(),
-        activity: v.content.activity.clone(),
         state: v.content.state,
         host: v.info.host.clone(),
         slug: v.info.slug.clone(),
@@ -127,7 +122,6 @@ pub(super) fn create_session(
     working: bool,
     automatic_delivery: bool,
     title: &str,
-    activity: &str,
     arm: u64,
 ) -> GraphResult<(SessionNodes, TransactionResult<StatusCommand>)> {
     let mut tx = graph.begin_transaction_with_options(opts())?;
@@ -140,7 +134,6 @@ pub(super) fn create_session(
         working,
         automatic_delivery,
         title,
-        activity,
         arm,
     )?;
     let result = tx.commit()?;
@@ -158,7 +151,6 @@ pub(super) fn stage_session(
     working: bool,
     automatic_delivery: bool,
     title: &str,
-    activity: &str,
     arm: u64,
 ) -> GraphResult<SessionNodes> {
     let scope = tx.create_scope(format!("status-{id}"))?;
@@ -177,9 +169,6 @@ pub(super) fn stage_session(
     let title_n = tx.input::<String>(format!("status-{id}-title"))?;
     labels.record(title_n.id(), format!("status/{id}/title"));
     tx.set_input(title_n, title.to_string())?;
-    let activity_n = tx.input::<String>(format!("status-{id}-activity"))?;
-    labels.record(activity_n.id(), format!("status/{id}/activity"));
-    tx.set_input(activity_n, activity.to_string())?;
     let channels_n = tx.input::<BTreeSet<String>>(format!("status-{id}-channels"))?;
     labels.record(channels_n.id(), format!("status/{id}/channels"));
     tx.set_input(channels_n, channels)?;
@@ -194,7 +183,6 @@ pub(super) fn stage_session(
             working_n.id(),
             automatic_delivery_n.id(),
             title_n.id(),
-            activity_n.id(),
             channels_n.id(),
         ])?,
         move |ctx| {
@@ -206,11 +194,6 @@ pub(super) fn stage_session(
             Ok(StatusContent {
                 channels: ctx.input(channels_n)?.iter().cloned().collect(),
                 title: ctx.input(title_n)?.clone(),
-                activity: if state.is_working() {
-                    ctx.input(activity_n)?.clone()
-                } else {
-                    String::new()
-                },
                 state,
             })
         },
@@ -241,9 +224,7 @@ pub(super) fn stage_session(
         working: working_n,
         automatic_delivery: automatic_delivery_n,
         title: title_n,
-        activity: activity_n,
         channels: channels_n,
         arm: arm_n,
-        activity_id: activity_n.id(),
     })
 }

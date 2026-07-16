@@ -32,12 +32,6 @@ pub(super) const DURABLE_TABLES: &[TableCoverage] = &[
     ),
     row("inbox", "direct", "inbox:<event>", "inbound delivery state"),
     row(
-        "llm_calls",
-        "direct",
-        "llm:<id>",
-        "LLM prompt/response evidence",
-    ),
-    row(
         "message_recipients",
         "direct",
         "recipient:<event>:<pubkey>",

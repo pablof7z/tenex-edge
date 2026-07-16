@@ -1,23 +1,14 @@
-//! Retrospective instrumentation host-boundary helpers (Slice 8).
+//! Retrospective instrumentation host-boundary helpers.
 //!
-//! The storage ledgers (`state::llm_calls`, `state::receipts`) are pure and never
-//! read the clock. This module is the host-side glue that captures a distill
-//! round-trip and each reconciler drive-seam receipt into those ledgers: it reads
-//! the wall clock HERE, hashes the transcript window, flattens Trellis-vocabulary
-//! `TransactionResult`s into plain JSON, and records — logging and continuing on a
-//! failed insert so instrumentation never blocks the hot path.
-//!
-//! The `window_hash` is the join key: the SAME sha256 of the exact transcript
-//! slice fed to the LLM is recorded on the `llm_calls` row AND carried in the
-//! status receipt's `changed_summary`, so a published kind:30315 (looked up by
-//! its event id → receipt) rejoins the exact LLM inputs that produced it.
+//! Storage ledgers are pure and never read the clock. This module is the host-side
+//! glue that hashes artifact bytes, flattens Trellis-vocabulary transaction
+//! results into plain JSON, and records them without blocking the hot path.
 
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use trellis_core::{NodeId, ResourceCommand};
 
 use crate::reconcile::labels::CommitFacts;
-use crate::state::llm_calls::NewLlmCall;
 use crate::state::receipts::NewReceipt;
 use crate::state::trellis_commits::NewCommit;
 use crate::state::Store;
@@ -27,8 +18,7 @@ pub fn now_millis() -> i64 {
     crate::util::now_millis() as i64
 }
 
-/// Stable content pointer for a transcript slice: `sha256:<hex>`. This is the
-/// join key between an `llm_calls` row and the status receipt of the 30315 it fed.
+/// Stable content pointer for arbitrary bytes encoded as text: `sha256:<hex>`.
 pub fn window_hash(slice: &str) -> String {
     let digest = Sha256::digest(slice.as_bytes());
     let mut hex = String::with_capacity(7 + digest.len() * 2);
@@ -40,51 +30,7 @@ pub fn window_hash(slice: &str) -> String {
     hex
 }
 
-/// The verbatim distill LLM round-trip, captured at the model seam in `distill`
-/// and completed host-side (session id, window hash, clock) before recording.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DistillCapture {
-    /// Distiller provider (`claude-cli` / `openrouter` / `ollama` / `command`).
-    pub provider: String,
-    /// Model name (or the external command string for the override seam).
-    pub model: String,
-    /// The system prompt actually sent to the model.
-    pub system_prompt: String,
-    /// The exact bytes fed as user input (incl. any `CURRENT TITLE:` prefix).
-    pub transcript_slice: String,
-    /// The raw response text before `parse_labels`.
-    pub raw_response: String,
-}
-
-/// Record one distill round-trip. Best-effort: a failed insert is logged, not
-/// propagated, so distillation is never blocked by instrumentation.
-pub fn record_llm_call(
-    store: &Store,
-    pubkey: &str,
-    window_hash: &str,
-    cap: &DistillCapture,
-    parsed_title: Option<&str>,
-    parsed_activity: Option<&str>,
-    created_at: i64,
-) {
-    let row = NewLlmCall {
-        pubkey: pubkey.to_string(),
-        window_hash: window_hash.to_string(),
-        provider: cap.provider.clone(),
-        model: cap.model.clone(),
-        system_prompt: cap.system_prompt.clone(),
-        transcript_slice: cap.transcript_slice.clone(),
-        raw_response: cap.raw_response.clone(),
-        parsed_title: parsed_title.map(str::to_string),
-        parsed_activity: parsed_activity.map(str::to_string),
-        created_at,
-    };
-    if let Err(e) = store.record_llm_call(&row) {
-        tracing::warn!(pubkey, error = %e, "record_llm_call failed — distill round-trip not instrumented");
-    }
-}
-
-/// Record one flattened reconciler receipt. Best-effort like [`record_llm_call`].
+/// Record one flattened reconciler receipt without blocking the reconciler.
 pub fn record_receipt(store: &Store, row: NewReceipt) {
     if let Err(e) = store.record_receipt(&row) {
         tracing::warn!(surface = %row.surface, error = %e, "record_receipt failed — drive seam not instrumented");
@@ -149,13 +95,12 @@ fn json_labels(labels: &[String]) -> String {
 
 /// A changed node summary plus optional join context, as a compact JSON string.
 /// Node identities are the graph-local numeric ids (Trellis-free strings); the
-/// optional `pubkey`/`window_hash` are the status-surface join keys.
+/// optional `pubkey` identifies the session for a status-surface receipt.
 pub fn changed_summary_json(
     inputs: &[NodeId],
     derived: &[NodeId],
     collections: &[NodeId],
     pubkey: Option<&str>,
-    window_hash: Option<&str>,
 ) -> String {
     #[derive(Serialize)]
     struct Summary<'a> {
@@ -164,8 +109,6 @@ pub fn changed_summary_json(
         collections: Vec<u64>,
         #[serde(skip_serializing_if = "Option::is_none")]
         pubkey: Option<&'a str>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        window_hash: Option<&'a str>,
     }
     let ids = |ns: &[NodeId]| ns.iter().map(|n| n.get()).collect::<Vec<_>>();
     serde_json::to_string(&Summary {
@@ -173,7 +116,6 @@ pub fn changed_summary_json(
         derived: ids(derived),
         collections: ids(collections),
         pubkey,
-        window_hash,
     })
     .unwrap_or_else(|_| "{}".into())
 }
@@ -222,17 +164,15 @@ mod tests {
 
     #[test]
     fn changed_summary_carries_join_keys() {
-        let s = changed_summary_json(&[], &[], &[], Some("pubkey-1"), Some("sha256:ab"));
+        let s = changed_summary_json(&[], &[], &[], Some("pubkey-1"));
         let v: serde_json::Value = serde_json::from_str(&s).unwrap();
         assert_eq!(v["pubkey"], "pubkey-1");
-        assert_eq!(v["window_hash"], "sha256:ab");
     }
 
     #[test]
     fn changed_summary_omits_absent_join_keys() {
-        let s = changed_summary_json(&[], &[], &[], None, None);
+        let s = changed_summary_json(&[], &[], &[], None);
         let v: serde_json::Value = serde_json::from_str(&s).unwrap();
         assert!(v.get("pubkey").is_none());
-        assert!(v.get("window_hash").is_none());
     }
 }

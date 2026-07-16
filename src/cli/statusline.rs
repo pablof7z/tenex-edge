@@ -2,7 +2,7 @@
 //!
 //! Renders the awareness floor for a host status bar:
 //!   amber-claude mosaico support [Refactoring the inbox] [writing tests]
-//!   └ identity ┘ └ root┘ └channel┘ └ distilled title ┘   └ live activity ┘
+//!   └ identity ┘ └ root┘ └channel┘ └ session title ┘   └ live state ┘
 //!
 //! The channel segment is the channel's human NAME (kind:39000 `name`), falling
 //! back to its raw id only when no name is cached — the opaque id is never shown
@@ -13,14 +13,13 @@
 //! hangs under. `#session` is the
 //! channel the session is currently on (changes with `mosaico channels
 //! switch`). `[title]` is that channel's title on the relay (kind:39000 `name`
-//! tag for a task channel; the distilled session title for a per-session
+//! tag for a task channel; the agent-supplied session title for a per-session
 //! room). `[status]` is what the agent last published in its kind:30315 — the
 //! live activity line when busy, or `idle` when not.
 //!
 //! Optional warning segments (kept per user request) append after `[status]`:
 //!   - `⚠ not in channel <name>` — citizenship problem (not a member of the
 //!     channel's NIP-29 group).
-//!   - `⚠ distill: <message>` — distillation failure flash (up to 5 min).
 //!
 //! Reads the harness's statusline JSON payload on stdin (Claude Code sends
 //! `session_id` + `workspace.current_dir`), asks the daemon for one pure-read
@@ -109,8 +108,8 @@ pub struct StatuslineView {
     #[serde(default)]
     channel: String,
     /// The channel's display title on the relay (kind:39000 `name` tag for a
-    /// task channel; the distilled session title for a per-session room).
-    /// Falls back to the distilled session title when the local metadata
+    /// task channel; the agent-supplied session title for a per-session room).
+    /// Falls back to the session title when the local metadata
     /// cache lags. Empty only when neither is known (brand-new session).
     #[serde(default)]
     channel_title: String,
@@ -120,7 +119,7 @@ pub struct StatuslineView {
     is_member: bool,
     #[serde(default)]
     working: bool,
-    /// The persistent distilled session title (carried on kind:30315 as the
+    /// The persistent agent-supplied session title (carried on kind:30315 as the
     /// `title` tag). Retained across idle turns and after exit. Rendered as the
     /// `[title]` segment when it differs from the channel name.
     #[serde(default)]
@@ -129,8 +128,6 @@ pub struct StatuslineView {
     /// what `[status]` renders when busy; idle renders `[idle]` instead.
     #[serde(default)]
     activity: String,
-    #[serde(default)]
-    distill_error: Option<String>,
     /// Populated by the daemon when the session ID is known but can't be
     /// resolved (stale after DB wipe, etc.). Rendered visibly so the user
     /// can see WHY the status bar is broken instead of getting a blank bar.
@@ -179,9 +176,8 @@ fn render_statusline_inner(v: &StatuslineView, color: bool) -> String {
     };
     segs.push(paint(truncate_chars(&channel_disp, TITLE_MAX_CHARS), "2"));
 
-    // Title: the distilled session title (kind:30315), shown while it differs
-    // from the channel name. Omitted when empty (brand-new session before any
-    // distill) or identical to the channel label already shown.
+    // Title: the agent-supplied session title (kind:30315), shown while it
+    // differs from the channel name.
     if !v.title.trim().is_empty() && v.title != channel_disp {
         segs.push(paint(
             format!("[{}]", truncate_chars(&v.title, TITLE_MAX_CHARS)),
@@ -210,14 +206,6 @@ fn render_statusline_inner(v: &StatuslineView, color: bool) -> String {
     if !v.is_member && v.member_count > 0 {
         segs.push(paint(
             format!("⚠ not in channel {channel_disp}"),
-            "1;31", // bold red
-        ));
-    }
-
-    // Distillation error — flashed in red for up to 5 minutes after the failure.
-    if let Some(ref err) = v.distill_error {
-        segs.push(paint(
-            format!("⚠ distill: {}", truncate_chars(err, 40)),
             "1;31", // bold red
         ));
     }

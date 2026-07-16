@@ -102,7 +102,6 @@ pub(super) fn build(
             "hook_context_evidence",
             json!(target_checks.hook_context_evidence),
         ),
-        ("llm_evidence", json!(target_checks.llm_evidence)),
         ("txn_evidence", json!(target_checks.txn_evidence)),
         ("receipt_evidence", json!(target_checks.receipt_evidence)),
         (

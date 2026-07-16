@@ -179,10 +179,8 @@ pub struct Status {
     /// about. Retained across idle turns AND after the session exits — a
     /// finished session keeps its title on the fabric. Never cleared.
     pub title: String,
-    /// The live activity line: what the agent is doing *right now* (the current
-    /// step/mechanics). Distilled alongside `title` in one model call and
-    /// refreshed every turn; cleared on idle (only the persistent title
-    /// survives). Empty when no live activity is known.
+    /// An optional live activity line published by an agent. Cleared on idle;
+    /// empty when the agent supplies no live activity.
     pub activity: String,
     /// Canonical user-facing state, normalized from host/runtime facts.
     pub state: crate::session_state::SessionState,

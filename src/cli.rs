@@ -19,7 +19,6 @@ use std::time::{Duration, Instant};
 mod acp_smoke;
 mod admin;
 mod args;
-mod config;
 mod context;
 mod debug;
 mod dispatch;
@@ -109,7 +108,6 @@ pub async fn run(cli: Cli) -> Result<()> {
         Cmd::Wait(args) => messaging::wait(args).await,
         Cmd::Mgmt { action } => match action {
             MgmtAction::Agent { action } => admin::agent(action).await,
-            MgmtAction::Config(args) => config::config(args).await,
         },
         Cmd::Dispatch(args) => dispatch::dispatch(args).await,
         Cmd::Harness { action } => harness::harness(action).await,

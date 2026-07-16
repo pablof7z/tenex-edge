@@ -122,7 +122,6 @@ fn seed_status_graph(state: &std::sync::Arc<DaemonState>, pubkey: &str) {
             true,
             true,
             "T",
-            "reading",
             100,
         )
         .unwrap();

@@ -62,8 +62,8 @@ not persist secret or public keys; only explicit `perSessionKey:false` agents ke
 a durable keypair in their Mosaico agent JSON.
 
 The `mosaico launch` status line displays the published agent name, work-root
-channel, current channel, optional distilled title, and live state. For example:
-`amber-claude mosaico support [Refactoring the inbox] [writing tests]`.
+channel, current channel, optional agent-supplied title, and live state. For example:
+`amber-claude mosaico support [Refactoring the inbox] [working]`.
 
 <!-- citations: [^abce9-cad96] [^abce9-0fd96] [^abce9-2b259] [^abce9-b1683] -->
 

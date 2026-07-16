@@ -8,8 +8,8 @@
 //! invents a fact the world did not hand it.
 //!
 //! Bulky payloads (transcripts, raw event bodies) NEVER enter the graph. Only
-//! stable pointers/hashes/summaries do: an [`InputFact`] carries a
-//! transcript-window *hash* and a distilled title/activity, never the text.
+//! stable pointers and hashes do: an [`InputFact`] carries a transcript-window
+//! *hash*, never the text.
 //!
 //! This module is the additive foundation for Trellis adoption. It proves the
 //! pattern compiles against the real `trellis-core` API and that the

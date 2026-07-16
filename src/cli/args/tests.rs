@@ -197,9 +197,9 @@ fn session_pty_wrap_me_rejects_positional_target_without_self() {
 }
 
 #[test]
-fn mgmt_config_parses() {
-    let cli = Cli::try_parse_from(["mosaico", "mgmt", "config", "providers"]).unwrap();
-    assert!(matches!(cli.cmd, Cmd::Mgmt { .. }));
+fn removed_mgmt_config_stays_unavailable() {
+    let err = parse_err(&["mosaico", "mgmt", "config", "providers"]);
+    assert_eq!(err.kind(), ErrorKind::InvalidSubcommand);
 }
 
 #[test]

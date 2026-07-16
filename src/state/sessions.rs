@@ -5,9 +5,8 @@ use rusqlite::{Transaction, TransactionBehavior};
 
 pub(super) const COLS: &str =
     "pubkey, runtime_generation, agent_slug, channel_h, harness, child_pid, \
-     transcript_path, alive, created_at, last_seen, working, turn_started_at, last_distill_at, \
-     work_topic, work_topic_set_at, seen_cursor, title, activity, distill_fail_streak, \
-     distill_notice_at, explicit_chat_published_at";
+     transcript_path, alive, created_at, last_seen, working, turn_started_at, \
+     seen_cursor, title, explicit_chat_published_at";
 
 pub(super) fn row_to_session(row: &rusqlite::Row) -> rusqlite::Result<Session> {
     Ok(Session {
@@ -23,15 +22,9 @@ pub(super) fn row_to_session(row: &rusqlite::Row) -> rusqlite::Result<Session> {
         last_seen: row.get(9)?,
         working: row.get::<_, i64>(10)? != 0,
         turn_started_at: row.get(11)?,
-        last_distill_at: row.get(12)?,
-        work_topic: row.get(13)?,
-        work_topic_set_at: row.get(14)?,
-        seen_cursor: row.get(15)?,
-        title: row.get(16)?,
-        activity: row.get(17)?,
-        distill_fail_streak: row.get(18)?,
-        distill_notice_at: row.get(19)?,
-        explicit_chat_published_at: row.get(20)?,
+        seen_cursor: row.get(12)?,
+        title: row.get(13)?,
+        explicit_chat_published_at: row.get(14)?,
     })
 }
 

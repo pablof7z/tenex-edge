@@ -32,9 +32,6 @@ touch /state/write-check
 rm /state/write-check
 echo "state: /state writable"
 
-test -f /state/mosaico/providers.json
-test -f /state/mosaico/llms.json
-
 case "${AGENT}" in
   claude)
     test -s "${HOME}/.claude.json"

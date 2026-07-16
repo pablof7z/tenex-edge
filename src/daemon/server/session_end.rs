@@ -163,7 +163,6 @@ async fn revoke_operator_session(
                 &state.outbox,
                 crate::status_seam::DriveMeta {
                     trigger: "operator_session_revoke",
-                    window_hash: None,
                     replay_fact: Some(crate::reconcile::InputFact::StatusDrive(
                         crate::reconcile::StatusDrive::SessionRevoked {
                             pubkey: rec.pubkey.clone(),
