@@ -44,8 +44,8 @@ fn reaction_on_own_message_renders_once_then_is_silent() {
 
     // Parity: the pure capture→assemble path renders identically.
     let captured = capture_inputs(&store, &input(Some(&rec), "root", 200, 300, false));
-    let trellis = render_view_text(&assemble::assemble_view(&captured, 200, 300));
-    assert_eq!(trellis, text);
+    let rendered = render_view_text(&assemble::assemble_view(&captured, 200, 300));
+    assert_eq!(rendered, text);
 
     // A later turn whose cursor is past the reaction: nothing new → silent.
     let after = render_fabric_context(&store, input(Some(&rec), "root", 210, 300, false));

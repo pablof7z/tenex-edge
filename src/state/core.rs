@@ -224,12 +224,6 @@ fn sample_order_sql(table: &str, table_columns: &[String]) -> Option<&'static st
         "message_recipients" if has_columns(table_columns, &["delivered_at"]) => {
             Some("CASE WHEN delivered_at > 0 THEN 0 ELSE 1 END, delivered_at DESC")
         }
-        "outbox" if has_columns(table_columns, &["state", "last_error", "local_id"]) => Some(
-            "CASE \
-             WHEN state = 'failed' OR COALESCE(last_error, '') <> '' THEN 0 \
-             WHEN state <> 'published' THEN 1 \
-             ELSE 2 END, local_id ASC",
-        ),
         "relay_status" if has_columns(table_columns, &["expiration", "updated_at"]) => {
             Some("expiration DESC, updated_at DESC")
         }

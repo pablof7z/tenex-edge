@@ -1,0 +1,247 @@
+//! Durable NIP-29 write and account lifecycle behind the NMP facade.
+
+use std::collections::BTreeSet;
+use std::sync::mpsc::Receiver;
+
+use anyhow::{Context, Result};
+use nmp::{RelayUrl, SignEventRequest, WritePayload, WriteStatus};
+use nostr_sdk::prelude::{Event, EventBuilder, EventId, Keys, PublicKey, Tag, UnsignedEvent};
+
+use super::scrub::scrub_unsigned;
+use super::NmpHost;
+
+mod receipt;
+use receipt::wait_for_write;
+#[cfg(test)]
+use receipt::wait_for_write_blocking;
+
+impl NmpHost {
+    /// Sign an exact event through NMP's account registry. The facade's
+    /// sign-only operation currently selects the active account, so this narrow
+    /// critical section prevents concurrent session identities from racing it.
+    pub(crate) async fn sign_event(
+        self: &std::sync::Arc<Self>,
+        builder: EventBuilder,
+        keys: &Keys,
+    ) -> Result<Event> {
+        let host = std::sync::Arc::clone(self);
+        let keys = keys.clone();
+        tokio::task::spawn_blocking(move || {
+            let _signing = host
+                .signing
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            host.ensure_account(&keys)?;
+            let mut unsigned = builder.build(keys.public_key());
+            scrub_unsigned(&mut unsigned);
+            let previous = host
+                .engine
+                .active_account()
+                .context("reading NMP account")?;
+            host.engine
+                .set_active_account(Some(keys.public_key()))
+                .context("selecting NMP signing account")?;
+            let result = (|| {
+                host.engine
+                    .sign_event(SignEventRequest {
+                        created_at: unsigned.created_at,
+                        kind: unsigned.kind,
+                        tags: unsigned.tags.into_iter().collect(),
+                        content: unsigned.content,
+                    })
+                    .context("starting NMP sign operation")?
+                    .recv()
+                    .context("signing event through NMP")
+            })();
+            let restored = host
+                .engine
+                .set_active_account(previous)
+                .context("restoring NMP account");
+            match (result, restored) {
+                (Ok(event), Ok(())) => Ok(event),
+                (Err(error), _) => Err(error),
+                (Ok(_), Err(error)) => Err(error),
+            }
+        })
+        .await
+        .context("joining NMP signer")?
+    }
+
+    /// Durably enqueue a NIP-29 write and return once NMP has frozen and signed
+    /// it. When `checked` is true, also wait for at least one relay ACK.
+    pub(crate) async fn publish_group_builder(
+        &self,
+        builder: EventBuilder,
+        keys: &Keys,
+        checked: bool,
+    ) -> Result<EventId> {
+        self.ensure_account(keys)?;
+        let mut unsigned = builder.build(keys.public_key());
+        scrub_unsigned(&mut unsigned);
+        let author = keys.public_key();
+        let receivers = self.publish_group_unsigned(unsigned, Some(author))?;
+        wait_for_write(receivers, None, checked).await
+    }
+
+    /// Enqueue an already-signed group event. This is used when the provider
+    /// needs the exact signed value for immediate local materialization.
+    pub(crate) async fn publish_group_event(
+        &self,
+        event: &Event,
+        checked: bool,
+    ) -> Result<EventId> {
+        let mut receivers = Vec::with_capacity(self.relays.len());
+        for relay in &self.relays {
+            let mut intent = group_intent(relay.clone(), event_template(event)?)?;
+            intent.payload = WritePayload::Signed(event.clone());
+            intent.identity_override = Some(event.pubkey);
+            receivers.push(
+                self.engine
+                    .publish(intent)
+                    .context("submitting signed NMP write")?,
+            );
+        }
+        require_configured_host(&receivers)?;
+        wait_for_write(receivers, Some(event.id), checked).await
+    }
+
+    fn ensure_account(&self, keys: &Keys) -> Result<()> {
+        let pubkey = keys.public_key();
+        let mut accounts = self
+            .accounts
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        if accounts.contains_key(&pubkey) {
+            return Ok(());
+        }
+        let registration = self
+            .engine
+            .add_account(&keys.secret_key().to_secret_hex())
+            .with_context(|| format!("registering NMP account {pubkey}"))?;
+        accounts.insert(pubkey, registration);
+        Ok(())
+    }
+
+    fn publish_group_unsigned(
+        &self,
+        unsigned: UnsignedEvent,
+        identity_override: Option<PublicKey>,
+    ) -> Result<Vec<Receiver<WriteStatus>>> {
+        let groups = group_values(unsigned.tags.iter());
+        if groups.len() != 1 {
+            anyhow::bail!(
+                "unsigned NIP-29 writes require exactly one h tag; exact multi-group events must be pre-signed"
+            );
+        }
+        let template = unsigned_template(&unsigned)?;
+        let mut receivers = Vec::with_capacity(self.relays.len());
+        for relay in &self.relays {
+            let mut intent = group_intent(relay.clone(), template.clone())?;
+            intent.identity_override = identity_override;
+            receivers.push(
+                self.engine
+                    .publish(intent)
+                    .context("submitting unsigned NMP write")?,
+            );
+        }
+        require_configured_host(&receivers)?;
+        Ok(receivers)
+    }
+}
+
+#[derive(Clone)]
+struct GroupTemplate {
+    group: String,
+    author: PublicKey,
+    created_at: nostr_sdk::Timestamp,
+    kind: u16,
+    content: String,
+    extra_tags: Vec<Vec<String>>,
+}
+
+fn unsigned_template(unsigned: &UnsignedEvent) -> Result<GroupTemplate> {
+    group_template(
+        unsigned.pubkey,
+        unsigned.created_at,
+        unsigned.kind.as_u16(),
+        unsigned.content.clone(),
+        unsigned.tags.iter().collect(),
+    )
+}
+
+fn event_template(event: &Event) -> Result<GroupTemplate> {
+    group_template(
+        event.pubkey,
+        event.created_at,
+        event.kind.as_u16(),
+        event.content.clone(),
+        event.tags.iter().collect(),
+    )
+}
+
+fn group_template(
+    author: PublicKey,
+    created_at: nostr_sdk::Timestamp,
+    kind: u16,
+    content: String,
+    tags: Vec<&Tag>,
+) -> Result<GroupTemplate> {
+    let groups = group_values(tags.iter().copied());
+    let group = groups
+        .first()
+        .cloned()
+        .context("NIP-29 write has no h tag")?;
+    let extra_tags = tags
+        .into_iter()
+        .filter(|tag| {
+            !matches!(
+                tag.as_slice().first().map(String::as_str),
+                Some("h" | "previous")
+            )
+        })
+        .map(|tag| tag.as_slice().to_vec())
+        .collect();
+    Ok(GroupTemplate {
+        group,
+        author,
+        created_at,
+        kind,
+        content,
+        extra_tags,
+    })
+}
+
+fn group_values<'a>(tags: impl IntoIterator<Item = &'a Tag>) -> BTreeSet<String> {
+    tags.into_iter()
+        .filter_map(|tag| {
+            let row = tag.as_slice();
+            (row.first().map(String::as_str) == Some("h"))
+                .then(|| row.get(1).cloned())
+                .flatten()
+        })
+        .collect()
+}
+
+fn group_intent(relay: RelayUrl, template: GroupTemplate) -> Result<nmp::WriteIntent> {
+    nmp_nip29::compose_group_send(
+        relay,
+        &template.group,
+        template.author,
+        template.created_at,
+        template.kind,
+        template.content,
+        template.extra_tags,
+        &nmp_nip29::GroupTimelineEvidence::none(),
+    )
+    .map_err(|error| anyhow::anyhow!("composing NMP group write: {error:?}"))
+}
+
+fn require_configured_host(receivers: &[Receiver<WriteStatus>]) -> Result<()> {
+    if receivers.is_empty() {
+        anyhow::bail!("cannot publish a NIP-29 event without a configured group host");
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests;

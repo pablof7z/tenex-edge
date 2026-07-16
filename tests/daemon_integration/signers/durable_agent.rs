@@ -31,6 +31,22 @@ fn durable_agent_reuses_key_and_rejects_concurrency() {
             .expect("durable launch registers session");
         let first = started["pubkey"].as_str().unwrap().to_string();
 
+        // Session readiness is asynchronous. An immediate send to the exact
+        // current channel must join that readiness work, never reinterpret the
+        // channel id as a human name and mint a second subgroup.
+        let sent = client
+            .call(
+                "channel_send",
+                serde_json::json!({
+                    "session": &first,
+                    "channel": &channel,
+                    "message": "durable signer check",
+                }),
+            )
+            .await
+            .expect("send as durable agent");
+        let chat_event_id = sent["event_id"].as_str().unwrap().to_string();
+
         let refused = run_cli(&home, &["launch", slug, "--workspace", "tmp"]);
         assert!(!refused.status.success());
         let refused = String::from_utf8_lossy(&refused.stderr);
@@ -154,19 +170,6 @@ fn durable_agent_reuses_key_and_rejects_concurrency() {
             "unexpected rejection: {error:#}"
         );
 
-        let sent = client
-            .call(
-                "channel_send",
-                serde_json::json!({
-                    "session": &first,
-                    "channel": &channel,
-                    "message": "durable signer check",
-                }),
-            )
-            .await
-            .expect("send as durable agent");
-        let chat_event_id = sent["event_id"].as_str().unwrap().to_string();
-
         client
             .call("session_end", serde_json::json!({ "session": first }))
             .await
@@ -181,6 +184,16 @@ fn durable_agent_reuses_key_and_rejects_concurrency() {
         "sequential durable-agent runs reuse their durable pubkey"
     );
     let store = Store::open(&home.store_path()).unwrap();
+    assert_eq!(
+        store.channel_id_for_name("tmp", &channel).unwrap(),
+        Some(channel.clone()),
+        "the exact current channel id must be the one materialized under the workspace"
+    );
+    assert_eq!(
+        store.channel_resolution_intent("tmp", &channel).unwrap(),
+        None,
+        "an exact current channel id must not enter the human-name provisioning path"
+    );
     for pubkey in [&first_id, &third_id] {
         let session = store.get_session(pubkey).unwrap().unwrap();
         assert_eq!(session.pubkey, durable_pubkey);

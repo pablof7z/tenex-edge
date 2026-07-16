@@ -1,20 +1,5 @@
 use super::*;
 
-// ── stable subscription id ──────────────────────────────────────────────────
-
-#[test]
-fn stable_subscription_id_is_deterministic_and_distinct() {
-    let pk = Keys::generate().public_key();
-    let a1 = Filter::new().kind(Kind::from(0u16)).author(pk);
-    let a2 = Filter::new().kind(Kind::from(0u16)).author(pk);
-    let b = Filter::new().kind(Kind::from(9u16)).author(pk);
-
-    // Same filter content -> identical id, so resubscribe replaces rather than
-    // accumulating a fresh random-id subscription.
-    assert_eq!(stable_subscription_id(&a1), stable_subscription_id(&a2));
-    assert_ne!(stable_subscription_id(&a1), stable_subscription_id(&b));
-}
-
 // ── assert_relay_accepted unit tests ────────────────────────────────────────
 
 fn output_with(success: &[&str], failed: &[(&str, &str)]) -> Output<EventId> {

@@ -1,8 +1,6 @@
-// The rendered fabric-context view. `Clone + PartialEq` so it can travel through
-// a Trellis materialized output as a typed payload (change-detected by the graph)
-// and be compared byte-for-byte in tests. The type is `pub(crate)` so the
-// reconcile spine can name it as an output payload; its fields stay module-private
-// so only `build`/`capture` construct it and `render`/`human_render` read it.
+// The rendered fabric-context view. `Clone + PartialEq` supports change detection
+// and byte-for-byte comparison in tests. Fields stay module-private so only
+// capture/assembly construct it and the renderers read it.
 #[derive(Clone, Default, PartialEq)]
 pub(crate) struct FabricView {
     pub(in crate::fabric_context) self_row: Option<SelfRow>,

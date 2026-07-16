@@ -1,12 +1,12 @@
 //! Agent-facing output-mode deltas. The source of truth stays transport-owned;
 //! this module only remembers which mode the agent has already been told.
 
-use super::HookContextGraphs;
+use super::HookContextStates;
 use crate::state::{Session, Store};
 use std::sync::Mutex;
 
 pub(super) fn push_mode_notice(
-    graphs: &HookContextGraphs,
+    states: &HookContextStates,
     store: &Mutex<Store>,
     rec: &Session,
     announce_initial: bool,
@@ -16,7 +16,7 @@ pub(super) fn push_mode_notice(
         let store = store.lock().expect("store mutex poisoned");
         crate::session_host::session_is_headless(&store, rec)
     };
-    let changed = graphs
+    let changed = states
         .lock()
         .expect("hook-context mutex poisoned")
         .entry(rec.pubkey.clone())

@@ -1,17 +1,18 @@
-# mosaico — Fabric Architecture (proposal)
+# mosaico — Fabric Architecture
 
 > High-level architecture for the swap-seam. The load-bearing idea: **all data is
 > read from one unified local store; *how* it was hydrated is irrelevant to its
-> use.** A **Fabric Provider** (nip29 / mls / a2a / …) is a write-side
-> materializer that owns all of how-and-who — wire shape, membership/admission, lifecycle
-> side-effects — and projects everything into canonical store rows. Readers query
-> the store; nothing in a read path ever names a kind, a tag, a group, or a relay.
+> use.** NMP owns Nostr acquisition and emits canonical wire events. A **Fabric
+> Provider** owns wire shape, membership/admission, lifecycle side-effects, and
+> projects those events into canonical store rows. Readers query the store;
+> nothing in a read path ever names a kind, a tag, a group, or a relay. NMP also
+> owns Nostr signing, durable group routing, receipts, and retries.
 
 ---
 
 ## 1. The core problem
 
-The current `Codec` seam swaps *NIP layouts*, not *fabrics*. It traffics in
+The former `Codec` seam swapped *NIP layouts*, not *fabrics*. It trafficked in
 `nostr_sdk` types and fuses three unrelated concerns into one trait:
 
 - **wire mapping** (domain event ↔ envelope),
@@ -30,12 +31,13 @@ Two observations drive the whole design:
 
    | Fabric | "member" means | hydrated from |
    |--------|----------------|---------------|
-   | nip29  | in the NIP-29 group | live `39002` members list (kept subscribed) |
+   | nip29  | in the NIP-29 group | NMP observation of the live `39002` members list |
    | mls    | in the MLS group | MLS group roster after invite/accept |
 
    The **shape** is uniform (`is_member(project, pubkey)` + a change stream); the
    **source** is the provider's secret. Add a member from another machine → the
-   nip29 provider's live subscription reflects it; nothing above notices *how*.
+   NMP observation reflects it through the nip29 materializer; nothing above
+   notices *how*.
 
    The **enforcement locus** also differs — and this is what forces admission to be
    a domain-side gate rather than something we delegate to the fabric:
@@ -47,7 +49,7 @@ Two observations drive the whole design:
 
    **Principle:** the domain `is_member` gate is *always* consulted client-side;
    server/crypto enforcement is defense-in-depth, never a replacement. Even nip29 has inbound p-tag paths outside
-   the group `#h` stream: the daemon's aggregate `#p` subscription receives them
+   the group `#h` stream: NMP's aggregate `#p` live query receives them
    without a relay-side group-membership check. So the gate can never be skipped
    — which is exactly why it lives in the domain, above the provider seam.
 
@@ -88,6 +90,7 @@ flowchart TD
     end
 
     subgraph WIRE["Wire / transport substrate"]
+        NMP["NMP Nostr engine<br/>live queries · signing · durable writes"]
         R1["Nostr relays"]
         R2["MLS delivery service"]
     end
@@ -97,22 +100,22 @@ flowchart TD
     CM --> SEAM
     ADMIT --> SEAM
     SEAM --> P1 & P2
-    P1 --> R1
+    P1 --> NMP --> R1
     P2 --> R2
 ```
 
 **Rule of the seam:** everything *above* `SEAM` is written once and never edited
 to add a fabric. Everything *below* is a self-contained provider. The domain
-speaks `DomainEvent`; subscription intent is expressed as `Scope` while concrete
-providers decide what native filters, streams, or queries that means.
+speaks `DomainEvent`; live Nostr acquisition is expressed as NMP queries while
+concrete providers decide how delivered envelopes materialize.
 
 ---
 
 ## 2a. The read model is the contract (the load-bearing principle)
 
 **All consumption reads from one unified local store; *how* the data got there is
-invisible to the reader.** A provider is a **write-side materializer** — it
-subscribes to its fabric, decodes, admits, and **upserts canonical rows**.
+invisible to the reader.** NMP acquires and deduplicates Nostr events; a provider
+decodes, admits, and **upserts canonical rows**.
 Every consumer (CLI `who`/`channel read`/`channel list`, the
 channel adapter, hooks, context injection) reads only the store. No reader ever
 holds a `Provider`, names a kind, or touches the wire. This is CQRS, and it is
@@ -122,7 +125,7 @@ read.
 This store already exists — `~/.mosaico/state.db`. Its `relay_*` tables are
 materialized projections that can be rebuilt from the fabric; its local tables
 (`sessions`, `session_channels`, `session_locators`, `session_signers`,
-`handle_leases`, `inbox`, `outbox`, and `workspace_roots`) are non-rebuildable
+`handle_leases`, `inbox`, and `workspace_roots`) are non-rebuildable
 daemon state. The schema is
 stamped at open, so an incompatible or unstamped existing DB fails loudly instead
 of being partially interpreted. The **single-writer materializer is the direct
@@ -233,8 +236,10 @@ flowchart LR
   them, who's online, and what they're doing.
   recipient of each.* All are `SELECT`s. None know the fabric.
 - **Intents** are writes: open a project, send a message, beat a heartbeat. The
-  provider encodes the intent to its wire shape, publishes with a checked relay
-  verdict when callers need to report success, and only then reflects accepted
+  provider encodes the intent to its wire shape and submits it to NMP. NMP
+  registers the exact account, freezes the per-write author, signs, routes,
+  retries, and streams receipts; callers that need convergence wait for an ACK.
+  The provider only then reflects accepted
   local writes into relay-derived read rows. Future optimistic UX must use an
   explicit pending-outbound state, never fabricated relay cache rows.
 - **The admission gate lives on the write face, then becomes a read.** `is_member` is
@@ -258,8 +263,8 @@ per fabric:
 | nip29  | groups the agent belongs to (reverse of `39002`) / relay group enumeration | relay-authored `kind:39000` group metadata | **canonical & shared** — one source, every machine agrees |
 | mls    | MLS groups in local state | group-context extension / metadata message | **member-authored**, cryptographically scoped to the group |
 
-**Hydration mode is the materializer's business too** — *pull vs. live*. nip29/mls
-can one-shot **fetch** the `39000` metadata *or* **subscribe** to it (it's
+**Hydration mode is the acquisition boundary's business too** — *pull vs. live*.
+nip29 can one-shot **fetch** the `39000` metadata or ask NMP to **observe** it (it's
 replaceable) and re-upsert on every change, so a description edited on another
 machine propagates by simply updating the store row — and the reader's next
 `SELECT` reflects it with zero changes anywhere above the seam. The reader sees only the current row; "a new project appeared on the fabric"
@@ -278,23 +283,25 @@ and prevents the current "codec also does admission" fusion.
 flowchart TD
     PROVIDER["FabricProvider<br/>(Nip29 · Mls)"]
     PROVIDER --> L["① Lifecycle reactor<br/>react(ProjectOpened, AgentJoined…)<br/>→ native side-effects"]
-    PROVIDER --> M["② Materializer<br/>composes ③+④ → admit · derive<br/>· upsert canonical rows into the store"]
+    NMP["NMP Nostr engine<br/>live queries → canonical events<br/>accounts · writes · receipts"] --> M
+    PROVIDER --> M["② Materializer<br/>decode · admit · derive<br/>· upsert canonical rows into the store"]
     PROVIDER --> W["③ Provider codec<br/>DomainEvent ⇄ provider-native envelope"]
-    PROVIDER --> D["④ Delivery<br/>publish(raw envelope) · subscribe(scope)→raw stream<br/>owns REQ-filters / gossip / MLS-stream"]
+    PROVIDER --> D["④ Direct edge<br/>profile indexer copy · probe · one-shot fetch"]
+    PROVIDER --> NMP
 ```
 
 | # | Capability | Responsibility | Must **not** |
 |---|------------|----------------|--------------|
 | ① | **Lifecycle** | Turn a domain lifecycle event into provider-native setup (create group, invite, or no-op). | Decide *when* a project opens (that's the host/daemon). |
-| ② | **Materializer** | **Composes ③ and ④:** consume ④'s inbound stream, decode via ③, then own *only* admission, and upsert of canonical rows — membership, channel list --all-workspaces & metadata, agents. The store is the read contract; this fills it. | Subscribe or decode *itself* (that's ④ and ③), or answer reads (readers query the store directly; the materializer never sits in a read path). |
+| ② | **Materializer** | Consume NMP-delivered envelopes through one bounded, backpressured stream, decode via ③, then own admission and canonical upserts — membership, channel metadata, agents, status, and messages. The store is the read contract; this fills it. | Open relay work, drop canonical additions under load, or answer reads. |
 | ③ | **Provider codec** | Pure, symmetric ser/de of the five+ `DomainEvent` nouns to the provider's native envelope. The current NIP-29 provider uses a Nostr-event codec. | Open subscriptions or manage groups. |
-| ④ | **Delivery** | Connect/auth, publish raw envelopes, and stream raw inbound envelopes for a `Scope`. Owns whatever fetch model the fabric uses. | Decode, derive, apply admission, or know domain meaning. |
+| ④ | **Direct edge** | Copy kind:0 profiles to the configured indexer, run the doctor probe, and perform bounded one-shot resolution fetches that NMP's facade does not express. | Publish group events, sign product writes, own retries, or grow into a second write plane. |
 
 The runtime only ever talks to one active provider interface. Swapping fabric =
 swap the provider constructor (or a small enum of providers until a truly
-object-safe async trait is needed). The `filters`-shaped subscription model
-disappears from the public seam — it becomes a private detail of the nostr
-delivery impl, so a push/gossip/MLS delivery model is now expressible.
+object-safe async trait is needed). App-owned relay filters disappear from the
+provider seam: NMP owns the live-query, signing, group-write, receipt, retry, and
+connection lifecycle.
 
 ---
 
@@ -318,8 +325,8 @@ sequenceDiagram
         P->>FAB: create group 9007 (h = dir slug)
         P->>FAB: edit-metadata 9002 (closed + public)
         P->>FAB: put-user 9000 (agent = member)
-        %% subscribe 39002 members keeps admission live
-        P->>FAB: subscribe 39002 members
+        %% NMP observes 39002 members and keeps admission live
+        P->>FAB: declare 39002 observation
     else mls provider
         P->>FAB: create MLS group
         P->>FAB: invite agent key
@@ -327,7 +334,7 @@ sequenceDiagram
     end
 
     Note over P,FAB: thereafter the materializer just keeps the store current
-    P->>FAB: subscribe (membership, metadata, …)
+    P->>FAB: NMP live queries (membership, metadata, …)
     FAB-->>P: events
     P->>STORE: upsert rows (members, channel metadata)
 ```
@@ -358,23 +365,6 @@ sequenceDiagram
 ```
 
 The admission check (`is_member?`) is identical logic for all three fabrics; only
-the **source rows** it reads were filled differently. Add a pubkey as a member
-from another computer → the nip29 materializer's live `39002` subscription upserts
-the `membership` table → the next admission check and the next reader `SELECT`
-both reflect it, with zero changes above the store.
-
-## 6. Implementation ladder
-
-The behavior-preserving phase ladder and validation commands live in [fabric-architecture-implementation.md](fabric-architecture-implementation.md).
-
-## 7. Remaining decisions
-
-- **Identity binding** (agent keypair ↔ fabric identity) is assumed shared, but
-  MLS adds a key-package / accept handshake with no nostr analogue. Is that a
-  fifth provider capability, or part of Lifecycle?
-- **Multi-fabric at once** — can a daemon run nip29 *and* MLS providers
-  concurrently (one project per fabric), and are rosters ever merged across
-  providers or always partitioned by `project_id` / `project_origins`?
-- **Store schema evolution** — the current policy is fail-loud schema stamps, not
-  in-place migrations. A future migration system would need an explicit export /
-  transform / import story for non-rebuildable local state.
+the source rows differ. When NMP delivers an updated `39002` row, the NIP-29
+materializer updates membership and every reader sees the change through the
+same store contract.

@@ -29,6 +29,5 @@ pub(in crate::daemon::server) fn set_active_session_channel(
             .context("set_active_session_channel: repointing active channel")?;
         Ok(())
     })?;
-    state.outbox_notify.notify_waiters();
     Ok(())
 }

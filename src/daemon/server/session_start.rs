@@ -36,8 +36,23 @@ pub(super) async fn rpc_session_start_inner(
         .map(std::path::PathBuf::from)
         .unwrap_or(std::env::current_dir()?);
     state.refresh_agent_catalog()?;
+    let work_root = crate::workspace::resolve(&cwd).unwrap_or_default();
+    let rel_cwd = crate::workspace::rel_cwd(&cwd);
+    runtime::bind_workspace(state, &cwd, &work_root)?;
+    let harness_name = harness.as_str();
+    let located_pubkey = runtime::resolve_existing_pubkey(state, &p, harness_name)?;
     let agent = if identity::is_configured(&mosaico_home, &p.agent) {
-        identity::load(&mosaico_home, &p.agent)?
+        identity::load(&mosaico_home, &p.agent).with_context(|| {
+            located_pubkey.as_ref().map_or_else(
+                || format!("loading agent identity {:?}", p.agent),
+                |_| {
+                    format!(
+                        "identity configuration changed for live agent {:?}",
+                        p.agent
+                    )
+                },
+            )
+        })?
     } else if state
         .resolve_native_agent(&p.agent, Some(&cwd), Some(harness))
         .is_ok()
@@ -52,21 +67,6 @@ pub(super) async fn rpc_session_start_inner(
             now_secs(),
         )?
     };
-    let work_root = crate::workspace::resolve(&cwd).unwrap_or_default();
-    let rel_cwd = crate::workspace::rel_cwd(&cwd);
-    runtime::bind_workspace(state, &cwd, &work_root)?;
-    let harness_name = harness.as_str();
-    let native_resume = p
-        .resume_id
-        .as_deref()
-        .filter(|value| !value.is_empty())
-        .or_else(|| {
-            p.harness_session
-                .as_deref()
-                .filter(|value| !value.is_empty())
-        });
-
-    let located_pubkey = runtime::resolve_existing_pubkey(state, &p, harness_name)?;
     let prepared = match located_pubkey.as_deref() {
         Some(pubkey) => load_session_identity(state, pubkey, &agent)?,
         None => prepare_session_identity(state, &agent, p.session_name.as_deref())?,
@@ -105,6 +105,13 @@ pub(super) async fn rpc_session_start_inner(
             channel = existing.channel_h.clone();
         }
     }
+    let readiness_parent = channel_ready::session_parent_hint(
+        state,
+        &channel,
+        &work_root,
+        room_parent.as_deref(),
+        existing.as_ref(),
+    )?;
     let now = now_secs();
     let runtime_generation = runtime::reserve_generation(
         state,
@@ -119,7 +126,7 @@ pub(super) async fn rpc_session_start_inner(
         .then(|| RuntimeReservation::new(state.clone(), pubkey.clone(), runtime_generation));
 
     state.with_store(|store| -> Result<()> {
-        store.set_session_channel(&pubkey, &channel)?;
+        store.set_session_context(&pubkey, &channel, &work_root, &readiness_parent)?;
         if !store.bind_runtime_process(&pubkey, runtime_generation, p.watch_pid)? {
             anyhow::bail!(
                 "runtime generation {runtime_generation} for {pubkey} is no longer active"
@@ -132,33 +139,26 @@ pub(super) async fn rpc_session_start_inner(
     membership_cleanup::cleanup_dead_local_sessions(state);
 
     let endpoint = p.pty_session.clone().filter(|value| !value.is_empty());
-    let request = crate::reconcile::SessionStartRequestFact {
+    let request = advisory::SessionStartRequest {
         pubkey: pubkey.clone(),
-        agent: p.agent.clone(),
-        harness: harness_name.to_string(),
-        native_id: native_resume.unwrap_or_default().to_string(),
-        work_root: work_root.clone(),
         channel_h: channel.clone(),
-        channel_for_upsert: channel.clone(),
         rel_cwd: rel_cwd.clone(),
         room_parent,
+        readiness_parent: (!readiness_parent.is_empty()).then_some(readiness_parent.clone()),
         channel_provision_name,
         watch_pid: p.watch_pid,
         pty_session: endpoint,
         ring_doorbell: p.pty_session.is_some(),
-        signer_label: prepared.identity.display_slug(),
         already_running,
         channel_already_subscribed: state.subs.lock().unwrap().covers_channel(&channel),
-        at: now,
     };
-    let plan = advisory::drive_request(state, request)?.plan;
+    let plan = advisory::plan(&request);
     let joined = joined_channels::record(state, &pubkey, channel.clone(), p.channels, now);
 
     if plan.ring_doorbell {
         crate::session_host::ring_doorbells(state.clone());
     }
     if plan.reassert {
-        advisory::record_started(state, &pubkey, &channel, p.watch_pid, now_secs());
         if let Some(guard) = reservation.as_mut() {
             guard.disarm();
         }
@@ -166,9 +166,6 @@ pub(super) async fn rpc_session_start_inner(
     }
 
     effects::schedule_channel_ready(state.clone(), pubkey.clone(), plan.channel_ready);
-    if plan.notify_outbox {
-        state.outbox_notify.notify_waiters();
-    }
     if plan.replay_chat {
         effects::schedule_replay_chat(state.clone(), channel.clone());
     }
@@ -189,10 +186,7 @@ pub(super) async fn rpc_session_start_inner(
         spawn.watch_pid,
     );
     progress_emit(&progress, "engine", "starting session engine");
-    if let Err(error) = spawn_session(state, engine).await {
-        advisory::record_failed(state, &pubkey, "spawn_engine", &error, now_secs());
-        return Err(error);
-    }
+    spawn_session(state, engine).await?;
     if plan.emit_tail {
         state.emit_tail(TailEvent::Sess {
             ts: now_secs(),
@@ -203,7 +197,6 @@ pub(super) async fn rpc_session_start_inner(
             rel_cwd,
         });
     }
-    advisory::record_started(state, &pubkey, &channel, p.watch_pid, now_secs());
     if let Some(guard) = reservation.as_mut() {
         guard.disarm();
     }

@@ -2,6 +2,7 @@ use super::turn::{turn_check, turn_end, turn_start, EmitFormat};
 use super::*;
 use std::path::PathBuf;
 
+mod applicability;
 mod class_b;
 mod hook_forensics;
 mod observation;
@@ -177,20 +178,6 @@ async fn hook_dispatch(
             }
         },
     };
-    // A slug from MOSAICO_AGENT (set by `mosaico launch`) is always
-    // authoritative. Otherwise, look for a live ancestor directly running
-    // `claude --agent <name>` (bypassing `mosaico launch`) and treat it the
-    // same as if it had been launched under that identity. The profile name is
-    // retained, but argv remains owned by harnesses.json.
-    let env_slug = agent_env_slug();
-    let (agent_slug, profile): (String, Option<String>) = match &env_slug {
-        Some(s) => (s.clone(), None),
-        None if host.name == "claude-code" => find_direct_agent_invocation()
-            .map(|slug| (slug.clone(), Some(slug)))
-            .unwrap_or_else(|| (host.agent_slug.to_string(), None)),
-        None => (host.agent_slug.to_string(), None),
-    };
-
     // Parse stdin — fail open if JSON is absent or malformed.
     let obj = raw.as_object();
 
@@ -215,17 +202,24 @@ async fn hook_dispatch(
         .map(PathBuf::from)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
 
-    // No known channel in this directory? Hooks must NOT disturb the agent:
-    // exit 0 silently. The user will see the "no known channel" message when
-    // they run an explicit `mosaico` verb from this dir; a harness running
-    // here should just proceed without mosaico's fabric features.
-    if crate::workspace::resolve(&cwd).is_err() {
-        call_log.note(
-            "no-channel",
-            serde_json::json!({ "cwd": cwd.to_string_lossy() }),
-        );
+    if let Some((note, detail)) = applicability::inapplicable(&cwd) {
+        call_log.note(note, detail);
         return Ok(());
     }
+
+    // A slug from MOSAICO_AGENT (set by `mosaico launch`) is always
+    // authoritative. Otherwise, look for a live ancestor directly running
+    // `claude --agent <name>` (bypassing `mosaico launch`) and treat it the
+    // same as if it had been launched under that identity. The profile name is
+    // retained, but argv remains owned by harnesses.json.
+    let env_slug = agent_env_slug();
+    let (agent_slug, profile): (String, Option<String>) = match &env_slug {
+        Some(s) => (s.clone(), None),
+        None if host.name == "claude-code" => find_direct_agent_invocation()
+            .map(|slug| (slug.clone(), Some(slug)))
+            .unwrap_or_else(|| (host.agent_slug.to_string(), None)),
+        None => (host.agent_slug.to_string(), None),
+    };
 
     let transcript: Option<String> = host.transcript_field.and_then(|field| {
         obj.and_then(|o| o.get(field))

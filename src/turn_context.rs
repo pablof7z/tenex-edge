@@ -13,70 +13,39 @@ pub(crate) use check::assemble_turn_check;
 pub(crate) use check::assemble_turn_check_context;
 pub(crate) use start::assemble_turn_start;
 #[cfg(test)]
-pub(crate) use start::assemble_turn_start_context;
+pub(crate) use start::render_turn_start_text_for_test;
 
 use crate::fabric_context::ViewInputs;
-use crate::reconcile::{
-    HookContextOutcome, HookContextReceipt, HookContextReconciler, HookContextRenderFact, InputFact,
-};
+use crate::reconcile::{HookContextOutcome, HookContextReceipt, HookContextState};
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-/// Daemon-held, per-session hook-context graphs. Test shims may construct a
+/// Daemon-held, per-session hook-context states. Tests may construct a
 /// local map, but production render paths reuse the daemon-owned instance.
-pub(crate) type HookContextGraphs = Mutex<HashMap<String, HookContextReconciler>>;
+pub(crate) type HookContextStates = Mutex<HashMap<String, HookContextState>>;
 
 pub(crate) fn render_hook_context(
-    graphs: &HookContextGraphs,
+    states: &HookContextStates,
     pubkey: &str,
     kind: &str,
     cursor: i64,
     now: i64,
     inputs: ViewInputs,
-) -> trellis_core::GraphResult<HookContextOutcome> {
-    let mut guard = graphs.lock().expect("hook-context mutex poisoned");
-    let graph = guard.entry(pubkey.to_string()).or_default();
-    graph.render_context(pubkey, kind, cursor, now, inputs)
+) -> HookContextOutcome {
+    let mut guard = states.lock().expect("hook-context mutex poisoned");
+    let state = guard.entry(pubkey.to_string()).or_default();
+    state.render_context(pubkey, kind, cursor, now, inputs)
 }
 
-/// One turn's assembled fabric snapshot plus its graph-sourced receipt. The text
-/// is what the agent sees (suppressed to `None` when empty); the receipt is the
-/// render's OWN dependency trace — it REPLACES the hand-rolled `turn_start_audit`
-/// / `turn_check_audit` and cannot drift from the bytes.
+/// One turn's assembled fabric snapshot plus its state-produced receipt. The text
+/// is what the agent sees (suppressed to `None` when empty); the receipt is
+/// calculated by the same render and cannot drift from the bytes.
 pub(crate) struct TurnContext {
     pub(crate) text: Option<String>,
     pub(crate) receipt: HookContextReceipt,
-    /// The render's committed transaction id / revision, for the receipts ledger.
+    /// Monotonic render identifiers for the receipts ledger.
     pub(crate) transaction_id: i64,
     pub(crate) revision: i64,
-    pub(crate) replay_fact: Option<InputFact>,
-}
-
-pub(crate) fn hook_replay_fact(
-    pubkey: &str,
-    hook_kind: &str,
-    cursor: i64,
-    now: i64,
-    force: bool,
-    inputs: &ViewInputs,
-    text: Option<&str>,
-) -> Option<InputFact> {
-    let inputs_json = match serde_json::to_value(inputs) {
-        Ok(value) => value,
-        Err(e) => {
-            tracing::warn!(pubkey, error = %e, "hook replay capsule serialization failed");
-            return None;
-        }
-    };
-    Some(InputFact::HookContextRender(HookContextRenderFact {
-        pubkey: pubkey.to_string(),
-        hook_kind: hook_kind.to_string(),
-        cursor,
-        now,
-        force,
-        emitted_text_hash: text.map(crate::replay_capsules::text_hash),
-        inputs_json,
-    }))
 }
 
 #[cfg(test)]

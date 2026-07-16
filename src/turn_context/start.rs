@@ -14,23 +14,23 @@ use crate::util::now_secs;
 /// The full turn-start context assembly, shared by the daemon's `turn_start` RPC
 /// (the only caller now). Mutating reads that belong to rendering (drain inbox
 /// → mark delivered) happen here under the shared store; cursor advancement is
-/// applied by the daemon after the graph-derived render.
+/// applied by the daemon after the context render.
 ///
 /// `backend_pubkey` is this daemon's signing pubkey, used to decide whether we
 /// manage (admin) the channel. `_prev_turn_started_at` is retained for the daemon
 /// call contract, but first-turn detection is based on `seen_cursor`: `turn_end`
 /// clears `turn_started_at`, while `seen_cursor` is the durable awareness cursor.
-/// Text-only shim preserving the historical `Option<String>` contract for the
-/// hook-parity tests; the daemon calls [`assemble_turn_start`] for the receipt.
+/// Test helper that returns only the agent-visible text. Production callers use
+/// [`assemble_turn_start`] and retain the accompanying receipt.
 #[cfg(test)]
-pub(crate) fn assemble_turn_start_context(
+pub(crate) fn render_turn_start_text_for_test(
     store: &std::sync::Mutex<Store>,
     rec: &Session,
     backend_pubkey: &str,
     self_host: &str,
     prev_turn_started_at: u64,
 ) -> Option<String> {
-    let hook_contexts = super::HookContextGraphs::default();
+    let hook_contexts = super::HookContextStates::default();
     assemble_turn_start(
         store,
         rec,
@@ -48,7 +48,7 @@ pub(crate) fn assemble_turn_start(
     backend_pubkey: &str,
     self_host: &str,
     _prev_turn_started_at: u64,
-    hook_contexts: &super::HookContextGraphs,
+    hook_contexts: &super::HookContextStates,
 ) -> TurnContext {
     let first_turn = rec.seen_cursor == 0;
     // Routing scope is the session's `channel_h` — a root channel, or the
@@ -223,9 +223,9 @@ pub(crate) fn assemble_turn_start(
     }
 
     let forced = mentions.iter().map(inbox_seed).collect::<Vec<_>>();
-    // Freeze the canonical inputs from the store, then derive the snapshot in the
-    // graph. The reconciler is the single authority that both PRODUCES the injected
-    // text and EXPLAINS it (the receipt), so the two cannot drift.
+    // Freeze the canonical inputs from the store, then render the snapshot. The
+    // stateful renderer is the single authority that both produces the injected
+    // text and explains it, so the two cannot drift.
     let inputs = {
         let s = store.lock().expect("store mutex poisoned");
         capture_inputs(
@@ -245,8 +245,6 @@ pub(crate) fn assemble_turn_start(
             },
         )
     };
-    let render_start = std::time::Instant::now();
-    let replay_inputs = inputs.clone();
     let outcome = super::render_hook_context(
         hook_contexts,
         &rec.pubkey,
@@ -254,37 +252,11 @@ pub(crate) fn assemble_turn_start(
         rec.seen_cursor as i64,
         now as i64,
         inputs,
-    )
-    .expect("hook-context snapshot derivation");
-    // §4.1: ledger EVERY render, incl. suppressed/no-op ones (which record no
-    // receipt) — the hook Unchanged-frame evidence `probe stats` reports.
-    {
-        let s = store.lock().expect("store mutex poisoned");
-        crate::instrument::record_commit(
-            &s,
-            "hook_context",
-            "turn_start",
-            Some(&rec.pubkey),
-            &outcome.commit,
-            render_start.elapsed().as_micros() as i64,
-            crate::instrument::now_millis(),
-        );
-    }
-
-    let replay_fact = super::hook_replay_fact(
-        &rec.pubkey,
-        "turn_start",
-        rec.seen_cursor as i64,
-        now as i64,
-        false,
-        &replay_inputs,
-        outcome.text.as_deref(),
     );
     TurnContext {
         text: outcome.text,
         receipt: outcome.receipt,
         transaction_id: outcome.transaction_id,
         revision: outcome.revision,
-        replay_fact,
     }
 }

@@ -4,7 +4,7 @@
 //! the Nostr fabric. Nothing here knows about any host (no `pc`, no `claude`);
 //! hosts integrate from the outside via the CLI, hooks, and a skill.
 //!
-//! Layering (M1 §2), each knowing only what is below it:
+//! Layering, each knowing only what is below it:
 //!   cli -> runtime -> { domain, codec, transport, state }
 //!   config / identity / channel are leaf utilities.
 
@@ -27,7 +27,7 @@ pub mod injection;
 pub mod instrument;
 pub(crate) mod liveness;
 pub mod logging;
-pub(crate) mod outbox_seam;
+mod nmp_host;
 pub mod profile;
 pub mod session;
 pub mod session_state;
@@ -39,7 +39,6 @@ pub mod daemon;
 pub mod fabric;
 pub mod pty;
 pub mod relay_log;
-pub mod replay_capsules;
 pub mod rpc_harness;
 pub mod runtime;
 pub mod session_host;
@@ -47,7 +46,7 @@ pub(crate) mod session_title;
 pub mod state;
 pub mod status_seam;
 pub mod transcript;
-pub mod transport;
+pub(crate) mod transport;
 
 pub mod reconcile;
 

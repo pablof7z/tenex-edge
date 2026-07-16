@@ -40,8 +40,8 @@ impl Nip29Provider {
             "",
         )
         .tags(tags);
-        let signed = self.transport.sign(builder, &mgmt_keys).await?;
-        let event_id = self.transport.publish_event_checked(&signed).await?;
+        let signed = self.nmp.sign_event(builder, &mgmt_keys).await?;
+        let event_id = self.nmp.publish_group_event(&signed, true).await?;
         self.with_store(|s| {
             crate::fabric::nip29::materializer::Nip29Materializer::materialize_agent_roster(
                 s, &signed,

@@ -88,22 +88,13 @@ fn referenced_pubkeys(event: &Event) -> Vec<String> {
 }
 
 pub(super) fn spawn_demux(state: Arc<DaemonState>) {
+    let mut events = state
+        .nmp
+        .take_materialization_events()
+        .expect("NMP materialization stream has one daemon owner");
     tokio::spawn(async move {
-        let mut notifications = state.transport.notifications();
-        loop {
-            let ev: Option<Event> = match notifications.recv().await {
-                Ok(RelayPoolNotification::Event { event, .. }) => Some(*event),
-                Ok(RelayPoolNotification::Message {
-                    message: RelayMessage::Event { event, .. },
-                    ..
-                }) => Some(event.into_owned()),
-                Ok(_) => None,
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                Err(_) => None,
-            };
-            if let Some(event) = ev {
-                handle_incoming(&state, &event);
-            }
+        while let Some(event) = events.recv().await {
+            handle_incoming(&state, &event);
         }
     });
 }

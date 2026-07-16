@@ -41,7 +41,6 @@ pub(in crate::daemon::server) async fn end_runtime_generation(
         return Ok(false);
     }
 
-    state.outbox_notify.notify_waiters();
     state.emit_tail(TailEvent::Sess {
         ts: ended_at,
         channel: rec.channel_h.clone(),
@@ -160,20 +159,12 @@ async fn revoke_operator_session(
                 state.fabric_provider(),
                 &keys,
                 &state.store,
-                &state.outbox,
                 crate::status_seam::DriveMeta {
                     trigger: "operator_session_revoke",
-                    replay_fact: Some(crate::reconcile::InputFact::StatusDrive(
-                        crate::reconcile::StatusDrive::SessionRevoked {
-                            pubkey: rec.pubkey.clone(),
-                            at: now,
-                        },
-                    )),
                 },
                 |status| status.on_session_revoked(&rec.pubkey, now),
             )
             .await;
-            state.outbox_notify.notify_waiters();
         }
         Err(error) => failures.push(format!("status expiration: {error:#}")),
     }

@@ -151,6 +151,8 @@ fn sample_session() -> crate::state::Session {
         runtime_generation: 1,
         agent_slug: "claude".into(),
         channel_h: "proj".into(),
+        work_root: "proj".into(),
+        readiness_parent: String::new(),
         harness: "claude".into(),
         child_pid: None,
         transcript_path: None,

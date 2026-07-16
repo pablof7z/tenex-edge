@@ -9,7 +9,6 @@ use super::launch_cli::LaunchArgs;
 use super::mcp::McpArgs;
 use super::messaging::WaitArgs;
 use super::my::MyAction;
-use super::probe::ProbeArgs;
 use super::pty::PtySupervisorArgs;
 use super::who::WhoArgs;
 
@@ -124,9 +123,6 @@ pub(super) enum Cmd {
         #[command(subcommand)]
         action: DebugAction,
     },
-    /// Diagnostic probe over the reconciler frontier: stats/oracle/simulate/why/state.
-    #[command(hide = true)]
-    Probe(ProbeArgs),
     /// Internal portable-pty supervisor process.
     #[command(name = "__pty-supervisor", hide = true)]
     PtySupervisor(PtySupervisorArgs),

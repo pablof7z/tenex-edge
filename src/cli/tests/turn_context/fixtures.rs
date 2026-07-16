@@ -63,6 +63,8 @@ pub(super) fn test_session(_id: &str) -> Session {
         runtime_generation: 1,
         agent_slug: "coder".to_string(),
         channel_h: "proj".to_string(),
+        work_root: "proj".to_string(),
+        readiness_parent: String::new(),
         harness: "claude-code".to_string(),
         child_pid: None,
         transcript_path: None,

@@ -214,7 +214,10 @@ impl TestRelay {
 
         TestRelay {
             child,
-            url: format!("ws://localhost:{port}"),
+            // Match the address used by the readiness probe. Keeping the URL
+            // numeric avoids an IPv6 localhost resolution when the relay is
+            // listening only on 127.0.0.1.
+            url: format!("ws://127.0.0.1:{port}"),
             data_dir: None,
         }
     }

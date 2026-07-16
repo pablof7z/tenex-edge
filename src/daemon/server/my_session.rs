@@ -1,6 +1,5 @@
 use super::channel_membership_rpc::resolve_caller;
 use super::*;
-use crate::replay_capsules::status_fact;
 use std::collections::BTreeSet;
 
 #[derive(serde::Deserialize)]
@@ -66,15 +65,12 @@ pub(in crate::daemon::server) async fn rpc_my_session_status(
         state.fabric_provider(),
         &keys,
         &state.store,
-        &state.outbox,
         crate::status_seam::DriveMeta {
             trigger: "manual_title",
-            replay_fact: Some(status_fact!(title, rec.pubkey, title, set_at)),
         },
         |r| r.on_title_set(&rec.pubkey, &title, set_at),
     )
     .await;
-    state.outbox_notify.notify_waiters();
     Ok(serde_json::json!({ "title": title }))
 }
 
@@ -173,19 +169,17 @@ mod tests {
         });
         {
             let mut status = state.status.lock().unwrap();
-            let out = status
-                .on_session_started(
-                    &pubkey,
-                    "test-host",
-                    "codex",
-                    ".",
-                    BTreeSet::from(["root".to_string()]),
-                    true,
-                    true,
-                    "",
-                    1,
-                )
-                .unwrap();
+            let out = status.on_session_started(
+                &pubkey,
+                "test-host",
+                "codex",
+                ".",
+                BTreeSet::from(["root".to_string()]),
+                true,
+                true,
+                "",
+                1,
+            );
             assert_eq!(out.effects.len(), 1);
         }
         state.with_store(|s| s.bind_session_signer(&pubkey, &signer_salt).unwrap());
@@ -210,18 +204,6 @@ mod tests {
             rec.title,
             "Researching MCP improvements around resource allocation"
         );
-
-        let rows = state.with_store(|s| s.peek_outbox(10, u64::MAX).unwrap());
-        assert_eq!(rows.len(), 1);
-        let event: serde_json::Value = serde_json::from_str(&rows[0].event_json).unwrap();
-        assert_eq!(event["kind"].as_i64(), Some(30315));
-        assert!(event["tags"].as_array().unwrap().iter().any(|tag| {
-            tag.as_array().is_some_and(|parts| {
-                parts.first().and_then(|v| v.as_str()) == Some("title")
-                    && parts.get(1).and_then(|v| v.as_str())
-                        == Some("Researching MCP improvements around resource allocation")
-            })
-        }));
     }
 
     #[tokio::test]

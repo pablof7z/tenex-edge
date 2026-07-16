@@ -81,3 +81,13 @@ fn dispatch_message_body_does_not_duplicate_existing_target_prefix() {
         existing
     );
 }
+
+#[test]
+fn dispatch_ack_observation_is_exactly_scoped_to_the_dispatch_event() {
+    let query = dispatch_ack_query("dispatch-id");
+    assert_eq!(
+        query.kinds,
+        std::collections::BTreeSet::from([crate::fabric::nip29::wire::KIND_STATUS])
+    );
+    assert_eq!(query.tag, Some(('e', "dispatch-id".to_string())));
+}

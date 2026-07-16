@@ -142,10 +142,10 @@ fn freeze_39000_39002_idempotency_no_member_duplication() {
     // channel's `about`.
     let meta_h = "freeze-39000-meta";
     store
-        .upsert_channel(meta_h, "", "about text v1", "tmp", ts)
+        .upsert_channel(meta_h, meta_h, "about text v1", "tmp", ts)
         .unwrap();
     store
-        .upsert_channel(meta_h, "", "about text v1", "tmp", ts)
+        .upsert_channel(meta_h, meta_h, "about text v1", "tmp", ts)
         .unwrap();
     let meta = store.get_channel(meta_h).unwrap();
     assert_eq!(
@@ -157,7 +157,7 @@ fn freeze_39000_39002_idempotency_no_member_duplication() {
     // Applying an updated 'about' (newer created_at) must overwrite (not
     // duplicate) — the upsert is DO UPDATE SET under the created_at guard.
     store
-        .upsert_channel(meta_h, "", "about text v2", "tmp", ts + 1)
+        .upsert_channel(meta_h, meta_h, "about text v2", "tmp", ts + 1)
         .unwrap();
     let meta2 = store.get_channel(meta_h).unwrap();
     assert_eq!(
@@ -170,7 +170,7 @@ fn freeze_39000_39002_idempotency_no_member_duplication() {
 }
 
 #[test]
-fn freeze_status_outbox_is_debuggable_and_presence_is_unified() {
+fn freeze_status_presence_is_unified() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let home = Home::new();
     rewrite_config_with_user_nsec(&home);
@@ -179,7 +179,7 @@ fn freeze_status_outbox_is_debuggable_and_presence_is_unified() {
         let mut c = Client::connect_or_spawn().await.expect("connect");
         let started = c.call(
             "session_start",
-            serde_json::json!({"agent": "coder", "harness_session": "freeze-outbox-1", "cwd": "/tmp"}),
+            serde_json::json!({"agent": "coder", "harness_session": "freeze-status-1", "cwd": "/tmp"}),
         )
         .await
         .expect("session_start");
@@ -197,18 +197,6 @@ fn freeze_status_outbox_is_debuggable_and_presence_is_unified() {
         .await
         .expect("turn_start");
 
-        // The outbox is now a generic signed-event publish queue (raw event_json),
-        // not a status-specific snapshot table — `debug_outbox` exposes verbatim
-        // queue rows with no `agent_slug` column (the deleted `status_outbox`).
-        // Assert it stays debuggable: a well-formed rows array.
-        let debug = c
-            .call("debug_outbox", serde_json::json!({"limit": 20}))
-            .await
-            .expect("debug_outbox");
-        assert!(
-            debug["rows"].as_array().is_some(),
-            "debug_outbox must remain debuggable (rows array): {debug}"
-        );
         pubkey
     });
 
@@ -227,7 +215,9 @@ fn freeze_status_outbox_is_debuggable_and_presence_is_unified() {
                 })
                 .unwrap_or(false)
         }),
-        "the coder agent's presence should materialize in relay_status under its selected pubkey"
+        "the coder agent's presence should materialize in relay_status under its selected pubkey; daemon_log={}",
+        std::fs::read_to_string(home.dir.path().join("daemon.log"))
+            .unwrap_or_else(|error| format!("<unreadable: {error}>"))
     );
 
     stop_daemon(&home);

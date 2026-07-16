@@ -1,99 +1,45 @@
 use super::*;
-use crate::reconcile::InputFact;
 
-fn fact(at: u64) -> DeliveryScanFact {
+fn fact() -> DeliveryScanFact {
     DeliveryScanFact {
-        pubkey: "s1".into(),
-        pending_event_ids: vec!["evt-1".into()],
-        endpoint_id: Some("pty-1".into()),
+        pubkey: "pk".into(),
+        pending_event_ids: vec!["event".into()],
+        endpoint_id: Some("pty".into()),
         endpoint_live: true,
         last_injected_at: None,
         debounce_secs: 20,
         force: false,
-        at,
+        at: 100,
     }
 }
 
 #[test]
-fn live_pty_with_pending_injects() {
-    let mut r = DeliveryReconciler::new();
-    let out = r.scan(fact(100)).unwrap();
-
-    assert_eq!(
-        out.effects,
-        vec![DeliveryEffect::Inject {
-            pubkey: "s1".into(),
-            endpoint_id: "pty-1".into(),
-            event_ids: vec!["evt-1".into()],
-        }]
-    );
-    r.assert_oracle().unwrap();
-}
-
-#[test]
-fn debounced_pending_schedules_retry() {
-    let mut r = DeliveryReconciler::new();
-    let mut f = fact(116);
-    f.last_injected_at = Some(100);
-
-    let out = r.scan(f).unwrap();
-
-    assert_eq!(
-        out.effects,
-        vec![DeliveryEffect::RetryAfter {
-            pubkey: "s1".into(),
-            delay_secs: 4,
-        }]
-    );
-    let row = r.state_rows().pop().unwrap();
-    assert_eq!(row.action, "defer_debounced");
-    assert_eq!(row.event_ids, vec!["evt-1"]);
-    r.assert_oracle().unwrap();
-}
-
-#[test]
-fn debounced_pending_becomes_injectable_after_retry_window() {
-    let mut r = DeliveryReconciler::new();
-    let mut blocked = fact(116);
-    blocked.last_injected_at = Some(100);
+fn injects_when_endpoint_is_live_and_not_debounced() {
+    let decision = decide(&fact()).unwrap();
+    assert_eq!(decision.action, DeliveryAction::Inject);
     assert!(matches!(
-        r.scan(blocked).unwrap().effects[0],
-        DeliveryEffect::RetryAfter { .. }
+        effects(Some(&decision))[0],
+        DeliveryEffect::Inject { .. }
     ));
-
-    let mut retry = fact(120);
-    retry.last_injected_at = Some(100);
-    let out = r.scan(retry).unwrap();
-
-    assert!(matches!(out.effects[0], DeliveryEffect::Inject { .. }));
-    assert_eq!(r.state_rows()[0].action, "inject");
-    r.assert_oracle().unwrap();
 }
 
 #[test]
-fn manual_force_bypasses_debounce() {
-    let mut r = DeliveryReconciler::new();
-    let mut f = fact(101);
-    f.last_injected_at = Some(100);
-    f.force = true;
-
-    let out = r.scan(f).unwrap();
-
-    assert!(matches!(out.effects[0], DeliveryEffect::Inject { .. }));
-    r.assert_oracle().unwrap();
+fn defers_inside_debounce_window() {
+    let mut input = fact();
+    input.last_injected_at = Some(90);
+    let decision = decide(&input).unwrap();
+    assert_eq!(decision.action, DeliveryAction::DeferDebounced);
+    assert_eq!(decision.retry_after_secs, Some(10));
 }
 
 #[test]
-fn replay_capsule_accepts_delivery_scan_fact() {
-    let mut script = trellis_testing::DataTransactionScript::new();
-    script
-        .step("delivery/scan")
-        .operation(InputFact::DeliveryScan(fact(100)))
-        .commit();
-
-    let report = crate::reconcile::replay::replay_script(&script, false).unwrap();
-
-    assert_eq!(report.surface, "delivery");
-    assert_eq!(report.steps, 1);
-    assert_eq!(report.resource_commands, 1);
+fn clears_dead_endpoint_and_ignores_empty_scan() {
+    let mut input = fact();
+    input.endpoint_live = false;
+    assert!(matches!(
+        effects(decide(&input).as_ref())[0],
+        DeliveryEffect::ClearDeadEndpoint { .. }
+    ));
+    input.pending_event_ids.clear();
+    assert!(decide(&input).is_none());
 }

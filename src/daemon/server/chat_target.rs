@@ -12,6 +12,12 @@ pub(in crate::daemon::server) fn resolve_chat_target(
     command: &str,
 ) -> Result<ChatTarget> {
     if let Some(reference) = explicit.map(str::trim).filter(|s| !s.is_empty()) {
+        if let Some(channel_h) = exact_current_channel(rec, reference) {
+            return Ok(ChatTarget {
+                channel_h,
+                explicit: true,
+            });
+        }
         let root = state.with_store(|s| super::root_channel(s, &rec.channel_h));
         let channel_h = state.with_store(|s| resolve_chat_channel_ref(s, &root, reference))?;
         return Ok(ChatTarget {
@@ -62,6 +68,12 @@ pub(in crate::daemon::server) async fn resolve_chat_target_provisioning(
     command: &str,
 ) -> Result<ChatTarget> {
     if let Some(reference) = explicit.map(str::trim).filter(|s| !s.is_empty()) {
+        if let Some(channel_h) = exact_current_channel(rec, reference) {
+            return Ok(ChatTarget {
+                channel_h,
+                explicit: true,
+            });
+        }
         let root = state.with_store(|s| super::root_channel(s, &rec.channel_h));
         match state.with_store(|s| super::resolve_channel_ref(s, &root, reference)) {
             super::ChannelResolution::Unique(channel_h) => {
@@ -88,6 +100,10 @@ pub(in crate::daemon::server) async fn resolve_chat_target_provisioning(
         }
     }
     resolve_chat_target(state, rec, None, command)
+}
+
+fn exact_current_channel(rec: &crate::state::Session, reference: &str) -> Option<String> {
+    (reference == rec.channel_h).then(|| rec.channel_h.clone())
 }
 
 fn resolve_chat_channel_ref(
@@ -122,6 +138,8 @@ mod tests {
             runtime_generation: 1,
             agent_slug: "codex".to_string(),
             channel_h: channel_h.to_string(),
+            work_root: "root".to_string(),
+            readiness_parent: "root".to_string(),
             harness: "codex".to_string(),
             child_pid: None,
             transcript_path: None,
@@ -167,6 +185,28 @@ mod tests {
             resolve_chat_channel_ref(&store, "root", "@abcd").unwrap(),
             "abcd1234"
         );
+    }
+
+    #[tokio::test]
+    async fn exact_active_channel_id_resolves_before_relay_metadata_materializes() {
+        let state = DaemonState::new_for_test().await;
+        let rec = session("pending-channel-id");
+
+        let target = resolve_chat_target_provisioning(
+            &state,
+            &rec,
+            Some("pending-channel-id"),
+            "channel send",
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(target.channel_h, "pending-channel-id");
+        assert!(target.explicit);
+        assert!(state
+            .with_store(|store| store.get_channel("pending-channel-id"))
+            .unwrap()
+            .is_none());
     }
 
     #[test]

@@ -4,9 +4,9 @@ use super::*;
 use rusqlite::{Transaction, TransactionBehavior};
 
 pub(super) const COLS: &str =
-    "pubkey, runtime_generation, agent_slug, channel_h, harness, child_pid, \
-     transcript_path, alive, created_at, last_seen, working, turn_started_at, \
-     seen_cursor, title, explicit_chat_published_at";
+    "pubkey, runtime_generation, agent_slug, channel_h, work_root, readiness_parent, \
+     harness, child_pid, transcript_path, alive, created_at, last_seen, working, \
+     turn_started_at, seen_cursor, title, explicit_chat_published_at";
 
 pub(super) fn row_to_session(row: &rusqlite::Row) -> rusqlite::Result<Session> {
     Ok(Session {
@@ -14,17 +14,19 @@ pub(super) fn row_to_session(row: &rusqlite::Row) -> rusqlite::Result<Session> {
         runtime_generation: row.get(1)?,
         agent_slug: row.get(2)?,
         channel_h: row.get(3)?,
-        harness: row.get(4)?,
-        child_pid: row.get(5)?,
-        transcript_path: row.get(6)?,
-        alive: row.get::<_, i64>(7)? != 0,
-        created_at: row.get(8)?,
-        last_seen: row.get(9)?,
-        working: row.get::<_, i64>(10)? != 0,
-        turn_started_at: row.get(11)?,
-        seen_cursor: row.get(12)?,
-        title: row.get(13)?,
-        explicit_chat_published_at: row.get(14)?,
+        work_root: row.get(4)?,
+        readiness_parent: row.get(5)?,
+        harness: row.get(6)?,
+        child_pid: row.get(7)?,
+        transcript_path: row.get(8)?,
+        alive: row.get::<_, i64>(9)? != 0,
+        created_at: row.get(10)?,
+        last_seen: row.get(11)?,
+        working: row.get::<_, i64>(12)? != 0,
+        turn_started_at: row.get(13)?,
+        seen_cursor: row.get(14)?,
+        title: row.get(15)?,
+        explicit_chat_published_at: row.get(16)?,
     })
 }
 
@@ -171,6 +173,40 @@ impl Store {
             self.join_session_channel(pubkey, channel_h, crate::util::now_secs())?;
         }
         Ok(())
+    }
+
+    pub fn set_session_context(
+        &self,
+        pubkey: &str,
+        channel_h: &str,
+        work_root: &str,
+        readiness_parent: &str,
+    ) -> Result<()> {
+        self.conn.execute(
+            "UPDATE sessions
+             SET channel_h=?2, work_root=?3, readiness_parent=?4
+             WHERE pubkey=?1",
+            params![pubkey, channel_h, work_root, readiness_parent],
+        )?;
+        if !channel_h.trim().is_empty() {
+            self.join_session_channel(pubkey, channel_h, crate::util::now_secs())?;
+        }
+        Ok(())
+    }
+
+    /// Admission-time immediate parent for a channel whose relay metadata may
+    /// not have materialized yet. This is host context, not channel truth.
+    pub fn session_readiness_parent(&self, channel_h: &str) -> Result<Option<String>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT readiness_parent FROM sessions
+                 WHERE channel_h=?1 AND readiness_parent<>''
+                 ORDER BY alive DESC, created_at DESC LIMIT 1",
+                [channel_h],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?)
     }
 
     pub fn join_session_channel(

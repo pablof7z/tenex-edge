@@ -34,8 +34,8 @@ pub(in crate::daemon::server) async fn archive_channel(
         let builder =
             crate::fabric::nip29::lifecycle::group_edit_metadata(channel, &archived_about)?;
         state
-            .transport
-            .publish_signed(builder, &mgmt_keys)
+            .nmp
+            .publish_group_builder(builder, &mgmt_keys, false)
             .await?
             .to_hex()
     };

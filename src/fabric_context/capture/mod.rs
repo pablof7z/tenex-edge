@@ -1,9 +1,8 @@
 //! Canonical, now/cursor-independent capture of everything the fabric view reads
 //! from the store, partitioned into the four sources the snapshot derives
 //! from: channel/subchannel metadata, the member roster, presence/status rows,
-//! and chat/mentions. This is the pure-data boundary the Trellis reconciler feeds
-//! as graph inputs (see [`crate::reconcile::hook_context`]); the wall-clock `now`
-//! and the seen `cursor` are modelled as SEPARATE inputs and applied by
+//! and chat/mentions. This is the pure-data boundary consumed by the hook-context
+//! policy; the wall-clock `now` and the seen `cursor` are separate inputs applied by
 //! [`super::assemble::assemble_view`], never baked in here.
 //!
 //! Captures are SUPERSETS: every status is kept regardless of NIP-40 expiration
@@ -23,9 +22,7 @@ use serde::{Deserialize, Serialize};
 use super::{missing_channel_warning, FabricContextInput};
 use crate::state::Store;
 
-/// The four canonical, replayable inputs the fabric view derives from. Each
-/// field is a distinct Trellis input node in the reconciler, so `why_changed`
-/// attributes a snapshot change to exactly the source that moved.
+/// The canonical, replayable inputs the fabric view derives from.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct ViewInputs {
     pub(crate) meta: MetaInput,
@@ -37,23 +34,6 @@ pub(crate) struct ViewInputs {
 }
 
 impl ViewInputs {
-    /// Reassemble from the canonical inputs (as read back from graph nodes).
-    pub(crate) fn from_parts(
-        meta: MetaInput,
-        members: MembersInput,
-        presence: PresenceInput,
-        messages: MessagesInput,
-        reactions: ReactionsInput,
-    ) -> Self {
-        Self {
-            meta,
-            members,
-            presence,
-            messages,
-            reactions,
-        }
-    }
-
     /// Whether the caller forced a render (suppresses the empty-snapshot gate).
     pub(crate) fn force(&self) -> bool {
         self.meta.force

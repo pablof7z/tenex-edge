@@ -5,6 +5,9 @@ use std::io::Write as _;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+mod process;
+use process::ProcessTreeSnapshot;
+
 const LOG_SCHEMA: &str = "mosaico.hook-call.v1";
 
 pub(super) struct HookCallLog {
@@ -23,6 +26,12 @@ impl HookCallLog {
     ) -> Self {
         let path = log_path(parsed_json);
         let call_id = call_id();
+        // The default hook log stays on the harness critical path and records
+        // cheap process facts only. An explicitly configured hook log opts into
+        // the slower ancestor snapshot used for focused diagnostics.
+        let detailed_process_tree =
+            path.is_some() && std::env::var_os("MOSAICO_HOOK_CALL_LOG").is_some();
+        let process_tree = ProcessTreeSnapshot::capture(detailed_process_tree);
         let payload = serde_json::json!({
             "schema": LOG_SCHEMA,
             "phase": "received",
@@ -32,8 +41,8 @@ impl HookCallLog {
                 "host": host,
                 "type": hook_type,
             },
-            "process": process_snapshot(),
-            "parent_chain": parent_chain(),
+            "process": process_tree.current_process(),
+            "parent_chain": process_tree.parent_chain(),
             "stdin": {
                 "bytes": stdin.len(),
                 "is_empty": stdin.is_empty(),
@@ -198,51 +207,6 @@ fn format_utc(unix_secs: u64) -> String {
             tm.tm_sec,
         )
     }
-}
-
-fn process_snapshot() -> Value {
-    serde_json::json!({
-        "pid": std::process::id(),
-        "ppid": ps_ppid(std::process::id() as i32),
-        "exe": std::env::current_exe().ok().map(|p| p.display().to_string()),
-        "argv": std::env::args().collect::<Vec<_>>(),
-        "cwd": std::env::current_dir().ok().map(|p| p.display().to_string()),
-    })
-}
-
-fn parent_chain() -> Vec<Value> {
-    let mut out = Vec::new();
-    let mut pid = std::process::id() as i32;
-    for _ in 0..12 {
-        let Some(ppid) = ps_ppid(pid) else {
-            break;
-        };
-        if ppid <= 1 {
-            break;
-        }
-        out.push(serde_json::json!({
-            "pid": ppid,
-            "ppid": ps_ppid(ppid),
-            "comm": ps_field(ppid, "comm="),
-            "args": ps_field(ppid, "args="),
-        }));
-        pid = ppid;
-    }
-    out
-}
-
-fn ps_ppid(pid: i32) -> Option<i32> {
-    ps_field(pid, "ppid=")?.trim().parse().ok()
-}
-
-fn ps_field(pid: i32, field: &str) -> Option<String> {
-    std::process::Command::new("ps")
-        .args(["-o", field, "-p", &pid.to_string()])
-        .output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
 }
 
 fn redacted_env() -> BTreeMap<String, String> {

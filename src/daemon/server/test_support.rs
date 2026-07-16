@@ -2,23 +2,16 @@ use super::*;
 
 impl DaemonState {
     pub(crate) async fn new_for_test() -> Arc<DaemonState> {
-        Self::new_for_test_with_started_at(0).await
-    }
-
-    pub(crate) async fn new_for_test_with_started_at(started_at: u64) -> Arc<DaemonState> {
-        Self::new_for_test_with(started_at, Vec::new()).await
+        Self::new_for_test_with(Vec::new()).await
     }
 
     pub(crate) async fn new_for_test_with_whitelisted(
         whitelisted_pubkeys: Vec<String>,
     ) -> Arc<DaemonState> {
-        Self::new_for_test_with(0, whitelisted_pubkeys).await
+        Self::new_for_test_with(whitelisted_pubkeys).await
     }
 
-    async fn new_for_test_with(
-        started_at: u64,
-        whitelisted_pubkeys: Vec<String>,
-    ) -> Arc<DaemonState> {
+    async fn new_for_test_with(whitelisted_pubkeys: Vec<String>) -> Arc<DaemonState> {
         let backend_key = Keys::generate().secret_key().to_secret_hex();
         let cfg = Config {
             whitelisted_pubkeys,
@@ -32,13 +25,17 @@ impl DaemonState {
         let host = cfg.host.clone();
         let owners = cfg.whitelisted_pubkeys.clone();
         let transport = Arc::new(
-            Transport::connect(&[], Keys::generate())
+            Transport::connect_with_indexer(&[], None, Keys::generate())
                 .await
                 .expect("offline transport connect"),
         );
         let store = Arc::new(Mutex::new(Store::open_memory().expect("in-memory store")));
+        let nmp = Arc::new(
+            crate::nmp_host::NmpHost::open(&[], None, None).expect("in-memory NMP engine"),
+        );
         let provider = Arc::new(Nip29Provider::new(
             transport.clone(),
+            nmp.clone(),
             store.clone(),
             Some(backend_key),
             None,
@@ -48,24 +45,19 @@ impl DaemonState {
             store,
             transport,
             provider,
+            nmp,
             cfg,
             host,
-            started_at,
             owners,
             agent_catalog: Mutex::new(crate::agent_catalog::AgentCatalog::default()),
             hosted: Mutex::new(HashMap::new()),
             sessions: Mutex::new(HashMap::new()),
             subscribed_root_channels: Mutex::new(Vec::new()),
-            subs: Mutex::new(crate::reconcile::SubscriptionReconciler::new().expect("subs")),
+            subs: Mutex::new(crate::reconcile::SubscriptionReconciler::new()),
+            subscription_sync: tokio::sync::Mutex::new(()),
             status: Arc::new(Mutex::new(crate::reconcile::StatusReconciler::for_ttl(
                 status_ttl_duration(),
             ))),
-            delivery: Mutex::new(crate::reconcile::DeliveryReconciler::new()),
-            turn_lifecycle: Mutex::new(crate::reconcile::TurnLifecycleReconciler::new()),
-            cursor: Mutex::new(crate::reconcile::CursorReconciler::new()),
-            session_start: Mutex::new(crate::reconcile::SessionStartReconciler::new()),
-            session_watch: Mutex::new(crate::reconcile::Reconciler::new().expect("session_watch")),
-            outbox: Arc::new(Mutex::new(crate::reconcile::OutboxReconciler::new())),
             hook_contexts: Mutex::new(HashMap::new()),
             tail_tx: tokio::sync::broadcast::channel(512).0,
             open_clients: Mutex::new(0),
@@ -78,7 +70,6 @@ impl DaemonState {
             seen_profiles: Mutex::new(std::collections::HashSet::new()),
             warming: Mutex::new(std::collections::HashSet::new()),
             last_status: Mutex::new(HashMap::new()),
-            outbox_notify: Notify::new(),
         })
     }
 }

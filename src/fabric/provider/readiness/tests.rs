@@ -80,3 +80,60 @@ fn materialized_subgroup_needs_relay_parent_consent_check() {
         &["admin".to_string()]
     ));
 }
+
+#[test]
+fn cold_nested_resolution_intents_preserve_every_ancestor() {
+    let store = crate::state::Store::open_memory().unwrap();
+    store
+        .reserve_channel_resolution_intent("root", "middle", "middle-h", 1)
+        .unwrap();
+    store
+        .reserve_channel_resolution_intent("middle-h", "leaf", "leaf-h", 2)
+        .unwrap();
+
+    assert_eq!(
+        ancestry::resolved_parent_hint_from_store(&store, "leaf-h", None).unwrap(),
+        Some("middle-h".into())
+    );
+    assert_eq!(
+        ancestry::resolved_parent_hint_from_store(&store, "middle-h", None).unwrap(),
+        Some("root".into())
+    );
+    assert_eq!(
+        ancestry::resolved_parent_hint_from_store(&store, "root", None).unwrap(),
+        None
+    );
+
+    store
+        .upsert_channel("middle-h", "middle", "", "", 3)
+        .unwrap();
+    assert_eq!(
+        ancestry::resolved_parent_hint_from_store(&store, "middle-h", None).unwrap(),
+        None,
+        "relay-authored root metadata must suppress a stale pending ancestor"
+    );
+}
+
+#[test]
+fn execution_time_relay_metadata_overrides_captured_parent_hint() {
+    let store = crate::state::Store::open_memory().unwrap();
+    assert_eq!(
+        ancestry::resolved_parent_hint_from_store(&store, "room", Some("captured-parent")).unwrap(),
+        Some("captured-parent".into())
+    );
+
+    store.upsert_channel("room", "room", "", "", 1).unwrap();
+    assert_eq!(
+        ancestry::resolved_parent_hint_from_store(&store, "room", Some("captured-parent")).unwrap(),
+        None,
+        "relay root truth arriving before execution must suppress the captured hint"
+    );
+
+    store
+        .upsert_channel("room", "room", "", "relay-parent", 2)
+        .unwrap();
+    assert_eq!(
+        ancestry::resolved_parent_hint_from_store(&store, "room", Some("captured-parent")).unwrap(),
+        Some("relay-parent".into())
+    );
+}

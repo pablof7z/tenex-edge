@@ -90,14 +90,11 @@ pub(in crate::daemon::server) fn cleanup_dead_local_sessions(state: &Arc<DaemonS
     for (pubkey, runtime_generation, alive, stale, process_dead) in candidates {
         if stale {
             remove_session_memberships(state, &pubkey, "stale-membership");
-            if let Err(e) = state
+            state
                 .status
                 .lock()
                 .expect("status mutex poisoned")
-                .forget_session(&pubkey)
-            {
-                tracing::error!(pubkey, error = %e, "stale cleanup: failed to forget status graph row");
-            }
+                .forget_session(&pubkey);
         }
 
         if alive && (stale || process_dead) {

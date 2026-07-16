@@ -1,10 +1,9 @@
 //! Daemon-hosted per-session engine: publishes identity/status and watches host
 //! liveness. Status effects flow
-//! exclusively through [`crate::reconcile::status`] and the outbox.
+//! exclusively through [`crate::reconcile::status`] and NMP's durable write plane.
 
 use crate::domain::{DomainEvent, Profile};
 use crate::fabric::provider::Nip29Provider;
-use crate::replay_capsules::status_fact;
 use crate::state::{Session, Store};
 use crate::status_seam::{drive, DriveMeta};
 use crate::util::now_secs;
@@ -86,7 +85,7 @@ fn channel_set(
 /// connection and the SHARED store (single writer). The daemon owns one union
 /// subscription and demuxes incoming events centrally; this task only:
 ///   - publishes the profile once (signed with the agent's keys),
-///   - heartbeats `last_seen` and enqueues a re-armed kind:30315 onto the outbox,
+///   - heartbeats `last_seen` and submits a re-armed kind:30315 to NMP,
 ///   - watches the host pid and marks the session dead (title RETAINED) on pid
 ///     death or `cancel` (the `session-end` path).
 ///
@@ -98,7 +97,6 @@ pub async fn run_session_in_daemon(
     store: std::sync::Arc<Mutex<Store>>,
     cancel: std::sync::Arc<tokio::sync::Notify>,
     status: std::sync::Arc<Mutex<crate::reconcile::StatusReconciler>>,
-    outbox: std::sync::Arc<Mutex<crate::reconcile::OutboxReconciler>>,
 ) -> Result<()> {
     let owners = p.owners.clone();
     let signing_keys = p.signing_keys();
@@ -147,17 +145,13 @@ pub async fn run_session_in_daemon(
 
     let mut prev_working = false;
     macro_rules! drive_status {
-        ($trigger:expr, $fact:expr, $f:expr) => {
+        ($trigger:expr, $f:expr) => {
             drive(
                 &status,
                 &provider,
                 &signing_keys,
                 &store,
-                &outbox,
-                DriveMeta {
-                    trigger: $trigger,
-                    replay_fact: Some($fact),
-                },
+                DriveMeta { trigger: $trigger },
                 $f,
             )
             .await
@@ -171,24 +165,20 @@ pub async fn run_session_in_daemon(
         let now = now_secs();
         let chans = channel_set(&p, &store, &session);
         let automatic_delivery = session_status::automatic_delivery(&store, Some(&session));
-        drive_status!(
-            "session_started",
-            status_fact!(started, p, aref, session, chans, automatic_delivery, now),
-            |r| {
-                r.on_session_started_with_dispatch(
-                    &aref.pubkey,
-                    &p.host,
-                    &aref.slug,
-                    &p.rel_cwd,
-                    chans,
-                    session.working,
-                    automatic_delivery,
-                    &session.title,
-                    p.dispatch_event.clone(),
-                    now,
-                )
-            }
-        );
+        drive_status!("session_started", |r| {
+            r.on_session_started_with_dispatch(
+                &aref.pubkey,
+                &p.host,
+                &aref.slug,
+                &p.rel_cwd,
+                chans,
+                session.working,
+                automatic_delivery,
+                &session.title,
+                p.dispatch_event.clone(),
+                now,
+            )
+        });
     }
 
     let mut hb = tokio::time::interval(p.heartbeat);
@@ -208,25 +198,23 @@ pub async fn run_session_in_daemon(
                 let automatic_delivery = session_status::automatic_delivery(&store, session.as_ref());
                 drive_status!(
                     "tick",
-                    status_fact!(tick, aref.pubkey, automatic_delivery, now),
                     |r| r.on_tick(&aref.pubkey, automatic_delivery, now)
                 );
             }
             _ = obs.tick() => {
                 let now = now_secs();
-
                 let session = load_session("observe-tick");
                 let working = session
                     .as_ref()
                     .is_some_and(|s| s.working);
 
                 if working != prev_working {
-                    drive_status!("turn_edge", status_fact!(turn, aref.pubkey, working, now), |r| {
+                    drive_status!("turn_edge", |r| {
                         if working { r.on_turn_start(&aref.pubkey, now) } else { r.on_turn_end(&aref.pubkey, now) }
                     });
                 }
                 if let Some(chans) = session.as_ref().map(|s| channel_set(&p, &store, s)) {
-                    drive_status!("channels_changed", status_fact!(channels, aref.pubkey, chans, now), |r| {
+                    drive_status!("channels_changed", |r| {
                         r.on_channels_changed(&aref.pubkey, chans, now)
                     });
                 }
@@ -237,11 +225,8 @@ pub async fn run_session_in_daemon(
     }
 
     let end_now = now_secs();
-    drive_status!(
-        "session_ended",
-        status_fact!(ended, aref.pubkey, end_now),
-        |r| r.on_session_ended(&aref.pubkey, end_now)
-    );
+    drive_status!("session_ended", |r| r
+        .on_session_ended(&aref.pubkey, end_now));
 
     if let Err(e) = st!(|s: &Store| { s.touch_session(&aref.pubkey, end_now) }) {
         tracing::error!(pubkey = %aref.pubkey, error = %e, "final liveness touch failed");

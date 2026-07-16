@@ -1,5 +1,5 @@
+use super::advisory::ChannelReadyIntent;
 use super::*;
-use crate::reconcile::session_start::ChannelReadyIntent;
 use std::sync::Arc;
 
 pub(super) fn schedule_channel_ready(
@@ -14,8 +14,8 @@ pub(super) fn schedule_channel_ready(
         match channel_ready::verify_start_channel_ready(
             &state,
             &check.channel_h,
-            &check.work_root,
             check.room_parent.as_deref(),
+            check.readiness_parent.as_deref(),
             check.name.as_deref(),
             &check.pubkey,
         )

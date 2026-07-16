@@ -38,6 +38,30 @@ fn table_samples_prefer_alive_sessions_and_locators() {
 }
 
 #[test]
+fn session_context_persists_host_workspace_without_fabricating_channel_metadata() {
+    let store = Store::open_memory().unwrap();
+    store
+        .reserve_session(&reg("pk", "pending-room", 100))
+        .unwrap();
+    store
+        .set_session_context("pk", "pending-room", "workspace", "immediate-parent")
+        .unwrap();
+
+    let session = store.get_session("pk").unwrap().unwrap();
+    assert_eq!(session.channel_h, "pending-room");
+    assert_eq!(session.work_root, "workspace");
+    assert_eq!(session.readiness_parent, "immediate-parent");
+    assert_eq!(
+        store
+            .session_readiness_parent("pending-room")
+            .unwrap()
+            .as_deref(),
+        Some("immediate-parent")
+    );
+    assert!(store.get_channel("pending-room").unwrap().is_none());
+}
+
+#[test]
 fn table_samples_prefer_fresh_status_rows() {
     let store = Store::open_memory().unwrap();
     for (pubkey, updated_at, expiration) in [("old", 100, 100), ("fresh", 200, 300)] {

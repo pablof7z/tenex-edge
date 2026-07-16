@@ -17,8 +17,8 @@ resolution stays daemon-side** so every client path observes the same identity
 rules.
 
 ### `session_start`
-Spawns an in-daemon `SessionTask` (publishes profile and presence, subscribes,
-and routes mentions — today's `runtime::run_session`).
+Spawns an in-daemon `SessionTask` (publishes profile and presence, declares its
+NMP live-query demand, and routes mentions — today's `runtime::run_session`).
 ```jsonc
 params: {"agent": "coder", "harness": "claude-code", "profile": "reviewer"|null, "harness_session": "native-id"|null, "cwd": "/path", "watch_pid": 12345|null}
 result: {"pubkey": "hex"}
@@ -27,8 +27,9 @@ result: {"pubkey": "hex"}
 addressed by its dashed public handle, such
 as `@quill-codex`, backed by the session's own minted pubkey. The npub is its
 permanent copy-paste resume value; the handle is a seven-day offline lease.
-The provider opens the workspace root NIP-29 group, named by the workspace slug,
-and adds the session agent as a relay member before the engine publishes presence.
+The provider opens the workspace root NIP-29 group through NMP, names it from the
+workspace slug, and adds the session agent as a relay member before the engine
+publishes presence.
 The workspace and root channel are one entity with the public address `<workspace>`.
 There is no local agent
 allow/block file in the NIP-29 path.
@@ -147,8 +148,9 @@ params: {}
 result: {"relays": [...], "probe_pubkey": "hex", "publish": "OK …"|"ERR …",
          "readback": "N event(s) …"|"ERR …"}
 ```
-Daemon performs the publish + read-back on the shared relay; client prints the
-existing multi-line report.
+The daemon's narrow direct edge performs the connectivity publish + read-back;
+the client prints the existing multi-line report. Product group writes do not
+use this diagnostic path.
 
 ### `tail` (streaming)
 ```jsonc
@@ -156,9 +158,10 @@ params: {"channel": "…"|null}
 stream: {"item": {"line": "<rendered fabric line>"}}   // repeated
         … until client disconnects (Ctrl-C)
 ```
-Daemon registers a forwarder on its shared relay subscription, decodes each
-event with the codec, renders with the existing `render()` and streams the line.
-The client just prints each `item.line`.
+The daemon ensures NMP observation coverage for the requested channel, then
+forwards structured events emitted by the materializer and daemon lifecycle.
+Backfill comes from the canonical store; live events come from the daemon's
+bounded tail broadcast. The client renders each streamed item.
 
 ### Channel messaging
 The streaming read, send, reply, and blocking wait contracts live in

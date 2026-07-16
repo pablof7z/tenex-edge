@@ -20,7 +20,7 @@ fn reg(harness: &str, ext: &str, channel: &str) -> RegisterSession {
 
 mod channels_tree;
 mod identity_projection_and_roots;
-mod inbox_outbox;
+mod inbox_ledger;
 mod nip01_events;
 mod retention;
 mod session_identity;

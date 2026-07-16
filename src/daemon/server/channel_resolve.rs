@@ -99,7 +99,7 @@ pub(in crate::daemon::server) async fn resolve_channel(
         tracing::warn!(
             channel = %child_h,
             error = %format!("{e:#}"),
-            "resolve_channel: ensure_subscription failed — new channel events may not be delivered until the next resubscribe"
+            "resolve_channel: ensure_subscription failed — new channel events may not be delivered until the next subscription sync"
         );
     }
     Ok(child_h)

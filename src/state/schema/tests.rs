@@ -1,6 +1,9 @@
 use crate::state::Store;
 use rusqlite::Connection;
 
+#[path = "tests/session_context.rs"]
+mod session_context;
+
 fn columns(conn: &Connection, table: &str) -> Vec<String> {
     conn.prepare(&format!("PRAGMA table_info({table})"))
         .unwrap()
@@ -19,6 +22,21 @@ fn table_exists(conn: &Connection, name: &str) -> bool {
     .unwrap()
 }
 
+fn assert_schema_version_rejected(version: u32) {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("state.db");
+    drop(Store::open(&path).unwrap());
+    let conn = Connection::open(&path).unwrap();
+    conn.pragma_update(None, "user_version", version).unwrap();
+    drop(conn);
+    let error = Store::open(&path)
+        .err()
+        .expect("old schema must be rejected");
+    assert!(error
+        .to_string()
+        .contains(&format!("schema version {version} is incompatible")));
+}
+
 #[test]
 fn fresh_file_db_uses_only_canonical_schema() {
     let dir = tempfile::tempdir().unwrap();
@@ -31,9 +49,8 @@ fn fresh_file_db_uses_only_canonical_schema() {
     let version: u32 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 7);
+    assert_eq!(version, 8);
     assert!(table_exists(&conn, "workspace_roots"));
-    assert!(table_exists(&conn, "trellis_replay_capsules"));
     assert!(table_exists(&conn, "session_locators"));
     assert!(!table_exists(&conn, "session_aliases"));
     assert!(!table_exists(&conn, "identities"));
@@ -84,12 +101,11 @@ fn fresh_file_db_uses_only_canonical_schema() {
     let recipients = columns(&conn, "message_recipients");
     assert!(recipients.iter().any(|c| c == "recipient_pubkey"));
     assert!(!recipients.iter().any(|c| c == "target_session"));
-    assert!(columns(&conn, "outbox")
-        .iter()
-        .any(|c| c == "next_attempt_at"));
     let sess_cols = columns(&conn, "sessions");
     assert!(sess_cols.iter().any(|c| c == "pubkey"));
     assert!(sess_cols.iter().any(|c| c == "runtime_generation"));
+    assert!(sess_cols.iter().any(|c| c == "work_root"));
+    assert!(sess_cols.iter().any(|c| c == "readiness_parent"));
     assert!(!sess_cols.iter().any(|c| c == "session_id"));
     assert!(!sess_cols.iter().any(|c| c == "agent_pubkey"));
     assert!(!sess_cols.iter().any(|c| c == "resume_id"));
@@ -221,10 +237,11 @@ fn stamped_non_canonical_file_db_is_rejected() {
             abs_path TEXT NOT NULL,
             updated_at INTEGER NOT NULL
         );
+        CREATE TABLE unexpected_table (id INTEGER PRIMARY KEY);
         "#,
     )
     .unwrap();
-    conn.pragma_update(None, "user_version", 7u32).unwrap();
+    conn.pragma_update(None, "user_version", 8u32).unwrap();
     drop(conn);
 
     let err = match Store::open(&path) {
@@ -236,23 +253,18 @@ fn stamped_non_canonical_file_db_is_rejected() {
 }
 
 #[test]
-fn schema_v4_is_rejected_instead_of_dual_reading_canonical_session_ids() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("state.db");
-    {
-        let store = Store::open(&path).unwrap();
-        drop(store);
-        let conn = Connection::open(&path).unwrap();
-        conn.pragma_update(None, "user_version", 4).unwrap();
-    }
+fn schema_v5_is_rejected_instead_of_being_upgraded() {
+    assert_schema_version_rejected(5);
+}
 
-    let error = match Store::open(&path) {
-        Ok(_) => panic!("schema v4 must be rejected"),
-        Err(error) => error,
-    };
-    assert!(error
-        .to_string()
-        .contains("schema version 4 is incompatible"));
+#[test]
+fn schema_v6_is_rejected_instead_of_retaining_removed_tables() {
+    assert_schema_version_rejected(6);
+}
+
+#[test]
+fn schema_v7_is_rejected_instead_of_retaining_removed_distillation_state() {
+    assert_schema_version_rejected(7);
 }
 
 #[test]

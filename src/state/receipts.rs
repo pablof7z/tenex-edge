@@ -1,17 +1,8 @@
-//! `receipts` — persisted, Trellis-vocabulary-free reconciler receipts (Slice 8:
-//! retrospective instrumentation).
+//! `receipts` — persisted reconciler decisions for retrospective instrumentation.
 //!
-//! Each Trellis reconciler commit yields a `TransactionResult`; the caller
-//! flattens it into plain fields (no `ResourceKey`/`ResourcePlan`/`Graph`
-//! types cross this boundary) before calling [`Store::record_receipt`]. This
-//! lets "why did this hook context/status/subscription set have this shape"
-//! be answered later without depending on Trellis's in-memory types.
-//!
-//! `transaction_id` is stored as `INTEGER`: Trellis's `TransactionId` newtypes
-//! a `u64` monotonic counter (see `trellis-core::ids::TransactionId`), which
-//! fits an `i64` column for the lifetime of any realistic run. Callers cast
-//! `TransactionId`/`Revision` to `i64` when flattening. Callers pass
-//! `created_at`; this module never reads the clock.
+//! Callers flatten decisions into plain fields before recording them so later
+//! explanations depend only on durable domain data. Callers provide timestamps;
+//! this module never reads the clock.
 
 use super::*;
 

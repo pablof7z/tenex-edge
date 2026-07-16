@@ -225,7 +225,7 @@ pub(in crate::daemon::server) async fn rpc_channel_switch(
                 "channel_switch: previous membership removal was not confirmed"
             );
         }
-        // Reconcile so the left channel's REQ tears down when no owner remains.
+        // Reconcile so the left channel observation closes when no owner remains.
         subscriptions::reconcile_subs_logged(state, "channel_switch").await;
     }
     Ok(serde_json::json!({

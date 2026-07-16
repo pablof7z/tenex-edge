@@ -21,7 +21,7 @@
 //! auto-reply — far simpler than a durable schema for ephemeral turn state.
 
 use super::*;
-use crate::fabric::provider::chat::{OutboundChatRecipient, OutboundChatRecord};
+use crate::fabric::provider::chat::OutboundChatRecord;
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
@@ -159,13 +159,13 @@ async fn do_publish(
     let recipients = if pending.requester_pubkey.trim().is_empty() {
         Vec::new()
     } else {
-        vec![OutboundChatRecipient::new(pending.requester_pubkey.clone())]
+        vec![pending.requester_pubkey.clone()]
     };
     let chat = ChatMessage {
         from: instance.agent_ref(),
         channel: pending.channel_h.clone(),
         body: body.to_string(),
-        mentioned_pubkeys: recipients.iter().map(|r| r.pubkey.clone()).collect(),
+        mentioned_pubkeys: recipients,
     };
     let published = state
         .provider
@@ -175,9 +175,6 @@ async fn do_publish(
             &keys,
             &OutboundChatRecord {
                 channel_h: pending.channel_h.clone(),
-                body: body.to_string(),
-                recipients,
-                created_at: Some(now_secs()),
                 direction: "outbound",
             },
         )

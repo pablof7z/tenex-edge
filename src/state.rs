@@ -7,7 +7,7 @@
 //!      joined-channel state (`session_channels`), typed runtime locators
 //!      (`session_locators`), signer material, public handle leases, the inbound
 //!      delivery ledger (`inbox`), backend replay guards (`event_claims`), the
-//!      outbound publish queue (`outbox`), pending channel-name reservations,
+//!      pending channel-name reservations,
 //!      and on-disk workspace paths (`workspace_roots`).
 //!
 //! A pubkey appears AT MOST ONCE per channel and is the durable agent identity.
@@ -193,18 +193,6 @@ pub struct InboxRow {
     pub delivered_at: u64,
 }
 
-/// One queued outbound publish, retried until the relay acks.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OutboxRow {
-    pub local_id: i64,
-    pub event_json: String,
-    pub state: String,
-    pub retries: i64,
-    pub last_error: Option<String>,
-    pub enqueued_at: u64,
-    pub next_attempt_at: u64, // earliest wall-clock second this row may be (re)attempted; 0 = due now
-}
-
 mod agent_roster;
 pub use agent_roster::{AgentAvailability, AgentRoster};
 mod locators;
@@ -223,8 +211,6 @@ mod members;
 mod session_signers;
 pub use members::ChannelMemberSet;
 mod messages;
-mod outbox;
-pub use outbox::outbox_retry_delay_secs;
 mod profiles;
 mod workspace_roots;
 pub use workspace_roots::WorkspaceBinding;
@@ -250,6 +236,4 @@ mod sessions;
 mod status;
 #[cfg(test)]
 mod tests;
-pub mod trellis_commits;
-pub mod trellis_replay_capsules;
 mod turn_projection;

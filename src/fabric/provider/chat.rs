@@ -10,24 +10,8 @@ use nostr_sdk::prelude::{Event, EventId, Keys, Tag};
 mod tests;
 
 #[derive(Clone)]
-pub(crate) struct OutboundChatRecipient {
-    pub pubkey: String,
-}
-
-impl OutboundChatRecipient {
-    pub(crate) fn new(pubkey: impl Into<String>) -> Self {
-        Self {
-            pubkey: pubkey.into(),
-        }
-    }
-}
-
-#[derive(Clone)]
 pub(crate) struct OutboundChatRecord {
     pub channel_h: String,
-    pub body: String,
-    pub recipients: Vec<OutboundChatRecipient>,
-    pub created_at: Option<u64>,
     pub direction: &'static str,
 }
 
@@ -50,7 +34,7 @@ impl Nip29Provider {
         if let Some(id) = reply_to.filter(|id| !id.is_empty()) {
             builder = builder.tags([Tag::parse(["e", id])?]);
         }
-        self.transport.sign(builder, keys).await
+        self.nmp.sign_event(builder, keys).await
     }
 
     pub(crate) async fn publish_chat_checked(
@@ -82,11 +66,9 @@ impl Nip29Provider {
         record: &OutboundChatRecord,
     ) -> Result<PublishedChat> {
         let event_id = self
-            .publish_signed_chat_event_checked(signed, &record.channel_h)
+            .publish_signed_chat_event_checked(signed, record)
             .await?;
-        let created_at = record
-            .created_at
-            .unwrap_or_else(|| signed.created_at.as_secs());
+        let created_at = signed.created_at.as_secs();
         self.with_store(|store| {
             seed_chat_read_models(
                 store,
@@ -106,12 +88,17 @@ impl Nip29Provider {
     async fn publish_signed_chat_event_checked(
         &self,
         signed: &Event,
-        channel: &str,
+        record: &OutboundChatRecord,
     ) -> Result<EventId> {
+        let channel = &record.channel_h;
+        let signed_channel = signed_group(signed)?;
+        if signed_channel != channel {
+            anyhow::bail!(
+                "signed chat targets group {signed_channel:?}, not checked group {channel:?}"
+            );
+        }
         let agent_pubkey = signed.pubkey.to_hex();
-        let parent = self
-            .with_store(|s| s.channel_parent(channel).unwrap_or(None))
-            .filter(|p| !p.is_empty());
+        let parent = super::readiness::stored_parent_hint(self, channel)?;
         let ctx = ChannelCtx {
             channel,
             expect_member: &agent_pubkey,
@@ -124,8 +111,25 @@ impl Nip29Provider {
                 "publish_chat_checked: channel {channel} is not verified (ChannelGate::Degraded) — refusing to publish into an unverified channel"
             );
         }
-        self.transport.publish_event_checked(signed).await
+        self.nmp.publish_group_event(signed, true).await
     }
+}
+
+fn signed_group(event: &Event) -> Result<&str> {
+    let groups = event
+        .tags
+        .iter()
+        .filter_map(|tag| {
+            let values = tag.as_slice();
+            (values.first().map(String::as_str) == Some("h"))
+                .then(|| values.get(1).map(String::as_str))
+                .flatten()
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    if groups.len() != 1 {
+        anyhow::bail!("signed chat must target exactly one h group");
+    }
+    Ok(groups.into_iter().next().expect("one group was verified"))
 }
 
 fn chat_relay_event(
@@ -141,7 +145,7 @@ fn chat_relay_event(
         created_at,
         channel_h: record.channel_h.clone(),
         d_tag: String::new(),
-        content: record.body.clone(),
+        content: signed.content.clone(),
         tags_json: signed_tags_json(signed),
     }
 }
@@ -172,7 +176,7 @@ fn seed_chat_read_models(
         thread_id: record.channel_h.clone(),
         channel_h: record.channel_h.clone(),
         author_pubkey: signed.pubkey.to_hex(),
-        body: record.body.clone(),
+        body: signed.content.clone(),
         created_at,
         direction: record.direction.to_string(),
         sync_state: "accepted".to_string(),
@@ -186,11 +190,21 @@ fn seed_chat_read_models(
             "{context}: seeding chat into messages failed"
         );
     }
-    for recipient in &record.recipients {
-        if let Err(e) = store.add_message_recipient(event_id, &recipient.pubkey, None) {
+    let recipients = signed
+        .tags
+        .iter()
+        .filter_map(|tag| {
+            let values = tag.as_slice();
+            (values.first().map(String::as_str) == Some("p"))
+                .then(|| values.get(1).cloned())
+                .flatten()
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    for recipient in recipients {
+        if let Err(e) = store.add_message_recipient(event_id, &recipient, None) {
             tracing::error!(
                 event_id,
-                recipient = %recipient.pubkey,
+                recipient,
                 channel = %record.channel_h,
                 error = %e,
                 "{context}: seeding message recipient failed"

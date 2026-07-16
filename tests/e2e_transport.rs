@@ -1,6 +1,4 @@
-//! End-to-end: publish every domain event through the real transport to a real
-//! relay, and verify a subscriber decodes them back. Exercises NIP-29 wire
-//! encoding + transport + a live relay together.
+//! End-to-end coverage for Nostr codec and NMP acquisition boundaries.
 
 #[path = "common/mod.rs"]
 mod common;
@@ -8,10 +6,12 @@ mod common;
 use common::TestRelay;
 use mosaico::domain::{AgentRef, DomainEvent, Profile, Status};
 use mosaico::fabric::nip29::wire::Nip29WireCodec;
-use mosaico::fabric::nostr_delivery::scope_filters;
-use mosaico::fabric::Scope;
-use mosaico::transport::Transport;
-use nostr_sdk::prelude::{Keys, RelayPoolNotification};
+use nmp::{
+    AccessContext, Binding, Demand, Engine, EngineConfig, Filter as NmpFilter, LiveQuery, RelayUrl,
+    SourceAuthority,
+};
+use nostr_sdk::prelude::{Client, EventBuilder, Filter, Keys, Kind};
+use std::collections::BTreeSet;
 use std::time::Duration;
 
 #[tokio::test]
@@ -21,34 +21,12 @@ async fn publishes_and_decodes_all_event_types() {
 
     let agent_keys = Keys::generate();
     let reader_keys = Keys::generate();
-    let agent_pk = agent_keys.public_key().to_hex();
+    let agent_pubkey = agent_keys.public_key();
+    let agent_pk = agent_pubkey.to_hex();
     let reader_pk = reader_keys.public_key().to_hex();
     let channel = "mosaico".to_string();
 
-    // Reader subscribes FIRST (presence is ephemeral — must be listening live).
-    let reader = Transport::connect(std::slice::from_ref(&relay.url), reader_keys)
-        .await
-        .expect("reader connects");
-    // `connect` initiates the relay connection in the background (so the daemon's
-    // store-only RPCs aren't stalled by relay latency); await real connectivity
-    // before subscribing, exactly as the daemon does via `warmup()`.
-    reader.warmup().await;
-    let scope = Scope {
-        authors: vec![agent_pk.clone()],
-        channel: Some(channel.clone()),
-    };
-    reader
-        .subscribe(scope_filters(&scope))
-        .await
-        .expect("subscribe");
-    let mut notifications = reader.notifications();
-    tokio::time::sleep(Duration::from_millis(300)).await;
-
-    // Agent connects and publishes one of each.
-    let agent = Transport::connect(std::slice::from_ref(&relay.url), agent_keys)
-        .await
-        .expect("agent connects");
-    agent.warmup().await;
+    let agent = relay_client(&relay.url, agent_keys).await;
     let aref = AgentRef::new(agent_pk.clone(), "coder");
 
     let events = vec![
@@ -75,26 +53,22 @@ async fn publishes_and_decodes_all_event_types() {
     ];
     for ev in &events {
         let builder = codec.encode_event(ev).expect("encode");
-        agent.publish_builder(builder).await.expect("publish");
+        agent.send_event_builder(builder).await.expect("publish");
     }
 
-    // Collect decoded events for a few seconds.
-    let mut seen: Vec<DomainEvent> = Vec::new();
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-    while seen.len() < 2 && tokio::time::Instant::now() < deadline {
-        match tokio::time::timeout(Duration::from_millis(500), notifications.recv()).await {
-            Ok(Ok(RelayPoolNotification::Event { event, .. })) => {
-                if let Some(de) = codec.decode_event(&event) {
-                    if !seen.contains(&de) {
-                        seen.push(de);
-                    }
-                }
-            }
-            Ok(Ok(_)) => {}
-            Ok(Err(_)) => break,
-            Err(_) => {} // timeout tick; loop
-        }
-    }
+    let fetched = agent
+        .fetch_events(
+            Filter::new()
+                .author(agent_pubkey)
+                .kinds([Kind::from(0), Kind::from(30315)]),
+            Duration::from_secs(5),
+        )
+        .await
+        .expect("fetch published events");
+    let seen: Vec<DomainEvent> = fetched
+        .iter()
+        .filter_map(|event| codec.decode_event(event))
+        .collect();
 
     // Identify the status by its title; the decoded status also carries its
     // session id, but the title is the stable user-facing session summary.
@@ -104,7 +78,60 @@ async fn publishes_and_decodes_all_event_types() {
     let has_profile = seen
         .iter()
         .any(|e| matches!(e, DomainEvent::Profile(p) if p.host == "test-host"));
-
     assert!(has_status, "expected status; saw {seen:#?}");
     assert!(has_profile, "expected profile; saw {seen:#?}");
+}
+
+#[tokio::test]
+async fn nmp_acquires_from_an_explicitly_allowed_local_relay() {
+    let relay = TestRelay::start();
+    let author = Keys::generate();
+    let author_hex = author.public_key().to_hex();
+    let relay_url = RelayUrl::parse(&relay.url).expect("valid relay URL");
+    let engine = Engine::new(EngineConfig {
+        app_relays: vec![relay.url.clone()],
+        allowed_local_relay_hosts: vec!["127.0.0.1".into()],
+        ..EngineConfig::default()
+    })
+    .expect("NMP engine starts");
+    let query = LiveQuery(
+        Demand::new(
+            NmpFilter {
+                kinds: Some(BTreeSet::from([1])),
+                authors: Some(Binding::Literal(BTreeSet::from([author_hex]))),
+                ..NmpFilter::default()
+            },
+            SourceAuthority::Pinned(BTreeSet::from([relay_url])),
+            AccessContext::Public,
+        )
+        .expect("valid pinned demand"),
+    );
+    let subscription = engine.observe(query, None).expect("NMP observes");
+    let writer = relay_client(&relay.url, author).await;
+    writer
+        .send_event_builder(EventBuilder::text_note("hello from NMP"))
+        .await
+        .expect("publish");
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    let mut found = false;
+    while !found && std::time::Instant::now() < deadline {
+        if let Ok(frame) = subscription.recv_timeout(Duration::from_millis(500)) {
+            found = frame
+                .deltas
+                .iter()
+                .filter_map(|delta| delta.event())
+                .any(|event| event.content == "hello from NMP");
+        }
+    }
+    assert!(found, "NMP did not acquire the published event");
+    engine.shutdown();
+}
+
+async fn relay_client(relay: &str, keys: Keys) -> Client {
+    let client = Client::new(keys);
+    client.add_relay(relay).await.expect("add relay");
+    client.connect().await;
+    client.wait_for_connection(Duration::from_secs(8)).await;
+    client
 }

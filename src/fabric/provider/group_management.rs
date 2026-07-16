@@ -97,7 +97,7 @@ impl Nip29Provider {
         keys: &nostr_sdk::prelude::Keys,
         label: &str,
     ) -> GroupPublishOutcome {
-        match self.transport.publish_signed_checked(builder, keys).await {
+        match self.nmp.publish_group_builder(builder, keys, true).await {
             Ok(_) => GroupPublishOutcome::Applied,
             Err(e) => {
                 let s = e.to_string();

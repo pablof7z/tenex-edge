@@ -60,8 +60,8 @@ fn member_row_shows_session_handle_without_role_for_peer_session() {
 
     // Parity: the pure capture→assemble path renders byte-identically.
     let captured = capture_inputs(&store, &input(Some(&rec), "root", 0, 100, true));
-    let trellis = render_view_text(&assemble::assemble_view(&captured, 0, 100));
-    assert_eq!(trellis, text);
+    let rendered = render_view_text(&assemble::assemble_view(&captured, 0, 100));
+    assert_eq!(rendered, text);
 }
 
 #[test]
@@ -248,8 +248,8 @@ fn same_named_channels_under_different_workspaces_show_workspace_context() {
     assert!(text.contains(&format!("ref=\"@{tester}\"")), "got: {text}");
 
     let captured = capture_inputs(&store, &input(Some(&rec), "test1-xxx", 200, 300, true));
-    let trellis = render_view_text(&assemble::assemble_view(&captured, 200, 300));
-    assert_eq!(trellis, text);
+    let rendered = render_view_text(&assemble::assemble_view(&captured, 200, 300));
+    assert_eq!(rendered, text);
 
     let human = render_fabric_context_human(
         &store,

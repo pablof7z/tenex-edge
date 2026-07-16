@@ -6,6 +6,12 @@ pub struct Session {
     pub runtime_generation: u64,
     pub agent_slug: String,
     pub channel_h: String,
+    /// Host-local workspace root resolved from the session's cwd. This is
+    /// runtime execution context, never relay-authored channel metadata.
+    pub work_root: String,
+    /// Immediate parent known when the session was admitted. Used only as a
+    /// readiness fallback while relay metadata is absent.
+    pub readiness_parent: String,
     pub harness: String,
     pub child_pid: Option<i32>,
     pub transcript_path: Option<String>,

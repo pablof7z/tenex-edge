@@ -1,5 +1,4 @@
 use super::*;
-use crate::fabric::provider::chat::OutboundChatRecipient;
 use anyhow::Context;
 use nostr_sdk::prelude::{PublicKey, ToBech32};
 use std::collections::HashSet;
@@ -50,8 +49,6 @@ pub(super) async fn rpc_dispatch(
     };
     let target_channels = resolve_dispatch_channels(state, &p.workspace, &requested).await?;
     let route_channel = first_shared_channel(state, &caller, &target_channels)?;
-    let mut notifications = state.transport.notifications();
-
     let dispatch_target = crate::fabric::nip29::session_dispatch::DispatchTarget {
         backend_pubkey: backend_pubkey.clone(),
         slug: target.slug.clone(),
@@ -65,14 +62,15 @@ pub(super) async fn rpc_dispatch(
         &prose,
     )?;
     let keys = state.session_signing_keys(&caller.pubkey)?;
-    let signed = state.transport.sign(builder, &keys).await?;
+    let signed = state.nmp.sign_event(builder, &keys).await?;
     let dispatch_event_id = signed.id.to_hex();
-    state.transport.publish_event_checked(&signed).await?;
+    let ack_events = state.nmp.observe(&dispatch_ack_query(&dispatch_event_id))?;
+    state.nmp.publish_group_event(&signed, true).await?;
     if let Some(op) = crate::fabric::nip29::session_dispatch::parse_session_dispatch(&signed) {
         super::session_dispatch_handler::handle_session_dispatch(state, &signed, op).await;
     }
 
-    let ack = wait_dispatch_ack(&mut notifications, &dispatch_event_id).await?;
+    let ack = wait_dispatch_ack(ack_events, dispatch_event_id.clone()).await?;
     let body = dispatch_message_body(&p.message, &ack.pubkey)?;
     let message_event_id =
         send_dispatch_message(state, &caller, &route_channel, &body, &ack).await?;
@@ -181,39 +179,50 @@ struct DispatchAck {
     pubkey: String,
 }
 
+fn dispatch_ack_query(dispatch_event_id: &str) -> crate::reconcile::SubscriptionQuery {
+    crate::reconcile::SubscriptionQuery {
+        kinds: std::collections::BTreeSet::from([crate::fabric::nip29::wire::KIND_STATUS]),
+        tag: Some(('e', dispatch_event_id.to_string())),
+    }
+}
+
 async fn wait_dispatch_ack(
-    notifications: &mut tokio::sync::broadcast::Receiver<RelayPoolNotification>,
+    events: nmp::Subscription,
+    dispatch_event_id: String,
+) -> Result<DispatchAck> {
+    tokio::task::spawn_blocking(move || wait_dispatch_ack_blocking(events, &dispatch_event_id))
+        .await
+        .context("joining dispatch ACK observation")?
+}
+
+fn wait_dispatch_ack_blocking(
+    events: nmp::Subscription,
     dispatch_event_id: &str,
 ) -> Result<DispatchAck> {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
     loop {
-        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
         if remaining.is_zero() {
             anyhow::bail!("dispatched agent did not ACK after 30 seconds");
         }
-        let item = tokio::time::timeout(remaining, notifications.recv()).await;
-        let event = match item {
-            Ok(Ok(RelayPoolNotification::Event { event, .. })) => Some(*event),
-            Ok(Ok(RelayPoolNotification::Message {
-                message: RelayMessage::Event { event, .. },
-                ..
-            })) => Some(event.into_owned()),
-            Ok(Ok(_)) => None,
-            Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(_))) => None,
-            Ok(Err(tokio::sync::broadcast::error::RecvError::Closed)) => {
+        let frame = match events.recv_timeout(remaining) {
+            Ok(frame) => frame,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                anyhow::bail!("dispatched agent did not ACK after 30 seconds")
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
                 anyhow::bail!("relay notification stream closed while waiting for dispatch ACK")
             }
-            Err(_) => anyhow::bail!("dispatched agent did not ACK after 30 seconds"),
         };
-        let Some(event) = event else { continue };
-        if crate::fabric::nip29::session_dispatch::dispatch_ack_ref(&event)
-            != Some(dispatch_event_id)
-        {
-            continue;
+        for event in frame.deltas.iter().filter_map(|delta| delta.event()) {
+            if crate::fabric::nip29::session_dispatch::dispatch_ack_ref(event)
+                == Some(dispatch_event_id)
+            {
+                return Ok(DispatchAck {
+                    pubkey: event.pubkey.to_hex(),
+                });
+            }
         }
-        return Ok(DispatchAck {
-            pubkey: event.pubkey.to_hex(),
-        });
     }
 }
 
@@ -239,9 +248,6 @@ async fn send_dispatch_message(
             &keys,
             &crate::fabric::provider::chat::OutboundChatRecord {
                 channel_h: channel.to_string(),
-                body: message.to_string(),
-                recipients: vec![OutboundChatRecipient::new(ack.pubkey.clone())],
-                created_at: Some(now_secs()),
                 direction: "outbound",
             },
         )
