@@ -230,7 +230,7 @@ against the same profile while it is live. Use host-side relay probes and the
 bind-mounted profile logs, then stop it with `cleanup-lab`.
 
 The helper passes `--headless` for structured profiles. A human running bare
-`mosaico launch <agent>` on a TTY instead gets an Inquire picker over PTY
+`mosaico launch <agent>` on a TTY instead gets an interactive picker over PTY
 bundles, with headless launch as the final option.
 
 ## Multi-Agent Runs

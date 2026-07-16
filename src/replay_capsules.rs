@@ -19,7 +19,6 @@ macro_rules! status_fact {
                 working: $session.working,
                 automatic_delivery: $automatic_delivery,
                 title: $session.title.clone(),
-                activity: $session.activity.clone(),
                 at: $at,
             },
         ))
@@ -30,17 +29,6 @@ macro_rules! status_fact {
             automatic_delivery: $automatic_delivery,
             at: $at,
         })
-    };
-    (distill, $pubkey:expr, $labels:expr, $window_hash:expr, $at:expr) => {
-        $crate::reconcile::InputFact::StatusDrive(
-            $crate::reconcile::StatusDrive::DistillCompleted {
-                pubkey: $pubkey.clone(),
-                title: $labels.title.clone(),
-                activity: $labels.activity.clone(),
-                window_hash: $window_hash.clone(),
-                at: $at,
-            },
-        )
     };
     (title, $pubkey:expr, $title:expr, $at:expr) => {
         $crate::reconcile::InputFact::StatusDrive($crate::reconcile::StatusDrive::TitleSet {

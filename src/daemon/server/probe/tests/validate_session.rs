@@ -1,11 +1,12 @@
 use super::*;
-use crate::state::{llm_calls::NewLlmCall, RegisterSession};
+use crate::instrument::changed_summary_json;
+use crate::state::receipts::NewReceipt;
+use crate::state::RegisterSession;
 
 #[tokio::test]
 async fn rpc_probe_validate_session_target_checks_specific_live_surfaces() {
     let state = DaemonState::new_for_test().await;
     seed_alive_session(&state, "s1", "room");
-    seed_llm_call(&state, "s1");
     seed_status_graph(&state, "s1", "room");
     seed_subscription_graph(&state, "s1", "room");
     seed_session_watch_graph(&state, "s1", "room");
@@ -31,7 +32,6 @@ async fn rpc_probe_validate_session_target_checks_specific_live_surfaces() {
 async fn rpc_probe_validate_session_target_fails_alive_session_missing_surfaces() {
     let state = DaemonState::new_for_test().await;
     seed_alive_session(&state, "s1", "room");
-    seed_llm_call(&state, "s1");
 
     let v = rpc_probe(
         &state,
@@ -81,26 +81,6 @@ fn seed_alive_session(state: &std::sync::Arc<DaemonState>, pubkey: &str, channel
         .unwrap();
 }
 
-fn seed_llm_call(state: &std::sync::Arc<DaemonState>, pubkey: &str) {
-    state
-        .with_store(|s| {
-            s.record_llm_call(&NewLlmCall {
-                pubkey: pubkey.into(),
-                window_hash: "sha256:w".into(),
-                provider: "test".into(),
-                model: "model".into(),
-                system_prompt: "system".into(),
-                transcript_slice: "transcript".into(),
-                raw_response: "TITLE: T\nNOW: A".into(),
-                parsed_title: Some("T".into()),
-                parsed_activity: Some("A".into()),
-                created_at: 100,
-            })?;
-            Ok::<(), anyhow::Error>(())
-        })
-        .unwrap();
-}
-
 fn seed_status_graph(state: &std::sync::Arc<DaemonState>, pubkey: &str, channel_h: &str) {
     state
         .status
@@ -115,9 +95,22 @@ fn seed_status_graph(state: &std::sync::Arc<DaemonState>, pubkey: &str, channel_
             false,
             true,
             "T",
-            "",
             100,
         )
+        .unwrap();
+    state
+        .with_store(|store| {
+            store.record_receipt(&NewReceipt {
+                surface: "status".into(),
+                transaction_id: 1,
+                revision: 1,
+                changed_summary: changed_summary_json(&[], &[], &[], Some(pubkey)),
+                commands: "[]".into(),
+                artifact_ref: Some("status-event".into()),
+                created_at: 100,
+            })?;
+            Ok::<(), anyhow::Error>(())
+        })
         .unwrap();
 }
 

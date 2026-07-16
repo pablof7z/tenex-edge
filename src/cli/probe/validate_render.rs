@@ -15,7 +15,6 @@ mod hook_context_tail;
 mod inbox_tail;
 mod input_tail;
 mod joined_tail;
-mod llm_tail;
 mod membership_tail;
 mod outbox_tail;
 mod quarantine_tail;
@@ -143,9 +142,6 @@ pub(in crate::cli) fn render_validate(v: &Value) -> String {
     if let Some(hook) = v.get("hook_context_evidence").filter(|v| !v.is_null()) {
         hook_context_tail::render(&mut out, hook);
     }
-    if let Some(llm) = v.get("llm_evidence").filter(|v| !v.is_null()) {
-        llm_tail::render(&mut out, llm);
-    }
     if let Some(txn) = v.get("txn_evidence").filter(|v| !v.is_null()) {
         txn_tail::render(&mut out, txn);
     }
@@ -214,7 +210,7 @@ fn render_explain_tail(out: &mut String, explain: &Value) {
         .get("receipts")
         .and_then(Value::as_array)
         .unwrap_or(&empty);
-    if receipts.is_empty() && explain.get("llm_call").is_none_or(Value::is_null) {
+    if receipts.is_empty() {
         return;
     }
 
@@ -236,17 +232,6 @@ fn render_explain_tail(out: &mut String, explain: &Value) {
     }
     if receipts.len() > 3 {
         let _ = writeln!(out, "  - ... {} more receipt(s)", receipts.len() - 3);
-    }
-    if let Some(call) = explain.get("llm_call").filter(|v| !v.is_null()) {
-        let _ = writeln!(
-            out,
-            "  - llm {} / {} window={} title={:?} activity={:?}",
-            str_at(call, "provider"),
-            str_at(call, "model"),
-            str_at(call, "window_hash"),
-            str_at(call, "parsed_title"),
-            str_at(call, "parsed_activity")
-        );
     }
 }
 

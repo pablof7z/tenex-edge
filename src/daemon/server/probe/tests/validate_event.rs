@@ -1,6 +1,5 @@
 use super::*;
-use crate::instrument::{changed_summary_json, window_hash};
-use crate::state::llm_calls::NewLlmCall;
+use crate::instrument::changed_summary_json;
 use crate::state::receipts::NewReceipt;
 use crate::state::{RecordMessage, RelayEvent};
 
@@ -46,26 +45,13 @@ async fn rpc_probe_validate_event_accepts_chat_event_without_trellis_receipt() {
 #[tokio::test]
 async fn rpc_probe_validate_event_prefix_explains_trellis_artifact() {
     let state = DaemonState::new_for_test().await;
-    let wh = window_hash("transcript slice");
     state
         .with_store(|s| {
-            s.record_llm_call(&NewLlmCall {
-                pubkey: "s1".into(),
-                window_hash: wh.clone(),
-                provider: "ollama".into(),
-                model: "glm".into(),
-                system_prompt: "system".into(),
-                transcript_slice: "transcript slice".into(),
-                raw_response: "TITLE: T\nNOW: A".into(),
-                parsed_title: Some("T".into()),
-                parsed_activity: Some("A".into()),
-                created_at: 1_700_000_010,
-            })?;
             s.record_receipt(&NewReceipt {
                 surface: "status".into(),
                 transaction_id: 7,
                 revision: 3,
-                changed_summary: changed_summary_json(&[], &[], &[], Some("s1"), Some(&wh)),
+                changed_summary: changed_summary_json(&[], &[], &[], Some("s1")),
                 commands: r#"[{"kind":"replace","key":"status/s1"}]"#.into(),
                 artifact_ref: Some("evt-status-long".into()),
                 created_at: 1_700_000_011,
@@ -88,7 +74,6 @@ async fn rpc_probe_validate_event_prefix_explains_trellis_artifact() {
     assert_eq!(v["event_evidence"]["receipt_count"], 1);
     assert_eq!(v["event_evidence"]["outbox_store_count"], 1);
     assert_eq!(v["event_evidence"]["outbox_published"], true);
-    assert_eq!(v["explain"]["llm_call"]["parsed_activity"], "A");
 }
 
 #[tokio::test]

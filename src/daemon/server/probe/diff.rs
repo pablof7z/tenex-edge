@@ -80,11 +80,9 @@ mod tests {
         let state = DaemonState::new_for_test().await;
         seed_status(&state);
         let before = state.status.lock().unwrap().revision();
-        let fact = InputFact::StatusDrive(StatusDrive::DistillCompleted {
+        let fact = InputFact::StatusDrive(StatusDrive::TitleSet {
             pubkey: "s1".into(),
-            title: "T".into(),
-            activity: "reviewing".into(),
-            window_hash: Some("sha256:w".into()),
+            title: "Reviewing".into(),
             at: 130,
         });
         let v = diff_value(
@@ -140,19 +138,16 @@ mod tests {
                     working: true,
                     automatic_delivery: true,
                     title: "T".into(),
-                    activity: "reading".into(),
                     dispatch_event: None,
                     at: 100,
                 },
             )))
             .commit();
         script
-            .step("distill")
-            .operation(InputFact::StatusDrive(StatusDrive::DistillCompleted {
+            .step("title")
+            .operation(InputFact::StatusDrive(StatusDrive::TitleSet {
                 pubkey: "s1".into(),
-                title: "T".into(),
-                activity: "reviewing".into(),
-                window_hash: Some("sha256:a".into()),
+                title: "Reviewing".into(),
                 at: 130,
             }))
             .commit();
@@ -160,7 +155,7 @@ mod tests {
             .with_store(|s| {
                 s.record_replay_capsule(&crate::state::trellis_replay_capsules::NewReplayCapsule {
                     surface: "status".into(),
-                    trigger_kind: "distill".into(),
+                    trigger_kind: "title".into(),
                     trigger_ref: "s1".into(),
                     script_json: script.to_json().unwrap(),
                     format_version: 1,
@@ -194,7 +189,6 @@ mod tests {
             true,
             true,
             "T",
-            "reading",
             100,
         )
         .unwrap();

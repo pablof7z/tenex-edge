@@ -32,7 +32,7 @@ pub(super) fn drift_surfaces(stats: &Value) -> Vec<String> {
 }
 
 pub(super) fn explain_found(v: &Value) -> bool {
-    has_receipts(v) || has_llm(v)
+    has_receipts(v)
 }
 
 pub(super) fn explain_summary(v: &Value) -> String {
@@ -40,11 +40,7 @@ pub(super) fn explain_summary(v: &Value) -> String {
         .get("receipts")
         .and_then(Value::as_array)
         .map_or(0, Vec::len);
-    let llm = if has_llm(v) { "yes" } else { "no" };
-    format!(
-        "{} explanation: {receipts} receipt(s), llm_call={llm}",
-        str_at(v, "kind")
-    )
+    format!("{} explanation: {receipts} receipt(s)", str_at(v, "kind"))
 }
 
 pub(super) fn receipt_surface(v: &Value) -> Option<String> {
@@ -191,10 +187,6 @@ fn has_receipts(v: &Value) -> bool {
     v.get("receipts")
         .and_then(Value::as_array)
         .is_some_and(|rows| !rows.is_empty())
-}
-
-fn has_llm(v: &Value) -> bool {
-    v.get("llm_call").is_some_and(|call| !call.is_null())
 }
 
 fn labels_at(v: &Value, key: &str) -> Vec<String> {

@@ -119,9 +119,7 @@ pub(super) struct SelfCap {
     #[serde(default)]
     pub(super) host: String,
     #[serde(default)]
-    pub(super) work_topic: String,
-    #[serde(default)]
-    pub(super) work_topic_set_at: u64,
+    pub(super) title: String,
 }
 
 #[derive(Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]

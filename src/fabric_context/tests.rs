@@ -5,7 +5,7 @@ mod channel_tree;
 mod cross_workspace;
 mod member_render;
 mod reactions;
-mod work_topic;
+mod session_title;
 
 const SELF_PK: &str = "self-pubkey";
 const OTHER_PK: &str = "other-pubkey";

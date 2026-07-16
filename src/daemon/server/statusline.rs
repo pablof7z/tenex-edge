@@ -37,26 +37,19 @@ pub(in crate::daemon::server) fn rpc_statusline(
         let is_member = s
             .is_channel_member(&scope, &instance.pubkey)
             .unwrap_or(true);
-        // State + title + live activity come straight off the local session row
-        // (the pre-publish draft the distiller maintains). Pure read: no drains,
-        // no touches. The statusline shows the activity line (the live "doing
-        // now" signal), not the persistent title.
+        // State and title come straight off the local session row. Pure read: no
+        // drains, no touches.
         let automatic_delivery = crate::session_host::session_has_live_delivery_path(s, &rec);
         let live =
             rec.alive && now.saturating_sub(rec.last_seen) <= crate::session::STATUS_TTL_SECS;
         let session_state =
             crate::session_state::SessionState::classify(live, rec.working, automatic_delivery);
         let title = rec.title.clone();
-        let activity = if session_state.is_working() {
-            rec.activity.clone()
-        } else {
-            String::new()
-        };
+        let activity = String::new();
         // `channel_title` is the channel's human handle from the relay-authored
         // kind:39000 metadata cache (relay_channels `name`). The channel name is
-        // set only at create/edit now — never from the distilled session title —
-        // so it is the durable display label for this scope (the distilled
-        // `title` is carried separately for the live status segment).
+        // set only at create/edit, so it is the durable display label for this
+        // scope (`title` is carried separately for the live status segment).
         let channel_title = s
             .get_channel(&scope)
             .ok()
@@ -92,7 +85,6 @@ pub(in crate::daemon::server) fn rpc_statusline(
             "activity": activity,
             "pending": pending_json,
             "recent": recent_json,
-            "distill_error": serde_json::Value::Null,
         }))
     })
 }

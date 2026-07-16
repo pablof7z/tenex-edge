@@ -31,7 +31,7 @@ use model::{create_session, opts, status_key, SessionNodes, StaticInfo};
 pub enum PublishReason {
     /// First status for a session.
     Opened,
-    /// The derived content changed (turn edge, distill, channel change).
+    /// The derived content changed (turn edge, title, channel change).
     Changed,
     /// Content unchanged; only the NIP-40 TTL window was re-armed.
     Refreshed,
@@ -98,7 +98,6 @@ impl StatusReconciler {
         working: bool,
         automatic_delivery: bool,
         title: &str,
-        activity: &str,
         now: u64,
     ) -> GraphResult<StatusOutcome> {
         self.on_session_started_with_dispatch(
@@ -110,7 +109,6 @@ impl StatusReconciler {
             working,
             automatic_delivery,
             title,
-            activity,
             None,
             now,
         )
@@ -127,7 +125,6 @@ impl StatusReconciler {
         working: bool,
         automatic_delivery: bool,
         title: &str,
-        activity: &str,
         dispatch_event: Option<String>,
         now: u64,
     ) -> GraphResult<StatusOutcome> {
@@ -149,7 +146,6 @@ impl StatusReconciler {
             working,
             automatic_delivery,
             title,
-            activity,
             now / self.refresh_secs,
         )?;
         self.sessions.insert(pubkey.to_string(), nodes);
@@ -157,7 +153,7 @@ impl StatusReconciler {
         Ok(StatusOutcome { effects, result })
     }
 
-    /// A turn started (working) / ended (the derive clears live activity).
+    /// A turn started (working) / ended (idle).
     pub fn on_turn_start(&mut self, id: &str, now: u64) -> GraphResult<StatusOutcome> {
         self.mutate(id, now, |tx, n| tx.set_input(n.working, true))
     }
@@ -166,23 +162,7 @@ impl StatusReconciler {
         self.mutate(id, now, |tx, n| tx.set_input(n.working, false))
     }
 
-    /// A distillation completed: the LLM output enters as canonical input.
-    pub fn on_distill(
-        &mut self,
-        id: &str,
-        title: &str,
-        activity: &str,
-        now: u64,
-    ) -> GraphResult<StatusOutcome> {
-        self.mutate(id, now, |tx, n| {
-            tx.set_input(n.title, title.to_string())?;
-            tx.set_input(n.activity, activity.to_string())
-        })
-    }
-
-    /// A manual broad title was declared by the session owner. It updates only
-    /// the persistent title; the live activity line remains whatever the current
-    /// turn already knew.
+    /// A manual title was declared by the session owner.
     pub fn on_title_set(&mut self, id: &str, title: &str, now: u64) -> GraphResult<StatusOutcome> {
         self.mutate(id, now, |tx, n| tx.set_input(n.title, title.to_string()))
     }
@@ -237,8 +217,8 @@ impl StatusReconciler {
         self.graph.why_resource_command(&status_key(id))
     }
 
-    pub fn activity_input(&self, id: &str) -> Option<NodeId> {
-        self.sessions.get(id).map(|n| n.activity_id)
+    pub fn title_input(&self, id: &str) -> Option<NodeId> {
+        self.sessions.get(id).map(|nodes| nodes.title.id())
     }
 
     pub fn assert_oracle(&self) -> GraphResult<()> {
@@ -291,8 +271,7 @@ impl StatusReconciler {
                 ResourceCommand::Refresh { command, .. } => (command, PublishReason::Refreshed),
                 ResourceCommand::Close { key, .. } => {
                     if let Some(cmd) = key.segment(1).and_then(|sid| self.last.remove(sid)) {
-                        // Expiring publish: activity cleared, expiration = now, but
-                        // the last-known `h` tags kept so the retraction lands.
+                        // Keep the last-known `h` tags so the retraction lands.
                         effects.push(StatusEffect::Expire {
                             status: self.to_status(&cmd, now, true),
                         });

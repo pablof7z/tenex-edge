@@ -254,7 +254,6 @@ mod tests {
                 true,
                 true,
                 "T",
-                "reading",
                 100,
             )
             .unwrap();

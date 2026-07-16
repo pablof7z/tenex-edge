@@ -162,11 +162,6 @@ stage_host_auth() {
     return 0
   fi
 
-  stage_auth_symlink "${HOST_HOME}/.mosaico/providers.json" \
-    "/host-auth/mosaico/providers.json" "${STATE_DIR}/mosaico/providers.json"
-  stage_auth_symlink "${HOST_HOME}/.mosaico/llms.json" \
-    "/host-auth/mosaico/llms.json" "${STATE_DIR}/mosaico/llms.json"
-
   stage_auth_symlink "${HOST_HOME}/.codex/auth.json" \
     "/host-auth/codex/auth.json" "${STATE_DIR}/home/.codex/auth.json"
   stage_auth_symlink "${HOST_HOME}/.codex/config.toml" \

@@ -74,11 +74,10 @@ fn render_status_row(out: &mut String, r: &Value) {
     let handle = row_handle(r, "status");
     let _ = writeln!(
         out,
-        "  {:<24} {:<6} title={:?}  activity={:?}  channels={:?}",
+        "  {:<24} {:<6} title={:?}  channels={:?}",
         handle,
         str_at(r, "state"),
         str_at(r, "title"),
-        str_at(r, "activity"),
         strs(r, "channels"),
     );
 }

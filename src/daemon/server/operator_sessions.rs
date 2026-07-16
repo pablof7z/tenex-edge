@@ -101,7 +101,6 @@ fn project_sessions(
             "handle": identity.display_slug(),
             "agent": rec.agent_slug,
             "title": rec.title,
-            "activity": rec.activity,
             "busy": rec.working,
             "last_seen": rec.last_seen,
             "host": host,

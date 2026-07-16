@@ -22,7 +22,6 @@ mod validate_hook_context;
 mod validate_inbox;
 mod validate_inputs;
 mod validate_joined;
-mod validate_llm;
 mod validate_membership;
 mod validate_message;
 mod validate_outbox;
@@ -56,11 +55,10 @@ async fn rpc_probe_reflects_driven_state_for_every_verb() {
             true,
             true,
             "T",
-            "reading",
             1_700_000_010,
         )
         .unwrap();
-        r.on_distill("s1", "T", "reviewing the PR", 1_700_000_010)
+        r.on_title_set("s1", "Reviewing the PR", 1_700_000_010)
             .unwrap();
     }
 
@@ -121,7 +119,7 @@ async fn rpc_probe_reflects_driven_state_for_every_verb() {
             transaction_id: 1,
             revision: 1,
             mode: "authoritative".into(),
-            trigger_kind: "distill".into(),
+            trigger_kind: "title".into(),
             trigger_ref: "s1".into(),
             changed_inputs_json: "[]".into(),
             changed_derived_json: "[]".into(),
@@ -192,11 +190,9 @@ async fn rpc_probe_reflects_driven_state_for_every_verb() {
     assert_eq!(replay["asserted"], true);
     assert_eq!(replay["steps"], 1);
 
-    let fact = InputFact::StatusDrive(StatusDrive::DistillCompleted {
+    let fact = InputFact::StatusDrive(StatusDrive::TitleSet {
         pubkey: "s1".into(),
-        title: "T".into(),
-        activity: "compiling".into(),
-        window_hash: Some("sha256:w2".into()),
+        title: "Compiling".into(),
         at: 1_700_000_020,
     });
     let sim = rpc_probe(
@@ -218,7 +214,7 @@ async fn rpc_probe_reflects_driven_state_for_every_verb() {
     let why = rpc_probe(&state, &json!({ "verb": "why", "handle": "status:s1" })).unwrap();
     assert_eq!(why["found"], true);
     assert_eq!(why["last_kind"], "Replace");
-    assert_array_contains(&why["input_causes"], "status/s1/activity");
+    assert_array_contains(&why["input_causes"], "status/s1/title");
 
     let hwhy = rpc_probe(&state, &json!({ "verb": "why", "handle": "hook:s1" })).unwrap();
     assert_eq!(hwhy["found"], true);
@@ -228,7 +224,7 @@ async fn rpc_probe_reflects_driven_state_for_every_verb() {
     let rows = st["rows"].as_array().unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0]["session"], "s1");
-    assert_eq!(rows[0]["activity"], "reviewing the PR");
+    assert_eq!(rows[0]["title"], "Reviewing the PR");
 
     let subs = rpc_probe(
         &state,

@@ -72,7 +72,7 @@ pub(crate) struct WhoRow {
     pub(crate) channel: String,
     /// Persistent session title (what the session is about); survives idle turns.
     pub(crate) status: String,
-    /// Live "doing now" line, distilled alongside the title. Shown after the
+    /// Live "doing now" line published by a peer. Shown after the
     /// title while mid-turn; empty (and not rendered) when idle.
     #[serde(default)]
     pub(crate) activity: String,

@@ -17,8 +17,8 @@ resolution stays daemon-side** so every client path observes the same identity
 rules.
 
 ### `session_start`
-Spawns an in-daemon `SessionTask` (publishes profile, presence, subscribes,
-distills, routes mentions — today's `runtime::run_session`).
+Spawns an in-daemon `SessionTask` (publishes profile and presence, subscribes,
+and routes mentions — today's `runtime::run_session`).
 ```jsonc
 params: {"agent": "coder", "harness": "claude-code", "profile": "reviewer"|null, "harness_session": "native-id"|null, "cwd": "/path", "watch_pid": 12345|null}
 result: {"pubkey": "hex"}
@@ -110,7 +110,7 @@ not advance the hook-awareness cursor.
 ### `my_session_status`
 ```jsonc
 params: {"title": "…", exact caller anchor fields...}
-result: {"title": "…", "distill_paused_until": u64}
+result: {"title": "…"}
 ```
 Sets and immediately publishes the exact caller session's broadcast
 status/title. CLI: `mosaico my session status <TITLE>`.

@@ -5,11 +5,10 @@
 //! hosts integrate from the outside via the CLI, hooks, and a skill.
 //!
 //! Layering (M1 §2), each knowing only what is below it:
-//!   cli -> runtime -> { domain, codec, transport, state, distill }
+//!   cli -> runtime -> { domain, codec, transport, state }
 //!   config / identity / channel are leaf utilities.
 
 pub mod agent_catalog;
-mod applog;
 mod attachment;
 mod channel_about;
 mod channel_name;
@@ -27,7 +26,6 @@ pub mod idref;
 pub mod injection;
 pub mod instrument;
 pub(crate) mod liveness;
-pub mod llmconfig;
 pub mod logging;
 pub(crate) mod outbox_seam;
 pub mod profile;
@@ -38,7 +36,6 @@ pub mod workspace;
 
 pub mod cli;
 pub mod daemon;
-pub mod distill;
 pub mod fabric;
 pub mod pty;
 pub mod relay_log;
@@ -46,11 +43,11 @@ pub mod replay_capsules;
 pub mod rpc_harness;
 pub mod runtime;
 pub mod session_host;
+pub(crate) mod session_title;
 pub mod state;
 pub mod status_seam;
 pub mod transcript;
 pub mod transport;
-pub(crate) mod work_topic;
 
 pub mod reconcile;
 

@@ -90,7 +90,7 @@ pub(in crate::fabric_context) struct SelfRow {
     pub(in crate::fabric_context) agent: String,
     pub(in crate::fabric_context) agent_slug: String,
     pub(in crate::fabric_context) host: String,
-    pub(in crate::fabric_context) work_topic: String,
+    pub(in crate::fabric_context) title: String,
 }
 
 #[derive(Clone, PartialEq)]

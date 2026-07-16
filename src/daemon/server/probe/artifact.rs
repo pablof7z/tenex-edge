@@ -1,5 +1,5 @@
 use super::DaemonState;
-use crate::reconcile::journal::{InputFact, StatusDrive};
+use crate::reconcile::journal::InputFact;
 use crate::reconcile::labels::{key_path, NodeLabels};
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
@@ -31,7 +31,7 @@ pub(super) fn fact_param(params: &Value, key: &str) -> Result<Option<InputFact>>
 
 pub(super) fn infer_surface(fact: &InputFact) -> Option<&'static str> {
     match fact {
-        InputFact::StatusDrive(_) | InputFact::DistillCompleted { .. } => Some("status"),
+        InputFact::StatusDrive(_) => Some("status"),
         InputFact::TurnStarted { .. }
         | InputFact::TurnEnded { .. }
         | InputFact::TranscriptWindowCaptured { .. } => Some("turn_lifecycle"),
@@ -271,22 +271,8 @@ fn op_str<C>(c: &ResourceCommand<C>) -> &'static str {
 }
 
 fn normalize_status_fact(fact: InputFact) -> Result<InputFact> {
-    let drive = match fact {
-        InputFact::StatusDrive(_) => return Ok(fact),
-        InputFact::DistillCompleted {
-            pubkey,
-            window_hash,
-            title,
-            activity,
-            at,
-        } => StatusDrive::DistillCompleted {
-            pubkey,
-            title,
-            activity,
-            window_hash: Some(window_hash),
-            at,
-        },
-        _ => return Err(anyhow::anyhow!("probe: fact is not a status fact")),
-    };
-    Ok(InputFact::StatusDrive(drive))
+    match fact {
+        InputFact::StatusDrive(_) => Ok(fact),
+        _ => Err(anyhow::anyhow!("probe: fact is not a status fact")),
+    }
 }

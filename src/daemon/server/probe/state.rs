@@ -28,7 +28,6 @@ pub(super) fn state_value(state: &Arc<DaemonState>, params: &Value) -> Result<Va
                         "session": session,
                         "resource_key": resource_key,
                         "title": row.title,
-                        "activity": row.activity,
                         "state": row.state,
                         "channels": row.channels,
                     })
@@ -254,14 +253,12 @@ mod tests {
             true,
             true,
             "T",
-            "reading",
             100,
         )
         .unwrap();
         let rows = r.state_rows();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].session, "s1");
-        assert_eq!(rows[0].activity, "reading");
         assert_eq!(rows[0].state, crate::session_state::SessionState::Working);
     }
 

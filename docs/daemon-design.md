@@ -227,8 +227,8 @@ The `session_start` RPC makes the daemon spawn a tokio task running
   owners, per-project as needed). Incoming relay events are demuxed once,
   daemon-side, and routed to the right session chat queue(s). Mentions route via the
   `compute_targets` / `route_mention` logic over all alive sessions.
-- Presence/status/activity publishing, heartbeats, turn-driven distillation, and
-  `watch_pid` death detection all move into the per-session task, but publish
+- Presence/status publishing, heartbeats, and `watch_pid` death detection all
+  move into the per-session task, but publish
   through the shared `Transport`.
 - Peer-staleness pruning is a single daemon-level periodic task.
 

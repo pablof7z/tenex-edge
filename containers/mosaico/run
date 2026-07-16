@@ -158,8 +158,7 @@ container_run() {
     ANTHROPIC_AUTH_TOKEN \
     ANTHROPIC_BASE_URL \
     CLAUDE_CODE_OAUTH_TOKEN \
-    CLAUDE_CODE_ORGANIZATION_UUID \
-    MOSAICO_DISTILL_CMD
+    CLAUDE_CODE_ORGANIZATION_UUID
   do
     if [[ -n "${!name:-}" ]]; then
       passthrough_env_args+=(--env "${name}=${!name}")

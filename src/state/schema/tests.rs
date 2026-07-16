@@ -1,8 +1,6 @@
 use crate::state::Store;
 use rusqlite::Connection;
 
-mod migration;
-
 fn columns(conn: &Connection, table: &str) -> Vec<String> {
     conn.prepare(&format!("PRAGMA table_info({table})"))
         .unwrap()
@@ -33,7 +31,7 @@ fn fresh_file_db_uses_only_canonical_schema() {
     let version: u32 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 6);
+    assert_eq!(version, 7);
     assert!(table_exists(&conn, "workspace_roots"));
     assert!(table_exists(&conn, "trellis_replay_capsules"));
     assert!(table_exists(&conn, "session_locators"));
@@ -95,26 +93,24 @@ fn fresh_file_db_uses_only_canonical_schema() {
     assert!(!sess_cols.iter().any(|c| c == "session_id"));
     assert!(!sess_cols.iter().any(|c| c == "agent_pubkey"));
     assert!(!sess_cols.iter().any(|c| c == "resume_id"));
-    assert!(
-        sess_cols.iter().any(|c| c == "distill_notice_at"),
-        "sessions.distill_notice_at"
-    );
-    assert!(
-        sess_cols.iter().any(|c| c == "distill_fail_streak"),
-        "sessions.distill_fail_streak"
-    );
+    assert!(!table_exists(&conn, "llm_calls"));
     assert!(
         sess_cols.iter().any(|c| c == "explicit_chat_published_at"),
         "sessions.explicit_chat_published_at"
     );
-    assert!(
-        sess_cols.iter().any(|c| c == "work_topic"),
-        "sessions.work_topic"
-    );
-    assert!(
-        sess_cols.iter().any(|c| c == "work_topic_set_at"),
-        "sessions.work_topic_set_at"
-    );
+    for removed in [
+        "last_distill_at",
+        "distill_fail_streak",
+        "distill_notice_at",
+        "work_topic",
+        "work_topic_set_at",
+        "activity",
+    ] {
+        assert!(
+            !sess_cols.iter().any(|c| c == removed),
+            "sessions.{removed}"
+        );
+    }
 }
 
 #[test]
@@ -228,7 +224,7 @@ fn stamped_non_canonical_file_db_is_rejected() {
         "#,
     )
     .unwrap();
-    conn.pragma_update(None, "user_version", 6u32).unwrap();
+    conn.pragma_update(None, "user_version", 7u32).unwrap();
     drop(conn);
 
     let err = match Store::open(&path) {

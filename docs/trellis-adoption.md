@@ -19,14 +19,14 @@ observed facts (the world hands us)
 ```
 
 Facts Trellis must **not** invent — they enter as canonical inputs: a hook
-happened, a process is alive/dead, a transcript window was captured, the LLM
-returned `NOW: doing x`, the relay accepted/rejected an event, a delivery scan
+happened, a process is alive/dead, a transcript reference was captured, an
+agent declared its title, the relay accepted/rejected an event, a delivery scan
 observed pending inbox ids / automatic-delivery reachability / debounce time, a clock tick.
 The input-journal vocabulary is `src/reconcile/journal.rs` (`InputFact`); each
 variant names the writer it replaces.
 
-Facts Trellis **does** own after that: a session is working, the activity
-should be *doing x*, publish this exact 30315, this subscription should close,
+Facts Trellis **does** own after that: a session is working, publish this exact
+30315 with its declared title, this subscription should close,
 inject or defer these inbox ids, this hook snapshot has this shape — and the
 causal path that explains each one.
 
@@ -52,11 +52,8 @@ direct `set_status` seam were deleted, not left alongside).
 
 ## Retrospective instrumentation (`mosaico debug explain`)
 
-Every distill round-trip records an `llm_calls` row (the exact transcript slice,
-system prompt, model, raw response, keyed by a sha256 `window_hash`). Every
-reconciler commit records a `receipts` row (surface, transaction, changed
-summary, commands, `artifact_ref` = the published event id or inbox event id). The same
-`window_hash` threads distill → status publish → receipt.
+Every reconciler commit records a `receipts` row (surface, transaction, changed
+summary, commands, `artifact_ref` = the published event id or inbox event id).
 
 Replay capsules live in `trellis_replay_capsules` as versioned
 `DataTransactionScript<InputFact>` JSON captured at the drive seam. Retention is
@@ -73,14 +70,13 @@ fact/snapshot before applying host effects and blocks the effect if the committe
 plan does not match the previewed plan.
 
 ```
-mosaico debug explain event:<30315-id>   # the receipt + the exact LLM inputs behind the activity
+mosaico debug explain event:<30315-id>   # why this status event was published
 mosaico debug explain event:<inbox-id>   # why a mention injected, deferred, or retried
 mosaico debug explain hook:<session>[@ts] # why the injected snapshot had this shape
-mosaico debug explain llm:<id> | session:<id>[@ts] | txn:<surface>:<id> | sub:<channel>
+mosaico debug explain session:<id>[@ts] | txn:<surface>:<id> | sub:<channel>
 ```
 
-`--json` for the raw joined record; `--redact` to replace prompt/transcript
-bodies with `sha256:<hash> (<n> bytes)`.
+Use `--json` for the raw receipt record.
 
 ## Self-check (the oracle) and CI
 

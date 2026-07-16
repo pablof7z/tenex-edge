@@ -111,7 +111,7 @@ pub fn group_edit_metadata(channel: &str, about: &str) -> Result<EventBuilder> {
 }
 
 /// kind:9002 edit-metadata: set the group's display `name` (issue #6 — a
-/// per-session room is renamed to its distilled session title). The relay
+/// per-session room is renamed to its agent-supplied session title). The relay
 /// validates admin rights and re-publishes kind:39000.
 ///
 /// Targets the group with the `h` tag (`h_tag`), matching the working

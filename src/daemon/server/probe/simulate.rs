@@ -3,7 +3,7 @@
 //! and changed labels before any host effect is allowed to run.
 
 use super::DaemonState;
-use crate::reconcile::journal::{InputFact, StatusDrive};
+use crate::reconcile::journal::InputFact;
 use crate::reconcile::labels::{key_path, NodeLabels};
 use crate::reconcile::status::probe::would_publish;
 use anyhow::{Context, Result};
@@ -159,7 +159,7 @@ fn fact_param(params: &Value) -> Result<InputFact> {
 
 fn infer_surface(fact: &InputFact) -> Option<&'static str> {
     match fact {
-        InputFact::StatusDrive(_) | InputFact::DistillCompleted { .. } => Some("status"),
+        InputFact::StatusDrive(_) => Some("status"),
         InputFact::TurnStarted { .. }
         | InputFact::TurnEnded { .. }
         | InputFact::TranscriptWindowCaptured { .. } => Some("turn_lifecycle"),
@@ -180,24 +180,10 @@ fn infer_surface(fact: &InputFact) -> Option<&'static str> {
 }
 
 fn normalize_status_fact(fact: InputFact) -> Result<InputFact> {
-    let drive = match fact {
-        InputFact::StatusDrive(_) => return Ok(fact),
-        InputFact::DistillCompleted {
-            pubkey,
-            window_hash,
-            title,
-            activity,
-            at,
-        } => StatusDrive::DistillCompleted {
-            pubkey,
-            title,
-            activity,
-            window_hash: Some(window_hash),
-            at,
-        },
-        _ => return Err(anyhow::anyhow!("probe simulate: fact is not a status fact")),
-    };
-    Ok(InputFact::StatusDrive(drive))
+    match fact {
+        InputFact::StatusDrive(_) => Ok(fact),
+        _ => Err(anyhow::anyhow!("probe simulate: fact is not a status fact")),
+    }
 }
 
 struct PlanJson<'a, C> {

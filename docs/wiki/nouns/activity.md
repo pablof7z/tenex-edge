@@ -10,4 +10,6 @@ source_refs:
 
 # activity
 
-A distilled one-line intent — the agent's broadcast 'what I'm doing right now,' produced by LLM distillation of the live transcript each turn.
+An optional peer-supplied detail in a kind:30315 status. Local Mosaico sessions
+publish their declared title and working/idle state without generating activity
+from their transcripts.

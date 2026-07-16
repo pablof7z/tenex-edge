@@ -1,7 +1,8 @@
 use super::*;
 use crate::fabric_context::ViewInputs;
 use crate::reconcile::{
-    CoverageSnapshot, HookContextRenderFact, SessionStartRequestFact, StatusSessionStartedArgs,
+    CoverageSnapshot, HookContextRenderFact, SessionStartRequestFact, StatusDrive,
+    StatusSessionStartedArgs,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -19,16 +20,13 @@ async fn simulate_status_accepts_input_fact_json_without_mutating() {
             true,
             true,
             "T",
-            "reading",
             100,
         )
         .unwrap();
     }
-    let fact = InputFact::StatusDrive(StatusDrive::DistillCompleted {
+    let fact = InputFact::StatusDrive(StatusDrive::TitleSet {
         pubkey: "s1".into(),
-        title: "T".into(),
-        activity: "compiling".into(),
-        window_hash: None,
+        title: "New title".into(),
         at: 100,
     });
 
@@ -129,7 +127,6 @@ async fn simulate_new_status_session_labels_preview_only_nodes() {
         working: true,
         automatic_delivery: true,
         title: "T".into(),
-        activity: "reading".into(),
         dispatch_event: None,
         at: 100,
     }));
@@ -140,7 +137,7 @@ async fn simulate_new_status_session_labels_preview_only_nodes() {
         .as_array()
         .unwrap()
         .iter()
-        .any(|v| v == "status/s1/activity"));
+        .any(|v| v == "status/s1/title"));
     assert_eq!(out["revision_before"], out["revision_after"]);
 }
 

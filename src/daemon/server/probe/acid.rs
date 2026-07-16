@@ -105,38 +105,6 @@ fn strip_handle_id<'a>(handle: &'a str, prefixes: &[&str]) -> Option<&'a str> {
 
 fn remove_cause(state: &Arc<DaemonState>, fact: InputFact, cause: &str) -> Result<InputFact> {
     match fact {
-        InputFact::StatusDrive(StatusDrive::DistillCompleted {
-            pubkey,
-            mut title,
-            mut activity,
-            window_hash,
-            mut at,
-        }) => {
-            let current = state
-                .status
-                .lock()
-                .expect("status mutex poisoned")
-                .state_rows()
-                .into_iter()
-                .find(|row| row.session == pubkey)
-                .with_context(|| format!("probe acid: no status row for `{pubkey}`"))?;
-            if cause.ends_with("/activity") {
-                activity = current.activity;
-            } else if cause.ends_with("/title") {
-                title = current.title;
-            } else if cause.ends_with("/arm") {
-                at = current_status_arm_at(state, &pubkey)?;
-            } else {
-                anyhow::bail!("probe acid: unsupported status cause `{cause}`");
-            }
-            Ok(InputFact::StatusDrive(StatusDrive::DistillCompleted {
-                pubkey,
-                title,
-                activity,
-                window_hash,
-                at,
-            }))
-        }
         InputFact::StatusDrive(StatusDrive::Tick {
             pubkey,
             automatic_delivery,
@@ -218,33 +186,8 @@ fn remove_cause(state: &Arc<DaemonState>, fact: InputFact, cause: &str) -> Resul
     }
 }
 
-fn current_status_arm_at(state: &Arc<DaemonState>, pubkey: &str) -> Result<u64> {
-    state
-        .status
-        .lock()
-        .expect("status mutex poisoned")
-        .current_arm_at(pubkey)
-        .with_context(|| format!("probe acid: no status arm for `{pubkey}`"))
-}
-
 fn mutate_unrelated(fact: InputFact) -> Result<InputFact> {
     match fact {
-        InputFact::StatusDrive(StatusDrive::DistillCompleted {
-            pubkey,
-            title,
-            activity,
-            window_hash,
-            at,
-        }) => Ok(InputFact::StatusDrive(StatusDrive::DistillCompleted {
-            pubkey,
-            title,
-            activity,
-            window_hash: Some(format!(
-                "{}:acid-unrelated",
-                window_hash.unwrap_or_else(|| "sha256".into())
-            )),
-            at,
-        })),
         InputFact::SubscriptionSync { snapshot, at } => Ok(InputFact::SubscriptionSync {
             snapshot,
             at: at.saturating_add(999_999),

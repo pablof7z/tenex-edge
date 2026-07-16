@@ -39,10 +39,8 @@ selecting `/state/mosaico/agents/<slug>.json`. Use the skill's
 does not share Codex subscription state. OpenCode has the same split between
 `opencode` and `opencode-ollama`.
 
-Live agent testing uses the host's real model credentials/config by default.
-This is intentional: Claude, Codex, OpenCode, and mosaico distillation should
-use the same subscriptions and provider settings as the host while keeping
-fabric runtime state isolated per container profile. The runner mounts host auth
+Live agent testing uses the host harnesses' real credentials/config by default
+while keeping fabric runtime state isolated per container profile. The runner mounts host auth
 directories read-only, symlinks credential files into the isolated container
 home, and keeps writable hook config in container state. Set
 `MOSAICO_CONTAINER_HOST_AUTH=0` only for non-agent smoke tests.

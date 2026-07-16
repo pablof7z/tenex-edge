@@ -3,17 +3,12 @@
 //! The store is opened only by the daemon, so the CLI reaches this through the
 //! `explain` RPC; the engine itself is a pure `&Store` query so it is unit-testable
 //! against a temp DB. It parses a `scheme:value` handle, then joins the
-//! `receipts` and `llm_calls` ledgers:
-//!
-//! For a published kind:30315 (`event:<id>`) it finds the status receipt by
-//! `artifact_ref`, reads the `window_hash` threaded into its `changed_summary`,
-//! and rejoins the exact `llm_calls` row. For an inbox event id, the same handle
-//! returns delivery receipts explaining inject/defer/retry decisions.
+//! `receipts` ledger. For a published event it finds receipts by `artifact_ref`;
+//! for a session it selects status receipts carrying that session's pubkey.
 
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 
-use crate::state::llm_calls::LlmCallRow;
 use crate::state::receipts::ReceiptRow;
 use crate::state::Store;
 
@@ -25,8 +20,6 @@ const SCAN_LIMIT: u32 = 500;
 pub enum Handle {
     /// A published nostr event id (e.g. a kind:30315).
     Event(String),
-    /// An `llm_calls` row id.
-    Llm(i64),
     /// A session, optionally at a timestamp (`session:<id>@<ts>`).
     Session { id: String, at: Option<i64> },
     /// A hook-context render for a session, optionally at a timestamp.
@@ -50,7 +43,6 @@ pub fn parse_handle(s: &str) -> Result<Handle> {
     let value = value.trim();
     Ok(match scheme {
         "event" => Handle::Event(value.to_string()),
-        "llm" => Handle::Llm(value.parse().context("llm handle id must be an integer")?),
         "session" => {
             let (id, at) = split_at(value)?;
             Handle::Session { id, at }
@@ -73,7 +65,7 @@ pub fn parse_handle(s: &str) -> Result<Handle> {
         "sub" => Handle::Sub {
             channel: value.to_string(),
         },
-        other => bail!("unknown handle scheme `{other}` (event|llm|session|hook|txn|sub)"),
+        other => bail!("unknown handle scheme `{other}` (event|session|hook|txn|sub)"),
     })
 }
 
@@ -94,30 +86,17 @@ pub fn explain(store: &Store, handle: &Handle) -> Result<Value> {
     match handle {
         Handle::Event(id) => {
             let receipts = store.receipts_by_artifact_ref_prefix(id)?;
-            let llm = receipts
-                .iter()
-                .find_map(|r| join_llm(store, r).transpose())
-                .transpose()?;
-            Ok(record("event", receipts, llm))
-        }
-        Handle::Llm(id) => {
-            let call = store.get_llm_call(*id)?;
-            let receipts = match &call {
-                Some(c) => receipts_for_window(store, &c.window_hash)?,
-                None => Vec::new(),
-            };
-            Ok(record("llm", receipts, call))
+            Ok(record("event", receipts))
         }
         Handle::Session { id, at } => {
-            let call = match at {
-                Some(ts) => store.find_llm_call_near(id, *ts)?,
-                None => store.latest_llm_calls_for_pubkey(id, 1)?.into_iter().next(),
-            };
-            let receipts = match &call {
-                Some(c) => receipts_for_window(store, &c.window_hash)?,
-                None => Vec::new(),
-            };
-            Ok(record("session", receipts, call))
+            let mut receipts = store
+                .latest_receipts_for_surface("status", SCAN_LIMIT)?
+                .into_iter()
+                .filter(|receipt| receipt_pubkey(receipt).as_deref() == Some(id.as_str()))
+                .collect::<Vec<_>>();
+            select_near(&mut receipts, *at);
+            receipts.truncate(1);
+            Ok(record("session", receipts))
         }
         Handle::Hook { id, at } => {
             let rows = match at {
@@ -127,7 +106,7 @@ pub fn explain(store: &Store, handle: &Handle) -> Result<Value> {
                     .collect(),
                 None => store.latest_hook_receipts_for_pubkey(id, 1)?,
             };
-            Ok(record("hook", rows, None))
+            Ok(record("hook", rows))
         }
         Handle::Txn { surface, id, at } => {
             let mut rows = store.receipts_for_surface_transaction(surface, *id)?;
@@ -135,7 +114,7 @@ pub fn explain(store: &Store, handle: &Handle) -> Result<Value> {
             if at.is_some() {
                 rows.truncate(1);
             }
-            Ok(record("txn", rows, None))
+            Ok(record("txn", rows))
         }
         Handle::Sub { channel } => {
             let rows: Vec<ReceiptRow> = store
@@ -143,36 +122,15 @@ pub fn explain(store: &Store, handle: &Handle) -> Result<Value> {
                 .into_iter()
                 .filter(|r| r.commands.contains(channel) || r.changed_summary.contains(channel))
                 .collect();
-            Ok(record("sub", rows.into_iter().take(1).collect(), None))
+            Ok(record("sub", rows.into_iter().take(1).collect()))
         }
     }
 }
 
-/// Join a status receipt to the `llm_calls` row that produced it via the
-/// `window_hash` threaded into its `changed_summary`. Non-status receipts (and
-/// receipts with no window hash) simply carry no LLM inputs.
-fn join_llm(store: &Store, r: &ReceiptRow) -> Result<Option<LlmCallRow>> {
-    let Some(wh) = window_hash_of(r) else {
-        return Ok(None);
-    };
-    // Most recent round-trip for that window is the one that fed this publish.
-    Ok(store.llm_calls_by_window_hash(&wh)?.into_iter().next_back())
-}
-
-/// Status receipts recorded for an llm_call's window (reverse of [`join_llm`]).
-fn receipts_for_window(store: &Store, window_hash: &str) -> Result<Vec<ReceiptRow>> {
-    Ok(store
-        .latest_receipts_for_surface("status", SCAN_LIMIT)?
-        .into_iter()
-        .filter(|r| window_hash_of(r).as_deref() == Some(window_hash))
-        .collect())
-}
-
-/// Read the `window_hash` a status receipt carries in its `changed_summary`.
-fn window_hash_of(r: &ReceiptRow) -> Option<String> {
+fn receipt_pubkey(r: &ReceiptRow) -> Option<String> {
     serde_json::from_str::<Value>(&r.changed_summary)
         .ok()?
-        .get("window_hash")?
+        .get("pubkey")?
         .as_str()
         .map(str::to_string)
 }
@@ -186,11 +144,10 @@ fn select_near(rows: &mut [ReceiptRow], at: Option<i64>) {
 }
 
 /// Assemble the joined record the RPC returns and the CLI renders.
-fn record(kind: &str, receipts: Vec<ReceiptRow>, llm: Option<LlmCallRow>) -> Value {
+fn record(kind: &str, receipts: Vec<ReceiptRow>) -> Value {
     json!({
         "kind": kind,
         "receipts": receipts.iter().map(receipt_json).collect::<Vec<_>>(),
-        "llm_call": llm.as_ref().map(llm_json),
     })
 }
 
@@ -205,23 +162,6 @@ pub fn receipt_json(r: &ReceiptRow) -> Value {
         "commands": r.commands,
         "artifact_ref": r.artifact_ref,
         "created_at": r.created_at,
-    })
-}
-
-/// An llm_call row as plain JSON — the verbatim inputs a 30315 rejoins to.
-pub fn llm_json(c: &LlmCallRow) -> Value {
-    json!({
-        "id": c.id,
-        "pubkey": c.pubkey,
-        "window_hash": c.window_hash,
-        "provider": c.provider,
-        "model": c.model,
-        "system_prompt": c.system_prompt,
-        "transcript_slice": c.transcript_slice,
-        "raw_response": c.raw_response,
-        "parsed_title": c.parsed_title,
-        "parsed_activity": c.parsed_activity,
-        "created_at": c.created_at,
     })
 }
 

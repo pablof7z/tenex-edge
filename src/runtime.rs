@@ -1,8 +1,7 @@
-//! Daemon-hosted per-session engine: publishes identity/status, schedules
-//! background distillation, and watches host liveness. Status effects flow
+//! Daemon-hosted per-session engine: publishes identity/status and watches host
+//! liveness. Status effects flow
 //! exclusively through [`crate::reconcile::status`] and the outbox.
 
-use crate::distill;
 use crate::domain::{DomainEvent, Profile};
 use crate::fabric::provider::Nip29Provider;
 use crate::replay_capsules::status_fact;
@@ -16,18 +15,6 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 mod session_status;
-/// Per-session debug log keyed by the canonical pubkey.
-fn slog(pubkey: &str, msg: &str) {
-    crate::applog::append(&format!("{pubkey}.log"), "", msg);
-}
-
-/// The distill task's output: labels, an optional LLM error, and the optional
-/// verbatim round-trip capture (Slice 8) the host records as an `llm_calls` row.
-type DistillOutput = (
-    Option<distill::SessionLabels>,
-    Option<String>,
-    Option<crate::instrument::DistillCapture>,
-);
 
 pub struct EngineParams {
     /// The session's read-side identity: selected pubkey, slug, and display name.
@@ -49,14 +36,8 @@ pub struct EngineParams {
     pub watch_pid: Option<i32>,
     pub store_path: PathBuf,
     pub heartbeat: Duration,
-    /// How often the engine polls turn state to decide whether to distill.
+    /// How often the engine polls session state for turn and channel changes.
     pub obs_interval: Duration,
-    pub status_ttl: Duration,
-    /// Delay from turn-start to first title distillation; short turns skip LLM cost.
-    pub turn_first: Duration,
-    /// Safety re-distillation interval WITHIN a single long-running turn that has
-    /// no new user message (default 0 = disabled).
-    pub turn_repeat: Duration,
 }
 
 impl EngineParams {
@@ -106,7 +87,6 @@ fn channel_set(
 /// subscription and demuxes incoming events centrally; this task only:
 ///   - publishes the profile once (signed with the agent's keys),
 ///   - heartbeats `last_seen` and enqueues a re-armed kind:30315 onto the outbox,
-///   - distills turn activity → `sessions.title`/`activity` + an outbox status,
 ///   - watches the host pid and marks the session dead (title RETAINED) on pid
 ///     death or `cancel` (the `session-end` path).
 ///
@@ -143,7 +123,7 @@ pub async fn run_session_in_daemon(
     };
 
     // Load the session row, distinguishing a genuine "no such session" (None) from
-    // a store error (loud): a swallowed Err here silently skips the heartbeat/distill
+    // a store error (loud): a swallowed Err here silently skips the heartbeat
     // cycle that depends on the row, masking DB corruption as an idle session.
     let load_session = |label: &str| -> Option<Session> {
         match st!(|s: &Store| s.get_session(&aref.pubkey)) {
@@ -165,15 +145,9 @@ pub async fn run_session_in_daemon(
     .with_workspace(p.workspace.clone());
     publish_de(DomainEvent::Profile(profile)).await;
 
-    let turn_first = p.turn_first.as_secs();
-    let turn_repeat = p.turn_repeat.as_secs();
-
-    let mut distill_task: Option<tokio::task::JoinHandle<DistillOutput>> = None;
-    let mut last_distill_attempt: u64 = 0;
-    let mut cur_turn_started: u64 = 0;
     let mut prev_working = false;
     macro_rules! drive_status {
-        ($trigger:expr, $window_hash:expr, $fact:expr, $f:expr) => {
+        ($trigger:expr, $fact:expr, $f:expr) => {
             drive(
                 &status,
                 &provider,
@@ -182,7 +156,6 @@ pub async fn run_session_in_daemon(
                 &outbox,
                 DriveMeta {
                     trigger: $trigger,
-                    window_hash: $window_hash,
                     replay_fact: Some($fact),
                 },
                 $f,
@@ -200,7 +173,6 @@ pub async fn run_session_in_daemon(
         let automatic_delivery = session_status::automatic_delivery(&store, Some(&session));
         drive_status!(
             "session_started",
-            None,
             status_fact!(started, p, aref, session, chans, automatic_delivery, now),
             |r| {
                 r.on_session_started_with_dispatch(
@@ -212,7 +184,6 @@ pub async fn run_session_in_daemon(
                     session.working,
                     automatic_delivery,
                     &session.title,
-                    &session.activity,
                     p.dispatch_event.clone(),
                     now,
                 )
@@ -237,7 +208,6 @@ pub async fn run_session_in_daemon(
                 let automatic_delivery = session_status::automatic_delivery(&store, session.as_ref());
                 drive_status!(
                     "tick",
-                    None,
                     status_fact!(tick, aref.pubkey, automatic_delivery, now),
                     |r| r.on_tick(&aref.pubkey, automatic_delivery, now)
                 );
@@ -245,129 +215,20 @@ pub async fn run_session_in_daemon(
             _ = obs.tick() => {
                 let now = now_secs();
 
-                // ── collect a finished background distillation ────────────
-                if distill_task.as_ref().is_some_and(|h| h.is_finished()) {
-                    let (result, error, capture) = distill_task.take().unwrap().await.ok().unwrap_or((None, None, None));
-                    slog(&aref.pubkey, &format!("[distill] task finished result={} error={:?}",
-                        result.as_ref().map(|l| format!("title={:?} activity={:?}", l.title, l.activity)).unwrap_or_else(|| "None".into()),
-                        error));
-                    let topic_holds_distill = st!(|s: &Store| {
-                        s.get_session(&aref.pubkey)
-                            .ok()
-                            .flatten()
-                            .is_some_and(|session| session.work_topic_suppresses_distillation(now))
-                    });
-                    if topic_holds_distill {
-                        slog(&aref.pubkey, "[distill] discarded while a manual title is protected");
-                    } else if let Some(labels) = result {
-                        if let Err(e) = st!(|s: &Store| s.set_session_distill(
-                            &aref.pubkey, &labels.title, &labels.activity, now,
-                        )) {
-                            tracing::error!(session = %aref.pubkey, error = %e, "set_session_distill failed — distilled title not persisted");
-                        }
-                        slog(&aref.pubkey, &format!("[distill] applied title={:?}", labels.title));
-
-                        let window_hash = capture.as_ref().map(|c| crate::instrument::window_hash(&c.transcript_slice));
-                        if let (Some(cap), Some(wh)) = (capture.as_ref(), window_hash.as_deref()) {
-                            let created_at = crate::instrument::now_millis();
-                            st!(|s: &Store| crate::instrument::record_llm_call(
-                                s, &aref.pubkey, wh, cap,
-                                Some(labels.title.as_str()),
-                                (!labels.activity.is_empty()).then_some(labels.activity.as_str()),
-                                created_at,
-                            ));
-                        }
-
-                        drive_status!("distill", window_hash.as_deref(), status_fact!(
-                            distill, aref.pubkey, labels, window_hash, now
-                        ), |r| {
-                            r.on_distill(&aref.pubkey, &labels.title, &labels.activity, now)
-                        });
-                    } else if let Some(err_msg) = error {
-                        slog(&aref.pubkey, &format!("[distill] ERROR: {err_msg}"));
-                        if let Err(e) = st!(|s: &Store| s.record_distill_failure(&aref.pubkey)) {
-                            tracing::error!(session = %aref.pubkey, error = %e, "record_distill_failure failed");
-                        }
-                    }
-                }
-
                 let session = load_session("observe-tick");
-                let (working, turn_started_at) = session
+                let working = session
                     .as_ref()
-                    .map(|s| (s.working, s.turn_started_at))
-                    .unwrap_or((false, 0));
+                    .is_some_and(|s| s.working);
 
                 if working != prev_working {
-                    drive_status!("turn_edge", None, status_fact!(turn, aref.pubkey, working, now), |r| {
+                    drive_status!("turn_edge", status_fact!(turn, aref.pubkey, working, now), |r| {
                         if working { r.on_turn_start(&aref.pubkey, now) } else { r.on_turn_end(&aref.pubkey, now) }
                     });
                 }
                 if let Some(chans) = session.as_ref().map(|s| channel_set(&p, &store, s)) {
-                    drive_status!("channels_changed", None, status_fact!(channels, aref.pubkey, chans, now), |r| {
+                    drive_status!("channels_changed", status_fact!(channels, aref.pubkey, chans, now), |r| {
                         r.on_channels_changed(&aref.pubkey, chans, now)
                     });
-                }
-
-                if working {
-                    // ── rising edge / new user message ────────────────────
-                    if turn_started_at != cur_turn_started {
-                        cur_turn_started = turn_started_at;
-                        last_distill_attempt = 0;
-                        distill_task = None;
-                    }
-
-                    // ── schedule background distillation ──────────────────
-                    if distill_task.is_none() {
-                        if let Some(sess) = session.as_ref() {
-                            if !sess.work_topic_suppresses_distillation(now) {
-                                let succeeded_this_turn = sess.turn_started_at > 0
-                                    && sess.last_distill_at >= sess.turn_started_at;
-                                let due = if last_distill_attempt == 0 {
-                                    now.saturating_sub(sess.turn_started_at) >= turn_first
-                                } else if succeeded_this_turn {
-                                    turn_repeat > 0
-                                        && now.saturating_sub(sess.last_distill_at) >= turn_repeat
-                                } else {
-                                    now.saturating_sub(last_distill_attempt) >= turn_first
-                                };
-                                if due {
-                                    let transcript_path = sess.transcript_path.clone();
-                                    slog(&aref.pubkey, &format!("[distill] due transcript_path={:?}", transcript_path));
-                                    let ctx = transcript_path.and_then(|path| {
-                                        let result = crate::transcript::read_recent(std::path::Path::new(&path), 14, 2500);
-                                        if result.is_none() {
-                                            slog(&aref.pubkey, &format!("[distill] read_recent returned None path={path}"));
-                                        }
-                                        result
-                                    });
-                                    if let Some(ctx) = ctx {
-                                        let current = (!sess.title.trim().is_empty())
-                                            .then(|| sess.title.clone());
-                                        slog(&aref.pubkey, &format!("[distill] spawning task ctx_len={} current_title={:?}", ctx.len(), current));
-                                        last_distill_attempt = now;
-                                        let sid = aref.pubkey.clone();
-                                        distill_task = Some(tokio::spawn(async move {
-                                            match tokio::time::timeout(
-                                                Duration::from_secs(20),
-                                                distill::distill_session(&ctx, current.as_deref(), &sid),
-                                            )
-                                            .await
-                                            {
-                                                Ok(triple) => triple,
-                                                Err(_) => (None, Some("distillation timed out after 20s".to_string()), None),
-                                            }
-                                        }));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } else if prev_working {
-                    // Falling edge: turn closed. Reset local distill scheduling; the
-                    // idle status was already published above via `on_turn_end`.
-                    cur_turn_started = 0;
-                    last_distill_attempt = 0;
-                    distill_task = None;
                 }
                 prev_working = working;
             }
@@ -378,7 +239,6 @@ pub async fn run_session_in_daemon(
     let end_now = now_secs();
     drive_status!(
         "session_ended",
-        None,
         status_fact!(ended, aref.pubkey, end_now),
         |r| r.on_session_ended(&aref.pubkey, end_now)
     );

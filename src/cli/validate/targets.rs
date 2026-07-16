@@ -126,8 +126,8 @@ const TARGET_FORMS: &[TargetForm] = &[
         example: "mosaico debug validate inbox:<event>",
     },
     TargetForm {
-        target: "llm:<id> | txn:<surface>:<id> | receipt:<id> | commit:<id> | trellis_commit:<id>",
-        proves: "durable Trellis receipts, LLM call evidence, transaction commits, and ledger payloads",
+        target: "txn:<surface>:<id> | receipt:<id> | commit:<id> | trellis_commit:<id>",
+        proves: "durable Trellis receipts, transaction commits, and ledger payloads",
         example: "mosaico debug validate commit:<id>",
     },
     TargetForm {

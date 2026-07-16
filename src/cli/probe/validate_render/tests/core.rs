@@ -21,7 +21,7 @@ fn validate_render_lists_checks_and_limitations() {
             "resource_key":"status/s1",
             "last_kind":"Replace",
             "cause":"planner",
-            "input_causes":["status/s1/activity"]
+            "input_causes":["status/s1/title"]
         },
         "simulate": {
             "surface":"status",
@@ -29,12 +29,12 @@ fn validate_render_lists_checks_and_limitations() {
             "would_effect":true,
             "would_publish":true,
             "commands":[{"kind":30315,"op":"replace","resource":"status/s1"}],
-            "changed":["status/s1/activity"]
+            "changed":["status/s1/title"]
         },
         "acid": {
             "handle":"status:s1",
             "surface":"status",
-            "cause":"status/s1/activity",
+            "cause":"status/s1/title",
             "necessary":true,
             "unrelated_stable":true,
             "ok":true,
@@ -48,14 +48,7 @@ fn validate_render_lists_checks_and_limitations() {
                 "transaction_id":5,
                 "revision":2,
                 "artifact_ref":"evt-1"
-            }],
-            "llm_call": {
-                "provider":"ollama",
-                "model":"glm",
-                "window_hash":"sha256:w",
-                "parsed_title":"T",
-                "parsed_activity":"A"
-            }
+            }]
         }
     });
     let text = render_validate(&v);
@@ -66,9 +59,8 @@ fn validate_render_lists_checks_and_limitations() {
     assert!(text.contains("why status:s1"));
     assert!(text.contains("simulate status"));
     assert!(text.contains("acid status:s1"));
-    assert!(text.contains("status/s1/activity"));
+    assert!(text.contains("status/s1/title"));
     assert!(text.contains("[status] txn 5 rev 2 -> evt-1"));
-    assert!(text.contains("llm ollama / glm"));
 }
 
 #[test]

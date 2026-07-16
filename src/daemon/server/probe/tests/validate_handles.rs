@@ -15,7 +15,7 @@ async fn rpc_probe_validate_accepts_visible_trellis_resource_paths() {
     assert_eq!(outbox_state["rows"][0]["resource_key"], "outbox/7");
 
     let cases = [
-        ("status/s1/activity", "status", "status/s1"),
+        ("status/s1/title", "status", "status/s1"),
         ("sub/h/room", "subscriptions", "sub/h/room"),
         ("sub/d/room", "subscriptions", "sub/d/room"),
         ("sub/p/pk1", "subscriptions", "sub/p/pk1"),
@@ -44,7 +44,7 @@ async fn rpc_probe_validate_accepts_visible_trellis_resource_paths() {
 }
 
 #[tokio::test]
-async fn rpc_probe_validate_slash_status_handle_keeps_acid_evidence() {
+async fn rpc_probe_validate_slash_status_handle_keeps_simulation_evidence() {
     let state = DaemonState::new_for_test().await;
     seed_visible_path_state(&state);
 
@@ -52,14 +52,12 @@ async fn rpc_probe_validate_slash_status_handle_keeps_acid_evidence() {
         &state,
         &json!({
             "verb": "validate",
-            "target": "status/s1/activity",
+            "target": "status/s1/title",
             "fact": {
                 "StatusDrive": {
-                    "DistillCompleted": {
+                    "TitleSet": {
                         "pubkey": "s1",
-                        "title": "T",
-                        "activity": "compiling",
-                        "window_hash": "sha256:w2",
+                        "title": "Reviewing",
                         "at": 130
                     }
                 }
@@ -71,9 +69,7 @@ async fn rpc_probe_validate_slash_status_handle_keeps_acid_evidence() {
     assert_eq!(v["surface"], "status");
     assert_check_status(&v, "why", "passed");
     assert_check_status(&v, "simulate", "passed");
-    assert_check_status(&v, "acid", "passed");
-    assert_eq!(v["acid"]["handle"], "status/s1/activity");
-    assert_eq!(v["acid"]["cause"], "status/s1/activity");
+    assert_eq!(v["simulate"]["surface"], "status");
 }
 
 #[tokio::test]
@@ -101,7 +97,7 @@ async fn rpc_probe_validate_specific_missing_handle_fails_state_check() {
 
     let v = rpc_probe(
         &state,
-        &json!({ "verb": "validate", "target": "status/missing/activity" }),
+        &json!({ "verb": "validate", "target": "status/missing/title" }),
     )
     .unwrap();
 
@@ -123,11 +119,10 @@ fn seed_visible_path_state(state: &std::sync::Arc<DaemonState>) {
             true,
             true,
             "T",
-            "reading",
             100,
         )
         .unwrap();
-        r.on_distill("s1", "T", "reviewing", 110).unwrap();
+        r.on_title_set("s1", "Reviewing", 110).unwrap();
     }
 
     {

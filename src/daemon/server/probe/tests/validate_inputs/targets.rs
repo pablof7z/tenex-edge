@@ -6,7 +6,7 @@ async fn rpc_probe_validate_accepts_planner_label_without_space() {
 
     let v = rpc_probe(
         &state,
-        &json!({ "verb": "validate", "target": "planner:status/s1/activity" }),
+        &json!({ "verb": "validate", "target": "planner:status/s1/title" }),
     )
     .unwrap();
 
@@ -14,7 +14,7 @@ async fn rpc_probe_validate_accepts_planner_label_without_space() {
     assert!(v["target_evidence"].is_null());
     assert_check_status(&v, "cause_label", "passed");
     assert_eq!(v["surface"], "status");
-    assert_eq!(v["cause_label_evidence"]["label"], "status/s1/activity");
+    assert_eq!(v["cause_label_evidence"]["label"], "status/s1/title");
     assert_eq!(v["cause_label_evidence"]["kind"], "planner_label");
 }
 

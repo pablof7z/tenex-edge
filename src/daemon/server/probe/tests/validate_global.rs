@@ -164,7 +164,6 @@ fn seed_status_graph(state: &std::sync::Arc<DaemonState>, pubkey: &str, channel_
             false,
             true,
             "T",
-            "",
             100,
         )
         .unwrap();

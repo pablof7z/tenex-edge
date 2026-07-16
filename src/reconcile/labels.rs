@@ -3,7 +3,7 @@
 //!
 //! Trellis nodes carry a `debug_name`, but core exports no registry, so each
 //! reconciler owns its own [`NodeLabels`] map, populated AT NODE CREATION with a
-//! stable, semantic path (`status/<session>/activity`,
+//! stable, semantic path (`status/<session>/title`,
 //! `subscriptions/session/<session>/channels`, `hook/<session>/cursor`). This is
 //! the precondition for legible receipts and the all-commit ledger: no consumer
 //! ever sees a bare integer node id.
@@ -211,16 +211,16 @@ mod tests {
         tx.commit().unwrap();
 
         let mut labels = NodeLabels::new();
-        labels.record(a.id(), "status/s1/activity");
-        labels.record(b.id(), "status/s1/title");
+        labels.record(a.id(), "status/s1/title");
+        labels.record(b.id(), "status/s1/channels");
 
-        assert_eq!(labels.label_of(a.id()), Some("status/s1/activity"));
+        assert_eq!(labels.label_of(a.id()), Some("status/s1/title"));
         assert_eq!(labels.len(), 2);
         assert_eq!(
             labels.labels_for(&[a.id(), b.id()]),
             vec![
-                "status/s1/activity".to_string(),
-                "status/s1/title".to_string()
+                "status/s1/title".to_string(),
+                "status/s1/channels".to_string()
             ]
         );
     }

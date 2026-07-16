@@ -52,8 +52,7 @@ pub(super) fn push_checks(
         };
         push_check(checks, "explain", explain_status, explain_summary(v));
         if explain_status == "not_proven" {
-            limitations
-                .push("no Trellis receipt/LLM explanation is recorded for this target".to_string());
+            limitations.push("no Trellis receipt is recorded for this target".to_string());
         }
     }
     if let Some(error) = explain_error {

@@ -38,12 +38,6 @@ impl StatusReconciler {
                 .ok()
                 .flatten()?,
             title: self.graph.input_value(nodes.title).ok().flatten()?.clone(),
-            activity: self
-                .graph
-                .input_value(nodes.activity)
-                .ok()
-                .flatten()?
-                .clone(),
             at: self
                 .graph
                 .input_value(nodes.arm)
@@ -97,7 +91,6 @@ impl ReplayState {
                     args.working,
                     args.automatic_delivery,
                     &args.title,
-                    &args.activity,
                     args.at / self.refresh_secs,
                 )?;
                 self.sessions.insert(args.pubkey.clone(), nodes);
@@ -107,18 +100,6 @@ impl ReplayState {
             }
             StatusDrive::TurnEnded { pubkey, at } => {
                 self.mutate(pubkey, tx, *at, |tx, n| tx.set_input(n.working, false))?;
-            }
-            StatusDrive::DistillCompleted {
-                pubkey,
-                title,
-                activity,
-                at,
-                ..
-            } => {
-                self.mutate(pubkey, tx, *at, |tx, n| {
-                    tx.set_input(n.title, title.clone())?;
-                    tx.set_input(n.activity, activity.clone())
-                })?;
             }
             StatusDrive::TitleSet { pubkey, title, at } => {
                 self.mutate(pubkey, tx, *at, |tx, n| {
@@ -220,19 +201,16 @@ mod tests {
                     working: true,
                     automatic_delivery: true,
                     title: "T".into(),
-                    activity: "reading".into(),
                     dispatch_event: None,
                     at: 100,
                 },
             )))
             .commit();
         script
-            .step("distill")
-            .operation(InputFact::StatusDrive(StatusDrive::DistillCompleted {
+            .step("title")
+            .operation(InputFact::StatusDrive(StatusDrive::TitleSet {
                 pubkey: "pk1".into(),
-                title: "T".into(),
-                activity: "reviewing".into(),
-                window_hash: Some("sha256:abc".into()),
+                title: "Reviewing".into(),
                 at: 130,
             }))
             .commit();

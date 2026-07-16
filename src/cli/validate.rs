@@ -92,11 +92,11 @@ mod tests {
             target: Some("status:s1".into()),
             targets: false,
             fact: Some(
-                r#"{"StatusDrive":{"Tick":{"session_id":"s1","automatic_delivery":true,"at":1}}}"#
+                r#"{"StatusDrive":{"Tick":{"pubkey":"s1","automatic_delivery":true,"at":1}}}"#
                     .into(),
             ),
             capsule: Some("9".into()),
-            cause: Some("status/s1/activity".into()),
+            cause: Some("status/s1/title".into()),
             since: 42,
             json: true,
         };
@@ -106,10 +106,10 @@ mod tests {
         assert_eq!(params["target"], "status:s1");
         assert_eq!(
             params["fact"],
-            r#"{"StatusDrive":{"Tick":{"session_id":"s1","automatic_delivery":true,"at":1}}}"#
+            r#"{"StatusDrive":{"Tick":{"pubkey":"s1","automatic_delivery":true,"at":1}}}"#
         );
         assert_eq!(params["capsule"], "9");
-        assert_eq!(params["cause"], "status/s1/activity");
+        assert_eq!(params["cause"], "status/s1/title");
         assert_eq!(params["since"], 42);
     }
 

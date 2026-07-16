@@ -10,7 +10,7 @@ Trellis is the private reconciliation engine. mosaico owns observations and
 effects; Trellis owns decisions. Observed facts enter a host-owned input journal,
 a Trellis transaction computes the new derived shape, and the host applies the
 resulting inert frames or commands. Effect results then return as new observed
-facts. Trellis does not read SQLite, watch processes, call LLMs, sign events,
+facts. Trellis does not read SQLite, watch processes, call external services, sign events,
 publish to relays, or inject hook text.
 
 The long-term shape is one journal-fed graph, with SQLite acting as durable log
@@ -25,7 +25,7 @@ adapter while moving toward this loop:
 5. apply success or failure enters the journal as the next observed fact.
 
 Host facts that may enter the graph include `SessionStarted`, `TurnStarted`,
-`TranscriptWindowCaptured`, `DistillCompleted`, `TurnEnded`,
+`TitleSet`, `TurnEnded`,
 `RelayEventObserved`, `RelayPublishAccepted`, `ProcessExited`, `ClockTick`, and
 configuration changes. Trellis may derive projection writes for `sessions` and
 `relay_status`, current activity, kind:30315 status frames, `who` and hook
@@ -78,18 +78,12 @@ the effect happened:
 - The `TransactionResult` audit handle that can answer `why_changed`,
   `why_resource_command`, `why_output_frame`, and dependency-path questions.
 
-LLM calls are host provenance, not graph computation. A `llm_calls` ledger should
-record model, provider, system prompt identity, transcript-slice pointer,
-request/response pointers or hashes, and the resulting `DistillCompleted` input
-fact. Trellis should depend on the distill fact, while `explain` can join back
-to the ledger when a status or hook output was caused by that distillation.
-
 ## Shared Inputs
 
 The local, non-rebuildable tables are the main owned truth:
 
 - `sessions`: private run key, agent pubkey/slug, active channel, liveness,
-  turn state, `seen_cursor`, title, and activity (`src/state/schema.rs`).
+  turn state, `seen_cursor`, and agent-supplied title (`src/state/schema.rs`).
 - `session_channels`: passive/active channel membership per session
   (`src/state/schema.rs`).
 - `identities`: per-session derived pubkey, channel, native id,
@@ -113,8 +107,7 @@ Additional non-SQL inputs:
 - local session identity pubkeys persisted in `identities`.
 - the backend pubkey.
 - `now`, status TTL, heartbeat cadence, and `seen_cursor`.
-- the nondeterministic distill result, which enters as a write to
-  `sessions.title`, `sessions.activity`, and `sessions.last_distill_at`.
+- agent-supplied `TitleSet` facts.
 
 ## Relay Subscriptions
 
@@ -176,19 +169,15 @@ Current shape:
 
 - Local publish intent lives on the pubkey-keyed `sessions` row: `pubkey`,
   `agent_slug`, `channel_h`, `alive`, `last_seen`, `working`,
-  `turn_started_at`, `last_distill_at`, `title`, and `activity`.
+  `turn_started_at`, and `title`.
 - Status `h` tags are derived from `session_channels`. Status builders sort and
   dedupe this set.
 - `session_signers` reconstructs an ordinary session's derived signing key;
   durable agents use their configured key. `handle_leases` supplies the only
   public alias for a pubkey.
-- There are two status builders today. `runtime::status_for` clears `activity`
-  while idle and preserves `rel_cwd`; `status_publish::status_from_session`
-  copies activity even when idle and leaves `rel_cwd` empty.
-- There are also two publish paths. The per-session engine signs a status and
-  enqueues raw JSON into `outbox`; the daemon heartbeat publisher bypasses
-  `outbox`, calls `provider.set_status`, and mirrors the accepted status into
-  `relay_status`.
+- The status reconciler derives a single status payload from lifecycle,
+  automatic-delivery, title, and channel facts. The host signs and enqueues its
+  commands through the outbox.
 - `relay_status` is a materialized cache, one row per `(pubkey, channel_h)`, live
   only while `expiration >= now`.
 - Session death and session end mark local rows dead. The final published
@@ -204,12 +193,11 @@ Trellis mapping:
   - `session-identity`: bound identity/pubkey/signing selection.
   - `session-channel-set`: active plus passively joined channels.
   - `now`, status TTL, and explicit heartbeat/TTL-refresh tick.
-  - `distill-result`: nondeterministic title/activity result, written as an
-    input update to `sessions`.
+  - `title-set`: the session owner's declared title.
 - Derived node:
-  - `status-payload/<session>`: one deterministic replacement for both current
-    builders. It decides busy/idle text, activity clearing, h-tags, expiration,
-    host, rel-cwd, and agent identity from declared inputs.
+  - `status-payload/<session>`: the deterministic status payload. It decides
+    working/idle state, h-tags, expiration, host, rel-cwd, and agent identity
+    from declared inputs.
 - Materialized output:
   - `status-frame/<session>` produces the publish payload.
   - The host signs and applies the frame through one publish executor. Keeping

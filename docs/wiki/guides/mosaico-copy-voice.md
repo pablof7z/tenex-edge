@@ -32,7 +32,7 @@ Present tense in copy certifies that a feature is shipped and tested. Unshipped 
 
 ## Verbs Over Adjectives
 
-Copy leads with verbs — broadcasts, injects, persists, survives, distills, lands. Adjectives are deleted wherever a sentence still reads without them. If an adjective-free sentence survives the cut, the adjective was not load-bearing. <!-- [^75f62-a0037] -->
+Copy leads with verbs — broadcasts, injects, persists, survives, lands. Adjectives are deleted wherever a sentence still reads without them. If an adjective-free sentence survives the cut, the adjective was not load-bearing. <!-- [^75f62-a0037] -->
 
 ## Numbers as Engineering Texture
 
@@ -56,7 +56,7 @@ The words 'Nostr,' 'crypto,' and 'decentralized' never appear above the architec
 
 ## Active Voice
 
-The @mention feature description uses active voice: 'An LLM distills each turn into one plain sentence and broadcasts it,' not the passive 'the running transcript is distilled by an LLM.' <!-- [^75f62-7914e] -->
+The @mention feature description uses active voice: 'Address a session and Mosaico delivers a real turn,' not the passive 'a message is delivered.' <!-- [^75f62-7914e] -->
 
 ## No Social Proof or Urgency Devices
 

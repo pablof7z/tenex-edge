@@ -30,7 +30,6 @@ fn validate_render_lists_status_evidence() {
             "relay_state": "working",
             "relay_expiration": 200,
             "graph_title": "T",
-            "graph_activity": "reading",
             "graph_state": "working",
             "graph_channels": ["room"],
             "channel_h": "room",

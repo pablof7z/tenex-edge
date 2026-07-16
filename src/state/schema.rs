@@ -14,7 +14,6 @@ mod version;
 use ddl::SCHEMA;
 
 pub(super) fn initialize_file(conn: &mut Connection, path: &Path) -> Result<()> {
-    version::migrate_legacy_v5(conn, path, SCHEMA)?;
     version::check(conn, path)?;
     if has_user_tables(conn)? {
         validate_canonical(conn, Some(path))?;
@@ -98,7 +97,7 @@ fn validate_canonical(conn: &Connection, path: Option<&Path>) -> Result<()> {
         &["session_id"],
         path,
     )?;
-    ensure_columns(conn, "llm_calls", &["pubkey"], &["session_id"], path)?;
+    ensure_absent_table(conn, "llm_calls", path)?;
     ensure_columns(
         conn,
         "inbox",
@@ -123,16 +122,18 @@ fn validate_canonical(conn: &Connection, path: Option<&Path>) -> Result<()> {
     ensure_columns(
         conn,
         "sessions",
+        &["pubkey", "runtime_generation", "explicit_chat_published_at"],
         &[
-            "pubkey",
-            "runtime_generation",
+            "session_id",
+            "agent_pubkey",
+            "resume_id",
+            "last_distill_at",
             "distill_fail_streak",
             "distill_notice_at",
-            "explicit_chat_published_at",
             "work_topic",
             "work_topic_set_at",
+            "activity",
         ],
-        &["session_id", "agent_pubkey", "resume_id"],
         path,
     )?;
     ensure_columns(

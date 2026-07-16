@@ -1,8 +1,7 @@
 //! The status reconciler drive seam, extracted from the runtime engine.
 //!
 //! [`drive`] runs one status-reconciler method under the shared lock, signs +
-//! enqueues publish effects, records receipts/commits, and threads distill
-//! `window_hash` values so `explain event:<id>` rejoins the exact LLM inputs.
+//! enqueues publish effects, and records receipts/commits.
 
 use std::sync::Mutex;
 
@@ -24,7 +23,6 @@ use replay::status_replay_seed_pubkey;
 
 pub(crate) struct DriveMeta<'a> {
     pub trigger: &'a str,
-    pub window_hash: Option<&'a str>,
     pub replay_fact: Option<InputFact>,
 }
 
@@ -92,7 +90,7 @@ pub(crate) async fn drive(
     )
     .await;
     let trigger_ref = status_pubkey(&outcome.result);
-    record_status_receipt(store, meta.window_hash, &outcome.result, &event_ids);
+    record_status_receipt(store, &outcome.result, &event_ids);
     if let Some(facts) = facts {
         let created_at = crate::instrument::now_millis();
         let g = store.lock().expect("store mutex poisoned");
@@ -141,7 +139,6 @@ fn status_pubkey(result: &TransactionResult<StatusCommand>) -> Option<&str> {
 /// recorded, so a no-op tick leaves no noise. Off the graph path, host-side.
 fn record_status_receipt(
     store: &Mutex<Store>,
-    window_hash: Option<&str>,
     result: &TransactionResult<StatusCommand>,
     event_ids: &[String],
 ) {
@@ -158,7 +155,6 @@ fn record_status_receipt(
             &result.changed_derived_nodes,
             &result.changed_collection_nodes,
             pubkey,
-            window_hash,
         ),
         commands: crate::instrument::commands_json(result.resource_plan.commands()),
         artifact_ref: Some(artifact_ref),

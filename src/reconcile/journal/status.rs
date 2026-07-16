@@ -16,13 +16,6 @@ pub enum StatusDrive {
         pubkey: String,
         at: Timestamp,
     },
-    DistillCompleted {
-        pubkey: String,
-        title: String,
-        activity: String,
-        window_hash: Option<String>,
-        at: Timestamp,
-    },
     TitleSet {
         pubkey: String,
         title: String,
@@ -56,7 +49,6 @@ impl StatusDrive {
             Self::SessionStarted(args) => args.at,
             Self::TurnStarted { at, .. }
             | Self::TurnEnded { at, .. }
-            | Self::DistillCompleted { at, .. }
             | Self::TitleSet { at, .. }
             | Self::ChannelsChanged { at, .. }
             | Self::Tick { at, .. }
@@ -76,7 +68,6 @@ pub struct StatusSessionStartedArgs {
     pub working: bool,
     pub automatic_delivery: bool,
     pub title: String,
-    pub activity: String,
     #[serde(default)]
     pub dispatch_event: Option<String>,
     pub at: Timestamp,

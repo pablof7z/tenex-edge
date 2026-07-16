@@ -3,9 +3,7 @@ use mosaico::cli::{self, Cli};
 use mosaico::command_forensics::CommandCallLog;
 
 fn main() {
-    // rig-core's reqwest pulls a second rustls crypto provider (aws-lc-rs)
-    // alongside nostr-sdk's (ring), so rustls 0.23 can't auto-pick one and panics
-    // on the first TLS handshake. Install an explicit process-wide default.
+    // Select the crypto provider before the first TLS handshake.
     let _ = rustls::crypto::ring::default_provider().install_default();
 
     let argv = std::env::args().collect::<Vec<_>>();
