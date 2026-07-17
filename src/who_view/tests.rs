@@ -154,7 +154,8 @@ fn agent_about_is_compact_and_bounded() {
             headless: false,
             expanded_workspaces: &BTreeSet::from(["alpha".to_string()]),
         },
-    );
+    )
+    .unwrap();
     let start = xml.find("<agent name=\"architect\"").unwrap();
     let row = &xml[start..xml[start..].find(" />").map(|end| start + end).unwrap()];
     let about = row
