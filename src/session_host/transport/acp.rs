@@ -29,6 +29,10 @@ use tokio::sync::mpsc;
 #[path = "acp/registry.rs"]
 mod registry;
 use registry::{register_child, registry};
+#[path = "acp/native_agent.rs"]
+mod native_agent;
+#[path = "acp/open_session.rs"]
+mod open_session;
 #[path = "acp/thread_start_agent.rs"]
 mod thread_start_agent;
 
@@ -62,6 +66,7 @@ impl AcpTransport {
         Dialect,
         mpsc::UnboundedReceiver<SessionUpdate>,
         Vec<String>,
+        Harness,
     )> {
         let cwd = std::path::PathBuf::from(&spec.abs_path);
         let bundle = bundle_name(spec);
@@ -107,7 +112,7 @@ impl AcpTransport {
         let (handle, updates) = RpcHandle::spawn(cfg)
             .await
             .map_err(|e| anyhow::anyhow!("spawning RPC harness for bundle {bundle:?}: {e}"))?;
-        Ok((handle, dialect, updates, argv))
+        Ok((handle, dialect, updates, argv, resolved.harness))
     }
 
     fn endpoint_id(slug: &str) -> String {
@@ -149,24 +154,10 @@ impl AcpTransport {
 
     /// Open a fresh session and register it; returns the open descriptor.
     pub async fn open(&self, spec: &LaunchSpec) -> Result<AcpOpen> {
-        let (handle, dialect, updates, argv) = Self::spawn_child(spec).await?;
+        let (handle, dialect, updates, argv, harness) = Self::spawn_child(spec).await?;
         let cwd = std::path::PathBuf::from(&spec.abs_path);
-        let native_id = match dialect {
-            Dialect::Acp => {
-                let client = AcpClient::new(handle.clone());
-                client
-                    .initialize()
-                    .await
-                    .map_err(|e| anyhow::anyhow!("ACP initialize: {e}"))?;
-                client
-                    .session_new(&cwd)
-                    .await
-                    .map_err(|e| anyhow::anyhow!("ACP session/new: {e}"))?
-            }
-            Dialect::AppServer => {
-                thread_start_agent::open(&handle, &cwd, spec.native_agent.as_ref()).await?
-            }
-        };
+        let native_id =
+            open_session::open(&handle, dialect, &cwd, spec.native_agent.as_ref(), harness).await?;
         let endpoint_id = Self::endpoint_id(&spec.slug);
         let pid = handle.pid;
         register_child(&endpoint_id, handle, native_id.clone(), cwd, updates);
@@ -198,7 +189,7 @@ impl SessionTransport for AcpTransport {
         if resume.native_id.is_empty() {
             anyhow::bail!("session has no resume token (not resumable)");
         }
-        let (handle, dialect, updates, argv) = Self::spawn_child(spec).await?;
+        let (handle, dialect, updates, argv, _harness) = Self::spawn_child(spec).await?;
         let cwd = std::path::PathBuf::from(&spec.abs_path);
         match dialect {
             Dialect::Acp => {

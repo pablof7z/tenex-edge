@@ -32,12 +32,12 @@ pub(in crate::cli) struct LaunchArgs {
     session_name: Option<String>,
 }
 
-pub(super) struct LaunchRequest {
-    pub(super) agent: String,
-    pub(super) root: Option<String>,
-    pub(super) channel: Option<String>,
-    pub(super) session_name: Option<String>,
-    pub(super) prompt: Option<String>,
+pub(in crate::cli) struct LaunchRequest {
+    pub(in crate::cli) agent: String,
+    pub(in crate::cli) root: Option<String>,
+    pub(in crate::cli) channel: Option<String>,
+    pub(in crate::cli) session_name: Option<String>,
+    pub(in crate::cli) prompt: Option<String>,
 }
 
 pub(in crate::cli) async fn launch(args: LaunchArgs) -> Result<()> {

@@ -1,47 +1,5 @@
 use clap::{Args, Subcommand};
 
-#[derive(Subcommand)]
-pub(in crate::cli) enum AgentAction {
-    /// List the agents in this machine's local keystore.
-    List,
-    /// Add a local agent and select its required harness bundle.
-    ///
-    /// Repeat `--workspace <p>` to document the intended assignment. Per-workspace
-    /// roster scoping is not implemented yet; current roster publish advertises
-    /// every local capability to every workspace.
-    Add {
-        /// Agent slug ([A-Za-z0-9._-]).
-        slug: String,
-        /// Intended workspace assignment (repeatable). Currently triggers a
-        /// roster republish; per-workspace scoping is not implemented yet.
-        #[arg(long = "workspace", value_name = "WORKSPACE")]
-        workspaces: Vec<String>,
-        /// Harness bundle key from harnesses.json.
-        #[arg(long, value_name = "BUNDLE")]
-        harness: String,
-        /// Optional harness-native named profile.
-        #[arg(long, value_name = "PROFILE")]
-        profile: Option<String>,
-    },
-    /// Assign an existing local agent to one or more workspaces. Per-workspace
-    /// roster scoping is not implemented yet; this republished roster still
-    /// advertises every local capability to every workspace.
-    Assign {
-        /// Agent slug (must already exist in the local keystore).
-        slug: String,
-        /// Workspace to assign to (repeatable; at least one required).
-        #[arg(long = "workspace", value_name = "WORKSPACE", required = true)]
-        workspaces: Vec<String>,
-    },
-    /// Remove a local agent. Its key file is parked at `<slug>.json.removed`
-    /// (not deleted) so a mistake is recoverable; the agent stops being spawnable
-    /// and stops being auto-trusted on next read.
-    Remove {
-        /// Agent slug to remove.
-        slug: String,
-    },
-}
-
 /// `channel add` targets. Exactly one of two shapes: a human member by id
 /// (two positionals `<id> <channel>`) or an existing session pulled in
 /// (`--session <npub|hex|current-handle> <channel>`). Session mode takes ONE positional

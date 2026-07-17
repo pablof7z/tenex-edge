@@ -97,20 +97,116 @@ fn add_local_agent_creates_then_is_idempotent() {
 }
 
 #[test]
-fn remove_local_agent_parks_then_reports_missing() {
+fn remove_local_agent_permanently_unlinks_then_reports_missing() {
     let dir = tempfile::tempdir().unwrap();
     load_or_create(dir.path(), "coder", "codex", None, 1).unwrap();
     let live = dir.path().join("agents").join("coder.json");
     assert!(live.exists());
 
-    let parked = remove_local_agent(dir.path(), "coder").unwrap();
-    let parked = parked.expect("removing an existing agent returns the parked path");
+    assert!(remove_local_agent(dir.path(), "coder").unwrap());
     assert!(!live.exists(), "live key file is gone");
-    assert!(parked.exists(), "key is parked, not unlinked");
+    assert!(!dir.path().join("agents/coder.json.removed").exists());
     assert!(list_local_agent_details(dir.path()).is_empty());
     assert!(list_local_pubkeys(dir.path()).is_empty());
 
-    assert!(remove_local_agent(dir.path(), "coder").unwrap().is_none());
+    assert!(!remove_local_agent(dir.path(), "coder").unwrap());
+}
+
+#[test]
+fn structured_save_transitions_identity_mode_and_preserves_owned_fields() {
+    let dir = tempfile::tempdir().unwrap();
+    add_local_agent(dir.path(), "coder", "codex-pty", Some("reviewer"), 10).unwrap();
+    set_local_agent_byline(dir.path(), "coder", Some("  Reviews changes  ".into())).unwrap();
+
+    let (durable, created) = save_local_agent(
+        dir.path(),
+        "coder",
+        LocalAgentUpdate {
+            harness: "codex-app".into(),
+            profile: None,
+            per_session_key: Some(false),
+            byline: None,
+        },
+        99,
+    )
+    .unwrap();
+    assert!(!created);
+    assert!(!durable.per_session_key);
+    let durable_pubkey = durable.pubkey_hex().expect("durable key generated");
+    let path = dir.path().join("agents/coder.json");
+    let stored: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(stored["created_at"], 10);
+    assert_eq!(stored["byline"], "Reviews changes");
+    assert_eq!(stored["harness"], "codex-app");
+    assert_eq!(stored["public_key"], durable_pubkey);
+    let keys = Keys::parse(stored["secret_key"].as_str().unwrap()).unwrap();
+    assert_eq!(keys.public_key().to_hex(), durable_pubkey);
+
+    let (preserved, _) = save_local_agent(
+        dir.path(),
+        "coder",
+        LocalAgentUpdate {
+            harness: "codex-app".into(),
+            profile: None,
+            per_session_key: None,
+            byline: Some(None),
+        },
+        100,
+    )
+    .unwrap();
+    assert!(!preserved.per_session_key);
+    assert_eq!(
+        preserved.pubkey_hex().as_deref(),
+        Some(durable_pubkey.as_str())
+    );
+    assert!(list_local_agent_details(dir.path())[0].byline.is_none());
+
+    let (per_session, _) = save_local_agent(
+        dir.path(),
+        "coder",
+        LocalAgentUpdate {
+            harness: "codex-pty".into(),
+            profile: Some("reviewer".into()),
+            per_session_key: Some(true),
+            byline: Some(Some("  New role  ".into())),
+        },
+        101,
+    )
+    .unwrap();
+    assert!(per_session.per_session_key);
+    assert!(per_session.keys.is_none());
+    let stored: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    assert_eq!(stored["created_at"], 10);
+    assert_eq!(stored["byline"], "New role");
+    assert!(stored.get("secret_key").is_none());
+    assert!(stored.get("public_key").is_none());
+}
+
+#[test]
+fn structured_save_can_create_a_durable_agent_directly() {
+    let dir = tempfile::tempdir().unwrap();
+    let (agent, created) = save_local_agent(
+        dir.path(),
+        "chief",
+        LocalAgentUpdate {
+            harness: "claude-acp".into(),
+            profile: None,
+            per_session_key: Some(false),
+            byline: Some(Some("Coordinates work".into())),
+        },
+        7,
+    )
+    .unwrap();
+
+    assert!(created);
+    assert!(!agent.per_session_key);
+    assert!(agent.keys.is_some());
+    assert_eq!(
+        list_local_agent_details(dir.path())[0].byline.as_deref(),
+        Some("Coordinates work")
+    );
 }
 
 fn mgmt_secret() -> SecretKey {

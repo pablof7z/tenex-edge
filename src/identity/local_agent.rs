@@ -1,9 +1,9 @@
-use super::{
-    agents_dir, atomic_write, key_path, normalize_optional_config_name, validate_config_name,
-    validate_slug, AgentIdentity, StoredKey,
-};
+use super::{agents_dir, atomic_write, key_path, validate_slug, AgentIdentity, StoredKey};
 use anyhow::{bail, Context, Result};
-use std::path::{Path, PathBuf};
+use std::path::Path;
+
+mod save;
+pub use save::{save_local_agent, LocalAgentUpdate};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentLaunchConfig {
@@ -11,16 +11,17 @@ pub struct AgentLaunchConfig {
     pub profile: Option<String>,
 }
 
-/// A local agent as listed by `mosaico mgmt agent list`: its slug, hex pubkey, and
+/// A local agent as listed by `mosaico agents`: its slug, hex pubkey, and
 /// configured launch selection. Distinct from `list_local_agents` (which the
 /// roster path uses) in that it also surfaces the pubkey for the operator.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocalAgent {
     pub slug: String,
     pub pubkey: Option<String>,
     pub per_session_key: bool,
     pub harness: String,
     pub profile: Option<String>,
+    pub byline: Option<String>,
 }
 
 /// Every agent in the local keystore (their hex pubkeys). Your own fleet trusts
@@ -159,13 +160,17 @@ pub fn list_local_agent_details(mosaico_home: &Path) -> Vec<LocalAgent> {
             }
             match std::fs::read_to_string(&path) {
                 Ok(s) => match serde_json::from_str::<StoredKey>(&s) {
-                    Ok(k) => out.push(LocalAgent {
-                        slug: k.slug,
-                        pubkey: k.public_key,
-                        per_session_key: k.per_session_key,
-                        harness: k.harness,
-                        profile: k.profile,
-                    }),
+                    Ok(k) => {
+                        let byline = k.effective_byline();
+                        out.push(LocalAgent {
+                            slug: k.slug,
+                            pubkey: k.public_key,
+                            per_session_key: k.per_session_key,
+                            harness: k.harness,
+                            profile: k.profile,
+                            byline,
+                        });
+                    }
                     Err(e) => tracing::warn!(
                         path = %path.display(),
                         error = %e,
@@ -193,59 +198,17 @@ pub fn add_local_agent(
     profile: Option<&str>,
     now: u64,
 ) -> Result<(AgentIdentity, bool)> {
-    validate_slug(slug)?;
-    let harness = validate_config_name("harness", harness)?;
-    let profile = normalize_optional_config_name("profile", profile)?;
-    let path = key_path(mosaico_home, slug);
-    if path.exists() {
-        let s = std::fs::read_to_string(&path)
-            .with_context(|| format!("reading key {}", path.display()))?;
-        let mut stored: StoredKey =
-            serde_json::from_str(&s).with_context(|| format!("parsing key {}", path.display()))?;
-        let keys = stored.identity_keys()?;
-        if stored.drop_redundant_session_key() {
-            tracing::info!(slug, path = %path.display(), "removed redundant per-session agent key");
-        }
-        stored.harness = harness;
-        stored.profile = profile;
-        let body = serde_json::to_string_pretty(&stored)?;
-        atomic_write(&path, &body)?;
-        return Ok((
-            AgentIdentity {
-                slug: slug.to_string(),
-                keys,
-                per_session_key: stored.per_session_key,
-                harness: stored.harness,
-                profile: stored.profile,
-            },
-            false,
-        ));
-    }
-
-    let stored = StoredKey {
-        slug: slug.to_string(),
-        secret_key: None,
-        public_key: None,
-        created_at: now,
-        byline: None,
-        per_session_key: true,
-        harness,
-        profile,
-    };
-    std::fs::create_dir_all(agents_dir(mosaico_home))
-        .with_context(|| format!("creating {}", agents_dir(mosaico_home).display()))?;
-    let body = serde_json::to_string_pretty(&stored)?;
-    atomic_write(&path, &body)?;
-    Ok((
-        AgentIdentity {
-            slug: slug.to_string(),
-            keys: None,
-            per_session_key: stored.per_session_key,
-            harness: stored.harness,
-            profile: stored.profile,
+    save_local_agent(
+        mosaico_home,
+        slug,
+        LocalAgentUpdate {
+            harness: harness.to_string(),
+            profile: profile.map(str::to_string),
+            per_session_key: None,
+            byline: None,
         },
-        true,
-    ))
+        now,
+    )
 }
 
 /// Load the exact bundle/profile selection for a configured agent.
@@ -279,15 +242,13 @@ pub fn set_local_agent_byline(home: &Path, slug: &str, byline: Option<String>) -
     atomic_write(&path, &body)?;
     Ok(())
 }
-/// Soft-delete the keystore file so a mistaken removal is recoverable.
-pub fn remove_local_agent(mosaico_home: &Path, slug: &str) -> Result<Option<PathBuf>> {
+/// Permanently delete the configured agent file.
+pub fn remove_local_agent(mosaico_home: &Path, slug: &str) -> Result<bool> {
     validate_slug(slug)?;
     let path = key_path(mosaico_home, slug);
     if !path.exists() {
-        return Ok(None);
+        return Ok(false);
     }
-    let parked = path.with_extension("json.removed");
-    std::fs::rename(&path, &parked)
-        .with_context(|| format!("parking {} -> {}", path.display(), parked.display()))?;
-    Ok(Some(parked))
+    std::fs::remove_file(&path).with_context(|| format!("deleting {}", path.display()))?;
+    Ok(true)
 }

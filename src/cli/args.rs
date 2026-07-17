@@ -1,6 +1,7 @@
 use clap::{Args, Command, CommandFactory, Parser, Subcommand};
 
-use super::admin::{AgentAction, ChannelAction};
+use super::admin::ChannelAction;
+use super::agents::AgentsArgs;
 use super::debug::DebugAction;
 use super::dispatch::DispatchArgs;
 use super::harness::HarnessAction;
@@ -44,7 +45,7 @@ fn command_for_context(in_agent: bool) -> Command {
     let visible: &[&str] = if in_agent {
         &["wait", "dispatch", "my"]
     } else {
-        &["who", "sessions", "mgmt", "launch"]
+        &["who", "sessions", "agents", "launch"]
     };
     for sub in cmd.get_subcommands_mut() {
         if visible.contains(&sub.get_name()) {
@@ -91,12 +92,9 @@ pub(super) enum Cmd {
     /// Block until matching chat arrives or the timeout passes.
     #[command(hide = true)]
     Wait(WaitArgs),
-    /// Manage local setup and operator-owned configuration.
+    /// Launch, configure, or remove local agents and harness profiles.
     #[command(hide = true)]
-    Mgmt {
-        #[command(subcommand)]
-        action: MgmtAction,
-    },
+    Agents(AgentsArgs),
     /// Start an agent session on a backend/workspace and hand it a message after ACK.
     #[command(hide = true)]
     Dispatch(DispatchArgs),
@@ -149,18 +147,6 @@ pub(super) enum DaemonAction {
     Restart,
     /// Stop the daemon and prevent hooks from restarting it.
     Stop,
-}
-
-#[derive(Subcommand)]
-pub(super) enum MgmtAction {
-    /// Manage the local agent keystore: agents that have a private key on THIS
-    /// machine under `<mosaico_home>/agents/<slug>.json`. These are the identities
-    /// you can spawn locally; channel membership is governed separately by the
-    /// codec (e.g. the channel group's member list), not here.
-    Agent {
-        #[command(subcommand)]
-        action: AgentAction,
-    },
 }
 
 #[cfg(test)]

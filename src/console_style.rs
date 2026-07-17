@@ -1,5 +1,23 @@
 //! Shared semantic console colors.
 
+use crate::session::Harness;
+
+/// Stable colors for harness-owned surfaces. Unlike workspace colors these are
+/// semantic, not hashed: a Claude label should look identical in every picker.
+pub(crate) fn harness_color_index(harness: Harness) -> u8 {
+    match harness {
+        Harness::ClaudeCode => 208,
+        Harness::Codex => 45,
+        Harness::Opencode => 141,
+        Harness::Grok => 75,
+        Harness::Unknown => 245,
+    }
+}
+
+pub(crate) fn harness_ratatui_color(harness: Harness) -> ratatui::style::Color {
+    ratatui::style::Color::Indexed(harness_color_index(harness))
+}
+
 /// Bright, readable hues that do not overlap busy/success green, warning
 /// yellow, or failure red. The workspace root id, not its display name, owns
 /// the color so renames do not make a project visually jump.
@@ -52,5 +70,15 @@ mod tests {
     fn plain_render_does_not_emit_terminal_escapes() {
         assert_eq!(paint_workspace("mosaico", "root", false), "mosaico");
         assert!(paint_workspace("mosaico", "root", true).contains("\u{1b}[38;5;"));
+    }
+
+    #[test]
+    fn harness_colors_are_fixed_semantic_colors() {
+        assert_eq!(harness_color_index(Harness::Codex), 45);
+        assert_eq!(harness_color_index(Harness::Codex), 45);
+        assert_ne!(
+            harness_color_index(Harness::Codex),
+            harness_color_index(Harness::ClaudeCode)
+        );
     }
 }

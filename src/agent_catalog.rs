@@ -218,6 +218,19 @@ impl NativeAgentProfile {
     }
 }
 
+/// Permanently delete one exact, already-discovered native profile source file.
+///
+/// Callers resolve the profile through the catalog first, which disambiguates
+/// same-named profiles by harness and scope without accepting an arbitrary path.
+pub fn remove_native_profile(profile: &NativeAgentProfile) -> Result<bool> {
+    match std::fs::remove_file(&profile.path) {
+        Ok(()) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error)
+            .with_context(|| format!("deleting native agent profile {}", profile.path.display())),
+    }
+}
+
 fn profile_key(profile: &NativeAgentProfile) -> (String, String, String) {
     (
         profile.slug.clone(),

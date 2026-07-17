@@ -1,6 +1,5 @@
 use super::*;
 
-mod agent;
 mod args;
 mod channel_add;
 mod channel_create;
@@ -9,8 +8,7 @@ mod doctor;
 mod tail;
 
 // Re-exports for cli.rs callers
-pub use agent::agent;
-pub(super) use args::{AgentAction, ChannelAction};
+pub(super) use args::ChannelAction;
 pub use channels::channels;
 pub use doctor::doctor;
 pub use tail::parse_since;

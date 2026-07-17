@@ -18,6 +18,7 @@ use std::time::{Duration, Instant};
 
 mod acp_smoke;
 mod admin;
+mod agents;
 mod args;
 mod context;
 mod debug;
@@ -40,7 +41,7 @@ mod who;
 #[cfg(test)]
 use admin::{parse_since, render_tail_event};
 pub use args::{print_help_all, print_help_contextual, Cli};
-use args::{Cmd, DaemonAction, MgmtAction};
+use args::{Cmd, DaemonAction};
 pub(crate) fn select_agent_env(active: Option<String>) -> Option<String> {
     active.filter(|s| !s.is_empty())
 }
@@ -104,9 +105,7 @@ pub async fn run(cli: Cli) -> Result<()> {
         Cmd::Sessions => interactive::session_picker::sessions().await,
         Cmd::Channel { action } => admin::channels(action).await,
         Cmd::Wait(args) => messaging::wait(args).await,
-        Cmd::Mgmt { action } => match action {
-            MgmtAction::Agent { action } => admin::agent(action).await,
-        },
+        Cmd::Agents(args) => agents::agents(args).await,
         Cmd::Dispatch(args) => dispatch::dispatch(args).await,
         Cmd::Harness { action } => harness::harness(action).await,
         Cmd::Launch(args) => launch_cli::launch(args).await,

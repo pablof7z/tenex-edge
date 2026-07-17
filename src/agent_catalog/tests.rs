@@ -216,3 +216,33 @@ fn opencode_uses_filename_and_excludes_non_root_agents() {
     assert!(catalog.resolve("worker", None, None).is_err());
     assert!(catalog.resolve("retired", None, None).is_err());
 }
+
+#[test]
+fn removal_unlinks_only_the_exact_resolved_harness_profile() {
+    let home = TempDir::new().unwrap();
+    let codex = home.path().join(".codex/agents/reviewer.toml");
+    let claude = home.path().join(".claude/agents/reviewer.md");
+    write(
+        &codex,
+        "name='reviewer'\ndescription='review'\ndeveloper_instructions='review'",
+    );
+    write(
+        &claude,
+        "---\nname: reviewer\ndescription: review\n---\nReview",
+    );
+    let catalog = AgentCatalog::discover(&roots(home.path()), &[]).unwrap();
+    let claude_profile = catalog
+        .resolve("reviewer", None, Some(Harness::ClaudeCode))
+        .unwrap();
+
+    assert!(remove_native_profile(&claude_profile).unwrap());
+    assert!(!claude.exists());
+    assert!(codex.exists());
+    assert!(!remove_native_profile(&claude_profile).unwrap());
+
+    let refreshed = AgentCatalog::discover(&roots(home.path()), &[]).unwrap();
+    assert_eq!(
+        refreshed.resolve("reviewer", None, None).unwrap().harness,
+        Harness::Codex
+    );
+}

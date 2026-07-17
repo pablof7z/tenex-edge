@@ -74,7 +74,7 @@ fn menu_rows_are_aligned_single_line_and_bounded() {
                 harness: crate::session::Harness::Codex,
                 use_criteria: String::new(),
                 available_since: 0,
-                source: crate::agent_inventory::AgentSource::Harness,
+                source: crate::agent_inventory::AgentSource::DefaultAgent,
                 persist_binding: false,
             },
         ],
@@ -83,12 +83,18 @@ fn menu_rows_are_aligned_single_line_and_bounded() {
 
     let usage = AgentUsageMap::new();
     let agents = ordered_agents(&inventory, &usage);
-    let rows = menu_rows(&agents);
+    let rows = menu_rows(&agents, &usage, 100);
 
-    assert_eq!(rows[0].plain(), "codex            Codex harness");
+    assert_eq!(rows[0].plain(), "codex  Generic Codex agent");
+    assert_eq!(
+        rows[0].description_harness,
+        Some(crate::session::Harness::Codex)
+    );
     assert!(!rows[1].plain().contains('\n'));
-    assert!(rows[1].detail.ends_with('…'));
-    assert!(rows[1].plain().chars().count() <= MAX_NAME_CHARS + 2 + MAX_DETAIL_CHARS);
+    assert!(rows[1]
+        .description
+        .starts_with("Drafts revises and publishes"));
+    assert_eq!(rows[1].provenance, None);
 }
 
 #[test]
@@ -100,7 +106,7 @@ fn recent_count_then_last_use_determine_agent_order() {
         harness: crate::session::Harness::Codex,
         use_criteria: String::new(),
         available_since: 0,
-        source: crate::agent_inventory::AgentSource::Harness,
+        source: crate::agent_inventory::AgentSource::DefaultAgent,
         persist_binding: false,
     };
     let inventory = crate::agent_inventory::AgentInventory {
@@ -131,7 +137,61 @@ fn recent_count_then_last_use_determine_agent_order() {
         .collect::<Vec<_>>();
 
     assert_eq!(ordered, ["grok", "writer-codex", "codex"]);
-    let rows = menu_rows(&ordered_agents(&inventory, &usage));
-    assert_eq!(rows[0].detail, "Codex harness");
-    assert!(rows.iter().all(|row| !row.detail.contains("uses / 30d")));
+    let rows = menu_rows(&ordered_agents(&inventory, &usage), &usage, 100);
+    assert_eq!(rows[0].description, "Generic Codex agent");
+    assert_eq!(rows[0].usage.as_deref(), Some("3 uses / 30d · just now"));
+    assert!(rows.iter().all(|row| row.provenance.is_none()));
+}
+
+#[test]
+fn native_profile_description_precedes_colored_harness_provenance() {
+    let agent = crate::agent_inventory::AvailableAgent {
+        slug: "writer".into(),
+        agent_slug: "writer".into(),
+        bundle: "claude-pty".into(),
+        harness: crate::session::Harness::ClaudeCode,
+        use_criteria: "Drafts release notes".into(),
+        available_since: 0,
+        source: crate::agent_inventory::AgentSource::NativeProfile,
+        persist_binding: false,
+    };
+
+    let row = menu_row(&agent, &AgentUsageMap::new(), 100);
+
+    assert_eq!(row.description, "Drafts release notes");
+    assert_eq!(row.description_harness, None);
+    assert_eq!(
+        row.provenance,
+        Some(AgentProvenance {
+            label: "Claude profile".into(),
+            harness: crate::session::Harness::ClaudeCode,
+        })
+    );
+    assert_eq!(row.plain(), "writer  Drafts release notes · Claude profile");
+}
+
+#[test]
+fn configured_agent_uses_byline_or_generic_configured_description_without_provenance() {
+    let configured = |criteria: &str| crate::agent_inventory::AvailableAgent {
+        slug: "writer".into(),
+        agent_slug: "writer".into(),
+        bundle: "claude-pty".into(),
+        harness: crate::session::Harness::ClaudeCode,
+        use_criteria: criteria.into(),
+        available_since: 0,
+        source: crate::agent_inventory::AgentSource::Configured,
+        persist_binding: false,
+    };
+
+    let described = menu_row(
+        &configured("Drafts release notes"),
+        &AgentUsageMap::new(),
+        100,
+    );
+    let generic = menu_row(&configured(""), &AgentUsageMap::new(), 100);
+
+    assert_eq!(described.description, "Drafts release notes");
+    assert_eq!(generic.description, "Configured agent");
+    assert!(described.provenance.is_none());
+    assert!(generic.provenance.is_none());
 }

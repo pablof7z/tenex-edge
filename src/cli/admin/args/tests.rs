@@ -1,7 +1,6 @@
 use super::*;
 use clap::{error::ErrorKind, Parser};
 
-mod agent;
 mod channel_send;
 
 fn parse_err(args: &[&str]) -> clap::Error {

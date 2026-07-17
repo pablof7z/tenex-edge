@@ -126,7 +126,7 @@ async fn live_opencode_roundtrip_and_resume() {
     let client = AcpClient::new(handle.clone());
 
     client.initialize().await.expect("initialize");
-    let session_id = client.session_new(&cwd).await.expect("session/new");
+    let session_id = client.session_new(&cwd, None).await.expect("session/new");
     eprintln!("session_id = {session_id}");
 
     // Drain updates in the background to prove chunks arrive.
