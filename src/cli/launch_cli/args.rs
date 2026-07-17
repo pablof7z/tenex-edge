@@ -4,8 +4,8 @@ use std::io::{self, Read as _};
 
 #[derive(Args)]
 pub(in crate::cli) struct LaunchArgs {
-    /// Agent, native profile combination, or configured harness. Omit to list
-    /// every available launch target.
+    /// Agent, native profile combination, or configured harness. Omit to choose
+    /// from every available launch target.
     #[arg(index = 1)]
     slug: Option<String>,
     /// Opening user prompt to inject into the fresh session. Use "-" to read
@@ -41,8 +41,12 @@ pub(super) struct LaunchRequest {
 }
 
 pub(in crate::cli) async fn launch(args: LaunchArgs) -> Result<()> {
-    let Some(slug) = args.slug else {
-        return super::selection::list_available();
+    let slug = match args.slug {
+        Some(slug) => slug,
+        None => match super::selection::select_available()? {
+            Some(slug) => slug,
+            None => return Ok(()),
+        },
     };
     let prompt = resolve_initial_prompt(args.prompt)?;
     super::verbs::launch(LaunchRequest {
@@ -117,7 +121,7 @@ mod tests {
     }
 
     #[test]
-    fn launch_without_agent_lists_available_targets() {
+    fn launch_without_agent_opens_available_target_selection() {
         let cli = crate::cli::args::Cli::try_parse_from(["mosaico", "launch"])
             .expect("launch without agent parses");
         match cli.cmd {

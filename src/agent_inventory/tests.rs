@@ -86,3 +86,25 @@ fn configured_binding_collapses_profile_conflicts() {
     assert!(inventory.find("writer-codex").is_none());
     assert!(inventory.find("writer-claude").is_none());
 }
+
+#[test]
+fn invalid_same_named_agent_does_not_shadow_available_harness() {
+    let home = tempfile::tempdir().unwrap();
+    let catalog = AgentCatalog::discover(&DiscoveryRoots::for_user_home(home.path()), &[]).unwrap();
+    let harnesses: HarnessesConfig =
+        serde_json::from_str(r#"{"codex-pty":{"harness":"codex","transport":"pty"}}"#).unwrap();
+    crate::identity::add_local_agent(home.path(), "codex", "codex", None, 10).unwrap();
+
+    let inventory =
+        AgentInventory::build(home.path(), &[Harness::Codex], &harnesses, &catalog, None);
+
+    let codex = inventory
+        .find("codex")
+        .expect("bare harness remains available");
+    assert_eq!(codex.source, AgentSource::Harness);
+    assert_eq!(codex.bundle, "codex-pty");
+    assert!(inventory
+        .failures
+        .iter()
+        .any(|failure| failure.contains("codex")));
+}

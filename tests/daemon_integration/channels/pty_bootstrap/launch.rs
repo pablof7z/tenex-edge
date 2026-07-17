@@ -85,7 +85,7 @@ fn launch_command_resolves_discovered_claude_profile_without_agent_json() {
 }
 
 #[test]
-fn launch_lists_and_starts_available_harness_without_agent_json() {
+fn launch_lists_and_starts_harness_despite_invalid_same_named_agent() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let home = Home::new();
     write_config(&home, false);
@@ -97,6 +97,14 @@ fn launch_lists_and_starts_available_harness_without_agent_json() {
     std::fs::write(
         home.dir.path().join("harnesses.json"),
         r#"{"opencode-pty":{"harness":"opencode","transport":"pty","args":["forever"]}}"#,
+    )
+    .unwrap();
+    mosaico::identity::add_local_agent(
+        home.dir.path(),
+        "opencode",
+        "opencode",
+        None,
+        mosaico::util::now_secs(),
     )
     .unwrap();
     let channel = unique_session("launch-bare-harness");
@@ -135,7 +143,8 @@ fn launch_lists_and_starts_available_harness_without_agent_json() {
         .find(|meta| meta.agent == "opencode")
         .expect("launched bare opencode harness metadata");
     assert_eq!(meta.command, ["opencode", "forever"]);
-    assert!(!home.dir.path().join("agents/opencode.json").exists());
+    let stale = mosaico::identity::agent_launch_config(home.dir.path(), "opencode").unwrap();
+    assert_eq!(stale.harness, "opencode");
 
     let cleanup = PtyCleanup(meta.id);
     drop(cleanup);

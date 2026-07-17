@@ -28,100 +28,88 @@ pub(super) fn resolve_agent_source(
 ) -> Result<ResolvedSource> {
     let home = crate::config::mosaico_home();
     let cfg = crate::harness::HarnessesConfig::load()?;
-    let (identity, bundle, profile, native_profile, retired_advertisements) =
-        if crate::identity::is_configured(&home, slug) {
+    let catalog = state.agent_catalog();
+    let inventory = crate::agent_inventory::AgentInventory::build(
+        &home,
+        state.available_harnesses(),
+        &cfg,
+        &catalog,
+        Some(workspace),
+    );
+    let selected = inventory.find(slug).cloned().with_context(|| {
+        let choices = inventory.profile_choices(slug);
+        if choices.is_empty() {
+            format!("no available agent or harness named {slug:?}")
+        } else {
+            format!(
+                "agent {slug:?} is available from multiple harnesses; choose {}",
+                choices
+                    .iter()
+                    .map(|choice| choice.slug.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" or ")
+            )
+        }
+    })?;
+    let (identity, bundle, profile, native_profile, retired_advertisements) = match selected.source
+    {
+        crate::agent_inventory::AgentSource::Configured => {
             let identity = crate::identity::load(&home, slug)?;
-            let bundle = identity.harness.clone();
+            let bundle = selected.bundle;
             let profile = identity.profile.clone();
-            let harness = crate::harness::bundle_harness_with(&cfg, &bundle)
-                .with_context(|| format!("resolving harness for configured agent {slug:?}"))?;
             let native_profile = profile
                 .is_none()
                 .then(|| {
                     state
-                        .resolve_native_agent(slug, Some(workspace), Some(harness))
+                        .resolve_native_agent(slug, Some(workspace), Some(selected.harness))
                         .ok()
                 })
                 .flatten();
             (identity, bundle, profile, native_profile, Vec::new())
-        } else {
-            let catalog = state.agent_catalog();
-            let inventory = crate::agent_inventory::AgentInventory::build(
-                &home,
-                state.available_harnesses(),
-                &cfg,
-                &catalog,
+        }
+        crate::agent_inventory::AgentSource::Harness => (
+            crate::identity::AgentIdentity::per_session(&selected.agent_slug, &selected.bundle),
+            selected.bundle,
+            None,
+            None,
+            Vec::new(),
+        ),
+        crate::agent_inventory::AgentSource::NativeProfile => {
+            let native_profile = state.resolve_native_agent(
+                &selected.agent_slug,
                 Some(workspace),
-            );
-            let selected = inventory.find(slug).with_context(|| {
-                let choices = inventory.profile_choices(slug);
-                if choices.is_empty() {
-                    format!("no available agent or harness named {slug:?}")
-                } else {
-                    format!(
-                        "agent {slug:?} is available from multiple harnesses; choose {}",
-                        choices
-                            .iter()
-                            .map(|choice| choice.slug.as_str())
-                            .collect::<Vec<_>>()
-                            .join(" or ")
-                    )
-                }
-            })?;
-            match selected.source {
-                crate::agent_inventory::AgentSource::Harness => (
-                    crate::identity::AgentIdentity::per_session(
-                        &selected.agent_slug,
-                        &selected.bundle,
-                    ),
-                    selected.bundle.clone(),
+                Some(selected.harness),
+            )?;
+            let retired = if selected.persist_binding {
+                inventory
+                    .profile_choices(&selected.agent_slug)
+                    .into_iter()
+                    .map(|choice| choice.slug.clone())
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            };
+            let identity = if selected.persist_binding {
+                crate::identity::add_local_agent(
+                    &home,
+                    &selected.agent_slug,
+                    &selected.bundle,
                     None,
-                    None,
-                    Vec::new(),
-                ),
-                crate::agent_inventory::AgentSource::NativeProfile => {
-                    let native_profile = state.resolve_native_agent(
-                        &selected.agent_slug,
-                        Some(workspace),
-                        Some(selected.harness),
-                    )?;
-                    let retired = if selected.persist_binding {
-                        inventory
-                            .profile_choices(&selected.agent_slug)
-                            .into_iter()
-                            .map(|choice| choice.slug.clone())
-                            .collect::<Vec<_>>()
-                    } else {
-                        Vec::new()
-                    };
-                    let identity = if selected.persist_binding {
-                        crate::identity::add_local_agent(
-                            &home,
-                            &selected.agent_slug,
-                            &selected.bundle,
-                            None,
-                            crate::util::now_secs(),
-                        )?
-                        .0
-                    } else {
-                        crate::identity::AgentIdentity::per_session(
-                            &selected.agent_slug,
-                            &selected.bundle,
-                        )
-                    };
-                    (
-                        identity,
-                        selected.bundle.clone(),
-                        None,
-                        Some(native_profile),
-                        retired,
-                    )
-                }
-                crate::agent_inventory::AgentSource::Configured => {
-                    unreachable!("configured agent inventory entry was not backed by agent JSON")
-                }
-            }
-        };
+                    crate::util::now_secs(),
+                )?
+                .0
+            } else {
+                crate::identity::AgentIdentity::per_session(&selected.agent_slug, &selected.bundle)
+            };
+            (
+                identity,
+                selected.bundle,
+                None,
+                Some(native_profile),
+                retired,
+            )
+        }
+    };
     let native_agent = native_profile
         .as_ref()
         .map(|profile| profile.activation())
