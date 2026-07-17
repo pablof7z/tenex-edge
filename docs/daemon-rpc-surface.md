@@ -95,16 +95,32 @@ exits non-zero unless the refusal is `already_wrapped`.
 
 ### `who`
 ```jsonc
-params: {"workspace": "…"|null, "all_workspaces": bool, "cwd": "/path"}
-result: {"now": u64, "fabric_human": "…"|null,
-         "rows": [ {source, fresh, slug, channel, status, host,
-                    pubkey, age_secs}, … ]}
+params: {"workspace": "…"|null, "all_workspaces": bool, "cwd": "/path"|null,
+         "human_color": bool, "expired": false}
+result: {
+  "root": "…", "now": u64,
+  "rows": [{
+    "source": "Local"|"Peer",
+    "state": "working"|"idle"|"suspended"|"offline",
+    "slug": "…", "channel": "…", "status": "…", "activity": "…",
+    "dormant": bool, "host": "…", "age_secs": u64|null,
+    "rel_cwd": "…", "remote": bool,
+    "work_root": "…", "work_root_display": "…", "pubkey": "hex"
+  }, …],
+  "other_roots": [{"root": "…", "agent_count": N,
+                    "agents": ["…", …], "about": "…"|null}, …],
+  "spawnable": [{"host": "…", "slug": "…", "command": "…",
+                  "byline": "…"|null}, …],
+  "channel_parent": "…"|null, "root_display": "…"
+}
 ```
-Human/operator-only live fabric projection. It returns terminal-oriented
-`fabric_human` text and never returns agent XML. Exact session anchors and loose
-agent/group hints are rejected with guidance to use `my_session`. Its snapshot
-and `my_session`'s XML tree project the same canonical `WhoAggregation` store
-read, so channel, session-state, capability, and live-status rules cannot drift.
+The normal snapshot result above is the exact serde shape of `WhoSnapshot`; the
+nested row, other-root, and spawnable fields are exhaustive. The RPC may add a
+top-level `fabric_human` string for terminal rendering. `expired: true` selects the alternate
+`{"expired": [{"agent_slug", "pubkey", "npub", "handle", "host", "channel",
+"last_seen", "resumable"}, …]}` result. The live snapshot and `my_session`'s XML
+tree project the same canonical `WhoAggregation` store read, so channel,
+session-state, capability, and live-status rules cannot drift.
 
 ### `agent_inventory`
 ```jsonc
@@ -117,6 +133,31 @@ result: {"agents": [{"slug": "…", "agent_slug": "…", "harness": "…",
 Daemon-owned projection of durable keystore agents and detected native/PATH
 capabilities. CLI listing and launch selection consume this RPC and never scan
 the keystore, harness configuration, or native profile directories themselves.
+
+### `agent_save`
+```jsonc
+params: {"slug": "…", "harness": "…",
+         "profile": "…"|null, "per_session_key": bool|null}
+result: {"created": bool, "slug": "…", "harness": "…"}
+```
+Strict daemon-owned create/update of one durable agent configuration. `slug` and
+`harness` are required; `profile` and `per_session_key` may be omitted (the same
+as `null`). Unknown fields or wrong JSON types are rejected. Slugs accept only
+`[A-Za-z0-9._-]`; harness/profile names are trimmed and must be non-empty when
+present. A null/omitted profile clears the stored profile. A null/omitted
+`per_session_key` preserves an existing identity mode and defaults a new agent
+to per-session identity. `created` distinguishes create from update; the result
+returns the persisted slug and normalized harness.
+
+### `agent_remove`
+```jsonc
+params: {"slug": "…"}
+result: {"removed": bool}
+```
+Strict daemon-owned permanent removal. `slug` is the only accepted field and
+uses the same validation as `agent_save`; missing, unknown, or wrongly typed
+fields are rejected. `removed` is false only when no configured agent file
+exists for that slug.
 
 ### `my_session`
 ```jsonc
