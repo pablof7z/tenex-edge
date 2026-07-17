@@ -171,17 +171,10 @@ pub fn transport_kind_for_slug(slug: &str) -> Result<TransportKind> {
     transport_kind_for(&cfg, &launch.harness)
 }
 
-/// Map a fully-resolved raw [`Transport`] to its hosting [`TransportImpl`], with
-/// the defect #5 hard-bail on `HeadlessExec` (see [`select_transport`]).
 fn transport_impl_for(transport: Transport) -> Result<TransportImpl> {
     Ok(match transport {
         Transport::Acp | Transport::AppServer => TransportImpl::new(AcpTransport),
         Transport::Pty => TransportImpl::new(PtyTransport),
-        Transport::HeadlessExec => anyhow::bail!(
-            "headless-exec harness bundles are not yet wired into session hosting; \
-             refusing to launch (a one-shot exec argv must not run inside the \
-             interactive PTY supervisor — route it through session_host::exec once wired)"
-        ),
     })
 }
 
@@ -194,10 +187,6 @@ pub fn transport_kind_for(cfg: &HarnessesConfig, bundle: &str) -> Result<Transpo
     Ok(match harness::bundle_transport_with(cfg, bundle)? {
         Transport::Acp | Transport::AppServer => TransportKind::Acp,
         Transport::Pty => TransportKind::Pty,
-        Transport::HeadlessExec => anyhow::bail!(
-            "harness bundle {bundle:?} uses the headless-exec transport, which is not a \
-             hosted-session transport and must not be collapsed onto the PTY (defect #5)"
-        ),
     })
 }
 

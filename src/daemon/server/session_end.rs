@@ -32,7 +32,7 @@ pub(in crate::daemon::server) async fn end_runtime_generation(
 
     let ended_at = now_secs();
     cancel_session(state, pubkey);
-    record_ephemeral_claim(state, &rec);
+    record_resumable_claim(state, &rec);
     let ended = state.with_store(|store| {
         store.touch_session(pubkey, ended_at)?;
         store.mark_dead_if_generation(pubkey, runtime_generation)
@@ -225,9 +225,8 @@ fn endpoint_locator(
         })
 }
 
-fn record_ephemeral_claim(state: &Arc<DaemonState>, rec: &crate::state::Session) {
+fn record_resumable_claim(state: &Arc<DaemonState>, rec: &crate::state::Session) {
     if rec.channel_h.is_empty()
-        || !crate::session_host::agent_supports_headless_exec(&rec.agent_slug)
         || state
             .with_store(|store| store.native_resume_locator(&rec.pubkey))
             .ok()
@@ -248,7 +247,7 @@ fn record_ephemeral_claim(state: &Arc<DaemonState>, rec: &crate::state::Session)
         owner_host: state.host.clone(),
     };
     if let Err(error) = state.with_store(|store| store.upsert_session_claim(&claim)) {
-        tracing::warn!(pubkey = %rec.pubkey, error = %error, "failed to record session claim");
+        tracing::warn!(pubkey = %rec.pubkey, error = %error, "failed to record resumable claim");
     }
 }
 

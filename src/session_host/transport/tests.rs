@@ -21,8 +21,7 @@ fn configured_bundles_select_exact_transport() {
         r#"{
           "claude-pty":{"harness":"claude","transport":"pty"},
           "claude-acp":{"harness":"claude","transport":"acp"},
-          "codex-app":{"harness":"codex","transport":"app-server"},
-          "codex-exec":{"harness":"codex","transport":"headless-exec"}
+          "codex-app":{"harness":"codex","transport":"app-server"}
         }"#,
     )
     .unwrap();
@@ -38,7 +37,6 @@ fn configured_bundles_select_exact_transport() {
         select_transport_with(&cfg, "codex-app").unwrap().kind(),
         TransportKind::Acp
     );
-    assert!(select_transport_with(&cfg, "codex-exec").is_err());
 }
 
 #[test]

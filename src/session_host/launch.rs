@@ -212,7 +212,6 @@ fn build_driver_resume_command(
         }
         ResumeMechanism::AcpSessionLoad
         | ResumeMechanism::AppServerThreadResume
-        | ResumeMechanism::ExecReplay
         | ResumeMechanism::None => Ok(base.to_vec()),
     }
 }

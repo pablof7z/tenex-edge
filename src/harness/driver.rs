@@ -46,9 +46,6 @@ pub enum ResumeMechanism {
     AppendFlag(&'static str),
     /// PTY: insert `<sub> <id>` right after argv[0]. codex `resume`.
     Subcommand(&'static str),
-    /// Headless: replay the recorded native id through the harness's own resume
-    /// path (`codex exec resume <id>`, `opencode run --session <id>`).
-    ExecReplay,
     /// Not resumable.
     None,
 }
@@ -73,8 +70,6 @@ pub enum TurnModel {
     RpcTurn,
     /// Long-lived TTY; a turn is "text pasted + Enter", no completion signal.
     InteractivePty,
-    /// Process runs to exit; stdout is the whole turn.
-    OneShot,
 }
 
 /// How an agent's optional harness-specific profile name is applied.
@@ -113,16 +108,6 @@ static DRIVERS: &[HarnessDriver] = &[
         turn: TurnModel::RpcTurn,
         profile: ProfileMechanism::Unsupported,
     },
-    HarnessDriver {
-        harness: Harness::ClaudeCode,
-        transport: Transport::HeadlessExec,
-        base_argv: &["claude"],
-        base_env: &[],
-        resume: ResumeMechanism::AppendFlag("--resume"),
-        steer: SteerPrimitive::None,
-        turn: TurnModel::OneShot,
-        profile: ProfileMechanism::CliFlag { flag: "--agent" },
-    },
     // ── Codex ─────────────────────────────────────────────────────
     HarnessDriver {
         harness: Harness::Codex,
@@ -142,16 +127,6 @@ static DRIVERS: &[HarnessDriver] = &[
         resume: ResumeMechanism::Subcommand("resume"),
         steer: SteerPrimitive::PtyPaste,
         turn: TurnModel::InteractivePty,
-        profile: ProfileMechanism::CliFlag { flag: "--profile" },
-    },
-    HarnessDriver {
-        harness: Harness::Codex,
-        transport: Transport::HeadlessExec,
-        base_argv: &["codex"],
-        base_env: &[],
-        resume: ResumeMechanism::ExecReplay,
-        steer: SteerPrimitive::None,
-        turn: TurnModel::OneShot,
         profile: ProfileMechanism::CliFlag { flag: "--profile" },
     },
     // ── OpenCode ──────────────────────────────────────────────────
@@ -174,16 +149,6 @@ static DRIVERS: &[HarnessDriver] = &[
         resume: ResumeMechanism::AppendFlag("--session"),
         steer: SteerPrimitive::PtyPaste,
         turn: TurnModel::InteractivePty,
-        profile: ProfileMechanism::CliFlag { flag: "--agent" },
-    },
-    HarnessDriver {
-        harness: Harness::Opencode,
-        transport: Transport::HeadlessExec,
-        base_argv: &["opencode", "run", "--format", "json"],
-        base_env: &[],
-        resume: ResumeMechanism::AppendFlag("--session"),
-        steer: SteerPrimitive::None,
-        turn: TurnModel::OneShot,
         profile: ProfileMechanism::CliFlag { flag: "--agent" },
     },
     // ── Grok (PTY only, profile unknown) ──────────────────────────

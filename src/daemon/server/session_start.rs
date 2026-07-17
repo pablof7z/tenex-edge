@@ -12,7 +12,7 @@ mod runtime;
 
 use params::SessionStartParams;
 
-pub(crate) use bootstrap::{bootstrap_exec_session_start, bootstrap_pty_session_start};
+pub(crate) use bootstrap::bootstrap_pty_session_start;
 pub(in crate::daemon::server) use reservation::rpc_session_start;
 
 pub(super) async fn rpc_session_start_inner(

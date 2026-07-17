@@ -46,8 +46,6 @@ pub enum Transport {
     Acp,
     /// Codex `app-server`: its own JSON-RPC dialect.
     AppServer,
-    /// One-shot run-to-exit (`claude -p`, `codex exec`, `opencode run`).
-    HeadlessExec,
 }
 
 impl Transport {
@@ -56,7 +54,6 @@ impl Transport {
             Transport::Pty => "pty",
             Transport::Acp => "acp",
             Transport::AppServer => "app-server",
-            Transport::HeadlessExec => "headless-exec",
         }
     }
 }

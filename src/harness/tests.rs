@@ -40,6 +40,7 @@ fn config_accepts_only_harness_transport_and_args() {
         r#"{"x":{"harness":"claude","transport":"pty","profile":"reviewer"}}"#,
         r#"{"x":{"harness":"codex","transport":"app-server","codex_config_profile":"planner"}}"#,
         r#"{"x":{"harness":"claude","transport":"pty","commands":["claude"]}}"#,
+        r#"{"x":{"harness":"codex","transport":"headless-exec"}}"#,
     ] {
         assert!(serde_json::from_str::<HarnessesConfig>(removed).is_err());
     }

@@ -385,7 +385,7 @@ async fn hook_dispatch(
         "stop" => {
             if !sid.is_empty() {
                 turn_end(sid).await?;
-                class_b::inject_idle_nudge(&agent_slug);
+                class_b::inject_idle_nudge();
             }
         }
         other => {

@@ -17,8 +17,8 @@ fn dead_pid_is_never_revived() {
 }
 
 #[test]
-fn exec_session_revives_on_pid_alone() {
-    // No PTY socket => PID liveness is authoritative.
+fn session_without_pty_socket_revives_on_pid_alone() {
+    // A transport with no PTY socket uses process liveness.
     assert!(revive_decision(true, None));
 }
 

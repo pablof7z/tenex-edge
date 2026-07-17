@@ -40,34 +40,6 @@ pub(crate) async fn bootstrap_pty_session_start(
     private_run_for_public_response(state, &response)
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn bootstrap_exec_session_start(
-    state: &Arc<DaemonState>,
-    agent: &str,
-    harness: Harness,
-    cwd: &str,
-    channel: Option<&str>,
-    watch_pid: i32,
-    native_id: Option<&str>,
-    pubkey: &str,
-) -> Result<String> {
-    let response = rpc_session_start(
-        state,
-        &serde_json::json!({
-            "agent": agent,
-            "pubkey": pubkey,
-            "harness": harness.as_str(),
-            "cwd": cwd,
-            "channel": channel,
-            "watch_pid": watch_pid,
-            "harness_session": native_id,
-        }),
-        None,
-    )
-    .await?;
-    private_run_for_public_response(state, &response)
-}
-
 fn private_run_for_public_response(
     state: &Arc<DaemonState>,
     response: &serde_json::Value,
