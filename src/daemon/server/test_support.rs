@@ -62,6 +62,7 @@ impl DaemonState {
             cfg,
             host,
             owners,
+            agent_config: AgentConfigState::new(),
             catalog,
             runtime: SessionRuntimeState::new(),
             subscriptions: SubscriptionState::new(),

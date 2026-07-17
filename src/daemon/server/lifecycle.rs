@@ -78,6 +78,7 @@ pub async fn run() -> Result<()> {
         cfg,
         host,
         owners,
+        agent_config: AgentConfigState::new(),
         catalog: CatalogState::new(),
         runtime: SessionRuntimeState::new(),
         subscriptions: SubscriptionState::new(),

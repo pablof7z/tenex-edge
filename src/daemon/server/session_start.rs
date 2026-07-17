@@ -61,13 +61,15 @@ pub(super) async fn rpc_session_start_inner(
     {
         identity::AgentIdentity::per_session(&p.agent, harness.as_str())
     } else {
-        identity::load_or_create(
-            &mosaico_home,
-            &p.agent,
-            harness.as_str(),
-            p.profile.as_deref(),
-            now_secs(),
-        )?
+        state.mutate_agent_config(|| {
+            identity::load_or_create(
+                &mosaico_home,
+                &p.agent,
+                harness.as_str(),
+                p.profile.as_deref(),
+                now_secs(),
+            )
+        })?
     };
     let prepared = match located_pubkey.as_deref() {
         Some(pubkey) => load_session_identity(state, pubkey, &agent)?,

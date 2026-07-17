@@ -50,8 +50,8 @@ use orchestration_handler::handle_orchestration;
 use session_dispatch_handler::handle_session_dispatch;
 use session_records::{HostedAgent, PeerTracked, SessionHandle, StatusTailKey, StatusTailSnapshot};
 use state::{
-    CatalogState, ConnectionState, DedupState, ReconcilerState, SessionRuntimeState,
-    SubscriptionState,
+    AgentConfigState, CatalogState, ConnectionState, DedupState, ReconcilerState,
+    SessionRuntimeState, SubscriptionState,
 };
 /// Shared daemon state. Store guards span synchronous rusqlite calls, never `.await`.
 pub struct DaemonState {
@@ -62,6 +62,7 @@ pub struct DaemonState {
     cfg: Config,
     host: String,
     owners: Vec<String>,
+    agent_config: AgentConfigState,
     catalog: CatalogState,
     runtime: SessionRuntimeState,
     subscriptions: SubscriptionState,
@@ -85,6 +86,9 @@ impl DaemonState {
     pub(crate) fn with_store<R>(&self, f: impl FnOnce(&Store) -> R) -> R {
         let g = self.store.lock().expect("store mutex poisoned");
         f(&g)
+    }
+    pub(crate) fn mutate_agent_config<R>(&self, operation: impl FnOnce() -> R) -> R {
+        self.agent_config.mutate(operation)
     }
     /// The operator's whitelisted human pubkeys (config `whitelistedPubkeys`);
     /// classify a mention's sender as human vs agent for envelope presentation.
@@ -228,8 +232,8 @@ async fn dispatch(state: &Arc<DaemonState>, req: &Request) -> Response {
         "channel_remove_member" => rpc::rpc_channel_remove_member(state, &req.params).await,
         "operator_sessions" => operator_sessions::rpc_operator_sessions(state),
         "agent_inventory" => agent_discovery::rpc_agent_inventory(state, &req.params),
-        "agent_save" => agent_config::rpc_agent_save(&req.params),
-        "agent_remove" => agent_config::rpc_agent_remove(&req.params),
+        "agent_save" => agent_config::rpc_agent_save(&state.agent_config, &req.params),
+        "agent_remove" => agent_config::rpc_agent_remove(&state.agent_config, &req.params),
         "agent_usage" => agent_usage::rpc_agent_usage(state, &req.params),
         "pty_supervisor_exit" => rpc::rpc_pty_supervisor_exit(state, &req.params).await,
         "agent_roster_refresh" => rpc_agent_roster_refresh(state, &req.params),

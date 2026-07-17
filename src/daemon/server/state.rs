@@ -6,6 +6,24 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
 use tokio::sync::Notify;
 
+/// Serializes durable agent-record mutations owned by this daemon instance.
+pub(super) struct AgentConfigState {
+    mutation: Mutex<()>,
+}
+
+impl AgentConfigState {
+    pub(super) fn new() -> Self {
+        Self {
+            mutation: Mutex::new(()),
+        }
+    }
+
+    pub(super) fn mutate<R>(&self, operation: impl FnOnce() -> R) -> R {
+        let _guard = self.mutation.lock().expect("agent config mutex poisoned");
+        operation()
+    }
+}
+
 /// Native-agent and harness discovery owned by the catalog monitor.
 pub(super) struct CatalogState {
     pub(super) agents: Mutex<crate::agent_catalog::AgentCatalog>,

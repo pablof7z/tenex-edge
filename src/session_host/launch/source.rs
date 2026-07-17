@@ -84,14 +84,17 @@ pub(super) fn resolve_agent_source(
                     .collect::<Vec<_>>()
             });
             let identity = if persist_binding {
-                crate::identity::add_local_agent(
-                    &home,
-                    &selected.agent_slug,
-                    &bundle,
-                    None,
-                    crate::util::now_secs(),
-                )?
-                .0
+                state
+                    .mutate_agent_config(|| {
+                        crate::identity::add_local_agent(
+                            &home,
+                            &selected.agent_slug,
+                            &bundle,
+                            None,
+                            crate::util::now_secs(),
+                        )
+                    })?
+                    .0
             } else {
                 crate::identity::AgentIdentity::per_session(&selected.agent_slug, &bundle)
             };
