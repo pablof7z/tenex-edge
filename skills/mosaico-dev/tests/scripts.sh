@@ -32,6 +32,7 @@ write_lab_env() {
   {
     printf 'RUN_ID=%q\n' test-run
     printf 'WORK_DIR=%q\n' "${TMP}/work"
+    printf 'RELAY_WS=%q\n' ws://127.0.0.1:29999
     printf 'MOSAICO_CONTAINER_STATE=%q\n' "${state}"
   } >"${path}"
 }
@@ -141,10 +142,10 @@ WRITER_OUTPUT="$(
     MOSAICO_DEV_CODEX_CONFIG_PROFILE=planner \
     MOSAICO_DEV_CODEX_APP_SERVER_ARGS_JSON='["--strict-config"]' \
     bash "${SKILL}/scripts/write-container-profiles" "${WRITER_ENV}" \
-      claude-acp codex-app-server codex-ollama opencode-ollama
+      claude-acp codex-app-server grok codex-ollama opencode-ollama
 )"
 
-for profile in claude-acp codex-app-server codex-ollama opencode-ollama; do
+for profile in claude-acp codex-app-server grok codex-ollama opencode-ollama; do
   HARNESSES="${TMP}/container-state/${profile}/mosaico/harnesses.json"
   AGENT="$(find "${TMP}/container-state/${profile}/mosaico/agents" -type f -name '*.json')"
   CONFIG="${TMP}/container-state/${profile}/mosaico/config.json"
@@ -162,6 +163,9 @@ assert_json '.["claude-acp"] == {"harness":"claude-code","transport":"acp"}' \
 assert_json '.["codex-app-server"].args == ["--strict-config"]' \
   "${TMP}/container-state/codex-app-server/mosaico/harnesses.json" \
   'per-profile args JSON overrides defaults'
+assert_json '.["grok"] == {"harness":"grok","transport":"pty"}' \
+  "${TMP}/container-state/grok/mosaico/harnesses.json" \
+  'Grok profile emits a native PTY bundle'
 assert_json '.profile == "planner"' \
   "${TMP}/container-state/codex-app-server/mosaico/agents/codex.json" \
   'Codex named profile belongs to agent config'
@@ -173,12 +177,12 @@ assert_json '.["opencode-ollama"].args == ["-m","ollama/deepseek-r1:8b"]' \
   'OpenCode Ollama bundle owns model args'
 
 BACKEND_KEY_COUNT="$(
-  for profile in claude-acp codex-app-server codex-ollama opencode-ollama; do
+  for profile in claude-acp codex-app-server grok codex-ollama opencode-ollama; do
     jq -r '.mosaicoPrivateKey' \
       "${TMP}/container-state/${profile}/mosaico/config.json"
   done | sort -u | wc -l | tr -d ' '
 )"
-assert_eq 4 "${BACKEND_KEY_COUNT}" 'each profile has a distinct backend key'
+assert_eq 5 "${BACKEND_KEY_COUNT}" 'each profile has a distinct backend key'
 CLAUDE_BACKEND_BEFORE="$(<"${TMP}/writer-work/keys/claude-acp.nsec")"
 PATH="${TMP}/writer-bin:${PATH}" \
   NAK_COUNTER_FILE="${TMP}/nak-counter" \
@@ -209,6 +213,19 @@ grep -Fq 'expected an array of strings' <<<"${BAD_ARGS_OUTPUT}" \
   || fail 'invalid args JSON did not report the current contract'
 echo 'ok: profile writer rejects obsolete object-shaped bundle config'
 
+GROK_STATE="${TMP}/grok-state"
+GROK_ENV="${TMP}/grok.env"
+write_profile "${GROK_STATE}" grok grok pty
+write_lab_env "${GROK_ENV}" "${GROK_STATE}"
+GROK_OUTPUT="$(
+  PATH="${TMP}/launcher-bin:${PATH}" \
+    MOSAICO_DEV_PROMPT='inspect grok identity' \
+    bash "${SKILL}/scripts/launch-agent" "${GROK_ENV}" launch grok
+)"
+GROK_TAIL="$(printf '%s\n' "${GROK_OUTPUT}" | launch_tail | sed -n '1,3p')"
+assert_eq $'<launch>\n<grok>\n<inspect grok identity>' \
+  "${GROK_TAIL}" 'Grok uses the current PTY launch contract'
+
 HOST_HOME="${TMP}/host-home"
 STATE_DIR="${TMP}/host-auth-state"
 mkdir -p "${HOST_HOME}/.codex" "${STATE_DIR}/home/.codex"
@@ -227,6 +244,22 @@ if [[ -e "${STATE_DIR}/home/.codex/planner.config.toml" \
   fail 'removed host Codex profile left a stale staged symlink'
 fi
 echo 'ok: host auth removes stale named Codex profile symlinks'
+
+mkdir -p "${HOST_HOME}/.grok" "${STATE_DIR}/home/.grok"
+printf '{"token":"secret-test-value"}\n' >"${HOST_HOME}/.grok/auth.json"
+printf 'theme = "dark"\n' >"${HOST_HOME}/.grok/config.toml"
+export AGENT=grok
+stage_grok_state
+build_host_auth_mounts
+cmp -s "${HOST_HOME}/.grok/auth.json" "${STATE_DIR}/home/.grok/auth.json" \
+  || fail 'Grok auth was not copied into isolated state'
+cmp -s "${HOST_HOME}/.grok/config.toml" "${STATE_DIR}/home/.grok/config.toml" \
+  || fail 'Grok config was not copied into isolated state'
+[[ ! -L "${STATE_DIR}/home/.grok/auth.json" ]] \
+  || fail 'Grok auth must be writable isolated state, not a host symlink'
+[[ "${#HOST_AUTH_MOUNTS[@]}" -eq 0 ]] \
+  || fail 'Grok host auth unexpectedly exposed a host bind mount'
+echo 'ok: host auth copies Grok state without sharing the host file'
 
 mkdir -p "${TMP}/relay-bin" "${TMP}/croissant"
 cat >"${TMP}/relay-bin/curl" <<'EOF'
@@ -275,6 +308,35 @@ if kill -0 "${RELAY_PID}" 2>/dev/null; then
   fail "readiness failure leaked relay pid ${RELAY_PID}"
 fi
 echo 'ok: readiness failure reaps the relay process'
+
+cat >"${TMP}/relay-bin/curl" <<'EOF'
+#!/bin/sh
+exit 0
+EOF
+FOREGROUND_WORK="${TMP}/foreground-relay"
+PATH="${TMP}/relay-bin:${PATH}" \
+  MOSAICO_DEV_CROISSANT_DIR="${TMP}/croissant" \
+  MOSAICO_DEV_RELAY_HOST=127.0.0.1 \
+  MOSAICO_DEV_RELAY_PORT=29998 \
+  MOSAICO_DEV_RELAY_FOREGROUND=1 \
+  MOSAICO_DEV_WORK="${FOREGROUND_WORK}" \
+  bash "${SKILL}/scripts/start-croissant-relay" \
+    >"${TMP}/foreground-relay.out" 2>&1 &
+FOREGROUND_HELPER_PID=$!
+for _ in 1 2 3 4 5; do
+  [[ -s "${FOREGROUND_WORK}/relay.pid" ]] && break
+  sleep 1
+done
+[[ -s "${FOREGROUND_WORK}/relay.pid" ]] \
+  || fail 'foreground relay did not write its pid file'
+FOREGROUND_RELAY_PID="$(cat "${FOREGROUND_WORK}/relay.pid")"
+kill -0 "${FOREGROUND_HELPER_PID}" 2>/dev/null \
+  || fail 'foreground relay helper returned instead of remaining yielded'
+kill "${FOREGROUND_RELAY_PID}"
+wait "${FOREGROUND_HELPER_PID}"
+grep -Fq 'relay_foreground=1' "${TMP}/foreground-relay.out" \
+  || fail 'foreground relay did not report its persistent mode'
+echo 'ok: foreground relay mode remains yielded until cleanup stops the relay'
 
 bash -n "${SKILL}"/scripts/* "${ROOT}/containers/mosaico/doctor" \
   "${ROOT}/containers/mosaico/host-auth.bash"

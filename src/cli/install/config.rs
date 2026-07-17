@@ -15,6 +15,7 @@ pub struct Harness {
 
 pub fn harnesses() -> Result<Vec<Harness>> {
     let home = home_dir()?;
+    let grok_home = grok_home_dir(std::env::var("GROK_HOME").ok(), &home);
     let available = crate::config::detect_available_harnesses()?;
     Ok(vec![
         Harness {
@@ -38,7 +39,7 @@ pub fn harnesses() -> Result<Vec<Harness>> {
         Harness {
             id: "grok",
             display: "Grok Build",
-            config_path: home.join(".grok/user-settings.json"),
+            config_path: grok_home.join("hooks/mosaico.json"),
             detected: available.contains(&crate::session::Harness::Grok),
         },
     ])
@@ -56,6 +57,13 @@ fn home_dir_from_env(home: Option<String>) -> Result<PathBuf> {
         );
     };
     Ok(PathBuf::from(home))
+}
+
+fn grok_home_dir(grok_home: Option<String>, home: &std::path::Path) -> PathBuf {
+    grok_home
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home.join(".grok"))
 }
 
 pub(super) fn claude_detected() -> Result<bool> {
@@ -167,5 +175,19 @@ mod tests {
             assert!(err.contains("HOME is not set"));
             assert!(err.contains("MOSAICO_HOME only controls"));
         }
+    }
+
+    #[test]
+    fn grok_home_honors_override_and_defaults_under_home() {
+        let home = PathBuf::from("/Users/alice");
+        assert_eq!(
+            grok_home_dir(Some("/tmp/grok".to_string()), &home),
+            PathBuf::from("/tmp/grok")
+        );
+        assert_eq!(grok_home_dir(None, &home), home.join(".grok"));
+        assert_eq!(
+            grok_home_dir(Some(String::new()), &home),
+            home.join(".grok")
+        );
     }
 }

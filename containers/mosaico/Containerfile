@@ -48,6 +48,16 @@ RUN mkdir -p /opt/claude \
 # download before the JSON-RPC handshake.
 RUN npm install --global @agentclientprotocol/claude-agent-acp
 
+ARG GROK_VERSION=0.2.102
+RUN curl -fsSL https://x.ai/cli/install.sh \
+    | HOME=/opt/grok GROK_BIN_DIR=/usr/local/bin bash -s "${GROK_VERSION}"
+
+# Grok's terminal tool starts a login shell that may replace PATH. Keep the
+# profile-local build reachable at a stable system path for injected commands.
+RUN printf '#!/usr/bin/env bash\nexec /state/target/debug/mosaico "$@"\n' \
+      > /usr/local/bin/mosaico \
+    && chmod +x /usr/local/bin/mosaico
+
 WORKDIR /workspace
 
 ENV HOME=/state/home \
@@ -57,6 +67,7 @@ ENV HOME=/state/home \
     CARGO_HOME=/state/cargo \
     CARGO_TARGET_DIR=/state/target \
     CODEX_HOME=/state/home/.codex \
+    GROK_HOME=/state/home/.grok \
     MOSAICO_CONFIG=/state/mosaico/config.json \
     MOSAICO_HOME=/state/mosaico \
     MOSAICO_BIN=/state/target/debug/mosaico \

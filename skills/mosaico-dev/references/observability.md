@@ -126,6 +126,10 @@ Use it for SessionStart, prompt/context injection, Stop/PostToolUse, installed
 hook paths, and stale hook configuration. If its TUI cannot open, use daemon and
 relay logs instead.
 
+For Grok, also inspect `.container-state/grok/home/.grok/hooks/mosaico.json` and
+confirm hook commands name `grok`, not `claude-code`. Correlate the hook process
+with the launched PTY PID before treating it as session provenance.
+
 Explain a published artifact with the current diagnostic path:
 
 ```bash

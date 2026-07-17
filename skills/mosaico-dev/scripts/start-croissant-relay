@@ -141,6 +141,11 @@ if ! wait_for_relay "${RELAY_HTTP}" "${MOSAICO_DEV_RELAY_READY_TIMEOUT:-20}"; th
   echo "relay did not become ready: ${RELAY_HTTP}" >&2
   exit 1
 fi
+if ! kill -0 "$(cat "${RELAY_PID_FILE}")" 2>/dev/null; then
+  tail -80 "${RELAY_LOG}" >&2 || true
+  echo "relay exited immediately after readiness: ${RELAY_HTTP}" >&2
+  exit 1
+fi
 
 {
   quote_env RUN_ID "${RUN_ID}"
@@ -164,3 +169,8 @@ echo "env=${ENV_FILE}"
 echo "relay=${RELAY_WS}"
 echo "relay_pid=$(cat "${RELAY_PID_FILE}")"
 echo "owner_pubkey=${OWNER_PK:0:12}"
+
+if [[ "${MOSAICO_DEV_RELAY_FOREGROUND:-0}" == "1" ]]; then
+  echo "relay_foreground=1"
+  wait "$(cat "${RELAY_PID_FILE}")" || true
+fi

@@ -23,7 +23,20 @@ before opening an agent UI.
 skills/mosaico-dev/scripts/start-croissant-relay
 ```
 
-Keep its emitted environment path:
+If the runner reaps background descendants, set
+`MOSAICO_DEV_RELAY_FOREGROUND=1` and clean up from another terminal.
+
+Expected output:
+
+```text
+run_id=...
+env=/tmp/.../mosaico-live-lab-.../lab.env
+relay=ws://192.168.64.1:<auto-port>
+relay_pid=...
+owner_pubkey=...
+```
+
+Keep the printed env path:
 
 ```bash
 LAB_ENV=/tmp/mosaico-live-lab-.../lab.env
@@ -47,7 +60,7 @@ Multi-provider lab:
 
 ```bash
 skills/mosaico-dev/scripts/write-container-profiles "${LAB_ENV}" \
-  claude claude-acp codex codex-app-server opencode opencode-acp
+  claude claude-acp codex codex-app-server grok opencode opencode-acp
 ```
 
 Each profile receives:
@@ -119,6 +132,9 @@ MOSAICO_DEV_PROMPT="Run mosaico my session." \
 The bundle's `transport: "pty"` selects portable PTY hosting. The current launch
 surface is `mosaico launch <target> [prompt]`; provider flags must already be in
 bundle `args`. Use the attached terminal for UI evidence.
+
+Use `grok-pty-lab.md` for native Grok hook provenance and p-tagged injection
+proof.
 
 ### ACP/app-server launch
 

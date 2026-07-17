@@ -148,6 +148,21 @@ stage_codex_named_profiles() {
   done
 }
 
+stage_grok_state() {
+  if [[ "${HOST_AUTH}" != "1" || "${AGENT}" != "grok" ]]; then
+    return 0
+  fi
+
+  stage_auth_copy "${HOST_HOME}/.grok/auth.json" \
+    "${STATE_DIR}/home/.grok/auth.json"
+  if [[ -f "${HOST_HOME}/.grok/config.toml" ]]; then
+    stage_auth_copy "${HOST_HOME}/.grok/config.toml" \
+      "${STATE_DIR}/home/.grok/config.toml"
+  else
+    rm -f "${STATE_DIR}/home/.grok/config.toml"
+  fi
+}
+
 build_host_auth_mounts() {
   HOST_AUTH_MOUNTS=()
   case "${AGENT}" in
@@ -156,6 +171,9 @@ build_host_auth_mounts() {
       ;;
     codex)
       add_required_auth_dir_mount "${HOST_HOME}/.codex" "/host-auth/codex"
+      ;;
+    grok)
+      # Grok state is copied into the writable isolated profile before launch.
       ;;
     opencode)
       add_required_auth_dir_mount \
@@ -219,6 +237,7 @@ stage_host_auth() {
   case "${AGENT}" in
     claude) stage_claude_auth ;;
     codex) stage_codex_auth ;;
+    grok) stage_grok_state ;;
     opencode) stage_opencode_auth ;;
     *)
       echo "unsupported host-auth agent: ${AGENT}" >&2

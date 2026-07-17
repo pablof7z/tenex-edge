@@ -18,7 +18,8 @@ auth files. Report a missing host path or failed provider check.
 
 Codex staging includes base auth/config and top-level named `*.config.toml`
 files. Claude may source current OAuth state from the macOS Keychain. OpenCode
-uses its staged XDG config/data homes.
+uses its staged XDG config/data homes. Grok copies `auth.json` and optional
+`config.toml` into writable isolated `GROK_HOME` without mutating host files.
 
 ## State boundary
 
@@ -110,7 +111,7 @@ translation are code-owned. Unknown bundle fields fail parsing.
 
 ```bash
 skills/mosaico-dev/scripts/write-container-profiles "${LAB_ENV}" \
-  claude claude-acp codex codex-app-server opencode opencode-acp \
+  claude claude-acp codex codex-app-server grok opencode opencode-acp \
   codex-ollama opencode-ollama
 ```
 
@@ -127,6 +128,7 @@ Every profile has an exact JSON-array override:
 | `claude-acp` | `MOSAICO_DEV_CLAUDE_ACP_ARGS_JSON` |
 | `codex` | `MOSAICO_DEV_CODEX_ARGS_JSON` |
 | `codex-app-server` | `MOSAICO_DEV_CODEX_APP_SERVER_ARGS_JSON` |
+| `grok` | `MOSAICO_DEV_GROK_ARGS_JSON` |
 | `opencode` | `MOSAICO_DEV_OPENCODE_ARGS_JSON` |
 | `opencode-acp` | `MOSAICO_DEV_OPENCODE_ACP_ARGS_JSON` |
 | `codex-ollama` | `MOSAICO_DEV_CODEX_OLLAMA_ARGS_JSON` |
@@ -190,6 +192,9 @@ Doctor performs the Cargo build, installs the relevant Mosaico integration, and
 checks provider auth plus transport tools. Structured smoke additionally proves
 the configured RPC bundle. Do not use unsupported top-level version flags as a
 prewarm shortcut.
+
+For Grok, doctor must also verify `${GROK_HOME}/hooks/mosaico.json`; follow it
+with the direct one-turn auth check in `grok-pty-lab.md`.
 
 ## Reporting
 
