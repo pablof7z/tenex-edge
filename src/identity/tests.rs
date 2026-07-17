@@ -1,6 +1,7 @@
 use super::*;
 
 mod byline;
+mod record_validation;
 
 #[test]
 fn creates_then_reloads_keyless_agent_config() {
@@ -59,26 +60,6 @@ fn per_session_key_defaults_true_and_can_select_durable_mode() {
     assert!(!durable.per_session_key);
     assert!(default.pubkey_hex().is_none());
     assert_eq!(durable.pubkey_hex(), Some(keys.public_key().to_hex()));
-}
-
-#[test]
-fn loading_ordinary_agent_scrubs_legacy_redundant_key_fields() {
-    let dir = tempfile::tempdir().unwrap();
-    load_or_create(dir.path(), "coder", "codex", None, 1).unwrap();
-    let path = dir.path().join("agents/coder.json");
-    let keys = Keys::generate();
-    let mut config: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    config["secret_key"] = serde_json::json!(keys.secret_key().to_secret_hex());
-    config["public_key"] = serde_json::json!(keys.public_key().to_hex());
-    std::fs::write(&path, serde_json::to_string_pretty(&config).unwrap()).unwrap();
-
-    let loaded = load(dir.path(), "coder").unwrap();
-    assert!(loaded.keys.is_none());
-    let scrubbed: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
-    assert!(scrubbed.get("secret_key").is_none());
-    assert!(scrubbed.get("public_key").is_none());
 }
 
 #[test]

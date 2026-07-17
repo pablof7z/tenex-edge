@@ -36,8 +36,7 @@ struct StoredKey {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     byline: Option<String>,
     /// When false, this persisted key signs every fresh session for the agent.
-    /// The default keeps the normal per-session derived-key contract.
-    #[serde(default = "default_per_session_key", rename = "perSessionKey")]
+    #[serde(rename = "perSessionKey")]
     per_session_key: bool,
     /// Required bundle name in `~/.mosaico/harnesses.json`.
     harness: String,
@@ -45,10 +44,6 @@ struct StoredKey {
     /// the configured `(harness, transport)` driver.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     profile: Option<String>,
-}
-
-const fn default_per_session_key() -> bool {
-    true
 }
 
 impl StoredKey {
@@ -65,7 +60,12 @@ impl StoredKey {
 fn read_stored_key(path: &Path) -> Result<StoredKey> {
     let body = std::fs::read_to_string(path)
         .with_context(|| format!("reading agent record {}", path.display()))?;
-    serde_json::from_str(&body).with_context(|| format!("parsing agent record {}", path.display()))
+    let stored: StoredKey = serde_json::from_str(&body)
+        .with_context(|| format!("parsing agent record {}", path.display()))?;
+    stored
+        .identity_keys()
+        .with_context(|| format!("validating agent record {}", path.display()))?;
+    Ok(stored)
 }
 
 /// A resolved agent identity plus its launch bundle/profile selection.
@@ -132,12 +132,8 @@ pub fn load_or_create(
     let profile = normalize_optional_config_name("profile", profile)?;
     let path = key_path(mosaico_home, slug);
     if path.exists() {
-        let mut stored = read_stored_key(&path)?;
+        let stored = read_stored_key(&path)?;
         let keys = stored.identity_keys()?;
-        if stored.drop_redundant_session_key() {
-            atomic_write(&path, &serde_json::to_string_pretty(&stored)?)?;
-            tracing::info!(slug, path = %path.display(), "removed redundant per-session agent key");
-        }
         return Ok(AgentIdentity {
             slug: slug.to_string(),
             keys,
@@ -176,12 +172,8 @@ pub fn load_or_create(
 pub fn load(mosaico_home: &Path, slug: &str) -> Result<AgentIdentity> {
     validate_slug(slug)?;
     let path = key_path(mosaico_home, slug);
-    let mut stored = read_stored_key(&path)?;
+    let stored = read_stored_key(&path)?;
     let keys = stored.identity_keys()?;
-    if stored.drop_redundant_session_key() {
-        atomic_write(&path, &serde_json::to_string_pretty(&stored)?)?;
-        tracing::info!(slug, path = %path.display(), "removed redundant per-session agent key");
-    }
     Ok(AgentIdentity {
         slug: stored.slug,
         keys,
@@ -194,6 +186,9 @@ pub fn load(mosaico_home: &Path, slug: &str) -> Result<AgentIdentity> {
 impl StoredKey {
     fn identity_keys(&self) -> Result<Option<Keys>> {
         if self.per_session_key {
+            if self.secret_key.is_some() || self.public_key.is_some() {
+                bail!("perSessionKey:true forbids secret_key and public_key");
+            }
             return Ok(None);
         }
         let secret = self
@@ -213,15 +208,6 @@ impl StoredKey {
             );
         }
         Ok(Some(keys))
-    }
-
-    fn drop_redundant_session_key(&mut self) -> bool {
-        if !self.per_session_key || (self.secret_key.is_none() && self.public_key.is_none()) {
-            return false;
-        }
-        self.secret_key = None;
-        self.public_key = None;
-        true
     }
 }
 
