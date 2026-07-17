@@ -47,10 +47,13 @@ git -C "${SEED}" commit -m current >/dev/null
 git -C "${SEED}" push origin master >/dev/null
 EXPECTED="$(git -C "${SEED}" rev-parse HEAD)"
 
-FAKE_BIN="${TMP}/bin"
 TEST_HOME="${TMP}/home"
+FAKE_BIN="${TEST_HOME}/.cargo/bin"
 LOG="${TMP}/commands.log"
-mkdir -p "${FAKE_BIN}" "${TEST_HOME}/.claude" "${TEST_HOME}/.local/bin"
+mkdir -p "${FAKE_BIN}" "${TEST_HOME}/.claude" "${TEST_HOME}/.local/bin" \
+  "${TEST_HOME}/.agents/skills/mosaico-dev"
+printf 'stale copied skill\n' \
+  >"${TEST_HOME}/.agents/skills/mosaico-dev/STALE"
 
 cat >"${FAKE_BIN}/just" <<'EOF'
 #!/usr/bin/env bash
@@ -112,6 +115,8 @@ MOSAICO_FLEET_LOCAL_REPO="${LOCAL_REPO}" \
 [[ "$(cd "${TEST_HOME}/.agents/skills/mosaico-dev" && pwd -P)" \
   == "$(cd "${REMOTE_REPO}/skills/mosaico-dev" && pwd -P)" ]] \
   || fail 'mosaico-dev skill did not resolve to the current checkout'
+[[ -L "${TEST_HOME}/.agents/skills/mosaico-dev" ]] \
+  || fail 'stale copied development skill was not replaced with a symlink'
 [[ -f "${TEST_HOME}/.agents/skills/mosaico-dev/references/grok-pty-lab.md" ]] \
   || fail 'installed development skill is incomplete'
 assert_contains 'fleet verified: local + 1 remote host(s)' "${OUTPUT}" \
@@ -134,3 +139,18 @@ set -e
 [[ "${DIRTY_STATUS}" -ne 0 ]] || fail 'dirty checkout unexpectedly passed'
 assert_contains 'has local changes' "${TMP}/dirty-output" \
   'dirty checkout failure is actionable'
+
+rm "${LOCAL_REPO}/DIRTY"
+git -C "${LOCAL_REPO}" switch -c topic >/dev/null
+set +e
+HOME="${TEST_HOME}" \
+PATH="${FAKE_BIN}:${PATH}" \
+FLEET_FAKE_MOSAICO="${FAKE_BIN}/mosaico-fake" \
+FLEET_TEST_LOG="${LOG}" \
+MOSAICO_FLEET_LOCAL_REPO="${LOCAL_REPO}" \
+  bash "${SCRIPT}" >"${TMP}/branch-output" 2>&1
+BRANCH_STATUS=$?
+set -e
+[[ "${BRANCH_STATUS}" -ne 0 ]] || fail 'non-master checkout unexpectedly passed'
+assert_contains "is on 'topic', expected master" "${TMP}/branch-output" \
+  'non-master checkout failure is actionable'

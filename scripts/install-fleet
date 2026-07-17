@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Non-interactive SSH shells commonly omit user and Homebrew tool directories.
+export PATH="${HOME}/.cargo/bin:${HOME}/.local/bin:/opt/homebrew/bin:/usr/local/bin:${PATH}"
+
 usage() {
   cat <<'EOF'
 Usage: scripts/install-fleet [SSH_TARGET[=ABSOLUTE_REPO] ...]
