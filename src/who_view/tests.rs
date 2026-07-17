@@ -127,6 +127,49 @@ fn lists_global_agents_and_compacts_other_workspaces() {
 }
 
 #[test]
+fn agent_about_is_compact_and_bounded() {
+    let store = seed();
+    let long_about = format!("Routes\\narchitecture work {}", "carefully ".repeat(40));
+    store
+        .replace_agent_roster(&AgentRoster {
+            backend_pubkey: "long-pk".into(),
+            host: "laptop".into(),
+            slug: "architect".into(),
+            use_criteria: long_about,
+            channels: vec!["alpha".into()],
+            updated_at: 2,
+        })
+        .unwrap();
+    let roots = vec!["alpha".to_string()];
+    let xml = render_agent_who(
+        &store,
+        AgentWhoInput {
+            roots: &roots,
+            self_name: "quill-peak-369-codex",
+            self_pubkey: "self-pk",
+            local_host: "laptop",
+            backend_pubkey: "backend-pk",
+            now: 100,
+            headless: false,
+            expanded_workspaces: &BTreeSet::from(["alpha".to_string()]),
+        },
+    );
+    let start = xml.find("<agent name=\"architect\"").unwrap();
+    let row = &xml[start..xml[start..].find(" />").map(|end| start + end).unwrap()];
+    let about = row
+        .split_once("about=\"")
+        .unwrap()
+        .1
+        .split_once('"')
+        .unwrap()
+        .0;
+
+    assert!(!about.contains("\\n"), "{about}");
+    assert!(about.chars().count() <= crate::agent_about::AGENT_ABOUT_MAX_CHARS);
+    assert!(about.ends_with('…'), "{about}");
+}
+
+#[test]
 fn workspace_carries_root_members_and_membership_gated_children() {
     let xml = render(false);
     assert!(

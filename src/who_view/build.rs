@@ -39,8 +39,9 @@ fn available_agents(store: &Store, local_host: &str) -> Vec<AvailableAgent> {
         } else {
             format!("{}@{}", row.slug, row.host)
         };
+        let about = crate::agent_about::for_injection(&row.use_criteria);
         grouped
-            .entry((row.backend_pubkey, name, row.use_criteria))
+            .entry((row.backend_pubkey, name, about))
             .or_default()
             .insert(
                 store
