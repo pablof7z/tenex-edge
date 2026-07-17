@@ -36,7 +36,7 @@ pub(super) async fn rpc_session_start_inner(
         .map(std::path::PathBuf::from)
         .unwrap_or(std::env::current_dir()?);
     state.refresh_agent_catalog()?;
-    let work_root = crate::workspace::resolve(&cwd).unwrap_or_default();
+    let work_root = crate::daemon::workspace_path::channel_for_path(&cwd).unwrap_or_default();
     let rel_cwd = crate::workspace::rel_cwd(&cwd);
     runtime::bind_workspace(state, &cwd, &work_root)?;
     let harness_name = harness.as_str();

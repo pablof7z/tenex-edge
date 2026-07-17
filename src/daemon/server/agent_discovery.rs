@@ -1,7 +1,7 @@
 use super::DaemonState;
 use crate::agent_catalog::{AgentCatalog, DiscoveryRoots, NativeAgentProfile};
 use crate::session::Harness;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -10,6 +10,30 @@ const REFRESH_INTERVAL: Duration = Duration::from_secs(3);
 
 pub(crate) struct CatalogChange {
     pub(crate) removed_slugs: Vec<String>,
+}
+
+pub(in crate::daemon::server) fn rpc_agent_inventory(
+    state: &Arc<DaemonState>,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value> {
+    #[derive(serde::Deserialize)]
+    struct Params {
+        #[serde(default)]
+        cwd: Option<PathBuf>,
+    }
+
+    let params: Params =
+        serde_json::from_value(params.clone()).context("agent_inventory params")?;
+    state.refresh_agent_catalog()?;
+    let harnesses = crate::harness::HarnessesConfig::load()?;
+    let inventory = crate::agent_inventory::AgentInventory::build(
+        &crate::config::mosaico_home(),
+        &state.installed_harnesses(),
+        &harnesses,
+        &state.agent_catalog(),
+        params.cwd.as_deref(),
+    );
+    Ok(serde_json::to_value(inventory)?)
 }
 
 impl DaemonState {
@@ -123,6 +147,7 @@ pub(super) fn start_monitor(state: Arc<DaemonState>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_env::EnvGuard;
     use tempfile::TempDir;
 
     #[test]
@@ -145,5 +170,32 @@ mod tests {
         )
         .unwrap();
         assert_eq!(catalog.capabilities(Some(workspace.path())).len(), 1);
+    }
+
+    #[tokio::test]
+    async fn rpc_serves_durable_inventory_without_a_cli_keystore_read() {
+        let root = TempDir::new().unwrap();
+        let mosaico_home = root.path().join(".mosaico");
+        std::fs::create_dir_all(&mosaico_home).unwrap();
+        std::fs::write(
+            mosaico_home.join("harnesses.json"),
+            r#"{"codex-pty":{"harness":"codex","transport":"pty"}}"#,
+        )
+        .unwrap();
+        let mut env = EnvGuard::set("HOME", root.path());
+        env.set_var("MOSAICO_HOME", &mosaico_home);
+        env.set_var("MOSAICO_ISOLATED_HOME_OK", "1");
+        crate::identity::add_local_agent(&mosaico_home, "writer", "codex-pty", None, 7).unwrap();
+        let state = DaemonState::new_for_test().await;
+
+        let value =
+            rpc_agent_inventory(&state, &serde_json::json!({ "cwd": root.path() })).unwrap();
+        let inventory: crate::agent_inventory::AgentInventory =
+            serde_json::from_value(value).unwrap();
+        let writer = inventory.find("writer").expect("durable writer");
+        assert!(matches!(
+            writer.source,
+            crate::agent_inventory::AgentSource::Durable { .. }
+        ));
     }
 }

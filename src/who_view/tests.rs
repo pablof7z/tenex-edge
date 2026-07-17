@@ -100,6 +100,7 @@ fn render(expand_beta: bool) -> String {
             expanded_workspaces: &expanded_workspaces,
         },
     )
+    .unwrap()
 }
 
 #[test]

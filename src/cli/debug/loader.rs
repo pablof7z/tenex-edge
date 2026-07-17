@@ -147,11 +147,8 @@ fn enrich_pane_scope_from_store(pane: &mut SessionPane, store: &crate::state::St
         .map(|(channel, _)| channel_display_label(store, channel))
         .collect();
     if let Some((channel, _)) = channels.first() {
-        let workspace = store
-            .root_channel_of(channel)
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| channel.to_string());
+        let workspace = crate::daemon::workspace_path::WorkspacePathResolver::new(store)
+            .root_for_channel(channel);
         pane.root = channel_display_label(store, &workspace);
     }
 }

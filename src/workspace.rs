@@ -13,8 +13,9 @@
 //!      exit 0 silently; explicit CLI verbs print a "run `mosaico channel
 //!      init` or `git init`" message and exit non-zero.
 //!
-//! The map at `~/.mosaico/workspaces.json` is the single source of truth for
-//! non-git workspaces.
+//! These are path-discovery inputs to the daemon-owned
+//! `daemon::workspace_path` resolver. They do not answer channel→path queries;
+//! the resolver binds the discovered root to the host-local store.
 
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
@@ -23,8 +24,8 @@ use std::process::Command;
 /// Error returned by [`resolve`]. Carries the working directory that had no
 /// resolvable workspace, so callers can format a helpful message.
 #[derive(Debug)]
-pub struct NoWorkspace {
-    pub cwd: PathBuf,
+pub(crate) struct NoWorkspace {
+    pub(crate) cwd: PathBuf,
 }
 
 impl std::fmt::Display for NoWorkspace {
@@ -39,7 +40,7 @@ impl std::error::Error for NoWorkspace {}
 ///
 /// Returns the slug, or [`NoWorkspace`] when the cwd is not in a git repo and is
 /// not registered in `~/.mosaico/workspaces.json` (nor any ancestor of it).
-pub fn resolve(cwd: &Path) -> std::result::Result<String, NoWorkspace> {
+pub(crate) fn resolve(cwd: &Path) -> std::result::Result<String, NoWorkspace> {
     // 1. git repo name (shared across all worktrees of the same repo).
     if let Some(root) = git_toplevel(cwd) {
         if let Some(name) = basename(&root) {
@@ -61,7 +62,7 @@ pub fn resolve(cwd: &Path) -> std::result::Result<String, NoWorkspace> {
 ///   1. the git repo root (derived from git-common-dir, shared across worktrees),
 ///   2. the nearest ancestor (or cwd itself) present in `workspaces.json`,
 ///   3. else `None`.
-pub fn workspace_dir(cwd: &Path) -> Option<PathBuf> {
+pub(crate) fn workspace_dir(cwd: &Path) -> Option<PathBuf> {
     if let Some(root) = git_toplevel(cwd) {
         return Some(root);
     }
@@ -88,7 +89,7 @@ pub fn rel_cwd(cwd: &Path) -> String {
 /// `Display` form is the user-facing "no known workspace … run `mosaico
 /// channel init` or `git init`" message. For the explicit-CLI-verb path only;
 /// hooks should call [`resolve`] and exit 0 on `Err`.
-pub fn resolve_or_bail(cwd: &Path) -> Result<String> {
+pub(crate) fn resolve_or_bail(cwd: &Path) -> Result<String> {
     resolve(cwd).map_err(|e| {
         anyhow::anyhow!(
             "{e}; run `mosaico channel init` or `git init` first, or pass `--workspace <slug>`"

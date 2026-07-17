@@ -2,17 +2,7 @@ use super::StoreReader;
 
 /// Top-level work-root for `scope`.
 pub(super) fn work_root_for(store: StoreReader<'_>, scope: &str) -> String {
-    store
-        .root_channel_of(scope)
-        .unwrap_or_else(|e| {
-            tracing::error!(
-                channel = %scope,
-                error = ?e,
-                "who snapshot: channel ancestry lookup failed walking work-root"
-            );
-            None
-        })
-        .unwrap_or_else(|| scope.to_string())
+    crate::daemon::workspace_path::root_for_reader(store, scope)
 }
 
 pub(super) fn scope_contains_channel(store: StoreReader<'_>, current: &str, scope: &str) -> bool {

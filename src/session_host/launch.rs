@@ -44,7 +44,10 @@ pub(super) fn workspace_abs_path(
         // write is dropped, a later resume falls into the "no workspace" branch and
         // we'd spawn in the wrong directory. Propagate the failure, don't swallow.
         state
-            .with_store(|s| s.upsert_workspace(channel, &abs, now))
+            .with_store(|s| {
+                crate::daemon::workspace_path::WorkspacePathResolver::new(s)
+                    .bind_root_path(channel, cwd, now)
+            })
             .with_context(|| format!("recording workspace path for {channel:?}"))?;
         state
             .refresh_agent_catalog()
@@ -56,7 +59,9 @@ pub(super) fn workspace_abs_path(
     // land the agent in the wrong directory. Fail loud on a read error or
     // missing row.
     let abs = state
-        .with_store(|s| s.workspace_path(channel))
+        .with_store(|s| {
+            crate::daemon::workspace_path::WorkspacePathResolver::new(s).path_for_channel(channel)
+        })
         .with_context(|| format!("looking up workspace path for {channel:?}"))?;
     abs.ok_or_else(|| {
         anyhow::anyhow!("cannot resolve workspace path for {channel:?} (no recorded path)")

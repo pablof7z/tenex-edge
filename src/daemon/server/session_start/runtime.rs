@@ -69,11 +69,15 @@ pub(super) fn bind_workspace(
     if work_root.is_empty() {
         return Ok(());
     }
-    let Some(root_path) = crate::workspace::workspace_dir(cwd) else {
+    let Some(root_path) = crate::daemon::workspace_path::root_path_for(cwd) else {
         return Ok(());
     };
     state.with_store(|store| {
-        store.upsert_workspace(work_root, &root_path.to_string_lossy(), now_secs())
+        crate::daemon::workspace_path::WorkspacePathResolver::new(store).bind_root_path(
+            work_root,
+            &root_path,
+            now_secs(),
+        )
     })
 }
 

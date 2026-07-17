@@ -15,7 +15,7 @@ use std::time::Duration;
 // Attachment-bearing `channel_send` / `channel_reply` calls require daemon-side
 // upload and marker expansion. Older daemons deserialize and ignore the new
 // field, then publish the raw marker, so this must force a re-exec.
-const PROTOCOL_VERSION_BASE: u32 = 65;
+const PROTOCOL_VERSION_BASE: u32 = 66;
 
 /// Effective protocol version. A client refuses to talk to a daemon whose
 /// protocol differs (older daemon → ask it to exit & respawn; newer daemon →
@@ -180,6 +180,8 @@ pub const ERR_PROTOCOL_SKEW: &str = "protocol_skew";
 // Deserialize): the daemon serializes the exact struct the CLI renderers
 // consume, so `who` output is byte-identical by construction without making
 // the daemon depend on CLI presentation modules.
+// `agent_inventory` likewise serializes `crate::agent_inventory::AgentInventory`;
+// no CLI process reads agent files or harness discovery state.
 
 #[cfg(test)]
 mod tests {

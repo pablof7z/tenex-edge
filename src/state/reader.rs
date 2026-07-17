@@ -1,6 +1,4 @@
-use super::{
-    session_claims::SessionClaim, AgentAvailability, Channel, Profile, Session, Status, Store,
-};
+use super::{session_claims::SessionClaim, Channel, Profile, Session, Status, Store};
 use anyhow::Result;
 
 /// Read-only capability for callers that assemble views from the store.
@@ -48,26 +46,11 @@ impl StoreReader<'_> {
         self.store.list_local_session_pubkeys()
     }
 
-    pub(crate) fn list_agent_roster_for_channel(
-        self,
-        channel_h: &str,
-    ) -> Result<Vec<AgentAvailability>> {
-        self.store.list_agent_roster_for_channel(channel_h)
-    }
-
-    pub(crate) fn list_agent_roster(self) -> Result<Vec<AgentAvailability>> {
-        self.store.list_agent_roster()
-    }
-
     pub(crate) fn session_identity(
         self,
         pubkey: &str,
     ) -> Result<Option<crate::identity::SessionIdentity>> {
         self.store.session_identity(pubkey)
-    }
-
-    pub(crate) fn list_alive_sessions(self) -> Result<Vec<Session>> {
-        self.store.list_alive_sessions()
     }
 
     pub(crate) fn get_session(self, pubkey: &str) -> Result<Option<Session>> {
@@ -84,9 +67,5 @@ impl StoreReader<'_> {
 
     pub(crate) fn get_status(self, pubkey: &str, channel_h: &str) -> Result<Option<Status>> {
         self.store.get_status(pubkey, channel_h)
-    }
-
-    pub(crate) fn live_status_for_channel(self, channel_h: &str, now: u64) -> Result<Vec<Status>> {
-        self.store.live_status_for_channel(channel_h, now)
     }
 }

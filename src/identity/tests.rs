@@ -106,7 +106,7 @@ fn remove_local_agent_permanently_unlinks_then_reports_missing() {
     assert!(remove_local_agent(dir.path(), "coder").unwrap());
     assert!(!live.exists(), "live key file is gone");
     assert!(!dir.path().join("agents/coder.json.removed").exists());
-    assert!(list_local_agent_details(dir.path()).is_empty());
+    assert!(keystore_entries(dir.path()).is_empty());
     assert!(list_local_pubkeys(dir.path()).is_empty());
 
     assert!(!remove_local_agent(dir.path(), "coder").unwrap());
@@ -160,7 +160,7 @@ fn structured_save_transitions_identity_mode_and_preserves_owned_fields() {
         preserved.pubkey_hex().as_deref(),
         Some(durable_pubkey.as_str())
     );
-    assert!(list_local_agent_details(dir.path())[0].byline.is_none());
+    assert!(keystore_entries(dir.path())[0].byline.is_none());
 
     let (per_session, _) = save_local_agent(
         dir.path(),
@@ -204,7 +204,7 @@ fn structured_save_can_create_a_durable_agent_directly() {
     assert!(!agent.per_session_key);
     assert!(agent.keys.is_some());
     assert_eq!(
-        list_local_agent_details(dir.path())[0].byline.as_deref(),
+        keystore_entries(dir.path())[0].byline.as_deref(),
         Some("Coordinates work")
     );
 }

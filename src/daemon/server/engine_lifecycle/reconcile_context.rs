@@ -12,8 +12,7 @@ pub(super) fn parent_hint(state: &DaemonState, session: &Session) -> Option<Stri
 }
 
 pub(super) fn workspace(state: &DaemonState, session: &Session) -> String {
-    state
-        .with_store(|store| store.root_channel_of(&session.channel_h).ok().flatten())
-        .or_else(|| (!session.work_root.is_empty()).then(|| session.work_root.clone()))
-        .unwrap_or_else(|| session.channel_h.clone())
+    state.with_store(|store| {
+        crate::daemon::workspace_path::WorkspacePathResolver::new(store).root_for_session(session)
+    })
 }

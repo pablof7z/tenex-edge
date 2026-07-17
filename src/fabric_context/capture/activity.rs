@@ -34,9 +34,8 @@ pub(super) fn workspace_caps(store: &Store, current_root: &str) -> Vec<Workspace
         .into_iter()
         .filter(|channel| !channel.is_archived())
     {
-        let Some(root) = store.root_channel_of(&channel.channel_h).ok().flatten() else {
-            continue;
-        };
+        let root = crate::daemon::workspace_path::WorkspacePathResolver::new(store)
+            .root_for_channel(&channel.channel_h);
         if root == current_root {
             continue;
         }

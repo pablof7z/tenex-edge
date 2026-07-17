@@ -83,10 +83,13 @@ pub(in crate::daemon::server) async fn rpc_channel_create(
 
     // Operator cwd-resolved channel slug (== root channel_h for channel roots).
     // Used as fallback when there is no agent session.
-    let cwd_channel: Option<String> = params["cwd"]
-        .as_str()
-        .filter(|s| !s.is_empty())
-        .and_then(|cwd| crate::workspace::resolve(std::path::Path::new(cwd)).ok());
+    let cwd_channel: Option<String> =
+        params["cwd"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .and_then(|cwd| {
+                crate::daemon::workspace_path::channel_for_path(std::path::Path::new(cwd)).ok()
+            });
 
     // Parent priority: override, current session, explicit parent, then cwd root.
     let parent: String = if let Some(r) = p

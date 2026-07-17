@@ -57,7 +57,10 @@ pub(super) fn fill_pane_from_hook(pane: &mut SessionPane, host: &str, stdin_json
     if pane.root.is_empty() {
         pane.root = stdin_json["cwd"]
             .as_str()
-            .map(|cwd| crate::workspace::resolve(std::path::Path::new(cwd)).unwrap_or_default())
+            .map(|cwd| {
+                crate::daemon::workspace_path::channel_for_path(std::path::Path::new(cwd))
+                    .unwrap_or_default()
+            })
             .unwrap_or_default();
     }
 }
@@ -79,7 +82,10 @@ pub(super) fn command_session(v: &Value) -> Option<String> {
 pub(super) fn command_root(v: &Value) -> String {
     v["process"]["cwd"]
         .as_str()
-        .map(|cwd| crate::workspace::resolve(std::path::Path::new(cwd)).unwrap_or_default())
+        .map(|cwd| {
+            crate::daemon::workspace_path::channel_for_path(std::path::Path::new(cwd))
+                .unwrap_or_default()
+        })
         .unwrap_or_default()
 }
 

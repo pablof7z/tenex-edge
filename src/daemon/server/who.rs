@@ -46,7 +46,7 @@ pub(in crate::daemon::server) fn rpc_who(
                 .clone()
                 .map(std::path::PathBuf::from)
                 .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-            crate::workspace::resolve(&cwd).unwrap_or_default()
+            crate::daemon::workspace_path::channel_for_path(&cwd).unwrap_or_default()
         }))
     };
     let now = now_secs();

@@ -15,10 +15,11 @@ use std::path::{Path, PathBuf};
 mod keys;
 mod local_agent;
 pub use keys::{derive_session_keys, new_session_signer_salt, SessionIdentity};
+pub(crate) use local_agent::keystore_entries;
 pub use local_agent::{
     add_local_agent, agent_launch_config, list_advertised_agents, list_invitable_agents,
-    list_local_agent_details, list_local_agents, list_local_pubkeys, remove_local_agent,
-    save_local_agent, set_local_agent_byline, AgentLaunchConfig, LocalAgent, LocalAgentUpdate,
+    list_local_agents, list_local_pubkeys, remove_local_agent, save_local_agent,
+    set_local_agent_byline, AgentLaunchConfig, LocalAgentUpdate,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -57,6 +58,14 @@ impl StoredKey {
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
     }
+}
+
+/// The single parser for an on-disk agent record. Directory and exact-key
+/// lookups both pass through this boundary so schema changes cannot drift.
+fn read_stored_key(path: &Path) -> Result<StoredKey> {
+    let body = std::fs::read_to_string(path)
+        .with_context(|| format!("reading agent record {}", path.display()))?;
+    serde_json::from_str(&body).with_context(|| format!("parsing agent record {}", path.display()))
 }
 
 /// A resolved agent identity plus its launch bundle/profile selection.
@@ -123,10 +132,7 @@ pub fn load_or_create(
     let profile = normalize_optional_config_name("profile", profile)?;
     let path = key_path(mosaico_home, slug);
     if path.exists() {
-        let s = std::fs::read_to_string(&path)
-            .with_context(|| format!("reading key {}", path.display()))?;
-        let mut stored: StoredKey =
-            serde_json::from_str(&s).with_context(|| format!("parsing key {}", path.display()))?;
+        let mut stored = read_stored_key(&path)?;
         let keys = stored.identity_keys()?;
         if stored.drop_redundant_session_key() {
             atomic_write(&path, &serde_json::to_string_pretty(&stored)?)?;
@@ -170,10 +176,7 @@ pub fn load_or_create(
 pub fn load(mosaico_home: &Path, slug: &str) -> Result<AgentIdentity> {
     validate_slug(slug)?;
     let path = key_path(mosaico_home, slug);
-    let s = std::fs::read_to_string(&path)
-        .with_context(|| format!("reading configured agent {}", path.display()))?;
-    let mut stored: StoredKey =
-        serde_json::from_str(&s).with_context(|| format!("parsing agent {}", path.display()))?;
+    let mut stored = read_stored_key(&path)?;
     let keys = stored.identity_keys()?;
     if stored.drop_redundant_session_key() {
         atomic_write(&path, &serde_json::to_string_pretty(&stored)?)?;

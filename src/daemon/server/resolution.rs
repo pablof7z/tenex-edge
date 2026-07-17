@@ -80,10 +80,7 @@ pub(in crate::daemon::server) fn resolve_session(
 /// The root channel a routing scope belongs under: a top-level channel is its
 /// own work root; sub-channels walk to the top-level channel root.
 pub(in crate::daemon::server) fn work_root_for(s: &Store, scope: &str) -> String {
-    s.root_channel_of(scope)
-        .ok()
-        .flatten()
-        .unwrap_or_else(|| scope.to_string())
+    crate::daemon::workspace_path::WorkspacePathResolver::new(s).root_for_channel(scope)
 }
 
 /// Resolve the caller's session through the single priority order:

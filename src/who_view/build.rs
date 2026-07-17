@@ -14,50 +14,56 @@ pub(crate) struct AgentWhoInput<'a> {
     pub(crate) expanded_workspaces: &'a BTreeSet<String>,
 }
 
-pub(super) fn build_agent_who(store: &Store, input: AgentWhoInput<'_>) -> AgentWhoView {
-    let channels = store.list_channels().unwrap_or_default();
-    let by_parent = channels_by_parent(channels);
+pub(super) fn build_agent_who(
+    store: &Store,
+    aggregation: &crate::who_aggregation::WhoAggregation,
+    input: AgentWhoInput<'_>,
+) -> AgentWhoView {
+    let by_parent = channels_by_parent(aggregation.channels.clone());
     let workspaces = input
         .roots
         .iter()
-        .map(|root| workspace_view(store, &by_parent, root, &input))
+        .map(|root| workspace_view(store, aggregation, &by_parent, root, &input))
         .collect();
     AgentWhoView {
         self_name: input.self_name.to_string(),
         self_host: input.local_host.to_string(),
         headless: input.headless,
-        agents: available_agents(store, input.local_host),
+        agents: available_agents(store, aggregation, input.local_host),
         workspaces,
     }
 }
 
-fn available_agents(store: &Store, local_host: &str) -> Vec<AvailableAgent> {
+fn available_agents(
+    store: &Store,
+    aggregation: &crate::who_aggregation::WhoAggregation,
+    local_host: &str,
+) -> Vec<AgentCapabilityView> {
     let mut grouped: BTreeMap<(String, String, String), BTreeSet<String>> = BTreeMap::new();
-    for row in store.list_agent_roster().unwrap_or_default() {
+    for row in &aggregation.agents {
         let name = if row.host.is_empty() || row.host == local_host {
-            row.slug
+            row.slug.clone()
         } else {
             format!("{}@{}", row.slug, row.host)
         };
         let about = crate::agent_about::for_injection(&row.use_criteria);
         grouped
-            .entry((row.backend_pubkey, name, about))
+            .entry((row.backend_pubkey.clone(), name, about))
             .or_default()
             .insert(
-                store
-                    .root_channel_of(&row.channel_h)
-                    .ok()
-                    .flatten()
-                    .unwrap_or(row.channel_h),
+                crate::daemon::workspace_path::WorkspacePathResolver::new(store)
+                    .root_for_channel(&row.channel_h),
             );
     }
     grouped
         .into_iter()
-        .map(|((_backend, name, about), workspaces)| AvailableAgent {
-            name,
-            about,
-            workspaces: workspaces.into_iter().collect(),
-        })
+        .map(
+            |((_backend, name, about), workspaces)| AgentCapabilityView {
+                name,
+                about,
+                workspaces: workspaces.into_iter().collect(),
+            },
+        )
         .collect()
 }
 
@@ -80,12 +86,13 @@ fn channels_by_parent(channels: Vec<Channel>) -> BTreeMap<String, Vec<Channel>> 
 
 fn workspace_view(
     store: &Store,
+    aggregation: &crate::who_aggregation::WhoAggregation,
     by_parent: &BTreeMap<String, Vec<Channel>>,
     root: &str,
     input: &AgentWhoInput<'_>,
 ) -> WorkspaceView {
     let meta = store.get_channel(root).ok().flatten();
-    let members = member_views(store, root, input);
+    let members = member_views(store, aggregation, root, input);
     let expanded = input.expanded_workspaces.contains(root);
     let channels = if expanded {
         let mut seen = BTreeSet::from([root.to_string()]);
@@ -94,7 +101,17 @@ fn workspace_view(
             .map(Vec::as_slice)
             .unwrap_or_default()
             .iter()
-            .map(|child| channel_view(store, by_parent, root, &child.channel_h, input, &mut seen))
+            .map(|child| {
+                channel_view(
+                    store,
+                    aggregation,
+                    by_parent,
+                    root,
+                    &child.channel_h,
+                    input,
+                    &mut seen,
+                )
+            })
             .collect()
     } else {
         Vec::new()
@@ -102,8 +119,8 @@ fn workspace_view(
     WorkspaceView {
         name: root.to_string(),
         channel: root.to_string(),
-        path: store
-            .workspace_path(root)
+        path: crate::daemon::workspace_path::WorkspacePathResolver::new(store)
+            .path_for_channel(root)
             .ok()
             .flatten()
             .unwrap_or_default(),
@@ -117,6 +134,7 @@ fn workspace_view(
 
 fn channel_view(
     store: &Store,
+    aggregation: &crate::who_aggregation::WhoAggregation,
     by_parent: &BTreeMap<String, Vec<Channel>>,
     workspace: &str,
     channel_h: &str,
@@ -132,7 +150,7 @@ fn channel_view(
         .and_then(Channel::human_name)
         .unwrap_or(channel_h)
         .to_string();
-    let members = member_views(store, channel_h, input);
+    let members = member_views(store, aggregation, channel_h, input);
     let expanded = store
         .is_channel_member(channel_h, input.self_pubkey)
         .unwrap_or(false);
@@ -142,7 +160,17 @@ fn channel_view(
             .map(Vec::as_slice)
             .unwrap_or_default()
             .iter()
-            .map(|child| channel_view(store, by_parent, workspace, &child.channel_h, input, seen))
+            .map(|child| {
+                channel_view(
+                    store,
+                    aggregation,
+                    by_parent,
+                    workspace,
+                    &child.channel_h,
+                    input,
+                    seen,
+                )
+            })
             .collect()
     } else {
         Vec::new()
@@ -170,17 +198,20 @@ fn empty_channel(workspace: &str, channel_h: &str) -> ChannelView {
     }
 }
 
-fn member_views(store: &Store, channel: &str, input: &AgentWhoInput<'_>) -> Vec<MemberView> {
-    let backend_pubkeys = store
-        .list_agent_roster()
-        .unwrap_or_default()
-        .into_iter()
-        .map(|row| row.backend_pubkey)
+fn member_views(
+    store: &Store,
+    aggregation: &crate::who_aggregation::WhoAggregation,
+    channel: &str,
+    input: &AgentWhoInput<'_>,
+) -> Vec<MemberView> {
+    let backend_pubkeys = aggregation
+        .agents
+        .iter()
+        .map(|row| row.backend_pubkey.clone())
         .collect::<BTreeSet<_>>();
-    let statuses = store
-        .live_status_for_channel(channel, input.now)
-        .unwrap_or_default()
-        .into_iter()
+    let statuses = aggregation
+        .statuses_for(channel)
+        .iter()
         .map(|status| (status.pubkey.clone(), status))
         .collect::<BTreeMap<_, _>>();
     store
@@ -196,7 +227,14 @@ fn member_views(store: &Store, channel: &str, input: &AgentWhoInput<'_>) -> Vec<
                     .flatten()
                     .is_some_and(|profile| profile.is_backend)
         })
-        .map(|member| member_view(store, &member.pubkey, statuses.get(&member.pubkey), input))
+        .map(|member| {
+            member_view(
+                store,
+                &member.pubkey,
+                statuses.get(&member.pubkey).copied(),
+                input,
+            )
+        })
         .collect()
 }
 

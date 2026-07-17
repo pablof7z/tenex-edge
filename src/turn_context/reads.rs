@@ -15,10 +15,7 @@ pub(super) fn context_instance(
 }
 
 pub(super) fn root_channel_h(s: &Store, channel: &str) -> String {
-    s.root_channel_of(channel)
-        .ok()
-        .flatten()
-        .unwrap_or_else(|| channel.to_string())
+    crate::daemon::workspace_path::WorkspacePathResolver::new(s).root_for_channel(channel)
 }
 
 pub(super) fn take_inbox(s: &Store, target_pubkey: &str, now: u64) -> Result<Vec<InboxRow>> {

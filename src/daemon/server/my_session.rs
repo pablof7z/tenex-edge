@@ -21,11 +21,8 @@ pub(in crate::daemon::server) fn rpc_my_session(
             .unwrap_or_default()
             .into_iter()
             .map(|(channel, _)| {
-                store
-                    .root_channel_of(&channel)
-                    .ok()
-                    .flatten()
-                    .unwrap_or(channel)
+                crate::daemon::workspace_path::WorkspacePathResolver::new(store)
+                    .root_for_channel(&channel)
             })
             .collect::<BTreeSet<_>>()
     });
@@ -45,7 +42,7 @@ pub(in crate::daemon::server) fn rpc_my_session(
                 expanded_workspaces: &expanded_workspaces,
             },
         )
-    });
+    })?;
     Ok(serde_json::json!({ "fabric": fabric }))
 }
 

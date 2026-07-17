@@ -45,9 +45,8 @@ fn project_sessions(
             .with_context(|| format!("live session {} has no identity projection", rec.pubkey))?;
         let mut grouped = BTreeMap::<String, Vec<String>>::new();
         for (channel_id, _) in store.list_session_joined_channels(&rec.pubkey)? {
-            let root_id = store
-                .root_channel_of(&channel_id)?
-                .unwrap_or_else(|| channel_id.clone());
+            let root_id = crate::daemon::workspace_path::WorkspacePathResolver::new(store)
+                .root_for_channel(&channel_id);
             grouped.entry(root_id).or_default().push(channel_id);
         }
         let workspaces = grouped
@@ -136,8 +135,8 @@ fn unbound_endpoint_value(
         .and_then(crate::state::Channel::human_name)
         .unwrap_or(&meta.root)
         .to_string();
-    let workspace_path = store
-        .workspace_path(&meta.root)?
+    let workspace_path = crate::daemon::workspace_path::WorkspacePathResolver::new(store)
+        .path_for_channel(&meta.root)?
         .or_else(|| Some(meta.cwd.clone()));
     Ok(serde_json::json!({
         "pubkey": "",
@@ -177,7 +176,8 @@ fn workspace_value(
     Ok(serde_json::json!({
         "id": root_id,
         "name": channel_name(channels.get(root_id), root_id),
-        "path": store.workspace_path(root_id)?,
+        "path": crate::daemon::workspace_path::WorkspacePathResolver::new(store)
+            .path_for_channel(root_id)?,
         "channels": channel_ids
             .iter()
             .map(|id| channel_value(id, channels.get(id)))

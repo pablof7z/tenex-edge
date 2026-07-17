@@ -42,8 +42,8 @@ fn roots_needing_workspace_name(store: &crate::state::Store, backend_pubkey: &st
             store
                 .is_channel_admin(&channel.channel_h, backend_pubkey)
                 .unwrap_or(false)
-                || store
-                    .workspace_path(&channel.channel_h)
+                || crate::daemon::workspace_path::WorkspacePathResolver::new(store)
+                    .path_for_channel(&channel.channel_h)
                     .ok()
                     .flatten()
                     .is_some()

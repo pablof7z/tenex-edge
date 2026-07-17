@@ -51,7 +51,7 @@ pub(super) fn resolve_agent_source(
 
     let (identity, bundle, profile, native_profile, retired_advertisements) = match selected.source
     {
-        AgentSource::Configured {
+        AgentSource::Durable {
             bundle,
             profile,
             native_profile,
@@ -61,7 +61,7 @@ pub(super) fn resolve_agent_source(
             let native_profile = profile.is_none().then_some(native_profile).flatten();
             (identity, bundle, profile, native_profile, Vec::new())
         }
-        AgentSource::Generic => {
+        AgentSource::DetectedHarness => {
             let bundle = realize_implicit_bundle(&mut harnesses, selected.harness, intent, false)?;
             (
                 crate::identity::AgentIdentity::per_session(&selected.agent_slug, &bundle),
@@ -71,7 +71,7 @@ pub(super) fn resolve_agent_source(
                 Vec::new(),
             )
         }
-        AgentSource::NativeProfile {
+        AgentSource::DetectedProfile {
             profile: native_profile,
             persist_binding,
         } => {

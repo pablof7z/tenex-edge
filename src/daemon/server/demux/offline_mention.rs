@@ -49,7 +49,13 @@ pub(super) async fn handle(
     let target_session = target.session;
 
     let work_root = state.with_store(|s| work_root_for(s, channel));
-    let has_path = state.with_store(|s| s.workspace_path(&work_root).ok().flatten().is_some());
+    let has_path = state.with_store(|s| {
+        crate::daemon::workspace_path::WorkspacePathResolver::new(s)
+            .path_for_channel(&work_root)
+            .ok()
+            .flatten()
+            .is_some()
+    });
     if !has_path {
         tracing::warn!(agent = %agent_slug, work_root = %work_root, channel, "no local channel root found - cannot spawn");
         return;

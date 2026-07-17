@@ -94,7 +94,21 @@ result: {"now": u64, "fabric_human": "…"|null,
 ```
 Human/operator-only live fabric projection. It returns terminal-oriented
 `fabric_human` text and never returns agent XML. Exact session anchors and loose
-agent/group hints are rejected with guidance to use `my_session`.
+agent/group hints are rejected with guidance to use `my_session`. Its snapshot
+and `my_session`'s XML tree project the same canonical `WhoAggregation` store
+read, so channel, session-state, capability, and live-status rules cannot drift.
+
+### `agent_inventory`
+```jsonc
+params: {"cwd": "/path"|null}
+result: {"agents": [{"slug": "…", "agent_slug": "…", "harness": "…",
+                     "use_criteria": "…", "available_since": N,
+                     "source": {…}}, …],
+         "failures": ["…", …]}
+```
+Daemon-owned projection of durable keystore agents and detected native/PATH
+capabilities. CLI listing and launch selection consume this RPC and never scan
+the keystore, harness configuration, or native profile directories themselves.
 
 ### `my_session`
 ```jsonc
