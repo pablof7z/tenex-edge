@@ -40,20 +40,6 @@ pub(crate) struct WhoSnapshot {
     pub(crate) root_display: String,
 }
 
-pub(super) fn display_name(store: StoreReader<'_>, id: &str) -> String {
-    let channel = match store.get_channel(id) {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::error!(channel = %id, error = ?e, "who snapshot: get_channel failed resolving display name; falling back to raw id");
-            None
-        }
-    };
-    channel
-        .map(|c| c.name)
-        .filter(|n| !n.trim().is_empty())
-        .unwrap_or_else(|| id.to_string())
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct SpawnableRow {
     pub(crate) host: String,
@@ -141,7 +127,7 @@ pub(crate) fn load_who_snapshot(
             .map(|p| scope_contains_channel(store, p, &scope))
             .unwrap_or(true)
         {
-            rows.push(local_row(store, s, &local_host, now));
+            rows.push(local_row(&aggregation, store, s, &local_host, now));
         } else if is_root_channel(store, &scope) {
             other_agents
                 .entry(scope)
@@ -183,7 +169,7 @@ pub(crate) fn load_who_snapshot(
                 .map(|p| scope_contains_channel(store, p, ch))
                 .unwrap_or(true);
             if in_scope {
-                rows.push(peer_row(store, st, &local_host, now));
+                rows.push(peer_row(&aggregation, store, st, &local_host, now));
             } else if is_root_channel(store, ch) {
                 let slug = peer_slug(store, st);
                 other_agents.entry(ch.clone()).or_default().insert(slug);
@@ -196,17 +182,10 @@ pub(crate) fn load_who_snapshot(
         .map(|(root, agents)| {
             // not-found → no `about`; a genuine read error is logged loudly
             // rather than silently swallowed into the same None.
-            let about = match store.get_channel(&root) {
-                Ok(c) => c.map(|c| c.about).filter(|a| !a.is_empty()),
-                Err(e) => {
-                    tracing::error!(
-                        channel = %root,
-                        error = ?e,
-                        "who snapshot: get_channel failed for other-root summary"
-                    );
-                    None
-                }
-            };
+            let about = aggregation
+                .channel(&root)
+                .map(|channel| channel.about.clone())
+                .filter(|about| !about.is_empty());
             let agents: Vec<String> = agents.into_iter().collect();
             OtherRootSummary {
                 root,
@@ -274,7 +253,7 @@ pub(crate) fn load_who_snapshot(
     });
 
     let root_display = match (current_root, channel_parent.is_some()) {
-        (Some(scope), true) => display_name(store, scope),
+        (Some(scope), true) => aggregation.channel_name(scope).to_string(),
         (Some(scope), false) => scope.to_string(),
         (None, _) => "*".to_string(),
     };

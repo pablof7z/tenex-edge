@@ -91,7 +91,7 @@ fn workspace_view(
     root: &str,
     input: &AgentWhoInput<'_>,
 ) -> WorkspaceView {
-    let meta = store.get_channel(root).ok().flatten();
+    let meta = aggregation.channel(root);
     let members = member_views(store, aggregation, root, input);
     let expanded = input.expanded_workspaces.contains(root);
     let channels = if expanded {
@@ -124,7 +124,9 @@ fn workspace_view(
             .ok()
             .flatten()
             .unwrap_or_default(),
-        about: meta.map(|channel| channel.about).unwrap_or_default(),
+        about: meta
+            .map(|channel| channel.about.clone())
+            .unwrap_or_default(),
         member_count: members.len(),
         expanded,
         members: if expanded { members } else { Vec::new() },
@@ -144,12 +146,8 @@ fn channel_view(
     if !seen.insert(channel_h.to_string()) {
         return empty_channel(workspace, channel_h);
     }
-    let meta = store.get_channel(channel_h).ok().flatten();
-    let name = meta
-        .as_ref()
-        .and_then(Channel::human_name)
-        .unwrap_or(channel_h)
-        .to_string();
+    let meta = aggregation.channel(channel_h);
+    let name = aggregation.channel_name(channel_h).to_string();
     let members = member_views(store, aggregation, channel_h, input);
     let expanded = store
         .is_channel_member(channel_h, input.self_pubkey)
@@ -178,7 +176,9 @@ fn channel_view(
     ChannelView {
         name,
         id: crate::channel_ref::full_channel_ref(store, channel_h),
-        about: meta.map(|channel| channel.about).unwrap_or_default(),
+        about: meta
+            .map(|channel| channel.about.clone())
+            .unwrap_or_default(),
         member_count: members.len(),
         expanded,
         members: if expanded { members } else { Vec::new() },
@@ -214,10 +214,9 @@ fn member_views(
         .iter()
         .map(|status| (status.pubkey.clone(), status))
         .collect::<BTreeMap<_, _>>();
-    store
-        .list_channel_members(channel)
-        .unwrap_or_default()
-        .into_iter()
+    aggregation
+        .members_for(channel)
+        .iter()
         .filter(|member| {
             member.pubkey != input.backend_pubkey
                 && !backend_pubkeys.contains(&member.pubkey)
@@ -232,6 +231,7 @@ fn member_views(
                 store,
                 &member.pubkey,
                 statuses.get(&member.pubkey).copied(),
+                aggregation,
                 input,
             )
         })
@@ -242,6 +242,7 @@ fn member_view(
     store: &Store,
     pubkey: &str,
     status: Option<&Status>,
+    aggregation: &crate::who_aggregation::WhoAggregation,
     input: &AgentWhoInput<'_>,
 ) -> MemberView {
     let profile = store.get_profile(pubkey).ok().flatten();
@@ -257,10 +258,10 @@ fn member_view(
     };
     let (state, text, seen) = match status {
         Some(row) => {
-            let state = row.state.observed(row.expiration >= input.now);
+            let state = aggregation.observed_state(row);
             (
                 state,
-                status_text(row, state),
+                aggregation.status_text(row),
                 relative_time(row.last_seen, input.now),
             )
         }
@@ -280,13 +281,5 @@ fn member_view(
         state,
         status: text,
         seen,
-    }
-}
-
-fn status_text(status: &Status, state: crate::session_state::SessionState) -> String {
-    if state.is_working() && !status.activity.trim().is_empty() {
-        status.activity.trim().to_string()
-    } else {
-        status.title.trim().to_string()
     }
 }

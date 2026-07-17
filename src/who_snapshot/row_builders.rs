@@ -2,19 +2,20 @@ use super::{scope::work_root_for, WhoRow, WhoSource};
 use crate::state::{Session, Status, StoreReader};
 
 /// Build a local-session row. Relay-confirmed agent-supplied status wins when present.
-pub(super) fn local_row(store: StoreReader<'_>, s: &Session, local_host: &str, now: u64) -> WhoRow {
+pub(super) fn local_row(
+    aggregation: &crate::who_aggregation::WhoAggregation,
+    store: StoreReader<'_>,
+    s: &Session,
+    local_host: &str,
+    now: u64,
+) -> WhoRow {
     let instance = local_instance(store, s);
     let live = store
         .get_status(&instance.pubkey, &s.channel_h)
         .ok()
         .flatten()
         .filter(|st| st.expiration == 0 || st.expiration >= now);
-    let fresh = now.saturating_sub(s.last_seen) <= crate::session::STATUS_TTL_SECS;
-    let state = crate::session_state::SessionState::classify(
-        fresh,
-        s.working,
-        store.has_live_delivery_path(s),
-    );
+    let state = aggregation.local_session_state(store, s);
     let (title, activity) = live
         .map(|st| (st.title, live_activity(state.is_working(), st.activity)))
         .unwrap_or_else(|| (s.title.clone(), String::new()));
@@ -48,7 +49,13 @@ pub(super) fn local_instance(
 }
 
 /// Build a peer row from relay-confirmed status; unknown host is treated local.
-pub(super) fn peer_row(store: StoreReader<'_>, st: &Status, local_host: &str, now: u64) -> WhoRow {
+pub(super) fn peer_row(
+    aggregation: &crate::who_aggregation::WhoAggregation,
+    store: StoreReader<'_>,
+    st: &Status,
+    local_host: &str,
+    now: u64,
+) -> WhoRow {
     let host = store
         .get_profile(&st.pubkey)
         .ok()
@@ -57,7 +64,7 @@ pub(super) fn peer_row(store: StoreReader<'_>, st: &Status, local_host: &str, no
         .filter(|h| !h.is_empty())
         .unwrap_or_else(|| local_host.to_string());
     let work_root = work_root_for(store, &st.channel_h);
-    let state = st.state.observed(st.expiration >= now);
+    let state = aggregation.observed_state(st);
     WhoRow {
         source: WhoSource::Peer,
         state,
@@ -113,7 +120,8 @@ mod tests {
             updated_at: 90,
             expiration: 100,
         };
-        let row = peer_row(store.reader(), &status, "laptop", 101);
+        let aggregation = crate::who_aggregation::WhoAggregation::load(&store, 101).unwrap();
+        let row = peer_row(&aggregation, store.reader(), &status, "laptop", 101);
         assert_eq!(row.state, crate::session_state::SessionState::Offline);
         assert!(row.activity.is_empty());
     }
