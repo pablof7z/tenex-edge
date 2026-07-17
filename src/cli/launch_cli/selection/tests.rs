@@ -1,3 +1,4 @@
+use super::usage::{AgentUsage, AgentUsageMap};
 use super::*;
 use crate::test_env::EnvGuard;
 
@@ -82,7 +83,7 @@ fn menu_rows_are_aligned_single_line_and_bounded() {
 
     let usage = AgentUsageMap::new();
     let agents = ordered_agents(&inventory, &usage);
-    let rows = menu_rows(&agents, &usage, 100);
+    let rows = menu_rows(&agents);
 
     assert_eq!(rows[0].plain(), "codex            Codex harness");
     assert!(!rows[1].plain().contains('\n'));
@@ -130,9 +131,7 @@ fn recent_count_then_last_use_determine_agent_order() {
         .collect::<Vec<_>>();
 
     assert_eq!(ordered, ["grok", "writer-codex", "codex"]);
-    assert!(
-        menu_rows(&ordered_agents(&inventory, &usage), &usage, 100)[0]
-            .detail
-            .starts_with("3 uses / 30d · just now")
-    );
+    let rows = menu_rows(&ordered_agents(&inventory, &usage));
+    assert_eq!(rows[0].detail, "Codex harness");
+    assert!(rows.iter().all(|row| !row.detail.contains("uses / 30d")));
 }

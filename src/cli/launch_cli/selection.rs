@@ -2,7 +2,7 @@ use anyhow::Result;
 
 mod theme;
 mod usage;
-use usage::{fetch_agent_usage, ordered_agents, usage_for, AgentUsage, AgentUsageMap};
+use usage::{fetch_agent_usage, ordered_agents};
 
 const MAX_MENU_ROWS: usize = 16;
 const MAX_NAME_CHARS: usize = 30;
@@ -43,7 +43,7 @@ pub(super) async fn select_available() -> Result<Option<String>> {
     let now = crate::util::now_secs();
     let usage = fetch_agent_usage(now).await?;
     let agents = ordered_agents(&inventory, &usage);
-    let rows = menu_rows(&agents, &usage, now);
+    let rows = menu_rows(&agents);
     if !interactive_terminal() {
         println!("Available launch targets:");
         for row in rows {
@@ -103,11 +103,7 @@ fn interactive_terminal() -> bool {
     std::io::stdin().is_terminal() && std::io::stderr().is_terminal()
 }
 
-fn menu_rows(
-    agents: &[&crate::agent_inventory::AvailableAgent],
-    usage: &AgentUsageMap,
-    now: u64,
-) -> Vec<MenuRow> {
+fn menu_rows(agents: &[&crate::agent_inventory::AvailableAgent]) -> Vec<MenuRow> {
     let name_width = agents
         .iter()
         .map(|agent| agent.slug.chars().count())
@@ -116,16 +112,11 @@ fn menu_rows(
         .min(MAX_NAME_CHARS);
     agents
         .iter()
-        .map(|agent| menu_row(agent, usage_for(usage, agent), name_width, now))
+        .map(|agent| menu_row(agent, name_width))
         .collect()
 }
 
-fn menu_row(
-    agent: &crate::agent_inventory::AvailableAgent,
-    usage: &AgentUsage,
-    name_width: usize,
-    now: u64,
-) -> MenuRow {
+fn menu_row(agent: &crate::agent_inventory::AvailableAgent, name_width: usize) -> MenuRow {
     let source = match agent.source {
         crate::agent_inventory::AgentSource::Configured => "configured".to_string(),
         crate::agent_inventory::AgentSource::NativeProfile => {
@@ -141,24 +132,10 @@ fn menu_row(
     } else {
         format!("{source} · {criteria}")
     };
-    let detail = if usage.last_used == 0 {
-        identity_detail
-    } else {
-        let uses = if usage.recent_uses == 1 {
-            "use"
-        } else {
-            "uses"
-        };
-        format!(
-            "{} {uses} / 30d · {} · {identity_detail}",
-            usage.recent_uses,
-            crate::util::relative_time(usage.last_used, now)
-        )
-    };
     let name = truncate(&agent.slug, name_width);
     MenuRow {
         name: format!("{name:<name_width$}"),
-        detail: truncate(&detail, MAX_DETAIL_CHARS),
+        detail: truncate(&identity_detail, MAX_DETAIL_CHARS),
     }
 }
 
