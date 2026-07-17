@@ -8,8 +8,8 @@ fn row(name: &str) -> AgentPickerRow {
     AgentPickerRow {
         name: name.into(),
         description: format!("{name} description"),
-        description_harness: None,
         provenance: None,
+        status: None,
     }
 }
 
@@ -52,10 +52,11 @@ fn management_mode_reserves_edit_delete_and_uses_slash_for_filtering() {
 }
 
 #[test]
-fn viewport_caps_at_sixteen_agent_rows() {
-    assert_eq!(viewport_height(40, 30), 18);
-    assert_eq!(viewport_height(40, 3), 5);
-    assert_eq!(option_rows(18), 16);
+fn viewport_uses_terminal_height_up_to_forty_agent_rows() {
+    assert_eq!(viewport_height(30), 30);
+    assert_eq!(viewport_height(50), 42);
+    assert_eq!(viewport_height(1), 1);
+    assert_eq!(option_rows(42), 40);
 }
 
 #[test]
@@ -64,11 +65,11 @@ fn renderer_orders_description_and_colored_provenance() {
         vec![AgentPickerRow {
             name: "writer".into(),
             description: "Drafts release notes".into(),
-            description_harness: None,
             provenance: Some(AgentProvenance {
                 label: "Claude profile".into(),
                 harness: Harness::ClaudeCode,
             }),
+            status: None,
         }],
         PickerMode::Launch,
     );
@@ -87,6 +88,13 @@ fn renderer_orders_description_and_colored_provenance() {
         .map(|cell| cell.symbol())
         .collect::<String>();
     assert!(line.contains("Drafts release notes · Claude profile"));
+    let description_column = line[..line.find("Drafts release notes").unwrap()]
+        .chars()
+        .count();
+    assert_eq!(
+        completed.buffer.content()[100 + description_column].fg,
+        ratatui::style::Color::Indexed(245)
+    );
     let provenance_column = line[..line.find("Claude profile").unwrap()].chars().count();
     assert_eq!(
         completed.buffer.content()[100 + provenance_column].fg,
@@ -95,35 +103,59 @@ fn renderer_orders_description_and_colored_provenance() {
 }
 
 #[test]
-fn renderer_colors_generic_agent_descriptions_by_harness() {
-    let state = PickerState::new(
-        vec![AgentPickerRow {
-            name: "codex".into(),
-            description: "Generic Codex agent".into(),
-            description_harness: Some(Harness::Codex),
-            provenance: None,
-        }],
-        PickerMode::Launch,
+fn manage_status_tracks_the_focused_harness_configuration() {
+    let mut state = PickerState::new(
+        vec![
+            AgentPickerRow {
+                name: "reviewer".into(),
+                description: "Reviews".into(),
+                provenance: None,
+                status: Some(AgentProvenance {
+                    label: "Harness config: claude-acp · acp · per-session key".into(),
+                    harness: Harness::ClaudeCode,
+                }),
+            },
+            AgentPickerRow {
+                name: "builder".into(),
+                description: "Builds".into(),
+                provenance: None,
+                status: Some(AgentProvenance {
+                    label: "Harness config: codex-app · app-server · persistent key".into(),
+                    harness: Harness::Codex,
+                }),
+            },
+        ],
+        PickerMode::Manage,
     );
-    let backend = TestBackend::new(80, 5);
+    let backend = TestBackend::new(100, 5);
     let mut terminal = Terminal::with_options(
         backend,
         TerminalOptions {
-            viewport: Viewport::Fixed(Rect::new(0, 0, 80, 5)),
+            viewport: Viewport::Fixed(Rect::new(0, 0, 100, 5)),
         },
     )
     .unwrap();
 
-    let completed = terminal.draw(|frame| render::draw(frame, &state)).unwrap();
-    let line = completed.buffer.content()[80..160]
+    let first = terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let first_status = first.buffer.content()[400..500]
         .iter()
         .map(|cell| cell.symbol())
         .collect::<String>();
-    let description_column = line[..line.find("Generic Codex agent").unwrap()]
-        .chars()
-        .count();
+    assert!(first_status.contains("Harness config: claude-acp · acp · per-session key"));
     assert_eq!(
-        completed.buffer.content()[80 + description_column].fg,
+        first.buffer.content()[400].fg,
+        crate::console_style::harness_ratatui_color(Harness::ClaudeCode)
+    );
+
+    state.handle_key(key(KeyCode::Down), 3);
+    let second = terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let second_status = second.buffer.content()[400..500]
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
+    assert!(second_status.contains("Harness config: codex-app · app-server · persistent key"));
+    assert_eq!(
+        second.buffer.content()[400].fg,
         crate::console_style::harness_ratatui_color(Harness::Codex)
     );
 }

@@ -67,14 +67,7 @@ pub(super) fn draw(frame: &mut Frame<'_>, state: &PickerState) {
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::raw("  "),
-                Span::styled(
-                    row.description.clone(),
-                    row.description_harness
-                        .map_or_else(Style::default, |harness| {
-                            Style::default()
-                                .fg(crate::console_style::harness_ratatui_color(harness))
-                        }),
-                ),
+                Span::styled(row.description.clone(), Style::default().fg(MUTED)),
             ];
             if let Some(provenance) = &row.provenance {
                 spans.push(Span::styled(" · ", Style::default().fg(MUTED)));
@@ -102,10 +95,23 @@ pub(super) fn draw(frame: &mut Frame<'_>, state: &PickerState) {
     } else {
         format!("{}/{}", state.cursor + 1, state.visible.len())
     };
-    frame.render_widget(
-        Paragraph::new(format!("{} · {position}", help(state))).style(Style::default().fg(MUTED)),
-        help_area,
-    );
+    let mut status = Vec::new();
+    if state.mode == PickerMode::Manage {
+        if let Some(configuration) = state.current_row().and_then(|row| row.status.as_ref()) {
+            status.push(Span::styled(
+                configuration.label.clone(),
+                Style::default().fg(crate::console_style::harness_ratatui_color(
+                    configuration.harness,
+                )),
+            ));
+            status.push(Span::styled("  ·  ", Style::default().fg(MUTED)));
+        }
+    }
+    status.push(Span::styled(
+        format!("{} · {position}", help(state)),
+        Style::default().fg(MUTED),
+    ));
+    frame.render_widget(Paragraph::new(Line::from(status)), help_area);
 }
 
 fn title(mode: PickerMode) -> &'static str {

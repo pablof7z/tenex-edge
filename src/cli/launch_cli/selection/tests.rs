@@ -61,10 +61,6 @@ fn menu_rows_are_aligned_single_line_and_bounded() {
     let rows = menu_rows(&agents);
 
     assert_eq!(rows[0].plain(), "codex  Generic Codex agent");
-    assert_eq!(
-        rows[0].description_harness,
-        Some(crate::session::Harness::Codex)
-    );
     assert!(!rows[1].plain().contains('\n'));
     assert!(rows[1]
         .description
@@ -141,7 +137,6 @@ fn native_profile_description_precedes_colored_harness_provenance() {
     let row = menu_row(&agent);
 
     assert_eq!(row.description, "Drafts release notes");
-    assert_eq!(row.description_harness, None);
     assert_eq!(
         row.provenance,
         Some(AgentProvenance {
