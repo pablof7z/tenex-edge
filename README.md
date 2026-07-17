@@ -183,6 +183,13 @@ Point `mosaico` at a relay and whitelist your human key in
 left unchanged. Override the whole home with `$MOSAICO_HOME`. Then run your agents; run
 `mosaico debug doctor` if anything looks off.
 
+For a development fleet, `scripts/install-fleet host-a user@host-b` updates the local
+checkout and both SSH hosts to exactly `origin/master`, installs the binary, harness
+integrations, and the `mosaico` and `mosaico-dev` skills, then safely restarts and verifies
+each daemon. Remote checkouts default to `~/Work/mosaico`; use
+`host=/absolute/repo/path` when they live elsewhere. The command stops on the first host
+that needs manual attention, such as a dirty or diverged checkout.
+
 ### Agent and operator surfaces
 
 Agents resolve their own session (from the PTY session, harness pid, or working directory),

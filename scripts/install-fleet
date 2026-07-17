@@ -1,0 +1,182 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Non-interactive SSH shells commonly omit user and Homebrew tool directories.
+export PATH="${HOME}/.cargo/bin:${HOME}/.local/bin:/opt/homebrew/bin:/usr/local/bin:${PATH}"
+
+usage() {
+  cat <<'EOF'
+Usage: scripts/install-fleet [SSH_TARGET[=ABSOLUTE_REPO] ...]
+
+Update, install, restart, and verify this computer plus every named SSH target.
+The local checkout is included automatically. Remote checkouts default to
+$HOME/Work/mosaico; append =/absolute/path when a target uses another path.
+
+Examples:
+  scripts/install-fleet
+  scripts/install-fleet desktop marina@192.168.1.20
+  scripts/install-fleet desktop=/Users/pablo/Code/mosaico
+
+The command intentionally stops at the first host that needs agent attention.
+Set MOSAICO_FLEET_LOCAL_REPO only when testing or invoking from another checkout.
+EOF
+}
+
+fail() {
+  echo "fleet install: $*" >&2
+  exit 1
+}
+
+resolved_dir() {
+  (cd "$1" && pwd -P)
+}
+
+assert_clean_master() {
+  local repo="$1"
+  local branch dirty
+  branch="$(git -C "${repo}" branch --show-current)"
+  [[ "${branch}" == "master" ]] \
+    || fail "${repo} is on '${branch:-detached}', expected master"
+  dirty="$(git -C "${repo}" status --porcelain --untracked-files=all)"
+  [[ -z "${dirty}" ]] || {
+    git -C "${repo}" status --short >&2
+    fail "${repo} has local changes"
+  }
+}
+
+assert_at_origin_master() {
+  local repo="$1" expected="${2:-}"
+  local head remote
+  head="$(git -C "${repo}" rev-parse HEAD)"
+  remote="$(git -C "${repo}" rev-parse refs/remotes/origin/master)"
+  [[ "${head}" == "${remote}" ]] \
+    || fail "${repo} HEAD ${head} is not origin/master ${remote}"
+  [[ -z "${expected}" || "${head}" == "${expected}" ]] \
+    || fail "${repo} moved from expected commit ${expected} to ${head}"
+}
+
+link_skill() {
+  local source="$1" target="$2"
+  [[ -f "${source}/SKILL.md" ]] || fail "missing skill source ${source}"
+  mkdir -p "$(dirname "${target}")"
+  if [[ -L "${target}" || -e "${target}" ]]; then
+    rm -rf -- "${target}"
+  fi
+  ln -s "${source}" "${target}"
+}
+
+assert_skill_link() {
+  local source="$1" target="$2"
+  [[ -L "${target}" ]] || fail "${target} is not an installed skill symlink"
+  [[ "$(resolved_dir "${target}")" == "$(resolved_dir "${source}")" ]] \
+    || fail "${target} does not resolve to ${source}"
+}
+
+sync_host() {
+  local repo="${1:-${HOME}/Work/mosaico}"
+  [[ -d "${repo}/.git" || -f "${repo}/.git" ]] \
+    || fail "no git checkout at ${repo}"
+  assert_clean_master "${repo}"
+  git -C "${repo}" fetch --prune origin master
+  git -C "${repo}" merge --ff-only refs/remotes/origin/master
+  assert_clean_master "${repo}"
+  assert_at_origin_master "${repo}"
+
+  local commit
+  commit="$(git -C "${repo}" rev-parse HEAD)"
+  exec "${repo}/scripts/install-fleet" --install-host "${repo}" "${commit}"
+}
+
+install_host() {
+  local repo="$1" expected="$2"
+  local binary="${HOME}/.local/bin/mosaico"
+  local agents_root="${HOME}/.agents/skills"
+
+  assert_clean_master "${repo}"
+  assert_at_origin_master "${repo}" "${expected}"
+
+  echo "==> $(hostname -s): building ${expected}"
+  (cd "${repo}" && just install)
+  [[ -x "${binary}" ]] || fail "${binary} was not installed"
+
+  echo "==> $(hostname -s): installing harnesses and skills"
+  (cd "${repo}" && "${binary}" install --all)
+  link_skill "${repo}/skills/mosaico-dev" "${agents_root}/mosaico-dev"
+  if [[ -d "${HOME}/.claude" ]]; then
+    link_skill "${agents_root}/mosaico-dev" \
+      "${HOME}/.claude/skills/mosaico-dev"
+  fi
+
+  assert_skill_link "${repo}/skills/mosaico" "${agents_root}/mosaico"
+  assert_skill_link "${repo}/skills/mosaico-dev" "${agents_root}/mosaico-dev"
+  if [[ -d "${HOME}/.claude" ]]; then
+    assert_skill_link "${repo}/skills/mosaico-dev" \
+      "${HOME}/.claude/skills/mosaico-dev"
+  fi
+
+  echo "==> $(hostname -s): restarting daemon"
+  "${binary}" daemon restart
+
+  git -C "${repo}" fetch origin master
+  assert_clean_master "${repo}"
+  assert_at_origin_master "${repo}" "${expected}"
+
+  echo "==> $(hostname -s): verified"
+  printf '    commit: %s\n' "${expected}"
+  printf '    binary: %s (%s)\n' "${binary}" "$("${binary}" --version)"
+  printf '    skills: %s, %s\n' \
+    "${agents_root}/mosaico" "${agents_root}/mosaico-dev"
+  "${binary}" install --status
+}
+
+run_worker() {
+  local repo="$1"
+  local script_body="$2"
+  printf '%s\n' "${script_body}" | bash -s -- --sync-host "${repo}"
+}
+
+run_remote() {
+  local target="$1" repo="$2" script_body="$3"
+  echo "==> ${target}: connecting"
+  if [[ -n "${repo}" ]]; then
+    [[ "${repo}" == /* ]] \
+      || fail "remote repo for ${target} must be an absolute path"
+    printf '%s\n' "${script_body}" \
+      | ssh "${target}" bash -s -- --sync-host "${repo}"
+  else
+    printf '%s\n' "${script_body}" \
+      | ssh "${target}" bash -s -- --sync-host
+  fi
+}
+
+case "${1:-}" in
+  --help|-h)
+    usage
+    exit 0
+    ;;
+  --sync-host)
+    shift
+    sync_host "${1:-}"
+    ;;
+  --install-host)
+    [[ "$#" -eq 3 ]] || fail "internal install worker received invalid arguments"
+    install_host "$2" "$3"
+    exit 0
+    ;;
+esac
+
+SCRIPT_PATH="$(resolved_dir "$(dirname "$0")")/$(basename "$0")"
+SCRIPT_BODY="$(<"${SCRIPT_PATH}")"
+LOCAL_REPO="${MOSAICO_FLEET_LOCAL_REPO:-$(git -C "$(dirname "${SCRIPT_PATH}")" rev-parse --show-toplevel)}"
+
+run_worker "${LOCAL_REPO}" "${SCRIPT_BODY}"
+for spec in "$@"; do
+  [[ "${spec}" != -* ]] || fail "unknown option ${spec}"
+  if [[ "${spec}" == *=* ]]; then
+    run_remote "${spec%%=*}" "${spec#*=}" "${SCRIPT_BODY}"
+  else
+    run_remote "${spec}" "" "${SCRIPT_BODY}"
+  fi
+done
+
+echo "==> fleet verified: local + $# remote host(s)"
