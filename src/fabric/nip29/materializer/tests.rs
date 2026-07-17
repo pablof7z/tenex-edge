@@ -295,6 +295,41 @@ fn mention_to_one_ordinal_does_not_route_to_sibling_ordinal() {
 }
 
 #[test]
+fn mention_to_dead_session_stays_pending_for_that_exact_pubkey() {
+    let store = Store::open_memory().unwrap();
+    let sender = Keys::generate();
+    let target = Keys::generate();
+    let sibling = Keys::generate();
+    let target_pk = target.public_key().to_hex();
+    let sibling_pk = sibling.public_key().to_hex();
+
+    register(&store, &target_pk, "proj", "target-ext");
+    register(&store, &sibling_pk, "proj", "sibling-ext");
+    store.mark_dead(&target_pk).unwrap();
+
+    let event = build(
+        &sender,
+        9,
+        "resume this exact session",
+        vec![make_tag(&["h", "proj"]), make_tag(&["p", &target_pk])],
+    );
+    let chat = ChatMessage {
+        from: crate::domain::AgentRef::new(sender.public_key().to_hex(), String::new()),
+        channel: "proj".into(),
+        body: "resume this exact session".into(),
+        mentioned_pubkeys: vec![target_pk.clone()],
+    };
+
+    assert!(Nip29Materializer::route_chat(&store, &event, &chat));
+    assert_eq!(store.peek_pending_for_pubkey(&target_pk).unwrap().len(), 1);
+    assert!(store
+        .peek_pending_for_pubkey(&sibling_pk)
+        .unwrap()
+        .is_empty());
+    assert!(!store.get_session(&target_pk).unwrap().unwrap().alive);
+}
+
+#[test]
 fn other_kind_lands_in_relay_events() {
     let store = Store::open_memory().unwrap();
     let agent = Keys::generate();

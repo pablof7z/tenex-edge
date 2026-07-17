@@ -45,20 +45,8 @@ async fn ring_doorbells_inner(state: &Arc<DaemonState>) -> Result<()> {
             continue;
         }
 
-        let kind = match transport_kind_for_slug(&rec.agent_slug) {
-            Ok(kind) => kind,
-            Err(e) => {
-                state.emit_delivery_failure(
-                    &rec.channel_h,
-                    &rec.agent_slug,
-                    &pubkey,
-                    format!("failed to resolve configured transport: {e:#}"),
-                );
-                continue;
-            }
-        };
-        let endpoint_id = match state.with_store(|s| endpoint_id_for(s, &pubkey, kind)) {
-            Ok(endpoint_id) => endpoint_id,
+        let endpoint = match state.with_store(|s| delivery_endpoint_for(s, &pubkey)) {
+            Ok(endpoint) => endpoint,
             Err(e) => {
                 tracing::error!(%pubkey, error = %e, "ring_doorbells: locator lookup failed — cannot resolve endpoint this tick");
                 state.emit_delivery_failure(
@@ -70,10 +58,11 @@ async fn ring_doorbells_inner(state: &Arc<DaemonState>) -> Result<()> {
                 continue;
             }
         };
-
-        let endpoint_live = endpoint_id
-            .as_deref()
-            .is_some_and(|id| endpoint_is_live(kind, id));
+        let kind = endpoint.as_ref().map(|(endpoint, _)| endpoint.kind);
+        let endpoint_id = endpoint
+            .as_ref()
+            .map(|(endpoint, _)| endpoint.endpoint_id.clone());
+        let endpoint_live = endpoint.is_some_and(|(_, live)| live);
         let fact = delivery_scan_fact(
             &rec,
             pending.into_iter().map(|row| row.event_id).collect(),
@@ -101,7 +90,7 @@ async fn ring_doorbells_inner(state: &Arc<DaemonState>) -> Result<()> {
 async fn apply_delivery_effects(
     state: &Arc<DaemonState>,
     rec: &crate::state::Session,
-    kind: TransportKind,
+    kind: Option<TransportKind>,
     effects: Vec<crate::reconcile::DeliveryEffect>,
 ) {
     for effect in effects {
@@ -111,6 +100,16 @@ async fn apply_delivery_effects(
                 endpoint_id,
                 event_ids,
             } => {
+                let Some(kind) = kind else {
+                    state.emit_delivery_failure(
+                        &rec.channel_h,
+                        &rec.agent_slug,
+                        &pubkey,
+                        "delivery reconciler selected injection without a typed endpoint"
+                            .to_string(),
+                    );
+                    continue;
+                };
                 let result = match kind {
                     TransportKind::Pty => {
                         inject_planned_messages_pty(state, rec, &endpoint_id, &event_ids).await
@@ -145,7 +144,9 @@ async fn apply_delivery_effects(
                 schedule_delivery_retry(state.clone(), pubkey, delay_secs)
             }
             crate::reconcile::DeliveryEffect::ClearDeadEndpoint { pubkey } => {
-                let _ = state.with_store(|s| s.clear_locator_kind(&pubkey, locator_kind(kind)));
+                if let Some(kind) = kind {
+                    let _ = state.with_store(|s| s.clear_locator_kind(&pubkey, locator_kind(kind)));
+                }
             }
         }
     }

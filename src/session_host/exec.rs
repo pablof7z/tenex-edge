@@ -53,6 +53,7 @@ pub(crate) async fn spawn_agent_exec(
     resume_id: Option<&str>,
     group: Option<&str>,
     client_cwd: Option<&Path>,
+    expected_pubkey: Option<&str>,
 ) -> Result<ExecLaunch> {
     let agent = crate::identity::agent_launch_config(&crate::config::mosaico_home(), slug)?;
     let scratch = crate::config::mosaico_home()
@@ -94,14 +95,24 @@ pub(crate) async fn spawn_agent_exec(
             group.unwrap_or(root),
             native,
         )?,
-        None => crate::session_host::admission::reserve_fresh(
-            state,
-            &identity,
-            harness.as_str(),
-            root,
-            group,
-            None,
-        )?,
+        None => match expected_pubkey {
+            Some(pubkey) => crate::session_host::admission::reserve_fresh_for_pubkey(
+                state,
+                &identity,
+                harness.as_str(),
+                root,
+                group,
+                pubkey,
+            )?,
+            None => crate::session_host::admission::reserve_fresh(
+                state,
+                &identity,
+                harness.as_str(),
+                root,
+                group,
+                None,
+            )?,
+        },
     };
     let mut launch = match spawn_process(
         slug,

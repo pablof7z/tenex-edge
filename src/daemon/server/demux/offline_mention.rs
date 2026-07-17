@@ -5,9 +5,10 @@ use std::sync::Arc;
 mod claim;
 mod headless;
 pub(super) mod liveness;
+mod target;
 
 pub(super) use claim::dispatch_all;
-use headless::{mention_prompt, spawn_headless_mention};
+use headless::spawn_headless_mention;
 use liveness::has_alive_session_for;
 
 /// Spawn a local agent that was p-tagged in a kind:9 message but had no alive
@@ -19,6 +20,7 @@ use liveness::has_alive_session_for;
 /// delivered via `ring_doorbells`.
 pub(super) async fn handle(
     state: &Arc<DaemonState>,
+    event_id: &str,
     mentioned_pk: &str,
     channel: &str,
     body: &str,
@@ -34,45 +36,18 @@ pub(super) async fn handle(
         return;
     }
 
-    let now = now_secs();
-    let backend_pubkey = state.backend_pubkey();
-    let claim = state
-        .with_store(|s| s.get_session_claim(mentioned_pk, channel).ok().flatten())
-        .filter(|c| c.is_owned_by_backend(backend_pubkey.as_deref()));
-    let active_claim = state.with_store(|s| {
-        s.get_active_session_claim(mentioned_pk, channel, now)
-            .ok()
-            .flatten()
-    });
-    if let Some(remote_claim) = active_claim
-        .as_ref()
-        .filter(|c| !c.is_owned_by_backend(backend_pubkey.as_deref()))
-    {
-        tracing::info!(
-            agent = %remote_claim.agent_slug,
-            channel,
-            owner_host = %remote_claim.owner_host,
-            owner_backend = %crate::util::pubkey_short(&remote_claim.owner_backend_pubkey),
-            "active ephemeral session claim belongs to another backend - skipping local spawn"
-        );
-        return;
-    }
-    let active_claim = active_claim.filter(|c| c.is_owned_by_backend(backend_pubkey.as_deref()));
-    let profile_slug = state.with_store(|s| {
-        s.get_profile(mentioned_pk)
-            .ok()
-            .flatten()
-            .and_then(|profile| (!profile.agent_slug.is_empty()).then_some(profile.agent_slug))
-    });
-    let Some(agent_slug) = active_claim
-        .as_ref()
-        .or(claim.as_ref())
-        .map(|route| route.agent_slug.clone())
-        .filter(|slug| !slug.is_empty())
-        .or(profile_slug)
-    else {
+    let Some(target) = target::resolve_and_persist(
+        state,
+        event_id,
+        mentioned_pk,
+        channel,
+        body,
+        requester_pubkey,
+    ) else {
         return;
     };
+    let agent_slug = target.agent_slug;
+    let target_session = target.session;
 
     let work_root = state.with_store(|s| work_root_for(s, channel));
     let has_path = state.with_store(|s| s.workspace_path(&work_root).ok().flatten().is_some());
@@ -81,9 +56,112 @@ pub(super) async fn handle(
         return;
     }
 
-    // A dormant claim is a route hint, not a resumable identity. Fresh launch
-    // allocates the next session pubkey before the child starts.
-    tracing::info!(agent = %agent_slug, channel, work_root = %work_root, "spawning agent on mention");
+    if let Some(target) = target_session.as_ref() {
+        let resume_locator = match state.with_store(|s| s.native_resume_locator(mentioned_pk)) {
+            Ok(locator) => locator,
+            Err(e) => {
+                tracing::error!(pubkey = %mentioned_pk, channel, error = %e, "exact mention resume lookup failed");
+                return;
+            }
+        };
+        if let Some(locator) = resume_locator {
+            tracing::info!(
+                agent = %agent_slug,
+                pubkey = %mentioned_pk,
+                channel,
+                work_root = %work_root,
+                "resuming exact session on mention"
+            );
+            match crate::session_host::resume_agent_in_channel(
+                state,
+                &agent_slug,
+                &work_root,
+                channel,
+                &locator.locator_value,
+                crate::session_host::LaunchIntent::Managed,
+            )
+            .await
+            {
+                Ok(endpoint_id) => tracing::info!(
+                    agent = %agent_slug,
+                    pubkey = %mentioned_pk,
+                    endpoint = %endpoint_id,
+                    channel,
+                    "exact session resumed; pending inbox will ring its doorbell"
+                ),
+                Err(e) => {
+                    tracing::warn!(
+                        agent = %agent_slug,
+                        pubkey = %mentioned_pk,
+                        channel,
+                        error = %e,
+                        "exact session resume failed; mention remains pending"
+                    );
+                    state.emit_delivery_failure(
+                        channel,
+                        &agent_slug,
+                        mentioned_pk,
+                        format!("exact session resume failed; mention remains pending: {e:#}"),
+                    );
+                }
+            }
+            return;
+        }
+
+        let derived = match state.with_store(|s| s.is_derived_session_pubkey(mentioned_pk)) {
+            Ok(derived) => derived,
+            Err(e) => {
+                tracing::error!(pubkey = %mentioned_pk, channel, error = %e, "exact mention signer lookup failed");
+                return;
+            }
+        };
+        if derived {
+            tracing::warn!(
+                agent = %agent_slug,
+                pubkey = %mentioned_pk,
+                channel,
+                "per-session mention target has no native resume locator; mention remains pending"
+            );
+            state.emit_delivery_failure(
+                channel,
+                &agent_slug,
+                mentioned_pk,
+                "per-session target is not resumable; mention remains pending for the exact pubkey"
+                    .to_string(),
+            );
+            return;
+        }
+
+        if target.agent_slug != agent_slug {
+            tracing::error!(
+                pubkey = %mentioned_pk,
+                session_agent = %target.agent_slug,
+                resolved_agent = %agent_slug,
+                channel,
+                "exact mention target agent projection disagrees; refusing launch"
+            );
+            return;
+        }
+    }
+
+    let configured = match crate::identity::load(&crate::config::mosaico_home(), &agent_slug) {
+        Ok(agent) => agent,
+        Err(e) => {
+            tracing::warn!(agent = %agent_slug, pubkey = %mentioned_pk, channel, error = %e, "cannot validate stable mention target");
+            return;
+        }
+    };
+    if configured.per_session_key || configured.pubkey_hex().as_deref() != Some(mentioned_pk) {
+        tracing::warn!(
+            agent = %agent_slug,
+            pubkey = %mentioned_pk,
+            channel,
+            "offline p-tag is not the configured stable agent pubkey; refusing slug substitution"
+        );
+        return;
+    }
+
+    tracing::info!(agent = %agent_slug, pubkey = %mentioned_pk, channel, work_root = %work_root, "starting stable agent on exact mention");
     match spawn_headless_mention(
         state,
         &agent_slug,
@@ -91,27 +169,41 @@ pub(super) async fn handle(
         channel,
         body,
         notice_context(state, mentioned_pk, &agent_slug, requester_pubkey),
+        mentioned_pk,
     )
     .await
     {
-        Ok(true) => return,
+        Ok(true) => {
+            if let Err(e) =
+                state.with_store(|s| s.mark_delivered(event_id, mentioned_pk, now_secs()))
+            {
+                tracing::error!(
+                    event_id,
+                    pubkey = %mentioned_pk,
+                    channel,
+                    error = %e,
+                    "headless mention ran but its inbox row could not be marked delivered"
+                );
+            }
+            return;
+        }
         Ok(false) => {}
         Err(e) => {
             tracing::warn!(agent = %agent_slug, channel, error = %e, "headless spawn failed - falling back to PTY spawn");
         }
     }
-    match crate::session_host::spawn_ephemeral_agent(
+    match crate::session_host::spawn_ephemeral_agent_for_pubkey(
         state,
         &agent_slug,
         &work_root,
         Some(channel),
         None,
+        mentioned_pk,
     )
     .await
     {
         Ok(pty_id) => {
             tracing::info!(agent = %agent_slug, pty_id = %pty_id, channel, "agent spawned successfully");
-            inject_spawn_prompt(agent_slug.clone(), pty_id, body);
         }
         Err(e) => {
             tracing::warn!(agent = %agent_slug, channel, error = %e, "agent spawn failed");
@@ -149,16 +241,4 @@ fn notice_context(
         requester_pubkey: requester_pubkey.map(str::to_string),
         target_label: Some(target_label(state, pubkey, fallback)),
     }
-}
-
-fn inject_spawn_prompt(agent: String, pty_id: String, body: &str) {
-    let prompt = mention_prompt(body);
-    // Transport-aware: an ACP spawn's child lives in the daemon registry and is
-    // driven over JSON-RPC; a PTY spawn is bracketed-paste injected. The endpoint
-    // id (`pty_id`) is resolved through the transport's typed locator.
-    // `deliver_spawn_prompt` logs
-    // its own failures, so the fresh-spawn mention is never silently PTY-only.
-    tokio::spawn(async move {
-        crate::session_host::deliver_spawn_prompt(&agent, &pty_id, &prompt).await;
-    });
 }

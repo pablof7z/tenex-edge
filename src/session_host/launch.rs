@@ -9,6 +9,7 @@ use std::sync::Arc;
 mod source;
 mod spawn;
 use source::{resolve_agent_source, PtyLaunchSpec};
+pub(crate) use spawn::spawn_ephemeral_agent_for_pubkey;
 pub(crate) use spawn::{spawn_agent, SpawnRequest};
 pub use spawn::{spawn_dispatched_ephemeral_agent, spawn_ephemeral_agent, DispatchedSpawn};
 

@@ -168,10 +168,12 @@ impl Nip29Materializer {
         store.insert_event(&to_relay_event(event)).unwrap_or(false)
     }
 
-    /// Route a chat message into the `inbox` ledger for every alive local session
-    /// whose agent is explicitly p-tagged in the event. Non-mention channel chat
-    /// stays in `relay_events` for ambient context but does not ring the direct
-    /// doorbell. Returns `true` if at least one new inbox row was enqueued.
+    /// Route a chat message into the `inbox` ledger for every known local session
+    /// whose exact pubkey is explicitly p-tagged in the event. Dead targets stay
+    /// pending under that same pubkey until the session is resumed; a slug or a
+    /// sibling session is never substituted. Non-mention channel chat stays in
+    /// `relay_events` for ambient context but does not ring the direct doorbell.
+    /// Returns `true` if at least one new inbox row was enqueued.
     /// Idempotent: a duplicate `(event_id, target_pubkey)` is ignored by the store.
     pub fn route_chat(store: &Store, event: &Event, chat: &ChatMessage) -> bool {
         let channel_h = chat.channel.as_str();
@@ -182,47 +184,43 @@ impl Nip29Materializer {
         if p_pubkeys.is_empty() {
             return false;
         }
-        // A DB error reading the live-session set must NOT be silently collapsed
-        // into "zero sessions" — that would drop the mention and never wake the
-        // agent. Fail loud; the chat row is still cached in relay_events.
-        let sessions = match store.list_alive_sessions() {
-            Ok(sessions) => sessions,
-            Err(e) => {
-                tracing::error!(
-                    channel = channel_h,
-                    event_id = %event_id,
-                    error = %e,
-                    "route_chat: list_alive_sessions failed — mention not routed to any session (possible message loss)"
-                );
-                return false;
-            }
-        };
         let mut woke = false;
-        for sess in sessions {
-            if sess.pubkey == from_pubkey {
+        for target_pubkey in p_pubkeys {
+            if target_pubkey == from_pubkey {
                 continue;
             }
-            let joined = match store.is_session_joined_channel(&sess.pubkey, channel_h) {
+            let session = match store.get_session(&target_pubkey) {
+                Ok(Some(session)) => session,
+                Ok(None) => continue,
+                Err(e) => {
+                    tracing::error!(
+                        channel = channel_h,
+                        pubkey = %target_pubkey,
+                        event_id = %event_id,
+                        error = %e,
+                        "route_chat: exact target lookup failed — mention left in relay cache"
+                    );
+                    continue;
+                }
+            };
+            let joined = match store.is_session_joined_channel(&session.pubkey, channel_h) {
                 Ok(joined) => joined,
                 Err(e) => {
                     tracing::error!(
                         channel = channel_h,
-                        session = %sess.pubkey,
+                        session = %session.pubkey,
                         error = %e,
                         "route_chat: session channel membership lookup failed"
                     );
-                    return false;
+                    continue;
                 }
             };
             if !joined {
                 continue;
             }
-            if !p_pubkeys.contains(&sess.pubkey) {
-                continue;
-            }
             match store.enqueue_inbox(
                 &event_id,
-                &sess.pubkey,
+                &session.pubkey,
                 &from_pubkey,
                 channel_h,
                 &chat.body,
@@ -234,16 +232,16 @@ impl Nip29Materializer {
                 // the agent will never see it. Surface loudly rather than folding
                 // the failure into woke=false.
                 Err(e) => tracing::error!(
-                    pubkey = %sess.pubkey,
+                    pubkey = %session.pubkey,
                     channel = channel_h,
                     event_id = %event_id,
                     error = %e,
                     "route_chat: enqueue_inbox failed for matched session — mention not delivered (agent not woken)"
                 ),
             }
-            if let Err(e) = store.add_message_recipient(&event_id, &sess.pubkey, None) {
+            if let Err(e) = store.add_message_recipient(&event_id, &session.pubkey, None) {
                 tracing::error!(
-                    pubkey = %sess.pubkey,
+                    pubkey = %session.pubkey,
                     channel = channel_h,
                     event_id = %event_id,
                     error = %e,

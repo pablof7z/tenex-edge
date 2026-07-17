@@ -30,18 +30,6 @@ fn locator_kind(kind: TransportKind) -> &'static str {
     }
 }
 
-fn endpoint_id_for(
-    store: &crate::state::Store,
-    pubkey: &str,
-    kind: TransportKind,
-) -> Result<Option<String>> {
-    Ok(store
-        .locators_for_pubkey(pubkey)?
-        .into_iter()
-        .find(|locator| locator.locator_kind == locator_kind(kind))
-        .map(|locator| locator.locator_value))
-}
-
 /// Liveness of a session's typed transport endpoint.
 fn endpoint_is_live(kind: TransportKind, endpoint_id: &str) -> bool {
     match kind {
@@ -53,13 +41,45 @@ fn endpoint_is_live(kind: TransportKind, endpoint_id: &str) -> bool {
     }
 }
 
+fn delivery_endpoint_for(
+    store: &crate::state::Store,
+    pubkey: &str,
+) -> Result<Option<(EndpointRef, bool)>> {
+    let endpoints = store
+        .locators_for_pubkey(pubkey)?
+        .into_iter()
+        .filter_map(|locator| {
+            let kind = match locator.locator_kind.as_str() {
+                crate::state::LOCATOR_PTY => TransportKind::Pty,
+                crate::state::LOCATOR_ACP => TransportKind::Acp,
+                _ => return None,
+            };
+            Some(EndpointRef {
+                kind,
+                endpoint_id: locator.locator_value,
+            })
+        })
+        .collect::<Vec<_>>();
+    Ok(endpoints
+        .iter()
+        .find(|endpoint| endpoint_is_live(endpoint.kind, &endpoint.endpoint_id))
+        .cloned()
+        .map(|endpoint| (endpoint, true))
+        .or_else(|| {
+            endpoints
+                .into_iter()
+                .next()
+                .map(|endpoint| (endpoint, false))
+        }))
+}
+
 /// Whether `session` has a live daemon-owned delivery endpoint.
 pub(crate) fn session_has_live_delivery_path(
     store: &crate::state::Store,
     session: &crate::state::Session,
 ) -> bool {
-    let locators = match store.locators_for_pubkey(&session.pubkey) {
-        Ok(locators) => locators,
+    let endpoint = match delivery_endpoint_for(store, &session.pubkey) {
+        Ok(endpoint) => endpoint,
         Err(e) => {
             tracing::error!(
                 pubkey = %session.pubkey,
@@ -69,17 +89,7 @@ pub(crate) fn session_has_live_delivery_path(
             return false;
         }
     };
-    locators
-        .into_iter()
-        .any(|locator| match locator.locator_kind.as_str() {
-            crate::state::LOCATOR_PTY => {
-                endpoint_is_live(TransportKind::Pty, &locator.locator_value)
-            }
-            crate::state::LOCATOR_ACP => {
-                endpoint_is_live(TransportKind::Acp, &locator.locator_value)
-            }
-            _ => false,
-        })
+    endpoint.is_some_and(|(_, live)| live)
 }
 
 /// How long to wait after `session_start` fires before typing into the PTY.
