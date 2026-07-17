@@ -10,18 +10,10 @@ pub(super) fn resolve_existing_pubkey(
             .map(Some)
             .context("session_start pubkey must be hex or npub");
     }
-    let endpoint_kind = params
-        .endpoint_kind
-        .unwrap_or(crate::session_host::transport::TransportKind::Pty)
-        .locator_kind();
-    let endpoint_pubkey = match params
-        .pty_session
-        .as_deref()
-        .filter(|value| !value.is_empty())
-    {
-        Some(endpoint) => state.with_store(|store| {
+    let endpoint_pubkey = match params.hosted_endpoint()? {
+        Some((endpoint, kind)) => state.with_store(|store| {
             store
-                .alive_session_for_locator(harness, endpoint_kind, endpoint)
+                .alive_session_for_locator(harness, kind.locator_kind(), endpoint)
                 .map(|session| session.map(|session| session.pubkey))
         })?,
         None => None,
@@ -80,6 +72,41 @@ pub(super) fn bind_workspace(
     })
 }
 
+pub(super) fn bind_locators(
+    store: &crate::state::Store,
+    params: &SessionStartParams,
+    harness: &str,
+    pubkey: &str,
+    now: u64,
+) -> Result<()> {
+    if let Some((endpoint, kind)) = params.hosted_endpoint()? {
+        store.put_session_locator(harness, kind.locator_kind(), endpoint, pubkey, now)?;
+    }
+    if let Some(native) = params
+        .resume_id
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            params
+                .harness_session
+                .as_deref()
+                .filter(|value| !value.is_empty())
+        })
+    {
+        store.set_native_resume_locator(pubkey, harness, native, now)?;
+    }
+    if let Some(pid) = params.watch_pid {
+        store.put_session_locator(
+            harness,
+            crate::state::LOCATOR_PID,
+            &pid.to_string(),
+            pubkey,
+            now,
+        )?;
+    }
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn reserve_generation(
     state: &Arc<DaemonState>,
@@ -123,3 +150,7 @@ pub(super) fn reserve_generation(
         )
     })
 }
+
+#[cfg(test)]
+#[path = "runtime/tests.rs"]
+mod tests;

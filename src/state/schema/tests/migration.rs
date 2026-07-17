@@ -102,6 +102,20 @@ fn schema_eight_transport_backfill_is_harness_scoped_and_defaults_are_canonical(
         session_runtime_facts(&migrated, "pk-acp"),
         ("acp".to_string(), "migration".to_string())
     );
+    assert_eq!(
+        session_runtime_facts(&migrated, "pk-app-server"),
+        ("app-server".to_string(), "migration".to_string())
+    );
+    assert_eq!(
+        migrated
+            .query_row(
+                "SELECT locator_kind FROM session_locators WHERE pubkey='pk-app-server'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+        "app_server"
+    );
 
     let fresh_path = directory.path().join("fresh.db");
     drop(Store::open(&fresh_path).expect("fresh schema opens"));

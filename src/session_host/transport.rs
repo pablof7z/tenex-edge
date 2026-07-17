@@ -8,24 +8,30 @@ pub mod acp;
 mod acp_runtime;
 mod acp_spawn;
 pub mod pty;
+mod types;
 
 use anyhow::Result;
 
 use crate::harness::{self, config::HarnessesConfig, Transport};
 
-/// Which transport hosts a session. Stringifies to `"pty"` / `"acp"`.
+/// Which transport hosts a session. This is the persisted runtime contract;
+/// configured app-server sessions never collapse into ACP.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "kebab-case")]
 pub enum TransportKind {
     Pty,
     Acp,
+    AppServer,
 }
 
 impl TransportKind {
+    pub const ALL: [Self; 3] = [Self::Pty, Self::Acp, Self::AppServer];
+
     pub fn as_str(&self) -> &'static str {
         match self {
             TransportKind::Pty => "pty",
             TransportKind::Acp => "acp",
+            TransportKind::AppServer => "app-server",
         }
     }
 
@@ -33,6 +39,7 @@ impl TransportKind {
         match value {
             "pty" => Some(Self::Pty),
             "acp" => Some(Self::Acp),
+            "app-server" => Some(Self::AppServer),
             _ => None,
         }
     }
@@ -41,6 +48,7 @@ impl TransportKind {
         match self {
             TransportKind::Pty => crate::state::LOCATOR_PTY,
             TransportKind::Acp => crate::state::LOCATOR_ACP,
+            TransportKind::AppServer => crate::state::LOCATOR_APP_SERVER,
         }
     }
 
@@ -48,109 +56,13 @@ impl TransportKind {
         match locator_kind {
             crate::state::LOCATOR_PTY => Some(TransportKind::Pty),
             crate::state::LOCATOR_ACP => Some(TransportKind::Acp),
+            crate::state::LOCATOR_APP_SERVER => Some(TransportKind::AppServer),
             _ => None,
         }
     }
 }
 
-/// Fully-resolved, transport-agnostic launch intent.
-#[derive(Clone)]
-pub struct LaunchSpec {
-    pub slug: String,
-    /// Harness-owned native agent definition discovered by Mosaico.
-    pub native_agent: Option<crate::agent_catalog::NativeAgentActivation>,
-    pub root: String,
-    pub abs_path: String,
-    pub group: Option<String>,
-    pub ephemeral: bool,
-    pub session_name: Option<String>,
-    /// Resolved argv incl. base_argv + profile + user flags + agent-def args.
-    pub base_command: Vec<String>,
-    /// Authoritative session identity allocated before the child starts.
-    pub pubkey: String,
-    /// Matching signer exposed only to the assigned harness process.
-    pub agent_nsec: String,
-    pub prepared: PreparedLaunch,
-}
-
-/// PTY-only launch details. Other transports ignore the empty/default value.
-#[derive(Clone, Debug, Default)]
-pub struct PtyLaunchSpec {
-    pub id: Option<String>,
-    pub env: Vec<(String, String)>,
-    pub env_remove: Vec<String>,
-}
-
-/// Immutable runtime inputs captured by the single admission-time resolution.
-#[derive(Clone, Debug, Default)]
-pub struct PreparedLaunch {
-    pub pty: PtyLaunchSpec,
-    pub rpc: Option<RpcLaunchSpec>,
-}
-
-#[derive(Clone, Debug)]
-pub struct RpcLaunchSpec {
-    pub driver: &'static crate::harness::HarnessDriver,
-    pub argv: Vec<String>,
-    pub extra_env: Vec<(String, String)>,
-    pub harness: crate::session::Harness,
-}
-
-/// A prior session's native resume token.
-#[derive(Debug, Clone)]
-pub struct ResumeSpec {
-    pub native_id: String,
-}
-
-/// What the daemon needs after a session opens. The typed kind must survive
-/// registration; callers never infer it from transport-specific metadata.
-#[derive(Debug)]
-pub struct SessionEndpoint {
-    pub kind: TransportKind,
-    pub endpoint_id: String,
-    pub watch_pid: Option<i32>,
-    pub meta: crate::pty::LaunchMetadata,
-}
-
-impl SessionEndpoint {
-    pub fn endpoint_ref(&self) -> EndpointRef {
-        EndpointRef {
-            kind: self.kind,
-            endpoint_id: self.endpoint_id.clone(),
-        }
-    }
-}
-
-/// A live-session address the daemon holds after registration.
-#[derive(Debug, Clone)]
-pub struct EndpointRef {
-    pub kind: TransportKind,
-    pub endpoint_id: String,
-}
-
-/// Resolution of the runtime endpoint admitted on a session record.
-pub enum HostedEndpoint {
-    /// A native process with no daemon-hosted transport.
-    Unhosted,
-    /// The session was admitted as hosted, but its exact locator is unavailable.
-    Unavailable { kind: TransportKind },
-    /// The admitted transport and exact harness-scoped locator both resolved.
-    Resolved {
-        transport: TransportImpl,
-        endpoint: EndpointRef,
-    },
-}
-
-/// Operator-facing endpoint capabilities projected by the owning transport.
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct EndpointDescriptor {
-    pub id: String,
-    pub kind: TransportKind,
-    pub live: bool,
-    pub attachable: bool,
-    pub cwd: Option<String>,
-    pub command: Vec<String>,
-}
+pub use types::*;
 
 /// Complete hosted-session contract. Every selectable transport implements it.
 #[async_trait::async_trait]
@@ -202,7 +114,7 @@ pub trait SessionTransport: Send + Sync {
     async fn kill(&self, ep: &EndpointRef) -> Result<()>;
 }
 
-pub use acp::AcpTransport;
+pub use acp::RpcTransport;
 pub use pty::PtyTransport;
 
 /// Type-erased transport selected from a configured harness bundle.
@@ -261,7 +173,9 @@ impl TransportImpl {
 pub fn transport_for_kind(kind: TransportKind) -> TransportImpl {
     match kind {
         TransportKind::Pty => TransportImpl::new(PtyTransport),
-        TransportKind::Acp => TransportImpl::new(AcpTransport),
+        TransportKind::Acp | TransportKind::AppServer => {
+            TransportImpl::new(RpcTransport::new(kind))
+        }
     }
 }
 
@@ -313,7 +227,8 @@ pub fn select_transport(bundle: &str) -> Result<TransportImpl> {
 /// Map a fully-resolved raw [`Transport`] to its hosting implementation.
 fn transport_impl_for(transport: Transport) -> Result<TransportImpl> {
     Ok(match transport {
-        Transport::Acp | Transport::AppServer => TransportImpl::new(AcpTransport),
+        Transport::Acp => TransportImpl::new(RpcTransport::new(TransportKind::Acp)),
+        Transport::AppServer => TransportImpl::new(RpcTransport::new(TransportKind::AppServer)),
         Transport::Pty => TransportImpl::new(PtyTransport),
     })
 }
@@ -325,7 +240,8 @@ pub fn select_transport_with(cfg: &HarnessesConfig, bundle: &str) -> Result<Tran
 /// Resolve a required bundle to the hosted-session transport kind.
 pub fn transport_kind_for(cfg: &HarnessesConfig, bundle: &str) -> Result<TransportKind> {
     Ok(match harness::bundle_transport_with(cfg, bundle)? {
-        Transport::Acp | Transport::AppServer => TransportKind::Acp,
+        Transport::Acp => TransportKind::Acp,
+        Transport::AppServer => TransportKind::AppServer,
         Transport::Pty => TransportKind::Pty,
     })
 }

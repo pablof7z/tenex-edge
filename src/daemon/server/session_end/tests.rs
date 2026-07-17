@@ -41,7 +41,7 @@ fn register(
 #[tokio::test]
 async fn admitted_hosted_session_without_locator_refuses_pid_fallback() {
     let state = DaemonState::new_for_test().await;
-    for transport in ["pty", "acp"] {
+    for transport in ["pty", "acp", "app-server"] {
         let rec = register(
             &state,
             &format!("pk-missing-{transport}"),

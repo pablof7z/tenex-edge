@@ -108,8 +108,8 @@ fn bound_endpoint_projection_is_transport_owned_and_generic() {
             &crate::state::AdmittedRuntimeFacts {
                 observed_harness: "codex".into(),
                 claimed_harness: String::new(),
-                bundle: "codex-acp".into(),
-                transport: "acp".into(),
+                bundle: "codex-app-server".into(),
+                transport: "app-server".into(),
                 endpoint_provenance: "launch".into(),
             },
         )
@@ -117,17 +117,17 @@ fn bound_endpoint_projection_is_transport_owned_and_generic() {
     store
         .put_session_locator(
             "codex",
-            crate::state::LOCATOR_ACP,
-            "acp-operator-test",
+            crate::state::LOCATOR_APP_SERVER,
+            "app-server-operator-test",
             &pubkey,
             2,
         )
         .unwrap();
 
     let rows = project_sessions(&store, "laptop", &HashMap::new()).unwrap();
-    assert_eq!(rows[0]["transport"], "acp");
-    assert_eq!(rows[0]["endpoint"]["id"], "acp-operator-test");
-    assert_eq!(rows[0]["endpoint"]["kind"], "acp");
+    assert_eq!(rows[0]["transport"], "app-server");
+    assert_eq!(rows[0]["endpoint"]["id"], "app-server-operator-test");
+    assert_eq!(rows[0]["endpoint"]["kind"], "app-server");
     assert_eq!(rows[0]["endpoint"]["live"], false);
     assert_eq!(rows[0]["endpoint"]["attachable"], false);
     assert!(rows[0].get("acp_endpoint_id").is_none());
@@ -136,7 +136,7 @@ fn bound_endpoint_projection_is_transport_owned_and_generic() {
 
 #[test]
 fn missing_hosted_locator_preserves_the_admitted_transport() {
-    for transport in ["pty", "acp"] {
+    for transport in ["pty", "acp", "app-server"] {
         let store = Store::open_memory().unwrap();
         let pubkey = Keys::generate().public_key().to_hex();
         store

@@ -157,6 +157,7 @@ fn late_session_start_hook_reasserts_pty_bootstrap_session() {
                 "channel": &channel,
                 "watch_pid": i32::try_from(meta.supervisor_pid).ok(),
                 "pty_session": &pty_id,
+                "endpoint_kind": "pty",
             }),
         )
         .await

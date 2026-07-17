@@ -193,12 +193,14 @@ pub(super) fn create_schema_eight(path: &Path) {
         INSERT INTO sessions
             (pubkey, runtime_generation, harness, created_at)
         VALUES ('pk-pty', 1, 'codex', 1),
-               ('pk-acp', 1, 'claude-code', 1);
+               ('pk-acp', 1, 'claude-code', 1),
+               ('pk-app-server', 1, 'codex', 1);
         INSERT INTO session_locators
             (harness, locator_kind, locator_value, pubkey, created_at)
         VALUES ('codex', 'pty', 'pty-owned', 'pk-pty', 1),
                ('claude-code', 'acp', 'acp-foreign', 'pk-pty', 2),
-               ('claude-code', 'acp', 'acp-owned', 'pk-acp', 1);
+               ('claude-code', 'acp', 'acp-owned', 'pk-acp', 1),
+               ('codex', 'acp', 'app-server-owned', 'pk-app-server', 1);
         PRAGMA user_version = 8;
         "#,
     )

@@ -187,7 +187,7 @@ async fn managed_generic_creates_preferred_rpc_bundle() {
     assert_eq!(source.bundle, "codex-app-server");
     assert_eq!(
         source.transport.kind(),
-        crate::session_host::transport::TransportKind::Acp
+        crate::session_host::transport::TransportKind::AppServer
     );
     let saved = HarnessesConfig::load().unwrap();
     assert_eq!(

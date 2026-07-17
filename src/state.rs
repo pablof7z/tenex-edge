@@ -215,7 +215,9 @@ mod agent_roster;
 pub use agent_roster::{AgentAvailability, AgentRoster};
 mod agent_usage;
 mod locators;
-pub(crate) use locators::{LOCATOR_ACP, LOCATOR_NATIVE_RESUME, LOCATOR_PID, LOCATOR_PTY};
+pub(crate) use locators::{
+    LOCATOR_ACP, LOCATOR_APP_SERVER, LOCATOR_NATIVE_RESUME, LOCATOR_PID, LOCATOR_PTY,
+};
 mod channel_readiness_attempts;
 pub use channel_readiness_attempts::{ChannelReadinessAttempt, NewChannelReadinessAttempt};
 mod channels;

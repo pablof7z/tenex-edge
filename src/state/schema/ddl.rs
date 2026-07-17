@@ -152,7 +152,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     claimed_harness   TEXT NOT NULL DEFAULT '',
     admitted_bundle   TEXT NOT NULL DEFAULT '',
     admitted_transport TEXT NOT NULL DEFAULT ''
-        CHECK (admitted_transport IN ('', 'pty', 'acp')),
+        CHECK (admitted_transport IN ('', 'pty', 'acp', 'app-server')),
     endpoint_provenance TEXT NOT NULL DEFAULT ''
         CHECK (endpoint_provenance IN ('', 'launch', 'hook', 'migration')),
     child_pid         INTEGER,
@@ -180,7 +180,8 @@ CREATE INDEX IF NOT EXISTS idx_session_channels_channel
 
 CREATE TABLE IF NOT EXISTS session_locators (
     harness        TEXT NOT NULL,
-    locator_kind   TEXT NOT NULL CHECK (locator_kind IN ('native_resume', 'pty', 'acp', 'pid')),
+    locator_kind   TEXT NOT NULL
+        CHECK (locator_kind IN ('native_resume', 'pty', 'acp', 'app_server', 'pid')),
     locator_value  TEXT NOT NULL,
     pubkey         TEXT NOT NULL,
     created_at     INTEGER NOT NULL,

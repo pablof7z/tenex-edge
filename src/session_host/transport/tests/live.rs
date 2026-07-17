@@ -24,7 +24,7 @@ fn live_spec(home: &std::path::Path, pubkey: String) -> LaunchSpec {
     let cfg = crate::harness::HarnessesConfig::load().unwrap();
     let mut resolved =
         crate::harness::resolve_with(&cfg, "opencode-acp", None, &home.join("profile")).unwrap();
-    let prepared = AcpTransport
+    let prepared = RpcTransport::new(TransportKind::Acp)
         .prepare_launch(&mut resolved, "live-endpoint".into())
         .unwrap();
     LaunchSpec {

@@ -31,7 +31,7 @@ pub(super) struct SessionStartParams {
     /// Launch-selected bundle. Empty for externally discovered sessions.
     #[serde(default)]
     pub(super) admitted_bundle: Option<String>,
-    /// Hosted transport recorded at admission (`pty`/`acp`).
+    /// Hosted transport recorded at admission (`pty`/`acp`/`app-server`).
     #[serde(default)]
     pub(super) admitted_transport: Option<String>,
     /// Source of endpoint facts (`launch` or `hook`).
@@ -43,6 +43,25 @@ pub(super) struct SessionStartParams {
     pub(super) channels: Vec<String>,
     #[serde(default)]
     pub(super) dispatch_event: Option<String>,
+}
+
+impl SessionStartParams {
+    pub(super) fn hosted_endpoint(
+        &self,
+    ) -> anyhow::Result<Option<(&str, crate::session_host::transport::TransportKind)>> {
+        let endpoint = self
+            .pty_session
+            .as_deref()
+            .filter(|value| !value.is_empty());
+        match (endpoint, self.endpoint_kind) {
+            (Some(endpoint), Some(kind)) => Ok(Some((endpoint, kind))),
+            (Some(_), None) => {
+                anyhow::bail!("session_start endpoint requires explicit endpoint_kind")
+            }
+            (None, Some(_)) => anyhow::bail!("session_start endpoint_kind requires an endpoint"),
+            (None, None) => Ok(None),
+        }
+    }
 }
 
 pub(super) struct RuntimeFacts {
@@ -64,8 +83,21 @@ pub(super) fn runtime_facts(p: &SessionStartParams) -> anyhow::Result<RuntimeFac
         anyhow::bail!("hook session_start requires an explicit claimed_harness");
     }
     let transport = p.admitted_transport.as_deref().unwrap_or("");
-    if !matches!(transport, "" | "pty" | "acp") {
+    if !matches!(transport, "" | "pty" | "acp" | "app-server") {
         anyhow::bail!("unknown admitted transport {transport:?}");
+    }
+    if let Some((_, endpoint_kind)) = p.hosted_endpoint()? {
+        let admitted_kind = crate::session_host::transport::TransportKind::parse(transport)
+            .ok_or_else(|| {
+                anyhow::anyhow!("session_start endpoint requires an admitted hosted transport")
+            })?;
+        if admitted_kind != endpoint_kind {
+            anyhow::bail!(
+                "session_start endpoint_kind {} does not match admitted transport {}",
+                endpoint_kind.as_str(),
+                admitted_kind.as_str()
+            );
+        }
     }
     Ok(RuntimeFacts {
         observed_harness: observed,
@@ -146,6 +178,45 @@ mod tests {
                 "endpoint_kind": "other"
             }))
             .is_err()
+        );
+    }
+
+    #[test]
+    fn endpoint_requires_an_explicit_matching_kind() {
+        let base = serde_json::json!({
+            "agent": "codex",
+            "observed_harness": "codex",
+            "admitted_transport": "app-server",
+            "endpoint_provenance": "launch",
+            "pty_session": "rpc-endpoint"
+        });
+        let missing: SessionStartParams = serde_json::from_value(base.clone()).unwrap();
+        let error = runtime_facts(&missing).err().unwrap().to_string();
+        assert!(error.contains("requires explicit endpoint_kind"), "{error}");
+
+        let mut mismatched = base;
+        mismatched["endpoint_kind"] = "acp".into();
+        let mismatched: SessionStartParams = serde_json::from_value(mismatched).unwrap();
+        let error = runtime_facts(&mismatched).err().unwrap().to_string();
+        assert!(error.contains("does not match"), "{error}");
+    }
+
+    #[test]
+    fn app_server_endpoint_kind_is_canonical() {
+        let params: SessionStartParams = serde_json::from_value(serde_json::json!({
+            "agent": "codex",
+            "observed_harness": "codex",
+            "admitted_transport": "app-server",
+            "endpoint_provenance": "launch",
+            "pty_session": "app-server-endpoint",
+            "endpoint_kind": "app-server"
+        }))
+        .unwrap();
+        let facts = runtime_facts(&params).unwrap();
+        assert_eq!(facts.admitted_transport, "app-server");
+        assert_eq!(
+            params.hosted_endpoint().unwrap().unwrap().1,
+            crate::session_host::transport::TransportKind::AppServer
         );
     }
 }

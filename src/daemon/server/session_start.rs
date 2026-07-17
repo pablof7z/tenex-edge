@@ -141,7 +141,7 @@ pub(super) async fn rpc_session_start_inner(
                 "hook harness claim differs from admitted observation"
             );
         }
-        bind_locators(store, &p, &admitted.observed_harness, &pubkey, now)?;
+        runtime::bind_locators(store, &p, &admitted.observed_harness, &pubkey, now)?;
         Ok(())
     })?;
     retire_reclaimed_profile(state, reclaimed_pubkey.as_deref()).await?;
@@ -226,43 +226,6 @@ fn resolve_start_channel(
         return Ok((work_root.to_string(), None));
     };
     Ok((channel_h.to_string(), None))
-}
-
-fn bind_locators(
-    store: &crate::state::Store,
-    p: &SessionStartParams,
-    harness: &str,
-    pubkey: &str,
-    now: u64,
-) -> Result<()> {
-    if let Some(endpoint) = p.pty_session.as_deref().filter(|value| !value.is_empty()) {
-        let kind = p
-            .endpoint_kind
-            .unwrap_or(crate::session_host::transport::TransportKind::Pty);
-        store.put_session_locator(harness, kind.locator_kind(), endpoint, pubkey, now)?;
-    }
-    if let Some(native) = p
-        .resume_id
-        .as_deref()
-        .filter(|value| !value.is_empty())
-        .or_else(|| {
-            p.harness_session
-                .as_deref()
-                .filter(|value| !value.is_empty())
-        })
-    {
-        store.set_native_resume_locator(pubkey, harness, native, now)?;
-    }
-    if let Some(pid) = p.watch_pid {
-        store.put_session_locator(
-            harness,
-            crate::state::LOCATOR_PID,
-            &pid.to_string(),
-            pubkey,
-            now,
-        )?;
-    }
-    Ok(())
 }
 
 fn progress_emit(progress: &Option<InitProgress>, stage: &str, message: &str) {

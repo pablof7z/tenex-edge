@@ -55,7 +55,7 @@ fn diagnostic_claim_update_does_not_touch_admitted_facts() {
     store
         .reserve_session_with_facts(
             &registration,
-            &facts("codex", "", "codex-app", "acp", "launch"),
+            &facts("codex", "", "codex-app", "app-server", "launch"),
         )
         .unwrap();
     store.record_claimed_harness("pk", "claude-code").unwrap();
@@ -64,7 +64,7 @@ fn diagnostic_claim_update_does_not_touch_admitted_facts() {
     assert_eq!(session.claimed_harness, "claude-code");
     assert_eq!(session.observed_harness, "codex");
     assert_eq!(session.admitted_bundle, "codex-app");
-    assert_eq!(session.admitted_transport, "acp");
+    assert_eq!(session.admitted_transport, "app-server");
     assert_eq!(session.endpoint_provenance, "launch");
 }
 

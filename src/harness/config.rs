@@ -1,7 +1,7 @@
 //! `~/.mosaico/harnesses.json` loader + serde.
 //!
 //! The file is a map of **bundle name -> bundle spec**. A bundle is the
-//! user-facing name you spawn (`codex-acp`, `planner`, …); it binds a `harness`
+//! user-facing name you spawn (`codex-app-server`, `planner`, …); it binds a `harness`
 //! (which CLI) to a `transport` (how mosaico drives it) plus operational args.
 //! Missing file => empty map; malformed JSON => hard error. There are no
 //! built-in bundle fallbacks.

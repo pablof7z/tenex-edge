@@ -7,6 +7,7 @@ use rusqlite::{Transaction, TransactionBehavior};
 pub(crate) const LOCATOR_NATIVE_RESUME: &str = "native_resume";
 pub(crate) const LOCATOR_PTY: &str = "pty";
 pub(crate) const LOCATOR_ACP: &str = "acp";
+pub(crate) const LOCATOR_APP_SERVER: &str = "app_server";
 pub(crate) const LOCATOR_PID: &str = "pid";
 
 const COLS: &str = "harness, locator_kind, locator_value, pubkey, created_at";
@@ -181,7 +182,9 @@ impl Store {
 
 fn validate_locator_kind(locator_kind: &str) -> Result<()> {
     match locator_kind {
-        LOCATOR_NATIVE_RESUME | LOCATOR_PTY | LOCATOR_ACP | LOCATOR_PID => Ok(()),
+        LOCATOR_NATIVE_RESUME | LOCATOR_PTY | LOCATOR_ACP | LOCATOR_APP_SERVER | LOCATOR_PID => {
+            Ok(())
+        }
         _ => anyhow::bail!("unknown session locator kind {locator_kind:?}"),
     }
 }

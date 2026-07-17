@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::rpc_harness::{Callbacks, Dialect, RpcHandle, SpawnConfig};
+use crate::session_host::transport::{EndpointRef, SessionTransport};
 
 fn short_lived_cfg() -> SpawnConfig {
     let cwd = std::env::temp_dir();
@@ -17,7 +18,7 @@ fn short_lived_cfg() -> SpawnConfig {
     }
 }
 
-fn recording_cfg(capture: &std::path::Path) -> SpawnConfig {
+fn recording_cfg(capture: &std::path::Path, dialect: Dialect) -> SpawnConfig {
     let cwd = std::env::temp_dir();
     SpawnConfig {
         program: "sh".into(),
@@ -34,56 +35,77 @@ while IFS= read -r line; do :; done"#
         cwd: cwd.clone(),
         env: vec![],
         env_remove: vec![],
-        dialect: Dialect::Acp,
+        dialect,
         callbacks: Callbacks::allow_all(cwd),
     }
 }
 
 #[tokio::test]
-async fn registered_acp_child_is_live_and_receives_delivery() {
+async fn retained_rpc_transports_are_live_deliver_and_kill() {
     let scratch = tempfile::tempdir().unwrap();
-    let capture = scratch.path().join("request.json");
-    let (handle, updates) = RpcHandle::spawn(recording_cfg(&capture))
-        .await
-        .expect("spawn controlled ACP child");
-    let endpoint_id = format!("acp-delivery-test-{}", std::process::id());
-    register_child(
-        &endpoint_id,
-        handle,
-        "native-delivery-test".into(),
-        scratch.path().to_path_buf(),
-        updates,
-    );
-    let endpoint = EndpointRef {
-        kind: TransportKind::Acp,
-        endpoint_id,
-    };
+    for (kind, dialect, method) in [
+        (TransportKind::Acp, Dialect::Acp, "session/prompt"),
+        (TransportKind::AppServer, Dialect::AppServer, "turn/start"),
+    ] {
+        let capture = scratch.path().join(format!("{}.json", kind.as_str()));
+        let (handle, updates) = RpcHandle::spawn(recording_cfg(&capture, dialect))
+            .await
+            .expect("spawn controlled RPC child");
+        let endpoint_id = format!("{}-delivery-test-{}", kind.as_str(), std::process::id());
+        register_child(
+            &endpoint_id,
+            handle,
+            "native-delivery-test".into(),
+            scratch.path().to_path_buf(),
+            updates,
+        );
+        let endpoint = EndpointRef { kind, endpoint_id };
+        let transport = RpcTransport::new(kind);
 
-    assert!(AcpTransport.is_live(&endpoint));
-    AcpTransport
-        .deliver(&endpoint, "positive ACP delivery", true)
-        .await
-        .unwrap();
+        assert!(transport.is_live(&endpoint));
+        let other_kind = match kind {
+            TransportKind::Acp => TransportKind::AppServer,
+            TransportKind::AppServer => TransportKind::Acp,
+            TransportKind::Pty => unreachable!(),
+        };
+        let wrong_transport = RpcTransport::new(other_kind);
+        let wrong_endpoint = EndpointRef {
+            kind: other_kind,
+            endpoint_id: endpoint.endpoint_id.clone(),
+        };
+        assert!(!wrong_transport.is_live(&wrong_endpoint));
+        assert!(wrong_transport
+            .deliver(&wrong_endpoint, "must not cross dialects", true)
+            .await
+            .is_err());
+        assert!(wrong_transport.kill(&wrong_endpoint).await.is_err());
+        assert!(transport.is_live(&endpoint));
+        transport
+            .deliver(&endpoint, "positive RPC delivery", true)
+            .await
+            .unwrap();
 
-    let request = tokio::time::timeout(std::time::Duration::from_secs(2), async {
-        loop {
-            if let Ok(bytes) = std::fs::read(&capture) {
-                break bytes;
+        let request = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                if let Ok(bytes) = std::fs::read(&capture) {
+                    break bytes;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
             }
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        }
-    })
-    .await
-    .expect("controlled ACP child did not receive delivery");
-    let request: serde_json::Value = serde_json::from_slice(&request).unwrap();
-    assert_eq!(request["method"], "session/prompt");
-    assert_eq!(request["params"]["sessionId"], "native-delivery-test");
-    assert_eq!(
-        request["params"]["prompt"][0]["text"],
-        "positive ACP delivery"
-    );
-    AcpTransport.kill(&endpoint).await.unwrap();
-    assert!(!AcpTransport.is_live(&endpoint));
+        })
+        .await
+        .expect("controlled RPC child did not receive delivery");
+        let request: serde_json::Value = serde_json::from_slice(&request).unwrap();
+        assert_eq!(request["method"], method);
+        assert_eq!(
+            request["params"]["sessionId"]
+                .as_str()
+                .or_else(|| request["params"]["threadId"].as_str()),
+            Some("native-delivery-test")
+        );
+        transport.kill(&endpoint).await.unwrap();
+        assert!(!transport.is_live(&endpoint));
+    }
 }
 
 #[tokio::test]
@@ -118,8 +140,5 @@ async fn self_exiting_child_is_reaped_from_registry() {
         kind: TransportKind::Acp,
         endpoint_id,
     };
-    assert!(
-        !AcpTransport.is_live(&ep),
-        "reaped endpoint must not be live"
-    );
+    assert!(!RpcTransport::new(TransportKind::Acp).is_live(&ep));
 }

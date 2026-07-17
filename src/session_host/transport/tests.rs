@@ -7,13 +7,22 @@ mod live;
 fn transport_kind_strings() {
     assert_eq!(TransportKind::Pty.as_str(), "pty");
     assert_eq!(TransportKind::Acp.as_str(), "acp");
+    assert_eq!(TransportKind::AppServer.as_str(), "app-server");
     assert_eq!(TransportKind::Pty.locator_kind(), crate::state::LOCATOR_PTY);
     assert_eq!(TransportKind::Acp.locator_kind(), crate::state::LOCATOR_ACP);
+    assert_eq!(
+        TransportKind::AppServer.locator_kind(),
+        crate::state::LOCATOR_APP_SERVER
+    );
     assert_eq!(
         TransportKind::from_locator_kind(crate::state::LOCATOR_ACP),
         Some(TransportKind::Acp)
     );
     assert_eq!(serde_json::to_value(TransportKind::Acp).unwrap(), "acp");
+    assert_eq!(
+        serde_json::to_value(TransportKind::AppServer).unwrap(),
+        "app-server"
+    );
     assert_eq!(
         serde_json::from_value::<TransportKind>(serde_json::json!("pty")).unwrap(),
         TransportKind::Pty
@@ -22,23 +31,25 @@ fn transport_kind_strings() {
 
 #[test]
 fn persisted_locator_selects_the_transport_without_agent_config() {
-    let locator = crate::state::SessionLocator {
-        harness: "codex".into(),
-        locator_kind: crate::state::LOCATOR_ACP.into(),
-        locator_value: "acp-owned-endpoint".into(),
-        pubkey: "pk".into(),
-        created_at: 1,
-    };
+    for kind in TransportKind::ALL {
+        let locator = crate::state::SessionLocator {
+            harness: "codex".into(),
+            locator_kind: kind.locator_kind().into(),
+            locator_value: format!("{}-owned-endpoint", kind.as_str()),
+            pubkey: "pk".into(),
+            created_at: 1,
+        };
 
-    let (transport, endpoint) = transport_for_locator(&locator).expect("hosted locator");
-    assert_eq!(transport.kind(), TransportKind::Acp);
-    assert_eq!(endpoint.kind, TransportKind::Acp);
-    assert_eq!(endpoint.endpoint_id, "acp-owned-endpoint");
+        let (transport, endpoint) = transport_for_locator(&locator).expect("hosted locator");
+        assert_eq!(transport.kind(), kind);
+        assert_eq!(endpoint.kind, kind);
+        assert_eq!(endpoint.endpoint_id, locator.locator_value);
+    }
 }
 
 #[test]
 fn admitted_hosted_transport_remains_distinct_when_its_locator_is_missing() {
-    for kind in [TransportKind::Pty, TransportKind::Acp] {
+    for kind in TransportKind::ALL {
         let store = crate::state::Store::open_memory().unwrap();
         let pubkey = format!("pk-missing-{}", kind.as_str());
         store
@@ -91,8 +102,8 @@ fn hosted_locator_lookup_errors_are_not_collapsed_to_unhosted() {
             &crate::state::AdmittedRuntimeFacts {
                 observed_harness: "codex".into(),
                 claimed_harness: String::new(),
-                bundle: "codex-acp".into(),
-                transport: "acp".into(),
+                bundle: "codex-app-server".into(),
+                transport: "app-server".into(),
                 endpoint_provenance: "launch".into(),
             },
         )
@@ -140,7 +151,7 @@ fn configured_bundles_select_exact_transport() {
     );
     assert_eq!(
         select_transport_with(&cfg, "codex-app").unwrap().kind(),
-        TransportKind::Acp
+        TransportKind::AppServer
     );
 }
 
@@ -153,7 +164,7 @@ fn rpc_spawn_uses_the_admitted_plan_after_config_mutation() {
     let scratch = tempfile::tempdir().unwrap();
     let mut resolved =
         crate::harness::resolve_with(&cfg, "codex-rpc", None, scratch.path()).unwrap();
-    let prepared = AcpTransport
+    let prepared = RpcTransport::new(TransportKind::AppServer)
         .prepare_launch(&mut resolved, "endpoint".into())
         .unwrap();
 
@@ -172,7 +183,7 @@ fn rpc_spawn_uses_the_admitted_plan_after_config_mutation() {
         prepared,
     };
     let callbacks = crate::rpc_harness::Callbacks::allow_all(scratch.path().to_path_buf());
-    let spawn = super::acp::AcpTransport::spawn_config(&spec, callbacks).unwrap();
+    let spawn = super::acp::RpcTransport::spawn_config(&spec, callbacks).unwrap();
 
     assert_eq!(spawn.program, "codex");
     assert_eq!(spawn.args, ["app-server", "--admitted"]);
@@ -180,18 +191,21 @@ fn rpc_spawn_uses_the_admitted_plan_after_config_mutation() {
 }
 
 #[tokio::test]
-async fn acp_unknown_endpoint_is_not_live() {
-    let ep = EndpointRef {
-        kind: TransportKind::Acp,
-        endpoint_id: "acp-nope".into(),
-    };
-    assert!(!AcpTransport.is_live(&ep));
-    assert!(AcpTransport.kill(&ep).await.is_ok());
+async fn rpc_unknown_endpoints_are_not_live() {
+    for kind in [TransportKind::Acp, TransportKind::AppServer] {
+        let transport = transport_for_kind(kind);
+        let ep = EndpointRef {
+            kind,
+            endpoint_id: format!("{}-nope", kind.as_str()),
+        };
+        assert!(!transport.is_live(&ep));
+        assert!(transport.kill(&ep).await.is_ok());
+    }
 }
 
 #[tokio::test]
 async fn transport_matrix_routes_liveness_delivery_and_kill_through_the_trait() {
-    for kind in [TransportKind::Pty, TransportKind::Acp] {
+    for kind in TransportKind::ALL {
         let transport = transport_for_kind(kind);
         let endpoint = EndpointRef {
             kind,

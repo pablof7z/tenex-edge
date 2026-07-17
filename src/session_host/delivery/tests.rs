@@ -149,7 +149,7 @@ fn headless_mode_separates_output_visibility_from_reachability() {
                 observed_harness: "codex".into(),
                 claimed_harness: String::new(),
                 bundle: "codex-acp".into(),
-                transport: "acp".into(),
+                transport: "app-server".into(),
                 endpoint_provenance: "launch".into(),
             },
         )
@@ -161,11 +161,17 @@ fn headless_mode_separates_output_visibility_from_reachability() {
     );
 
     store
-        .put_session_locator("codex", crate::state::LOCATOR_ACP, "acp-1", "pk-output", 2)
+        .put_session_locator(
+            "codex",
+            crate::state::LOCATOR_APP_SERVER,
+            "app-server-1",
+            "pk-output",
+            2,
+        )
         .unwrap();
     assert!(session_is_headless(&store, &session));
     store
-        .clear_session_locator_kind("pk-output", "codex", crate::state::LOCATOR_ACP)
+        .clear_session_locator_kind("pk-output", "codex", crate::state::LOCATOR_APP_SERVER)
         .unwrap();
 
     let dir = tempfile::tempdir().unwrap();
