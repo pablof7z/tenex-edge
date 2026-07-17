@@ -1,277 +1,198 @@
-# Container Backends
+# Container backends
 
-This reference explains how the local live lab wires backend CLIs, host auth,
-container state, fabric config, and model choices.
+This reference explains provider auth, isolated state, fabric identity, bundles,
+and launch modes in the local lab.
 
-## Auth Boundary
+## Auth boundary
 
-The live lab must use real host credentials. The container runner defaults to:
+The runner defaults to real host auth:
 
 ```bash
 MOSAICO_CONTAINER_HOST_AUTH=1
 ```
 
-With host auth enabled, the runner mounts host auth sources read-only and stages
-only the writable pieces needed by CLI hooks/plugins into `.container-state`.
-The expected direction is:
+Host credentials remain read-only. Writable hook, plugin, cache, and provider
+state is staged under `.container-state/<profile>`. Do not run provider login
+inside a disposable container, copy credentials into the repository, or print
+auth files. Report a missing host path or failed provider check.
 
-- real provider credentials remain on the host
-- the container gets read-only access or symlinked projections
-- mutable CLI state and hook-installed files stay in profile-local state
-- Claude OAuth credentials may be materialized from the macOS Keychain into the
-  isolated profile when the host JSON credential file is stale
-- generated local fabric keys stay inside the live-lab work directory and
-  `.container-state/<profile>/mosaico/config.json`
+Codex staging includes base auth/config and top-level named `*.config.toml`
+files. Claude may source current OAuth state from the macOS Keychain. OpenCode
+uses its staged XDG config/data homes.
 
-Do not run login commands inside the container to create unrelated credentials.
-If a provider credential is missing, report the missing host file or directory.
-If Claude shows an OAuth or paste-code prompt, treat that as an auth-staging
-failure; do not paste a code or print credential contents.
+## State boundary
 
-## Important Host Auth Sources
-
-The runner and `host-auth.bash` are the source of truth, but the relevant host
-families are:
-
-- Codex auth/config state
-- Claude credential and settings state, including the `Claude Code-credentials`
-  Keychain item on macOS when available
-- OpenCode auth/config state
-
-Never print file contents from those paths. It is acceptable to report whether a
-path exists, whether it is mounted, and whether the CLI accepted it.
-
-For Codex, host auth staging includes base `config.toml`, auth state, and every
-top-level `*.config.toml` named profile. Stale named-profile symlinks are removed
-when their host source disappears. The files remain on the read-only host auth
-mount; app-server profile composition writes only to profile-local scratch.
-
-## State Boundary
-
-Each profile gets isolated state:
+Each profile owns:
 
 ```text
 .container-state/<profile>/home/
-.container-state/<profile>/mosaico/
-.container-state/<profile>/mosaico/
+.container-state/<profile>/cargo/
+.container-state/<profile>/target/
 .container-state/<profile>/mosaico/config.json
 .container-state/<profile>/mosaico/harnesses.json
 .container-state/<profile>/mosaico/agents/<slug>.json
+.container-state/<profile>/mosaico/state.db*
+.container-state/<profile>/mosaico/nmp.redb
 ```
 
-The profile name should match the backend being tested when practical:
+`write-container-profiles` resets the disposable `mosaico/` directory by
+default while preserving provider home and build caches. This clears both the
+SQLite daemon state and NMP's `nmp.redb`; carrying either store onto a fresh
+relay can produce stale membership or event projections. Set
+`MOSAICO_DEV_RESET_PROFILE_STATE=0` only to diagnose that exact existing state.
 
-```text
-claude
-claude-acp
-codex
-codex-app-server
-opencode
-opencode-acp
-```
+Never run two containers against the same profile concurrently. Their daemons
+share a bind-mounted socket/state path; the second can replace the socket,
+evict the active agent, and make its hooks time out. While a launched agent is
+alive, use host relay probes and bind-mounted logs only.
 
-Use profile-specific state even for one-off tests. Avoid sharing state across
-profiles because it makes hook behavior, logs, and relays harder to attribute.
-Also avoid running two containers against the same profile at once. A launched
-agent can own the daemon socket while a second diagnostic container waits or
-times out. Use PTY attach, hook-tail, and logs first, or stop the agent before
-same-profile RPC checks.
+## Fabric identity
 
-`write-container-profiles` resets `.container-state/<profile>/mosaico` by
-default when generating a lab profile. That removes stale daemon DB, relay logs,
-agent keys, and socket files tied to previous relays while preserving build
-cache and provider home state. Set `MOSAICO_DEV_RESET_PROFILE_STATE=0` only
-when debugging the exact existing daemon state.
-
-## Fabric Config Shape
-
-The profile writer creates this shape:
+The writer creates a device config shaped like:
 
 ```json
 {
-  "whitelistedPubkeys": ["<pubkey-a>", "<pubkey-b>"],
+  "whitelistedPubkeys": ["<human-owner-pubkey>"],
   "relays": ["ws://192.168.64.1:<lab-port>"],
   "indexerRelay": "ws://192.168.64.1:<lab-port>",
-  "backendName": "claude",
-  "userNsec": "<secret>",
-  "mosaicoPrivateKey": "<secret>"
+  "backendName": "claude-acp",
+  "userNsec": "<relay-owner-secret>",
+  "mosaicoPrivateKey": "<distinct-profile-backend-secret>"
 }
 ```
 
-Only inspect the safe fields:
+`userNsec` represents the human operator. `mosaicoPrivateKey` represents the
+backend and signs management operations and derives per-session identities.
+They must not be the same key. The relay owner public key is the sole human
+whitelist entry. Backend public keys are not human whitelist entries; their
+authority comes from the backend management-key lifecycle.
+
+Inspect only safe fields:
 
 ```bash
-jq '{relays,indexerRelay,backendName,whitelistedPubkeys}' .container-state/claude/mosaico/config.json
+jq '{relays,indexerRelay,backendName,whitelistedPubkeys}' \
+  .container-state/claude-acp/mosaico/config.json
 ```
 
-Never print the secret fields. If a command must read them, let the command read
-the file directly.
+## Bundle and agent ownership
 
-The current two-file harness/agent shape and safe inspection commands live in
-`acp-backends.md`.
+Each bundle contains exactly:
 
-## Profile Generation
+```json
+{
+  "claude": {
+    "harness": "claude-code",
+    "transport": "pty",
+    "args": []
+  }
+}
+```
 
-Use:
+The agent file selects the bundle and optional native profile:
+
+```json
+{
+  "slug": "claude",
+  "created_at": 0,
+  "perSessionKey": true,
+  "harness": "claude"
+}
+```
+
+Per-session agents omit key fields. Only durable `perSessionKey: false` agents
+persist `secret_key` and `public_key`.
+
+The bundle owns operational `args`; the agent owns the optional profile name.
+The executable, required transport prefix, resume behavior, and profile
+translation are code-owned. Unknown bundle fields fail parsing.
+
+## Profile generation
 
 ```bash
 skills/mosaico-dev/scripts/write-container-profiles "${LAB_ENV}" \
-  claude claude-acp codex codex-app-server opencode opencode-acp
+  claude claude-acp codex codex-app-server opencode opencode-acp \
+  codex-ollama opencode-ollama
 ```
 
-The script:
+Default bundle args are empty for standard PTY and structured profiles.
+`codex-ollama` owns `--oss --local-provider ollama`; `opencode-ollama` owns
+`-m <model>`, where `MOSAICO_DEV_OPENCODE_OLLAMA_MODEL` defaults to
+`ollama/deepseek-r1:8b`.
 
-- creates one generated Nostr secret per profile
-- computes each public key with `nak`
-- whitelists all generated public keys in every profile
-- writes relay/indexer relay to the croissant URL from `lab.env`
-- writes a named bundle and selecting agent file for every profile
-- resets profile-local daemon/fabric state so fresh keys do not inherit an old
-  relay workspace
-- validates all generated JSON and prints only safe bundle metadata and pubkey prefixes
+Every profile has an exact JSON-array override:
 
-Supported profiles are `claude`, `claude-acp`, `codex`, `codex-app-server`,
-`opencode`, `opencode-acp`, `codex-ollama`, and `opencode-ollama`. Unknown
-profile names fail loudly rather than silently selecting the wrong harness.
+| profile | args override |
+| --- | --- |
+| `claude` | `MOSAICO_DEV_CLAUDE_ARGS_JSON` |
+| `claude-acp` | `MOSAICO_DEV_CLAUDE_ACP_ARGS_JSON` |
+| `codex` | `MOSAICO_DEV_CODEX_ARGS_JSON` |
+| `codex-app-server` | `MOSAICO_DEV_CODEX_APP_SERVER_ARGS_JSON` |
+| `opencode` | `MOSAICO_DEV_OPENCODE_ARGS_JSON` |
+| `opencode-acp` | `MOSAICO_DEV_OPENCODE_ACP_ARGS_JSON` |
+| `codex-ollama` | `MOSAICO_DEV_CODEX_OLLAMA_ARGS_JSON` |
+| `opencode-ollama` | `MOSAICO_DEV_OPENCODE_OLLAMA_ARGS_JSON` |
 
-## Launch Modes
+Each override must be a JSON array of strings and replaces the generated args.
 
-Direct mode:
+`MOSAICO_DEV_CODEX_CONFIG_PROFILE=<name>` adds the optional `profile` string to
+the Codex app-server agent file. It does not add fields to the bundle.
+
+## Direct and launched runs
+
+Direct mode runs the provider CLI in the foreground and may receive provider
+arguments:
 
 ```bash
-skills/mosaico-dev/scripts/launch-agent "${LAB_ENV}" direct claude --model haiku
+skills/mosaico-dev/scripts/launch-agent "${LAB_ENV}" direct claude \
+  -p "Respond with exactly OK." --model haiku
 ```
 
-Use direct mode when validating:
+Use direct mode for auth, provider startup, and hook/plugin staging checks.
 
-- the backend CLI starts inside the container
-- real host auth works
-- hook/plugin installation is visible to the backend CLI
-- agent UI and auth behavior are visible in the foreground terminal
-
-Launch mode:
+Launch mode takes no provider arguments:
 
 ```bash
-skills/mosaico-dev/scripts/launch-agent "${LAB_ENV}" launch claude --model haiku
+bash containers/mosaico/run --profile claude mosaico channel init
+MOSAICO_DEV_PROMPT="Run mosaico my session." \
+  skills/mosaico-dev/scripts/launch-agent "${LAB_ENV}" launch claude
 ```
 
-Use launch mode when validating:
+Use launch mode for bundle/transport routing, native-profile activation,
+hosted lifecycle, PTY behavior, and channel delivery. Configure provider flags
+in bundle `args`, then regenerate the profile.
 
-- `mosaico launch` selects and starts the backend correctly
-- launch-time environment is correct
-- mosaico hook context is injected
-- portable PTY naming, attachment, and injection behavior are correct
-- the launched agent appears as expected in fabric state
+## Native profile inventory
 
-For ACP/app-server smoke and headless launch, use `acp-backends.md`.
+`mosaico launch` without a target prints or interactively selects the full
+launch inventory. It includes configured agents, eligible raw harnesses, and
+native agent profiles discovered from:
 
-The launch helper writes a cidfile in the lab work directory when the container
-runtime provides one. Clean up with `scripts/cleanup-lab` so the container-side
-daemon exits before the relay is stopped.
+- `$CODEX_HOME/agents` or `~/.codex/agents`
+- `~/.claude/agents`
+- `$XDG_CONFIG_HOME/opencode/agents` or `~/.config/opencode/agents`
+- workspace-local `.codex/agents`, `.claude/agents`, and `.opencode/agents`
 
-## Backend Commands And Model Policy
+Workspace-local definitions override the matching global profile. A slug
+provided by multiple harnesses appears as harness-suffixed choices; selecting a
+choice persists the binding. Do not manufacture an agent JSON merely to hide an
+inventory-routing failure.
 
-Claude:
+## Prewarm and doctor
 
-```bash
-bash containers/mosaico/run --profile claude claude --model haiku
-```
-
-Codex:
-
-```bash
-bash containers/mosaico/run --profile codex codex -m gpt-5.3-codex-spark
-```
-
-OpenCode with the Ollama Cloud helper:
-
-```bash
-bash containers/mosaico/run --profile opencode opencode-ollama "${MOSAICO_OPENCODE_OLLAMA_MODEL:-ollama/deepseek-r1:8b}"
-```
-
-The named models are preferences, not brittle requirements. If a CLI rejects a
-flag or model name, capture the rejection and use the cheapest configured model
-that can run shell commands. Record the fallback in the report.
-
-Structured model overrides are listed in `acp-backends.md`.
-
-For a named Codex app-server profile, use:
-
-```bash
-MOSAICO_DEV_CODEX_CONFIG_PROFILE=planner \
-  skills/mosaico-dev/scripts/write-container-profiles "${LAB_ENV}" codex-app-server
-```
-
-Set `MOSAICO_DEV_CODEX_APP_SERVER_MODEL` as well only when the lab needs an
-inline model override to win over the named profile. See `acp-backends.md` for
-the composition and precedence contract.
-
-## Doctor Expectations
-
-Run:
-
-```bash
-bash containers/mosaico/run doctor
-```
-
-The doctor should prove:
-
-- required CLIs are installed in the image
-- `nak` is available
-- host auth projections are present for the selected profile's provider
-- Claude hooks can be installed into writable staged settings
-- Codex hooks can be installed into the profile state
-- OpenCode plugin state can be installed or verified
-- the Claude ACP adapter, Codex app-server, and OpenCode ACP commands exist
-- generated `harnesses.json` and agent files parse when present
-
-For live agent testing, run doctor against the exact generated profile before
-launching that profile:
+Run doctor against the exact generated profile:
 
 ```bash
 bash containers/mosaico/run --profile claude-acp doctor
-```
-
-Then run the structured smoke to prove the bundle and staged auth:
-
-```bash
 skills/mosaico-dev/scripts/launch-agent "${LAB_ENV}" smoke claude-acp
 ```
 
-If a provider is intentionally unavailable on the host, do not call the whole
-lab passing for that provider. Report it as unavailable and scope the lab to the
-providers that actually passed doctor/auth checks.
+Doctor performs the Cargo build, installs the relevant Mosaico integration, and
+checks provider auth plus transport tools. Structured smoke additionally proves
+the configured RPC bundle. Do not use unsupported top-level version flags as a
+prewarm shortcut.
 
-## Build Cache Cost
+## Reporting
 
-A fresh profile can pay a full Cargo cold build because its state starts empty.
-Prewarm the exact profile before timing a live run:
-
-```bash
-bash containers/mosaico/run --profile claude mosaico --version
-```
-
-For Claude, prefer the tiny `claude -p` command above because it proves both the
-build and the staged Claude auth. Reuse a deliberate lab profile only when
-isolation is not the behavior under test.
-
-## File Mount Caveat
-
-Apple containers are much happier when mounting directories than individual
-files. The host auth staging script should mount host directories read-only and
-then create symlinks or copies inside writable profile state. If a direct file
-mount fails, do not work around it by duplicating credentials into the repo.
-Fix the staging path or report the unsupported mount.
-
-## Reporting Backend Results
-
-For each backend include:
-
-- profile name
-- direct or launch mode
-- exact command
-- model flag accepted or fallback used
-- whether host auth was accepted
-- PTY id for PTY launch, ACP session id for structured launch, or foreground evidence
-- log paths inspected
-- pass/fail and the next concrete failing command
+For each backend report the profile, bundle, transport, exact direct or launch
+command, accepted model/provider args, auth result, PTY or RPC session id, logs
+inspected, and the next concrete failure if it did not pass.

@@ -150,18 +150,27 @@ stage_codex_named_profiles() {
 
 build_host_auth_mounts() {
   HOST_AUTH_MOUNTS=()
-  add_required_auth_dir_mount "${HOST_HOME}/.mosaico" "/host-auth/mosaico"
-  add_required_auth_dir_mount "${HOST_HOME}/.codex" "/host-auth/codex"
-  add_required_auth_dir_mount "${HOST_HOME}/.claude" "/host-auth/claude"
-  add_required_auth_dir_mount "${HOST_HOME}/.local/share/opencode" "/host-auth/opencode-data"
-  add_required_auth_dir_mount "${HOST_HOME}/.config/opencode" "/host-auth/opencode-config"
+  case "${AGENT}" in
+    claude)
+      add_required_auth_dir_mount "${HOST_HOME}/.claude" "/host-auth/claude"
+      ;;
+    codex)
+      add_required_auth_dir_mount "${HOST_HOME}/.codex" "/host-auth/codex"
+      ;;
+    opencode)
+      add_required_auth_dir_mount \
+        "${HOST_HOME}/.local/share/opencode" "/host-auth/opencode-data"
+      add_required_auth_dir_mount \
+        "${HOST_HOME}/.config/opencode" "/host-auth/opencode-config"
+      ;;
+    *)
+      echo "unsupported host-auth agent: ${AGENT}" >&2
+      exit 2
+      ;;
+  esac
 }
 
-stage_host_auth() {
-  if [[ "${HOST_AUTH}" != "1" ]]; then
-    return 0
-  fi
-
+stage_codex_auth() {
   stage_auth_symlink "${HOST_HOME}/.codex/auth.json" \
     "/host-auth/codex/auth.json" "${STATE_DIR}/home/.codex/auth.json"
   stage_auth_symlink "${HOST_HOME}/.codex/config.toml" \
@@ -169,7 +178,11 @@ stage_host_auth() {
   stage_auth_symlink "${HOST_HOME}/.codex/config.json" \
     "/host-auth/codex/config.json" "${STATE_DIR}/home/.codex/config.json" optional
   stage_codex_named_profiles
+  stage_auth_symlink "${HOST_HOME}/.codex/agents" \
+    "/host-auth/codex/agents" "${STATE_DIR}/home/.codex/agents" optional
+}
 
+stage_claude_auth() {
   stage_auth_copy "${HOST_HOME}/.claude.json" "${STATE_DIR}/home/.claude.json"
   stage_auth_copy "${HOST_HOME}/.claude.json" "${STATE_DIR}/home/.claude/.claude.json"
   stage_claude_credentials "${STATE_DIR}/home/.claude/.credentials.json"
@@ -185,11 +198,31 @@ stage_host_auth() {
     "/host-auth/claude/custom-skills" "${STATE_DIR}/home/.claude/custom-skills" optional
   stage_auth_symlink "${HOST_HOME}/.claude/commands" \
     "/host-auth/claude/commands" "${STATE_DIR}/home/.claude/commands" optional
+}
 
+stage_opencode_auth() {
   stage_auth_symlink "${HOST_HOME}/.local/share/opencode/auth.json" \
     "/host-auth/opencode-data/auth.json" "${STATE_DIR}/home/.local/share/opencode/auth.json"
   stage_auth_symlink "${HOST_HOME}/.local/share/opencode/account.json" \
     "/host-auth/opencode-data/account.json" "${STATE_DIR}/home/.local/share/opencode/account.json"
   stage_auth_symlink "${HOST_HOME}/.config/opencode/opencode.jsonc" \
     "/host-auth/opencode-config/opencode.jsonc" "${STATE_DIR}/home/.config/opencode/opencode.jsonc"
+  stage_auth_symlink "${HOST_HOME}/.config/opencode/agents" \
+    "/host-auth/opencode-config/agents" "${STATE_DIR}/home/.config/opencode/agents" optional
+}
+
+stage_host_auth() {
+  if [[ "${HOST_AUTH}" != "1" ]]; then
+    return 0
+  fi
+
+  case "${AGENT}" in
+    claude) stage_claude_auth ;;
+    codex) stage_codex_auth ;;
+    opencode) stage_opencode_auth ;;
+    *)
+      echo "unsupported host-auth agent: ${AGENT}" >&2
+      exit 2
+      ;;
+  esac
 }

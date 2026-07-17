@@ -1,244 +1,188 @@
 ---
 name: mosaico-dev
-description: "Use for mosaico development live labs: run a local croissant relay, configure isolated PTY or ACP/app-server agent bundles with real host AI auth, launch Claude/Codex/OpenCode agents, and inspect sessions, logs, relay traffic, and Nostr events."
+description: "Use for Mosaico development live labs: run a local croissant relay, configure isolated PTY, ACP, app-server, or headless-exec bundles with real host AI auth, launch Claude/Codex/OpenCode agents, and inspect sessions, logs, relay traffic, and Nostr events."
 allowed-tools: Bash
 ---
 
-# mosaico development live lab
+# Mosaico development live lab
 
-Use this skill when validating mosaico changes in a real local environment:
-a host croissant relay, isolated container backends, real host
-Claude/Codex/OpenCode auth, PTY and ACP/app-server agents, relay-level traffic,
-hook logs, and Nostr events inspected with `nak`.
+Use this skill to validate Mosaico on a real local stack: a host croissant
+relay, isolated container backends, real provider auth, Mosaico hooks, and
+inspectable relay and daemon evidence. The objective is transport and fabric
+proof, not model quality.
 
-This is the replacement mindset for the old scripted e2e harness. Prefer a
-small live lab that can be inspected over a mocked shortcut. The objective is
-not to prove model quality; it is to prove that the real agents, hooks, relay
-traffic, launch paths, and injected context work together.
+## Resource map
 
-## Resource Map
+- `references/live-lab-workflow.md`: start-to-finish single- and multi-agent
+  procedure.
+- `references/container-backends.md`: auth, state, identity, profile, and model
+  boundaries.
+- `references/acp-backends.md`: ACP/app-server configuration, smoke, and launch.
+- `references/observability.md`: safe evidence surfaces and report format.
+- `references/troubleshooting.md`: concrete failure checks and cleanup.
+- `scripts/start-croissant-relay`: starts a host relay and writes `lab.env`.
+- `scripts/write-container-profiles`: writes current device, harness-bundle, and
+  agent-selection state.
+- `scripts/launch-agent`: runs a provider directly, runs `__acp-smoke`, or calls
+  the current `mosaico launch` surface.
+- `scripts/probe-lab`: captures relay metadata, logs, and Nostr events.
+- `scripts/cleanup-lab`: stops recorded containers before stopping the relay.
 
-Read these files from this skill directory as needed:
+## Current launch contract
 
-- `references/live-lab-workflow.md`: the complete start-to-finish lab procedure,
-  including single-agent, multi-agent, direct harness, and `mosaico launch`
-  flows.
-- `references/container-backends.md`: how host credentials, container state,
-  profile configs, model choices, and launch modes fit together.
-- `references/acp-backends.md`: the two-file bundle contract, structured
-  profiles, smoke/headless launch workflow, and ACP-specific troubleshooting.
-- `references/observability.md`: how to inspect PTY sessions, croissant logs,
-  Nostr events, hook logs, daemon logs, and what counts as evidence.
-- `references/troubleshooting.md`: common failures and the concrete checks to
-  run before escalating.
-- `scripts/start-croissant-relay`: starts croissant as a host process, creates a
-  per-run work directory, waits for NIP-11, and writes `lab.env`.
-- `scripts/write-container-profiles`: writes disposable backend config plus the
-  current `harnesses.json` and `agents/<slug>.json` launch contract.
-- `scripts/launch-agent`: runs a raw provider CLI, an ACP/app-server smoke, or
-  `mosaico launch`; structured launches are headless and PTY launches attach.
-- `scripts/probe-lab`: captures relay NIP-11, relay logs, and selected Nostr
-  event kinds into a probe directory.
-- `scripts/cleanup-lab`: stops recorded agent containers and then stops the
-  relay process.
+Treat these ownership boundaries as fixed:
 
-## Non-Negotiables
+- `harnesses.json` maps a bundle name to exactly `harness`, `transport`, and
+  optional `args`. Unknown fields fail parsing. The executable and transport
+  driver are code-owned.
+- `agents/<slug>.json` owns the public slug, selected bundle in `harness`,
+  optional harness-native `profile`, identity mode, and metadata.
+- `mosaico launch [TARGET] [PROMPT]` selects an available target. It accepts
+  `--workspace`, `--channel`, and `--name`; it does not accept provider argv or
+  launch overrides.
+- The selected bundle's transport decides whether the session is PTY, ACP,
+  app-server, or headless-exec. There is no launch-time headed/headless or
+  harness selector.
+- Bundle `args` are operational provider flags. An agent `profile` is a named
+  native profile: Claude PTY/headless-exec applies `--agent`, Codex
+  PTY/headless-exec applies `--profile`, and Codex app-server composes the named
+  config into an isolated `CODEX_HOME`. ACP transports that do not support a
+  named profile reject it.
+
+Never add old launch flags, separator-forwarded provider arguments, duplicate
+config fields, or fallback bundle names. Fix the generated config or caller.
+
+## Identity contract
+
+- `userNsec` is the human operator signer. `mosaicoPrivateKey` is the backend
+  management/session-derivation identity. They must be distinct.
+- `perSessionKey: true` agents are keyless on disk: omit `secret_key` and
+  `public_key`. A fresh session derives its key from the backend key plus a
+  fresh anchor.
+- `perSessionKey: false` is the durable identity mode and requires a persisted
+  agent `secret_key` and `public_key`.
+- Never print provider credentials, Nostr secrets, or private-key fields.
+
+## Non-negotiables
 
 - Use real host AI auth. The container runner defaults to
-  `MOSAICO_CONTAINER_HOST_AUTH=1`; it mounts host auth directories read-only
-  and projects credential files into isolated container state.
-- Do not create fake provider files or fake logins unless the user explicitly
-  asks for a non-agent smoke test.
-- Do not print secrets. Never show auth files, provider files, generated `nsec`
-  values, or raw private keys in the transcript or final report.
-- Keep fabric state isolated. Generated state belongs under `.container-state/`
-  or a temp live-lab work directory, not in the host `~/.mosaico`.
-- Run croissant on the host at `/tmp/croissant-smallmap` when present, else
-  `${HOME}/Work/croissant`; set `MOSAICO_DEV_CROISSANT_DIR` to override.
-  Containers point at the host relay URL; croissant itself does not need a
-  container.
-- Use the cheapest useful model for each provider. The lab only needs enough
-  model ability to run commands and surface UI/hook behavior.
-- Use `mosaico launch` when validating reattach, injection, or hosted
-  lifecycle behavior. Direct runs are foreground auth/plugin checks;
-  `__acp-smoke` proves structured transport handshake, prompt, and resume.
-- Interactive `mosaico launch` of an ACP/app-server agent offers attachable
-  PTY bundles plus a final headless choice. Automated structured launches pass
-  `--headless`; PTY launches may pass `--harness <bundle>` explicitly.
-- Harness configuration is two-file state under `MOSAICO_HOME`:
-  `harnesses.json` defines bundles and `agents/<slug>.json` selects a bundle via
-  `harness`. The filename is plural; there is no `harness.json` surface.
-- Use `mosaico my session` for agent identity/fabric inspection. Do not rely on obsolete
-  identity commands.
+  `MOSAICO_CONTAINER_HOST_AUTH=1` and stages writable provider state under the
+  selected isolated profile.
+- Keep fabric state under `.container-state/<profile>` or the run's temporary
+  work directory, never host `~/.mosaico`.
+- Run croissant on the host from `/tmp/croissant-smallmap` when present, else
+  `${HOME}/Work/croissant`; override with `MOSAICO_DEV_CROISSANT_DIR`.
+- Use the cheapest provider model sufficient to run one command and report a
+  result.
+- Use direct mode only for provider auth/plugin checks. Use launch mode for
+  hosted lifecycle, PTY, transport routing, native-profile activation, and
+  delivery checks. Use `__acp-smoke` before a structured launch.
+- Never start a second container against a profile whose launched agent is
+  alive. The second daemon can replace the shared socket and evict the active
+  session. Inspect bind-mounted logs and the relay from the host instead.
 
-## Standard Start
+## Standard start
 
-From the mosaico repo root:
+From the repository root:
 
 ```bash
 git status -sb
 bash containers/mosaico/run build-image
 bash containers/mosaico/run doctor
-```
-
-`doctor` must verify every installed backend/transport tool, `nak`, and the
-selected profile's provider auth plus hook/plugin installation. If auth checks
-fail, stop and report the
-missing host path; do not silently switch to new credentials.
-
-Start a relay:
-
-```bash
 skills/mosaico-dev/scripts/start-croissant-relay
 ```
 
-The command prints an `env=.../lab.env` path. Use that exact file for the rest
-of the run:
+Keep the emitted environment path:
 
 ```bash
 LAB_ENV=/tmp/mosaico-live-lab-YYYYmmdd-HHMMSS/lab.env
-skills/mosaico-dev/scripts/write-container-profiles "${LAB_ENV}" claude-acp
+skills/mosaico-dev/scripts/write-container-profiles "${LAB_ENV}" \
+  claude claude-acp codex codex-app-server opencode opencode-acp
 ```
 
-Prewarm and verify the exact profile before launching the agent UI:
+The writer resets disposable Mosaico state, including SQLite/WAL state and the
+NMP `nmp.redb` store, while preserving provider home and build caches.
+
+Prewarm the exact profile with a real supported operation:
 
 ```bash
 bash containers/mosaico/run --profile claude-acp doctor
 skills/mosaico-dev/scripts/launch-agent "${LAB_ENV}" smoke claude-acp
 ```
 
-For multiple backends:
+For a PTY profile, `doctor` performs the Cargo build and hook installation. A
+small direct provider prompt can additionally prove auth before an interactive
+launch.
+
+## Launch patterns
+
+Direct provider mode may receive provider arguments:
 
 ```bash
-skills/mosaico-dev/scripts/write-container-profiles "${LAB_ENV}" \
-  claude-acp codex-app-server opencode-acp
+skills/mosaico-dev/scripts/launch-agent "${LAB_ENV}" direct claude -p \
+  "Respond with exactly OK." --model haiku
 ```
 
-The writer generates disposable local Nostr keys, writes
-`.container-state/<profile>/mosaico/harnesses.json` plus the selecting agent
-file, and whitelists every generated pubkey in every profile. Model-provider
-auth still comes from the host credential mounts.
-
-To exercise a normal named Codex config profile through app-server, regenerate
-the bundle with its profile name:
-
-```bash
-MOSAICO_DEV_CODEX_CONFIG_PROFILE=planner \
-  skills/mosaico-dev/scripts/write-container-profiles "${LAB_ENV}" codex-app-server
-```
-
-The runner stages host `~/.codex/*.config.toml` files without exposing their
-contents. The harness composes the selected file over base `config.toml` in an
-isolated `CODEX_HOME`; project config and inline bundle overrides still win.
-
-## Launch Patterns
-
-Direct harness run in the foreground:
-
-```bash
-skills/mosaico-dev/scripts/launch-agent "${LAB_ENV}" direct claude --model haiku
-```
-
-Run through `mosaico launch` in portable PTY mode:
+Launch mode receives only a generated target and optional prompt:
 
 ```bash
 bash containers/mosaico/run --profile claude mosaico channel init
-skills/mosaico-dev/scripts/launch-agent "${LAB_ENV}" launch claude --model haiku
+MOSAICO_DEV_PROMPT="Run mosaico my session and summarize the self header." \
+  skills/mosaico-dev/scripts/launch-agent "${LAB_ENV}" launch claude
 ```
 
-Codex example:
-
-```bash
-skills/mosaico-dev/scripts/launch-agent "${LAB_ENV}" direct codex -m gpt-5.3-codex-spark
-```
-
-OpenCode example:
-
-```bash
-skills/mosaico-dev/scripts/launch-agent "${LAB_ENV}" direct opencode-ollama "${MOSAICO_OPENCODE_OLLAMA_MODEL:-ollama/deepseek-r1:8b}"
-```
-
-If a CLI rejects the model flag, record the rejection and fall back to the
-cheapest configured model that works. Do not block the lab on an exact model
-name unless the feature under test depends on that provider/model.
-
-Structured launch examples:
+The same form launches structured profiles; the bundle transport owns the
+choice:
 
 ```bash
 bash containers/mosaico/run --profile claude-acp mosaico channel init
-MOSAICO_DEV_PROMPT="Run mosaico my session and summarize the self header." \
+MOSAICO_DEV_PROMPT="Run mosaico my session." \
   skills/mosaico-dev/scripts/launch-agent "${LAB_ENV}" launch claude-acp
 ```
 
-The helper passes `--headless` for ACP/app-server profiles so an interactive
-terminal does not stop at the launch-mode picker.
+To audit launch inventory, run `mosaico launch` without a target. In a
+non-interactive command it prints the available configured agents, raw harness
+targets, and installed native profiles. Native profiles are discovered from
+Codex, Claude, and OpenCode global directories plus workspace-local agent
+directories. If one slug exists in multiple harnesses, select the suffixed
+target printed by the inventory; that selection persists the binding.
 
-Use `codex-app-server` and `opencode-acp` the same way. Configure their model
-through the profile-writer environment described in `container-backends.md`;
-do not pass provider CLI flags to an ACP/app-server launch.
+## Safe inspection
 
-## Inspecting The Run
-
-Inspect or attach to PTY launch sessions with the human session picker:
-
-```bash
-bash containers/mosaico/run --profile claude mosaico sessions
-```
-
-Drive an agent through its attached terminal or send it a channel mention; there
-is no public PTY injection command.
+While a launch container is alive, use host-only evidence:
 
 ```bash
-bash containers/mosaico/run --profile claude mosaico channel send \
-  --channel <channel> --message "@<session-handle> Run mosaico my session."
+skills/mosaico-dev/scripts/probe-lab "${LAB_ENV}"
+tail -n 200 .container-state/claude-acp/mosaico/daemon.log
+tail -n 200 .container-state/claude-acp/mosaico/relay.log
 ```
 
-Probe everything into files:
+Do not run `containers/mosaico/run --profile <same-profile> ...` concurrently,
+including `sessions`, `channel`, `debug explain`, or `debug hook-tail`. For a
+PTY run, use the terminal already attached by launch. After stopping the launch
+container, the operator may use `mosaico sessions` or other same-profile tools.
+
+Send a real tagged mention from a safe sender profile or after the target is
+stopped:
 
 ```bash
-skills/mosaico-dev/scripts/probe-lab "${LAB_ENV}" <agent-session>
+mosaico channel send --channel <channel> --tag <session-handle> \
+  --message "Run mosaico my session."
 ```
 
-Also inspect:
+Literal `@handle` text is not a tag. Use `--force` only when the literal text is
+intentional.
+
+## Evidence standard
+
+Report the relay URL and run id, generated profiles, exact accepted commands,
+transport/bundle metadata, PTY or RPC session id, provider auth result,
+croissant and `nak` evidence, relevant daemon/hook logs, and a feature-specific
+pass/fail. If a step fails, include the first failing command and preserve its
+work directory until the failure is understood.
+
+Always clean up recorded containers before the relay:
 
 ```bash
-bash containers/mosaico/run --profile claude mosaico debug hook-tail
-tail -n 200 .container-state/claude/mosaico/daemon.log
-tail -n 200 .container-state/claude/mosaico/relay.log
-```
-
-Croissant logs all inbound/outbound traffic and rejected event reasons to the
-relay log named in `lab.env`. Use those logs together with `nak` event probes
-and transport-specific evidence. ACP/app-server launches print
-`[mosaico acp] session: ...` and have no PTY to attach; prove them with the
-smoke output, launch session id, daemon/delivery logs, and relay events.
-
-## Evidence Standard
-
-A useful report contains:
-
-- relay URL, run id, profile names, and whether this was direct or launch mode
-- exact agent commands and accepted model flags
-- PTY attach output for PTY agents, or `__acp-smoke` plus headless session and
-  delivery evidence for ACP/app-server agents
-- croissant log excerpts showing traffic or rejection reasons
-- `nak` evidence for the expected event kinds
-- hook-tail or daemon log evidence when testing hook injection
-- pass/fail tied to the feature under test, plus the next failing command if it
-  did not pass
-
-## Simple Agent Validation Prompt
-
-Give this to a simple agent to validate that the skill works:
-
-```text
-Use the mosaico-dev skill. Start a fresh local croissant relay on the host
-without forcing port 9888. Generate a `claude-acp` container profile with real
-host Claude auth, disposable fabric keys, `harnesses.json`, and a selecting
-agent file. Run profile doctor and the ACP smoke, initialize the workspace
-channel, then launch the headless Claude ACP agent with an initial prompt asking
-it to run `mosaico my session`. Collect the ACP session id, daemon/delivery and
-croissant logs, hook evidence, and nak relay probes. Clean up with
-scripts/cleanup-lab. Do not print secret or auth file contents. Report exact
-commands/results; if it fails, write concise lessons to the skill.
+skills/mosaico-dev/scripts/cleanup-lab "${LAB_ENV}"
 ```

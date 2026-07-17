@@ -35,6 +35,7 @@ Env:
   MOSAICO_CONTAINER_NAME        Optional Apple container name for cleanup.
   MOSAICO_CONTAINER_CIDFILE     Optional path for the Apple container ID.
   MOSAICO_CONTAINER_UID/GID     Optional numeric user/group for agent CLI processes.
+  MOSAICO_CONTAINER_CLEAR_SOCKET Default: 1. Clear a stale socket after taking the profile lock.
   MOSAICO_OLLAMA_HOST   Default: http://192.168.64.1:11434
   MOSAICO_OPENCODE_OLLAMA_MODEL   Default: ollama/qwen2.5-coder:7b
 EOF
@@ -90,6 +91,39 @@ ensure_image() {
   fi
 }
 
+PROFILE_LOCK_DIR=
+
+release_profile_lock() {
+  [[ -n "${PROFILE_LOCK_DIR}" ]] || return 0
+  if [[ "$(cat "${PROFILE_LOCK_DIR}/owner" 2>/dev/null || true)" == "$$" ]]; then
+    rm -f "${PROFILE_LOCK_DIR}/owner"
+    rmdir "${PROFILE_LOCK_DIR}" 2>/dev/null || true
+  fi
+  PROFILE_LOCK_DIR=
+}
+
+acquire_profile_lock() {
+  local lock_dir="${STATE_DIR}.container-lock" owner=
+  mkdir -p "$(dirname "${lock_dir}")"
+  if ! mkdir "${lock_dir}" 2>/dev/null; then
+    owner="$(cat "${lock_dir}/owner" 2>/dev/null || true)"
+    if [[ "${owner}" =~ ^[0-9]+$ ]] && ! kill -0 "${owner}" 2>/dev/null; then
+      rm -f "${lock_dir}/owner"
+      rmdir "${lock_dir}" 2>/dev/null || true
+    fi
+    if ! mkdir "${lock_dir}" 2>/dev/null; then
+      echo "container profile is already in use: ${PROFILE}" >&2
+      echo "state: ${STATE_DIR}" >&2
+      [[ -z "${owner}" ]] || echo "runner pid: ${owner}" >&2
+      echo "stop the live profile container before starting another command" >&2
+      exit 1
+    fi
+  fi
+  printf '%s\n' "$$" >"${lock_dir}/owner"
+  PROFILE_LOCK_DIR="${lock_dir}"
+  trap release_profile_lock EXIT
+}
+
 prepare_state() {
   mkdir -p \
     "${STATE_DIR}/home/.codex" \
@@ -122,6 +156,7 @@ container_run() {
   local access="${1:-readonly}"
   shift || true
 
+  acquire_profile_lock
   ensure_image
   prepare_state
   stage_host_auth
@@ -315,6 +350,7 @@ main() {
       container_run writable bash "$@"
       ;;
     clean-state)
+      acquire_profile_lock
       rm -rf "${STATE_DIR}"
       ;;
     -h|--help|help)
