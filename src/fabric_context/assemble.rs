@@ -154,7 +154,7 @@ fn agent_rows(inputs: &ViewInputs, cursor: u64, now: u64) -> Vec<AgentRow> {
         .filter(|a| cursor == 0 || (a.created_at > cursor && a.created_at <= now))
         .map(|a| AgentRow {
             reference: a.reference.clone(),
-            about: a.about.clone(),
+            about: crate::agent_about::for_injection(&a.about),
         })
         .collect()
 }
