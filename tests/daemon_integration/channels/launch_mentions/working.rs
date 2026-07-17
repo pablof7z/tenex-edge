@@ -40,6 +40,15 @@ fn operator_kind9_injects_into_working_launch_session() {
         .set_working(&rec.pubkey, true, mosaico::util::now_secs())
         .expect("mark launch session working");
 
+    // Launch-time admission already bound this exact pubkey to its typed PTY
+    // endpoint. Later delivery must not reopen mutable slug configuration to
+    // rediscover how the live session is hosted.
+    std::fs::write(
+        home.dir.path().join("agents").join(format!("{agent}.json")),
+        b"{ invalid after launch",
+    )
+    .expect("corrupt post-launch agent config");
+
     let body = format!("operator relay injection {}", unique_session("body"));
     rt().block_on(async {
         publish_user_kind9(&channel, &body, &rec.pubkey).await;

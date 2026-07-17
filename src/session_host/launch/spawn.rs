@@ -54,6 +54,32 @@ pub async fn spawn_ephemeral_agent(
     .id)
 }
 
+pub(crate) async fn spawn_ephemeral_agent_for_pubkey(
+    state: &Arc<DaemonState>,
+    slug: &str,
+    root: &str,
+    group: Option<&str>,
+    client_cwd: Option<&std::path::Path>,
+    expected_pubkey: &str,
+) -> Result<String> {
+    Ok(spawn_agent_inner_full(
+        state,
+        slug,
+        root,
+        group,
+        None,
+        None,
+        client_cwd,
+        None,
+        true,
+        LaunchIntent::Managed,
+        Some(expected_pubkey),
+    )
+    .await?
+    .0
+    .id)
+}
+
 pub async fn spawn_dispatched_ephemeral_agent(
     state: &Arc<DaemonState>,
     slug: &str,
@@ -75,6 +101,7 @@ pub async fn spawn_dispatched_ephemeral_agent(
         None,
         true,
         LaunchIntent::Managed,
+        None,
     )
     .await?;
     Ok(DispatchedSpawn {
@@ -105,6 +132,7 @@ async fn spawn_agent_inner(
         session_name,
         ephemeral,
         intent,
+        None,
     )
     .await?
     .0)
@@ -122,6 +150,7 @@ async fn spawn_agent_inner_full(
     session_name: Option<&str>,
     ephemeral: bool,
     intent: LaunchIntent,
+    expected_pubkey: Option<&str>,
 ) -> Result<(crate::pty::LaunchMetadata, String)> {
     let abs_path = workspace_abs_path(state, root, client_cwd)?;
     let resolved = resolve_agent_source(state, slug, std::path::Path::new(&abs_path), intent)?;
@@ -129,14 +158,24 @@ async fn spawn_agent_inner_full(
     let retired_advertisements = resolved.retired_advertisements.clone();
     let agent_command = resolved.command.clone();
     let harness = resolved.harness;
-    let reservation = admission::reserve_fresh(
-        state,
-        &resolved.identity,
-        harness.as_str(),
-        root,
-        group,
-        session_name,
-    )?;
+    let reservation = match expected_pubkey {
+        Some(pubkey) => admission::reserve_fresh_for_pubkey(
+            state,
+            &resolved.identity,
+            harness.as_str(),
+            root,
+            group,
+            pubkey,
+        )?,
+        None => admission::reserve_fresh(
+            state,
+            &resolved.identity,
+            harness.as_str(),
+            root,
+            group,
+            session_name,
+        )?,
+    };
     let meta = match open_agent_session(
         &resolved.transport,
         &agent_slug,

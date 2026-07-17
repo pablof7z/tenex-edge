@@ -23,6 +23,33 @@ pub(super) fn reserve_fresh(
     reserve_prepared(state, prepared, &agent.slug, harness, root, group)
 }
 
+pub(super) fn reserve_fresh_for_pubkey(
+    state: &Arc<DaemonState>,
+    agent: &crate::identity::AgentIdentity,
+    harness: &str,
+    root: &str,
+    group: Option<&str>,
+    expected_pubkey: &str,
+) -> Result<Reservation> {
+    if agent.per_session_key {
+        anyhow::bail!(
+            "cannot fresh-launch per-session agent {:?} for existing pubkey {}; a native resume locator is required",
+            agent.slug,
+            expected_pubkey
+        );
+    }
+    let configured_pubkey = agent
+        .pubkey_hex()
+        .context("durable agent has no configured pubkey")?;
+    if configured_pubkey != expected_pubkey {
+        anyhow::bail!(
+            "configured durable pubkey {configured_pubkey} does not match addressed pubkey {expected_pubkey}"
+        );
+    }
+    let prepared = crate::daemon::server::prepare_session_identity(state, agent, None)?;
+    reserve_prepared(state, prepared, &agent.slug, harness, root, group)
+}
+
 pub(super) fn reserve_resume(
     state: &Arc<DaemonState>,
     agent: &crate::identity::AgentIdentity,
@@ -135,5 +162,44 @@ mod tests {
                 .to_hex(),
             resumed.pubkey
         );
+    }
+
+    #[tokio::test]
+    async fn exact_fresh_launch_requires_a_matching_durable_pubkey() {
+        let state = DaemonState::new_for_test().await;
+        let per_session = agent();
+        let error = match reserve_fresh_for_pubkey(
+            &state,
+            &per_session,
+            "codex",
+            "root",
+            Some("root"),
+            "addressed",
+        ) {
+            Ok(_) => panic!("per-session identity unexpectedly fresh-launched for an old pubkey"),
+            Err(error) => error,
+        };
+        assert!(error
+            .to_string()
+            .contains("native resume locator is required"));
+        assert!(state
+            .with_store(|store| store.get_session("addressed"))
+            .unwrap()
+            .is_none());
+
+        let keys = Keys::generate();
+        let pubkey = keys.public_key().to_hex();
+        let durable = crate::identity::AgentIdentity {
+            slug: "integrator".into(),
+            keys: Some(keys),
+            per_session_key: false,
+            harness: "codex".into(),
+            profile: None,
+        };
+        let reservation =
+            reserve_fresh_for_pubkey(&state, &durable, "codex", "root", Some("root"), &pubkey)
+                .unwrap();
+        assert_eq!(reservation.pubkey, pubkey);
+        release(&state, &reservation);
     }
 }

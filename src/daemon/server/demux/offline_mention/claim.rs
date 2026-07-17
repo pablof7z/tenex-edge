@@ -69,6 +69,7 @@ fn dispatch(
     tokio::spawn(async move {
         super::handle(
             &st,
+            &event_id,
             &mentioned_pubkey,
             &channel,
             &body,

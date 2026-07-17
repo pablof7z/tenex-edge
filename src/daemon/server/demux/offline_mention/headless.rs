@@ -15,6 +15,7 @@ pub(super) async fn spawn_headless_mention(
     channel_h: &str,
     body: &str,
     mention_notice: MentionNotice,
+    expected_pubkey: &str,
 ) -> anyhow::Result<bool> {
     if !crate::session_host::agent_supports_headless_exec(agent_slug) {
         return Ok(false);
@@ -28,6 +29,7 @@ pub(super) async fn spawn_headless_mention(
         None,
         Some(channel_h),
         None,
+        Some(expected_pubkey),
     )
     .await?;
     tracing::info!(

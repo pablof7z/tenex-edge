@@ -27,6 +27,7 @@ pub(crate) use delivery::{session_has_live_delivery_path, session_is_headless};
 pub(crate) use exec::{
     agent_supports_headless_exec, bind_native_id_from_log, spawn_agent_exec, ExecLaunch,
 };
+pub(crate) use launch::spawn_ephemeral_agent_for_pubkey;
 pub use launch::{
     resume_agent, spawn_dispatched_ephemeral_agent, spawn_ephemeral_agent, DispatchedSpawn,
 };
