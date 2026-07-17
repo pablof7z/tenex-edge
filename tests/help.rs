@@ -1,5 +1,50 @@
 use std::process::Command;
 
+fn installed_codex_home() -> tempfile::TempDir {
+    let home = tempfile::tempdir().unwrap();
+    let mosaico_home = home.path().join(".mosaico");
+    std::fs::create_dir_all(&mosaico_home).unwrap();
+    std::fs::write(
+        mosaico_home.join("config.json"),
+        r#"{"availableHarnesses":[]}"#,
+    )
+    .unwrap();
+    let codex_home = home.path().join(".codex");
+    std::fs::create_dir_all(&codex_home).unwrap();
+    let group = |hook_type: &str| {
+        serde_json::json!([{
+            "hooks": [{
+                "command": format!("mosaico harness hook codex --type {hook_type}")
+            }]
+        }])
+    };
+    std::fs::write(
+        codex_home.join("hooks.json"),
+        serde_json::json!({
+            "hooks": {
+                "SessionStart": group("session-start"),
+                "UserPromptSubmit": group("user-prompt-submit"),
+                "PostToolUse": group("post-tool-use"),
+                "Stop": group("stop")
+            }
+        })
+        .to_string(),
+    )
+    .unwrap();
+    home
+}
+
+fn isolated_command(home: &std::path::Path, args: &[&str]) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_mosaico"))
+        .args(args)
+        .env("HOME", home)
+        .env("MOSAICO_HOME", home.join(".mosaico"))
+        .env("MOSAICO_ISOLATED_HOME_OK", "1")
+        .env_remove("MOSAICO_AGENT")
+        .output()
+        .expect("run isolated mosaico")
+}
+
 fn contextual_help(args: &[&str], agent: bool) -> String {
     let mut command = Command::new(env!("CARGO_BIN_EXE_mosaico"));
     command.args(args);
@@ -15,15 +60,39 @@ fn contextual_help(args: &[&str], agent: bool) -> String {
 }
 
 #[test]
-fn bare_invocation_matches_top_level_human_help() {
-    let bare = contextual_help(&[], false);
-    let explicit = contextual_help(&["--help"], false);
+fn bare_invocation_without_installation_shows_install_guide() {
+    let home = tempfile::tempdir().unwrap();
+    let output = isolated_command(home.path(), &[]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
 
-    assert_eq!(bare, explicit);
-    assert!(bare.contains("  sessions"));
-    assert!(bare.contains("  agents"));
-    assert!(!bare.contains("  mgmt"));
-    assert!(!bare.contains("  publish"));
+    assert!(output.status.success(), "bare mosaico failed: {output:?}");
+    assert!(stdout.contains("mosaico install"));
+    assert!(stdout.contains("mosaico install --all"));
+    assert!(!stdout.contains("Usage: mosaico"));
+    assert!(!home.path().join(".mosaico/daemon.sock").exists());
+}
+
+#[test]
+fn bare_invocation_with_installation_is_exactly_bare_launch() {
+    let home = installed_codex_home();
+    let bare = isolated_command(home.path(), &[]);
+    let launch = isolated_command(home.path(), &["launch"]);
+
+    assert!(bare.status.success(), "bare mosaico failed: {bare:?}");
+    assert!(launch.status.success(), "mosaico launch failed: {launch:?}");
+    assert_eq!(bare.stdout, launch.stdout);
+    assert_eq!(bare.stderr, launch.stderr);
+    assert!(String::from_utf8_lossy(&bare.stdout).contains("No available agents."));
+}
+
+#[test]
+fn explicit_top_level_human_help_remains_contextual() {
+    let help = contextual_help(&["--help"], false);
+
+    assert!(help.contains("  sessions"));
+    assert!(help.contains("  agents"));
+    assert!(!help.contains("  mgmt"));
+    assert!(!help.contains("  publish"));
 }
 
 #[test]

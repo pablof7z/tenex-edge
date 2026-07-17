@@ -3,7 +3,7 @@ use mosaico::cli::{self, Cli};
 use mosaico::command_forensics::CommandCallLog;
 
 fn main() {
-    let argv = std::env::args().collect::<Vec<_>>();
+    let mut argv = std::env::args().collect::<Vec<_>>();
     // Harness callbacks are latency-sensitive and explicitly fail open. When
     // no daemon socket exists, return before Clap, Tokio, TLS, hook forensics,
     // or process discovery page in the full application. Require the complete
@@ -27,14 +27,27 @@ fn main() {
         std::process::exit(0);
     }
 
-    // Bare invocation and top-level `--help` / `-h` (without `--all`) print the
-    // same context-sensitive help: operator commands (`who`, `agents`, `launch`)
-    // are shown only outside an agent context. Internal/debug commands stay
-    // hidden; use `--all` for those. Only intercept top-level help so subcommand
-    // help (`mosaico who --help`, etc.) still goes through clap normally.
-    if argv.len() == 1 || matches!(argv.get(1).map(String::as_str), Some("--help" | "-h")) {
+    // Explicit top-level help stays context-sensitive. Only intercept top-level
+    // help so subcommand help (`mosaico who --help`, etc.) still goes through
+    // clap normally.
+    if matches!(argv.get(1).map(String::as_str), Some("--help" | "-h")) {
         cli::print_help_contextual();
         std::process::exit(0);
+    }
+
+    // Bare mosaico is the primary operator flow: route it exactly through the
+    // existing launch command when a harness integration exists. A binary with
+    // no installed integration gives setup guidance without starting a daemon.
+    if argv.len() == 1 {
+        match cli::install::route_bare_invocation() {
+            Ok(true) => argv.push("launch".to_string()),
+            Ok(false) => return,
+            Err(error) => {
+                command_log.finish_result(&Err(anyhow::anyhow!(error.to_string())));
+                eprintln!("mosaico: {error:#}");
+                std::process::exit(1);
+            }
+        }
     }
 
     let cli = match Cli::try_parse_from(argv.clone()) {

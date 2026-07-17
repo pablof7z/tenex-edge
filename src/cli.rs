@@ -26,7 +26,7 @@ mod dispatch;
 mod explain;
 mod harness;
 mod hooks;
-mod install;
+pub mod install;
 mod interactive;
 mod launch_cli;
 mod mcp;

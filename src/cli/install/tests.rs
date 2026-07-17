@@ -189,3 +189,18 @@ fn status_detects_installed_codex_hooks() {
 
     assert!(is_installed(&h));
 }
+
+#[test]
+fn installation_requires_at_least_one_wired_harness() {
+    let temp = tempfile::tempdir().unwrap();
+    let codex = harness("codex", temp.path().join("hooks.json"));
+    let opencode = harness("opencode", temp.path().join("mosaico.ts"));
+
+    assert!(![&codex, &opencode].into_iter().any(is_installed));
+
+    let mut root = serde_json::json!({});
+    merge_hooks(&mut root, &config::codex_hook_entries(), "codex", false);
+    write_json(&codex.config_path, &root).unwrap();
+
+    assert!([&codex, &opencode].into_iter().any(is_installed));
+}

@@ -83,7 +83,6 @@ fn picker_row(row: &AgentRow) -> crate::cli::interactive::agent_picker::AgentPic
         name: row.slug.clone(),
         description: row.description.clone(),
         description_harness: None,
-        usage: None,
         provenance: Some(crate::cli::interactive::agent_picker::AgentProvenance {
             label: format!(
                 "{} · {transport} · {bundle} · {key}",

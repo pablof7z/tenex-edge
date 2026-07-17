@@ -9,7 +9,6 @@ fn row(name: &str) -> AgentPickerRow {
         name: name.into(),
         description: format!("{name} description"),
         description_harness: None,
-        usage: None,
         provenance: None,
     }
 }
@@ -60,13 +59,12 @@ fn viewport_caps_at_sixteen_agent_rows() {
 }
 
 #[test]
-fn renderer_orders_description_usage_and_colored_provenance() {
+fn renderer_orders_description_and_colored_provenance() {
     let state = PickerState::new(
         vec![AgentPickerRow {
             name: "writer".into(),
             description: "Drafts release notes".into(),
             description_harness: None,
-            usage: Some("3 uses / 30d".into()),
             provenance: Some(AgentProvenance {
                 label: "Claude profile".into(),
                 harness: Harness::ClaudeCode,
@@ -88,7 +86,7 @@ fn renderer_orders_description_usage_and_colored_provenance() {
         .iter()
         .map(|cell| cell.symbol())
         .collect::<String>();
-    assert!(line.contains("Drafts release notes · 3 uses / 30d · Claude profile"));
+    assert!(line.contains("Drafts release notes · Claude profile"));
     let provenance_column = line[..line.find("Claude profile").unwrap()].chars().count();
     assert_eq!(
         completed.buffer.content()[100 + provenance_column].fg,
@@ -103,7 +101,6 @@ fn renderer_colors_generic_agent_descriptions_by_harness() {
             name: "codex".into(),
             description: "Generic Codex agent".into(),
             description_harness: Some(Harness::Codex),
-            usage: None,
             provenance: None,
         }],
         PickerMode::Launch,
