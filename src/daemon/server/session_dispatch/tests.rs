@@ -6,6 +6,9 @@ const WRITER_PUBKEY: &str = "31d4c4950a12b978cee21f84f4f5703e700b2d77a1864877323
 
 fn caller_session(state: &Arc<DaemonState>, channels: &[&str]) -> crate::state::Session {
     state.with_store(|s| {
+        for channel in channels {
+            s.upsert_channel(channel, channel, "", "", 1).unwrap();
+        }
         s.reserve_hook_session_for_test(&RegisterSession {
             pubkey: "caller-pubkey".to_string(),
             observed_harness: "codex".to_string(),

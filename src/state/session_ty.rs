@@ -19,7 +19,7 @@ pub struct Session {
     pub claimed_harness: String,
     /// Launch-selected harness bundle. Empty for externally discovered sessions.
     pub admitted_bundle: String,
-    /// Hosted transport selected when this runtime was admitted (`pty`/`acp`).
+    /// Hosted transport selected when admitted (`pty`/`acp`/`app-server`).
     pub admitted_transport: String,
     /// Where the endpoint facts came from (`launch`, `hook`, or `migration`).
     pub endpoint_provenance: String,

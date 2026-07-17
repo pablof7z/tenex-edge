@@ -108,6 +108,7 @@ mod tests {
     #[test]
     fn expired_peer_is_offline_without_stale_activity() {
         let store = crate::state::Store::open_memory().unwrap();
+        store.upsert_channel("root", "root", "", "", 1).unwrap();
         let status = Status {
             pubkey: "peer".into(),
             channel_h: "root".into(),

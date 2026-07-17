@@ -15,6 +15,9 @@ fn register_local_in(
     ext_id: &str,
     ts: u64,
 ) -> String {
+    if store.get_channel(channel).unwrap().is_none() {
+        store.upsert_channel(channel, channel, "", "", ts).unwrap();
+    }
     store
         .reserve_hook_session_for_test(&RegisterSession {
             pubkey: pubkey.to_string(),
@@ -57,6 +60,9 @@ fn record_peer(
     busy: bool,
     ts: u64,
 ) {
+    if store.get_channel("proj").unwrap().is_none() {
+        store.upsert_channel("proj", "proj", "", "", ts).unwrap();
+    }
     store
         .upsert_profile(pubkey, slug, slug, host, false, 1)
         .unwrap();

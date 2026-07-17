@@ -370,7 +370,7 @@ fn validate_runtime_facts(r: &RegisterSession, facts: &AdmittedRuntimeFacts) -> 
             r.observed_harness
         );
     }
-    if !matches!(facts.transport.as_str(), "" | "pty" | "acp") {
+    if !matches!(facts.transport.as_str(), "" | "pty" | "acp" | "app-server") {
         anyhow::bail!(
             "runtime facts contain unknown transport {:?}",
             facts.transport

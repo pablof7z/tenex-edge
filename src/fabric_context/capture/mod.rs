@@ -162,7 +162,13 @@ pub(crate) fn capture_inputs(
     store: &Store,
     input: &FabricContextInput<'_>,
 ) -> anyhow::Result<ViewInputs> {
-    let root = read::root_channel(store, input.scope)?;
+    // Missing relay metadata is an explicit outer-view degraded case: retain the
+    // requested scope only to label the warning, never as an alternate binding.
+    let root = if store.get_channel(input.scope)?.is_some() {
+        read::root_channel(store, input.scope)?
+    } else {
+        input.scope.to_string()
+    };
     let channel_hs = read::selected_channels(store, input);
     let other_workspaces = activity::workspace_caps(store, &root)?;
     let mut warnings = input.warnings.to_vec();

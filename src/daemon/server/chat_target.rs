@@ -216,6 +216,8 @@ mod tests {
     #[test]
     fn multi_join_without_explicit_channel_errors_with_reruns() {
         let store = Store::open_memory().unwrap();
+        store.upsert_channel("root", "root", "", "", 1).unwrap();
+        store.upsert_channel("other", "other", "", "", 1).unwrap();
         let rec = session("root");
         store
             .reserve_hook_session_for_test(&crate::state::RegisterSession {

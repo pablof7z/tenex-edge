@@ -7,6 +7,9 @@ const SELF_PK: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 const OTHER_PK: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
 fn register(store: &Store, pk: &str, channel: &str, now: u64) -> String {
+    if store.get_channel(channel).unwrap().is_none() {
+        store.upsert_channel(channel, channel, "", "", now).unwrap();
+    }
     store
         .reserve_hook_session_for_test(&RegisterSession {
             pubkey: pk.to_string(),

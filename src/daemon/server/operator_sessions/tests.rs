@@ -93,6 +93,7 @@ fn projection_includes_live_unbound_supervisor() {
 #[test]
 fn bound_endpoint_projection_is_transport_owned_and_generic() {
     let store = Store::open_memory().unwrap();
+    store.upsert_channel("root", "root", "", "", 1).unwrap();
     let pubkey = Keys::generate().public_key().to_hex();
     store
         .reserve_session_with_facts(
@@ -138,6 +139,7 @@ fn bound_endpoint_projection_is_transport_owned_and_generic() {
 fn missing_hosted_locator_preserves_the_admitted_transport() {
     for transport in ["pty", "acp", "app-server"] {
         let store = Store::open_memory().unwrap();
+        store.upsert_channel("root", "root", "", "", 1).unwrap();
         let pubkey = Keys::generate().public_key().to_hex();
         store
             .reserve_session_with_facts(
