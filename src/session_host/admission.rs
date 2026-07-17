@@ -32,11 +32,34 @@ pub(super) fn reserve_fresh_for_pubkey(
     expected_pubkey: &str,
 ) -> Result<Reservation> {
     if agent.per_session_key {
-        anyhow::bail!(
-            "cannot fresh-launch per-session agent {:?} for existing pubkey {}; a native resume locator is required",
-            agent.slug,
-            expected_pubkey
-        );
+        let existing = state
+            .with_store(|store| store.get_session(expected_pubkey))?
+            .with_context(|| {
+                format!("cannot fresh-relaunch unknown per-session pubkey {expected_pubkey}")
+            })?;
+        if existing.agent_slug != agent.slug || existing.harness != harness {
+            anyhow::bail!(
+                "cannot fresh-relaunch per-session pubkey {expected_pubkey}: persisted agent/harness ({}/{}) does not match requested ({}/{harness})",
+                existing.agent_slug,
+                existing.harness,
+                agent.slug,
+            );
+        }
+        if state
+            .with_store(|store| store.native_resume_locator(expected_pubkey))?
+            .is_some()
+        {
+            anyhow::bail!(
+                "cannot fresh-relaunch per-session pubkey {expected_pubkey}: native resume is available"
+            );
+        }
+        if !state.with_store(|store| store.session_can_fresh_relaunch_exact(expected_pubkey))? {
+            anyhow::bail!(
+                "cannot fresh-relaunch per-session pubkey {expected_pubkey}: exact relaunch requires a stopped, non-revoked session"
+            );
+        }
+        let prepared = crate::daemon::server::load_session_identity(state, expected_pubkey, agent)?;
+        return reserve_prepared(state, prepared, &agent.slug, harness, root, group);
     }
     let configured_pubkey = agent
         .pubkey_hex()
@@ -113,7 +136,12 @@ fn reserve_prepared(
 
 pub(super) fn release(state: &Arc<DaemonState>, reservation: &Reservation) {
     if let Err(error) = state.with_store(|store| {
-        store.mark_dead_if_generation(&reservation.pubkey, reservation.runtime_generation)
+        store.mark_runtime_stopped_if_generation(
+            &reservation.pubkey,
+            reservation.runtime_generation,
+            crate::state::StopReason::Unknown,
+            crate::util::now_secs(),
+        )
     }) {
         tracing::warn!(
             pubkey = %reservation.pubkey,
@@ -179,9 +207,7 @@ mod tests {
             Ok(_) => panic!("per-session identity unexpectedly fresh-launched for an old pubkey"),
             Err(error) => error,
         };
-        assert!(error
-            .to_string()
-            .contains("native resume locator is required"));
+        assert!(error.to_string().contains("unknown per-session pubkey"));
         assert!(state
             .with_store(|store| store.get_session("addressed"))
             .unwrap()
@@ -201,5 +227,22 @@ mod tests {
                 .unwrap();
         assert_eq!(reservation.pubkey, pubkey);
         release(&state, &reservation);
+    }
+
+    #[tokio::test]
+    async fn stopped_zero_turn_session_can_fresh_relaunch_with_exact_signer() {
+        let state = DaemonState::new_for_test().await;
+        let agent = agent();
+        let first = reserve_fresh(&state, &agent, "codex", "root", Some("root"), None).unwrap();
+        release(&state, &first);
+
+        let relaunched =
+            reserve_fresh_for_pubkey(&state, &agent, "codex", "root", Some("root"), &first.pubkey)
+                .unwrap();
+
+        assert_eq!(relaunched.pubkey, first.pubkey);
+        assert_eq!(relaunched.agent_nsec, first.agent_nsec);
+        assert!(relaunched.runtime_generation > first.runtime_generation);
+        release(&state, &relaunched);
     }
 }

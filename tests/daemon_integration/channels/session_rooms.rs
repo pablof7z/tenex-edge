@@ -203,7 +203,7 @@ fn session_start_with_user_nsec_owns_group_and_adds_member() {
         .get_session(&pubkey_for_harness_session(&store, "claude-code", "sess-grp-1").unwrap())
         .unwrap()
         .expect("session row");
-    assert!(rec.alive);
+    assert!(rec.is_running());
     // The minted session room's parent is the work-root channel. (Parent
     // now lives in `relay_channels`; `session_room_parent` was renamed to
     // `channel_parent`.)

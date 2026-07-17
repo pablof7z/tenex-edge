@@ -250,9 +250,10 @@ impl RpcHandle {
 
     /// Kill the child process. The reader task observes the resulting stdout EOF
     /// and fires the exit signal, which the reaper turns into a `wait()`.
-    pub async fn kill(&self) {
-        self.alive.store(false, Ordering::Relaxed);
+    pub async fn kill(&self) -> std::io::Result<()> {
         let mut child = self.child.lock().await;
-        let _ = child.start_kill();
+        child.start_kill()?;
+        self.alive.store(false, Ordering::Relaxed);
+        Ok(())
     }
 }

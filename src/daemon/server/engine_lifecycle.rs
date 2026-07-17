@@ -52,7 +52,7 @@ pub(in crate::daemon::server) async fn spawn_session(
     let st = state.clone();
     let channel_for_sub = channel.clone();
     tokio::spawn(async move {
-        if let Err(e) = ensure_subscription(&st, &channel_for_sub).await {
+        if let Err(e) = sync_subscriptions(&st).await {
             tracing::warn!(
                 channel = %channel_for_sub,
                 error = %e,
@@ -87,7 +87,23 @@ pub(in crate::daemon::server) async fn spawn_session(
             tracing::debug!(pubkey = %task_pubkey, runtime_generation, "ignoring stale runtime teardown");
             return;
         }
-        match st.with_store(|s| s.mark_dead_if_generation(&task_pubkey, runtime_generation)) {
+        let teardown = match st.with_store(|store| store.get_session(&task_pubkey)) {
+            Ok(Some(session))
+                if session.runtime_generation == runtime_generation
+                    && session.runtime_state == crate::state::RuntimeState::Running =>
+            {
+                super::managed_lifecycle::stop_generation(
+                    &st,
+                    &session,
+                    crate::state::StopReason::Crash,
+                    now_secs(),
+                )
+                .await
+            }
+            Ok(_) => Ok(false),
+            Err(error) => Err(error),
+        };
+        match teardown {
             Ok(true) => {}
             Ok(false) => tracing::debug!(
                 pubkey = %task_pubkey,
@@ -109,7 +125,7 @@ pub(in crate::daemon::server) async fn spawn_session(
 
 pub(in crate::daemon::server) fn prune_hosted(state: &Arc<DaemonState>) {
     let live: std::collections::HashSet<String> = state
-        .with_store(|s| s.list_alive_sessions().unwrap_or_default())
+        .with_store(|s| s.list_running_sessions().unwrap_or_default())
         .into_iter()
         .map(|r| r.pubkey)
         .collect();
@@ -120,11 +136,21 @@ pub(in crate::daemon::server) fn prune_hosted(state: &Arc<DaemonState>) {
         .retain(|pk, _| live.contains(pk));
 }
 
-pub(in crate::daemon::server) fn cancel_session(state: &Arc<DaemonState>, pubkey: &str) -> bool {
-    if let Some(h) = state.sessions.lock().unwrap().get(pubkey) {
+pub(in crate::daemon::server) fn cancel_session(
+    state: &Arc<DaemonState>,
+    pubkey: &str,
+    runtime_generation: u64,
+) -> bool {
+    if let Some(h) = state
+        .sessions
+        .lock()
+        .unwrap()
+        .get(pubkey)
+        .filter(|handle| handle.runtime_generation == runtime_generation)
+    {
         // `notify_one` retains a permit when the engine is still doing startup
         // I/O; `notify_waiters` would lose cancellation before `notified()` is
-        // first polled and leave a dead generation occupying the runtime map.
+        // first polled and leave a stopped generation occupying the runtime map.
         h.cancel.notify_one();
         true
     } else {
@@ -133,19 +159,21 @@ pub(in crate::daemon::server) fn cancel_session(state: &Arc<DaemonState>, pubkey
 }
 
 /// Revive sessions a previous daemon left behind (skew re-exec / crash),
-/// rebuilding from the `sessions` table. Invariant: **a live session is never
+/// rebuilding from the `sessions` table. Invariant: **a running session is never
 /// reaped and left with an orphaned supervisor.** For each ALIVE row we respawn
 /// the engine task iff the session is still live ([`session_still_live`]: PID
-/// alive AND, for PTY sessions, the supervisor socket accepts a connect+write).
-/// A genuinely-gone session is marked dead (so `who`/presence don't lie after a
-/// restart) and has its ordinal member crash-GC'd. The one case where a *live*
+/// running AND, for PTY sessions, the supervisor socket accepts a connect+write).
+/// A genuinely-gone session is stopped (so `who`/presence don't lie after a
+/// restart). The one case where a *running*
 /// session is retired — its agent's identity config changed under it — first
 /// kills the PTY supervisor, so no orphan is left (defect #4). Transient
 /// conditions — a cold relay
-/// (`ChannelGate::Degraded`) or a spawn hiccup — no longer reap a live session;
+/// (`ChannelGate::Degraded`) or a spawn hiccup — no longer reap a running session;
 /// correctness on a not-yet-ready channel is upheld by the send-time gate.
 pub(in crate::daemon::server) async fn reconcile_sessions(state: &Arc<DaemonState>) {
-    let snaps = state.with_store(|s| s.list_alive_sessions().unwrap_or_default());
+    super::managed_lifecycle::replay_supervisor_exits(state).await;
+    super::managed_lifecycle::reconcile_stopping(state).await;
+    let snaps = state.with_store(|s| s.list_running_sessions().unwrap_or_default());
     tracing::info!(
         session_count = snaps.len(),
         "reconciling sessions from previous daemon instance"
@@ -164,17 +192,47 @@ pub(in crate::daemon::server) async fn reconcile_sessions(state: &Arc<DaemonStat
                 agent = %snap.agent_slug,
                 channel = %snap.channel_h,
                 pid = ?snap.child_pid,
-                "session process gone (pid dead or pty socket unreachable); marking dead and leaving membership for stale cleanup"
+                "session process gone (pid stopped or pty socket unreachable); stopping runtime and retaining standing"
             );
-            state.with_store(|s| {
-                match s.mark_dead_if_generation(&pubkey, runtime_generation) {
+            if snap.child_pid.is_some_and(pid_alive) {
+                let Some(pty_id) = endpoint_id_for(state, &snap, crate::state::LOCATOR_PTY) else {
+                    tracing::error!(
+                        pubkey,
+                        runtime_generation,
+                        "live PTY supervisor has no endpoint; refusing to lose process ownership"
+                    );
+                    continue;
+                };
+                match crate::pty::terminate_owned_supervisor(&pty_id) {
                     Ok(true) => {}
-                    Ok(false) => tracing::debug!(pubkey, runtime_generation, "reconcile GC ignored stale runtime generation"),
-                    Err(e) => {
-                        tracing::error!(pubkey, runtime_generation, error = %e, "reconcile GC: conditional teardown failed; ghost-alive row may remain");
+                    Ok(false) => {
+                        tracing::error!(pubkey, runtime_generation, pty_id, "unreachable PTY has no owned supervisor metadata; refusing to lose process ownership");
+                        continue;
+                    }
+                    Err(error) => {
+                        tracing::error!(pubkey, runtime_generation, pty_id, %error, "unreachable PTY could not be safely terminated; refusing to mark stopped");
+                        continue;
                     }
                 }
-            });
+            }
+            match super::managed_lifecycle::stop_generation(
+                state,
+                &snap,
+                crate::state::StopReason::Crash,
+                now_secs(),
+            )
+            .await
+            {
+                Ok(true) => {}
+                Ok(false) => tracing::debug!(
+                    pubkey,
+                    runtime_generation,
+                    "reconcile GC ignored stale runtime generation"
+                ),
+                Err(e) => {
+                    tracing::error!(pubkey, runtime_generation, error = %e, "reconcile GC: conditional teardown failed; ghost-running row may remain")
+                }
+            }
             continue;
         }
         tracing::info!(
@@ -210,16 +268,50 @@ pub(in crate::daemon::server) async fn reconcile_sessions(state: &Arc<DaemonStat
         // admission-time immediate parent is retained only for a restart before
         // metadata materializes. Idempotent ready channels still fast-path.
         let parent_hint = reconcile_context::parent_hint(state, &snap);
-        let gate = state
-            .provider
-            .ensure_channel_ready(crate::fabric::nip29::readiness::ChannelCtx {
-                channel: &snap.channel_h,
-                expect_member: &pubkey,
-                parent_hint: parent_hint.as_deref(),
-                name: None,
-                repair_whitelisted_admins: true,
-            })
-            .await;
+        let (gate, admission_current) = {
+            let _lane = state.standing_sync.lock().await;
+            let gate = state
+                .provider
+                .ensure_channel_ready(crate::fabric::nip29::readiness::ChannelCtx {
+                    channel: &snap.channel_h,
+                    expect_member: &pubkey,
+                    parent_hint: parent_hint.as_deref(),
+                    name: None,
+                    repair_whitelisted_admins: true,
+                })
+                .await;
+            let admission_current = if matches!(
+                gate,
+                crate::fabric::nip29::readiness::ChannelGate::Degraded
+            ) {
+                true
+            } else {
+                match super::managed_lifecycle::commit_confirmed_admission(
+                    state,
+                    &pubkey,
+                    &snap.channel_h,
+                    runtime_generation,
+                    snap.lifecycle_epoch,
+                )
+                .await
+                {
+                    Ok(current) => current,
+                    Err(error) => {
+                        tracing::error!(pubkey, %error, "reconciled membership admission could not be persisted");
+                        false
+                    }
+                }
+            };
+            (gate, admission_current)
+        };
+        if !admission_current {
+            tracing::warn!(
+                pubkey,
+                runtime_generation,
+                "reconciled admission became stale; skipping engine revival"
+            );
+            continue;
+        }
         // `Degraded` means the channel was NOT verified ready on the relay (e.g.
         // the freshly-reconnected relay is still cold / not yet NIP-42 authed).
         // A LIVE session must never be reaped for a transient relay condition, so
@@ -235,7 +327,7 @@ pub(in crate::daemon::server) async fn reconcile_sessions(state: &Arc<DaemonStat
                 "channel not verified ready on reconcile; reviving live session anyway (send-time gate still enforced), will re-verify on next heartbeat"
             );
         }
-        if let Err(e) = ensure_subscription(state, &snap.channel_h).await {
+        if let Err(e) = sync_subscriptions(state).await {
             tracing::warn!(channel = %snap.channel_h, error = %e, "ensure_subscription failed during reconcile");
         }
         let workspace = reconcile_context::workspace(state, &snap);
@@ -251,15 +343,15 @@ pub(in crate::daemon::server) async fn reconcile_sessions(state: &Arc<DaemonStat
             snap.child_pid,
         );
         if let Err(e) = spawn_session(state, ep).await {
-            // The supervisor process is still alive (we checked above), so do NOT
-            // mark the session dead — that would blink a running agent offline.
+            // The supervisor process is still running (we checked above), so do NOT
+            // stop the session — that would blink a running agent offline.
             // Leave the row ALIVE with its signer reserved; the next daemon
             // restart's reconcile retries the engine spawn.
             tracing::error!(
                 pubkey,
                 runtime_generation,
                 error = %e,
-                "reconcile: failed to respawn session engine for a live session; leaving row alive for retry on next restart"
+                "reconcile: failed to respawn session engine for a running session; leaving row running for retry on next restart"
             );
         }
     }
@@ -270,9 +362,9 @@ pub(in crate::daemon::server) async fn reconcile_sessions(state: &Arc<DaemonStat
 pub(in crate::daemon::server) use crate::liveness::pid_alive;
 
 /// Whether reconcile should treat a session left behind by a previous daemon as
-/// still alive (and therefore revive it rather than reap it).
+/// still running (and therefore revive it rather than reap it).
 ///
-/// `child_pid` liveness alone is unsafe: PIDs recycle, so a dead supervisor's
+/// `child_pid` liveness alone is unsafe: PIDs recycle, so a stopped supervisor's
 /// reused PID could revive a ghost session against an unrelated process. When the
 /// session owns a PTY supervisor socket, that socket being reachable —
 /// connect+write, not a round-trip reply ([`crate::pty::is_live`]) — is the
@@ -292,7 +384,7 @@ fn session_still_live(state: &Arc<DaemonState>, snap: &crate::state::Session) ->
         transport_kind_for_slug(&snap.agent_slug),
         Ok(TransportKind::Acp)
     ) {
-        return endpoint_id_for(state, &snap.pubkey, crate::state::LOCATOR_ACP)
+        return endpoint_id_for(state, snap, crate::state::LOCATOR_ACP)
             .map(|endpoint_id| {
                 AcpTransport.is_live(&EndpointRef {
                     kind: TransportKind::Acp,
@@ -302,21 +394,27 @@ fn session_still_live(state: &Arc<DaemonState>, snap: &crate::state::Session) ->
             .unwrap_or(false);
     }
     let pid_ok = snap.child_pid.map(pid_alive).unwrap_or(false);
-    let endpoint_live = endpoint_id_for(state, &snap.pubkey, crate::state::LOCATOR_PTY)
+    let endpoint_live = endpoint_id_for(state, snap, crate::state::LOCATOR_PTY)
         .map(|endpoint_id| crate::pty::is_live(&endpoint_id));
     revive_decision(pid_ok, endpoint_live)
 }
 
 /// The typed host endpoint bound to this pubkey, if one exists.
-fn endpoint_id_for(state: &Arc<DaemonState>, pubkey: &str, locator_kind: &str) -> Option<String> {
-    state.with_store(|s| {
-        s.locators_for_pubkey(pubkey).ok().and_then(|locators| {
-            locators
-                .into_iter()
-                .find(|locator| locator.locator_kind == locator_kind)
-                .map(|locator| locator.locator_value)
+fn endpoint_id_for(
+    state: &Arc<DaemonState>,
+    session: &crate::state::Session,
+    locator_kind: &str,
+) -> Option<String> {
+    state
+        .with_store(|store| {
+            store.runtime_locator_for_session(
+                &session.pubkey,
+                session.runtime_generation,
+                locator_kind,
+            )
         })
-    })
+        .ok()?
+        .map(|locator| locator.locator_value)
 }
 
 /// Pure revive decision, split out for unit testing. `endpoint_live` is `None` for a

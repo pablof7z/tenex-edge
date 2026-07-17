@@ -2,7 +2,7 @@ use super::{scope, StoreReader, WhoRow, WhoSource};
 use anyhow::Result;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
-pub(super) fn push_claim_rows(
+pub(super) fn push_retained_rows(
     store: StoreReader<'_>,
     current_root: Option<&str>,
     now: u64,
@@ -10,70 +10,73 @@ pub(super) fn push_claim_rows(
     rows: &mut Vec<WhoRow>,
     other_agents: &mut BTreeMap<String, BTreeSet<String>>,
 ) -> Result<()> {
-    let live_pubkeys: HashSet<String> = rows.iter().map(|r| r.pubkey.clone()).collect();
-    for claim in store.list_active_session_claims(now)? {
-        if live_pubkeys.contains(&claim.pubkey) {
+    let live_pubkeys: HashSet<String> = rows.iter().map(|row| row.pubkey.clone()).collect();
+    for standing in store.list_retained_session_standing(now)? {
+        if live_pubkeys.contains(&standing.pubkey)
+            || scope::is_archived_channel(store, &standing.channel_h)
+        {
             continue;
         }
-        let scope = claim.channel_h.clone();
-        if scope::is_archived_channel(store, &scope) {
+        let Some(session) = store.get_session(&standing.pubkey)? else {
             continue;
-        }
+        };
         let slug = store
-            .session_identity(&claim.pubkey)
+            .session_identity(&standing.pubkey)
             .ok()
             .flatten()
             .map(|identity| identity.display_slug())
-            .or_else(|| store.resolve_slug_for_pubkey(&claim.pubkey).ok().flatten())
-            .unwrap_or_else(|| claim.agent_slug.clone());
+            .or_else(|| {
+                store
+                    .resolve_slug_for_pubkey(&standing.pubkey)
+                    .ok()
+                    .flatten()
+            })
+            .unwrap_or_else(|| session.agent_slug.clone());
         if current_root
-            .map(|p| scope::scope_contains_channel(store, p, &scope))
+            .map(|root| scope::scope_contains_channel(store, root, &standing.channel_h))
             .unwrap_or(true)
         {
-            rows.push(dormant_row(store, claim, slug, local_host, now));
-        } else if scope::is_root_channel(store, &scope) {
-            other_agents.entry(scope).or_default().insert(slug);
+            rows.push(retained_row(
+                store,
+                &session,
+                &standing.channel_h,
+                slug,
+                local_host,
+                now,
+            ));
+        } else if scope::is_root_channel(store, &standing.channel_h) {
+            other_agents
+                .entry(standing.channel_h)
+                .or_default()
+                .insert(slug);
         }
     }
     Ok(())
 }
 
-fn dormant_row(
+fn retained_row(
     store: StoreReader<'_>,
-    claim: crate::state::session_claims::SessionClaim,
+    session: &crate::state::Session,
+    channel: &str,
     slug: String,
     local_host: &str,
     now: u64,
 ) -> WhoRow {
-    let owner_host = claim.owner_host.trim();
-    let host = if owner_host.is_empty() {
-        local_host.to_string()
-    } else {
-        owner_host.to_string()
-    };
-    let remote = !owner_host.is_empty() && owner_host != local_host;
-    let title = store
-        .get_session(&claim.pubkey)
-        .ok()
-        .flatten()
-        .map(|s| s.title)
-        .unwrap_or_default();
-    let work_root = scope::work_root_for(store, &claim.channel_h);
-    let work_root_display = work_root.clone();
+    let work_root = scope::work_root_for(store, channel);
     WhoRow {
         source: WhoSource::Local,
         state: crate::session_state::SessionState::Offline,
         slug,
-        channel: claim.channel_h.clone(),
-        status: title,
+        channel: channel.to_string(),
+        status: session.title.clone(),
         activity: String::new(),
         dormant: true,
-        host,
-        age_secs: Some(now.saturating_sub(claim.last_active_at)),
+        host: local_host.to_string(),
+        age_secs: Some(now.saturating_sub(session.stopped_at)),
         rel_cwd: String::new(),
-        remote,
+        remote: false,
+        work_root_display: work_root.clone(),
         work_root,
-        work_root_display,
-        pubkey: claim.pubkey,
+        pubkey: session.pubkey.clone(),
     }
 }

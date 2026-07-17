@@ -135,6 +135,7 @@ fn reap_headless_on_exit(
             &state,
             &pubkey,
             runtime_generation,
+            crate::state::StopReason::HeadlessExit,
         )
         .await
         {

@@ -14,7 +14,7 @@ fn deployed_schema_four_migrates_to_current_without_losing_local_state() {
     drop(Store::open(&path).expect("schema four upgrades to current"));
 
     let conn = Connection::open(&path).unwrap();
-    assert_eq!(version(&conn), 8);
+    assert_eq!(version(&conn), 9);
     assert_eq!(
         conn.query_row("SELECT title FROM sessions WHERE pubkey='pk1'", [], |row| {
             row.get::<_, String>(0)
@@ -40,6 +40,34 @@ fn deployed_schema_four_migrates_to_current_without_losing_local_state() {
         .unwrap(),
         "native_resume:resume-new"
     );
+    assert_eq!(
+        conn.query_row(
+            "SELECT runtime_state || ':' || recovery_state || ':' || turn_count
+             FROM sessions WHERE pubkey='pk1'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .unwrap(),
+        "running:ready:1"
+    );
+    assert_eq!(
+        conn.query_row(
+            "SELECT channel_h || ':' || granted_at FROM session_channels WHERE pubkey='pk1'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .unwrap(),
+        "room:8"
+    );
+    assert_eq!(
+        conn.query_row(
+            "SELECT state FROM session_standing WHERE pubkey='pk1' AND channel_h='room'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .unwrap(),
+        "absent"
+    );
     assert_eq!(count(&conn, "messages"), 1);
     assert_eq!(count(&conn, "message_recipients"), 1);
     assert_eq!(
@@ -56,6 +84,7 @@ fn deployed_schema_four_migrates_to_current_without_losing_local_state() {
         "trellis_commits",
         "trellis_replay_capsules",
         "llm_calls",
+        "session_claims",
     ] {
         assert!(!fixture::table_exists(&conn, removed), "{removed} removed");
     }
@@ -86,7 +115,10 @@ fn malformed_schema_seven_fails_before_mutating_the_database() {
 
 #[test]
 fn migration_chain_covers_every_version_before_current() {
-    assert_eq!(super::super::migration::supported_versions(), [4, 5, 6, 7]);
+    assert_eq!(
+        super::super::migration::supported_versions(),
+        [4, 5, 6, 7, 8]
+    );
 }
 
 fn version(conn: &Connection) -> u32 {

@@ -127,7 +127,7 @@ fn first_shared_channel(
     caller: &crate::state::Session,
     target_channels: &[String],
 ) -> Result<String> {
-    let joined = state.with_store(|s| s.list_session_joined_channels(&caller.pubkey))?;
+    let joined = state.with_store(|s| s.list_session_routes(&caller.pubkey))?;
     let joined_set: HashSet<&str> = joined.iter().map(|(h, _)| h.as_str()).collect();
     if let Some(ch) = target_channels
         .iter()

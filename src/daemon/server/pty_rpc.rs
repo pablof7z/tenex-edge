@@ -13,11 +13,16 @@ pub(super) async fn rpc_pty_status(state: &Arc<DaemonState>) -> Result<serde_jso
     status::rpc_pty_status(state).await
 }
 
-fn pty_session_for_pubkey(state: &Arc<DaemonState>, pubkey: &str) -> Option<String> {
-    let locators = state.with_store(|s| s.locators_for_pubkey(pubkey)).ok()?;
-    locators
-        .into_iter()
-        .find(|locator| locator.locator_kind == crate::state::LOCATOR_PTY)
+fn pty_session_for(state: &Arc<DaemonState>, session: &crate::state::Session) -> Option<String> {
+    state
+        .with_store(|store| {
+            store.runtime_locator_for_session(
+                &session.pubkey,
+                session.runtime_generation,
+                crate::state::LOCATOR_PTY,
+            )
+        })
+        .ok()?
         .map(|locator| locator.locator_value)
 }
 
@@ -39,19 +44,17 @@ pub(super) async fn rpc_pty_send(
         .with_store(|store| super::resolution::resolve_public_session(store, &p.session))?
         .with_context(|| "PTY send requires an npub, hex pubkey, or current handle")?;
 
-    let Some(pty_id) = pty_session_for_pubkey(state, &rec.pubkey) else {
+    let Some(pty_id) = pty_session_for(state, &rec) else {
         return Ok(serde_json::json!({
             "injected": false,
             "reason": "no PTY endpoint registered for this session"
         }));
     };
     if !crate::pty::is_live(&pty_id) {
-        // Retire the row + its stale alias; clearing only the alias reopens the recycled-PID false-revive (defect #6).
-        let _ = state.with_store(|s| s.retire_dead_endpoint(&rec.pubkey));
         return Ok(serde_json::json!({
             "injected": false,
             "pty_id": pty_id,
-            "reason": "PTY endpoint is not live"
+            "reason": "PTY endpoint probe failed; bounded lifecycle reconciliation will verify ownership"
         }));
     }
 
@@ -82,7 +85,7 @@ pub(in crate::daemon::server) async fn provision_before_spawn(
 ) -> Result<()> {
     let scope = channel.filter(|g| !g.is_empty()).unwrap_or(root);
     let already_live = state
-        .with_store(|s| s.list_alive_sessions())
+        .with_store(|s| s.list_running_sessions())
         .unwrap_or_default()
         .iter()
         .any(|r| r.agent_slug == slug && r.channel_h == scope);
@@ -150,7 +153,7 @@ pub(super) fn rpc_pty_attach(
     let rec = state
         .with_store(|store| super::resolution::resolve_public_session(store, &p.session))?
         .with_context(|| "PTY attach requires an npub, hex pubkey, or current handle")?;
-    match pty_session_for_pubkey(state, &rec.pubkey) {
+    match pty_session_for(state, &rec) {
         Some(pty) => Ok(serde_json::json!({
             "pty_id": pty,
             "pubkey": rec.pubkey,
@@ -238,10 +241,10 @@ pub(super) async fn rpc_pty_resumable(state: &Arc<DaemonState>) -> Result<serde_
 
     let mut arr = Vec::new();
     for rec in candidates {
-        if resume_token_for(state, &rec).is_none() || rec.alive {
+        if resume_token_for(state, &rec).is_none() || rec.is_running() {
             continue;
         }
-        let live_pty = pty_session_for_pubkey(state, &rec.pubkey)
+        let live_pty = pty_session_for(state, &rec)
             .map(|pty| crate::pty::is_live(&pty))
             .unwrap_or(false);
         if live_pty {
@@ -258,7 +261,7 @@ pub(super) async fn rpc_pty_resumable(state: &Arc<DaemonState>) -> Result<serde_
             "root": rec.channel_h,
             "work_root": work_root,
             "rel_cwd": "",
-            "alive": rec.alive,
+            "runtime_state": rec.runtime_state.as_str(),
             "created_at": rec.created_at,
             "title": rec.title,
         }));

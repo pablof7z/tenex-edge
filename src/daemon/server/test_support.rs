@@ -67,6 +67,8 @@ impl DaemonState {
             subscribed_root_channels: Mutex::new(Vec::new()),
             subs: Mutex::new(crate::reconcile::SubscriptionReconciler::new()),
             subscription_sync: tokio::sync::Mutex::new(()),
+            standing_sync: tokio::sync::Mutex::new(()),
+            pty_probe_failures: Mutex::new(HashMap::new()),
             status: Arc::new(Mutex::new(crate::reconcile::StatusReconciler::for_ttl(
                 status_ttl_duration(),
             ))),

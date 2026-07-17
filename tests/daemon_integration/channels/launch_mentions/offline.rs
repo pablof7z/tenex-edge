@@ -61,7 +61,25 @@ fn end_target(home: &Home, pubkey: &str) {
     )
     .and_then(|store| store.get_session(pubkey))
     .unwrap_or(None)
-    .is_some_and(|session| !session.alive)));
+    .is_some_and(|session| !session.is_running())));
+}
+
+fn expire_local_standing(home: &Home, pubkey: &str, channel: &str) {
+    let store = Store::open(&home.store_path()).unwrap();
+    let standing = store
+        .get_session_standing(pubkey, channel)
+        .unwrap()
+        .unwrap();
+    assert!(store
+        .mark_session_standing_absent_if_epoch(
+            pubkey,
+            channel,
+            standing.state,
+            standing.standing_epoch,
+            standing.session_lifecycle_epoch,
+            standing.retain_until,
+        )
+        .unwrap());
 }
 
 #[test]
@@ -83,6 +101,7 @@ fn operator_kind9_to_offline_session_resumes_the_exact_pubkey() {
     let (_, original) = launch_target(&home, agent, &channel, &work_dir);
     start_keeper(&home, &channel, &work_dir);
     end_target(&home, &original.pubkey);
+    expire_local_standing(&home, &original.pubkey, &channel);
 
     let body = format!("resume exact session {}", unique_session("body"));
     rt().block_on(publish_user_kind9(&channel, &body, &original.pubkey));
@@ -98,7 +117,7 @@ fn operator_kind9_to_offline_session_resumes_the_exact_pubkey() {
 }
 
 #[test]
-fn operator_kind9_to_offline_nonresumable_session_stays_pending_without_sibling_spawn() {
+fn operator_kind9_to_zero_turn_session_without_native_resume_relaunches_exact_pubkey() {
     let _guard = ENV_LOCK.lock().unwrap_or_else(|error| error.into_inner());
     let home = Home::new();
     write_config(&home, false);
@@ -124,18 +143,9 @@ fn operator_kind9_to_offline_nonresumable_session_stays_pending_without_sibling_
     let body = format!("stay with exact session {}", unique_session("body"));
     let event_id = rt().block_on(publish_user_kind9(&channel, &body, &original.pubkey));
 
-    assert!(wait_until(Duration::from_secs(10), || Store::open(
-        &home.store_path()
-    )
-    .and_then(|store| store.peek_pending_for_pubkey(&original.pubkey))
-    .is_ok_and(|pending| pending
-        .iter()
-        .any(|row| row.event_id == event_id))));
-    assert!(wait_until(Duration::from_secs(10), || {
-        std::fs::read_to_string(home.dir.path().join("daemon.log")).is_ok_and(|text| {
-            text.contains("per-session mention target has no native resume locator")
-        })
-    }));
+    let relaunched = wait_for_alive_session(&home, agent, &channel);
+    assert_eq!(relaunched.pubkey, original.pubkey);
+    wait_for_injected_log(&log, &body);
 
     let session_count: i64 = rusqlite::Connection::open(home.store_path())
         .unwrap()
@@ -146,17 +156,80 @@ fn operator_kind9_to_offline_nonresumable_session_stays_pending_without_sibling_
         )
         .unwrap();
     assert_eq!(session_count, 1, "must not mint a sibling session pubkey");
-    assert!(
-        !Store::open(&home.store_path())
-            .unwrap()
-            .get_session(&original.pubkey)
-            .unwrap()
-            .unwrap()
-            .alive
-    );
-    assert!(!std::fs::read_to_string(&log)
-        .unwrap_or_default()
-        .contains(&body));
+    assert!(Store::open(&home.store_path())
+        .unwrap()
+        .get_session(&original.pubkey)
+        .unwrap()
+        .unwrap()
+        .is_running());
+    assert!(Store::open(&home.store_path())
+        .unwrap()
+        .peek_pending_for_pubkey(&original.pubkey)
+        .unwrap()
+        .iter()
+        .all(|row| row.event_id != event_id));
+
+    let endpoint =
+        pty_session_for_session(&Store::open(&home.store_path()).unwrap(), &original.pubkey)
+            .expect("relaunched endpoint");
+    kill_pty(&endpoint);
+    stop_daemon(&home);
+}
+
+#[test]
+fn operator_kind9_to_used_session_without_native_resume_relaunches_exact_pubkey() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let home = Home::new();
+    write_config(&home, false);
+
+    let channel = unique_session("kind9-used-pending");
+    let work_dir = home.dir.path().join(&channel);
+    add_workspace_mapping(&home, &channel, &work_dir);
+    let agent = "used-pending-kind9";
+    let log = home.dir.path().join("used-pending-injected.log");
+    let native_session = unique_session("used-pending-native");
+    let _path = install_opencode_shim(&home, &native_session, &work_dir, &log);
+    identity::add_local_agent(home.dir.path(), agent, "offline-test", None, 1)
+        .expect("add local agent");
+
+    let (_, original) = launch_target(&home, agent, &channel, &work_dir);
+    start_keeper(&home, &channel, &work_dir);
+    end_target(&home, &original.pubkey);
+    let store = Store::open(&home.store_path()).unwrap();
+    store
+        .clear_locator_kind(&original.pubkey, "native_resume")
+        .unwrap();
+    drop(store);
+    rusqlite::Connection::open(home.store_path())
+        .unwrap()
+        .execute(
+            "UPDATE sessions SET turn_count=1 WHERE pubkey=?1",
+            [&original.pubkey],
+        )
+        .unwrap();
+
+    let body = format!("recover used exact session {}", unique_session("body"));
+    let event_id = rt().block_on(publish_user_kind9(&channel, &body, &original.pubkey));
+
+    let relaunched = wait_for_alive_session(&home, agent, &channel);
+    assert_eq!(relaunched.pubkey, original.pubkey);
+    wait_for_injected_log(&log, &body);
+    assert!(Store::open(&home.store_path())
+        .unwrap()
+        .get_session(&original.pubkey)
+        .unwrap()
+        .unwrap()
+        .is_running());
+    assert!(Store::open(&home.store_path())
+        .unwrap()
+        .peek_pending_for_pubkey(&original.pubkey)
+        .unwrap()
+        .iter()
+        .all(|row| row.event_id != event_id));
+    let endpoint =
+        pty_session_for_session(&Store::open(&home.store_path()).unwrap(), &original.pubkey)
+            .expect("relaunched endpoint");
+    kill_pty(&endpoint);
     stop_daemon(&home);
 }
 

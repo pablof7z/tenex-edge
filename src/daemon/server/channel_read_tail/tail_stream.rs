@@ -174,7 +174,7 @@ pub(in crate::daemon::server) fn build_backfill(
     }
 
     // ── This daemon's own live sessions as synthetic Sess/Turn events ────────
-    let mine = state.with_store(|s| s.list_alive_sessions().unwrap_or_default());
+    let mine = state.with_store(|s| s.list_running_sessions().unwrap_or_default());
     for rec in mine {
         if channel.map(|pr| rec.channel_h != pr).unwrap_or(false) {
             continue;
@@ -187,7 +187,7 @@ pub(in crate::daemon::server) fn build_backfill(
             state: "start".into(),
             rel_cwd: String::new(),
         });
-        if rec.working {
+        if rec.is_working() {
             events.push(TailEvent::Turn {
                 ts: rec.turn_started_at,
                 channel: rec.channel_h.clone(),

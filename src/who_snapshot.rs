@@ -76,7 +76,7 @@ pub(crate) struct WhoRow {
     /// title while mid-turn; empty (and not rendered) when idle.
     #[serde(default)]
     pub(crate) activity: String,
-    /// A local Class A session that exited but still owns a soft route claim.
+    /// A stopped local session whose relay membership is still retained.
     #[serde(default)]
     pub(crate) dormant: bool,
     pub(crate) host: String,
@@ -132,7 +132,7 @@ pub(crate) fn load_who_snapshot(
 
     // ── local sessions on this machine (read failure must error, not go quiet) ──
     for s in store
-        .list_alive_sessions()
+        .list_running_sessions()
         .context("who snapshot: failed to list live local sessions")?
     {
         let scope = s.channel_h.clone();
@@ -151,7 +151,7 @@ pub(crate) fn load_who_snapshot(
                 .insert(local_instance(store, &s).display_slug());
         }
     }
-    dormant::push_claim_rows(
+    dormant::push_retained_rows(
         store,
         current_root,
         now,
@@ -159,7 +159,7 @@ pub(crate) fn load_who_snapshot(
         &mut rows,
         &mut other_agents,
     )
-    .context("who snapshot: failed to read dormant session claims")?;
+    .context("who snapshot: failed to read retained session standing")?;
 
     // ── peers: relay_status across all channels, minus our own keys ────────────
     // Scan every channel even when a `current_root` is set: in-scope statuses

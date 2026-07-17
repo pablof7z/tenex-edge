@@ -14,10 +14,10 @@ pub fn ring_doorbells(state: Arc<DaemonState>) {
 
 async fn ring_doorbells_inner(state: &Arc<DaemonState>) -> Result<()> {
     let sessions: Vec<crate::state::Session> = state.with_store(|s| {
-        let alive = match s.list_alive_sessions() {
+        let alive = match s.list_running_sessions() {
             Ok(v) => v,
             Err(e) => {
-                tracing::error!(error = %e, "ring_doorbells: list_alive_sessions failed — skipping doorbell scan this tick");
+                tracing::error!(error = %e, "ring_doorbells: list_running_sessions failed — skipping doorbell scan this tick");
                 return Vec::new();
             }
         };
@@ -145,7 +145,13 @@ async fn apply_delivery_effects(
             }
             crate::reconcile::DeliveryEffect::ClearDeadEndpoint { pubkey } => {
                 if let Some(kind) = kind {
-                    let _ = state.with_store(|s| s.clear_locator_kind(&pubkey, locator_kind(kind)));
+                    let _ = state.with_store(|s| {
+                        s.clear_runtime_locator_if_generation(
+                            &pubkey,
+                            locator_kind(kind),
+                            rec.runtime_generation,
+                        )
+                    });
                 }
             }
         }

@@ -17,7 +17,7 @@ fn caller_session(state: &Arc<DaemonState>, channels: &[&str]) -> crate::state::
         })
         .unwrap();
         for (idx, channel) in channels.iter().enumerate().skip(1) {
-            s.join_session_channel("caller-pubkey", channel, 2 + idx as u64)
+            s.grant_session_route("caller-pubkey", channel, 2 + idx as u64)
                 .unwrap();
         }
         s.get_session("caller-pubkey").unwrap().unwrap()

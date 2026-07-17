@@ -39,12 +39,12 @@ fn project_sessions(
         .collect::<HashMap<_, _>>();
     let mut rows = Vec::new();
     let mut projected_endpoints = HashSet::new();
-    for rec in store.list_alive_sessions()? {
+    for rec in store.list_running_sessions()? {
         let identity = store
             .session_identity(&rec.pubkey)?
             .with_context(|| format!("live session {} has no identity projection", rec.pubkey))?;
         let mut grouped = BTreeMap::<String, Vec<String>>::new();
-        for (channel_id, _) in store.list_session_joined_channels(&rec.pubkey)? {
+        for (channel_id, _) in store.list_session_routes(&rec.pubkey)? {
             let root_id = store
                 .root_channel_of(&channel_id)?
                 .unwrap_or_else(|| channel_id.clone());
@@ -57,7 +57,10 @@ fn project_sessions(
         let locators = store.locators_for_pubkey(&rec.pubkey)?;
         let pty_endpoint = locators
             .iter()
-            .find(|locator| locator.locator_kind == crate::state::LOCATOR_PTY)
+            .find(|locator| {
+                locator.locator_kind == crate::state::LOCATOR_PTY
+                    && locator.runtime_generation == rec.runtime_generation
+            })
             .and_then(|locator| endpoints.get(&locator.locator_value))
             .map(|endpoint| {
                 let meta = &endpoint.metadata;
@@ -71,7 +74,10 @@ fn project_sessions(
             });
         let acp_endpoint_id = locators
             .iter()
-            .find(|locator| locator.locator_kind == crate::state::LOCATOR_ACP)
+            .find(|locator| {
+                locator.locator_kind == crate::state::LOCATOR_ACP
+                    && locator.runtime_generation == rec.runtime_generation
+            })
             .map(|locator| locator.locator_value.clone());
         let acp_live = acp_endpoint_id
             .as_deref()
@@ -101,7 +107,7 @@ fn project_sessions(
             "handle": identity.display_slug(),
             "agent": rec.agent_slug,
             "title": rec.title,
-            "busy": rec.working,
+            "busy": rec.is_working(),
             "last_seen": rec.last_seen,
             "host": host,
             "harness": rec.harness,
@@ -234,9 +240,7 @@ mod tests {
                 now: 10,
             })
             .unwrap();
-        store
-            .join_session_channel(&pubkey, "skill-dev", 11)
-            .unwrap();
+        store.grant_session_route(&pubkey, "skill-dev", 11).unwrap();
 
         let rows = project_sessions(&store, "laptop", &HashMap::new()).unwrap();
         assert_eq!(rows.len(), 1);
@@ -256,7 +260,13 @@ mod tests {
         assert_eq!(rows[0]["transport"], "process");
         assert!(rows[0]["endpoint"].is_null());
 
-        store.mark_dead(&pubkey).unwrap();
+        store
+            .mark_runtime_stopped(
+                &pubkey,
+                crate::state::StopReason::OperatorKill,
+                crate::util::now_secs(),
+            )
+            .unwrap();
         assert!(project_sessions(&store, "laptop", &HashMap::new())
             .unwrap()
             .is_empty());
@@ -273,6 +283,7 @@ mod tests {
             id: "pty-1".into(),
             socket: "/tmp/pty-1.sock".into(),
             supervisor_pid: 42,
+            instance_token: String::new(),
             agent: "codex".into(),
             root: "workspace".into(),
             cwd: "/repo/subdir".into(),

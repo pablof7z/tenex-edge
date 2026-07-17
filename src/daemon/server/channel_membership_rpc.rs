@@ -84,6 +84,7 @@ async fn ensure_joinable(
     rec: &crate::state::Session,
     channel_h: &str,
 ) -> Result<()> {
+    let _lane = state.standing_sync.lock().await;
     refresh_channel_members_cache(state, channel_h).await;
     let is_member = state.with_store(|s| match s.is_channel_member(channel_h, &rec.pubkey) {
         Ok(present) => present,
@@ -116,6 +117,17 @@ async fn ensure_joinable(
         refresh_channel_members_cache(state, channel_h).await;
     }
 
+    let recorded = super::managed_lifecycle::commit_confirmed_admission(
+        state,
+        &rec.pubkey,
+        channel_h,
+        rec.runtime_generation,
+        rec.lifecycle_epoch,
+    )
+    .await?;
+    if !recorded {
+        anyhow::bail!("session changed while channel membership was being confirmed");
+    }
     Ok(())
 }
 
@@ -134,11 +146,7 @@ pub(in crate::daemon::server) async fn rpc_channel_join(
         TargetChannel::Ambiguous(v) => return Ok(v),
     };
     ensure_joinable(state, &rec, &channel).await?;
-    ensure_subscription(state, &channel).await?;
-    state.with_store(|s| {
-        s.join_session_channel(&rec.pubkey, &channel, now_secs())
-            .ok();
-    });
+    sync_subscriptions(state).await?;
     Ok(serde_json::json!({
         "channel": channel,
         "active_channel": rec.channel_h,
@@ -162,11 +170,10 @@ pub(in crate::daemon::server) async fn rpc_channel_leave(
     if channel == rec.channel_h {
         anyhow::bail!("cannot leave the active channel; switch to another channel first");
     }
-    let was_joined = state.with_store(|s| {
-        s.is_session_joined_channel(&rec.pubkey, &channel)
-            .unwrap_or(false)
-    });
+    let was_joined =
+        state.with_store(|s| s.has_session_route(&rec.pubkey, &channel).unwrap_or(false));
     let left = if was_joined {
+        let _lane = state.standing_sync.lock().await;
         let removed = state
             .provider
             .remove_member_confirmed(&channel, &rec.pubkey)
@@ -179,7 +186,7 @@ pub(in crate::daemon::server) async fn rpc_channel_leave(
             );
         }
         state.with_store(|s| {
-            s.leave_session_channel(&rec.pubkey, &channel)
+            s.revoke_route_and_mark_absent(&rec.pubkey, &channel, now_secs())
                 .unwrap_or(false)
         })
     } else {
@@ -210,10 +217,11 @@ pub(in crate::daemon::server) async fn rpc_channel_switch(
         TargetChannel::Ambiguous(v) => return Ok(v),
     };
     ensure_joinable(state, &rec, &new_channel).await?;
-    ensure_subscription(state, &new_channel).await?;
+    sync_subscriptions(state).await?;
     let prev_channel = rec.channel_h.clone();
-    set_active_session_channel(state, &rec.pubkey, &new_channel, true)?;
+    set_active_session_channel(state, &rec.pubkey, &new_channel)?;
     if prev_channel != new_channel {
+        let _lane = state.standing_sync.lock().await;
         let removed = state
             .provider
             .remove_member_confirmed(&prev_channel, &rec.pubkey)
@@ -224,6 +232,10 @@ pub(in crate::daemon::server) async fn rpc_channel_switch(
                 prev_channel,
                 "channel_switch: previous membership removal was not confirmed"
             );
+        } else {
+            state.with_store(|store| {
+                store.revoke_route_and_mark_absent(&rec.pubkey, &prev_channel, now_secs())
+            })?;
         }
         // Reconcile so the left channel observation closes when no owner remains.
         subscriptions::reconcile_subs_logged(state, "channel_switch").await;

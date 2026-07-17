@@ -68,7 +68,7 @@ fn channels_for(store: &Store, session: Option<&Session>, scope: &str) -> Vec<St
         return vec![scope.to_string()];
     };
     let mut channels = store
-        .list_session_joined_channels(&rec.pubkey)
+        .list_session_routes(&rec.pubkey)
         .unwrap_or_else(|_| vec![(rec.channel_h.clone(), rec.created_at)])
         .into_iter()
         .map(|(h, _)| h)

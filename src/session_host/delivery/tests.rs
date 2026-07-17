@@ -102,11 +102,33 @@ fn session_has_live_delivery_path_true_only_for_a_live_locator() {
 
 #[test]
 fn headless_mode_separates_output_visibility_from_reachability() {
-    assert!(!headless_for_endpoint(TransportKind::Pty, false, false));
-    assert!(headless_for_endpoint(TransportKind::Pty, true, false));
-    assert!(!headless_for_endpoint(TransportKind::Pty, true, true));
-    assert!(headless_for_endpoint(TransportKind::Acp, false, false));
-    assert!(headless_for_endpoint(TransportKind::Acp, true, false));
+    let headless = crate::pty::PresentationSnapshot {
+        attached_clients: 0,
+        attachment_epoch: 4,
+        changed_at: 1,
+    };
+    let headed = crate::pty::PresentationSnapshot {
+        attached_clients: 1,
+        attachment_epoch: 5,
+        changed_at: 2,
+    };
+    assert!(!headless_for_endpoint(TransportKind::Pty, false, None));
+    assert!(headless_for_endpoint(
+        TransportKind::Pty,
+        true,
+        Some(headless)
+    ));
+    assert!(!headless_for_endpoint(
+        TransportKind::Pty,
+        true,
+        Some(headed)
+    ));
+    assert!(headless_for_endpoint(TransportKind::Acp, false, None));
+    assert!(headless_for_endpoint(TransportKind::Acp, true, None));
+    assert!(
+        !headless_for_endpoint(TransportKind::Pty, true, None),
+        "an unavailable supervisor is not a headless presentation snapshot"
+    );
 }
 
 /// The delivery policy is transport-neutral: it plans an `Inject` carrying the

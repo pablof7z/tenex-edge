@@ -65,7 +65,7 @@ fn session_start_without_mosaico_private_key_generates_key_and_provisions_channe
         store
             .get_session(&pubkey)
             .unwrap()
-            .map(|rec| rec.alive)
+            .map(|rec| rec.is_running())
             .unwrap_or(false),
         "successful readiness should leave a live session row"
     );
@@ -169,7 +169,7 @@ fn session_start_schedules_unverified_channel_work_without_blocking() {
         store
             .get_session(&pubkey)
             .unwrap()
-            .map(|rec| rec.alive)
+            .map(|rec| rec.is_running())
             .unwrap_or(false),
         "session_start should leave a live local session row"
     );
@@ -255,8 +255,8 @@ fn session_reassert_with_wrong_channel_does_not_corrupt_active_channel() {
     // A spurious re-assert with a different channel used to add a second passive
     // join for the stale channel, leaving two rows in session_channels.
     let joined = store
-        .list_session_joined_channels(&pubkey)
-        .expect("list_session_joined_channels");
+        .list_session_routes(&pubkey)
+        .expect("list_session_routes");
     assert_eq!(
         joined.len(),
         1,

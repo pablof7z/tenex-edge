@@ -1,6 +1,5 @@
 use super::*;
-use crate::state::session_claims::SessionClaim;
-use crate::state::{RegisterSession, Store};
+use crate::state::{RegisterSession, StopReason, Store};
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -20,26 +19,13 @@ fn register(store: &Store, pubkey: &str, slug: &str, channel: &str, _locator: &s
     pubkey.to_string()
 }
 
-fn claim(pubkey: &str, channel: &str, owner_backend: &str, expires_at: u64) -> SessionClaim {
-    SessionClaim {
-        pubkey: pubkey.to_string(),
-        agent_slug: "codex".to_string(),
-        channel_h: channel.to_string(),
-        harness: "codex".to_string(),
-        last_active_at: 10,
-        expires_at,
-        owner_backend_pubkey: owner_backend.to_string(),
-        owner_host: "laptop".to_string(),
-    }
-}
-
 // ── has_alive gate ────────────────────────────────────────────────────────────
 
 #[test]
 fn has_alive_gate_skips_when_agent_has_live_session_in_channel() {
     let store = Store::open_memory().unwrap();
     let sid = register(&store, "pk-ord-1", "codex", "proj", "ext-1");
-    // reserve_session with child_pid=Some sets alive=1.
+    // reserve_session creates a running runtime generation.
     assert!(!sid.is_empty());
 
     assert!(offline_mention::liveness::has_alive_session_for(
@@ -51,7 +37,9 @@ fn has_alive_gate_skips_when_agent_has_live_session_in_channel() {
 fn has_alive_gate_does_not_skip_when_session_is_dead() {
     let store = Store::open_memory().unwrap();
     let sid = register(&store, "pk-ord-1", "codex", "proj", "ext-1");
-    store.mark_dead(&sid).unwrap();
+    store
+        .mark_runtime_stopped(&sid, StopReason::Crash, 1_001)
+        .unwrap();
 
     assert!(!offline_mention::liveness::has_alive_session_for(
         &store, "pk-ord-1", "proj"
@@ -87,116 +75,10 @@ fn has_alive_gate_matches_joined_subchannel_not_just_home_channel() {
     let store = Store::open_memory().unwrap();
     let sid = register(&store, "pk-ord-1", "codex", "proj", "ext-1");
     // Join a sub-channel
-    store.join_session_channel(&sid, "sub-chan", 10).unwrap();
+    store.grant_session_route(&sid, "sub-chan", 10).unwrap();
 
     assert!(offline_mention::liveness::has_alive_session_for(
         &store, "pk-ord-1", "sub-chan"
-    ));
-}
-
-// ── remote backend claim gate ─────────────────────────────────────────────────
-
-const BACKEND_A: &str = "backend-a-pubkey";
-const BACKEND_B: &str = "backend-b-pubkey";
-
-/// Replicates the remote-claim check: if the active (non-expired) claim belongs
-/// to a different backend, skip the spawn.
-fn remote_backend_owns_active_claim(
-    store: &Store,
-    mentioned_pk: &str,
-    channel: &str,
-    now: u64,
-    our_backend: Option<&str>,
-) -> bool {
-    store
-        .get_active_session_claim(mentioned_pk, channel, now)
-        .ok()
-        .flatten()
-        .as_ref()
-        .filter(|c| !c.is_owned_by_backend(our_backend))
-        .is_some()
-}
-
-#[test]
-fn remote_claim_gate_skips_when_active_claim_owned_by_other_backend() {
-    let store = Store::open_memory().unwrap();
-    store
-        .upsert_session_claim(&claim("pk", "proj", BACKEND_B, 100))
-        .unwrap();
-
-    assert!(remote_backend_owns_active_claim(
-        &store,
-        "pk",
-        "proj",
-        50,
-        Some(BACKEND_A)
-    ));
-}
-
-#[test]
-fn remote_claim_gate_does_not_skip_when_active_claim_owned_by_us() {
-    let store = Store::open_memory().unwrap();
-    store
-        .upsert_session_claim(&claim("pk", "proj", BACKEND_A, 100))
-        .unwrap();
-
-    assert!(!remote_backend_owns_active_claim(
-        &store,
-        "pk",
-        "proj",
-        50,
-        Some(BACKEND_A)
-    ));
-}
-
-#[test]
-fn remote_claim_gate_does_not_skip_when_claim_expired() {
-    let store = Store::open_memory().unwrap();
-    // Claim expired at t=10; now=50.
-    store
-        .upsert_session_claim(&claim("pk", "proj", BACKEND_B, 10))
-        .unwrap();
-
-    assert!(!remote_backend_owns_active_claim(
-        &store,
-        "pk",
-        "proj",
-        50,
-        Some(BACKEND_A)
-    ));
-}
-
-#[test]
-fn remote_claim_gate_treats_missing_owner_as_remote() {
-    let store = Store::open_memory().unwrap();
-    let mut c = claim("pk", "proj", "", 100);
-    c.owner_backend_pubkey.clear();
-    store.upsert_session_claim(&c).unwrap();
-
-    // A claim without the canonical owner cannot be attributed to this backend.
-    assert!(remote_backend_owns_active_claim(
-        &store,
-        "pk",
-        "proj",
-        50,
-        Some(BACKEND_A)
-    ));
-    assert!(remote_backend_owns_active_claim(
-        &store, "pk", "proj", 50, None
-    ));
-}
-
-#[test]
-fn remote_claim_gate_skips_when_we_have_no_backend_pubkey_and_claim_has_owner() {
-    let store = Store::open_memory().unwrap();
-    store
-        .upsert_session_claim(&claim("pk", "proj", BACKEND_A, 100))
-        .unwrap();
-
-    // Our backend key is None — we can't prove ownership, so a claim with a
-    // real owner is treated as "not ours" → remote → skip.
-    assert!(remote_backend_owns_active_claim(
-        &store, "pk", "proj", 50, None
     ));
 }
 

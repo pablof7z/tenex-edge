@@ -188,6 +188,7 @@ Switch into it instead: mosaico channel switch {}",
     // thing that differs between callers is where the name comes from and who the
     // member is. Fail loudly if the relay could not provision it.
     let expect_member = creator.as_deref().unwrap_or(&mgmt_pk);
+    let standing_lane = state.standing_sync.lock().await;
     let ready = state
         .provider
         .ensure_channel_ready(crate::fabric::nip29::readiness::ChannelCtx {
@@ -218,6 +219,20 @@ Switch into it instead: mosaico channel switch {}",
             CHANNEL_CREATE_READY_TIMEOUT.as_secs()
         );
     }
+    if let Some(rec) = creator_rec.as_ref() {
+        let recorded = super::managed_lifecycle::commit_confirmed_admission(
+            state,
+            &rec.pubkey,
+            &child_h,
+            rec.runtime_generation,
+            rec.lifecycle_epoch,
+        )
+        .await?;
+        if !recorded {
+            anyhow::bail!("creator session changed while channel membership was being confirmed");
+        }
+    }
+    drop(standing_lane);
     let _ = ensure_subscription(state, &child_h).await;
 
     // Publish the durable `about` as kind:9002 edit-metadata so it reaches the
@@ -277,7 +292,7 @@ Switch into it instead: mosaico channel switch {}",
     // Unlike `channel switch`, this preserves the parent as a passive joined
     // channel so the creator can still see and receive mentions from it.
     let switched = if let Some(rec) = &creator_rec {
-        set_active_session_channel(state, &rec.pubkey, &child_h, false)?;
+        set_active_session_channel(state, &rec.pubkey, &child_h)?;
         true
     } else {
         false

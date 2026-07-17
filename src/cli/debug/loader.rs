@@ -136,7 +136,7 @@ fn enrich_panes_from_store_path(panes: &mut BTreeMap<String, SessionPane>, path:
 }
 
 fn enrich_pane_scope_from_store(pane: &mut SessionPane, store: &crate::state::Store) {
-    let Ok(channels) = store.list_session_joined_channels(&pane.session) else {
+    let Ok(channels) = store.list_session_routes(&pane.session) else {
         return;
     };
     if channels.is_empty() {
@@ -447,7 +447,7 @@ mod tests {
             .unwrap();
         store.upsert_channel("aaa", "aaa", "", "", 1).unwrap();
         store.upsert_channel("dev-h", "dev", "", "aaa", 1).unwrap();
-        store.join_session_channel("pk", "dev-h", 2).unwrap();
+        store.grant_session_route("pk", "dev-h", 2).unwrap();
 
         let mut panes = BTreeMap::from([(
             "pk".into(),

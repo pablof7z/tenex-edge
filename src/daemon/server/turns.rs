@@ -124,7 +124,7 @@ pub(in crate::daemon::server) async fn rpc_turn_check(
 ) -> Result<serde_json::Value> {
     let rec = resolve_session(state, &CallerAnchor::from_params(params))?;
     let now = now_secs();
-    let delta_since = cursor::drive_cursor_request(state, &rec, now, rec.working)
+    let delta_since = cursor::drive_cursor_request(state, &rec, now, rec.is_working())
         .context("applying cursor turn_check projection")?;
     schedule_context_profile_warm(state.clone(), rec.clone(), delta_since.unwrap_or(now));
     let turn = crate::turn_context::assemble_turn_check(
@@ -163,11 +163,11 @@ pub(in crate::daemon::server) async fn rpc_turn_end(
     let pre = state.with_store(|s| s.get_session(&p.harness_session).ok().flatten());
     let (was_working, turn_started_at) = pre
         .as_ref()
-        .map(|r| (r.working, r.turn_started_at))
+        .map(|r| (r.is_working(), r.turn_started_at))
         .unwrap_or((false, 0));
     let now = now_secs();
     if let Some(rec) = pre.as_ref() {
-        turn_lifecycle::drive_turn_ended(state, rec)
+        turn_lifecycle::drive_turn_ended(state, rec, now)
             .context("applying turn_end lifecycle projection")?;
     }
 
@@ -233,7 +233,7 @@ fn context_profile_pubkeys(
         pubkeys.extend(crate::profile::body_mention_pubkeys(&row.body));
     }
 
-    let channels = match store.list_session_joined_channels(&rec.pubkey) {
+    let channels = match store.list_session_routes(&rec.pubkey) {
         Ok(channels) => channels,
         Err(error) => {
             tracing::warn!(

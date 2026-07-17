@@ -10,7 +10,7 @@ const ONLINE_POLL: Duration = Duration::from_millis(500);
 
 pub(super) fn live_session_ids(state: &Arc<DaemonState>) -> HashSet<String> {
     state
-        .with_store(|s| s.list_alive_sessions())
+        .with_store(|s| s.list_running_sessions())
         .unwrap_or_default()
         .into_iter()
         .map(|s| s.pubkey)
@@ -34,14 +34,13 @@ pub(super) async fn wait_local_agent_online(
 ) -> Result<String> {
     let rec = wait_until(None, || {
         state.with_store(|s| {
-            s.list_alive_sessions()
+            s.list_running_sessions()
                 .unwrap_or_default()
                 .into_iter()
                 .find(|rec| {
                     rec.agent_slug == slug
                         && !before.contains(&rec.pubkey)
-                        && s.is_session_joined_channel(&rec.pubkey, channel_h)
-                            .unwrap_or(false)
+                        && s.has_session_route(&rec.pubkey, channel_h).unwrap_or(false)
                         && s.is_channel_member(channel_h, &rec.pubkey).unwrap_or(false)
                 })
         })
@@ -58,9 +57,8 @@ pub(super) async fn wait_local_session_online(
     let rec = wait_until(None, || {
         state.with_store(|s| {
             let rec = s.get_session(pubkey).ok().flatten()?;
-            let online = rec.alive
-                && s.is_session_joined_channel(&rec.pubkey, channel_h)
-                    .unwrap_or(false)
+            let online = rec.is_running()
+                && s.has_session_route(&rec.pubkey, channel_h).unwrap_or(false)
                 && s.is_channel_member(channel_h, &rec.pubkey).unwrap_or(false);
             online.then_some(rec)
         })

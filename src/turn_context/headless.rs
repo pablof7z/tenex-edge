@@ -2,20 +2,15 @@
 //! this module only remembers which mode the agent has already been told.
 
 use super::HookContextStates;
-use crate::state::{Session, Store};
-use std::sync::Mutex;
+use crate::state::Session;
 
 pub(super) fn push_mode_notice(
     states: &HookContextStates,
-    store: &Mutex<Store>,
     rec: &Session,
     announce_initial: bool,
     warnings: &mut Vec<String>,
 ) {
-    let headless = {
-        let store = store.lock().expect("store mutex poisoned");
-        crate::session_host::session_is_headless(&store, rec)
-    };
+    let headless = crate::session_host::session_is_headless(rec);
     let changed = states
         .lock()
         .expect("hook-context mutex poisoned")

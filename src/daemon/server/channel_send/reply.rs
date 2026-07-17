@@ -121,7 +121,7 @@ fn enqueue_local_reply(
     created_at: u64,
 ) {
     let targets = state
-        .with_store(|s| s.list_alive_sessions())
+        .with_store(|s| s.list_running_sessions())
         .unwrap_or_default();
     let mut routed = false;
     state.with_store(|s| {
@@ -134,7 +134,7 @@ fn enqueue_local_reply(
                 continue;
             }
             let joined = s
-                .is_session_joined_channel(&target.pubkey, &original.channel_h)
+                .has_session_route(&target.pubkey, &original.channel_h)
                 .unwrap_or(target.channel_h == original.channel_h);
             if !joined {
                 continue;

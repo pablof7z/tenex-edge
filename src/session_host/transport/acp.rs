@@ -142,6 +142,7 @@ impl AcpTransport {
             // registry, not by pid (defect #3). Do NOT rely on this pid to prove an
             // ACP session live.
             supervisor_pid: pid.unwrap_or(0),
+            instance_token: String::new(),
             agent: spec.slug.clone(),
             root: spec.root.clone(),
             cwd: spec.abs_path.clone(),
@@ -297,18 +298,21 @@ impl SessionTransport for AcpTransport {
     }
 
     async fn kill(&self, ep: &EndpointRef) -> Result<()> {
-        // Remove eagerly so a concurrent is_live() stops reporting it; the reaper
-        // (which may also fire on the resulting exit) tolerates a missing entry.
-        let child = registry().lock().unwrap().remove(&ep.endpoint_id);
-        if let Some(child) = child {
-            let _ = child.cwd; // retained for parity/debugging
-            let _ = child.runtime;
-            if child.handle.dialect == Dialect::Acp {
-                AcpClient::new(child.handle.clone())
-                    .session_cancel(&child.native_id)
+        let child = registry()
+            .lock()
+            .unwrap()
+            .get(&ep.endpoint_id)
+            .map(|child| (child.handle.clone(), child.native_id.clone()));
+        if let Some((handle, native_id)) = child {
+            if handle.dialect == Dialect::Acp {
+                AcpClient::new(handle.clone())
+                    .session_cancel(&native_id)
                     .await;
             }
-            child.handle.kill().await;
+            handle
+                .kill()
+                .await
+                .with_context(|| format!("killing ACP endpoint {}", ep.endpoint_id))?;
         }
         Ok(())
     }

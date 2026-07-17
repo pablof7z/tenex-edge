@@ -132,7 +132,7 @@ async fn run_acp(
     if stop != StopReason::EndTurn {
         anyhow::bail!("expected stopReason end_turn, got {stop:?}");
     }
-    handle.kill().await;
+    handle.kill().await?;
 
     // Fresh process: cross-process resume.
     let (handle2, _u2) = RpcHandle::spawn(mk_cfg()?)
@@ -148,7 +148,7 @@ async fn run_acp(
         .await
         .map_err(|e| anyhow::anyhow!("session/load (cross-process resume): {e}"))?;
     println!("[acp-smoke] session/load cross-process resume ok for {session_id}");
-    handle2.kill().await;
+    handle2.kill().await?;
 
     println!("[acp-smoke] PASS");
     Ok(())
@@ -197,7 +197,7 @@ async fn run_app_server(
         .await
         .map_err(|e| anyhow::anyhow!("turn/start: {e}"))?;
     println!("[acp-smoke] turn/completed -> {}", outcome.raw);
-    handle.kill().await;
+    handle.kill().await?;
 
     let (handle2, _updates2) = RpcHandle::spawn(mk_cfg()?)
         .await
@@ -217,7 +217,7 @@ async fn run_app_server(
         .await
         .map_err(|e| anyhow::anyhow!("turn/start after resume: {e}"))?;
     println!("[acp-smoke] resumed turn/completed -> {}", resumed.raw);
-    handle2.kill().await;
+    handle2.kill().await?;
     println!("[acp-smoke] PASS");
     Ok(())
 }

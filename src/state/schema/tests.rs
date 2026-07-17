@@ -36,7 +36,7 @@ fn fresh_file_db_uses_only_canonical_schema() {
     let version: u32 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 8);
+    assert_eq!(version, 9);
     assert!(table_exists(&conn, "workspace_roots"));
     assert!(table_exists(&conn, "session_locators"));
     assert!(!table_exists(&conn, "session_aliases"));
@@ -64,20 +64,30 @@ fn fresh_file_db_uses_only_canonical_schema() {
             "locator_kind",
             "locator_value",
             "pubkey",
+            "runtime_generation",
             "created_at"
         ]
     );
 
     assert_eq!(columns(&conn, "session_signers"), ["pubkey", "signer_salt"]);
 
-    let claims = columns(&conn, "session_claims");
-    assert!(claims.iter().any(|c| c == "owner_backend_pubkey"));
-    assert!(claims.iter().any(|c| c == "owner_host"));
-    assert!(!claims.iter().any(|c| c == "session_id"));
-    assert!(!claims.iter().any(|c| c == "codename"));
-    assert!(!claims.iter().any(|c| c == "native_id"));
-    assert!(!claims.iter().any(|c| c == "base_pubkey"));
-    assert!(!claims.iter().any(|c| c == "ordinal"));
+    assert!(!table_exists(&conn, "session_claims"));
+    assert_eq!(
+        columns(&conn, "session_channels"),
+        ["pubkey", "channel_h", "granted_at"]
+    );
+    assert_eq!(
+        columns(&conn, "session_standing"),
+        [
+            "pubkey",
+            "channel_h",
+            "state",
+            "retain_until",
+            "standing_epoch",
+            "session_lifecycle_epoch",
+            "updated_at"
+        ]
+    );
 
     assert!(columns(&conn, "relay_profiles")
         .iter()
@@ -93,6 +103,24 @@ fn fresh_file_db_uses_only_canonical_schema() {
     assert!(sess_cols.iter().any(|c| c == "runtime_generation"));
     assert!(sess_cols.iter().any(|c| c == "work_root"));
     assert!(sess_cols.iter().any(|c| c == "readiness_parent"));
+    for lifecycle in [
+        "runtime_state",
+        "presentation_state",
+        "work_state",
+        "recovery_state",
+        "lifecycle_epoch",
+        "attachment_epoch",
+        "idle_since",
+        "idle_deadline",
+        "stopped_at",
+        "stop_reason",
+        "turn_count",
+    ] {
+        assert!(
+            sess_cols.iter().any(|column| column == lifecycle),
+            "{lifecycle}"
+        );
+    }
     assert!(!sess_cols.iter().any(|c| c == "session_id"));
     assert!(!sess_cols.iter().any(|c| c == "agent_pubkey"));
     assert!(!sess_cols.iter().any(|c| c == "resume_id"));
@@ -108,6 +136,8 @@ fn fresh_file_db_uses_only_canonical_schema() {
         "work_topic",
         "work_topic_set_at",
         "activity",
+        "alive",
+        "working",
     ] {
         assert!(
             !sess_cols.iter().any(|c| c == removed),
@@ -208,7 +238,7 @@ fn stamped_non_canonical_file_db_is_rejected() {
         "#,
     )
     .unwrap();
-    conn.pragma_update(None, "user_version", 8u32).unwrap();
+    conn.pragma_update(None, "user_version", 9u32).unwrap();
     drop(conn);
 
     let err = match Store::open(&path) {

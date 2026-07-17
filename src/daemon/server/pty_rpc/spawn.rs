@@ -55,7 +55,7 @@ pub(in crate::daemon::server) async fn rpc_pty_spawn(
     };
     let handle = state.with_store(|store| {
         let session = store
-            .alive_session_for_locator(None, endpoint_kind, &meta.id)?
+            .running_session_for_locator(None, endpoint_kind, &meta.id)?
             .context("spawned endpoint has no registered session")?;
         Ok::<String, anyhow::Error>(
             store

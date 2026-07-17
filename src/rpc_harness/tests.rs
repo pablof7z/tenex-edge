@@ -146,7 +146,7 @@ async fn live_opencode_roundtrip_and_resume() {
         .expect("session/prompt");
     assert_eq!(stop, StopReason::EndTurn, "expected end_turn");
 
-    handle.kill().await;
+    handle.kill().await.unwrap();
 
     // Fresh process: session/load proves cross-process resume.
     let cfg2 = SpawnConfig {
@@ -169,5 +169,5 @@ async fn live_opencode_roundtrip_and_resume() {
         "resume ok; got_chunk={}",
         got_chunk.load(std::sync::atomic::Ordering::Relaxed)
     );
-    handle2.kill().await;
+    handle2.kill().await.unwrap();
 }

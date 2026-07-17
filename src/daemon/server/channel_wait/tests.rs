@@ -19,8 +19,8 @@ fn seed_session(state: &Arc<DaemonState>) -> Session {
                 transcript_path: None,
                 now: 1,
             })?;
-            store.join_session_channel(SELF_PUBKEY, "x", 1)?;
-            store.join_session_channel(SELF_PUBKEY, "y", 2)?;
+            store.grant_session_route(SELF_PUBKEY, "x", 1)?;
+            store.grant_session_route(SELF_PUBKEY, "y", 2)?;
             store.get_session(SELF_PUBKEY)?.context("missing session")
         })
         .unwrap()
@@ -91,7 +91,7 @@ async fn explicit_channel_filters_resolve_across_every_active_workspace() {
         .with_store(|store| {
             store.upsert_channel("other", "other", "", "", 5)?;
             store.upsert_channel("other-y", "y", "", "other", 6)?;
-            store.join_session_channel(SELF_PUBKEY, "other-y", 7)?;
+            store.grant_session_route(SELF_PUBKEY, "other-y", 7)?;
             Ok::<(), anyhow::Error>(())
         })
         .unwrap();

@@ -21,7 +21,7 @@ fn wait_for_alive(home: &Home, agent: &str, channel: &str) -> mosaico::state::Se
     assert!(
         wait_until(Duration::from_secs(25), || {
             found = Store::open(&home.store_path())
-                .and_then(|s| s.list_alive_sessions())
+                .and_then(|s| s.list_running_sessions())
                 .unwrap_or_default()
                 .into_iter()
                 .find(|rec| rec.agent_slug == agent && rec.channel_h == channel);
@@ -69,7 +69,7 @@ fn session_kill_stops_pty_session_and_marks_offline() {
             .await
             .expect("session_kill")
     });
-    assert_eq!(killed["killed"].as_bool(), Some(true));
+    assert_eq!(killed["killed"].as_bool(), Some(true), "{killed}");
     assert_eq!(killed["ended"].as_bool(), Some(true));
 
     assert!(
@@ -87,7 +87,7 @@ fn session_kill_stops_pty_session_and_marks_offline() {
             let offline = store
                 .get_session(&rec.pubkey)
                 .unwrap()
-                .map(|row| !row.alive)
+                .map(|row| !row.is_running())
                 .unwrap_or(false);
             offline && pty_session_for_session(&store, &rec.pubkey).is_none()
         }),

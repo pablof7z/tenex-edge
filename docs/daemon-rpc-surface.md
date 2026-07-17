@@ -36,30 +36,28 @@ allow/block file in the NIP-29 path.
 
 ### `session_end`
 ```jsonc
-params: {"session": "npub1…"|"hex"|"handle"}
-result: {"ended": true|false}    // false ⇒ no such session
+params: {"session": "npub1…"|"hex"|"handle", "cause": "manual"|"harness_hook"}
+result: {"ended": true|false, "deferred": true|false}
 ```
-Metadata-only. Stops the `SessionTask` (which publishes idle presence/status
-and marks the session dead) but does **not** touch the hosted PTY/child
-process — a process left running after `session_end` keeps executing
-unsupervised. stderr message (`session … ended` / `no such session: …`) is
-produced client-side to match today's output. CLI: `mosaico my session
-end --self`; agents cannot target another session.
+The harness hook is an observation, not the owner of PTY exit classification.
+For PTY-bound sessions it returns `deferred=true`; the supervisor subsequently
+reports child status plus its attachment snapshot. A manual call stops the
+runtime record but does not signal its process. CLI: `mosaico my session end
+--self`; agents cannot target another session.
 
 ### `session_kill`
 ```jsonc
-params: {"session": "npub1…"|"hex"|"handle", "revoke_memberships": bool}
+params: {"session": "npub1…"|"hex"|"handle", "forget": bool}
 result: {"killed": true|false, "ended": true|false, "note": "pty=…"|"pid=…", "cleanup_confirmed": bool, "cleanup_failures": ["…"], "reason": "…"}
 ```
 Process-kill, the counterpart to `session_end`. Stops the session's hosted
 process (kills the owning PTY if one is tracked, else `SIGTERM`s the tracked
-child pid), then internally calls `session_end` to mark the session's
-metadata dead. `killed` reflects whether process termination itself
+child pid), then stops that exact runtime generation. `killed` reflects whether process termination itself
 succeeded; `reason` is populated on failure (including "no local session
 matched" when `session` doesn't resolve). `mosaico sessions` sets
-`revoke_memberships`: the daemon also expires presence now, clears the resume
-claim, confirms removal from every recorded NIP-29 channel, and clears local
-channel bindings. `mosaico my session kill --self` leaves that flag false,
+`forget`: the daemon atomically revokes local signer, locator, and route
+authority before attempting relay cleanup. Unconfirmed NIP-29 removals remain
+durable retry work. `mosaico my session kill --self` leaves that flag false,
 resolves the caller from the PTY/session environment, and refuses a positional
 target — an agent may only kill its own session. The CLI exits non-zero when
 process termination or requested fabric cleanup is not confirmed.
@@ -76,7 +74,7 @@ Re-homes a session started manually outside a daemon-owned PTY (no live
 if the session already has a live `pty_session` alias (`already_wrapped`,
 nothing to do), is mid-turn (`working`, to avoid losing in-flight work), or
 carries no harness resume token (`not_resumable`). Otherwise kills the
-manually-started process (via `session_kill`, marking the old row dead)
+manually-started process (via `session_kill`, stopping the old generation)
 BEFORE resuming the SAME harness session inside a fresh PTY, so the two
 steps cannot race a second caller across CLI round-trips. Only the harness's
 own persisted session state survives the hop; terminal scrollback from the
@@ -247,7 +245,7 @@ public `handle`; private runtime ids are omitted.
 
 ### `operator_sessions`
 Returns the canonical local control projection consumed by `mosaico
-sessions`. It starts from alive rows in the daemon-owned `sessions` table,
+sessions`. It starts from `runtime_state='running'` rows in the daemon-owned `sessions` table,
 but exposes only `pubkey`, `npub`, and the current public `handle`; the private
 runtime row id never crosses this RPC boundary. Each row joins agent/harness
 state, workspace-grouped joined channels, filesystem bindings, local host, and
@@ -269,14 +267,14 @@ or bundle override.
 Accepts an npub, hex pubkey, or handle and returns the PTY target plus public identity.
 
 ### `pty_resume`
-Reconstitutes a dead harness session in pty (re-opens the agent in its worktree).
+Reconstitutes a stopped harness session in PTY (re-opens the agent in its worktree).
 ```jsonc
 params: {"session": "npub1…"}
 result: {"pty_id": "…", "npub": "npub1…", "agent": "coder"}
 ```
 
 ### `pty_resumable`
-Returns resumable rows with `pubkey`, `npub`, and an optional current `handle`.
+Returns resumable rows with `pubkey`, `npub`, `runtime_state`, and an optional current `handle`.
 Raw session ids are not exposed.
 
 ### Control / handshake (not user verbs)

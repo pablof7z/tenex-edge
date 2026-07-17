@@ -80,10 +80,7 @@ fn explicit_channel_is_pure_destination_selection_and_preserves_tags() {
         .unwrap()
         .expect("sender session row");
     assert_eq!(sender_row.channel_h, child);
-    assert_eq!(
-        store.list_session_joined_channels(&sender).unwrap().len(),
-        2
-    );
+    assert_eq!(store.list_session_routes(&sender).unwrap().len(), 2);
     let sender_identity = store
         .session_identity(&sender)
         .unwrap()
@@ -242,10 +239,10 @@ fn channel_commands_require_channel_when_session_joined_to_multiple_channels() {
         })
         .unwrap();
     store
-        .join_session_channel(&pubkey, "root-chat-channel", 1)
+        .grant_session_route(&pubkey, "root-chat-channel", 1)
         .unwrap();
     store
-        .join_session_channel(&pubkey, "other-chat-channel", 2)
+        .grant_session_route(&pubkey, "other-chat-channel", 2)
         .unwrap();
 
     let write_err = rt().block_on(async {

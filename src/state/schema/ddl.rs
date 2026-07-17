@@ -151,32 +151,66 @@ CREATE TABLE IF NOT EXISTS sessions (
     harness           TEXT NOT NULL DEFAULT '',
     child_pid         INTEGER,
     transcript_path   TEXT,
-    alive             INTEGER NOT NULL DEFAULT 1,
+    runtime_state     TEXT NOT NULL DEFAULT 'running'
+        CHECK (runtime_state IN ('running', 'stopping', 'stopped')),
+    presentation_state TEXT NOT NULL DEFAULT 'unavailable'
+        CHECK (presentation_state IN ('unavailable', 'headed', 'headless')),
+    work_state        TEXT NOT NULL DEFAULT 'idle'
+        CHECK (work_state IN ('idle', 'working')),
+    recovery_state    TEXT NOT NULL DEFAULT 'pending'
+        CHECK (recovery_state IN ('pending', 'ready', 'revoked')),
+    lifecycle_epoch   INTEGER NOT NULL DEFAULT 1,
+    attachment_epoch  INTEGER NOT NULL DEFAULT 0,
+    idle_since        INTEGER NOT NULL DEFAULT 0,
+    idle_deadline     INTEGER NOT NULL DEFAULT 0,
+    stopped_at        INTEGER NOT NULL DEFAULT 0,
+    stop_reason       TEXT CHECK (stop_reason IS NULL OR stop_reason IN (
+        'unknown', 'attached_clean_exit', 'idle_evicted', 'headless_exit',
+        'crash', 'operator_kill', 'revoked', 'superseded'
+    )),
+    turn_count        INTEGER NOT NULL DEFAULT 0,
     created_at        INTEGER NOT NULL,
     last_seen         INTEGER NOT NULL DEFAULT 0,
-    working           INTEGER NOT NULL DEFAULT 0,
     turn_started_at   INTEGER NOT NULL DEFAULT 0,
     seen_cursor       INTEGER NOT NULL DEFAULT 0,
     title             TEXT NOT NULL DEFAULT '',
     explicit_chat_published_at INTEGER NOT NULL DEFAULT 0
 );
-CREATE INDEX IF NOT EXISTS idx_sessions_alive
-    ON sessions(alive, channel_h);
+CREATE INDEX IF NOT EXISTS idx_sessions_runtime
+    ON sessions(runtime_state, channel_h);
+CREATE INDEX IF NOT EXISTS idx_sessions_idle_deadline
+    ON sessions(runtime_state, presentation_state, work_state, idle_deadline);
 
+-- Durable exact-session routing affinity. These rows do not assert NIP-29
+-- membership; fabric standing is owned exclusively by session_standing.
 CREATE TABLE IF NOT EXISTS session_channels (
     pubkey        TEXT NOT NULL,
     channel_h    TEXT NOT NULL,
-    joined_at    INTEGER NOT NULL,
+    granted_at   INTEGER NOT NULL,
     PRIMARY KEY (pubkey, channel_h)
 );
 CREATE INDEX IF NOT EXISTS idx_session_channels_channel
     ON session_channels(channel_h, pubkey);
+
+CREATE TABLE IF NOT EXISTS session_standing (
+    pubkey                  TEXT NOT NULL,
+    channel_h               TEXT NOT NULL,
+    state                   TEXT NOT NULL CHECK (state IN ('member', 'retained', 'absent')),
+    retain_until            INTEGER NOT NULL DEFAULT 0,
+    standing_epoch          INTEGER NOT NULL DEFAULT 1,
+    session_lifecycle_epoch INTEGER NOT NULL,
+    updated_at              INTEGER NOT NULL,
+    PRIMARY KEY (pubkey, channel_h)
+);
+CREATE INDEX IF NOT EXISTS idx_session_standing_due
+    ON session_standing(state, retain_until);
 
 CREATE TABLE IF NOT EXISTS session_locators (
     harness        TEXT NOT NULL,
     locator_kind   TEXT NOT NULL CHECK (locator_kind IN ('native_resume', 'pty', 'acp', 'pid')),
     locator_value  TEXT NOT NULL,
     pubkey         TEXT NOT NULL,
+    runtime_generation INTEGER NOT NULL DEFAULT 0,
     created_at     INTEGER NOT NULL,
     PRIMARY KEY (harness, locator_kind, locator_value)
 );
@@ -186,6 +220,9 @@ CREATE INDEX IF NOT EXISTS idx_session_locators_value
     ON session_locators(locator_value);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_session_locators_native_resume
     ON session_locators(pubkey) WHERE locator_kind='native_resume';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_session_locators_runtime_endpoint
+    ON session_locators(pubkey, locator_kind)
+    WHERE locator_kind IN ('pty', 'acp', 'pid');
 
 CREATE TABLE IF NOT EXISTS session_signers (pubkey TEXT PRIMARY KEY, signer_salt TEXT NOT NULL);
 
@@ -199,9 +236,6 @@ CREATE TABLE IF NOT EXISTS handle_leases (
 );
 CREATE INDEX IF NOT EXISTS idx_handle_leases_reclaim
     ON handle_leases(agent_slug, live, last_active_at);
-
-CREATE TABLE IF NOT EXISTS session_claims (pubkey TEXT NOT NULL, agent_slug TEXT NOT NULL DEFAULT '', channel_h TEXT NOT NULL DEFAULT '', harness TEXT NOT NULL DEFAULT '', last_active_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, owner_backend_pubkey TEXT NOT NULL DEFAULT '', owner_host TEXT NOT NULL DEFAULT '', PRIMARY KEY (pubkey, channel_h));
-CREATE INDEX IF NOT EXISTS idx_session_claims_expires ON session_claims(expires_at);
 
 CREATE TABLE IF NOT EXISTS inbox (
     event_id        TEXT NOT NULL,

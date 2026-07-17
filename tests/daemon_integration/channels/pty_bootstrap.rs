@@ -26,7 +26,7 @@ fn wait_for_alive(home: &Home, agent: &str, channel: &str) -> mosaico::state::Se
     assert!(
         wait_until(Duration::from_secs(25), || {
             found = Store::open(&home.store_path())
-                .and_then(|s| s.list_alive_sessions())
+                .and_then(|s| s.list_running_sessions())
                 .unwrap_or_default()
                 .into_iter()
                 .find(|rec| rec.agent_slug == agent && rec.channel_h == channel);
@@ -158,7 +158,7 @@ fn late_session_start_hook_reasserts_pty_bootstrap_session() {
     assert_eq!(reasserted["pubkey"].as_str(), Some(first.pubkey.as_str()));
     let store = Store::open(&home.store_path()).unwrap();
     let alive = store
-        .list_alive_sessions()
+        .list_running_sessions()
         .unwrap()
         .into_iter()
         .filter(|rec| rec.agent_slug == agent && rec.channel_h == channel)
@@ -238,7 +238,7 @@ fn codex_hook_reasserts_launch_session_from_pty_anchor_without_native_id() {
         Some(first.pubkey.as_str())
     );
     let alive = store
-        .list_alive_sessions()
+        .list_running_sessions()
         .unwrap()
         .into_iter()
         .filter(|rec| rec.agent_slug == agent && rec.channel_h == channel)

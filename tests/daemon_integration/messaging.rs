@@ -42,7 +42,7 @@ fn session_start_runs_engine_and_records_alive_session() {
             .as_deref(),
         Some(pubkey.as_str())
     );
-    assert!(rec.alive);
+    assert!(rec.is_running());
     assert_eq!(rec.agent_slug, "coder");
 
     rt().block_on(async {
@@ -105,11 +105,19 @@ fn session_start_replaces_prior_session_for_same_host_pid() {
 
     let store = Store::open(&home.store_path()).unwrap();
     assert!(
-        !store.get_session(&old_pubkey).unwrap().unwrap().alive,
+        !store
+            .get_session(&old_pubkey)
+            .unwrap()
+            .unwrap()
+            .is_running(),
         "old session should be marked dead"
     );
     assert!(
-        store.get_session(&new_pubkey).unwrap().unwrap().alive,
+        store
+            .get_session(&new_pubkey)
+            .unwrap()
+            .unwrap()
+            .is_running(),
         "new session should remain alive"
     );
 

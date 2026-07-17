@@ -21,7 +21,7 @@ fn wait_for_alive(home: &Home, agent: &str, channel: &str) -> mosaico::state::Se
     assert!(
         wait_until(Duration::from_secs(25), || {
             found = Store::open(&home.store_path())
-                .and_then(|s| s.list_alive_sessions())
+                .and_then(|s| s.list_running_sessions())
                 .unwrap_or_default()
                 .into_iter()
                 .find(|rec| rec.agent_slug == agent && rec.channel_h == channel);
@@ -103,8 +103,7 @@ fn channel_add_session_pulls_live_pty_without_resuming() {
             refresh_channel_members(&side);
             Store::open(&home.store_path())
                 .map(|s| {
-                    s.is_session_joined_channel(&rec.pubkey, &side)
-                        .unwrap_or(false)
+                    s.has_session_route(&rec.pubkey, &side).unwrap_or(false)
                         && s.is_channel_member(&side, &rec.pubkey).unwrap_or(false)
                 })
                 .unwrap_or(false)

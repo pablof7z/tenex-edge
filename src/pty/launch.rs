@@ -3,6 +3,8 @@ use anyhow::{Context, Result};
 use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::OnceLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone)]
@@ -24,6 +26,7 @@ pub fn spawn_session(args: SpawnSessionArgs) -> Result<LaunchMetadata> {
         anyhow::bail!("pty launch command must not be empty");
     }
     let id = args.id.unwrap_or_else(|| new_endpoint_id(&args.agent));
+    let instance_token = unique_token();
     let socket = session_socket(&id);
     let log_path = super::meta::session_dir().join(format!("{id}.supervisor.log"));
     std::fs::create_dir_all(super::meta::session_dir())
@@ -40,6 +43,8 @@ pub fn spawn_session(args: SpawnSessionArgs) -> Result<LaunchMetadata> {
         .arg("__pty-supervisor")
         .arg("--id")
         .arg(&id)
+        .arg("--instance-token")
+        .arg(&instance_token)
         .arg("--socket")
         .arg(&socket)
         .arg("--cwd")
@@ -80,6 +85,7 @@ pub fn spawn_session(args: SpawnSessionArgs) -> Result<LaunchMetadata> {
         id,
         socket: socket.to_string_lossy().to_string(),
         supervisor_pid: supervisor.id(),
+        instance_token,
         agent: args.agent,
         root: args.root,
         cwd: args.cwd.to_string_lossy().to_string(),
@@ -104,6 +110,61 @@ pub(crate) fn new_endpoint_id(agent: &str) -> String {
                 '-'
             }
         })
+        .take(16)
         .collect::<String>();
-    format!("{safe_agent}-{now}-{}", std::process::id())
+    static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+    let sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    format!(
+        "{safe_agent}-{now}-{}-{}-{sequence}",
+        std::process::id(),
+        process_nonce()
+    )
+}
+
+fn process_nonce() -> &'static str {
+    static NONCE: OnceLock<String> = OnceLock::new();
+    NONCE
+        .get_or_init(|| unique_token().chars().take(16).collect())
+        .as_str()
+}
+
+fn unique_token() -> String {
+    use std::io::Read;
+
+    let mut bytes = [0_u8; 16];
+    if std::fs::File::open("/dev/urandom")
+        .and_then(|mut random| random.read_exact(&mut bytes))
+        .is_ok()
+    {
+        return bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+    }
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or(Duration::ZERO)
+        .as_nanos();
+    static FALLBACK_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+    format!(
+        "fallback-{nanos:x}-{}-{}",
+        std::process::id(),
+        FALLBACK_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn endpoint_ids_are_unique_within_the_same_process_and_second() {
+        let first = super::new_endpoint_id("grok");
+        let second = super::new_endpoint_id("grok");
+        assert_ne!(first, second);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn generated_endpoint_stays_within_unix_socket_limits() {
+        use std::os::unix::ffi::OsStrExt;
+
+        let id = super::new_endpoint_id(&"very-long-agent-name-".repeat(8));
+        assert!(super::session_socket(&id).as_os_str().as_bytes().len() < 100);
+    }
 }

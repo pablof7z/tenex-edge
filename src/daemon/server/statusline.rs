@@ -40,10 +40,13 @@ pub(in crate::daemon::server) fn rpc_statusline(
         // State and title come straight off the local session row. Pure read: no
         // drains, no touches.
         let automatic_delivery = crate::session_host::session_has_live_delivery_path(s, &rec);
-        let live =
-            rec.alive && now.saturating_sub(rec.last_seen) <= crate::session::STATUS_TTL_SECS;
-        let session_state =
-            crate::session_state::SessionState::classify(live, rec.working, automatic_delivery);
+        let live = rec.is_running()
+            && now.saturating_sub(rec.last_seen) <= crate::session::STATUS_TTL_SECS;
+        let session_state = crate::session_state::SessionState::classify(
+            live,
+            rec.is_working(),
+            automatic_delivery,
+        );
         let title = rec.title.clone();
         let activity = String::new();
         // `channel_title` is the channel's human handle from the relay-authored

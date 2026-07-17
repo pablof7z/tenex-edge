@@ -13,17 +13,13 @@ pub fn spawn_pruner(state: Arc<DaemonState>) {
             tick.tick().await;
             let now = now_secs();
 
-            // Reap locally-managed sessions that crashed or went silent past the
-            // membership TTL. Boot and session-start also sweep, but a session that
-            // dies mid-run with no further lifecycle event would otherwise linger on
-            // its channel rosters until the daemon restarts — this timer closes that
-            // gap (~10 min worst case).
-            super::super::membership_cleanup::cleanup_dead_local_sessions(&state);
+            super::super::demux::drive_offline_mention_retries(&state);
 
             match state.with_store(|s| s.prune_retained_state(now)) {
                 Ok(report) if report.total() > 0 => tracing::debug!(
                     relay_events = report.relay_events,
                     delivered_inbox = report.delivered_inbox,
+                    completed_event_claims = report.completed_event_claims,
                     "pruned retained state"
                 ),
                 Ok(_) => {}

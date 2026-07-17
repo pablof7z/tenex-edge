@@ -7,9 +7,14 @@ use rusqlite::Connection;
 use super::journal;
 
 mod v5_v6;
+mod v8_v9;
 
 pub(super) fn v5_to_v6(conn: &mut Connection, path: &Path) -> Result<()> {
     v5_v6::migrate(conn, path)
+}
+
+pub(super) fn v8_to_v9(conn: &mut Connection, path: &Path) -> Result<()> {
+    v8_v9::migrate(conn, path)
 }
 
 pub(super) fn v4_to_v5(conn: &mut Connection, _path: &Path) -> Result<()> {

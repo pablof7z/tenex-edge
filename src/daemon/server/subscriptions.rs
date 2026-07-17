@@ -76,7 +76,7 @@ async fn apply_effect(state: &Arc<DaemonState>, effect: &SubEffect) -> Result<()
 }
 
 /// Reopen the channel observation so NMP re-emits its canonical cached rows to a
-/// session that became alive after a mention was first materialized.
+/// session that became running after a mention was first materialized.
 pub(in crate::daemon::server) async fn replay_channel_chat(state: &Arc<DaemonState>, h: &str) {
     tracing::debug!(
         channel = h,
@@ -101,10 +101,11 @@ pub(in crate::daemon::server) async fn replay_channel_chat(state: &Arc<DaemonSta
 /// Compute the daemon's current subscription coverage from durable sources,
 /// split by owner so channels can refcount per session:
 ///
-/// - `daemon_channels` / archived: explicitly tracked channels, groups any
-///   local session pubkey is a member of (spawn-on-mention), and groups this
-///   daemon manages (admin). Owned by the daemon scope.
-/// - `sessions`: each alive session mapped to the channels it has joined. Each
+/// - `daemon_channels` / archived: explicitly requested daemon observations,
+///   groups any local pubkey currently stands in, and groups this daemon
+///   manages (admin). Owned by the daemon scope. Session-derived membership is
+///   recomputed rather than copied into the explicit set.
+/// - `sessions`: each running session mapped to the channels it has joined. Each
 ///   session is its own scope, so a shared channel stays open until the LAST
 ///   owning session leaves.
 /// - `addressed_pubkeys`: selected session pubkeys and the backend identity.
@@ -138,9 +139,9 @@ fn build_coverage_snapshot(state: &Arc<DaemonState>) -> CoverageSnapshot {
             }
         }
         // Channels each live session listens to (active + passively joined).
-        for sess in s.list_alive_sessions().unwrap_or_default() {
+        for sess in s.list_running_sessions().unwrap_or_default() {
             let joined = s
-                .list_session_joined_channels(&sess.pubkey)
+                .list_session_routes(&sess.pubkey)
                 .unwrap_or_else(|_| vec![(sess.channel_h.clone(), sess.created_at)]);
             sessions.insert(
                 sess.pubkey.clone(),

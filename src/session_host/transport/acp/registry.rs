@@ -1,7 +1,6 @@
 //! Process-global ACP child registry and exit reaper.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use tokio::sync::mpsc;
@@ -14,7 +13,6 @@ pub(super) struct AcpChild {
     pub(super) handle: RpcHandle,
     /// ACP `sessionId` or app-server `threadId`.
     pub(super) native_id: String,
-    pub(super) cwd: PathBuf,
     /// Captured transcript + running-turn state, fed by the update-drain task.
     pub(super) runtime: Arc<Mutex<AcpRuntime>>,
 }
@@ -30,7 +28,7 @@ pub(super) fn register_child(
     endpoint_id: &str,
     handle: RpcHandle,
     native_id: String,
-    cwd: PathBuf,
+    _cwd: std::path::PathBuf,
     mut updates: mpsc::UnboundedReceiver<SessionUpdate>,
 ) {
     let runtime = Arc::new(Mutex::new(AcpRuntime::default()));
@@ -55,7 +53,6 @@ pub(super) fn register_child(
         AcpChild {
             handle,
             native_id,
-            cwd,
             runtime,
         },
     );

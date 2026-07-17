@@ -108,7 +108,7 @@ fn cli_subprocess_blocking_path_session_start_and_who() {
         wait_until(std::time::Duration::from_secs(5), || {
             sid = Store::open(&home.store_path()).ok().and_then(|store| {
                 store
-                    .list_alive_sessions()
+                    .list_running_sessions()
                     .ok()?
                     .into_iter()
                     .find(|session| session.agent_slug == "opencode")
@@ -177,7 +177,7 @@ fn cli_subprocess_blocking_path_session_start_and_who() {
         Store::open(&home.store_path())
             .and_then(|store| store.get_session(&sid))
             .unwrap_or(None)
-            .map(|rec| !rec.alive)
+            .map(|rec| !rec.is_running())
             .unwrap_or(false)
     }));
 
@@ -291,7 +291,7 @@ fn claude_user_prompt_submit_reasserts_missing_session() {
         .get_session(&pubkey)
         .unwrap()
         .expect("revived session row");
-    assert!(rec.alive);
+    assert!(rec.is_running());
     assert_eq!(rec.agent_slug, "claude");
 
     stop_daemon(&home);
@@ -365,7 +365,7 @@ fn turn_lifecycle_drives_pubkey_row_resolved_from_harness_locator() {
 
     let started = store.get_session(&pubkey).unwrap().expect("session row");
     assert!(
-        started.working,
+        started.is_working(),
         "turn_start must set the pubkey row working"
     );
     assert!(
@@ -385,7 +385,7 @@ fn turn_lifecycle_drives_pubkey_row_resolved_from_harness_locator() {
         .unwrap()
         .expect("pubkey-owned session row");
     assert!(
-        !ended.working,
+        !ended.is_working(),
         "turn_end must clear working on the pubkey row"
     );
 

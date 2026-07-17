@@ -1,6 +1,6 @@
-//! `who --expired`: the dead/old local sessions a user can list and then resume.
+//! `who --expired`: stopped local sessions a user can list and then resume.
 //!
-//! A session row that is no longer `alive` (its process exited) is an expired
+//! A session row whose runtime is stopped is an expired
 //! session. Its npub is the permanent resume selector; a current leased handle
 //! is optional presentation data.
 
@@ -21,13 +21,12 @@ pub(crate) struct ExpiredSessionRow {
     pub(crate) channel: String,
     /// Last heartbeat, unix seconds (0 when never seen).
     pub(crate) last_seen: u64,
-    /// Whether a resume token is present — the session can be reconstituted.
+    /// Whether exact recovery authority remains (native resume or fresh launch).
     pub(crate) resumable: bool,
 }
 
-/// The not-currently-live local sessions (process exited), newest first, each
-/// named by its public handle. Reads [`Store::list_resumable_sessions`] (alive OR
-/// dead, capped) and keeps only the dead rows.
+/// The stopped local sessions, newest first, each named by its public handle.
+/// Reads [`Store::list_resumable_sessions`] and keeps only stopped rows.
 pub(crate) fn load_expired_sessions(
     store: &Store,
     host: &str,
@@ -37,7 +36,7 @@ pub(crate) fn load_expired_sessions(
         .list_resumable_sessions(limit)
         .unwrap_or_default()
         .into_iter()
-        .filter(|s| !s.alive)
+        .filter(|s| !s.is_running())
         .map(|s| ExpiredSessionRow {
             agent_slug: s.agent_slug,
             pubkey: s.pubkey.clone(),
@@ -91,26 +90,32 @@ mod tests {
     }
 
     #[test]
-    fn only_dead_sessions_are_listed_by_permanent_pubkey() {
+    fn only_stopped_sessions_are_listed_by_permanent_pubkey() {
         let store = Store::open_memory().unwrap();
         store.upsert_channel("proj", "main", "", "", 1).unwrap();
-        let alive_id = register(&store, "alive", "proj");
-        let dead_id = register(&store, "dead", "proj");
-        store.mark_dead(&dead_id).unwrap();
+        let running_id = register(&store, "running", "proj");
+        let stopped_id = register(&store, "stopped", "proj");
+        store
+            .mark_runtime_stopped(&stopped_id, crate::state::StopReason::HeadlessExit, 50)
+            .unwrap();
 
         let rows = load_expired_sessions(&store, "laptop", 50);
-        assert_eq!(rows.len(), 1, "only the dead session is expired: {rows:?}");
+        assert_eq!(
+            rows.len(),
+            1,
+            "only the stopped session is expired: {rows:?}"
+        );
         let row = &rows[0];
         assert_eq!(row.agent_slug, "coder");
-        assert_eq!(row.pubkey, "pk-dead");
+        assert_eq!(row.pubkey, "pk-stopped");
         assert!(row.handle.is_none());
         assert!(
             row.npub.is_empty(),
             "fixture pubkey is intentionally invalid"
         );
-        assert_ne!(dead_id, alive_id);
+        assert_ne!(stopped_id, running_id);
         assert_eq!(row.host, "laptop");
         assert_eq!(row.channel, "main");
-        assert!(row.resumable, "row carries a resume token");
+        assert!(row.resumable, "row retains exact recovery authority");
     }
 }

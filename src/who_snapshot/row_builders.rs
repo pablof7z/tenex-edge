@@ -12,7 +12,7 @@ pub(super) fn local_row(store: StoreReader<'_>, s: &Session, local_host: &str, n
     let fresh = now.saturating_sub(s.last_seen) <= crate::session::STATUS_TTL_SECS;
     let state = crate::session_state::SessionState::classify(
         fresh,
-        s.working,
+        s.is_working(),
         store.has_live_delivery_path(s),
     );
     let (title, activity) = live

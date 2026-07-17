@@ -73,7 +73,7 @@ fn opencode_style_session_without_id_mints_room_via_pid() {
 
     let store = Store::open(&home.store_path()).unwrap();
     let rec = store
-        .list_alive_sessions()
+        .list_running_sessions()
         .unwrap()
         .into_iter()
         .find(|r| r.agent_slug == "opencoder")

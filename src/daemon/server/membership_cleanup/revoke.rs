@@ -1,12 +1,16 @@
 use super::*;
+use std::collections::BTreeSet;
 
-fn recorded_channels(state: &Arc<DaemonState>, pubkey: &str) -> Vec<(String, String)> {
+pub(in crate::daemon::server) fn recorded_channels(
+    state: &Arc<DaemonState>,
+    pubkey: &str,
+) -> Vec<String> {
     state.with_store(|store| {
         let Some(session) = store.get_session(pubkey).ok().flatten() else {
             return Vec::new();
         };
         let mut channels = store
-            .list_session_joined_channels(&session.pubkey)
+            .list_session_routes(&session.pubkey)
             .unwrap_or_default()
             .into_iter()
             .map(|(channel, _)| channel)
@@ -14,53 +18,53 @@ fn recorded_channels(state: &Arc<DaemonState>, pubkey: &str) -> Vec<(String, Str
         if !session.channel_h.is_empty() {
             channels.insert(session.channel_h.clone());
         }
-        channels
-            .into_iter()
-            .map(|channel| (channel, session.pubkey.clone()))
-            .collect()
+        channels.extend(
+            store
+                .list_session_standing(&session.pubkey)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|standing| standing.state != crate::state::StandingState::Absent)
+                .map(|standing| standing.channel_h),
+        );
+        channels.into_iter().collect()
     })
 }
 
 /// Explicit operator destruction has no grace window. Attempt every recorded
 /// channel even when the local membership mirror is stale, and await read-back.
-pub(in crate::daemon::server) async fn revoke_session_memberships(
+pub(in crate::daemon::server) async fn remove_revoked_session_memberships(
     state: &Arc<DaemonState>,
     pubkey: &str,
+    channels: Vec<String>,
 ) -> Vec<String> {
-    let removals = recorded_channels(state, pubkey);
-    let channels = removals
-        .iter()
-        .map(|(channel, _)| channel.clone())
-        .collect::<Vec<_>>();
-    let mut tasks = tokio::task::JoinSet::new();
-    for (channel, pubkey) in removals {
-        let state = state.clone();
-        tasks.spawn(async move {
-            let outcome = state
-                .provider
-                .remove_member_confirmed(&channel, &pubkey)
-                .await;
-            (channel, outcome)
-        });
-    }
-
+    let _lane = state.standing_sync.lock().await;
     let mut failures = Vec::new();
-    while let Some(result) = tasks.join_next().await {
-        match result {
-            Ok((_channel, outcome)) if outcome.is_confirmed() => {}
-            Ok((channel, outcome)) => failures.push(format!("{channel}: {outcome:?}")),
-            Err(error) => failures.push(format!("cleanup task failed: {error}")),
-        }
-    }
-    if failures.is_empty() {
-        if let Err(error) = state.with_store(|store| -> Result<()> {
-            store.set_session_channel(pubkey, "")?;
-            for channel in channels {
-                store.leave_session_channel(pubkey, &channel)?;
+    for channel in channels {
+        let standing = state
+            .with_store(|store| store.get_session_standing(pubkey, &channel))
+            .ok()
+            .flatten();
+        let outcome = state
+            .provider
+            .remove_member_confirmed(&channel, pubkey)
+            .await;
+        if !outcome.is_confirmed() {
+            failures.push(format!("{channel}: {outcome:?}"));
+        } else if let Some(standing) = standing {
+            if let Err(error) = state.with_store(|store| {
+                store.mark_session_standing_absent_if_epoch(
+                    pubkey,
+                    &channel,
+                    standing.state,
+                    standing.standing_epoch,
+                    standing.session_lifecycle_epoch,
+                    now_secs(),
+                )
+            }) {
+                failures.push(format!(
+                    "{channel}: confirmed removal persistence: {error:#}"
+                ));
             }
-            Ok(())
-        }) {
-            failures.push(format!("local channel cleanup: {error:#}"));
         }
     }
     failures
@@ -89,7 +93,7 @@ mod tests {
                 .unwrap()
         });
         state
-            .with_store(|store| store.join_session_channel(session, "joined", now_secs()))
+            .with_store(|store| store.grant_session_route(session, "joined", now_secs()))
             .unwrap();
 
         assert!(!state
@@ -97,10 +101,7 @@ mod tests {
             .unwrap());
         assert_eq!(
             recorded_channels(&state, session),
-            vec![
-                ("active".into(), "pk-operator-kill".into()),
-                ("joined".into(), "pk-operator-kill".into()),
-            ]
+            vec![String::from("active"), String::from("joined")]
         );
     }
 }

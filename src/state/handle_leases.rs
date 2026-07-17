@@ -58,17 +58,6 @@ impl Store {
         Ok(())
     }
 
-    pub(crate) fn mark_handle_offline_for_pubkey(&self, pubkey: &str) -> Result<()> {
-        self.conn.execute(
-            "UPDATE handle_leases SET live=0,
-                 last_active_at=MAX(last_active_at,
-                     COALESCE((SELECT last_seen FROM sessions WHERE pubkey=?1), 0))
-             WHERE pubkey=?1",
-            [pubkey],
-        )?;
-        Ok(())
-    }
-
     pub fn session_identity(
         &self,
         pubkey: &str,

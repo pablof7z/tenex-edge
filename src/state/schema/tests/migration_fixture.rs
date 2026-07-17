@@ -12,7 +12,8 @@ pub(super) fn create_schema_four(path: &Path) {
         DROP TABLE messages;
         DROP TABLE session_locators;
         DROP TABLE session_channels;
-        DROP TABLE session_claims;
+        DROP TABLE IF EXISTS session_claims;
+        DROP TABLE IF EXISTS session_standing;
         DROP TABLE sessions;
         DROP TABLE relay_status;
 

@@ -37,7 +37,12 @@ fn operator_kind9_injects_into_working_launch_session() {
     wait_for_group_member(&home, &channel, &rec.pubkey);
     Store::open(&home.store_path())
         .unwrap()
-        .set_working(&rec.pubkey, true, mosaico::util::now_secs())
+        .apply_session_turn_started(
+            &rec.pubkey,
+            rec.runtime_generation,
+            mosaico::util::now_secs(),
+            None,
+        )
         .expect("mark launch session working");
 
     // Launch-time admission already bound this exact pubkey to its typed PTY

@@ -26,7 +26,7 @@ pub(in crate::daemon::server) fn resolve_chat_target(
         });
     }
 
-    let joined = state.with_store(|s| s.list_session_joined_channels(&rec.pubkey))?;
+    let joined = state.with_store(|s| s.list_session_routes(&rec.pubkey))?;
     match joined.as_slice() {
         [] => Ok(ChatTarget {
             channel_h: rec.channel_h.clone(),
@@ -143,10 +143,19 @@ mod tests {
             harness: "codex".to_string(),
             child_pid: None,
             transcript_path: None,
-            alive: true,
+            runtime_state: crate::state::RuntimeState::Running,
+            presentation_state: crate::state::PresentationState::Headed,
+            work_state: crate::state::WorkState::Idle,
+            recovery_state: crate::state::RecoveryState::Pending,
+            lifecycle_epoch: 1,
+            attachment_epoch: 1,
+            idle_since: 0,
+            idle_deadline: 0,
+            stopped_at: 0,
+            stop_reason: None,
+            turn_count: 0,
             created_at: 1,
             last_seen: 1,
-            working: false,
             turn_started_at: 0,
             seen_cursor: 0,
             title: String::new(),
@@ -224,10 +233,10 @@ mod tests {
                 now: 1,
             })
             .unwrap();
-        store.join_session_channel("pk", "root", 1).unwrap();
-        store.join_session_channel("pk", "other", 2).unwrap();
+        store.grant_session_route("pk", "root", 1).unwrap();
+        store.grant_session_route("pk", "other", 2).unwrap();
 
-        let joined = store.list_session_joined_channels("pk").unwrap();
+        let joined = store.list_session_routes("pk").unwrap();
         assert_eq!(joined.len(), 2);
         let refs = joined
             .iter()

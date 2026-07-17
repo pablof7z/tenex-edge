@@ -1,14 +1,34 @@
-//! Pubkey-keyed local runtime persistence.
+//! Pubkey-keyed durable session and runtime-incarnation persistence.
 
 use super::*;
 use rusqlite::{Transaction, TransactionBehavior};
 
 pub(super) const COLS: &str =
     "pubkey, runtime_generation, agent_slug, channel_h, work_root, readiness_parent, \
-     harness, child_pid, transcript_path, alive, created_at, last_seen, working, \
-     turn_started_at, seen_cursor, title, explicit_chat_published_at";
+     harness, child_pid, transcript_path, runtime_state, presentation_state, work_state, \
+     recovery_state, lifecycle_epoch, attachment_epoch, idle_since, idle_deadline, \
+     stopped_at, stop_reason, turn_count, created_at, last_seen, turn_started_at, \
+     seen_cursor, title, explicit_chat_published_at";
+
+fn conversion<T>(index: usize, result: Result<T>) -> rusqlite::Result<T> {
+    result.map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(
+            index,
+            rusqlite::types::Type::Text,
+            Box::new(std::io::Error::other(error.to_string())),
+        )
+    })
+}
 
 pub(super) fn row_to_session(row: &rusqlite::Row) -> rusqlite::Result<Session> {
+    let runtime_state = conversion(9, RuntimeState::parse(&row.get::<_, String>(9)?))?;
+    let presentation_state = conversion(10, PresentationState::parse(&row.get::<_, String>(10)?))?;
+    let work_state = conversion(11, WorkState::parse(&row.get::<_, String>(11)?))?;
+    let recovery_state = conversion(12, RecoveryState::parse(&row.get::<_, String>(12)?))?;
+    let stop_reason = row
+        .get::<_, Option<String>>(18)?
+        .map(|value| conversion(18, StopReason::parse(&value)))
+        .transpose()?;
     Ok(Session {
         pubkey: row.get(0)?,
         runtime_generation: row.get(1)?,
@@ -19,38 +39,64 @@ pub(super) fn row_to_session(row: &rusqlite::Row) -> rusqlite::Result<Session> {
         harness: row.get(6)?,
         child_pid: row.get(7)?,
         transcript_path: row.get(8)?,
-        alive: row.get::<_, i64>(9)? != 0,
-        created_at: row.get(10)?,
-        last_seen: row.get(11)?,
-        working: row.get::<_, i64>(12)? != 0,
-        turn_started_at: row.get(13)?,
-        seen_cursor: row.get(14)?,
-        title: row.get(15)?,
-        explicit_chat_published_at: row.get(16)?,
+        runtime_state,
+        presentation_state,
+        work_state,
+        recovery_state,
+        lifecycle_epoch: row.get(13)?,
+        attachment_epoch: row.get(14)?,
+        idle_since: row.get(15)?,
+        idle_deadline: row.get(16)?,
+        stopped_at: row.get(17)?,
+        stop_reason,
+        turn_count: row.get(19)?,
+        created_at: row.get(20)?,
+        last_seen: row.get(21)?,
+        turn_started_at: row.get(22)?,
+        seen_cursor: row.get(23)?,
+        title: row.get(24)?,
+        explicit_chat_published_at: row.get(25)?,
     })
 }
 
 impl Store {
-    /// Atomically reserve the one active runtime for `r.pubkey`. A dead runtime
-    /// may be replaced; its monotonically increasing generation fences late
-    /// completion from the previous incarnation.
-    pub fn reserve_session(&self, r: &RegisterSession) -> Result<u64> {
-        if r.pubkey.trim().is_empty() {
+    /// Reserve the sole running incarnation. Stopping runtimes still own their
+    /// pubkey; only a fully stopped runtime may advance the generation.
+    pub fn reserve_session(&self, registration: &RegisterSession) -> Result<u64> {
+        if registration.pubkey.trim().is_empty() {
             anyhow::bail!("session pubkey must not be empty");
         }
         let tx = Transaction::new_unchecked(&self.conn, TransactionBehavior::Immediate)?;
         let previous = tx
             .query_row(
-                "SELECT runtime_generation, alive FROM sessions WHERE pubkey=?1",
-                [&r.pubkey],
-                |row| Ok((row.get::<_, u64>(0)?, row.get::<_, bool>(1)?)),
+                "SELECT runtime_generation, runtime_state, recovery_state
+                 FROM sessions WHERE pubkey=?1",
+                [&registration.pubkey],
+                |row| {
+                    Ok((
+                        row.get::<_, u64>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
             )
             .optional()?;
-        if previous.is_some_and(|(_, alive)| alive) {
-            anyhow::bail!("pubkey {} already has an active runtime", r.pubkey);
+        if let Some((_, state, recovery)) = previous.as_ref() {
+            if RuntimeState::parse(state)? != RuntimeState::Stopped {
+                anyhow::bail!(
+                    "pubkey {} already has an active runtime",
+                    registration.pubkey
+                );
+            }
+            if RecoveryState::parse(recovery)? == RecoveryState::Revoked {
+                anyhow::bail!(
+                    "pubkey {} recovery authority is revoked",
+                    registration.pubkey
+                );
+            }
         }
         let generation = match previous {
-            Some((generation, _)) => generation
+            Some((generation, _, _)) => generation
                 .checked_add(1)
                 .context("runtime generation exhausted")?,
             None => 1,
@@ -58,40 +104,37 @@ impl Store {
         tx.execute(
             "INSERT INTO sessions
                  (pubkey, runtime_generation, agent_slug, channel_h, harness, child_pid,
-                  transcript_path, alive, created_at, last_seen)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, ?8, ?8)
+                  transcript_path, runtime_state, presentation_state, work_state,
+                  recovery_state, lifecycle_epoch, created_at, last_seen)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'running', 'unavailable', 'idle',
+                     'pending', 1, ?8, ?8)
              ON CONFLICT(pubkey) DO UPDATE SET
                  runtime_generation=excluded.runtime_generation,
                  agent_slug=excluded.agent_slug, channel_h=excluded.channel_h,
                  harness=excluded.harness, child_pid=excluded.child_pid,
-                 transcript_path=excluded.transcript_path, alive=1,
+                 transcript_path=excluded.transcript_path, runtime_state='running',
+                 presentation_state='unavailable', work_state='idle',
+                 lifecycle_epoch=sessions.lifecycle_epoch+1, attachment_epoch=0,
+                 idle_since=0, idle_deadline=0, stopped_at=0, stop_reason=NULL,
                  created_at=excluded.created_at, last_seen=excluded.last_seen,
-                 working=0, turn_started_at=0",
+                 turn_started_at=0",
             params![
-                r.pubkey,
+                registration.pubkey,
                 generation,
-                r.agent_slug,
-                r.channel_h,
-                r.harness,
-                r.child_pid,
-                r.transcript_path,
-                r.now,
+                registration.agent_slug,
+                registration.channel_h,
+                registration.harness,
+                registration.child_pid,
+                registration.transcript_path,
+                registration.now,
             ],
         )?;
-        if !r.channel_h.trim().is_empty() {
-            tx.execute(
-                "INSERT OR IGNORE INTO session_channels (pubkey, channel_h, joined_at)
-                 VALUES (?1, ?2, ?3)",
-                params![r.pubkey, r.channel_h, r.now],
-            )?;
+        if !registration.channel_h.trim().is_empty() {
+            grant_route_and_initialize_standing(&tx, registration)?;
         }
         tx.execute(
-            "DELETE FROM session_claims WHERE pubkey=?1 AND channel_h=?2",
-            params![r.pubkey, r.channel_h],
-        )?;
-        tx.execute(
             "UPDATE handle_leases SET live=1, last_active_at=?2 WHERE pubkey=?1",
-            params![r.pubkey, r.now],
+            params![registration.pubkey, registration.now],
         )?;
         tx.commit()?;
         Ok(generation)
@@ -112,20 +155,26 @@ impl Store {
         Ok(self.get_session(pubkey)?.is_some())
     }
 
-    pub fn list_alive_sessions(&self) -> Result<Vec<Session>> {
+    pub fn list_running_sessions(&self) -> Result<Vec<Session>> {
+        let mut statement = self.conn.prepare(&format!(
+            "SELECT {COLS} FROM sessions WHERE runtime_state='running' ORDER BY created_at DESC"
+        ))?;
+        let rows = statement.query_map([], row_to_session)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    pub fn list_stopping_sessions(&self) -> Result<Vec<Session>> {
         let mut stmt = self.conn.prepare(&format!(
-            "SELECT {COLS} FROM sessions WHERE alive=1 ORDER BY created_at DESC"
+            "SELECT {COLS} FROM sessions WHERE runtime_state='stopping' ORDER BY pubkey"
         ))?;
         let rows = stmt.query_map([], row_to_session)?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    pub fn set_working(&self, pubkey: &str, working: bool, turn_started_at: u64) -> Result<()> {
-        self.conn.execute(
-            "UPDATE sessions SET working=?2, turn_started_at=?3 WHERE pubkey=?1",
-            params![pubkey, working as i64, turn_started_at],
-        )?;
-        Ok(())
+    pub fn session_can_fresh_relaunch_exact(&self, pubkey: &str) -> Result<bool> {
+        Ok(self
+            .get_session(pubkey)?
+            .is_some_and(|session| session.can_fresh_relaunch_exact()))
     }
 
     pub fn touch_session(&self, pubkey: &str, last_seen: u64) -> Result<()> {
@@ -136,16 +185,6 @@ impl Store {
         self.touch_handle_for_pubkey(pubkey, last_seen)
     }
 
-    pub fn set_session_transcript(&self, pubkey: &str, transcript_path: &str) -> Result<()> {
-        self.conn.execute(
-            "UPDATE sessions SET transcript_path=?2 WHERE pubkey=?1",
-            params![pubkey, transcript_path],
-        )?;
-        Ok(())
-    }
-
-    /// Attach the host process to exactly the runtime incarnation reserved
-    /// before spawn. A stale bootstrap cannot overwrite a newer incarnation.
     pub fn bind_runtime_process(
         &self,
         pubkey: &str,
@@ -154,7 +193,8 @@ impl Store {
     ) -> Result<bool> {
         Ok(self.conn.execute(
             "UPDATE sessions SET child_pid=?3, last_seen=?4
-             WHERE pubkey=?1 AND runtime_generation=?2 AND alive=1",
+             WHERE pubkey=?1 AND runtime_generation=?2 AND runtime_state='running'
+               AND recovery_state<>'revoked'",
             params![
                 pubkey,
                 runtime_generation,
@@ -164,133 +204,101 @@ impl Store {
         )? > 0)
     }
 
-    pub fn set_session_channel(&self, pubkey: &str, channel_h: &str) -> Result<()> {
-        self.conn.execute(
-            "UPDATE sessions SET channel_h=?2 WHERE pubkey=?1",
-            params![pubkey, channel_h],
-        )?;
-        if !channel_h.trim().is_empty() {
-            self.join_session_channel(pubkey, channel_h, crate::util::now_secs())?;
-        }
-        Ok(())
-    }
-
-    pub fn set_session_context(
+    pub fn mark_runtime_stopped_if_generation(
         &self,
         pubkey: &str,
-        channel_h: &str,
-        work_root: &str,
-        readiness_parent: &str,
-    ) -> Result<()> {
-        self.conn.execute(
-            "UPDATE sessions
-             SET channel_h=?2, work_root=?3, readiness_parent=?4
-             WHERE pubkey=?1",
-            params![pubkey, channel_h, work_root, readiness_parent],
-        )?;
-        if !channel_h.trim().is_empty() {
-            self.join_session_channel(pubkey, channel_h, crate::util::now_secs())?;
-        }
-        Ok(())
-    }
-
-    /// Admission-time immediate parent for a channel whose relay metadata may
-    /// not have materialized yet. This is host context, not channel truth.
-    pub fn session_readiness_parent(&self, channel_h: &str) -> Result<Option<String>> {
-        Ok(self
-            .conn
-            .query_row(
-                "SELECT readiness_parent FROM sessions
-                 WHERE channel_h=?1 AND readiness_parent<>''
-                 ORDER BY alive DESC, created_at DESC LIMIT 1",
-                [channel_h],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()?)
-    }
-
-    pub fn join_session_channel(
-        &self,
-        pubkey: &str,
-        channel_h: &str,
-        joined_at: u64,
-    ) -> Result<()> {
-        if channel_h.trim().is_empty() {
-            return Ok(());
-        }
-        self.conn.execute(
-            "INSERT OR IGNORE INTO session_channels (pubkey, channel_h, joined_at)
-             VALUES (?1, ?2, ?3)",
-            params![pubkey, channel_h, joined_at],
-        )?;
-        Ok(())
-    }
-
-    pub fn leave_session_channel(&self, pubkey: &str, channel_h: &str) -> Result<bool> {
-        Ok(self.conn.execute(
-            "DELETE FROM session_channels WHERE pubkey=?1 AND channel_h=?2",
-            params![pubkey, channel_h],
-        )? > 0)
-    }
-
-    pub fn is_session_joined_channel(&self, pubkey: &str, channel_h: &str) -> Result<bool> {
-        if self
-            .get_session(pubkey)?
-            .is_some_and(|session| session.channel_h == channel_h)
-        {
-            return Ok(true);
-        }
-        Ok(self.conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM session_channels WHERE pubkey=?1 AND channel_h=?2)",
-            params![pubkey, channel_h],
-            |row| row.get(0),
-        )?)
-    }
-
-    pub fn list_session_joined_channels(&self, pubkey: &str) -> Result<Vec<(String, u64)>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT channel_h, joined_at FROM session_channels
-             WHERE pubkey=?1 ORDER BY joined_at ASC, channel_h ASC",
-        )?;
-        let rows = stmt.query_map([pubkey], |row| Ok((row.get(0)?, row.get(1)?)))?;
-        let mut joined = rows.collect::<rusqlite::Result<Vec<_>>>()?;
-        if let Some(session) = self.get_session(pubkey)? {
-            if !session.channel_h.is_empty() && !joined.iter().any(|(h, _)| h == &session.channel_h)
-            {
-                joined.push((session.channel_h, session.created_at));
-            }
-        }
-        joined.sort_by(|(a_h, a_t), (b_h, b_t)| a_t.cmp(b_t).then(a_h.cmp(b_h)));
-        Ok(joined)
-    }
-
-    /// End only the incarnation the caller started. Returns false when a newer
-    /// generation is already active.
-    pub fn mark_dead_if_generation(&self, pubkey: &str, generation: u64) -> Result<bool> {
+        generation: u64,
+        reason: StopReason,
+        stopped_at: u64,
+    ) -> Result<bool> {
         let tx = Transaction::new_unchecked(&self.conn, TransactionBehavior::Immediate)?;
         let changed = tx.execute(
-            "UPDATE sessions SET alive=0, working=0
-             WHERE pubkey=?1 AND runtime_generation=?2 AND alive=1",
-            params![pubkey, generation],
+            "UPDATE sessions
+             SET runtime_state='stopped', presentation_state='unavailable', work_state='idle',
+                 lifecycle_epoch=lifecycle_epoch+1, idle_since=0, idle_deadline=0,
+                 stopped_at=?4, stop_reason=?3, turn_started_at=0
+             WHERE pubkey=?1 AND runtime_generation=?2 AND runtime_state='running'",
+            params![pubkey, generation, reason.as_str(), stopped_at],
         )?;
         if changed > 0 {
-            tx.execute(
-                "UPDATE handle_leases SET live=0,
-                     last_active_at=MAX(last_active_at,
-                         COALESCE((SELECT last_seen FROM sessions WHERE pubkey=?1), 0))
-                 WHERE pubkey=?1",
+            mark_handle_stopped(&tx, pubkey)?;
+            let lifecycle_epoch: u64 = tx.query_row(
+                "SELECT lifecycle_epoch FROM sessions WHERE pubkey=?1",
                 [pubkey],
+                |row| row.get(0),
+            )?;
+            let retain_until =
+                if matches!(reason, StopReason::AttachedCleanExit | StopReason::Revoked) {
+                    stopped_at
+                } else {
+                    stopped_at.saturating_add(STOPPED_STANDING_RETENTION_SECS)
+                };
+            super::session_standing::retain_in_transaction(
+                &tx,
+                pubkey,
+                lifecycle_epoch,
+                retain_until,
+                stopped_at,
             )?;
         }
         tx.commit()?;
-        Ok(changed > 0)
+        Ok(changed == 1)
     }
 
-    pub fn mark_dead(&self, pubkey: &str) -> Result<()> {
-        self.conn.execute(
-            "UPDATE sessions SET alive=0, working=0 WHERE pubkey=?1",
-            [pubkey],
-        )?;
-        self.mark_handle_offline_for_pubkey(pubkey)
+    pub fn mark_runtime_stopped(
+        &self,
+        pubkey: &str,
+        reason: StopReason,
+        stopped_at: u64,
+    ) -> Result<bool> {
+        let generation = self
+            .get_session(pubkey)?
+            .map(|session| session.runtime_generation);
+        match generation {
+            Some(generation) => {
+                self.mark_runtime_stopped_if_generation(pubkey, generation, reason, stopped_at)
+            }
+            None => Ok(false),
+        }
     }
+}
+
+fn grant_route_and_initialize_standing(
+    tx: &Transaction<'_>,
+    registration: &RegisterSession,
+) -> Result<()> {
+    tx.execute(
+        "INSERT OR IGNORE INTO session_channels (pubkey, channel_h, granted_at)
+         VALUES (?1, ?2, ?3)",
+        params![
+            registration.pubkey,
+            registration.channel_h,
+            registration.now
+        ],
+    )?;
+    tx.execute(
+        "INSERT INTO session_standing
+             (pubkey, channel_h, state, retain_until, standing_epoch,
+              session_lifecycle_epoch, updated_at)
+         SELECT ?1, ?2, 'absent', 0, 1, lifecycle_epoch, ?3
+         FROM sessions WHERE pubkey=?1
+         ON CONFLICT(pubkey, channel_h) DO NOTHING",
+        params![
+            registration.pubkey,
+            registration.channel_h,
+            registration.now
+        ],
+    )?;
+    Ok(())
+}
+
+fn mark_handle_stopped(tx: &Transaction<'_>, pubkey: &str) -> Result<()> {
+    tx.execute(
+        "UPDATE handle_leases SET live=0,
+             last_active_at=MAX(last_active_at,
+                 COALESCE((SELECT last_seen FROM sessions WHERE pubkey=?1), 0))
+         WHERE pubkey=?1",
+        [pubkey],
+    )?;
+    Ok(())
 }

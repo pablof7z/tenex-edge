@@ -203,7 +203,7 @@ fn same_named_channels_under_different_workspaces_show_workspace_context() {
         .unwrap();
     let rec = session_record(&store, "cross-workspace", "test1-xxx");
     store
-        .join_session_channel(&rec.pubkey, "test2-xxx", 20)
+        .grant_session_route(&rec.pubkey, "test2-xxx", 20)
         .unwrap();
     for (pk, channel, slug, activity) in [
         (

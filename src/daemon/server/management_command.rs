@@ -129,7 +129,7 @@ async fn kill_session(state: &Arc<DaemonState>, selector: &str) -> Result<String
         .with_context(|| {
             format!("no local session matching {selector:?}; use its npub or current handle")
         })?;
-    if !rec.alive {
+    if !rec.is_running() {
         anyhow::bail!("session {selector:?} is not running");
     }
     let public_label = state
@@ -137,11 +137,11 @@ async fn kill_session(state: &Arc<DaemonState>, selector: &str) -> Result<String
         .or_else(|| crate::idref::npub(&rec.pubkey))
         .unwrap_or_else(|| rec.pubkey.clone());
     let stop_note = stop_local_process(state, &rec).await;
-    let _ = super::rpc_session_end(
+    let _ = super::session_end::end_runtime_generation(
         state,
-        &serde_json::json!({
-            "session": rec.pubkey,
-        }),
+        &rec.pubkey,
+        rec.runtime_generation,
+        crate::state::StopReason::OperatorKill,
     )
     .await?;
     match stop_note {
@@ -222,11 +222,15 @@ async fn stop_local_process(
     state: &Arc<DaemonState>,
     rec: &crate::state::Session,
 ) -> Result<String> {
-    if let Some(pty_id) = pty_session_for_session(state, &rec.pubkey) {
+    if let Some(pty_id) = pty_session_for_session(state, rec) {
         crate::pty::kill(&pty_id).with_context(|| format!("killing PTY session {pty_id}"))?;
         state.with_store(|s| {
-            s.clear_locator_kind(&rec.pubkey, crate::state::LOCATOR_PTY)
-                .ok()
+            s.clear_runtime_locator_if_generation(
+                &rec.pubkey,
+                crate::state::LOCATOR_PTY,
+                rec.runtime_generation,
+            )
+            .ok()
         });
         return Ok(format!(" pty={pty_id}"));
     }
@@ -241,16 +245,21 @@ async fn stop_local_process(
     Ok(String::new())
 }
 
-fn pty_session_for_session(state: &Arc<DaemonState>, pubkey: &str) -> Option<String> {
+fn pty_session_for_session(
+    state: &Arc<DaemonState>,
+    session: &crate::state::Session,
+) -> Option<String> {
     state
-        .with_store(|s| s.locators_for_pubkey(pubkey))
-        .ok()
-        .and_then(|locators| {
-            locators
-                .into_iter()
-                .find(|locator| locator.locator_kind == crate::state::LOCATOR_PTY)
-                .map(|locator| locator.locator_value)
+        .with_store(|store| {
+            store.runtime_locator_for_session(
+                &session.pubkey,
+                session.runtime_generation,
+                crate::state::LOCATOR_PTY,
+            )
         })
+        .ok()
+        .flatten()
+        .map(|locator| locator.locator_value)
 }
 
 fn channel_label(state: &Arc<DaemonState>, channel_h: &str) -> String {

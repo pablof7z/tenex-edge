@@ -7,6 +7,8 @@ pub struct LaunchMetadata {
     pub id: String,
     pub socket: String,
     pub supervisor_pid: u32,
+    #[serde(default)]
+    pub instance_token: String,
     pub agent: String,
     pub root: String,
     pub cwd: String,
@@ -89,6 +91,92 @@ pub fn read_all_metadata() -> Vec<LaunchMetadata> {
     out
 }
 
+/// Terminate only the supervisor whose persisted metadata and live command line
+/// both identify `endpoint_id`. The identity check prevents a recycled PID from
+/// turning stale metadata into an unrelated process kill.
+pub(crate) fn terminate_owned_supervisor(endpoint_id: &str) -> Result<bool> {
+    let Some(metadata) = read_all_metadata()
+        .into_iter()
+        .find(|metadata| metadata.id == endpoint_id)
+    else {
+        return Ok(false);
+    };
+    let pid = i32::try_from(metadata.supervisor_pid).context("supervisor pid overflow")?;
+    if pid <= 1 || !process_exists(pid) {
+        remove_metadata(endpoint_id)?;
+        return Ok(true);
+    }
+    verify_owned_process(pid, endpoint_id, &metadata.instance_token)?;
+    signal(pid, nix::sys::signal::Signal::SIGTERM)?;
+    wait_for_exit(pid, 20);
+    if process_exists(pid) {
+        verify_owned_process(pid, endpoint_id, &metadata.instance_token)?;
+        signal(pid, nix::sys::signal::Signal::SIGKILL)?;
+        wait_for_exit(pid, 20);
+    }
+    if process_exists(pid) {
+        anyhow::bail!("PTY supervisor {endpoint_id:?} pid {pid} did not terminate");
+    }
+    remove_metadata(endpoint_id)?;
+    Ok(true)
+}
+
+fn signal(pid: i32, signal: nix::sys::signal::Signal) -> Result<()> {
+    nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), Some(signal))
+        .with_context(|| format!("sending {signal:?} to PTY supervisor pid {pid}"))
+}
+
+fn wait_for_exit(pid: i32, attempts: usize) {
+    for _ in 0..attempts {
+        if !process_exists(pid) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
+fn verify_owned_process(pid: i32, endpoint_id: &str, instance_token: &str) -> Result<()> {
+    let output = std::process::Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "command="])
+        .output()
+        .context("inspecting PTY supervisor command")?;
+    let command = String::from_utf8_lossy(&output.stdout);
+    if !output.status.success() || !command_owns_endpoint(&command, endpoint_id, instance_token) {
+        anyhow::bail!("refusing to terminate pid {pid}: command does not own PTY {endpoint_id:?}");
+    }
+    Ok(())
+}
+
+fn command_owns_endpoint(command: &str, endpoint_id: &str, instance_token: &str) -> bool {
+    if endpoint_id.is_empty() || instance_token.is_empty() {
+        return false;
+    }
+    let Some(argv) = shlex::split(command.trim()) else {
+        return false;
+    };
+    if argv.get(1).map(String::as_str) != Some("__pty-supervisor") {
+        return false;
+    }
+    let supervisor_args = &argv[2..];
+    let option_end = supervisor_args
+        .iter()
+        .position(|arg| arg == "--")
+        .unwrap_or(supervisor_args.len());
+    let supervisor_options = &supervisor_args[..option_end];
+    exact_option(supervisor_options, "--id") == Some(endpoint_id)
+        && exact_option(supervisor_options, "--instance-token") == Some(instance_token)
+}
+
+fn exact_option<'a>(argv: &'a [String], option: &str) -> Option<&'a str> {
+    argv.windows(2)
+        .find(|pair| pair[0] == option)
+        .map(|pair| pair[1].as_str())
+}
+
+fn process_exists(pid: i32) -> bool {
+    nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None).is_ok()
+}
+
 /// Resolve a PTY endpoint id to its supervisor socket without inventing a
 /// socket for non-PTY endpoints. Absolute paths are accepted for direct callers.
 pub fn endpoint_socket(endpoint_id: &str) -> Option<String> {
@@ -130,6 +218,7 @@ mod tests {
             id: "pty-1".into(),
             socket: "/tmp/pty-1.sock".into(),
             supervisor_pid: 42,
+            instance_token: "token-1".into(),
             agent: "agent".into(),
             root: "/tmp".into(),
             cwd: "/tmp".into(),
@@ -156,5 +245,57 @@ mod tests {
             super::socket_dir_for(mosaico_home, 501).join("testing-lead-1783399436-28334.sock");
 
         assert!(path.as_os_str().as_bytes().len() < 100);
+    }
+
+    #[test]
+    fn ownership_requires_exact_endpoint_and_instance_token_arguments() {
+        let command =
+            "/opt/mosaico __pty-supervisor --id grok-123-456 --instance-token token-2 -- echo";
+        assert!(super::command_owns_endpoint(
+            command,
+            "grok-123-456",
+            "token-2"
+        ));
+        assert!(!super::command_owns_endpoint(
+            command,
+            "grok-123-45",
+            "token-2"
+        ));
+        assert!(!super::command_owns_endpoint(
+            command,
+            "grok-123-456",
+            "token"
+        ));
+        assert!(!super::command_owns_endpoint(
+            "/opt/mosaico unrelated -- __pty-supervisor --id grok-123-456 --instance-token token-2",
+            "grok-123-456",
+            "token-2"
+        ));
+        assert!(!super::command_owns_endpoint(
+            "/opt/mosaico __pty-supervisor --id other --instance-token other -- --id grok-123-456 --instance-token token-2",
+            "grok-123-456",
+            "token-2"
+        ));
+    }
+
+    #[test]
+    fn old_metadata_without_instance_token_remains_readable_but_untrusted() {
+        let metadata: super::LaunchMetadata = serde_json::from_value(serde_json::json!({
+            "id": "grok-old",
+            "socket": "/tmp/grok-old.sock",
+            "supervisor_pid": 42,
+            "agent": "grok",
+            "root": "/tmp",
+            "cwd": "/tmp",
+            "command": ["grok"]
+        }))
+        .expect("old metadata should remain readable for live-session adoption");
+
+        assert!(metadata.instance_token.is_empty());
+        assert!(!super::command_owns_endpoint(
+            "/opt/mosaico __pty-supervisor --id grok-old -- grok",
+            &metadata.id,
+            &metadata.instance_token,
+        ));
     }
 }

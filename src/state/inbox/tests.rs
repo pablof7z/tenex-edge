@@ -56,7 +56,8 @@ fn pending_event_survives_runtime_replacement() {
     upsert_runtime(&s, "pk-agent", 10);
     s.enqueue_inbox("evt", "pk-agent", "sender", "room", "hello", 11)
         .unwrap();
-    s.mark_dead("pk-agent").unwrap();
+    s.mark_runtime_stopped("pk-agent", StopReason::Unknown, 11)
+        .unwrap();
     upsert_runtime(&s, "pk-agent", 12);
 
     let replacement = s.get_session("pk-agent").unwrap().unwrap();

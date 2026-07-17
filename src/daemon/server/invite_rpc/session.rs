@@ -11,7 +11,7 @@ pub(super) async fn invite_session(
     if let Some(rec) =
         state.with_store(|s| super::super::resolution::resolve_public_session(s, selector))?
     {
-        if rec.alive {
+        if rec.is_running() {
             if let Some(pty_id) = live_pty_for_session(state, &rec) {
                 return pull_live_session(state, channel_h, &rec, &pty_id).await;
             }
@@ -29,9 +29,21 @@ async fn pull_live_session(
     rec: &crate::state::Session,
     pty_id: &str,
 ) -> Result<serde_json::Value> {
+    let standing_lane = state.standing_sync.lock().await;
     ensure_live_session_member(state, channel_h, rec).await?;
-    ensure_subscription(state, channel_h).await?;
-    state.with_store(|s| s.join_session_channel(&rec.pubkey, channel_h, now_secs()))?;
+    let recorded = super::super::managed_lifecycle::commit_confirmed_admission(
+        state,
+        &rec.pubkey,
+        channel_h,
+        rec.runtime_generation,
+        rec.lifecycle_epoch,
+    )
+    .await?;
+    if !recorded {
+        anyhow::bail!("session changed while invite membership was being confirmed");
+    }
+    drop(standing_lane);
+    sync_subscriptions(state).await?;
     let online = wait_local_session_online(state, channel_h, &rec.pubkey).await?;
     Ok(serde_json::json!({
         "pty_id": pty_id,
@@ -146,13 +158,20 @@ fn live_pty_for_session(state: &Arc<DaemonState>, rec: &crate::state::Session) -
         .with_store(|s| s.locators_for_pubkey(&rec.pubkey))
         .ok()?
         .into_iter()
-        .find(|locator| locator.locator_kind == crate::state::LOCATOR_PTY)?
+        .find(|locator| {
+            locator.locator_kind == crate::state::LOCATOR_PTY
+                && locator.runtime_generation == rec.runtime_generation
+        })?
         .locator_value;
     if crate::pty::is_live(&pty_id) {
         return Some(pty_id);
     }
     state.with_store(|s| {
-        let _ = s.clear_locator_kind(&rec.pubkey, crate::state::LOCATOR_PTY);
+        let _ = s.clear_runtime_locator_if_generation(
+            &rec.pubkey,
+            crate::state::LOCATOR_PTY,
+            rec.runtime_generation,
+        );
     });
     None
 }

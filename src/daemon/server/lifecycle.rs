@@ -86,6 +86,8 @@ pub async fn run() -> Result<()> {
         subscribed_root_channels: Mutex::new(Vec::new()),
         subs: Mutex::new(crate::reconcile::SubscriptionReconciler::new()),
         subscription_sync: tokio::sync::Mutex::new(()),
+        standing_sync: tokio::sync::Mutex::new(()),
+        pty_probe_failures: Mutex::new(HashMap::new()),
         status: Arc::new(Mutex::new(StatusReconciler::for_ttl(status_ttl_duration()))),
         hook_contexts: Mutex::new(HashMap::new()),
         tail_tx: tokio::sync::broadcast::channel(512).0,
@@ -103,6 +105,7 @@ pub async fn run() -> Result<()> {
     // These tolerate a not-yet-connected relay, so they start now.
     spawn_demux(state.clone());
     spawn_pruner(state.clone());
+    super::managed_lifecycle::spawn(state.clone());
 
     let accept_state = state.clone();
     let accept = tokio::spawn(async move {
@@ -150,8 +153,6 @@ pub async fn run() -> Result<()> {
         }
 
         roster_bootstrap::publish_startup_roster(&relay_state).await;
-        membership_cleanup::cleanup_dead_local_sessions(&relay_state);
-        roster_bootstrap::seed_spawn_on_mention_coverage(&relay_state);
 
         // Seed the daemon-lifetime kind:9000 discovery observation plus the
         // refcounted per-entity #h / #p / group-state observations. No kind:0 is
