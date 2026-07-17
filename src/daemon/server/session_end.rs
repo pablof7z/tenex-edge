@@ -1,5 +1,9 @@
 use super::*;
 
+#[cfg(test)]
+#[path = "session_end/tests.rs"]
+mod tests;
+
 const CLAIM_GRACE_ENV: &str = "MOSAICO_EPHEMERAL_GRACE_SECS";
 const DEFAULT_CLAIM_GRACE_SECS: u64 = 15 * 60;
 
@@ -180,21 +184,34 @@ pub(in crate::daemon::server) async fn stop_local_process(
     state: &Arc<DaemonState>,
     rec: &crate::state::Session,
 ) -> Result<String> {
-    if let Some((transport, endpoint)) =
-        state.with_store(|store| crate::session_host::transport::hosted_endpoint_for(store, rec))?
+    match state
+        .with_store(|store| crate::session_host::transport::hosted_endpoint_for(store, rec))?
     {
-        transport
-            .kill(&endpoint)
-            .await
-            .with_context(|| format!("killing {} endpoint", endpoint.kind.as_str()))?;
-        state.with_store(|store| {
-            store.clear_session_locator_kind(
-                &rec.pubkey,
-                &rec.observed_harness,
-                endpoint.kind.locator_kind(),
-            )
-        })?;
-        return Ok(format!("endpoint={}", endpoint.endpoint_id));
+        crate::session_host::transport::HostedEndpoint::Resolved {
+            transport,
+            endpoint,
+        } => {
+            transport
+                .kill(&endpoint)
+                .await
+                .with_context(|| format!("killing {} endpoint", endpoint.kind.as_str()))?;
+            state.with_store(|store| {
+                store.clear_session_locator_kind(
+                    &rec.pubkey,
+                    &rec.observed_harness,
+                    endpoint.kind.locator_kind(),
+                )
+            })?;
+            return Ok(format!("endpoint={}", endpoint.endpoint_id));
+        }
+        crate::session_host::transport::HostedEndpoint::Unavailable { kind } => {
+            anyhow::bail!(
+                "session {} was admitted on {} but its endpoint locator is unavailable; refusing PID fallback",
+                rec.pubkey,
+                kind.as_str()
+            );
+        }
+        crate::session_host::transport::HostedEndpoint::Unhosted => {}
     }
     if let Some(pid) = rec.child_pid {
         nix::sys::signal::kill(

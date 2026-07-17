@@ -50,18 +50,28 @@ fn project_sessions(
             .into_iter()
             .map(|(root_id, channel_ids)| workspace_value(store, &root_id, &channel_ids, &channels))
             .collect::<Result<Vec<_>>>()?;
-        let endpoint = crate::session_host::transport::hosted_endpoint_for(store, &rec)?.map(
-            |(transport, endpoint)| {
+        let hosted = crate::session_host::transport::hosted_endpoint_for(store, &rec)?;
+        let (endpoint, transport) = match hosted {
+            crate::session_host::transport::HostedEndpoint::Resolved {
+                transport,
+                endpoint,
+            } => {
                 projected_endpoints.insert(endpoint.endpoint_id.clone());
-                transport.describe(&endpoint)
-            },
-        );
-        let transport = if let Some(endpoint) = &endpoint {
-            endpoint.kind.as_str()
-        } else if rec.child_pid.is_some() {
-            TRANSPORT_PROCESS
-        } else {
-            TRANSPORT_HARNESS
+                let descriptor = transport.describe(&endpoint);
+                let kind = descriptor.kind.as_str();
+                (Some(descriptor), kind)
+            }
+            crate::session_host::transport::HostedEndpoint::Unavailable { kind } => {
+                (None, kind.as_str())
+            }
+            crate::session_host::transport::HostedEndpoint::Unhosted => (
+                None,
+                if rec.child_pid.is_some() {
+                    TRANSPORT_PROCESS
+                } else {
+                    TRANSPORT_HARNESS
+                },
+            ),
         };
         let npub = crate::idref::npub(&rec.pubkey)
             .with_context(|| format!("invalid session pubkey {}", rec.pubkey))?;

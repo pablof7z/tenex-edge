@@ -11,7 +11,7 @@ mod doorbell;
 mod output_mode;
 mod prompt;
 use crate::session_host::transport::{
-    hosted_endpoint_for, transport_for_kind, EndpointRef, TransportKind,
+    hosted_endpoint_for, transport_for_kind, EndpointRef, HostedEndpoint, TransportKind,
 };
 pub use doorbell::ring_doorbells;
 pub(crate) use output_mode::session_is_headless;
@@ -37,7 +37,13 @@ pub(crate) fn session_has_live_delivery_path(
             return false;
         }
     };
-    endpoint.is_some_and(|(transport, endpoint)| transport.is_live(&endpoint))
+    match endpoint {
+        HostedEndpoint::Resolved {
+            transport,
+            endpoint,
+        } => transport.is_live(&endpoint),
+        HostedEndpoint::Unhosted | HostedEndpoint::Unavailable { .. } => false,
+    }
 }
 
 /// Don't re-inject into the same session within this window (seconds).

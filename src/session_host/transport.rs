@@ -128,6 +128,19 @@ pub struct EndpointRef {
     pub endpoint_id: String,
 }
 
+/// Resolution of the runtime endpoint admitted on a session record.
+pub enum HostedEndpoint {
+    /// A native process with no daemon-hosted transport.
+    Unhosted,
+    /// The session was admitted as hosted, but its exact locator is unavailable.
+    Unavailable { kind: TransportKind },
+    /// The admitted transport and exact harness-scoped locator both resolved.
+    Resolved {
+        transport: TransportImpl,
+        endpoint: EndpointRef,
+    },
+}
+
 /// Operator-facing endpoint capabilities projected by the owning transport.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct EndpointDescriptor {
@@ -270,17 +283,25 @@ pub fn transport_for_locator(
 pub fn hosted_endpoint_for(
     store: &crate::state::Store,
     session: &crate::state::Session,
-) -> Result<Option<(TransportImpl, EndpointRef)>> {
+) -> Result<HostedEndpoint> {
     let Some(kind) = TransportKind::parse(&session.admitted_transport) else {
-        return Ok(None);
+        return Ok(HostedEndpoint::Unhosted);
     };
-    Ok(store
-        .locator_for_session(
-            &session.pubkey,
-            &session.observed_harness,
-            kind.locator_kind(),
-        )?
-        .and_then(|locator| transport_for_locator(&locator)))
+    let Some(locator) = store.locator_for_session(
+        &session.pubkey,
+        &session.observed_harness,
+        kind.locator_kind(),
+    )?
+    else {
+        return Ok(HostedEndpoint::Unavailable { kind });
+    };
+    Ok(HostedEndpoint::Resolved {
+        transport: transport_for_kind(kind),
+        endpoint: EndpointRef {
+            kind,
+            endpoint_id: locator.locator_value,
+        },
+    })
 }
 
 /// Pick the exact transport for a required configured bundle.

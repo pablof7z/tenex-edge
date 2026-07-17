@@ -282,16 +282,40 @@ pub(in crate::daemon::server) fn session_still_live(
     snap: &crate::state::Session,
 ) -> bool {
     let pid_ok = snap.child_pid.map(pid_alive).unwrap_or(false);
-    let endpoint_live = state
-        .with_store(|store| crate::session_host::transport::hosted_endpoint_for(store, snap))
-        .ok()
-        .flatten()
-        .map(|(transport, endpoint)| transport.is_live(&endpoint));
-    revive_decision(pid_ok, endpoint_live)
+    match state.with_store(|store| crate::session_host::transport::hosted_endpoint_for(store, snap))
+    {
+        Ok(crate::session_host::transport::HostedEndpoint::Unhosted) => {
+            revive_decision(pid_ok, false, None)
+        }
+        Ok(crate::session_host::transport::HostedEndpoint::Unavailable { kind }) => {
+            tracing::warn!(
+                pubkey = %snap.pubkey,
+                transport = kind.as_str(),
+                "admitted hosted endpoint locator is unavailable; refusing PID fallback"
+            );
+            revive_decision(pid_ok, true, None)
+        }
+        Ok(crate::session_host::transport::HostedEndpoint::Resolved {
+            transport,
+            endpoint,
+        }) => revive_decision(pid_ok, true, Some(transport.is_live(&endpoint))),
+        Err(error) => {
+            tracing::error!(
+                pubkey = %snap.pubkey,
+                admitted_transport = %snap.admitted_transport,
+                %error,
+                "hosted endpoint lookup failed; refusing PID fallback"
+            );
+            false
+        }
+    }
 }
-/// Pure revive decision, split out for unit testing. `endpoint_live` is `None` for a
-/// session with no hosted endpoint (a native harness process), in which case
-/// the PID check is authoritative.
-fn revive_decision(pid_ok: bool, endpoint_live: Option<bool>) -> bool {
-    endpoint_live.unwrap_or(pid_ok)
+
+/// PID liveness is authoritative only when no hosted transport was admitted.
+fn revive_decision(pid_ok: bool, hosted_admitted: bool, endpoint_live: Option<bool>) -> bool {
+    match endpoint_live {
+        Some(live) => live,
+        None if hosted_admitted => false,
+        None => pid_ok,
+    }
 }

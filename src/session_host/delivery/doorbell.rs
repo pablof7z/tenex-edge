@@ -58,12 +58,17 @@ async fn ring_doorbells_inner(state: &Arc<DaemonState>) -> Result<()> {
                 continue;
             }
         };
-        let endpoint_live = hosted
-            .as_ref()
-            .is_some_and(|(transport, endpoint)| transport.is_live(endpoint));
-        let endpoint_id = hosted
-            .as_ref()
-            .map(|(_, endpoint)| endpoint.endpoint_id.clone());
+        let (endpoint_id, endpoint_live) = match &hosted {
+            crate::session_host::transport::HostedEndpoint::Resolved {
+                transport,
+                endpoint,
+            } => (
+                Some(endpoint.endpoint_id.clone()),
+                transport.is_live(endpoint),
+            ),
+            crate::session_host::transport::HostedEndpoint::Unhosted
+            | crate::session_host::transport::HostedEndpoint::Unavailable { .. } => (None, false),
+        };
         let fact = delivery_scan_fact(
             &rec,
             pending.into_iter().map(|row| row.event_id).collect(),
@@ -83,7 +88,7 @@ async fn ring_doorbells_inner(state: &Arc<DaemonState>) -> Result<()> {
                 continue;
             }
         };
-        if let Some((transport, _)) = hosted {
+        if let crate::session_host::transport::HostedEndpoint::Resolved { transport, .. } = hosted {
             apply_delivery_effects(state, &rec, &transport, effects).await;
         }
     }

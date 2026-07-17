@@ -37,6 +37,84 @@ fn persisted_locator_selects_the_transport_without_agent_config() {
 }
 
 #[test]
+fn admitted_hosted_transport_remains_distinct_when_its_locator_is_missing() {
+    for kind in [TransportKind::Pty, TransportKind::Acp] {
+        let store = crate::state::Store::open_memory().unwrap();
+        let pubkey = format!("pk-missing-{}", kind.as_str());
+        store
+            .reserve_session_with_facts(
+                &crate::state::RegisterSession {
+                    pubkey: pubkey.clone(),
+                    observed_harness: "codex".into(),
+                    agent_slug: "codex".into(),
+                    channel_h: "root".into(),
+                    child_pid: Some(std::process::id() as i32),
+                    transcript_path: None,
+                    now: 1,
+                },
+                &crate::state::AdmittedRuntimeFacts {
+                    observed_harness: "codex".into(),
+                    claimed_harness: String::new(),
+                    bundle: format!("codex-{}", kind.as_str()),
+                    transport: kind.as_str().into(),
+                    endpoint_provenance: "launch".into(),
+                },
+            )
+            .unwrap();
+        let session = store.get_session(&pubkey).unwrap().unwrap();
+
+        match hosted_endpoint_for(&store, &session).unwrap() {
+            HostedEndpoint::Unavailable { kind: actual } => assert_eq!(actual, kind),
+            HostedEndpoint::Unhosted | HostedEndpoint::Resolved { .. } => {
+                panic!("missing {} locator lost admitted transport", kind.as_str())
+            }
+        }
+    }
+}
+
+#[test]
+fn hosted_locator_lookup_errors_are_not_collapsed_to_unhosted() {
+    let scratch = tempfile::tempdir().unwrap();
+    let database = scratch.path().join("state.db");
+    let store = crate::state::Store::open(&database).unwrap();
+    store
+        .reserve_session_with_facts(
+            &crate::state::RegisterSession {
+                pubkey: "pk-broken-locator-table".into(),
+                observed_harness: "codex".into(),
+                agent_slug: "codex".into(),
+                channel_h: "root".into(),
+                child_pid: Some(std::process::id() as i32),
+                transcript_path: None,
+                now: 1,
+            },
+            &crate::state::AdmittedRuntimeFacts {
+                observed_harness: "codex".into(),
+                claimed_harness: String::new(),
+                bundle: "codex-acp".into(),
+                transport: "acp".into(),
+                endpoint_provenance: "launch".into(),
+            },
+        )
+        .unwrap();
+    let session = store
+        .get_session("pk-broken-locator-table")
+        .unwrap()
+        .unwrap();
+
+    rusqlite::Connection::open(&database)
+        .unwrap()
+        .execute_batch("DROP TABLE session_locators")
+        .unwrap();
+
+    let error = match hosted_endpoint_for(&store, &session) {
+        Err(error) => error,
+        Ok(_) => panic!("broken locator lookup was collapsed to an endpoint state"),
+    };
+    assert!(error.to_string().contains("session_locators"), "{error:#}");
+}
+
+#[test]
 fn missing_bundle_fails_without_pty_fallback() {
     let cfg = crate::harness::HarnessesConfig::default();
     assert!(select_transport_with(&cfg, "claude").is_err());

@@ -18,5 +18,12 @@ pub(crate) fn session_is_headless(
             return false;
         }
     };
-    endpoint.is_some_and(|(transport, endpoint)| !transport.output_is_visible(&endpoint))
+    match endpoint {
+        crate::session_host::transport::HostedEndpoint::Unhosted => false,
+        crate::session_host::transport::HostedEndpoint::Unavailable { .. } => true,
+        crate::session_host::transport::HostedEndpoint::Resolved {
+            transport,
+            endpoint,
+        } => !transport.output_is_visible(&endpoint),
+    }
 }

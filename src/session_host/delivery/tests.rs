@@ -155,7 +155,10 @@ fn headless_mode_separates_output_visibility_from_reachability() {
         )
         .unwrap();
     let session = store.get_session("pk-output").unwrap().unwrap();
-    assert!(!session_is_headless(&store, &session));
+    assert!(
+        session_is_headless(&store, &session),
+        "an admitted hosted session without its endpoint has no visible output surface"
+    );
 
     store
         .put_session_locator("codex", crate::state::LOCATOR_ACP, "acp-1", "pk-output", 2)
