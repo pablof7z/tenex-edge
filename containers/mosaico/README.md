@@ -28,8 +28,10 @@ codex-app-server -> Codex app-server JSON-RPC
 opencode-acp     -> native OpenCode ACP
 ```
 
-Each generated profile writes `/state/mosaico/harnesses.json` plus a
-selecting `/state/mosaico/agents/<slug>.json`. Use the skill's
+Each generated profile writes `/state/mosaico/harnesses.json` plus a keyless
+selecting `/state/mosaico/agents/<slug>.json`. Harness bundles contain only
+`harness`, `transport`, and optional `args`; provider profile selection belongs
+in the agent file. Use the skill's
 `scripts/launch-agent ... smoke` for the transport handshake/model turn and
 `scripts/launch-agent ... launch` for a live headless agent. The latter uses
 `mosaico-hosted` to keep the container-owned daemon and RPC child alive.
@@ -39,10 +41,12 @@ selecting `/state/mosaico/agents/<slug>.json`. Use the skill's
 does not share Codex subscription state. OpenCode has the same split between
 `opencode` and `opencode-ollama`.
 
-Live agent testing uses the host harnesses' real credentials/config by default
-while keeping fabric runtime state isolated per container profile. The runner mounts host auth
-directories read-only, symlinks credential files into the isolated container
-home, and keeps writable hook config in container state. Set
+Live agent testing uses the selected host harness's real credentials/config by
+default while keeping fabric runtime state isolated per container profile. The
+runner mounts only that provider's auth directories read-only, projects its
+credentials and native agent profiles into the isolated container home, and
+keeps writable hook config in container state. It never mounts host
+`~/.mosaico`. Set
 `MOSAICO_CONTAINER_HOST_AUTH=0` only for non-agent smoke tests.
 
 `doctor` checks every installed transport command, then validates credentials
@@ -65,6 +69,11 @@ container if the host pty pane is killed before the agent exits.
 Headless ACP/app-server labs use the same cidfile contract because there is no
 attached PTY keeping the container's main process alive.
 
+The runner takes a host-side lock for each profile state directory. A second
+command against the same profile fails while its agent container is alive,
+before it can replace the shared daemon socket. Stop the live profile container
+before running same-profile `mosaico`, `doctor`, or cleanup commands.
+
 The runner defaults `OLLAMA_HOST` to `http://192.168.64.1:11434`, the Apple
 container VM's gateway to the host on this machine. Override it with
 `MOSAICO_OLLAMA_HOST` if your setup changes.
@@ -78,9 +87,9 @@ from inside the container.
 | Purpose | Path |
 | --- | --- |
 | Home | `/state/home` |
-| Claude auth/config | host credentials projected into `/state/home/.claude`, hook config copied and sanitized |
-| Codex config/auth | host credentials symlinked into `/state/home/.codex` |
-| OpenCode config | host credentials symlinked into `/state/home/.config/opencode` |
+| Claude auth/config | selected host credentials and `agents/` projected into `/state/home/.claude`, hook config copied and sanitized |
+| Codex config/auth | selected host credentials and `agents/` projected into `/state/home/.codex` |
+| OpenCode config | selected host credentials and `agents/` projected into `/state/home/.config/opencode` |
 | OpenCode data/cache | `/state/home/.local/share`, `/state/home/.cache` |
 | Cargo registry/cache | `/state/cargo` |
 | Cargo target | `/state/target` |
@@ -89,5 +98,5 @@ from inside the container.
 | harness bundles | `/state/mosaico/harnesses.json` |
 | agent bundle selectors | `/state/mosaico/agents/*.json` |
 
-Host Codex/OpenCode config, sessions, plugins, and host Mosaico daemon state are
-not mounted.
+Unselected provider config, provider session history, plugins, and host Mosaico
+daemon state are not mounted.

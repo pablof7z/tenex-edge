@@ -1,66 +1,83 @@
-# mosaico-dev live lab lessons
+# Mosaico development live lab lessons
 
-## `mosaico channel init` is required before `mosaico launch`
+## Register the workspace before the first launch
 
-`mosaico launch <agent> -- <args>` fails fast with:
-
-```
-mosaico: no known workspace in /workspace; run `mosaico channel init` or
-git init first, or pass `--workspace <slug>`
-```
-
-even though `/workspace` (the mounted `REPO_ROOT`) is already a git repo. The
-workspace registry (`~/.mosaico/workspaces.json`, inside container/profile
-state) is separate from git-repo detection. Run once per profile before the
-first `launch` in a lab:
+The mounted repository being a Git checkout does not populate the isolated
+profile's workspace registry. Run once per fresh profile:
 
 ```bash
 bash containers/mosaico/run --profile claude mosaico channel init
 ```
 
-This registers the directory's basename (e.g. `workspace` for a worktree
-checked out as a feature worktree mounted at `/workspace`) as the
-workspace slug and creates the `workspace` channel. It only touches
-profile-local/container state, not host `~/.mosaico`. The main skill and
-live-lab workflow include this step before both PTY and structured launches.
+This writes only profile-local Mosaico state and creates/resolves the workspace
+root channel used by launch.
 
-## Running a second container against the same profile WHILE a launch-mode agent is alive breaks that agent's daemon connection
+## Launch configuration is transport-owned
 
-The troubleshooting reference already warns "avoid running two containers
-against the same profile at once," but it undersells the blast radius. In
-this run, launching `claude` via `launch-agent ... launch claude
---model haiku` produced a healthy session UI (`claude@claude workspace workspace
-[idle]`, no missing-session warning). Running
-`bash containers/mosaico/run --profile claude mosaico explain event:<id>`
-in a **second** container against the same profile while that PTY session
-was still up:
+`mosaico launch <target> [prompt]` does not accept provider argv, a harness
+override, a command override, or a headed/headless selector. The selected
+agent's `harness` points to one `harnesses.json` bundle; that bundle owns
+`harness`, `transport`, and `args`. The transport selects PTY, ACP, app-server,
+or headless-exec.
 
-- succeeded and printed a correct receipt, BUT
-- started its own daemon in its own container/VM bound to the same
-  bind-mounted socket path, logged
-  `removing locally managed offline agent from channel ... reason=startup-stale-pid`,
-  and evicted the live agent's pubkey from the channel.
-- The live PTY session's statusline flipped to `[mosaico: down]` and its next
-  prompt hung with `UserPromptSubmit hook timed out after 30s` — the session
-  was unrecoverable; it had to be killed (`container stop/rm`, or choose Kill
-  from `mosaico sessions`) and relaunched fresh.
+Put operational provider flags in bundle `args`. Put a supported native profile
+name in the agent's optional `profile` string. Use direct mode when testing raw
+provider arguments.
 
-Lesson: treat "same-profile RPC" as a hard stop, not a soft caution. Before
-any `mosaico explain ...` / `mosaico channel ...` / other one-shot
-`mosaico` subcommand against a profile, first stop that profile's
-launch-mode agent (`container stop <name>`, or choose Kill in `mosaico sessions`),
-remove the stale `daemon.sock` if needed), THEN run the diagnostic command. Only `nak`
-against the relay directly (no container involved) is safe to run
-concurrently with a live agent.
+## Per-session agents are keyless on disk
 
-## `scripts/cleanup-lab` now relies on cidfiles and the relay PID
+With `perSessionKey: true`, omit `secret_key` and `public_key`. Mosaico derives a
+fresh session identity from the backend `mosaicoPrivateKey` plus a fresh anchor.
+Persist key fields only for an explicit `perSessionKey: false` durable agent.
 
-The cleanup helper no longer scans external session names. It reads the
-container cidfiles under the lab work directory, stops those containers when the
-container runtime is available, and kills the relay PID recorded in `lab.env`.
-For a stuck launch-mode PTY, open the session picker with the same profile/home
-context and choose Kill:
+The device's `userNsec` is the human identity and `mosaicoPrivateKey` is the
+backend identity. They must be distinct even in a disposable lab.
+
+## Never inspect a live profile from a second container
+
+A second container for the same bind-mounted profile can replace `daemon.sock`,
+run startup cleanup against the live session, and leave the active agent with a
+down status or hook timeouts. This applies to all daemon-backed commands,
+including:
+
+```text
+mosaico sessions
+mosaico channel ...
+mosaico debug explain ...
+mosaico debug hook-tail
+```
+
+While a launched container is alive, read bind-mounted logs from the host and
+use croissant/`nak`/`probe-lab`. Use the PTY terminal already attached by the
+launch helper. Stop the container before same-profile CLI inspection.
+
+## Mentions require tags
+
+Use:
 
 ```bash
-bash containers/mosaico/run --profile claude mosaico sessions
+mosaico channel send --channel <channel> --tag <session-handle> \
+  --message "Run mosaico my session."
 ```
+
+Literal `@handle` text is not a recipient tag. `--force` publishes mention-like
+text literally; it does not turn the text into a tagged delivery.
+
+## Reset both Mosaico state stores
+
+Disposable profile resets must remove SQLite `state.db*` and NMP's `nmp.redb`.
+Keeping either while switching to a fresh relay can retain stale workspace,
+membership, or event state. The profile writer performs this reset by default.
+
+## Use supported operations to prewarm
+
+Exact-profile `doctor` builds Mosaico and installs the relevant provider
+integration. ACP/app-server `smoke` then proves the configured transport and
+real model auth. Do not use an unsupported top-level version flag as a build
+shortcut.
+
+## Cleanup uses recorded container ids
+
+`scripts/cleanup-lab` reads cidfiles under the lab work directory, stops those
+containers, and then stops the relay PID from `lab.env`. Always clean containers
+before the relay so live agents do not reconnect or mutate the next run.

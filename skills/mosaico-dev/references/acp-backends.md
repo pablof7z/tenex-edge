@@ -1,87 +1,87 @@
-# ACP And App-Server Backends
+# ACP and app-server backends
 
-Use this reference for structured Claude, Codex, and OpenCode live-lab runs.
-These agents use JSON-RPC instead of terminal byte injection.
+Use this reference for Claude ACP, Codex app-server, and OpenCode ACP labs.
+These transports use structured RPC instead of terminal-byte injection.
 
-## Configuration Contract
+## Configuration contract
 
-The filename is `harnesses.json` (plural). A structured launch requires both:
+A structured launch requires two files:
 
 ```text
 <MOSAICO_HOME>/harnesses.json
 <MOSAICO_HOME>/agents/<slug>.json
 ```
 
-The first file defines a named bundle:
+`harnesses.json` contains only transport policy. For example:
 
 ```json
 {
   "claude-acp": {
     "harness": "claude-code",
     "transport": "acp",
-    "profile": { "model": "haiku" }
+    "args": []
   }
 }
 ```
 
-The agent file selects it through `harness`:
+`args` is optional and defaults to an empty array. It is the only bundle-owned
+provider-argument surface. Agent profile names and executable selection do not
+belong in a bundle; unknown fields are invalid.
+
+The agent file selects that bundle:
 
 ```json
 {
   "slug": "claude",
-  "secret_key": "<secret>",
-  "public_key": "<pubkey>",
   "created_at": 0,
   "perSessionKey": true,
   "harness": "claude-acp"
 }
 ```
 
-Never print the secret fields. Safe inspection:
+This per-session agent is intentionally keyless on disk. Add `secret_key` and
+`public_key` only with `perSessionKey: false` for a deliberately durable agent.
+
+Safe inspection:
 
 ```bash
-jq 'to_entries[] | {bundle:.key,harness:.value.harness,transport:.value.transport,codex_config_profile:.value.codex_config_profile,profile:.value.profile}' \
+jq 'to_entries[] | {bundle:.key,harness:.value.harness,transport:.value.transport,args:(.value.args // [])}' \
   .container-state/claude-acp/mosaico/harnesses.json
-jq '{slug,harness,perSessionKey}' \
+jq '{slug,harness,profile,perSessionKey,has_secret:has("secret_key"),has_public:has("public_key")}' \
   .container-state/claude-acp/mosaico/agents/claude.json
 ```
 
-## Supported Structured Profiles
+For a normal per-session lab agent, both `has_secret` and `has_public` must be
+false.
 
-| profile | harness | transport | model override |
+## Generated profiles
+
+| profile | harness | transport | args override |
 | --- | --- | --- | --- |
-| `claude-acp` | `claude-code` | `acp` | `MOSAICO_DEV_CLAUDE_ACP_MODEL` |
-| `codex-app-server` | `codex` | `app-server` | `MOSAICO_DEV_CODEX_APP_SERVER_MODEL` |
-| `opencode-acp` | `opencode` | `acp` | `MOSAICO_DEV_OPENCODE_ACP_MODEL` |
+| `claude-acp` | `claude-code` | `acp` | `MOSAICO_DEV_CLAUDE_ACP_ARGS_JSON` |
+| `codex-app-server` | `codex` | `app-server` | `MOSAICO_DEV_CODEX_APP_SERVER_ARGS_JSON` |
+| `opencode-acp` | `opencode` | `acp` | `MOSAICO_DEV_OPENCODE_ACP_ARGS_JSON` |
 
-The defaults are the cheapest useful models known to the lab. If one is
-rejected, set the corresponding variable and regenerate the profile. Provider
-CLI flags do not belong after a structured `mosaico launch`; the bundle
-profile is the source of truth.
+Default args are `[]`. Use the listed writer override only when the lab needs
+explicit provider arguments. The value must be a JSON array of strings. There
+are no model/profile objects.
 
-Codex app-server bundles can also select an ordinary named Codex profile:
+A named Codex configuration is different from bundle args. Select it with:
 
 ```bash
 MOSAICO_DEV_CODEX_CONFIG_PROFILE=planner \
   skills/mosaico-dev/scripts/write-container-profiles "${LAB_ENV}" codex-app-server
 ```
 
-This writes `"codex_config_profile":"planner"` next to the bundle `profile`.
-Codex app-server rejects the CLI `--profile` selector, so mosaico reads base
-`config.toml`, deep-merges `planner.config.toml`, and materializes the result as
-an isolated app-server `CODEX_HOME/config.toml`. Project configuration and the
-bundle's inline `profile` (`-c` overrides) retain their normal higher
-precedence. Profile names accept only letters, numbers, hyphens, and
-underscores; missing or invalid profiles fail before launch.
+The writer places `"profile":"planner"` in the Codex agent file. Mosaico then
+composes `$CODEX_HOME/planner.config.toml` over the base config in an isolated
+app-server home. Codex app-server does not accept the native `--profile` flag.
+Claude ACP and OpenCode ACP do not support named agent profiles; omit `profile`
+for those combinations.
 
-When a named profile is selected, the writer lets its model stand unless
-`MOSAICO_DEV_CODEX_APP_SERVER_MODEL` is explicitly set. Approval and sandbox
-lab overrides remain explicit. Host auth staging projects all
-`~/.codex/*.config.toml` files into the isolated container home.
+## Smoke before launch
 
-## Smoke Before Launch
-
-Generate state, run doctor, then drive the exact configured bundle:
+Generate the profile, run doctor, and drive the configured bundle:
 
 ```bash
 skills/mosaico-dev/scripts/write-container-profiles "${LAB_ENV}" claude-acp
@@ -89,16 +89,14 @@ bash containers/mosaico/run --profile claude-acp doctor
 skills/mosaico-dev/scripts/launch-agent "${LAB_ENV}" smoke claude-acp
 ```
 
-A passing smoke proves `initialize`, session/thread creation, a real model turn,
-and cross-process resume. ACP harnesses use `session/load`; Codex app-server
-uses a fresh process, `thread/resume`, and a second real turn. Its smoke also
-prints safe effective model, reasoning-effort, sandbox, and approval fields
-from `config/read` so named-profile application is directly observable.
+A passing smoke proves initialization, session/thread creation, a real turn,
+and cross-process resume. ACP uses `session/load`; Codex app-server uses
+`thread/resume` and a second real turn.
 
-## Headless Launch
+## Launch
 
-Register the mounted workspace before the first launch, then provide an initial
-prompt through the mosaico launch surface:
+Register the workspace and supply an optional positional prompt through the
+helper environment:
 
 ```bash
 bash containers/mosaico/run --profile claude-acp mosaico channel init
@@ -106,30 +104,28 @@ MOSAICO_DEV_PROMPT="Run mosaico my session." \
   skills/mosaico-dev/scripts/launch-agent "${LAB_ENV}" launch claude-acp
 ```
 
+The helper calls the current `mosaico launch <slug> [prompt]` form. It supplies
+no provider arguments or launch override flags. The selected bundle transport
+causes the helper to keep the container alive after the launch command returns.
+
 Expected output includes `[mosaico acp] session: ...`. There is no PTY to
-attach. The helper uses `mosaico-hosted` so the container remains alive after
-the launch CLI returns; otherwise container lifecycle would reap the daemon and
-RPC child. Do not start a second container against that profile while it is
-live. Inspect bind-mounted logs and host-side `nak` probes, then stop it with
-`cleanup-lab`.
+attach. While the container is alive, inspect bind-mounted logs and host-side
+relay probes only. Do not start another container against the same profile.
 
 ## Troubleshooting
 
-If the bundle does not resolve, compare the agent's `harness` value to the exact
-key in `harnesses.json` and validate both files with `jq`. Rerun the writer when
-they differ. Do not add `harness.json`, duplicate fields, or fallback commands.
+If resolution fails, compare the agent's `harness` string to the exact bundle
+key and validate that each bundle has only `harness`, `transport`, and optional
+`args`. Do not add alternate filenames, duplicate fields, fallback commands, or
+launch-time selectors.
 
-If Claude asks `npx` for permission to install the adapter, rebuild the image:
+If Claude asks to install the adapter, rebuild the image and rerun doctor:
 
 ```bash
 bash containers/mosaico/run build-image
 bash containers/mosaico/run --profile claude-acp doctor
 ```
 
-Current doctor output includes `claude-acp-adapter`, Codex app-server, OpenCode
-ACP, and parsed bundle/agent config. The adapter belongs in the image, not in an
-interactive one-profile install.
-
-For delivery failures, correlate the accepted kind:9 event id, inbox state,
-headless session liveness, endpoint alias, and daemon delivery log. A passing
-handshake alone proves the driver, not mention delivery.
+For delivery failures, correlate the accepted kind:9 id, target tag, RPC
+session, and daemon delivery/completion log. A handshake proves the driver, not
+mention delivery.

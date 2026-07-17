@@ -1,299 +1,191 @@
 # Troubleshooting
 
-Use this when the live lab does not start cleanly or evidence is missing.
+Use the first failing command and the real profile/relay state. Do not add
+compatibility fields or launch overrides to work around current contract errors.
 
-## Relay Port Already In Use
+## Relay does not start
 
-Symptom:
-
-```text
-port ... is already held by pid ...
-```
-
-Find it:
+For a fixed-port conflict:
 
 ```bash
 lsof -nP -iTCP:<port> -sTCP:LISTEN
 ```
 
-By default `start-croissant-relay` auto-selects an unused high port so stale
-labs do not share a relay. If a fixed port is required, set it explicitly:
+Only stop a process known to be a stale lab. The relay helper normally chooses
+an unused high port. If readiness times out, inspect `${RELAY_LOG}` and verify
+the croissant checkout, bridge bind address, writable data path, owner public
+key, and NIP-11 response.
 
-```bash
-MOSAICO_DEV_RELAY_PORT=9899 skills/mosaico-dev/scripts/start-croissant-relay
-```
-
-Only kill an existing process if you know it belongs to a stale test.
-
-## Relay Does Not Become Ready
-
-Inspect the relay log:
-
-```bash
-tail -n 120 "${RELAY_LOG}"
-```
-
-Check:
-
-- croissant checkout exists at `${HOME}/Work/croissant` or
-  `MOSAICO_DEV_CROISSANT_DIR`
-- `go build` succeeds there
-- `HOST` is the Apple container bridge IP, usually `192.168.64.1`
-- `PORT` is not in use
-- `DATAPATH` is writable
-- `OWNER_PUBLIC_KEY` is a hex public key
-
-Then retry with a fresh run id or port.
-
-## Container Cannot Reach Relay
-
-Host reachability:
+## Container cannot reach the relay
 
 ```bash
 curl -fsS -H 'Accept: application/nostr+json' "${RELAY_HTTP}" | jq .
+bash containers/mosaico/run --profile claude shell -c \
+  "curl -fsS -H 'Accept: application/nostr+json' '${RELAY_HTTP}'"
 ```
 
-Container reachability:
+Run the container check before launching that profile. If host reachability
+passes but container reachability fails, verify bridge binding, profile relay
+URL, Apple container networking, and the chosen port.
 
-```bash
-bash containers/mosaico/run --profile claude shell -c "curl -fsS -H 'Accept: application/nostr+json' '${RELAY_HTTP}'"
-```
-
-If host works and container fails:
-
-- verify croissant was bound to the bridge IP, not only localhost
-- verify the profile config uses `ws://<bridge-ip>:<port>`
-- verify Apple container networking is running
-- try a fresh port
-
-## Host Auth Missing
-
-Run:
-
-```bash
-bash containers/mosaico/run doctor
-```
-
-If it reports a missing host auth path:
-
-- report the path
-- do not run provider login inside the container
-- do not create replacement provider files in the repo
-- do not copy credential contents into `.container-state` by hand
-
-The expected fix is host-side auth or host-auth projection repair.
-
-## Claude Stops At OAuth
-
-Symptom: the Claude terminal UI shows a login, OAuth, paste-code, or first-run
-auth prompt instead of accepting the prompt.
-
-Treat this as a failed auth staging check. Do not paste OAuth codes, do not run
-Claude login in the container, and do not print credential files. Check:
+## Host auth missing or Claude opens OAuth
 
 ```bash
 bash containers/mosaico/run --profile claude doctor
-bash containers/mosaico/run --profile claude claude -p "Respond with exactly OK." --model haiku
+bash containers/mosaico/run --profile claude claude -p \
+  "Respond with exactly OK." --model haiku
 ```
 
-On macOS the runner should prefer the `Claude Code-credentials` Keychain item
-over a stale host `~/.claude/.credentials.json`. If the tiny command fails,
-fix `containers/mosaico/host-auth.bash` or host auth before running the lab.
+Treat login, OAuth, paste-code, or first-run prompts as auth-staging failures.
+Do not authenticate inside the disposable container or print credential files.
+On macOS, Claude staging should prefer the current Keychain credential over a
+stale JSON credential.
 
-## Host Hook Path Leaked Into Claude
+## Host hook path leaked into the container
 
-Symptom:
-
-```text
-spawning detached daemon from /Users/.../.local/bin/mosaico: No such file or directory
-```
-
-The staged Claude settings are still carrying a host `MOSAICO_BIN`. The
-container profile must use:
+If a hook tries to execute a host path, verify staged provider settings point to:
 
 ```text
 /state/target/debug/mosaico
 ```
 
-Rerun the profile after staging has sanitized Claude settings. Do not edit host
-Claude settings just to make a container lab pass.
+Repair host-auth staging and regenerate the profile; do not change host hook
+settings merely to pass the lab.
 
-## Launch Session Has No Session Anchor
+## Bundle or agent config is rejected
 
-Symptom: Claude launches and is authenticated, but the statusline says:
+Validate the exact schema:
 
-```text
-[mosaico: no session id]
+```bash
+jq 'to_entries[] | {bundle:.key,keys:(.value|keys),harness:.value.harness,transport:.value.transport,args:(.value.args // [])}' \
+  .container-state/<profile>/mosaico/harnesses.json
+jq '{slug,harness,profile,perSessionKey,has_secret:has("secret_key"),has_public:has("public_key")}' \
+  .container-state/<profile>/mosaico/agents/<slug>.json
 ```
 
-This means the launch session did not get a successful SessionStart hook before the
-statusline rendered. A brief startup frame can show this before SessionStart
-settles; it is a failure when the warning persists after the prompt is accepted
-or after the agent runs `mosaico my session`. Check that auth staging did not
-overwrite installed hooks without reinstalling them:
+Each bundle allows only `harness`, `transport`, and optional string-array
+`args`. The agent owns optional string `profile`. A `perSessionKey: true` agent
+must be keyless. Regenerate invalid state; do not add aliases or duplicate old
+fields.
+
+## Launch rejects arguments
+
+The current surface is:
+
+```text
+mosaico launch [TARGET] [PROMPT] [--workspace ...] [--channel [ROOM]] [--name ...]
+```
+
+Provider flags belong in bundle `args`, not after a separator or in launch-time
+override flags. Regenerate the profile and call the helper with no trailing
+launch args. Direct mode may still receive provider CLI args.
+
+## Launch target is missing or ambiguous
+
+```bash
+bash containers/mosaico/run --profile <profile> mosaico launch
+```
+
+A non-interactive run prints available targets. Check `availableHarnesses`,
+`harnesses.json`, configured agents, and the installed global/workspace native
+agent directories. If the same native slug exists in several harnesses, use the
+harness-suffixed target printed by the inventory. Do not hide the conflict with
+a fallback bundle.
+
+## Workspace is unknown
+
+Register the mounted workspace once per fresh profile:
+
+```bash
+bash containers/mosaico/run --profile claude mosaico channel init
+```
+
+The profile-local workspace registry is independent of Git discovery.
+
+## Session has no anchor
+
+If the UI persistently shows no session id after the first prompt or after
+`mosaico my session`, inspect installed hooks and hook-call files:
 
 ```bash
 jq '.hooks | keys' .container-state/<profile>/home/.claude/settings.json
 find .container-state/<profile>/mosaico/sessions -name hook-calls.jsonl -print
 ```
 
-For Claude launch mode, `containers/mosaico/run mosaico ...` must install
-the `claude-code` harness after staging auth, even though the agent slug is
-`claude`. A passing session shows an identity like
-`claude1@<profile> workspace workspace [idle]` instead of the warning.
+Doctor/install must use the real harness name (`claude-code`, `codex`, or
+`opencode`) even when the public agent slug differs.
 
-## Claude Hooks Cannot Install
+## Same-profile inspection broke a live agent
 
-Common cause: Claude settings were mounted read-only. The host-auth staging
-should copy writable settings into profile state while keeping credentials
-read-only.
+Symptoms include `[mosaico: down]`, a hook timeout, socket replacement, or
+startup cleanup removing the active agent. Stop the launched container with the
+recorded cidfile/cleanup helper. Do not attempt to recover it through another
+same-profile command. After it is stopped, remove only a stale socket if needed
+and relaunch.
 
-Check:
+While an agent is alive, only host log reads, croissant logs, `nak`, and
+`probe-lab` are safe. Same-profile `sessions`, `channel`, `debug explain`, and
+`debug hook-tail` must wait until the launch container stops.
 
-```bash
-bash containers/mosaico/run --profile claude doctor
-find .container-state/claude -maxdepth 4 -type f | sort
-```
+## Stale SQLite or NMP state
 
-If hooks fail, inspect the staged Claude settings path and file permissions. Do
-not make host credential directories writable from the container.
-
-## Model Flag Rejected
-
-Capture the exact CLI output from the foreground terminal or attach through the
-human session picker:
+A fresh relay paired with old `state.db` or `nmp.redb` can retain obsolete
+workspace, membership, or acquisition state. For a disposable lab, rerun:
 
 ```bash
-bash containers/mosaico/run --profile claude mosaico sessions
+skills/mosaico-dev/scripts/write-container-profiles "${LAB_ENV}" <profile>
 ```
 
-Then retry with the cheapest model the installed CLI accepts. Record both the
-rejected flag and the fallback. The lab should continue unless the model choice
-itself is what you are testing.
-
-## Cargo Or Build Cache Problems
-
-If Rust or Go build caches fail with transient corruption:
-
-```bash
-cargo test --no-run
-```
-
-or rebuild the specific binary/image that failed. Do not delete broad cache
-directories unless the user asks or the failure clearly points to that cache.
-For fresh profiles, a long first run is usually a cold build, not a hung agent.
-Prewarm the exact profile before pty launch.
-
-## Stale Daemon Socket Or State
-
-Apple containers can leave a Unix socket path in the bind-mounted profile state
-after a container exits. The runner removes the socket before new sequential
-runs by default, but an active launched agent can still own the same profile.
-Avoid same-profile parallel commands.
-
-If an interrupted disposable profile has a corrupt or half-created daemon DB,
-use a fresh profile or remove only that generated profile's daemon state:
+The default reset removes both stores. If manually repairing an already-stopped
+disposable profile, target only that profile:
 
 ```bash
 rm -f .container-state/<profile>/mosaico/daemon.sock
-rm -f .container-state/<profile>/mosaico/state.db*
+rm -f .container-state/<profile>/mosaico/state.db \
+  .container-state/<profile>/mosaico/state.db-shm \
+  .container-state/<profile>/mosaico/state.db-wal
+rm -f .container-state/<profile>/mosaico/nmp.redb
 ```
 
-Do not remove a non-disposable profile unless the user approves it.
+Never delete these from a live or non-disposable profile without explicit
+authorization.
 
-## Management Key Is Not Admin
+## Management key is not admin
 
-Symptom:
+Verify `userNsec` and `mosaicoPrivateKey` are distinct and that the relay-owner
+human pubkey is the sole whitelist entry. Backend keys must not be added to the
+human whitelist. Then confirm no stale profile connected first on a reused
+relay. Prefer a fresh auto-selected port and freshly generated profile state.
 
-```text
-ensure_channel_ready: management key is not admin of "workspace"
-blocked: unknown member
-not in channel workspace
-```
+## Model or provider arg rejected
 
-This usually means a profile config was pointed at a fresh relay while the
-profile-local daemon DB still reflected an older workspace and key set. For
-live labs, rerun:
+Capture the provider's exact error. For direct mode, choose the cheapest model
+the installed CLI accepts. For launch mode, change the profile's explicit
+`MOSAICO_DEV_*_ARGS_JSON` override and regenerate it. Do not append flags to
+`mosaico launch`.
 
-```bash
-skills/mosaico-dev/scripts/write-container-profiles "${LAB_ENV}" claude
-```
+## Missing events
 
-The writer resets `.container-state/claude/mosaico` by default. If you set
-`MOSAICO_DEV_RESET_PROFILE_STATE=0`, use a fresh profile name instead.
+Check in order:
 
-If the profile state is already fresh, check for shared relay contamination:
+1. The launch accepted the prompt and produced a session id.
+2. The generated config points to the current relay.
+3. The sender used `--tag <target>`, not literal `@target` text.
+4. Croissant logged the connection, subscription, and event.
+5. `nak` reads the same relay URL.
+6. Daemon logs show delivery or a concrete rejection.
 
-```bash
-nak req -k 39000 "${RELAY_WS}" | head
-tail -n 160 "${RELAY_LOG}"
-```
-
-A fresh lab should not show old profile pubkeys creating `workspace` before the
-current profile connects. Use the default auto port, or explicitly choose a new
-port; do not keep retesting on a shared `9888` relay with stale agents alive.
-
-If the lab otherwise passed and `blocked: unknown member` appears only in
-`.container-state/<profile>/mosaico/logs/group-mgmt.log` as
-`9000 put-admin (self-grant via userNsec)`, treat it as a non-blocking cleanup
-or background repair warning. It becomes a failing symptom when it is paired
-with `management key is not admin`, `not in channel workspace`, a missing
-session anchor, or missing channel/member events.
-
-After a launch-mode lab, run cleanup before stopping or reusing the relay:
+## Cleanup order
 
 ```bash
 skills/mosaico-dev/scripts/cleanup-lab "${LAB_ENV}"
 ```
 
-## Croissant pprof Conflict
+The helper stops recorded containers before the relay PID. Preserve the work
+directory when a failure still needs diagnosis.
 
-Croissant can log a local pprof bind conflict on `127.0.0.1:3337` while the
-relay itself is healthy on the requested bridge URL. Confirm actual health with:
+## Final stale-surface audit
 
-```bash
-curl -fsS -H 'Accept: application/nostr+json' "${RELAY_HTTP}" | jq .
-nak req -k 39000 "${RELAY_WS}" | head
-```
-
-Treat pprof as fatal only if NIP-11 or WebSocket probes also fail.
-
-## Relay Has No Events
-
-Check in order:
-
-1. Agent actually launched and accepted the prompt.
-2. Agent profile config points at the croissant relay.
-3. The backend profile has a generated key and whitelist.
-4. Croissant relay log shows a subscription or connection.
-5. `nak req` is pointed at the same relay URL.
-6. Hook/daemon logs show the action that should have published.
-
-An empty `nak` output is useful only if paired with these checks.
-
-## Agent UI Is Not Inspectable
-
-PTY reattach and injection evidence requires a PTY profile in launch mode. If a
-PTY agent was started as a direct foreground run, stop it and relaunch through:
-
-```bash
-skills/mosaico-dev/scripts/launch-agent "${LAB_ENV}" launch claude --model haiku
-```
-
-Use the human session picker and choose Attach:
-
-```bash
-bash containers/mosaico/run --profile claude mosaico sessions
-```
-
-## Stale Active Strings
-
-Before reporting the skill clean, run the repo audit the user expects:
-
-```bash
-grep -R "stale string" * | grep -v docs/wiki | wc -l
-```
-
-Replace `stale string` locally with the exact deprecated term being audited.
-The count should be zero for active source/docs. Keep historical wiki material
-out of this cleanup unless the user asks.
+From the repository root, audit active skill files with `rg` for removed
+product names, environment prefixes, config keys, and launch forms. Historical
+wiki material is outside this skill cleanup unless explicitly in scope.

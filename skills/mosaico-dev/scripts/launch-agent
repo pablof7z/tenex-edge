@@ -57,7 +57,8 @@ BACKEND_CMD="${MOSAICO_DEV_BACKEND_CMD:-$(backend_command_for_profile "${PROFILE
 AGENT_SLUG="${MOSAICO_DEV_AGENT_SLUG:-$(agent_slug_for_profile "${PROFILE}")}"
 CONTAINER_NAME="${MOSAICO_DEV_CONTAINER_NAME:-${SESSION}}"
 CONTAINER_CIDFILE="${WORK_DIR}/container-${SESSION}.cid"
-STATE_DIR="${MOSAICO_CONTAINER_STATE:-${REPO_ROOT}/.container-state/${PROFILE}}"
+STATE_ROOT="${MOSAICO_DEV_STATE_ROOT:-${REPO_ROOT}/.container-state}"
+STATE_DIR="${MOSAICO_CONTAINER_STATE:-${STATE_ROOT}/${PROFILE}}"
 AGENT_CFG="${STATE_DIR}/mosaico/agents/${AGENT_SLUG}.json"
 HARNESSES_CFG="${STATE_DIR}/mosaico/harnesses.json"
 
@@ -89,14 +90,10 @@ case "${MODE}" in
       launch_args+=("${MOSAICO_DEV_PROMPT}")
     fi
     if [[ $# -gt 0 ]]; then
-      if [[ "${TRANSPORT}" == "acp" || "${TRANSPORT}" == "app-server" ]]; then
-        echo "ACP/app-server launch settings belong in harnesses.json profile; regenerate the profile instead of passing CLI args" >&2
-        exit 2
-      fi
-      launch_args+=(-- "$@")
+      echo "launch mode does not accept provider arguments; put operational args in the harness bundle" >&2
+      exit 2
     fi
     if [[ "${TRANSPORT}" == "acp" || "${TRANSPORT}" == "app-server" ]]; then
-      launch_args+=(--headless)
       cmd=("${common[@]}" mosaico-hosted "${launch_args[@]}")
     else
       cmd=("${common[@]}" mosaico "${launch_args[@]}")

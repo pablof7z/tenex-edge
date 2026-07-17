@@ -33,79 +33,78 @@ mkdir -p "${KEY_DIR}"
 
 profile_contract() {
   local profile="$1"
-  CODEX_CONFIG_PROFILE=
+  AGENT_PROFILE=
   case "${profile}" in
     claude)
       AGENT_SLUG=claude
       BUNDLE=claude
       HARNESS=claude-code
       TRANSPORT=pty
-      PROFILE_JSON=null
+      BUNDLE_ARGS_JSON="${MOSAICO_DEV_CLAUDE_ARGS_JSON:-[]}"
       ;;
     claude-acp)
       AGENT_SLUG=claude
       BUNDLE=claude-acp
       HARNESS=claude-code
       TRANSPORT=acp
-      PROFILE_JSON="$(jq -cn --arg model "${MOSAICO_DEV_CLAUDE_ACP_MODEL:-haiku}" '{model:$model}')"
+      BUNDLE_ARGS_JSON="${MOSAICO_DEV_CLAUDE_ACP_ARGS_JSON:-[]}"
       ;;
     codex)
       AGENT_SLUG=codex
       BUNDLE=codex
       HARNESS=codex
       TRANSPORT=pty
-      PROFILE_JSON=null
+      BUNDLE_ARGS_JSON="${MOSAICO_DEV_CODEX_ARGS_JSON:-[]}"
       ;;
     codex-app-server)
       AGENT_SLUG=codex
       BUNDLE=codex-app-server
       HARNESS=codex
       TRANSPORT=app-server
-      CODEX_CONFIG_PROFILE="${MOSAICO_DEV_CODEX_CONFIG_PROFILE:-}"
-      if [[ -n "${CODEX_CONFIG_PROFILE}" \
-        && -z "${MOSAICO_DEV_CODEX_APP_SERVER_MODEL:-}" ]]; then
-        PROFILE_JSON='{"approval_policy":"never","sandbox_mode":"danger-full-access"}'
-      else
-        PROFILE_JSON="$(jq -cn \
-          --arg model "${MOSAICO_DEV_CODEX_APP_SERVER_MODEL:-gpt-5.3-codex-spark}" \
-          '{model:$model,approval_policy:"never",sandbox_mode:"danger-full-access"}')"
-      fi
+      BUNDLE_ARGS_JSON="${MOSAICO_DEV_CODEX_APP_SERVER_ARGS_JSON:-[]}"
+      AGENT_PROFILE="${MOSAICO_DEV_CODEX_CONFIG_PROFILE:-}"
       ;;
     opencode)
       AGENT_SLUG=opencode
       BUNDLE=opencode
       HARNESS=opencode
       TRANSPORT=pty
-      PROFILE_JSON=null
+      BUNDLE_ARGS_JSON="${MOSAICO_DEV_OPENCODE_ARGS_JSON:-[]}"
       ;;
     opencode-acp)
       AGENT_SLUG=opencode
       BUNDLE=opencode-acp
       HARNESS=opencode
       TRANSPORT=acp
-      PROFILE_JSON="$(jq -cn --arg model \
-        "${MOSAICO_DEV_OPENCODE_ACP_MODEL:-ollama/deepseek-r1:8b}" \
-        '{model:$model}')"
+      BUNDLE_ARGS_JSON="${MOSAICO_DEV_OPENCODE_ACP_ARGS_JSON:-[]}"
       ;;
     codex-ollama)
       AGENT_SLUG=codex
       BUNDLE=codex-ollama
       HARNESS=codex
       TRANSPORT=pty
-      PROFILE_JSON=null
+      BUNDLE_ARGS_JSON="${MOSAICO_DEV_CODEX_OLLAMA_ARGS_JSON:-[\"--oss\",\"--local-provider\",\"ollama\"]}"
       ;;
     opencode-ollama)
       AGENT_SLUG=opencode
       BUNDLE=opencode-ollama
       HARNESS=opencode
       TRANSPORT=pty
-      PROFILE_JSON=null
+      default_opencode_args="$(jq -cn --arg model \
+        "${MOSAICO_DEV_OPENCODE_OLLAMA_MODEL:-ollama/deepseek-r1:8b}" \
+        '["-m",$model]')"
+      BUNDLE_ARGS_JSON="${MOSAICO_DEV_OPENCODE_OLLAMA_ARGS_JSON:-${default_opencode_args}}"
       ;;
     *)
       printf 'unsupported profile %s; expected claude|claude-acp|codex|codex-app-server|opencode|opencode-acp|codex-ollama|opencode-ollama\n' "${profile}" >&2
       exit 2
       ;;
   esac
+  if ! jq -e 'type == "array" and all(.[]; type == "string")' \
+    <<<"${BUNDLE_ARGS_JSON}" >/dev/null; then
+    printf 'invalid args JSON for profile %s: expected an array of strings\n' "${profile}" >&2
+    exit 2
+  fi
 }
 
 reset_mosaico_state() {
@@ -119,33 +118,32 @@ reset_mosaico_state() {
   mkdir -p "${mosaico_dir}"
 }
 
-declare -a PUBKEYS=() AGENT_PUBKEYS=()
+if [[ -z "${OWNER_SK_FILE:-}" || ! -s "${OWNER_SK_FILE}" ]]; then
+  echo "lab environment is missing OWNER_SK_FILE; start the relay first" >&2
+  exit 2
+fi
+OWNER_SECRET="$(<"${OWNER_SK_FILE}")"
+OWNER_PUBKEY="$(nak key public "${OWNER_SECRET}")"
+
+declare -a BACKEND_PUBKEYS=()
 for profile in "${PROFILES[@]}"; do
   profile_contract "${profile}"
-  key_file="${KEY_DIR}/${profile}.nsec"
-  agent_key_file="${KEY_DIR}/${profile}-agent.nsec"
-  if [[ ! -s "${key_file}" ]]; then
-    nak key generate >"${key_file}"
-    chmod 600 "${key_file}"
+  backend_key_file="${KEY_DIR}/${profile}.nsec"
+  if [[ ! -s "${backend_key_file}" ]]; then
+    nak key generate >"${backend_key_file}"
+    chmod 600 "${backend_key_file}"
   fi
-  if [[ ! -s "${agent_key_file}" ]]; then
-    nak key generate >"${agent_key_file}"
-    chmod 600 "${agent_key_file}"
-  fi
-  PUBKEYS+=("$(nak key public "$(cat "${key_file}")")")
-  AGENT_PUBKEYS+=("$(nak key public "$(cat "${agent_key_file}")")")
+  BACKEND_PUBKEYS+=("$(nak key public "$(<"${backend_key_file}")")")
 done
 
-pubkeys_json="$(
-  printf '%s\n' "${PUBKEYS[@]}" "${AGENT_PUBKEYS[@]}" | jq -R . | jq -s .
-)"
+whitelist_json="$(jq -cn --arg public "${OWNER_PUBKEY}" '[$public]')"
+STATE_ROOT="${MOSAICO_DEV_STATE_ROOT:-${REPO_ROOT}/.container-state}"
 
 for i in "${!PROFILES[@]}"; do
   profile="${PROFILES[$i]}"
   profile_contract "${profile}"
-  key_file="${KEY_DIR}/${profile}.nsec"
-  agent_key_file="${KEY_DIR}/${profile}-agent.nsec"
-  state_dir="${REPO_ROOT}/.container-state/${profile}"
+  backend_key_file="${KEY_DIR}/${profile}.nsec"
+  state_dir="${STATE_ROOT}/${profile}"
   cfg="${state_dir}/mosaico/config.json"
   mosaico_dir="${state_dir}/mosaico"
   harnesses_cfg="${mosaico_dir}/harnesses.json"
@@ -154,42 +152,39 @@ for i in "${!PROFILES[@]}"; do
   reset_mosaico_state "${state_dir}"
   mkdir -p "${mosaico_dir}/agents"
   jq -n \
-    --argjson whitelisted "${pubkeys_json}" \
+    --argjson whitelisted "${whitelist_json}" \
     --arg relay "${RELAY_WS}" \
     --arg backend "${profile}" \
-    --rawfile secret "${key_file}" \
+    --rawfile user_secret "${OWNER_SK_FILE}" \
+    --rawfile backend_secret "${backend_key_file}" \
     '{
       whitelistedPubkeys: $whitelisted,
       relays: [$relay],
       indexerRelay: $relay,
       backendName: $backend,
-      userNsec: ($secret | rtrimstr("\n")),
-      mosaicoPrivateKey: ($secret | rtrimstr("\n"))
+      userNsec: ($user_secret | rtrimstr("\n")),
+      mosaicoPrivateKey: ($backend_secret | rtrimstr("\n"))
     }' >"${cfg}"
 
   jq -n \
     --arg bundle "${BUNDLE}" \
     --arg harness "${HARNESS}" \
     --arg transport "${TRANSPORT}" \
-    --argjson profile "${PROFILE_JSON}" \
-    --arg codex_config_profile "${CODEX_CONFIG_PROFILE}" \
+    --argjson args "${BUNDLE_ARGS_JSON}" \
     '{($bundle): ({harness:$harness,transport:$transport}
-      + if $profile == null then {} else {profile:$profile} end
-      + if $codex_config_profile == "" then {}
-        else {codex_config_profile:$codex_config_profile} end)}' \
+      + if $args == [] then {} else {args:$args} end)}' \
     >"${harnesses_cfg}"
 
   jq -n \
     --arg slug "${AGENT_SLUG}" \
-    --rawfile secret "${agent_key_file}" \
-    --arg public "${AGENT_PUBKEYS[$i]}" \
     --argjson created_at "$(date +%s)" \
     --arg harness "${BUNDLE}" \
-    '{slug:$slug,secret_key:($secret | rtrimstr("\n")),public_key:$public,
-      created_at:$created_at,perSessionKey:true,harness:$harness}' \
+    --arg profile "${AGENT_PROFILE}" \
+    '{slug:$slug,created_at:$created_at,perSessionKey:true,harness:$harness}
+      + if $profile == "" then {} else {profile:$profile} end' \
     >"${agent_cfg}"
 
   jq -e . "${cfg}" "${harnesses_cfg}" "${agent_cfg}" >/dev/null
   chmod 600 "${cfg}" "${agent_cfg}"
-  echo "profile=${profile} agent=${AGENT_SLUG} bundle=${BUNDLE} harness=${HARNESS} transport=${TRANSPORT} config=${cfg} pubkey=${PUBKEYS[$i]:0:12} reset_mosaico_state=${MOSAICO_DEV_RESET_PROFILE_STATE:-1}"
+  echo "profile=${profile} agent=${AGENT_SLUG} bundle=${BUNDLE} harness=${HARNESS} transport=${TRANSPORT} config=${cfg} human_pubkey=${OWNER_PUBKEY:0:12} backend_pubkey=${BACKEND_PUBKEYS[$i]:0:12} reset_mosaico_state=${MOSAICO_DEV_RESET_PROFILE_STATE:-1}"
 done

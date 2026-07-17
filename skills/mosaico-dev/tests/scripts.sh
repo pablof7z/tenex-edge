@@ -36,6 +36,12 @@ write_lab_env() {
   } >"${path}"
 }
 
+assert_json() {
+  local filter="$1" path="$2" label="$3"
+  jq -e "${filter}" "${path}" >/dev/null || fail "${label}: ${path}"
+  echo "ok: ${label}"
+}
+
 launch_tail() {
   awk 'seen || $0 == "<launch>" { seen = 1; print }'
 }
@@ -61,13 +67,10 @@ ACP_OUTPUT="$(
 ACP_TAIL="$(printf '%s\n' "${ACP_OUTPUT}" | launch_tail | sed -n '1,3p')"
 assert_eq $'<launch>\n<claude>\n<prompt with spaces>' "${ACP_TAIL}" \
   'ACP launch uses the positional prompt contract'
-if printf '%s\n' "${ACP_OUTPUT}" | grep -Fq -- '--prompt'; then
-  fail 'ACP launch still emits removed --prompt flag'
+if printf '%s\n' "${ACP_OUTPUT}" | grep -Eq '^<--(prompt|headless)>$'; then
+  fail 'ACP launch emits a removed launch flag'
 fi
-if ! printf '%s\n' "${ACP_OUTPUT}" | grep -Fxq -- '<--headless>'; then
-  fail 'ACP launch does not bypass the interactive picker with --headless'
-fi
-echo 'ok: ACP launch bypasses the interactive picker'
+echo 'ok: ACP launch emits no removed flags'
 
 PTY_STATE="${TMP}/claude-state"
 PTY_ENV="${TMP}/claude.env"
@@ -76,11 +79,135 @@ write_lab_env "${PTY_ENV}" "${PTY_STATE}"
 PTY_OUTPUT="$(
   PATH="${TMP}/launcher-bin:${PATH}" \
     MOSAICO_DEV_PROMPT='inspect identity' \
-    bash "${SKILL}/scripts/launch-agent" "${PTY_ENV}" launch claude --model haiku
+    bash "${SKILL}/scripts/launch-agent" "${PTY_ENV}" launch claude
 )"
-PTY_TAIL="$(printf '%s\n' "${PTY_OUTPUT}" | launch_tail | sed -n '1,6p')"
-assert_eq $'<launch>\n<claude>\n<inspect identity>\n<-->\n<--model>\n<haiku>' \
-  "${PTY_TAIL}" 'PTY prompt precedes provider arguments'
+PTY_TAIL="$(printf '%s\n' "${PTY_OUTPUT}" | launch_tail | sed -n '1,3p')"
+assert_eq $'<launch>\n<claude>\n<inspect identity>' \
+  "${PTY_TAIL}" 'PTY launch uses only target and positional prompt'
+
+set +e
+PTY_ARGS_OUTPUT="$(
+  PATH="${TMP}/launcher-bin:${PATH}" \
+    bash "${SKILL}/scripts/launch-agent" "${PTY_ENV}" launch claude --model haiku 2>&1
+)"
+PTY_ARGS_STATUS=$?
+set -e
+[[ "${PTY_ARGS_STATUS}" -eq 2 ]] || fail 'launch provider arguments were not rejected'
+grep -Fq 'put operational args in the harness bundle' <<<"${PTY_ARGS_OUTPUT}" \
+  || fail 'launch argument rejection did not explain the bundle contract'
+echo 'ok: launch rejects provider arguments'
+
+DIRECT_OUTPUT="$(
+  PATH="${TMP}/launcher-bin:${PATH}" \
+    bash "${SKILL}/scripts/launch-agent" "${PTY_ENV}" direct claude --model haiku
+)"
+DIRECT_TAIL="$(printf '%s\n' "${DIRECT_OUTPUT}" \
+  | awk '$0 == "<claude>" { count++ } count == 2 { print }' | sed -n '1,3p')"
+assert_eq $'<claude>\n<--model>\n<haiku>' "${DIRECT_TAIL}" \
+  'direct mode still forwards provider arguments'
+
+mkdir -p "${TMP}/writer-bin" "${TMP}/writer-work/keys"
+printf 'nsec-relay-owner\n' >"${TMP}/writer-work/keys/relay-owner.nsec"
+cat >"${TMP}/writer-bin/nak" <<'EOF'
+#!/bin/sh
+if [ "${1:-} ${2:-}" = 'key generate' ]; then
+  count=0
+  [ ! -f "${NAK_COUNTER_FILE}" ] || count="$(cat "${NAK_COUNTER_FILE}")"
+  count=$((count + 1))
+  printf '%s\n' "${count}" >"${NAK_COUNTER_FILE}"
+  printf 'nsec-backend-%s\n' "${count}"
+elif [ "${1:-} ${2:-}" = 'key public' ]; then
+  case "${3:-}" in
+    nsec-relay-owner) printf 'pub-relay-owner\n' ;;
+    nsec-backend-*) printf 'pub-backend-%s\n' "${3##*-}" ;;
+    *) exit 2 ;;
+  esac
+else
+  exit 2
+fi
+EOF
+chmod +x "${TMP}/writer-bin/nak"
+WRITER_ENV="${TMP}/writer.env"
+{
+  printf 'RUN_ID=%q\n' test-run
+  printf 'WORK_DIR=%q\n' "${TMP}/writer-work"
+  printf 'RELAY_WS=%q\n' 'ws://127.0.0.1:19888'
+  printf 'OWNER_SK_FILE=%q\n' "${TMP}/writer-work/keys/relay-owner.nsec"
+} >"${WRITER_ENV}"
+WRITER_OUTPUT="$(
+  PATH="${TMP}/writer-bin:${PATH}" \
+    NAK_COUNTER_FILE="${TMP}/nak-counter" \
+    MOSAICO_DEV_STATE_ROOT="${TMP}/container-state" \
+    MOSAICO_DEV_CODEX_CONFIG_PROFILE=planner \
+    MOSAICO_DEV_CODEX_APP_SERVER_ARGS_JSON='["--strict-config"]' \
+    bash "${SKILL}/scripts/write-container-profiles" "${WRITER_ENV}" \
+      claude-acp codex-app-server codex-ollama opencode-ollama
+)"
+
+for profile in claude-acp codex-app-server codex-ollama opencode-ollama; do
+  HARNESSES="${TMP}/container-state/${profile}/mosaico/harnesses.json"
+  AGENT="$(find "${TMP}/container-state/${profile}/mosaico/agents" -type f -name '*.json')"
+  CONFIG="${TMP}/container-state/${profile}/mosaico/config.json"
+  assert_json 'all(.[]; ((keys - ["args","harness","transport"]) | length) == 0)' \
+    "${HARNESSES}" "${profile} bundle contains only current fields"
+  assert_json 'has("slug") and has("created_at") and .perSessionKey == true and has("harness") and (has("secret_key") | not) and (has("public_key") | not)' \
+    "${AGENT}" "${profile} agent is keyless"
+  assert_json '.userNsec == "nsec-relay-owner" and .whitelistedPubkeys == ["pub-relay-owner"] and (.mosaicoPrivateKey != .userNsec)' \
+    "${CONFIG}" "${profile} separates human and backend keys"
+done
+
+assert_json '.["claude-acp"] == {"harness":"claude-code","transport":"acp"}' \
+  "${TMP}/container-state/claude-acp/mosaico/harnesses.json" \
+  'structured bundle defaults to no args'
+assert_json '.["codex-app-server"].args == ["--strict-config"]' \
+  "${TMP}/container-state/codex-app-server/mosaico/harnesses.json" \
+  'per-profile args JSON overrides defaults'
+assert_json '.profile == "planner"' \
+  "${TMP}/container-state/codex-app-server/mosaico/agents/codex.json" \
+  'Codex named profile belongs to agent config'
+assert_json '.["codex-ollama"].args == ["--oss","--local-provider","ollama"]' \
+  "${TMP}/container-state/codex-ollama/mosaico/harnesses.json" \
+  'Codex Ollama bundle owns provider args'
+assert_json '.["opencode-ollama"].args == ["-m","ollama/deepseek-r1:8b"]' \
+  "${TMP}/container-state/opencode-ollama/mosaico/harnesses.json" \
+  'OpenCode Ollama bundle owns model args'
+
+BACKEND_KEY_COUNT="$(
+  for profile in claude-acp codex-app-server codex-ollama opencode-ollama; do
+    jq -r '.mosaicoPrivateKey' \
+      "${TMP}/container-state/${profile}/mosaico/config.json"
+  done | sort -u | wc -l | tr -d ' '
+)"
+assert_eq 4 "${BACKEND_KEY_COUNT}" 'each profile has a distinct backend key'
+CLAUDE_BACKEND_BEFORE="$(<"${TMP}/writer-work/keys/claude-acp.nsec")"
+PATH="${TMP}/writer-bin:${PATH}" \
+  NAK_COUNTER_FILE="${TMP}/nak-counter" \
+  MOSAICO_DEV_STATE_ROOT="${TMP}/container-state" \
+  bash "${SKILL}/scripts/write-container-profiles" "${WRITER_ENV}" claude-acp \
+  >/dev/null
+assert_eq "${CLAUDE_BACKEND_BEFORE}" \
+  "$(<"${TMP}/writer-work/keys/claude-acp.nsec")" \
+  'profile regeneration preserves backend key material'
+
+if grep -Fq 'nsec-' <<<"${WRITER_OUTPUT}"; then
+  fail 'profile writer leaked secret key material'
+fi
+echo 'ok: profile writer output does not expose secrets'
+
+set +e
+BAD_ARGS_OUTPUT="$(
+  PATH="${TMP}/writer-bin:${PATH}" \
+    NAK_COUNTER_FILE="${TMP}/nak-counter" \
+    MOSAICO_DEV_STATE_ROOT="${TMP}/bad-state" \
+    MOSAICO_DEV_CLAUDE_ACP_ARGS_JSON='{"model":"haiku"}' \
+    bash "${SKILL}/scripts/write-container-profiles" "${WRITER_ENV}" claude-acp 2>&1
+)"
+BAD_ARGS_STATUS=$?
+set -e
+[[ "${BAD_ARGS_STATUS}" -eq 2 ]] || fail 'non-array bundle args unexpectedly passed'
+grep -Fq 'expected an array of strings' <<<"${BAD_ARGS_OUTPUT}" \
+  || fail 'invalid args JSON did not report the current contract'
+echo 'ok: profile writer rejects obsolete object-shaped bundle config'
 
 HOST_HOME="${TMP}/host-home"
 STATE_DIR="${TMP}/host-auth-state"
@@ -152,3 +279,8 @@ echo 'ok: readiness failure reaps the relay process'
 bash -n "${SKILL}"/scripts/* "${ROOT}/containers/mosaico/doctor" \
   "${ROOT}/containers/mosaico/host-auth.bash"
 echo 'ok: skill and container helper scripts parse as bash'
+
+cargo test --quiet --lib harness::tests::config_accepts_only_harness_transport_and_args
+cargo test --quiet --lib identity::tests::creates_then_reloads_keyless_agent_config
+cargo test --quiet --lib config::tests::key_accessors_split_when_both_present
+echo 'ok: generated config assumptions match current Rust schemas'

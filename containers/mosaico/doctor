@@ -5,6 +5,52 @@ PROFILE="${1:?missing profile}"
 HOST_AUTH="${2:?missing host-auth mode}"
 AGENT="${MOSAICO_AGENT:?missing MOSAICO_AGENT}"
 
+validate_mosaico_configs() {
+  if [[ ! -f "${MOSAICO_HOME}/harnesses.json" ]]; then
+    echo "harness bundles: none"
+    return 0
+  fi
+  jq -e '
+    type == "object" and
+    all(.[];
+      type == "object" and
+      ((keys - ["args", "harness", "transport"]) | length == 0) and
+      (.harness == "claude" or .harness == "claude-code" or
+        .harness == "codex" or .harness == "opencode" or .harness == "grok") and
+      (.transport == "pty" or .transport == "acp" or
+        .transport == "app-server" or .transport == "headless-exec") and
+      ((.args // []) | type == "array") and
+      all((.args // [])[]; type == "string")
+    )
+  ' "${MOSAICO_HOME}/harnesses.json" >/dev/null
+  for agent_file in "${MOSAICO_HOME}"/agents/*.json; do
+    [[ -e "${agent_file}" ]] || continue
+    jq -e '
+      type == "object" and
+      ((keys - ["byline", "created_at", "harness", "perSessionKey", "profile",
+        "public_key", "secret_key", "slug"]) | length == 0) and
+      (.slug | type == "string" and length > 0) and
+      (.harness | type == "string" and length > 0) and
+      (.created_at | type == "number") and
+      ((.byline == null) or (.byline | type == "string")) and
+      ((.profile == null) or (.profile | type == "string" and length > 0)) and
+      ((.perSessionKey // true) | type == "boolean") and
+      (if (.perSessionKey // true) then
+        ((has("secret_key") or has("public_key")) | not)
+      else
+        (.secret_key | type == "string" and length > 0) and
+        (.public_key | type == "string" and length > 0)
+      end)
+    ' "${agent_file}" >/dev/null
+  done
+  echo "harness bundles: $(jq -r 'keys | join(",")' "${MOSAICO_HOME}/harnesses.json")"
+}
+
+if [[ "${MOSAICO_DOCTOR_CONFIG_ONLY:-0}" == "1" ]]; then
+  validate_mosaico_configs
+  exit 0
+fi
+
 echo "profile: ${PROFILE}"
 echo "agent: ${AGENT}"
 echo "rust: $(rustc --version)"
@@ -66,19 +112,7 @@ case "${AGENT}" in
 esac
 echo "${AGENT} auth/hooks: mounted"
 
-if [[ -f "${MOSAICO_HOME}/harnesses.json" ]]; then
-  jq -e '
-    type == "object" and
-    all(.[]; (.harness | type == "string") and (.transport | type == "string"))
-  ' "${MOSAICO_HOME}/harnesses.json" >/dev/null
-  for agent_file in "${MOSAICO_HOME}"/agents/*.json; do
-    [[ -e "${agent_file}" ]] || continue
-    jq -e '.slug and .secret_key and .public_key and .harness' "${agent_file}" >/dev/null
-  done
-  echo "harness bundles: $(jq -r 'keys | join(",")' "${MOSAICO_HOME}/harnesses.json")"
-else
-  echo "harness bundles: none"
-fi
+validate_mosaico_configs
 
 echo "codex home: ${CODEX_HOME}"
 echo "mosaico home: ${MOSAICO_HOME}"
