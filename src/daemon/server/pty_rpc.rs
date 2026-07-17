@@ -178,7 +178,7 @@ pub(in crate::daemon::server) fn resume_token_for(
     rec: &crate::state::Session,
 ) -> Option<String> {
     state
-        .with_store(|store| store.native_resume_locator(&rec.pubkey))
+        .with_store(|store| store.native_resume_locator(&rec.pubkey, &rec.observed_harness))
         .ok()
         .flatten()
         .map(|locator| locator.locator_value)

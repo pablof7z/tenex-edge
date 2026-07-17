@@ -235,7 +235,7 @@ fn endpoint_locator(
 fn record_resumable_claim(state: &Arc<DaemonState>, rec: &crate::state::Session) {
     if rec.channel_h.is_empty()
         || state
-            .with_store(|store| store.native_resume_locator(&rec.pubkey))
+            .with_store(|store| store.native_resume_locator(&rec.pubkey, &rec.observed_harness))
             .ok()
             .flatten()
             .is_none()

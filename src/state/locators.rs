@@ -131,15 +131,19 @@ impl Store {
             .optional()?)
     }
 
-    pub fn native_resume_locator(&self, pubkey: &str) -> Result<Option<SessionLocator>> {
+    pub fn native_resume_locator(
+        &self,
+        pubkey: &str,
+        harness: &str,
+    ) -> Result<Option<SessionLocator>> {
         Ok(self
             .conn
             .query_row(
                 &format!(
                     "SELECT {COLS} FROM session_locators
-                 WHERE pubkey=?1 AND locator_kind=?2"
+                 WHERE pubkey=?1 AND harness=?2 AND locator_kind=?3"
                 ),
-                params![pubkey, LOCATOR_NATIVE_RESUME],
+                params![pubkey, harness, LOCATOR_NATIVE_RESUME],
                 row_to_locator,
             )
             .optional()?)
@@ -209,8 +213,12 @@ mod tests {
             .put_session_locator("codex", LOCATOR_NATIVE_RESUME, "new", "pk", 3)
             .unwrap();
 
-        let locator = store.native_resume_locator("pk").unwrap().unwrap();
+        let locator = store.native_resume_locator("pk", "codex").unwrap().unwrap();
         assert_eq!(locator.locator_value, "new");
+        assert!(store
+            .native_resume_locator("pk", "claude-code")
+            .unwrap()
+            .is_none());
         assert!(store
             .resolve_pubkey_by_locator("codex", LOCATOR_NATIVE_RESUME, "old")
             .unwrap()

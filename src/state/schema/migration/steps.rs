@@ -181,14 +181,19 @@ pub(super) fn v8_to_v9(conn: &mut Connection, _path: &Path) -> Result<()> {
         ALTER TABLE sessions ADD COLUMN admitted_bundle TEXT NOT NULL DEFAULT '';
         ALTER TABLE sessions ADD COLUMN admitted_transport TEXT NOT NULL DEFAULT ''
             CHECK (admitted_transport IN ('', 'pty', 'acp'));
-        ALTER TABLE sessions ADD COLUMN endpoint_provenance TEXT NOT NULL DEFAULT 'migration'
+        ALTER TABLE sessions ADD COLUMN endpoint_provenance TEXT NOT NULL DEFAULT ''
             CHECK (endpoint_provenance IN ('', 'launch', 'hook', 'migration'));
         UPDATE sessions SET admitted_transport = CASE
             WHEN EXISTS (SELECT 1 FROM session_locators l
-                         WHERE l.pubkey=sessions.pubkey AND l.locator_kind='acp') THEN 'acp'
+                         WHERE l.pubkey=sessions.pubkey
+                           AND l.harness=sessions.observed_harness
+                           AND l.locator_kind='acp') THEN 'acp'
             WHEN EXISTS (SELECT 1 FROM session_locators l
-                         WHERE l.pubkey=sessions.pubkey AND l.locator_kind='pty') THEN 'pty'
+                         WHERE l.pubkey=sessions.pubkey
+                           AND l.harness=sessions.observed_harness
+                           AND l.locator_kind='pty') THEN 'pty'
             ELSE '' END;
+        UPDATE sessions SET endpoint_provenance = 'migration';
         PRAGMA user_version = 9;
         "#,
     )?;
