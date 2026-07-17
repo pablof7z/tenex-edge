@@ -2,7 +2,7 @@
 //!
 //! This static table is the source of truth for every supported transport. It
 //! supplies the executable, required environment, resume behavior, turn model,
-//! and profile application for PTY, ACP, app-server, and headless execution.
+//! and profile application for PTY, ACP, and app-server sessions.
 //!
 //! Invalid cells (e.g. Codex x Acp — Codex has no native ACP) simply have no
 //! entry; `lookup` returns `None` and the caller fails loud.

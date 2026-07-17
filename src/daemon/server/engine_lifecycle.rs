@@ -277,7 +277,7 @@ pub(in crate::daemon::server) use crate::liveness::pid_alive;
 /// reused PID could revive a ghost session against an unrelated process. When the
 /// session owns a PTY supervisor socket, that socket being reachable —
 /// connect+write, not a round-trip reply ([`crate::pty::is_live`]) — is the
-/// authoritative, unspoofable signal; exec sessions with no socket fall back to
+/// authoritative, unspoofable signal; sessions with no socket fall back to
 /// the PID check alone (risk #1).
 fn session_still_live(state: &Arc<DaemonState>, snap: &crate::state::Session) -> bool {
     use crate::session_host::transport::{
