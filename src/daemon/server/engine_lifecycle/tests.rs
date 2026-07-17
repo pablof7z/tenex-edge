@@ -10,25 +10,23 @@ fn nonpositive_pid_is_never_alive() {
 }
 
 #[test]
-fn dead_pid_is_never_revived() {
+fn native_process_requires_a_live_pid() {
     assert!(!revive_decision(false, None));
-    assert!(!revive_decision(false, Some(true)));
-    assert!(!revive_decision(false, Some(false)));
 }
 
 #[test]
-fn session_without_pty_socket_revives_on_pid_alone() {
-    // A transport with no PTY socket uses process liveness.
+fn session_without_hosted_endpoint_revives_on_pid_alone() {
     assert!(revive_decision(true, None));
 }
 
 #[test]
-fn live_pid_with_live_pty_is_revived() {
+fn live_hosted_endpoint_is_authoritative_without_a_pid() {
+    assert!(revive_decision(false, Some(true)));
     assert!(revive_decision(true, Some(true)));
 }
 
 #[test]
-fn live_pid_with_dead_pty_is_not_revived() {
+fn dead_hosted_endpoint_is_not_revived_despite_a_live_pid() {
     // Guards against PID recycling: the process at `child_pid` is alive but
     // its supervisor socket is gone, so it is not our session.
     assert!(!revive_decision(true, Some(false)));

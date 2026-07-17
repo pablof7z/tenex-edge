@@ -21,10 +21,14 @@ fn live_home(label: &str) -> Option<std::path::PathBuf> {
 fn live_spec(home: &std::path::Path, pubkey: String) -> LaunchSpec {
     let cwd = home.join("work");
     std::fs::create_dir_all(&cwd).unwrap();
+    let cfg = crate::harness::HarnessesConfig::load().unwrap();
+    let mut resolved =
+        crate::harness::resolve_with(&cfg, "opencode-acp", None, &home.join("profile")).unwrap();
+    let prepared = AcpTransport
+        .prepare_launch(&mut resolved, "live-endpoint".into())
+        .unwrap();
     LaunchSpec {
         slug: "opencode-acp".into(),
-        bundle: "opencode-acp".into(),
-        profile: None,
         native_agent: None,
         root: "live".into(),
         abs_path: cwd.to_string_lossy().into_owned(),
@@ -34,7 +38,7 @@ fn live_spec(home: &std::path::Path, pubkey: String) -> LaunchSpec {
         base_command: vec!["opencode".into()],
         pubkey,
         agent_nsec: "test-agent-nsec".into(),
-        pty: PtyLaunchSpec::default(),
+        prepared,
     }
 }
 

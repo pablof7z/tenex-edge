@@ -75,7 +75,7 @@ fn prune_debounce(active_pubkeys: &HashSet<String>) {
 pub async fn deliver_spawn_prompt(endpoint: &EndpointRef, text: &str) {
     let transport = transport_for_kind(endpoint.kind);
     tokio::time::sleep(transport.opening_delivery_delay()).await;
-    if let Err(e) = transport.deliver(&endpoint, text, true).await {
+    if let Err(e) = transport.deliver(endpoint, text, true).await {
         tracing::warn!(
             endpoint = %endpoint.endpoint_id,
             transport = endpoint.kind.as_str(),

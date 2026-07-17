@@ -3,7 +3,7 @@ use crate::agent_catalog::NativeAgentActivation;
 use crate::daemon::server::DaemonState;
 use crate::harness::ResumeMechanism;
 use crate::session_host::transport::{
-    LaunchSpec, PtyLaunchSpec, ResumeSpec, SessionEndpoint, TransportImpl,
+    LaunchSpec, PreparedLaunch, ResumeSpec, SessionEndpoint, TransportImpl,
 };
 use anyhow::{Context, Result};
 use std::sync::Arc;
@@ -82,15 +82,11 @@ async fn open_agent_session(
     ephemeral: bool,
     pubkey: &str,
     agent_nsec: &str,
-    bundle: &str,
-    profile: Option<&str>,
     native_agent: Option<&NativeAgentActivation>,
-    pty_launch: PtyLaunchSpec,
+    prepared_launch: PreparedLaunch,
 ) -> Result<SessionEndpoint> {
     let spec = LaunchSpec {
         slug: slug.to_string(),
-        bundle: bundle.to_string(),
-        profile: profile.map(str::to_string),
         native_agent: native_agent.cloned(),
         root: root.to_string(),
         abs_path: abs_path.to_string(),
@@ -100,7 +96,7 @@ async fn open_agent_session(
         base_command: command.to_vec(),
         pubkey: pubkey.to_string(),
         agent_nsec: agent_nsec.to_string(),
-        pty: pty_launch,
+        prepared: prepared_launch,
     };
     transport.launch(&spec).await
 }
@@ -156,8 +152,6 @@ pub(crate) async fn resume_agent_in_channel(
     let resume_command = build_driver_resume_command(&base, source.resume, resume_id, slug)?;
     let spec = LaunchSpec {
         slug: slug.to_string(),
-        bundle: bundle.clone(),
-        profile: source.profile,
         native_agent: source.native_agent,
         root: root.to_string(),
         abs_path: abs_path.clone(),
@@ -167,7 +161,7 @@ pub(crate) async fn resume_agent_in_channel(
         base_command: resume_command,
         pubkey: reservation.pubkey.clone(),
         agent_nsec: reservation.agent_nsec.clone(),
-        pty: source.pty_launch,
+        prepared: source.prepared_launch,
     };
     let resume = ResumeSpec {
         native_id: resume_id.to_string(),

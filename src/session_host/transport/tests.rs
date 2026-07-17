@@ -67,14 +67,21 @@ fn configured_bundles_select_exact_transport() {
 }
 
 #[test]
-fn acp_resolves_driver_from_bundle_not_agent_slug() {
-    let cfg: crate::harness::HarnessesConfig =
-        serde_json::from_str(r#"{"codex-rpc":{"harness":"codex","transport":"app-server"}}"#)
-            .unwrap();
+fn rpc_spawn_uses_the_admitted_plan_after_config_mutation() {
+    let mut cfg: crate::harness::HarnessesConfig = serde_json::from_str(
+        r#"{"codex-rpc":{"harness":"codex","transport":"app-server","args":["--admitted"]}}"#,
+    )
+    .unwrap();
+    let scratch = tempfile::tempdir().unwrap();
+    let mut resolved =
+        crate::harness::resolve_with(&cfg, "codex-rpc", None, scratch.path()).unwrap();
+    let prepared = AcpTransport
+        .prepare_launch(&mut resolved, "endpoint".into())
+        .unwrap();
+
+    cfg.bundles.get_mut("codex-rpc").unwrap().args = vec!["--mutated".into()];
     let spec = LaunchSpec {
         slug: "reviewer".into(),
-        bundle: "codex-rpc".into(),
-        profile: Some("planner".into()),
         native_agent: None,
         root: "chan".into(),
         abs_path: "/tmp".into(),
@@ -84,15 +91,14 @@ fn acp_resolves_driver_from_bundle_not_agent_slug() {
         base_command: vec!["codex".into(), "app-server".into()],
         pubkey: "33".repeat(32),
         agent_nsec: "test-agent-nsec".into(),
-        pty: PtyLaunchSpec::default(),
+        prepared,
     };
-    assert_eq!(super::acp::bundle_name(&spec), "codex-rpc");
-    let scratch = tempfile::tempdir().unwrap();
-    let resolved =
-        crate::harness::resolve_with(&cfg, super::acp::bundle_name(&spec), None, scratch.path())
-            .unwrap();
-    assert_eq!(resolved.harness, crate::session::Harness::Codex);
-    assert!(crate::harness::resolve_with(&cfg, &spec.slug, None, scratch.path()).is_err());
+    let callbacks = crate::rpc_harness::Callbacks::allow_all(scratch.path().to_path_buf());
+    let spawn = super::acp::AcpTransport::spawn_config(&spec, callbacks).unwrap();
+
+    assert_eq!(spawn.program, "codex");
+    assert_eq!(spawn.args, ["app-server", "--admitted"]);
+    assert!(!spawn.args.iter().any(|arg| arg == "--mutated"));
 }
 
 #[tokio::test]

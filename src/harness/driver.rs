@@ -11,6 +11,7 @@ use super::config::Transport;
 use crate::session::Harness;
 
 /// One row of the capability matrix.
+#[derive(Debug)]
 pub struct HarnessDriver {
     pub harness: Harness,
     pub transport: Transport,

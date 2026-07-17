@@ -8,10 +8,9 @@ pub(super) struct ResolvedSource {
     pub(super) harness: crate::session::Harness,
     pub(super) resume: ResumeMechanism,
     pub(super) bundle: String,
-    pub(super) profile: Option<String>,
     pub(super) native_agent: Option<NativeAgentActivation>,
     pub(super) identity: crate::identity::AgentIdentity,
-    pub(super) pty_launch: PtyLaunchSpec,
+    pub(super) prepared_launch: crate::session_host::transport::PreparedLaunch,
     pub(super) retired_advertisements: Vec<String>,
 }
 
@@ -123,17 +122,16 @@ pub(super) fn resolve_agent_source(
             .with_context(|| format!("applying native agent {selector:?}"))?;
     }
     let transport = crate::session_host::transport::select_transport_with(&harnesses, &bundle)?;
-    let pty_launch = transport.prepare_launch(&mut resolved, id)?;
+    let prepared_launch = transport.prepare_launch(&mut resolved, id)?;
     Ok(ResolvedSource {
         transport,
         command: resolved.base_argv,
         harness: resolved.harness,
         resume: resolved.driver.resume,
         bundle,
-        profile,
         native_agent,
         identity,
-        pty_launch,
+        prepared_launch,
         retired_advertisements,
     })
 }

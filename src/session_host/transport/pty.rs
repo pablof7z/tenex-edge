@@ -19,7 +19,7 @@ impl SessionTransport for PtyTransport {
         &self,
         resolved: &mut crate::harness::ResolvedHarness,
         endpoint_id: String,
-    ) -> Result<super::PtyLaunchSpec> {
+    ) -> Result<super::PreparedLaunch> {
         resolved.profile.materialize()?;
         let mut env = resolved.profile.extra_env.clone();
         let mut env_remove = Vec::new();
@@ -37,16 +37,19 @@ impl SessionTransport for PtyTransport {
             "MOSAICO_OBSERVED_HARNESS".to_string(),
             resolved.harness.as_str().to_string(),
         ));
-        Ok(super::PtyLaunchSpec {
-            id: Some(endpoint_id),
-            env,
-            env_remove,
+        Ok(super::PreparedLaunch {
+            pty: super::PtyLaunchSpec {
+                id: Some(endpoint_id),
+                env,
+                env_remove,
+            },
+            rpc: None,
         })
     }
 
     async fn launch(&self, spec: &LaunchSpec) -> Result<SessionEndpoint> {
-        let mut env = spec.pty.env.clone();
-        let mut env_remove = spec.pty.env_remove.clone();
+        let mut env = spec.prepared.pty.env.clone();
+        let mut env_remove = spec.prepared.pty.env_remove.clone();
         crate::session_host::agent_env::assign(
             &mut env,
             &mut env_remove,
@@ -54,7 +57,7 @@ impl SessionTransport for PtyTransport {
             &spec.agent_nsec,
         );
         let meta = crate::pty::spawn_session(crate::pty::SpawnSessionArgs {
-            id: spec.pty.id.clone(),
+            id: spec.prepared.pty.id.clone(),
             agent: spec.slug.clone(),
             root: spec.root.clone(),
             cwd: std::path::PathBuf::from(&spec.abs_path),

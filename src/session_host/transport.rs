@@ -57,13 +57,6 @@ impl TransportKind {
 #[derive(Clone)]
 pub struct LaunchSpec {
     pub slug: String,
-    /// The agent's configured harness bundle name (a `harnesses.json` key).
-    /// Distinct from [`Self::slug`]: an agent
-    /// `reviewer` may run bundle `codex-acp`. The ACP transport MUST resolve its
-    /// harness/driver from this bundle, never from the agent slug (defect #1).
-    pub bundle: String,
-    /// Optional harness-native named profile from the agent definition.
-    pub profile: Option<String>,
     /// Harness-owned native agent definition discovered by Mosaico.
     pub native_agent: Option<crate::agent_catalog::NativeAgentActivation>,
     pub root: String,
@@ -77,7 +70,7 @@ pub struct LaunchSpec {
     pub pubkey: String,
     /// Matching signer exposed only to the assigned harness process.
     pub agent_nsec: String,
-    pub pty: PtyLaunchSpec,
+    pub prepared: PreparedLaunch,
 }
 
 /// PTY-only launch details. Other transports ignore the empty/default value.
@@ -86,6 +79,21 @@ pub struct PtyLaunchSpec {
     pub id: Option<String>,
     pub env: Vec<(String, String)>,
     pub env_remove: Vec<String>,
+}
+
+/// Immutable runtime inputs captured by the single admission-time resolution.
+#[derive(Clone, Debug, Default)]
+pub struct PreparedLaunch {
+    pub pty: PtyLaunchSpec,
+    pub rpc: Option<RpcLaunchSpec>,
+}
+
+#[derive(Clone, Debug)]
+pub struct RpcLaunchSpec {
+    pub driver: &'static crate::harness::HarnessDriver,
+    pub argv: Vec<String>,
+    pub extra_env: Vec<(String, String)>,
+    pub harness: crate::session::Harness,
 }
 
 /// A prior session's native resume token.
@@ -141,8 +149,8 @@ pub trait SessionTransport: Send + Sync {
         &self,
         _resolved: &mut crate::harness::ResolvedHarness,
         _endpoint_id: String,
-    ) -> Result<PtyLaunchSpec> {
-        Ok(PtyLaunchSpec::default())
+    ) -> Result<PreparedLaunch> {
+        Ok(PreparedLaunch::default())
     }
 
     /// Open a brand-new harness session.
@@ -200,7 +208,7 @@ impl TransportImpl {
         &self,
         resolved: &mut crate::harness::ResolvedHarness,
         endpoint_id: String,
-    ) -> Result<PtyLaunchSpec> {
+    ) -> Result<PreparedLaunch> {
         self.0.prepare_launch(resolved, endpoint_id)
     }
 

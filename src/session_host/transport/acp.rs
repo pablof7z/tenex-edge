@@ -15,12 +15,12 @@ use super::acp_spawn::{
     spawn_acp_prompt, spawn_app_server_steer, spawn_app_server_steer_pending, spawn_app_server_turn,
 };
 use super::{
-    EndpointRef, LaunchSpec, ResumeSpec, SessionEndpoint, SessionTransport, TransportKind,
+    EndpointRef, LaunchSpec, PreparedLaunch, ResumeSpec, RpcLaunchSpec, SessionEndpoint,
+    SessionTransport, TransportKind,
 };
-use crate::harness::{self, config::HarnessesConfig, Transport};
 use crate::rpc_harness::{
     spawn_config_from_driver, AcpClient, AppServerClient, Callbacks, Dialect, RpcHandle,
-    SessionUpdate,
+    SessionUpdate, SpawnConfig,
 };
 use crate::session::Harness;
 use anyhow::{Context, Result};
@@ -38,13 +38,6 @@ mod thread_start_agent;
 
 pub struct AcpTransport;
 
-/// The harness BUNDLE name to resolve a spec's driver from — never the agent slug
-/// (defect #1). An agent `reviewer` may carry bundle `codex-acp`, and `reviewer`
-/// is not a `harnesses.json` key.
-pub(crate) fn bundle_name(spec: &LaunchSpec) -> &str {
-    &spec.bundle
-}
-
 /// The outcome of opening (or resuming) an RPC-hosted session, before it is
 /// wrapped into a `SessionEndpoint`.
 pub struct AcpOpen {
@@ -56,9 +49,25 @@ pub struct AcpOpen {
 }
 
 impl AcpTransport {
-    /// Resolve the harness bundle for `spec.bundle` and spawn its RPC child,
-    /// returning the live handle + dialect + the update stream + the argv actually
-    /// executed. Shared by launch/resume.
+    pub(super) fn spawn_config(spec: &LaunchSpec, callbacks: Callbacks) -> Result<SpawnConfig> {
+        let prepared = spec
+            .prepared
+            .rpc
+            .as_ref()
+            .context("RPC transport received no admitted launch plan")?;
+        let mut cfg = spawn_config_from_driver(
+            prepared.driver,
+            &prepared.argv,
+            &prepared.extra_env,
+            std::path::PathBuf::from(&spec.abs_path),
+            callbacks,
+        )?;
+        crate::session_host::agent_env::assign_launch(&mut cfg.env, &mut cfg.env_remove, spec);
+        Ok(cfg)
+    }
+
+    /// Spawn from the immutable plan captured at admission. Configuration is not
+    /// reloaded here: the executed runtime must exactly match the admitted facts.
     async fn spawn_child(
         spec: &LaunchSpec,
     ) -> Result<(
@@ -69,50 +78,20 @@ impl AcpTransport {
         Harness,
     )> {
         let cwd = std::path::PathBuf::from(&spec.abs_path);
-        let bundle = bundle_name(spec);
-        // Claude ACP reads its profile from cwd; OpenCode reads `OPENCODE_CONFIG`
-        // from isolated scratch. Both reach the harness without clobbering files.
-        let cfg = HarnessesConfig::load()?;
-        let harness_kind = harness::bundle_harness_with(&cfg, bundle)
-            .with_context(|| format!("resolving harness for bundle {bundle:?}"))?;
-        let scratch = if harness_kind == Harness::ClaudeCode {
-            cwd.clone()
-        } else {
-            crate::config::mosaico_home()
-                .join("harness-profiles")
-                .join(&spec.slug)
-        };
-        let mut resolved = harness::resolve_with(&cfg, bundle, spec.profile.as_deref(), &scratch)
-            .with_context(|| format!("resolving harness bundle {bundle:?}"))?;
-        if let Some(native_agent) = &spec.native_agent {
-            harness::apply_native_agent(&mut resolved, native_agent, &scratch)
-                .with_context(|| format!("applying native agent {:?}", spec.slug))?;
-        }
-        if !matches!(resolved.transport, Transport::Acp | Transport::AppServer) {
-            anyhow::bail!(
-                "harness bundle {bundle:?} is transport {} — not an RPC transport",
-                resolved.transport.as_str()
-            );
-        }
-        resolved.profile.materialize()?;
-        // The argv actually executed (driver base_argv + profile extra_argv). We
-        // record THIS in the session metadata, not the nominal `spec.base_command`
-        // that the ACP path never runs (defect #8).
-        let argv = resolved.base_argv.clone();
+        let prepared = spec
+            .prepared
+            .rpc
+            .as_ref()
+            .context("RPC transport received no admitted launch plan")?;
+        let argv = prepared.argv.clone();
+        let harness = prepared.harness;
         let callbacks = Callbacks::allow_all(cwd.clone());
-        let mut cfg = spawn_config_from_driver(
-            resolved.driver,
-            &resolved.base_argv,
-            &resolved.profile.extra_env,
-            cwd,
-            callbacks,
-        )?;
-        crate::session_host::agent_env::assign_launch(&mut cfg.env, &mut cfg.env_remove, spec);
+        let cfg = Self::spawn_config(spec, callbacks)?;
         let dialect = cfg.dialect;
         let (handle, updates) = RpcHandle::spawn(cfg)
             .await
-            .map_err(|e| anyhow::anyhow!("spawning RPC harness for bundle {bundle:?}: {e}"))?;
-        Ok((handle, dialect, updates, argv, resolved.harness))
+            .map_err(|e| anyhow::anyhow!("spawning admitted RPC harness: {e}"))?;
+        Ok((handle, dialect, updates, argv, harness))
     }
 
     fn endpoint_id(slug: &str) -> String {
@@ -174,6 +153,23 @@ impl AcpTransport {
 impl SessionTransport for AcpTransport {
     fn kind(&self) -> TransportKind {
         TransportKind::Acp
+    }
+
+    fn prepare_launch(
+        &self,
+        resolved: &mut crate::harness::ResolvedHarness,
+        _endpoint_id: String,
+    ) -> Result<PreparedLaunch> {
+        resolved.profile.materialize()?;
+        Ok(PreparedLaunch {
+            pty: Default::default(),
+            rpc: Some(RpcLaunchSpec {
+                driver: resolved.driver,
+                argv: resolved.base_argv.clone(),
+                extra_env: resolved.profile.extra_env.clone(),
+                harness: resolved.harness,
+            }),
+        })
     }
 
     async fn launch(&self, spec: &LaunchSpec) -> Result<SessionEndpoint> {

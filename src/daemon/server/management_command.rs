@@ -223,9 +223,11 @@ async fn stop_local_process(
     rec: &crate::state::Session,
 ) -> Result<String> {
     let note = super::session_end::stop_local_process(state, rec).await?;
-    Ok((!note.is_empty())
-        .then(|| format!(" {note}"))
-        .unwrap_or_default())
+    Ok(if note.is_empty() {
+        String::new()
+    } else {
+        format!(" {note}")
+    })
 }
 
 fn channel_label(state: &Arc<DaemonState>, channel_h: &str) -> String {

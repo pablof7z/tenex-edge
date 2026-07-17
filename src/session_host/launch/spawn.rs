@@ -51,8 +51,6 @@ pub async fn spawn_ephemeral_agent(
         slug,
         root,
         group,
-        None,
-        None,
         client_cwd,
         None,
         true,
@@ -199,10 +197,8 @@ async fn spawn_agent_inner_full(
         ephemeral,
         &reservation.pubkey,
         &reservation.agent_nsec,
-        &resolved.bundle,
-        resolved.profile.as_deref(),
         resolved.native_agent.as_ref(),
-        resolved.pty_launch,
+        resolved.prepared_launch,
     )
     .await
     {
