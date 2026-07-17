@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 mod claim;
 pub(super) mod liveness;
-mod target;
 mod notice;
+mod target;
 
 pub(super) use claim::dispatch_all;
 use liveness::has_alive_session_for;
@@ -62,7 +62,9 @@ pub(super) async fn handle(
     }
 
     if let Some(target) = target_session.as_ref() {
-        let resume_locator = match state.with_store(|s| s.native_resume_locator(mentioned_pk)) {
+        let resume_locator = match state
+            .with_store(|s| s.native_resume_locator(mentioned_pk, &target.observed_harness))
+        {
             Ok(locator) => locator,
             Err(e) => {
                 tracing::error!(pubkey = %mentioned_pk, channel, error = %e, "exact mention resume lookup failed");

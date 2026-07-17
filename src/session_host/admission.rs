@@ -240,6 +240,8 @@ mod tests {
             &state,
             &per_session,
             "codex",
+            "codex-pty",
+            "pty",
             "root",
             Some("root"),
             "addressed",
@@ -264,9 +266,17 @@ mod tests {
             harness: "codex".into(),
             profile: None,
         };
-        let reservation =
-            reserve_fresh_for_pubkey(&state, &durable, "codex", "root", Some("root"), &pubkey)
-                .unwrap();
+        let reservation = reserve_fresh_for_pubkey(
+            &state,
+            &durable,
+            "codex",
+            "codex-pty",
+            "pty",
+            "root",
+            Some("root"),
+            &pubkey,
+        )
+        .unwrap();
         assert_eq!(reservation.pubkey, pubkey);
         release(&state, &reservation);
     }

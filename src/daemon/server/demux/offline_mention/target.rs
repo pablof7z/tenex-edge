@@ -59,7 +59,7 @@ pub(super) fn resolve_and_persist(
             .flatten()
             .and_then(|profile| (!profile.agent_slug.is_empty()).then_some(profile.agent_slug))
     });
-    let configured_slug = crate::identity::list_local_agent_details(&crate::config::mosaico_home())
+    let configured_slug = crate::identity::keystore_entries(&crate::config::mosaico_home())
         .into_iter()
         .find(|agent| agent.pubkey.as_deref() == Some(mentioned_pubkey))
         .map(|agent| agent.slug);
