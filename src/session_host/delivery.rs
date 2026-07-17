@@ -11,13 +11,13 @@ mod doorbell;
 mod output_mode;
 mod prompt;
 use crate::session_host::transport::{
-    transport_kind_for_slug, AcpTransport, EndpointRef, SessionTransport, TransportKind,
+    transport_for_kind, transport_kind_for_slug, EndpointRef, TransportKind,
 };
 pub use doorbell::ring_doorbells;
 #[cfg(test)]
 pub(crate) use output_mode::headless_for_endpoint;
 pub(crate) use output_mode::session_is_headless;
-use prompt::{inject_planned_messages_acp, inject_planned_messages_pty};
+use prompt::inject_planned_messages;
 
 #[cfg(test)]
 #[path = "delivery/tests.rs"]
@@ -32,13 +32,11 @@ fn locator_kind(kind: TransportKind) -> &'static str {
 
 /// Liveness of a session's typed transport endpoint.
 fn endpoint_is_live(kind: TransportKind, endpoint_id: &str) -> bool {
-    match kind {
-        TransportKind::Pty => crate::pty::is_live(endpoint_id),
-        TransportKind::Acp => AcpTransport.is_live(&EndpointRef {
-            kind: TransportKind::Acp,
-            endpoint_id: endpoint_id.to_string(),
-        }),
-    }
+    let transport = transport_for_kind(kind);
+    transport.is_live(&EndpointRef {
+        kind,
+        endpoint_id: endpoint_id.to_string(),
+    })
 }
 
 fn delivery_endpoint_for(
@@ -92,11 +90,6 @@ pub(crate) fn session_has_live_delivery_path(
     endpoint.is_some_and(|(_, live)| live)
 }
 
-/// How long to wait after `session_start` fires before typing into the PTY.
-/// The hook fires early in harness startup; we need to wait until the input
-/// box is actually interactive.
-const SPAWN_PROMPT_DELAY_MS: u64 = 2000;
-
 /// Don't re-inject into the same session within this window (seconds).
 const MESSAGE_INJECT_DEBOUNCE_SECS: u64 = 20;
 
@@ -123,18 +116,6 @@ fn prune_debounce(active_pubkeys: &HashSet<String>) {
     });
 }
 
-/// Type the received message into `endpoint_id` and submit it, so a freshly-spawned
-/// harness opens on the message that triggered its spawn.
-pub async fn inject_spawn_message(endpoint_id: &str, text: &str) -> Result<()> {
-    tokio::time::sleep(Duration::from_millis(SPAWN_PROMPT_DELAY_MS)).await;
-    if !crate::pty::is_live(endpoint_id) {
-        anyhow::bail!("pty session {endpoint_id} died before spawn message could be injected");
-    }
-
-    crate::pty::inject(endpoint_id, text, true, true)?;
-    Ok(())
-}
-
 /// Deliver a fresh session's opening prompt over whichever transport hosts it:
 /// ACP via a JSON-RPC `deliver` (submit=true → a fresh turn), PTY via the
 /// bracketed-paste spawn inject. The ACP child lives in the daemon registry, so
@@ -142,36 +123,31 @@ pub async fn inject_spawn_message(endpoint_id: &str, text: &str) -> Result<()> {
 /// not propagated: the session is already live and can still receive mentions via
 /// the doorbell path.
 pub async fn deliver_spawn_prompt(agent_slug: &str, endpoint_id: &str, text: &str) {
-    match transport_kind_for_slug(agent_slug) {
-        Ok(TransportKind::Acp) => {
-            let ep = EndpointRef {
-                kind: TransportKind::Acp,
-                endpoint_id: endpoint_id.to_string(),
-            };
-            if let Err(e) = AcpTransport.deliver(&ep, text, true).await {
-                tracing::warn!(
-                    agent = %agent_slug,
-                    endpoint = %endpoint_id,
-                    error = %format!("{e:#}"),
-                    "failed to deliver ACP spawn prompt"
-                );
-            }
-        }
-        Ok(TransportKind::Pty) => {
-            if let Err(e) = inject_spawn_message(endpoint_id, text).await {
-                tracing::warn!(
-                    agent = %agent_slug,
-                    endpoint = %endpoint_id,
-                    error = %format!("{e:#}"),
-                    "failed to inject PTY spawn prompt"
-                );
-            }
-        }
-        Err(e) => tracing::warn!(
+    let kind = match transport_kind_for_slug(agent_slug) {
+        Ok(kind) => kind,
+        Err(e) => {
+            tracing::warn!(
             agent = %agent_slug,
             error = %format!("{e:#}"),
             "failed to resolve transport for spawn prompt"
-        ),
+            );
+            return;
+        }
+    };
+    let transport = transport_for_kind(kind);
+    tokio::time::sleep(transport.opening_delivery_delay()).await;
+    let endpoint = EndpointRef {
+        kind,
+        endpoint_id: endpoint_id.to_string(),
+    };
+    if let Err(e) = transport.deliver(&endpoint, text, true).await {
+        tracing::warn!(
+            agent = %agent_slug,
+            endpoint = %endpoint_id,
+            transport = kind.as_str(),
+            error = %format!("{e:#}"),
+            "failed to deliver spawn prompt"
+        );
     }
 }
 
@@ -184,11 +160,16 @@ pub async fn inject_pending_messages_pty(
     if pending.is_empty() {
         return Ok(false);
     };
+    let transport = transport_for_kind(TransportKind::Pty);
+    let endpoint = EndpointRef {
+        kind: TransportKind::Pty,
+        endpoint_id: endpoint_id.to_string(),
+    };
     let fact = delivery_scan_fact(
         rec,
         pending.iter().map(|row| row.event_id.clone()).collect(),
         Some(endpoint_id.to_string()),
-        crate::pty::is_live(endpoint_id),
+        transport.is_live(&endpoint),
         true,
     );
     let effects = state.drive_delivery_scan("pty_send", fact)?;
@@ -200,7 +181,7 @@ pub async fn inject_pending_messages_pty(
         } = effect
         {
             let injected =
-                inject_planned_messages_pty(state, rec, &endpoint_id, &event_ids).await?;
+                inject_planned_messages(state, rec, &transport, &endpoint_id, &event_ids).await?;
             if injected {
                 record_message_injection(&rec.pubkey);
             }

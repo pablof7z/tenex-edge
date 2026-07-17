@@ -1,30 +1,76 @@
-//! `PtyTransport`: the PTY transport marker.
-//!
-//! The PTY launch/resume/deliver paths are driven DIRECTLY — `pty::spawn_session`
-//! / `pty::inject` in `session_host::launch` / `session_host::delivery`, with
-//! resume argv shaped by the `registry` argv sniffers — NOT through this type. So
-//! the only methods ever reached are `kind` (endpoint classification) and `kill`
-//! (endpoint rollback via [`super::TransportImpl::kill`]).
-//!
-//! The dead `SessionTransport` `launch`/`resume`/`deliver`/`is_live` methods that
-//! once mirrored the direct path were removed. They were never called and one of
-//! them (`launch`/`resume`) could not participate in pre-spawn identity allocation.
-//! `AcpTransport` remains the sole full [`super::SessionTransport`]
-//! implementation; `PtyTransport` exposes only the two inherent methods the enum
-//! dispatcher actually invokes.
+//! Portable-PTY implementation of the complete hosted-session transport seam.
 
 use anyhow::Result;
 
-use super::{EndpointRef, TransportKind};
+use super::{
+    EndpointRef, LaunchSpec, ResumeSpec, SessionEndpoint, SessionTransport, TransportKind,
+};
 
 pub struct PtyTransport;
 
-impl PtyTransport {
-    pub fn kind(&self) -> TransportKind {
+#[async_trait::async_trait]
+impl SessionTransport for PtyTransport {
+    fn kind(&self) -> TransportKind {
         TransportKind::Pty
     }
 
-    pub async fn kill(&self, ep: &EndpointRef) -> Result<()> {
+    async fn launch(&self, spec: &LaunchSpec) -> Result<SessionEndpoint> {
+        let mut env = spec.pty.env.clone();
+        let mut env_remove = spec.pty.env_remove.clone();
+        crate::session_host::agent_env::assign(
+            &mut env,
+            &mut env_remove,
+            &spec.pubkey,
+            &spec.agent_nsec,
+        );
+        let meta = crate::pty::spawn_session(crate::pty::SpawnSessionArgs {
+            id: spec.pty.id.clone(),
+            agent: spec.slug.clone(),
+            root: spec.root.clone(),
+            cwd: std::path::PathBuf::from(&spec.abs_path),
+            channel: spec.group.clone().filter(|group| !group.is_empty()),
+            session_name: spec.session_name.clone(),
+            ephemeral: spec.ephemeral,
+            command: spec.base_command.clone(),
+            env,
+            env_remove,
+        })?;
+        Ok(SessionEndpoint {
+            kind: TransportKind::Pty,
+            endpoint_id: meta.id.clone(),
+            watch_pid: i32::try_from(meta.supervisor_pid).ok(),
+            meta,
+        })
+    }
+
+    async fn resume(&self, spec: &LaunchSpec, _resume: &ResumeSpec) -> Result<SessionEndpoint> {
+        self.launch(spec).await
+    }
+
+    async fn deliver(&self, ep: &EndpointRef, text: &str, submit: bool) -> Result<()> {
+        if !self.is_live(ep) {
+            anyhow::bail!("pty session {} is not live", ep.endpoint_id);
+        }
+        crate::pty::inject(&ep.endpoint_id, text, true, false)?;
+        if submit {
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            crate::pty::inject(&ep.endpoint_id, "", false, true)?;
+        }
+        Ok(())
+    }
+
+    fn is_live(&self, ep: &EndpointRef) -> bool {
+        crate::pty::is_live(&ep.endpoint_id)
+    }
+
+    fn opening_delivery_delay(&self) -> std::time::Duration {
+        std::time::Duration::from_millis(2000)
+    }
+
+    async fn kill(&self, ep: &EndpointRef) -> Result<()> {
+        if !self.is_live(ep) {
+            return Ok(());
+        }
         crate::pty::kill(&ep.endpoint_id)
     }
 }

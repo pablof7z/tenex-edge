@@ -1,13 +1,7 @@
 use super::*;
 use crate::agent_inventory::AgentSource;
 use crate::harness::{HarnessesConfig, Transport};
-
-#[derive(Default)]
-pub(super) struct PtyLaunchSpec {
-    pub(super) id: Option<String>,
-    pub(super) env: Vec<(String, String)>,
-    pub(super) env_remove: Vec<String>,
-}
+use crate::session_host::transport::{PtyLaunchSpec, TransportKind};
 
 pub(super) struct ResolvedSource {
     pub(super) transport: TransportImpl,
@@ -18,7 +12,7 @@ pub(super) struct ResolvedSource {
     pub(super) profile: Option<String>,
     pub(super) native_agent: Option<NativeAgentActivation>,
     pub(super) identity: crate::identity::AgentIdentity,
-    pub(super) pty_launch: Option<PtyLaunchSpec>,
+    pub(super) pty_launch: PtyLaunchSpec,
     pub(super) retired_advertisements: Vec<String>,
 }
 
@@ -127,7 +121,7 @@ pub(super) fn resolve_agent_source(
             .with_context(|| format!("applying native agent {selector:?}"))?;
     }
     let transport = crate::session_host::transport::select_transport_with(&harnesses, &bundle)?;
-    let pty_launch = if matches!(transport, TransportImpl::Pty(_)) {
+    let pty_launch = if transport.kind() == TransportKind::Pty {
         resolved.profile.materialize()?;
         let mut env = resolved.profile.extra_env.clone();
         let mut env_remove = Vec::new();
@@ -141,13 +135,13 @@ pub(super) fn resolve_agent_source(
                 }
             }
         }
-        Some(PtyLaunchSpec {
+        PtyLaunchSpec {
             id: Some(id),
             env,
             env_remove,
-        })
+        }
     } else {
-        None
+        PtyLaunchSpec::default()
     };
     Ok(ResolvedSource {
         transport,

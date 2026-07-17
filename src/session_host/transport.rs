@@ -1,16 +1,8 @@
 //! Transport-agnostic session hosting seam.
 //!
-//! A "hosted session" is opened over exactly one transport. The portable PTY is
-//! driven DIRECTLY (`pty::spawn_session` / `pty::inject`, argv shaped by the
-//! `registry` sniffers) and reaches [`PtyTransport`] only for `kind`/`kill`.
-//! `AcpTransport` is the JSON-RPC backend (ACP / codex app-server) for harnesses
-//! that expose an `RpcTurn` model, and is the sole full [`SessionTransport`] impl
-//! — its `launch`/`resume`/`deliver`/`is_live` are the ones actually invoked.
-//!
-//! Object dispatch is via the [`TransportImpl`] enum rather than `dyn` (native
-//! async-fn-in-trait is not object-safe and we avoid pulling `async-trait`).
-//! The [`SessionTransport`] trait documents the RPC contract `AcpTransport`
-//! fulfils.
+//! A hosted session is opened and driven through one [`SessionTransport`].
+//! Transport-specific launch, resume, delivery, liveness, and teardown stay in
+//! the implementing module; callers never branch on transport kind.
 
 pub mod acp;
 mod acp_runtime;
@@ -54,12 +46,22 @@ pub struct LaunchSpec {
     pub abs_path: String,
     pub group: Option<String>,
     pub ephemeral: bool,
+    pub session_name: Option<String>,
     /// Resolved argv incl. base_argv + profile + user flags + agent-def args.
     pub base_command: Vec<String>,
     /// Authoritative session identity allocated before the child starts.
     pub pubkey: String,
     /// Matching signer exposed only to the assigned harness process.
     pub agent_nsec: String,
+    pub pty: PtyLaunchSpec,
+}
+
+/// PTY-only launch details. Other transports ignore the empty/default value.
+#[derive(Clone, Debug, Default)]
+pub struct PtyLaunchSpec {
+    pub id: Option<String>,
+    pub env: Vec<(String, String)>,
+    pub env_remove: Vec<String>,
 }
 
 /// A prior session's native resume token.
@@ -85,12 +87,9 @@ pub struct EndpointRef {
     pub endpoint_id: String,
 }
 
-/// The RPC transport contract, fulfilled by [`AcpTransport`]. Each method maps to
-/// an existing daemon behavior over JSON-RPC (ACP / codex app-server). The PTY
-/// path does NOT implement this trait — it is driven directly (relaunch-with-flag
-/// + bracketed-paste), and [`PtyTransport`] exposes only `kind`/`kill`.
-#[allow(async_fn_in_trait)]
-pub trait SessionTransport {
+/// Complete hosted-session contract. Every selectable transport implements it.
+#[async_trait::async_trait]
+pub trait SessionTransport: Send + Sync {
     fn kind(&self) -> TransportKind;
 
     /// Open a brand-new harness session.
@@ -104,37 +103,58 @@ pub trait SessionTransport {
 
     fn is_live(&self, ep: &EndpointRef) -> bool;
 
+    /// Delay before the opening prompt can be delivered to a newly launched endpoint.
+    fn opening_delivery_delay(&self) -> std::time::Duration {
+        std::time::Duration::ZERO
+    }
+
     async fn kill(&self, ep: &EndpointRef) -> Result<()>;
 }
 
 pub use acp::AcpTransport;
 pub use pty::PtyTransport;
 
-/// Enum dispatcher giving dynamic transport selection without `dyn`.
-///
-/// Only `kind` and `kill` are dispatched here: the ACP path invokes
-/// `AcpTransport`'s [`SessionTransport`] methods on the concrete variant directly
-/// (`launch.rs`/`delivery.rs`), and the PTY path is driven outside the trait
-/// entirely. The former per-method enum forwarders for
-/// `launch`/`resume`/`deliver`/`is_live` were dead and removed.
-pub enum TransportImpl {
-    Pty(PtyTransport),
-    Acp(AcpTransport),
-}
+/// Type-erased transport selected from a configured harness bundle.
+pub struct TransportImpl(Box<dyn SessionTransport>);
 
 impl TransportImpl {
+    fn new(transport: impl SessionTransport + 'static) -> Self {
+        Self(Box::new(transport))
+    }
+
     pub fn kind(&self) -> TransportKind {
-        match self {
-            TransportImpl::Pty(t) => t.kind(),
-            TransportImpl::Acp(t) => t.kind(),
-        }
+        self.0.kind()
+    }
+
+    pub async fn launch(&self, spec: &LaunchSpec) -> Result<SessionEndpoint> {
+        self.0.launch(spec).await
+    }
+
+    pub async fn resume(&self, spec: &LaunchSpec, resume: &ResumeSpec) -> Result<SessionEndpoint> {
+        self.0.resume(spec, resume).await
+    }
+
+    pub async fn deliver(&self, ep: &EndpointRef, text: &str, submit: bool) -> Result<()> {
+        self.0.deliver(ep, text, submit).await
+    }
+
+    pub fn is_live(&self, ep: &EndpointRef) -> bool {
+        self.0.is_live(ep)
+    }
+
+    pub fn opening_delivery_delay(&self) -> std::time::Duration {
+        self.0.opening_delivery_delay()
     }
 
     pub async fn kill(&self, ep: &EndpointRef) -> Result<()> {
-        match self {
-            TransportImpl::Pty(t) => t.kill(ep).await,
-            TransportImpl::Acp(t) => t.kill(ep).await,
-        }
+        self.0.kill(ep).await
+    }
+}
+
+pub fn transport_for_kind(kind: TransportKind) -> TransportImpl {
+    match kind {
+        TransportKind::Pty => TransportImpl::new(PtyTransport),
+        TransportKind::Acp => TransportImpl::new(AcpTransport),
     }
 }
 
@@ -155,8 +175,8 @@ pub fn transport_kind_for_slug(slug: &str) -> Result<TransportKind> {
 /// the defect #5 hard-bail on `HeadlessExec` (see [`select_transport`]).
 fn transport_impl_for(transport: Transport) -> Result<TransportImpl> {
     Ok(match transport {
-        Transport::Acp | Transport::AppServer => TransportImpl::Acp(AcpTransport),
-        Transport::Pty => TransportImpl::Pty(PtyTransport),
+        Transport::Acp | Transport::AppServer => TransportImpl::new(AcpTransport),
+        Transport::Pty => TransportImpl::new(PtyTransport),
         Transport::HeadlessExec => anyhow::bail!(
             "headless-exec harness bundles are not yet wired into session hosting; \
              refusing to launch (a one-shot exec argv must not run inside the \

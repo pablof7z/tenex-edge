@@ -55,9 +55,11 @@ fn acp_resolves_driver_from_bundle_not_agent_slug() {
         abs_path: "/tmp".into(),
         group: None,
         ephemeral: false,
+        session_name: None,
         base_command: vec!["codex".into(), "app-server".into()],
         pubkey: "33".repeat(32),
         agent_nsec: "test-agent-nsec".into(),
+        pty: PtyLaunchSpec::default(),
     };
     assert_eq!(super::acp::bundle_name(&spec), "codex-rpc");
     let scratch = tempfile::tempdir().unwrap();
@@ -76,4 +78,23 @@ async fn acp_unknown_endpoint_is_not_live() {
     };
     assert!(!AcpTransport.is_live(&ep));
     assert!(AcpTransport.kill(&ep).await.is_ok());
+}
+
+#[tokio::test]
+async fn transport_matrix_routes_liveness_delivery_and_kill_through_the_trait() {
+    for kind in [TransportKind::Pty, TransportKind::Acp] {
+        let transport = transport_for_kind(kind);
+        let endpoint = EndpointRef {
+            kind,
+            endpoint_id: format!("missing-{}-endpoint", kind.as_str()),
+        };
+
+        assert_eq!(transport.kind(), kind);
+        assert!(!transport.is_live(&endpoint));
+        assert!(transport
+            .deliver(&endpoint, "deterministic matrix probe", true)
+            .await
+            .is_err());
+        assert!(transport.kill(&endpoint).await.is_ok());
+    }
 }

@@ -170,6 +170,7 @@ impl AcpTransport {
     }
 }
 
+#[async_trait::async_trait]
 impl SessionTransport for AcpTransport {
     fn kind(&self) -> TransportKind {
         TransportKind::Acp

@@ -2,13 +2,13 @@ use super::admission;
 use crate::agent_catalog::NativeAgentActivation;
 use crate::daemon::server::DaemonState;
 use crate::harness::ResumeMechanism;
-use crate::session_host::transport::{LaunchSpec, ResumeSpec, TransportImpl};
+use crate::session_host::transport::{LaunchSpec, PtyLaunchSpec, ResumeSpec, TransportImpl};
 use anyhow::{Context, Result};
 use std::sync::Arc;
 
 mod source;
 mod spawn;
-use source::{resolve_agent_source, PtyLaunchSpec};
+use source::resolve_agent_source;
 pub(crate) use spawn::spawn_ephemeral_agent_for_pubkey;
 pub(crate) use spawn::{spawn_agent, SpawnRequest};
 pub use spawn::{spawn_dispatched_ephemeral_agent, spawn_ephemeral_agent, DispatchedSpawn};
@@ -78,53 +78,24 @@ async fn open_agent_session(
     bundle: &str,
     profile: Option<&str>,
     native_agent: Option<&NativeAgentActivation>,
-    pty_launch: Option<PtyLaunchSpec>,
+    pty_launch: PtyLaunchSpec,
 ) -> Result<crate::pty::LaunchMetadata> {
-    match transport {
-        TransportImpl::Pty(_) => {
-            let mut pty_launch = pty_launch.unwrap_or_default();
-            crate::session_host::agent_env::assign(
-                &mut pty_launch.env,
-                &mut pty_launch.env_remove,
-                pubkey,
-                agent_nsec,
-            );
-            let meta = crate::pty::spawn_session(crate::pty::SpawnSessionArgs {
-                id: pty_launch.id,
-                agent: slug.to_string(),
-                root: root.to_string(),
-                cwd: std::path::PathBuf::from(abs_path),
-                channel: group.filter(|g| !g.is_empty()).map(str::to_string),
-                session_name: session_name.map(str::to_string),
-                ephemeral,
-                command: command.to_vec(),
-                env: pty_launch.env,
-                env_remove: pty_launch.env_remove,
-            })?;
-            Ok(meta)
-        }
-        TransportImpl::Acp(t) => {
-            use crate::session_host::transport::SessionTransport;
-            let spec = LaunchSpec {
-                slug: slug.to_string(),
-                // The bundle NAME (harnesses.json key) is distinct from the agent
-                // slug; the ACP transport resolves its harness/driver from this,
-                // never from the slug (defect #1).
-                bundle: bundle.to_string(),
-                profile: profile.map(str::to_string),
-                native_agent: native_agent.cloned(),
-                root: root.to_string(),
-                abs_path: abs_path.to_string(),
-                group: group.map(str::to_string),
-                ephemeral,
-                base_command: command.to_vec(),
-                pubkey: pubkey.to_string(),
-                agent_nsec: agent_nsec.to_string(),
-            };
-            let endpoint = t.launch(&spec).await?;
-            Ok(endpoint.meta)
-        }
-    }
+    let spec = LaunchSpec {
+        slug: slug.to_string(),
+        bundle: bundle.to_string(),
+        profile: profile.map(str::to_string),
+        native_agent: native_agent.cloned(),
+        root: root.to_string(),
+        abs_path: abs_path.to_string(),
+        group: group.map(str::to_string),
+        ephemeral,
+        session_name: session_name.map(str::to_string),
+        base_command: command.to_vec(),
+        pubkey: pubkey.to_string(),
+        agent_nsec: agent_nsec.to_string(),
+        pty: pty_launch,
+    };
+    Ok(transport.launch(&spec).await?.meta)
 }
 
 /// Resume a prior session by replaying its harness with the native resume token.
@@ -172,52 +143,26 @@ pub(crate) async fn resume_agent_in_channel(
         group,
         resume_id,
     )?;
-    let meta = match &transport {
-        TransportImpl::Pty(_) => {
-            let resume_command =
-                build_driver_resume_command(&base, source.resume, resume_id, slug)?;
-            open_agent_session(
-                &transport,
-                slug,
-                root,
-                &abs_path,
-                &resume_command,
-                Some(group),
-                None,
-                false,
-                &reservation.pubkey,
-                &reservation.agent_nsec,
-                &source.bundle,
-                source.profile.as_deref(),
-                source.native_agent.as_ref(),
-                source.pty_launch,
-            )
-            .await?
-        }
-        // ACP/app-server: re-enter the native session by its resume token
-        // (`session/load` or `thread/resume`); the driver argv comes from the
-        // harness bundle, so no PTY resume-command shaping applies.
-        TransportImpl::Acp(t) => {
-            use crate::session_host::transport::SessionTransport;
-            let spec = LaunchSpec {
-                slug: slug.to_string(),
-                bundle: source.bundle,
-                profile: source.profile,
-                native_agent: source.native_agent,
-                root: root.to_string(),
-                abs_path: abs_path.clone(),
-                group: Some(group.to_string()),
-                ephemeral: false,
-                base_command: base,
-                pubkey: reservation.pubkey.clone(),
-                agent_nsec: reservation.agent_nsec.clone(),
-            };
-            let resume = ResumeSpec {
-                native_id: resume_id.to_string(),
-            };
-            t.resume(&spec, &resume).await?.meta
-        }
+    let resume_command = build_driver_resume_command(&base, source.resume, resume_id, slug)?;
+    let spec = LaunchSpec {
+        slug: slug.to_string(),
+        bundle: source.bundle,
+        profile: source.profile,
+        native_agent: source.native_agent,
+        root: root.to_string(),
+        abs_path: abs_path.clone(),
+        group: Some(group.to_string()),
+        ephemeral: false,
+        session_name: None,
+        base_command: resume_command,
+        pubkey: reservation.pubkey.clone(),
+        agent_nsec: reservation.agent_nsec.clone(),
+        pty: source.pty_launch,
     };
+    let resume = ResumeSpec {
+        native_id: resume_id.to_string(),
+    };
+    let meta = transport.resume(&spec, &resume).await?.meta;
     let pty_id = meta.id.clone();
     if let Err(e) = crate::daemon::server::session_start::bootstrap_pty_session_start(
         state,
@@ -265,6 +210,9 @@ fn build_driver_resume_command(
             command.extend(args.iter().cloned());
             Ok(command)
         }
-        _ => anyhow::bail!("agent {slug:?} uses a non-PTY resume mechanism"),
+        ResumeMechanism::AcpSessionLoad
+        | ResumeMechanism::AppServerThreadResume
+        | ResumeMechanism::ExecReplay
+        | ResumeMechanism::None => Ok(base.to_vec()),
     }
 }

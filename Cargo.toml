@@ -22,6 +22,7 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 clap = { version = "4", features = ["derive"] }
 crossterm = "0.28"
 anyhow = "1"
+async-trait = "0.1"
 axum = "0.8"
 base64 = "0.22"
 serde = { version = "1", features = ["derive"] }
