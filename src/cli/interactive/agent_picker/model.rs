@@ -11,8 +11,8 @@ pub(in crate::cli) struct AgentProvenance {
 pub(in crate::cli) struct AgentPickerRow {
     pub(in crate::cli) name: String,
     pub(in crate::cli) description: String,
-    pub(in crate::cli) description_harness: Option<Harness>,
     pub(in crate::cli) provenance: Option<AgentProvenance>,
+    pub(in crate::cli) status: Option<AgentProvenance>,
 }
 
 impl AgentPickerRow {
@@ -37,6 +37,13 @@ impl AgentPickerRow {
                     .unwrap_or_default(),
                 1_000,
             ),
+            (
+                self.status
+                    .as_ref()
+                    .map(|value| value.label.as_str())
+                    .unwrap_or_default(),
+                750,
+            ),
         ]
         .into_iter()
         .filter_map(|(field, priority)| {
@@ -57,11 +64,11 @@ mod tests {
         let row = AgentPickerRow {
             name: "writer".into(),
             description: "Drafts release notes".into(),
-            description_harness: None,
             provenance: Some(AgentProvenance {
                 label: "Claude profile".into(),
                 harness: Harness::ClaudeCode,
             }),
+            status: None,
         };
 
         assert_eq!(row.plain(), "writer  Drafts release notes · Claude profile");

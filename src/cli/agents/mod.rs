@@ -66,8 +66,8 @@ async fn interactive() -> Result<()> {
 
 fn picker_row(row: &AgentRow) -> crate::cli::interactive::agent_picker::AgentPickerRow {
     let key = match row.per_session_key {
-        Some(true) => "per-session",
-        Some(false) => "persistent",
+        Some(true) => "per-session key",
+        Some(false) => "persistent key",
         None => "not configured",
     };
     let transport = row
@@ -78,12 +78,12 @@ fn picker_row(row: &AgentRow) -> crate::cli::interactive::agent_picker::AgentPic
     crate::cli::interactive::agent_picker::AgentPickerRow {
         name: row.slug.clone(),
         description: row.description.clone(),
-        description_harness: None,
         provenance: Some(crate::cli::interactive::agent_picker::AgentProvenance {
-            label: format!(
-                "{} · {transport} · {bundle} · {key}",
-                data::harness_name(row.harness)
-            ),
+            label: data::harness_name(row.harness).to_string(),
+            harness: row.harness,
+        }),
+        status: Some(crate::cli::interactive::agent_picker::AgentProvenance {
+            label: format!("Harness config: {bundle} · {transport} · {key}"),
             harness: row.harness,
         }),
     }
@@ -175,9 +175,10 @@ mod tests {
         };
         let picker = picker_row(&row);
         assert_eq!(picker.description, "Reviews changes");
+        assert_eq!(picker.provenance.unwrap().label, "Claude");
         assert_eq!(
-            picker.provenance.unwrap().label,
-            "Claude · acp · claude-acp · per-session"
+            picker.status.unwrap().label,
+            "Harness config: claude-acp · acp · per-session key"
         );
     }
 }

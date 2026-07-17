@@ -12,7 +12,7 @@ use crossterm::{
 use ratatui::{backend::CrosstermBackend, layout::Rect, Terminal, TerminalOptions, Viewport};
 use std::io;
 
-const MAX_VISIBLE_ROWS: u16 = 16;
+const MAX_VISIBLE_ROWS: u16 = 40;
 const CHROME_ROWS: u16 = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -107,6 +107,10 @@ impl PickerState {
         self.visible.get(self.cursor).copied()
     }
 
+    fn current_row(&self) -> Option<&AgentPickerRow> {
+        self.current().map(|index| &self.rows[index])
+    }
+
     fn move_up(&mut self, amount: usize) {
         if self.visible.is_empty() {
             return;
@@ -184,7 +188,7 @@ impl Drop for RawMode {
 
 pub(in crate::cli) fn select(rows: Vec<AgentPickerRow>, mode: PickerMode) -> Result<PickerAction> {
     let (_, terminal_height) = terminal::size().unwrap_or((100, 28));
-    let height = viewport_height(terminal_height, rows.len());
+    let height = viewport_height(terminal_height);
     let _raw_mode = RawMode::enter()?;
     let backend = CrosstermBackend::new(io::stdout());
     let mut terminal = Terminal::with_options(
@@ -243,9 +247,6 @@ fn option_rows(height: u16) -> usize {
     usize::from(height.saturating_sub(CHROME_ROWS))
 }
 
-fn viewport_height(terminal_height: u16, choices: usize) -> u16 {
-    terminal_height
-        .min(MAX_VISIBLE_ROWS + CHROME_ROWS)
-        .min(u16::try_from(choices).unwrap_or(u16::MAX) + CHROME_ROWS)
-        .max(1)
+fn viewport_height(terminal_height: u16) -> u16 {
+    terminal_height.clamp(1, MAX_VISIBLE_ROWS + CHROME_ROWS)
 }

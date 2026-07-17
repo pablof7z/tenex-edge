@@ -86,15 +86,14 @@ fn menu_rows(agents: &[&crate::agent_inventory::AvailableAgent]) -> Vec<AgentPic
 
 fn menu_row(agent: &crate::agent_inventory::AvailableAgent) -> AgentPickerRow {
     let description = compact(&agent.use_criteria);
-    let (description, description_harness, provenance) = match &agent.source {
+    let (description, provenance) = match &agent.source {
         crate::agent_inventory::AgentSource::Configured { .. } => {
-            (nonempty(description, "Configured agent"), None, None)
+            (nonempty(description, "Configured agent"), None)
         }
         crate::agent_inventory::AgentSource::NativeProfile { .. } => {
             let label = format!("{} profile", harness_label(agent.harness));
             (
                 nonempty(description, "Native agent profile"),
-                None,
                 Some(AgentProvenance {
                     label,
                     harness: agent.harness,
@@ -103,15 +102,14 @@ fn menu_row(agent: &crate::agent_inventory::AvailableAgent) -> AgentPickerRow {
         }
         crate::agent_inventory::AgentSource::Generic => (
             format!("Generic {} agent", harness_label(agent.harness)),
-            Some(agent.harness),
             None,
         ),
     };
     AgentPickerRow {
         name: agent.slug.clone(),
         description,
-        description_harness,
         provenance,
+        status: None,
     }
 }
 
