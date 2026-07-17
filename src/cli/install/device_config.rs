@@ -19,7 +19,9 @@ pub(super) fn run_if_needed(opts: &super::args::InstallOpts) -> Result<()> {
         note_if_missing();
         Ok(())
     } else {
-        ensure_device_config()
+        ensure_device_config()?;
+        crate::config::ensure_available_harnesses()?;
+        Ok(())
     }
 }
 

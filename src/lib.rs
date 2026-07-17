@@ -9,6 +9,7 @@
 //!   config / identity / channel are leaf utilities.
 
 pub mod agent_catalog;
+pub(crate) mod agent_inventory;
 mod attachment;
 mod channel_about;
 mod channel_name;

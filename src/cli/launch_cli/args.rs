@@ -4,9 +4,10 @@ use std::io::{self, Read as _};
 
 #[derive(Args)]
 pub(in crate::cli) struct LaunchArgs {
-    /// Configured local agent slug.
+    /// Agent, native profile combination, or configured harness. Omit to list
+    /// every available launch target.
     #[arg(index = 1)]
-    slug: String,
+    slug: Option<String>,
     /// Opening user prompt to inject into the fresh session. Use "-" to read
     /// from stdin.
     #[arg(index = 2, value_name = "PROMPT")]
@@ -40,9 +41,12 @@ pub(super) struct LaunchRequest {
 }
 
 pub(in crate::cli) async fn launch(args: LaunchArgs) -> Result<()> {
+    let Some(slug) = args.slug else {
+        return super::selection::list_available();
+    };
     let prompt = resolve_initial_prompt(args.prompt)?;
     super::verbs::launch(LaunchRequest {
-        agent: args.slug,
+        agent: slug,
         root: args.workspace,
         channel: args.channel,
         session_name: args.session_name,
@@ -110,6 +114,16 @@ mod tests {
         assert_eq!(channel(omitted), None);
         assert_eq!(channel(picker).as_deref(), Some(""));
         assert_eq!(channel(named).as_deref(), Some("ops"));
+    }
+
+    #[test]
+    fn launch_without_agent_lists_available_targets() {
+        let cli = crate::cli::args::Cli::try_parse_from(["mosaico", "launch"])
+            .expect("launch without agent parses");
+        match cli.cmd {
+            crate::cli::args::Cmd::Launch(args) => assert!(args.slug.is_none()),
+            _ => panic!("expected launch command"),
+        }
     }
 
     #[test]

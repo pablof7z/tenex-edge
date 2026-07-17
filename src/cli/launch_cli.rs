@@ -3,6 +3,7 @@
 mod args;
 mod existing;
 mod fresh;
+mod selection;
 pub mod verbs;
 
 // Re-export public items for external callers (cli.rs)

@@ -39,6 +39,17 @@ impl Harness {
             _ => Harness::Unknown,
         }
     }
+
+    /// User-facing agent slug for launching a harness with its default profile.
+    pub fn agent_slug(&self) -> &'static str {
+        match self {
+            Harness::ClaudeCode => "claude",
+            Harness::Codex => "codex",
+            Harness::Opencode => "opencode",
+            Harness::Grok => "grok",
+            Harness::Unknown => "unknown",
+        }
+    }
 }
 
 /// Where a newly born session's fabric events land.

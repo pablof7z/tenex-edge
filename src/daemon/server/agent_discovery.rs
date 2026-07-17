@@ -13,6 +13,10 @@ pub(crate) struct CatalogChange {
 }
 
 impl DaemonState {
+    pub(crate) fn available_harnesses(&self) -> &[Harness] {
+        &self.cfg.available_harnesses
+    }
+
     pub(crate) fn agent_catalog(&self) -> AgentCatalog {
         self.agent_catalog.lock().unwrap().clone()
     }

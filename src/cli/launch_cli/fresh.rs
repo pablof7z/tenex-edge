@@ -8,6 +8,7 @@ pub(super) struct FreshLaunchRequest {
     pub(super) channel: Option<String>,
     pub(super) session_name: Option<String>,
     pub(super) prompt: Option<String>,
+    pub(super) retired_advertisements: Vec<String>,
 }
 
 pub(super) async fn launch(request: FreshLaunchRequest) -> Result<()> {
@@ -59,6 +60,7 @@ fn pty_spawn_params(request: &FreshLaunchRequest, cwd: &std::path::Path) -> serd
         "channel": request.channel,
         "session_name": request.session_name,
         "prompt": request.prompt,
+        "retired_advertisements": request.retired_advertisements,
     })
 }
 
@@ -75,6 +77,7 @@ mod tests {
                 channel: Some("design".into()),
                 session_name: Some("forensic".into()),
                 prompt: Some("start here".into()),
+                retired_advertisements: vec!["writer-codex".into()],
             },
             std::path::Path::new("/tmp/project"),
         );
@@ -87,6 +90,7 @@ mod tests {
                 "channel": "design",
                 "session_name": "forensic",
                 "prompt": "start here",
+                "retired_advertisements": ["writer-codex"],
             })
         );
     }

@@ -15,30 +15,31 @@ pub struct Harness {
 
 pub fn harnesses() -> Result<Vec<Harness>> {
     let home = home_dir()?;
+    let available = crate::config::detect_available_harnesses()?;
     Ok(vec![
         Harness {
             id: "claude-code",
             display: "Claude Code",
             config_path: home.join(".claude/settings.json"),
-            detected: home.join(".claude").exists() || bin_on_path("claude"),
+            detected: available.contains(&crate::session::Harness::ClaudeCode),
         },
         Harness {
             id: "codex",
             display: "Codex",
             config_path: home.join(".codex/hooks.json"),
-            detected: home.join(".codex").exists() || bin_on_path("codex"),
+            detected: available.contains(&crate::session::Harness::Codex),
         },
         Harness {
             id: "opencode",
             display: "opencode",
             config_path: home.join(".config/opencode/plugin/mosaico.ts"),
-            detected: home.join(".config/opencode").exists() || bin_on_path("opencode"),
+            detected: available.contains(&crate::session::Harness::Opencode),
         },
         Harness {
             id: "grok",
             display: "Grok Build",
             config_path: home.join(".grok/user-settings.json"),
-            detected: home.join(".grok").exists() || bin_on_path("grok"),
+            detected: available.contains(&crate::session::Harness::Grok),
         },
     ])
 }
@@ -58,15 +59,7 @@ fn home_dir_from_env(home: Option<String>) -> Result<PathBuf> {
 }
 
 pub(super) fn claude_detected() -> Result<bool> {
-    let home = home_dir()?;
-    Ok(home.join(".claude").exists() || bin_on_path("claude"))
-}
-
-fn bin_on_path(bin: &str) -> bool {
-    let Ok(path) = std::env::var("PATH") else {
-        return false;
-    };
-    std::env::split_paths(&path).any(|dir| dir.join(bin).is_file())
+    Ok(crate::config::detect_available_harnesses()?.contains(&crate::session::Harness::ClaudeCode))
 }
 
 /// The hook signature we dedupe by: `mosaico harness hook <host> --type <type>`.

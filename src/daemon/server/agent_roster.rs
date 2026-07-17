@@ -2,10 +2,11 @@ use super::*;
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct CapabilityAdvertisement {
-    slug: String,
-    use_criteria: String,
-    root_channels: Vec<String>,
+pub(in crate::daemon::server) struct CapabilityAdvertisement {
+    pub(in crate::daemon::server) slug: String,
+    pub(in crate::daemon::server) use_criteria: String,
+    pub(in crate::daemon::server) root_channels: Vec<String>,
+    pub(in crate::daemon::server) available_since: u64,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -78,6 +79,25 @@ pub(in crate::daemon::server) async fn publish_local_agent_roster(
     })
 }
 
+impl DaemonState {
+    pub(crate) fn schedule_agent_roster_refresh(self: &Arc<Self>, removed_slugs: Vec<String>) {
+        if removed_slugs.is_empty() {
+            return;
+        }
+        let state = self.clone();
+        tokio::spawn(async move {
+            for slug in removed_slugs {
+                if let Err(error) = publish_local_agent_roster(&state, Some(&slug)).await {
+                    tracing::warn!(slug, error = %format!("{error:#}"), "selected agent combination retirement failed");
+                }
+            }
+            if let Err(error) = publish_local_agent_roster(&state, None).await {
+                tracing::warn!(error = %format!("{error:#}"), "selected agent binding roster publish failed");
+            }
+        });
+    }
+}
+
 /// Publish the backend process's own kind:0 identity, advertising the managed
 /// agents as `["agent", slug, description]` tags. Best-effort: a failure is
 /// logged and deferred to the next trigger (startup or the next roster change).
@@ -117,22 +137,13 @@ fn root_channels(store: &Store) -> Vec<String> {
         .collect()
 }
 
-fn capability_advertisements(
+pub(in crate::daemon::server) fn capability_advertisements(
     state: &Arc<DaemonState>,
 ) -> (Vec<CapabilityAdvertisement>, Vec<String>) {
     let roots = state.with_store(root_channels);
     let root_set = roots.iter().cloned().collect::<BTreeSet<_>>();
     let bindings = state.with_store(|store| store.list_workspace_bindings().unwrap_or_default());
-    let local_agents = crate::identity::list_local_agents(&crate::config::mosaico_home());
-    let configured = local_agents
-        .iter()
-        .map(|(slug, _, _, _)| slug.clone())
-        .collect::<BTreeSet<_>>();
-    let mut merged = BTreeMap::<String, (String, BTreeSet<String>)>::new();
-    for (slug, _, _, byline) in local_agents {
-        merged.insert(slug, (byline.unwrap_or_default(), root_set.clone()));
-    }
-
+    let mut merged = BTreeMap::<String, (String, u64, BTreeSet<String>)>::new();
     let catalog = state.agent_catalog();
     let mut failed = Vec::new();
     let harnesses = match crate::harness::HarnessesConfig::load() {
@@ -142,24 +153,32 @@ fn capability_advertisements(
             crate::harness::HarnessesConfig::default()
         }
     };
-    merge_discovered(
+    merge_inventory(
         &mut merged,
-        &configured,
-        catalog.capabilities(None),
+        crate::agent_inventory::AgentInventory::build(
+            &crate::config::mosaico_home(),
+            state.available_harnesses(),
+            &harnesses,
+            &catalog,
+            None,
+        ),
         &root_set,
-        &harnesses,
         &mut failed,
     );
     for binding in bindings {
         if !root_set.contains(&binding.channel_h) {
             continue;
         }
-        merge_discovered(
+        merge_inventory(
             &mut merged,
-            &configured,
-            catalog.capabilities(Some(std::path::Path::new(&binding.abs_path))),
+            crate::agent_inventory::AgentInventory::build(
+                &crate::config::mosaico_home(),
+                state.available_harnesses(),
+                &harnesses,
+                &catalog,
+                Some(std::path::Path::new(&binding.abs_path)),
+            ),
             &BTreeSet::from([binding.channel_h]),
-            &harnesses,
             &mut failed,
         );
     }
@@ -167,10 +186,11 @@ fn capability_advertisements(
     let advertisements = merged
         .into_iter()
         .map(
-            |(slug, (use_criteria, root_channels))| CapabilityAdvertisement {
+            |(slug, (use_criteria, available_since, root_channels))| CapabilityAdvertisement {
                 slug,
                 use_criteria,
                 root_channels: root_channels.into_iter().collect(),
+                available_since,
             },
         )
         .collect();
@@ -179,40 +199,19 @@ fn capability_advertisements(
     (advertisements, failed)
 }
 
-fn merge_discovered(
-    merged: &mut BTreeMap<String, (String, BTreeSet<String>)>,
-    configured: &BTreeSet<String>,
-    capabilities: Vec<crate::agent_catalog::AgentCapability>,
+fn merge_inventory(
+    merged: &mut BTreeMap<String, (String, u64, BTreeSet<String>)>,
+    inventory: crate::agent_inventory::AgentInventory,
     roots: &BTreeSet<String>,
-    harnesses: &crate::harness::HarnessesConfig,
     failed: &mut Vec<String>,
 ) {
-    for capability in capabilities {
-        if configured.contains(&capability.slug) {
-            continue;
-        }
-        if capability.profiles.len() != 1 {
-            let harnesses = capability
-                .profiles
-                .iter()
-                .map(|profile| profile.harness.as_str())
-                .collect::<Vec<_>>()
-                .join(", ");
-            failed.push(format!(
-                "{}: installed by multiple harnesses ({harnesses}); add an explicit agent harness binding",
-                capability.slug
-            ));
-            continue;
-        }
-        let harness = capability.profiles[0].harness;
-        if let Err(error) = crate::harness::native_bundle_with(harnesses, harness) {
-            failed.push(format!("{}: {error:#}", capability.slug));
-            continue;
-        }
+    failed.extend(inventory.failures);
+    for agent in inventory.agents {
         let entry = merged
-            .entry(capability.slug)
-            .or_insert_with(|| (capability.use_criteria, BTreeSet::new()));
-        entry.1.extend(roots.iter().cloned());
+            .entry(agent.slug)
+            .or_insert_with(|| (agent.use_criteria, agent.available_since, BTreeSet::new()));
+        entry.1 = entry.1.min(agent.available_since);
+        entry.2.extend(roots.iter().cloned());
     }
 }
 
