@@ -13,6 +13,7 @@ need nak
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+STATE_ROOT="${MOSAICO_DEV_STATE_ROOT:-${REPO_ROOT}/.container-state}"
 ENV_FILE="${1:-${MOSAICO_DEV_ENV:-}}"
 if [[ -z "${ENV_FILE}" || ! -f "${ENV_FILE}" ]]; then
   echo "usage: $0 <lab.env> [profile ...]" >&2
@@ -64,6 +65,13 @@ profile_contract() {
       BUNDLE_ARGS_JSON="${MOSAICO_DEV_CODEX_APP_SERVER_ARGS_JSON:-[]}"
       AGENT_PROFILE="${MOSAICO_DEV_CODEX_CONFIG_PROFILE:-}"
       ;;
+    grok)
+      AGENT_SLUG=grok
+      BUNDLE=grok
+      HARNESS=grok
+      TRANSPORT=pty
+      BUNDLE_ARGS_JSON="${MOSAICO_DEV_GROK_ARGS_JSON:-[]}"
+      ;;
     opencode)
       AGENT_SLUG=opencode
       BUNDLE=opencode
@@ -96,7 +104,7 @@ profile_contract() {
       BUNDLE_ARGS_JSON="${MOSAICO_DEV_OPENCODE_OLLAMA_ARGS_JSON:-${default_opencode_args}}"
       ;;
     *)
-      printf 'unsupported profile %s; expected claude|claude-acp|codex|codex-app-server|opencode|opencode-acp|codex-ollama|opencode-ollama\n' "${profile}" >&2
+      printf 'unsupported profile %s; expected claude|claude-acp|codex|codex-app-server|grok|opencode|opencode-acp|codex-ollama|opencode-ollama\n' "${profile}" >&2
       exit 2
       ;;
   esac
@@ -137,7 +145,6 @@ for profile in "${PROFILES[@]}"; do
 done
 
 whitelist_json="$(jq -cn --arg public "${OWNER_PUBKEY}" '[$public]')"
-STATE_ROOT="${MOSAICO_DEV_STATE_ROOT:-${REPO_ROOT}/.container-state}"
 
 for i in "${!PROFILES[@]}"; do
   profile="${PROFILES[$i]}"

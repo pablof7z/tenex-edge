@@ -1,7 +1,6 @@
 ---
 name: mosaico-dev
-description: "Use for Mosaico development live labs: run a local croissant relay, configure isolated PTY, ACP, app-server, or headless-exec bundles with real host AI auth, launch Claude/Codex/OpenCode agents, and inspect sessions, logs, relay traffic, and Nostr events."
-allowed-tools: Bash
+description: "Use for Mosaico development live labs: run a local croissant relay, configure isolated PTY, ACP, app-server, or headless-exec bundles with real host AI auth, launch Claude/Codex/Grok/OpenCode agents, and inspect sessions, logs, relay traffic, and Nostr events."
 ---
 
 # Mosaico development live lab
@@ -17,6 +16,8 @@ proof, not model quality.
   procedure.
 - `references/container-backends.md`: auth, state, identity, profile, and model
   boundaries.
+- `references/grok-pty-lab.md`: native Grok hooks, p-tagged PTY injection,
+  provenance, delivery state, and reply proof.
 - `references/acp-backends.md`: ACP/app-server configuration, smoke, and launch.
 - `references/observability.md`: safe evidence surfaces and report format.
 - `references/troubleshooting.md`: concrete failure checks and cleanup.
@@ -68,6 +69,8 @@ config fields, or fallback bundle names. Fix the generated config or caller.
 - Use real host AI auth. The container runner defaults to
   `MOSAICO_CONTAINER_HOST_AUTH=1` and stages writable provider state under the
   selected isolated profile.
+- Grok auth is copied into writable isolated `GROK_HOME`; native Mosaico hooks
+  install at `.grok/hooks/mosaico.json`. Imported Claude hooks are not Grok proof.
 - Keep fabric state under `.container-state/<profile>` or the run's temporary
   work directory, never host `~/.mosaico`.
 - Run croissant on the host from `/tmp/croissant-smallmap` when present, else
@@ -92,12 +95,15 @@ bash containers/mosaico/run doctor
 skills/mosaico-dev/scripts/start-croissant-relay
 ```
 
+If the runner reaps background descendants, set
+`MOSAICO_DEV_RELAY_FOREGROUND=1` and clean up from another terminal.
+
 Keep the emitted environment path:
 
 ```bash
 LAB_ENV=/tmp/mosaico-live-lab-YYYYmmdd-HHMMSS/lab.env
 skills/mosaico-dev/scripts/write-container-profiles "${LAB_ENV}" \
-  claude claude-acp codex codex-app-server opencode opencode-acp
+  claude claude-acp codex codex-app-server grok opencode opencode-acp
 ```
 
 The writer resets disposable Mosaico state, including SQLite/WAL state and the
@@ -129,6 +135,14 @@ Launch mode receives only a generated target and optional prompt:
 bash containers/mosaico/run --profile claude mosaico channel init
 MOSAICO_DEV_PROMPT="Run mosaico my session and summarize the self header." \
   skills/mosaico-dev/scripts/launch-agent "${LAB_ENV}" launch claude
+```
+
+Native Grok uses the same PTY shape:
+
+```bash
+skills/mosaico-dev/scripts/launch-agent "${LAB_ENV}" direct grok \
+  -p "Respond with exactly OK."
+skills/mosaico-dev/scripts/launch-agent "${LAB_ENV}" launch grok
 ```
 
 The same form launches structured profiles; the bundle transport owns the

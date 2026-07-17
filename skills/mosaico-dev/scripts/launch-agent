@@ -17,6 +17,7 @@ backend_command_for_profile() {
     claude*) echo "claude" ;;
     codex-ollama*) echo "codex-ollama" ;;
     codex*) echo "codex" ;;
+    grok*) echo "grok" ;;
     opencode-ollama*) echo "opencode-ollama" ;;
     opencode*) echo "opencode" ;;
     *) echo "$1" ;;
@@ -27,6 +28,7 @@ agent_slug_for_profile() {
   case "$1" in
     claude*) echo "claude" ;;
     codex*) echo "codex" ;;
+    grok*) echo "grok" ;;
     opencode*) echo "opencode" ;;
     *) echo "$1" ;;
   esac
