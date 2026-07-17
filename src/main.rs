@@ -28,7 +28,7 @@ fn main() {
     }
 
     // Bare invocation and top-level `--help` / `-h` (without `--all`) print the
-    // same context-sensitive help: operator commands (`who`, `mgmt`, `launch`)
+    // same context-sensitive help: operator commands (`who`, `agents`, `launch`)
     // are shown only outside an agent context. Internal/debug commands stay
     // hidden; use `--all` for those. Only intercept top-level help so subcommand
     // help (`mosaico who --help`, etc.) still goes through clap normally.

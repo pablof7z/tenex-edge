@@ -2,6 +2,9 @@ use super::*;
 use crate::cli::session::SessionAction;
 use clap::{error::ErrorKind, Parser};
 
+#[path = "tests/agents.rs"]
+mod agents;
+
 fn parse_err(args: &[&str]) -> clap::Error {
     match Cli::try_parse_from(args) {
         Ok(_) => panic!("expected parse failure for {args:?}"),
@@ -197,12 +200,6 @@ fn session_pty_wrap_me_rejects_positional_target_without_self() {
 }
 
 #[test]
-fn removed_mgmt_config_stays_unavailable() {
-    let err = parse_err(&["mosaico", "mgmt", "config", "providers"]);
-    assert_eq!(err.kind(), ErrorKind::InvalidSubcommand);
-}
-
-#[test]
 fn my_session_status_parses_positional_title() {
     let cli = Cli::try_parse_from([
         "mosaico",
@@ -251,13 +248,6 @@ fn removed_my_status_stays_unavailable() {
 }
 
 #[test]
-fn removed_agents_command_stays_unavailable() {
-    let err = parse_err(&["mosaico", "agents", "list-sessions"]);
-
-    assert_eq!(err.kind(), ErrorKind::InvalidSubcommand);
-}
-
-#[test]
 fn mcp_command_parses() {
     let cli = Cli::try_parse_from(["mosaico", "mcp"]).unwrap();
     assert!(matches!(cli.cmd, Cmd::Mcp(_)));
@@ -276,11 +266,7 @@ fn sessions_parses() {
 }
 
 #[test]
-fn removed_session_and_pty_command_trees_stay_unavailable() {
-    assert_eq!(
-        parse_err(&["mosaico", "mgmt", "session", "list"]).kind(),
-        ErrorKind::InvalidSubcommand
-    );
+fn removed_pty_command_tree_stays_unavailable() {
     assert_eq!(
         parse_err(&["mosaico", "pty", "list"]).kind(),
         ErrorKind::InvalidSubcommand

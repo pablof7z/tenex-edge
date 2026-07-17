@@ -11,11 +11,11 @@ fn expands_conflicts_and_includes_bare_harnesses() {
     let home = tempfile::tempdir().unwrap();
     write(
         &home.path().join(".codex/agents/writer.toml"),
-        "name='writer'\ndescription='Writes'\ndeveloper_instructions='Write'",
+        "name='writer'\ndescription='Writes with Codex'\ndeveloper_instructions='Write'",
     );
     write(
         &home.path().join(".claude/agents/writer.md"),
-        "---\nname: writer\ndescription: Writes\n---\nWrite",
+        "---\nname: writer\ndescription: Writes with Claude\n---\nWrite",
     );
     let catalog = AgentCatalog::discover(&DiscoveryRoots::for_user_home(home.path()), &[]).unwrap();
     let harnesses: HarnessesConfig = serde_json::from_str(
@@ -51,6 +51,14 @@ fn expands_conflicts_and_includes_bare_harnesses() {
         ]
     );
     assert_eq!(inventory.profile_choices("writer").len(), 2);
+    assert_eq!(
+        inventory.find("writer-claude").unwrap().use_criteria,
+        "Writes with Claude"
+    );
+    assert_eq!(
+        inventory.find("writer-codex").unwrap().use_criteria,
+        "Writes with Codex"
+    );
 }
 
 #[test]
@@ -101,7 +109,7 @@ fn invalid_same_named_agent_does_not_shadow_available_harness() {
     let codex = inventory
         .find("codex")
         .expect("bare harness remains available");
-    assert_eq!(codex.source, AgentSource::Harness);
+    assert_eq!(codex.source, AgentSource::DefaultAgent);
     assert_eq!(codex.bundle, "codex-pty");
     assert!(inventory
         .failures

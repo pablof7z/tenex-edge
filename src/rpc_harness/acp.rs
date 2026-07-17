@@ -39,16 +39,18 @@ impl AcpClient {
             .await
     }
 
-    /// `session/new {cwd, mcpServers:[]}` -> sessionId.
-    pub async fn session_new(&self, cwd: &Path) -> Result<String, RpcError> {
+    /// `session/new {cwd, mcpServers:[]}` -> sessionId. Claude's ACP adapter
+    /// accepts a custom-agent selector in its namespaced metadata.
+    pub async fn session_new(
+        &self,
+        cwd: &Path,
+        claude_agent: Option<&str>,
+    ) -> Result<String, RpcError> {
         let v = self
             .handle
             .request_timeout(
                 "session/new",
-                serde_json::json!({
-                    "cwd": cwd.to_string_lossy(),
-                    "mcpServers": []
-                }),
+                session_new_params(cwd, claude_agent),
                 RPC_TIMEOUT,
             )
             .await?;
@@ -107,6 +109,19 @@ impl AcpClient {
     }
 }
 
+fn session_new_params(cwd: &Path, claude_agent: Option<&str>) -> serde_json::Value {
+    let mut params = serde_json::json!({
+        "cwd": cwd.to_string_lossy(),
+        "mcpServers": []
+    });
+    if let Some(agent) = claude_agent {
+        params["_meta"] = serde_json::json!({
+            "claudeCode": { "options": { "agent": agent } }
+        });
+    }
+    params
+}
+
 fn extract_session_id(v: &serde_json::Value) -> Result<String, RpcError> {
     v.get("sessionId")
         .and_then(|s| s.as_str())
@@ -118,4 +133,29 @@ fn extract_session_id(v: &serde_json::Value) -> Result<String, RpcError> {
                 data: None,
             })
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn claude_custom_agent_uses_adapter_metadata() {
+        assert_eq!(
+            session_new_params(Path::new("/work"), Some("reviewer")),
+            serde_json::json!({
+                "cwd": "/work",
+                "mcpServers": [],
+                "_meta": {
+                    "claudeCode": { "options": { "agent": "reviewer" } }
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn ordinary_acp_session_omits_adapter_metadata() {
+        let params = session_new_params(Path::new("/work"), None);
+        assert!(params.get("_meta").is_none());
+    }
 }

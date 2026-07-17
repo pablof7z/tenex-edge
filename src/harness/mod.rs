@@ -104,6 +104,16 @@ pub fn apply_native_agent(
     activation: &crate::agent_catalog::NativeAgentActivation,
     scratch: &Path,
 ) -> anyhow::Result<()> {
+    if matches!(
+        (resolved.harness, resolved.transport, activation),
+        (
+            Harness::ClaudeCode,
+            Transport::Acp,
+            crate::agent_catalog::NativeAgentActivation::NativeSelector { .. }
+        )
+    ) {
+        return Ok(());
+    }
     let plan = match activation {
         crate::agent_catalog::NativeAgentActivation::NativeSelector { name } => {
             profile::plan_profile(resolved.driver.profile, Some(name), scratch, None)?
@@ -122,6 +132,15 @@ pub fn apply_native_agent(
     resolved.base_argv.extend(plan.extra_argv.iter().cloned());
     resolved.profile.extend(plan);
     Ok(())
+}
+
+pub fn supports_native_agent(harness: Harness, transport: Transport) -> bool {
+    matches!(
+        (harness, transport),
+        (Harness::ClaudeCode, Transport::Pty | Transport::Acp)
+            | (Harness::Codex, Transport::Pty | Transport::AppServer)
+            | (Harness::Opencode, Transport::Pty)
+    )
 }
 
 fn resolve_with_codex_home(

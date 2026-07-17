@@ -1,29 +1,11 @@
 use anyhow::Result;
 
-mod theme;
 mod usage;
-use usage::{fetch_agent_usage, ordered_agents};
+use usage::{fetch_agent_usage, ordered_agents, usage_for, AgentUsageMap};
 
-const MAX_MENU_ROWS: usize = 16;
-const MAX_NAME_CHARS: usize = 30;
-const MAX_DETAIL_CHARS: usize = 76;
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct MenuRow {
-    name: String,
-    detail: String,
-}
-
-impl MenuRow {
-    fn plain(&self) -> String {
-        format!("{}  {}", self.name, self.detail)
-    }
-}
-
-impl std::fmt::Display for MenuRow {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}{}{}", self.name, theme::ROW_SEPARATOR, self.detail)
-    }
-}
+use crate::cli::interactive::agent_picker::{
+    self, AgentPickerRow, AgentProvenance, PickerAction, PickerMode,
+};
 
 pub(super) struct FreshAgentSelection {
     pub(super) slug: String,
@@ -34,7 +16,7 @@ pub(super) async fn select_available() -> Result<Option<String>> {
     let cwd = std::env::current_dir().unwrap_or_default();
     let inventory = local_inventory(&cwd)?;
     if inventory.agents.is_empty() {
-        println!("No available agents or harnesses.");
+        println!("No available agents.");
         for failure in inventory.failures {
             eprintln!("- unavailable: {failure}");
         }
@@ -43,7 +25,7 @@ pub(super) async fn select_available() -> Result<Option<String>> {
     let now = crate::util::now_secs();
     let usage = fetch_agent_usage(now).await?;
     let agents = ordered_agents(&inventory, &usage);
-    let rows = menu_rows(&agents);
+    let rows = menu_rows(&agents, &usage, now);
     if !interactive_terminal() {
         println!("Available launch targets:");
         for row in rows {
@@ -52,15 +34,11 @@ pub(super) async fn select_available() -> Result<Option<String>> {
         return Ok(None);
     }
 
-    let theme = theme::LaunchTheme::default();
-    let selected = dialoguer::FuzzySelect::with_theme(&theme)
-        .with_prompt("Launch agent · type to filter")
-        .items(&rows)
-        .default(0)
-        .max_length(MAX_MENU_ROWS)
-        .vim_mode(true)
-        .interact_opt()?;
-    Ok(selected.map(|index| agents[index].slug.clone()))
+    match agent_picker::select(rows, PickerMode::Launch)? {
+        PickerAction::Launch(index) => Ok(Some(agents[index].slug.clone())),
+        PickerAction::Cancel => Ok(None),
+        PickerAction::Edit(_) | PickerAction::Delete(_) => unreachable!("launch picker actions"),
+    }
 }
 
 pub(super) fn resolve_fresh_agent(
@@ -74,7 +52,7 @@ pub(super) fn resolve_fresh_agent(
 
     let choices = inventory.profile_choices(requested);
     if choices.is_empty() {
-        anyhow::bail!("no available agent or harness named {requested:?}");
+        anyhow::bail!("no available agent named {requested:?}");
     }
     if !interactive_terminal() {
         anyhow::bail!(
@@ -100,43 +78,77 @@ pub(super) fn resolve_fresh_agent(
 
 fn interactive_terminal() -> bool {
     use std::io::IsTerminal;
-    std::io::stdin().is_terminal() && std::io::stderr().is_terminal()
+    std::io::stdin().is_terminal() && std::io::stdout().is_terminal()
 }
 
-fn menu_rows(agents: &[&crate::agent_inventory::AvailableAgent]) -> Vec<MenuRow> {
-    let name_width = agents
-        .iter()
-        .map(|agent| agent.slug.chars().count())
-        .max()
-        .unwrap_or(0)
-        .min(MAX_NAME_CHARS);
+fn menu_rows(
+    agents: &[&crate::agent_inventory::AvailableAgent],
+    usage: &AgentUsageMap,
+    now: u64,
+) -> Vec<AgentPickerRow> {
     agents
         .iter()
-        .map(|agent| menu_row(agent, name_width))
+        .map(|agent| menu_row(agent, usage, now))
         .collect()
 }
 
-fn menu_row(agent: &crate::agent_inventory::AvailableAgent, name_width: usize) -> MenuRow {
-    let source = match agent.source {
-        crate::agent_inventory::AgentSource::Configured => "configured".to_string(),
+fn menu_row(
+    agent: &crate::agent_inventory::AvailableAgent,
+    usage: &AgentUsageMap,
+    now: u64,
+) -> AgentPickerRow {
+    let description = compact(&agent.use_criteria);
+    let (description, description_harness, provenance) = match agent.source {
+        crate::agent_inventory::AgentSource::Configured => {
+            (nonempty(description, "Configured agent"), None, None)
+        }
         crate::agent_inventory::AgentSource::NativeProfile => {
-            format!("{} profile", harness_label(agent.harness))
+            let label = format!("{} profile", harness_label(agent.harness));
+            (
+                nonempty(description, "Native agent profile"),
+                None,
+                Some(AgentProvenance {
+                    label,
+                    harness: agent.harness,
+                }),
+            )
         }
-        crate::agent_inventory::AgentSource::Harness => {
-            format!("{} harness", harness_label(agent.harness))
-        }
+        crate::agent_inventory::AgentSource::DefaultAgent => (
+            format!("Generic {} agent", harness_label(agent.harness)),
+            Some(agent.harness),
+            None,
+        ),
     };
-    let criteria = compact(&agent.use_criteria);
-    let identity_detail = if criteria.is_empty() {
-        source
-    } else {
-        format!("{source} · {criteria}")
-    };
-    let name = truncate(&agent.slug, name_width);
-    MenuRow {
-        name: format!("{name:<name_width$}"),
-        detail: truncate(&identity_detail, MAX_DETAIL_CHARS),
+    AgentPickerRow {
+        name: agent.slug.clone(),
+        description,
+        description_harness,
+        usage: usage_detail(usage_for(usage, agent), now),
+        provenance,
     }
+}
+
+fn nonempty(value: String, fallback: &str) -> String {
+    if value.is_empty() {
+        fallback.to_string()
+    } else {
+        value
+    }
+}
+
+fn usage_detail(usage: &usage::AgentUsage, now: u64) -> Option<String> {
+    (usage.last_used != 0).then(|| {
+        let uses = if usage.recent_uses == 1 {
+            "use"
+        } else {
+            "uses"
+        };
+        format!(
+            "{} {uses} / 30d · {}",
+            usage.recent_uses,
+            crate::util::relative_time(usage.last_used, now)
+        )
+    })
 }
 
 fn harness_label(harness: crate::session::Harness) -> &'static str {
@@ -155,22 +167,6 @@ fn compact(value: &str) -> String {
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
-}
-
-fn truncate(value: &str, max_chars: usize) -> String {
-    let mut chars = value.chars();
-    let prefix = chars.by_ref().take(max_chars).collect::<String>();
-    if chars.next().is_none() {
-        prefix
-    } else {
-        format!(
-            "{}…",
-            prefix
-                .chars()
-                .take(max_chars.saturating_sub(1))
-                .collect::<String>()
-        )
-    }
 }
 
 fn persist_selection(

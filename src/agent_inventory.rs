@@ -10,7 +10,7 @@ use std::path::Path;
 pub(crate) enum AgentSource {
     Configured,
     NativeProfile,
-    Harness,
+    DefaultAgent,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -107,14 +107,14 @@ impl AgentInventory {
                 continue;
             }
             match crate::harness::native_bundle_with(harnesses, profile.harness) {
-                Ok(bundle) => choices.push((profile.harness, bundle)),
+                Ok(bundle) => choices.push((profile.harness, bundle, profile.use_criteria)),
                 Err(error) => self
                     .failures
                     .push(format!("{}: {error:#}", capability.slug)),
             }
         }
         let conflicted = choices.len() > 1;
-        for (harness, bundle) in choices {
+        for (harness, bundle, use_criteria) in choices {
             let slug = if conflicted {
                 format!("{}-{}", capability.slug, harness.agent_slug())
             } else {
@@ -125,7 +125,7 @@ impl AgentInventory {
                 agent_slug: capability.slug.clone(),
                 bundle,
                 harness,
-                use_criteria: capability.use_criteria.clone(),
+                use_criteria,
                 available_since: capability.available_since,
                 source: AgentSource::NativeProfile,
                 persist_binding: conflicted,
@@ -147,7 +147,7 @@ impl AgentInventory {
                     harness: *harness,
                     use_criteria: String::new(),
                     available_since: 0,
-                    source: AgentSource::Harness,
+                    source: AgentSource::DefaultAgent,
                     persist_binding: false,
                 }),
                 Err(error) => self.failures.push(format!("{slug}: {error:#}")),

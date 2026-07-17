@@ -127,7 +127,7 @@ cat >"$(backend_mosaico_home mosaico-a)/harnesses.json" <<'JSON'
   }
 }
 JSON
-mosaico mosaico-a mgmt agent add reviewer --harness yolo-claude --profile reviewer >/dev/null
+mosaico mosaico-a agents add reviewer --harness yolo-claude --profile reviewer >/dev/null
 ok "backend-a agent reviewer selects yolo-claude with profile reviewer"
 
 # ── 4. smoke test ────────────────────────────────────────────────────────────

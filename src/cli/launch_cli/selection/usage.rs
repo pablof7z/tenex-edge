@@ -63,7 +63,7 @@ pub(super) fn usage_for<'a>(
 
 fn source_rank(source: crate::agent_inventory::AgentSource) -> u8 {
     match source {
-        crate::agent_inventory::AgentSource::Harness => 0,
+        crate::agent_inventory::AgentSource::DefaultAgent => 0,
         crate::agent_inventory::AgentSource::Configured => 1,
         crate::agent_inventory::AgentSource::NativeProfile => 2,
     }

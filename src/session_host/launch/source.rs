@@ -67,7 +67,7 @@ pub(super) fn resolve_agent_source(
                 .flatten();
             (identity, bundle, profile, native_profile, Vec::new())
         }
-        crate::agent_inventory::AgentSource::Harness => (
+        crate::agent_inventory::AgentSource::DefaultAgent => (
             crate::identity::AgentIdentity::per_session(&selected.agent_slug, &selected.bundle),
             selected.bundle,
             None,

@@ -115,7 +115,7 @@ async fn run_acp(
         .map_err(|e| anyhow::anyhow!("initialize: {e}"))?;
     println!("[acp-smoke] initialize ok");
     let session_id = client
-        .session_new(cwd)
+        .session_new(cwd, None)
         .await
         .map_err(|e| anyhow::anyhow!("session/new: {e}"))?;
     println!("[acp-smoke] session/new -> {session_id}");

@@ -18,7 +18,7 @@ pub use keys::{derive_session_keys, new_session_signer_salt, SessionIdentity};
 pub use local_agent::{
     add_local_agent, agent_launch_config, list_advertised_agents, list_invitable_agents,
     list_local_agent_details, list_local_agents, list_local_pubkeys, remove_local_agent,
-    set_local_agent_byline, AgentLaunchConfig, LocalAgent,
+    save_local_agent, set_local_agent_byline, AgentLaunchConfig, LocalAgent, LocalAgentUpdate,
 };
 
 #[derive(Debug, Serialize, Deserialize)]

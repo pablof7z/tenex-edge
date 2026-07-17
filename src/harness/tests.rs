@@ -171,6 +171,28 @@ fn native_selector_uses_only_supported_driver_cells() {
 }
 
 #[test]
+fn claude_acp_defers_native_agent_to_session_new() {
+    let cfg: HarnessesConfig =
+        serde_json::from_str(r#"{"claude-acp":{"harness":"claude","transport":"acp"}}"#).unwrap();
+    let scratch = scratch();
+    let mut resolved = resolve_with(&cfg, "claude-acp", None, scratch.path()).unwrap();
+    apply_native_agent(
+        &mut resolved,
+        &crate::agent_catalog::NativeAgentActivation::NativeSelector {
+            name: "reviewer".into(),
+        },
+        scratch.path(),
+    )
+    .unwrap();
+    assert_eq!(
+        resolved.base_argv,
+        ["npx", "--yes", "@agentclientprotocol/claude-agent-acp"]
+    );
+    assert!(supports_native_agent(Harness::ClaudeCode, Transport::Acp));
+    assert!(!supports_native_agent(Harness::Opencode, Transport::Acp));
+}
+
+#[test]
 fn codex_app_server_defers_custom_agent_to_thread_start() {
     let cfg: HarnessesConfig =
         serde_json::from_str(r#"{"codex-rpc":{"harness":"codex","transport":"app-server"}}"#)

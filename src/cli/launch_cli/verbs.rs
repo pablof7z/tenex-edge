@@ -8,7 +8,7 @@ use anyhow::{Context as _, Result};
 ///
 /// A fresh launch delegates agent discovery and transport selection to the
 /// daemon, then attaches PTY sessions or reports headless RPC sessions.
-pub(super) async fn launch(request: LaunchRequest) -> Result<()> {
+pub(in crate::cli) async fn launch(request: LaunchRequest) -> Result<()> {
     if super::existing::launch_if_known(&request).await? {
         return Ok(());
     }
