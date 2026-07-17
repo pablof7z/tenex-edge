@@ -12,15 +12,17 @@ fn cli_my_session_status_sets_the_exact_pty_session_title() {
         let response = client
             .call(
                 "session_start",
-                hook_session_start(
-                    serde_json::json!({
-                        "agent": "codex",
-                        "harness_session": "native-title-session",
-                        "cwd": "/tmp",
-                        "pty_session": "pty-title-session",
-                    }),
-                    "codex",
-                ),
+                serde_json::json!({
+                    "agent": "codex",
+                    "harness_session": "native-title-session",
+                    "cwd": "/tmp",
+                    "observed_harness": "codex",
+                    "admitted_bundle": "codex-pty",
+                    "admitted_transport": "pty",
+                    "endpoint_provenance": "launch",
+                    "pty_session": "pty-title-session",
+                    "endpoint_kind": "pty",
+                }),
             )
             .await
             .expect("session start");

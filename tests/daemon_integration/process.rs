@@ -13,6 +13,10 @@ mod who;
 fn sixteen_concurrent_writers_no_corruption_single_writer() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let home = Home::new().with_backend_key();
+    Store::open(&home.store_path())
+        .unwrap()
+        .upsert_channel("mosaico", "mosaico", "", "", 1)
+        .unwrap();
 
     // Start one session, then 16 concurrent clients hammer write-RPCs
     // (turn_start/turn_end flip turn state; this is the corruption repro path,

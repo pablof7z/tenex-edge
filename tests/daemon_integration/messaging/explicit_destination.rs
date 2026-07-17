@@ -238,6 +238,12 @@ fn channel_commands_require_channel_when_session_joined_to_multiple_channels() {
     let home = Home::new().with_backend_key();
 
     let store = Store::open(&home.store_path()).unwrap();
+    store
+        .upsert_channel("root-chat-channel", "root-chat-channel", "", "", 1)
+        .unwrap();
+    store
+        .upsert_channel("other-chat-channel", "other-chat-channel", "", "", 1)
+        .unwrap();
     let pubkey = Keys::generate().public_key().to_hex();
     store
         .reserve_session_with_facts(

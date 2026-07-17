@@ -105,7 +105,17 @@ pub(crate) fn assemble_turn_start(
                 }
             };
             if !member && !locally_managed {
-                let root = root_channel_h(&s, &scope)?;
+                let root = match root_channel_h(&s, &scope) {
+                    Ok(root) => root,
+                    Err(error) => {
+                        tracing::warn!(
+                            channel = %scope,
+                            %error,
+                            "turn_start: channel ancestry unavailable; warning uses exact scope"
+                        );
+                        scope.clone()
+                    }
+                };
                 let channel_name = crate::injection::channel_display(&s, &scope);
                 let root_name = crate::injection::channel_display(&s, &root);
                 Ok::<_, anyhow::Error>(Some((root, channel_name, root_name)))

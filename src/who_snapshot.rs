@@ -124,6 +124,9 @@ pub(crate) fn build_who_snapshot(
     // ── local sessions on this machine (read failure must error, not go quiet) ──
     for s in &aggregation.local_sessions {
         let scope = s.channel_h.clone();
+        if aggregation.channel(&scope).is_none() && aggregation.workspace_path(&scope).is_none() {
+            continue;
+        }
         if is_archived_channel(aggregation, &scope) {
             continue;
         }

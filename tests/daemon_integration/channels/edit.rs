@@ -110,6 +110,10 @@ fn channel_edit_ambiguous_reference_returns_exact_reruns() {
         .unwrap_or(active_channel);
     Store::open(&home.store_path())
         .unwrap()
+        .upsert_channel(&actual_root, &actual_root, "", "", 1)
+        .unwrap();
+    Store::open(&home.store_path())
+        .unwrap()
         .upsert_channel("h-direct", "planning", "", &actual_root, 1)
         .unwrap();
     Store::open(&home.store_path())
