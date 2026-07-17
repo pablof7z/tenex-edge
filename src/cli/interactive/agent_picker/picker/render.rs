@@ -76,10 +76,6 @@ pub(super) fn draw(frame: &mut Frame<'_>, state: &PickerState) {
                         }),
                 ),
             ];
-            if let Some(usage) = &row.usage {
-                spans.push(Span::styled(" · ", Style::default().fg(MUTED)));
-                spans.push(Span::styled(usage.clone(), Style::default().fg(MUTED)));
-            }
             if let Some(provenance) = &row.provenance {
                 spans.push(Span::styled(" · ", Style::default().fg(MUTED)));
                 spans.push(Span::styled(

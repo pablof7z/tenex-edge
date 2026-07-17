@@ -21,6 +21,30 @@ pub(super) use config::{harnesses, hook_entries, host_for_harness, OPENCODE_PLUG
 pub(super) use hooks::{is_installed, merge_hooks, migrate_codex_root_events};
 pub(super) use io::{print_json_preview, read_json_or_default, write_json, write_text};
 
+fn has_harness_installation() -> Result<bool> {
+    Ok(harnesses()?.iter().any(is_installed))
+}
+
+fn print_install_guide() {
+    println!("Mosaico is not installed in any supported agent harness.\n");
+    println!("Install it with:\n\n  mosaico install\n");
+    println!(
+        "This detects Claude Code, Codex, OpenCode, and Grok and lets you choose integrations."
+    );
+    println!("Use `mosaico install --all` to install every detected harness.");
+}
+
+/// Route a bare operator invocation into the primary launch flow. When no
+/// harness integration has been installed yet, print the setup path and stop.
+pub fn route_bare_invocation() -> Result<bool> {
+    if has_harness_installation()? {
+        Ok(true)
+    } else {
+        print_install_guide();
+        Ok(false)
+    }
+}
+
 async fn install_with_opts(opts: InstallOpts) -> Result<()> {
     let all = harnesses()?;
 

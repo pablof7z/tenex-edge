@@ -1,7 +1,7 @@
 use anyhow::Result;
 
 mod usage;
-use usage::{fetch_agent_usage, ordered_agents, usage_for, AgentUsageMap};
+use usage::{fetch_agent_usage, ordered_agents};
 
 use crate::cli::interactive::agent_picker::{
     self, AgentPickerRow, AgentProvenance, PickerAction, PickerMode,
@@ -25,7 +25,7 @@ pub(super) async fn select_available() -> Result<Option<String>> {
     let now = crate::util::now_secs();
     let usage = fetch_agent_usage(now).await?;
     let agents = ordered_agents(&inventory, &usage);
-    let rows = menu_rows(&agents, &usage, now);
+    let rows = menu_rows(&agents);
     if !interactive_terminal() {
         println!("Available launch targets:");
         for row in rows {
@@ -81,22 +81,11 @@ fn interactive_terminal() -> bool {
     std::io::stdin().is_terminal() && std::io::stdout().is_terminal()
 }
 
-fn menu_rows(
-    agents: &[&crate::agent_inventory::AvailableAgent],
-    usage: &AgentUsageMap,
-    now: u64,
-) -> Vec<AgentPickerRow> {
-    agents
-        .iter()
-        .map(|agent| menu_row(agent, usage, now))
-        .collect()
+fn menu_rows(agents: &[&crate::agent_inventory::AvailableAgent]) -> Vec<AgentPickerRow> {
+    agents.iter().map(|agent| menu_row(agent)).collect()
 }
 
-fn menu_row(
-    agent: &crate::agent_inventory::AvailableAgent,
-    usage: &AgentUsageMap,
-    now: u64,
-) -> AgentPickerRow {
+fn menu_row(agent: &crate::agent_inventory::AvailableAgent) -> AgentPickerRow {
     let description = compact(&agent.use_criteria);
     let (description, description_harness, provenance) = match agent.source {
         crate::agent_inventory::AgentSource::Configured => {
@@ -123,7 +112,6 @@ fn menu_row(
         name: agent.slug.clone(),
         description,
         description_harness,
-        usage: usage_detail(usage_for(usage, agent), now),
         provenance,
     }
 }
@@ -134,21 +122,6 @@ fn nonempty(value: String, fallback: &str) -> String {
     } else {
         value
     }
-}
-
-fn usage_detail(usage: &usage::AgentUsage, now: u64) -> Option<String> {
-    (usage.last_used != 0).then(|| {
-        let uses = if usage.recent_uses == 1 {
-            "use"
-        } else {
-            "uses"
-        };
-        format!(
-            "{} {uses} / 30d · {}",
-            usage.recent_uses,
-            crate::util::relative_time(usage.last_used, now)
-        )
-    })
 }
 
 fn harness_label(harness: crate::session::Harness) -> &'static str {

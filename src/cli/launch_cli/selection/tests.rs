@@ -83,7 +83,7 @@ fn menu_rows_are_aligned_single_line_and_bounded() {
 
     let usage = AgentUsageMap::new();
     let agents = ordered_agents(&inventory, &usage);
-    let rows = menu_rows(&agents, &usage, 100);
+    let rows = menu_rows(&agents);
 
     assert_eq!(rows[0].plain(), "codex  Generic Codex agent");
     assert_eq!(
@@ -137,9 +137,10 @@ fn recent_count_then_last_use_determine_agent_order() {
         .collect::<Vec<_>>();
 
     assert_eq!(ordered, ["grok", "writer-codex", "codex"]);
-    let rows = menu_rows(&ordered_agents(&inventory, &usage), &usage, 100);
+    let rows = menu_rows(&ordered_agents(&inventory, &usage));
     assert_eq!(rows[0].description, "Generic Codex agent");
-    assert_eq!(rows[0].usage.as_deref(), Some("3 uses / 30d · just now"));
+    assert!(rows.iter().all(|row| !row.plain().contains("uses / 30d")));
+    assert!(rows.iter().all(|row| !row.plain().contains("ago")));
     assert!(rows.iter().all(|row| row.provenance.is_none()));
 }
 
@@ -156,7 +157,7 @@ fn native_profile_description_precedes_colored_harness_provenance() {
         persist_binding: false,
     };
 
-    let row = menu_row(&agent, &AgentUsageMap::new(), 100);
+    let row = menu_row(&agent);
 
     assert_eq!(row.description, "Drafts release notes");
     assert_eq!(row.description_harness, None);
@@ -183,12 +184,8 @@ fn configured_agent_uses_byline_or_generic_configured_description_without_proven
         persist_binding: false,
     };
 
-    let described = menu_row(
-        &configured("Drafts release notes"),
-        &AgentUsageMap::new(),
-        100,
-    );
-    let generic = menu_row(&configured(""), &AgentUsageMap::new(), 100);
+    let described = menu_row(&configured("Drafts release notes"));
+    let generic = menu_row(&configured(""));
 
     assert_eq!(described.description, "Drafts release notes");
     assert_eq!(generic.description, "Configured agent");

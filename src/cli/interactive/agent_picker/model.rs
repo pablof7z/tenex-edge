@@ -12,14 +12,12 @@ pub(in crate::cli) struct AgentPickerRow {
     pub(in crate::cli) name: String,
     pub(in crate::cli) description: String,
     pub(in crate::cli) description_harness: Option<Harness>,
-    pub(in crate::cli) usage: Option<String>,
     pub(in crate::cli) provenance: Option<AgentProvenance>,
 }
 
 impl AgentPickerRow {
     pub(in crate::cli) fn plain(&self) -> String {
         let mut details = vec![self.description.as_str()];
-        details.extend(self.usage.as_deref());
         details.extend(self.provenance.as_ref().map(|value| value.label.as_str()));
         format!("{}  {}", self.name, details.join(" · "))
     }
@@ -32,7 +30,6 @@ impl AgentPickerRow {
         [
             (self.name.as_str(), 4_000),
             (self.description.as_str(), 2_000),
-            (self.usage.as_deref().unwrap_or_default(), 500),
             (
                 self.provenance
                     .as_ref()
@@ -61,16 +58,12 @@ mod tests {
             name: "writer".into(),
             description: "Drafts release notes".into(),
             description_harness: None,
-            usage: Some("3 uses / 30d".into()),
             provenance: Some(AgentProvenance {
                 label: "Claude profile".into(),
                 harness: Harness::ClaudeCode,
             }),
         };
 
-        assert_eq!(
-            row.plain(),
-            "writer  Drafts release notes · 3 uses / 30d · Claude profile"
-        );
+        assert_eq!(row.plain(), "writer  Drafts release notes · Claude profile");
     }
 }
