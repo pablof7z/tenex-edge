@@ -83,12 +83,6 @@ async fn spawn_dispatched(
     op: &crate::fabric::nip29::session_dispatch::SessionDispatchOp,
 ) -> bool {
     let slug = &op.target.slug;
-    let mosaico_home = config::mosaico_home();
-    if let Err(e) = crate::identity::load(&mosaico_home, slug) {
-        tracing::error!(slug = %slug, error = %e, "session dispatch: failed to mint agent identity");
-        return false;
-    }
-
     match crate::session_host::spawn_dispatched_ephemeral_agent(
         state,
         slug,

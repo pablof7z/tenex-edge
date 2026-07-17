@@ -226,19 +226,6 @@ async fn spawn_target(
     target: &crate::fabric::nip29::orchestration::AddTarget,
 ) -> bool {
     let slug = &target.slug;
-    let mosaico_home = config::mosaico_home();
-    let id = match crate::identity::load(&mosaico_home, slug) {
-        Ok(id) => {
-            tracing::info!(slug = %slug, child = %op.child_h, "loading local derivation root for orchestration target");
-            id
-        }
-        Err(e) => {
-            tracing::error!(slug = %slug, error = %e, "failed to mint agent identity");
-            return false;
-        }
-    };
-    drop(id);
-
     let work_root = state.with_store(|s| work_root_for(s, &op.child_h));
     match crate::session_host::spawn_ephemeral_agent(
         state,

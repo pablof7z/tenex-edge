@@ -85,6 +85,64 @@ fn launch_command_resolves_discovered_claude_profile_without_agent_json() {
 }
 
 #[test]
+fn launch_lists_and_starts_available_harness_without_agent_json() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let home = Home::new();
+    write_config(&home, false);
+    let config_path = home.dir.path().join("config.json");
+    let mut config: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+    config["availableHarnesses"] = serde_json::json!(["opencode"]);
+    std::fs::write(&config_path, serde_json::to_string(&config).unwrap()).unwrap();
+    std::fs::write(
+        home.dir.path().join("harnesses.json"),
+        r#"{"opencode-pty":{"harness":"opencode","transport":"pty","args":["forever"]}}"#,
+    )
+    .unwrap();
+    let channel = unique_session("launch-bare-harness");
+    let work_dir = home.dir.path().join(&channel);
+    add_workspace_mapping(&home, &channel, &work_dir);
+    let isolated_home = home.dir.path().to_string_lossy().into_owned();
+    let xdg = home
+        .dir
+        .path()
+        .join(".config")
+        .to_string_lossy()
+        .into_owned();
+
+    let listed = run_cli_with_env_in_dir(
+        &home,
+        &["launch"],
+        &[("HOME", &isolated_home), ("XDG_CONFIG_HOME", &xdg)],
+        &work_dir,
+    );
+    assert!(listed.status.success());
+    assert!(String::from_utf8_lossy(&listed.stdout).contains("- opencode"));
+
+    let launched = run_cli_with_env_in_dir(
+        &home,
+        &["launch", "opencode", "--workspace", &channel],
+        &[("HOME", &isolated_home), ("XDG_CONFIG_HOME", &xdg)],
+        &work_dir,
+    );
+    assert!(
+        launched.status.success(),
+        "bare harness launch failed: {}",
+        String::from_utf8_lossy(&launched.stderr)
+    );
+    let meta = mosaico::pty::read_all_metadata()
+        .into_iter()
+        .find(|meta| meta.agent == "opencode")
+        .expect("launched bare opencode harness metadata");
+    assert_eq!(meta.command, ["opencode", "forever"]);
+    assert!(!home.dir.path().join("agents/opencode.json").exists());
+
+    let cleanup = PtyCleanup(meta.id);
+    drop(cleanup);
+    stop_daemon(&home);
+}
+
+#[test]
 fn launch_command_bootstraps_session_without_child_session_start_hook() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let home = Home::new();

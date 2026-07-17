@@ -72,8 +72,8 @@ pub fn resolve_with(
 pub fn native_bundle_with(cfg: &HarnessesConfig, harness: Harness) -> anyhow::Result<String> {
     let preferred = match harness {
         Harness::Codex => [Some(Transport::AppServer), Some(Transport::Pty)],
-        Harness::ClaudeCode | Harness::Opencode => [Some(Transport::Pty), None],
-        Harness::Grok | Harness::Unknown => [None, None],
+        Harness::ClaudeCode | Harness::Opencode | Harness::Grok => [Some(Transport::Pty), None],
+        Harness::Unknown => [None, None],
     };
     for transport in preferred.into_iter().flatten() {
         let candidates = cfg

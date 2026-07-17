@@ -112,6 +112,8 @@ async fn spawn_agent_inner_full(
 ) -> Result<(crate::pty::LaunchMetadata, String)> {
     let abs_path = workspace_abs_path(state, root, client_cwd)?;
     let resolved = resolve_agent_source(state, slug, std::path::Path::new(&abs_path))?;
+    let agent_slug = resolved.identity.slug.clone();
+    let retired_advertisements = resolved.retired_advertisements.clone();
     let agent_command = resolved.command.clone();
     let harness = resolved.harness;
     let reservation = admission::reserve_fresh(
@@ -124,7 +126,7 @@ async fn spawn_agent_inner_full(
     )?;
     let meta = match open_agent_session(
         &resolved.transport,
-        slug,
+        &agent_slug,
         root,
         &abs_path,
         &agent_command,
@@ -170,5 +172,6 @@ async fn spawn_agent_inner_full(
             return Err(e.context("registering hosted session"));
         }
     };
+    state.schedule_agent_roster_refresh(retired_advertisements);
     Ok((meta, pubkey))
 }

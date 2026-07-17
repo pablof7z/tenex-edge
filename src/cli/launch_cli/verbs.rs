@@ -1,4 +1,5 @@
 use super::args::LaunchRequest;
+use super::selection::resolve_fresh_agent;
 use anyhow::{Context as _, Result};
 
 // ── launch ───────────────────────────────────────────────────────────────────
@@ -12,12 +13,15 @@ pub(super) async fn launch(request: LaunchRequest) -> Result<()> {
         return Ok(());
     }
     let LaunchRequest {
-        agent,
+        agent: requested_agent,
         root,
         channel,
         session_name,
         prompt,
     } = request;
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let selection = resolve_fresh_agent(&requested_agent, &cwd)?;
+    let agent = selection.slug;
     let root = match root {
         Some(p) => p,
         None => crate::workspace::resolve_or_bail(&std::env::current_dir().unwrap_or_default())?,
@@ -30,6 +34,7 @@ pub(super) async fn launch(request: LaunchRequest) -> Result<()> {
         channel,
         session_name,
         prompt,
+        retired_advertisements: selection.retired_advertisements,
     })
     .await
 }

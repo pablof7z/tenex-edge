@@ -13,6 +13,17 @@ impl DaemonState {
 
     async fn new_for_test_with(whitelisted_pubkeys: Vec<String>) -> Arc<DaemonState> {
         let backend_key = Keys::generate().secret_key().to_secret_hex();
+        let available_harnesses = crate::harness::HarnessesConfig::load()
+            .unwrap_or_default()
+            .bundles
+            .into_values()
+            .map(|bundle| bundle.harness)
+            .fold(Vec::new(), |mut harnesses, harness| {
+                if !harnesses.contains(&harness) {
+                    harnesses.push(harness);
+                }
+                harnesses
+            });
         let cfg = Config {
             whitelisted_pubkeys,
             relays: Vec::new(),
@@ -21,6 +32,7 @@ impl DaemonState {
             user_nsec: None,
             mosaico_private_key: Some(backend_key.clone()),
             per_session_rooms: false,
+            available_harnesses,
         };
         let host = cfg.host.clone();
         let owners = cfg.whitelisted_pubkeys.clone();

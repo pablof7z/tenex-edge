@@ -1,0 +1,88 @@
+use super::*;
+use crate::agent_catalog::DiscoveryRoots;
+
+fn write(path: &Path, body: &str) {
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, body).unwrap();
+}
+
+#[test]
+fn expands_conflicts_and_includes_bare_harnesses() {
+    let home = tempfile::tempdir().unwrap();
+    write(
+        &home.path().join(".codex/agents/writer.toml"),
+        "name='writer'\ndescription='Writes'\ndeveloper_instructions='Write'",
+    );
+    write(
+        &home.path().join(".claude/agents/writer.md"),
+        "---\nname: writer\ndescription: Writes\n---\nWrite",
+    );
+    let catalog = AgentCatalog::discover(&DiscoveryRoots::for_user_home(home.path()), &[]).unwrap();
+    let harnesses: HarnessesConfig = serde_json::from_str(
+        r#"{
+          "claude-pty":{"harness":"claude","transport":"pty"},
+          "codex-pty":{"harness":"codex","transport":"pty"},
+          "opencode-pty":{"harness":"opencode","transport":"pty"}
+        }"#,
+    )
+    .unwrap();
+
+    let inventory = AgentInventory::build(
+        home.path(),
+        &[Harness::ClaudeCode, Harness::Codex, Harness::Opencode],
+        &harnesses,
+        &catalog,
+        None,
+    );
+
+    assert!(inventory.failures.is_empty(), "{:?}", inventory.failures);
+    assert_eq!(
+        inventory
+            .agents
+            .iter()
+            .map(|agent| agent.slug.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "claude",
+            "codex",
+            "opencode",
+            "writer-claude",
+            "writer-codex"
+        ]
+    );
+    assert_eq!(inventory.profile_choices("writer").len(), 2);
+}
+
+#[test]
+fn configured_binding_collapses_profile_conflicts() {
+    let home = tempfile::tempdir().unwrap();
+    write(
+        &home.path().join(".codex/agents/writer.toml"),
+        "name='writer'\ndescription='Writes'\ndeveloper_instructions='Write'",
+    );
+    write(
+        &home.path().join(".claude/agents/writer.md"),
+        "---\nname: writer\ndescription: Writes\n---\nWrite",
+    );
+    let catalog = AgentCatalog::discover(&DiscoveryRoots::for_user_home(home.path()), &[]).unwrap();
+    let harnesses: HarnessesConfig = serde_json::from_str(
+        r#"{
+          "claude-pty":{"harness":"claude","transport":"pty"},
+          "codex-pty":{"harness":"codex","transport":"pty"}
+        }"#,
+    )
+    .unwrap();
+    crate::identity::add_local_agent(home.path(), "writer", "codex-pty", None, 10).unwrap();
+
+    let inventory = AgentInventory::build(
+        home.path(),
+        &[Harness::ClaudeCode, Harness::Codex],
+        &harnesses,
+        &catalog,
+        None,
+    );
+
+    assert!(inventory.find("writer").is_some());
+    assert!(inventory.find("writer-codex").is_none());
+    assert!(inventory.find("writer-claude").is_none());
+}

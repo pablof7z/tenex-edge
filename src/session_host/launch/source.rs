@@ -18,6 +18,7 @@ pub(super) struct ResolvedSource {
     pub(super) native_agent: Option<NativeAgentActivation>,
     pub(super) identity: crate::identity::AgentIdentity,
     pub(super) pty_launch: Option<PtyLaunchSpec>,
+    pub(super) retired_advertisements: Vec<String>,
 }
 
 pub(super) fn resolve_agent_source(
@@ -27,33 +28,105 @@ pub(super) fn resolve_agent_source(
 ) -> Result<ResolvedSource> {
     let home = crate::config::mosaico_home();
     let cfg = crate::harness::HarnessesConfig::load()?;
-    let (identity, bundle, profile, native_profile) = if crate::identity::is_configured(&home, slug)
-    {
-        let identity = crate::identity::load(&home, slug)?;
-        let bundle = identity.harness.clone();
-        let profile = identity.profile.clone();
-        let harness = crate::harness::bundle_harness_with(&cfg, &bundle)
-            .with_context(|| format!("resolving harness for configured agent {slug:?}"))?;
-        let native_profile = profile
-            .is_none()
-            .then(|| {
-                state
-                    .resolve_native_agent(slug, Some(workspace), Some(harness))
-                    .ok()
-            })
-            .flatten();
-        (identity, bundle, profile, native_profile)
-    } else {
-        let native_profile = state.resolve_native_agent(slug, Some(workspace), None)?;
-        let bundle = crate::harness::native_bundle_with(&cfg, native_profile.harness)?;
-        let identity = crate::identity::AgentIdentity::per_session(slug, &bundle);
-        (identity, bundle, None, Some(native_profile))
-    };
+    let (identity, bundle, profile, native_profile, retired_advertisements) =
+        if crate::identity::is_configured(&home, slug) {
+            let identity = crate::identity::load(&home, slug)?;
+            let bundle = identity.harness.clone();
+            let profile = identity.profile.clone();
+            let harness = crate::harness::bundle_harness_with(&cfg, &bundle)
+                .with_context(|| format!("resolving harness for configured agent {slug:?}"))?;
+            let native_profile = profile
+                .is_none()
+                .then(|| {
+                    state
+                        .resolve_native_agent(slug, Some(workspace), Some(harness))
+                        .ok()
+                })
+                .flatten();
+            (identity, bundle, profile, native_profile, Vec::new())
+        } else {
+            let catalog = state.agent_catalog();
+            let inventory = crate::agent_inventory::AgentInventory::build(
+                &home,
+                state.available_harnesses(),
+                &cfg,
+                &catalog,
+                Some(workspace),
+            );
+            let selected = inventory.find(slug).with_context(|| {
+                let choices = inventory.profile_choices(slug);
+                if choices.is_empty() {
+                    format!("no available agent or harness named {slug:?}")
+                } else {
+                    format!(
+                        "agent {slug:?} is available from multiple harnesses; choose {}",
+                        choices
+                            .iter()
+                            .map(|choice| choice.slug.as_str())
+                            .collect::<Vec<_>>()
+                            .join(" or ")
+                    )
+                }
+            })?;
+            match selected.source {
+                crate::agent_inventory::AgentSource::Harness => (
+                    crate::identity::AgentIdentity::per_session(
+                        &selected.agent_slug,
+                        &selected.bundle,
+                    ),
+                    selected.bundle.clone(),
+                    None,
+                    None,
+                    Vec::new(),
+                ),
+                crate::agent_inventory::AgentSource::NativeProfile => {
+                    let native_profile = state.resolve_native_agent(
+                        &selected.agent_slug,
+                        Some(workspace),
+                        Some(selected.harness),
+                    )?;
+                    let retired = if selected.persist_binding {
+                        inventory
+                            .profile_choices(&selected.agent_slug)
+                            .into_iter()
+                            .map(|choice| choice.slug.clone())
+                            .collect::<Vec<_>>()
+                    } else {
+                        Vec::new()
+                    };
+                    let identity = if selected.persist_binding {
+                        crate::identity::add_local_agent(
+                            &home,
+                            &selected.agent_slug,
+                            &selected.bundle,
+                            None,
+                            crate::util::now_secs(),
+                        )?
+                        .0
+                    } else {
+                        crate::identity::AgentIdentity::per_session(
+                            &selected.agent_slug,
+                            &selected.bundle,
+                        )
+                    };
+                    (
+                        identity,
+                        selected.bundle.clone(),
+                        None,
+                        Some(native_profile),
+                        retired,
+                    )
+                }
+                crate::agent_inventory::AgentSource::Configured => {
+                    unreachable!("configured agent inventory entry was not backed by agent JSON")
+                }
+            }
+        };
     let native_agent = native_profile
         .as_ref()
         .map(|profile| profile.activation())
         .transpose()?;
-    let id = crate::pty::new_endpoint_id(slug);
+    let id = crate::pty::new_endpoint_id(&identity.slug);
     let scratch = crate::config::mosaico_home()
         .join("harness-profiles")
         .join(&id);
@@ -96,81 +169,10 @@ pub(super) fn resolve_agent_source(
         native_agent,
         identity,
         pty_launch,
+        retired_advertisements,
     })
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::test_env::EnvGuard;
-
-    fn write(path: &std::path::Path, body: &str) {
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(path, body).unwrap();
-    }
-
-    #[tokio::test]
-    async fn installed_codex_agent_resolves_without_agent_json() {
-        let home = tempfile::tempdir().unwrap();
-        let mosaico_home = home.path().join("mosaico");
-        let codex_home = home.path().join(".codex");
-        let mut env = EnvGuard::set("MOSAICO_HOME", &mosaico_home);
-        env.set_var("MOSAICO_ISOLATED_HOME_OK", "1");
-        env.set_var("HOME", home.path());
-        env.set_var("CODEX_HOME", &codex_home);
-        write(
-            &mosaico_home.join("harnesses.json"),
-            r#"{"codex-rpc":{"harness":"codex","transport":"app-server"}}"#,
-        );
-        write(
-            &codex_home.join("agents/reviewer.toml"),
-            "name='reviewer'\ndescription='Reviews code'\ndeveloper_instructions='Review carefully'",
-        );
-        let workspace = home.path().join("work");
-        std::fs::create_dir_all(&workspace).unwrap();
-        let state = DaemonState::new_for_test().await;
-        state.refresh_agent_catalog().unwrap();
-
-        let source = resolve_agent_source(&state, "reviewer", &workspace).unwrap();
-        assert_eq!(source.bundle, "codex-rpc");
-        assert!(source.identity.per_session_key);
-        assert!(source.identity.keys.is_none());
-        assert!(matches!(
-            source.native_agent,
-            Some(NativeAgentActivation::CodexRoot(_))
-        ));
-        assert!(!mosaico_home.join("agents/reviewer.json").exists());
-    }
-
-    #[tokio::test]
-    async fn installed_opencode_agent_resolves_to_native_agent_argv() {
-        let home = tempfile::tempdir().unwrap();
-        let mosaico_home = home.path().join("mosaico");
-        let mut env = EnvGuard::set("MOSAICO_HOME", &mosaico_home);
-        env.set_var("MOSAICO_ISOLATED_HOME_OK", "1");
-        env.set_var("HOME", home.path());
-        env.set_var("XDG_CONFIG_HOME", home.path().join(".config"));
-        write(
-            &mosaico_home.join("harnesses.json"),
-            r#"{"opencode-pty":{"harness":"opencode","transport":"pty","args":["--verbose"]}}"#,
-        );
-        write(
-            &home.path().join(".config/opencode/agents/new-profile.md"),
-            "---\ndescription: Handles backend changes\n---\nWork carefully",
-        );
-        let workspace = home.path().join("work");
-        std::fs::create_dir_all(&workspace).unwrap();
-        let state = DaemonState::new_for_test().await;
-        state.refresh_agent_catalog().unwrap();
-
-        let source = resolve_agent_source(&state, "new-profile", &workspace).unwrap();
-        assert_eq!(source.bundle, "opencode-pty");
-        assert_eq!(
-            source.command,
-            ["opencode", "--verbose", "--agent", "new-profile"]
-        );
-        assert!(source.identity.per_session_key);
-        assert!(source.identity.keys.is_none());
-        assert!(!mosaico_home.join("agents/new-profile.json").exists());
-    }
-}
+#[path = "source/tests.rs"]
+mod tests;

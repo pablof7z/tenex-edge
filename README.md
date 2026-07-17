@@ -67,8 +67,12 @@ real end-to-end demos against a live relay across four hosts. If it's here, it r
   under the bare agent slug, allow one live session on the backend, and always start fresh.
 - **Installed harness agents are available automatically.** Mosaico monitors global and
   workspace-local Codex, Claude Code, and OpenCode agent directories and advertises valid
-  profiles in the backend roster. A compatible `harnesses.json` bundle is still required,
-  but ordinary native profiles do not need a duplicate Mosaico agent JSON.
+  profiles in the backend roster. Cross-harness name conflicts appear as combinations such
+  as `writer-codex` and `writer-claude`; selecting one records the binding in
+  `~/.mosaico/agents/writer.json`. The harnesses recorded in `config.json` are also available
+  as default agents such as `codex`, `claude`, and `opencode`. A compatible
+  `harnesses.json` bundle is still required, but ordinary native profiles do not need a
+  duplicate Mosaico agent JSON.
 - **Presence and liveness.** Every agent on the repo broadcasts that it's alive; dead
   ones fall off on their own after a short heartbeat timeout.
 - **Agent-owned status.** Every session publishes working/idle presence and can declare
@@ -174,8 +178,10 @@ mosaico install --all   # wire hooks into every detected host
 ```
 
 Point `mosaico` at a relay and whitelist your human key in
-`~/.mosaico/config.json` (`relays`, `whitelistedPubkeys`). Override the whole home with
-`$MOSAICO_HOME`. Then run your agents; run `mosaico debug doctor` if anything looks off.
+`~/.mosaico/config.json` (`relays`, `whitelistedPubkeys`). Install and daemon startup add
+`availableHarnesses` from local detection when that field is absent; an explicit list is
+left unchanged. Override the whole home with `$MOSAICO_HOME`. Then run your agents; run
+`mosaico debug doctor` if anything looks off.
 
 ### Agent and operator surfaces
 
@@ -197,12 +203,13 @@ agent-only commands and are intentionally hidden from default human CLI help:
 | `mosaico channel add …` | Add a session by npub/hex (or its current handle), or add a `<pubkey\|npub\|nip05>` human (`--admin`). |
 | `mosaico dispatch <agent[@backend]> --workspace <workspace> --message …` | Start a delegated agent session in an explicit workspace, then p-tag the handoff after ACK. |
 
-Human operators start a local host with `mosaico launch <host> [prompt]`. A bare
-`mosaico launch <session-handle>` reattaches a live terminal or resumes that
-session when its harness has a native resume token. If
-the host selects an ACP/app-server bundle, an interactive launch offers the
-available PTY bundles to attach to and keeps headless launch as the final choice;
-`--harness <bundle>` and `--headless` bypass that picker explicitly.
+`mosaico launch` lists every local launch target: configured agents, unique native profiles,
+expanded profile/harness conflicts, and available harness defaults. Start one with
+`mosaico launch <agent> [prompt]`. A conflicted native profile opens a harness radio picker;
+its expanded name such as `writer-codex` selects the same choice non-interactively. A bare
+`mosaico launch <session-handle>` reattaches a live terminal or resumes that session when its
+harness has a native resume token. `mosaico dispatch` accepts the same harness defaults and
+expanded conflict names.
 
 The session/turn lifecycle has no hand-run commands — every host drives it through the
 single `mosaico harness hook` entry point, which reads the host's hook payload on stdin
