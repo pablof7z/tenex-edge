@@ -22,6 +22,7 @@ test-all-local: test-dev-scripts test-unit test-local-relay test-local-nip29
 
 test-dev-scripts:
     bash skills/mosaico-dev/tests/scripts.sh
+    bash scripts/tests/install-fleet.sh
 
 # Hermetic unit tests only. This is what CI runs.
 test-unit:
