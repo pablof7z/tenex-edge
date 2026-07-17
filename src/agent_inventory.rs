@@ -50,18 +50,20 @@ impl AgentInventory {
             .collect::<BTreeMap<_, _>>();
 
         for (slug, bundle, _, byline) in crate::identity::list_local_agents(mosaico_home) {
-            configured.insert(slug.clone());
             match crate::harness::bundle_harness_with(harnesses, &bundle) {
-                Ok(harness) => inventory.agents.push(AvailableAgent {
-                    slug: slug.clone(),
-                    agent_slug: slug.clone(),
-                    bundle,
-                    harness,
-                    use_criteria: byline.unwrap_or_default(),
-                    available_since: created.get(&slug).copied().unwrap_or(0),
-                    source: AgentSource::Configured,
-                    persist_binding: false,
-                }),
+                Ok(harness) => {
+                    configured.insert(slug.clone());
+                    inventory.agents.push(AvailableAgent {
+                        slug: slug.clone(),
+                        agent_slug: slug.clone(),
+                        bundle,
+                        harness,
+                        use_criteria: byline.unwrap_or_default(),
+                        available_since: created.get(&slug).copied().unwrap_or(0),
+                        source: AgentSource::Configured,
+                        persist_binding: false,
+                    });
+                }
                 Err(error) => inventory.failures.push(format!("{slug}: {error:#}")),
             }
         }

@@ -95,6 +95,29 @@ async fn available_harness_resolves_without_profile_or_agent_json() {
 }
 
 #[tokio::test]
+async fn invalid_same_named_agent_does_not_shadow_available_harness() {
+    let home = tempfile::tempdir().unwrap();
+    let mosaico_home = home.path().join("mosaico");
+    let mut env = EnvGuard::set("MOSAICO_HOME", &mosaico_home);
+    env.set_var("MOSAICO_ISOLATED_HOME_OK", "1");
+    env.set_var("HOME", home.path());
+    write(
+        &mosaico_home.join("harnesses.json"),
+        r#"{"codex-pty":{"harness":"codex","transport":"pty","args":["--yolo"]}}"#,
+    );
+    crate::identity::add_local_agent(&mosaico_home, "codex", "codex", None, 10).unwrap();
+    let workspace = home.path().join("work");
+    std::fs::create_dir_all(&workspace).unwrap();
+    let state = DaemonState::new_for_test().await;
+
+    let source = resolve_agent_source(&state, "codex", &workspace).unwrap();
+
+    assert_eq!(source.identity.slug, "codex");
+    assert_eq!(source.bundle, "codex-pty");
+    assert_eq!(source.command, ["codex", "--yolo"]);
+}
+
+#[tokio::test]
 async fn conflict_combination_resolves_and_persists_selected_binding() {
     let home = tempfile::tempdir().unwrap();
     let mosaico_home = home.path().join("mosaico");
