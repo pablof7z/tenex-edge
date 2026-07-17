@@ -123,7 +123,8 @@ install_host() {
 
   echo "==> $(hostname -s): verified"
   printf '    commit: %s\n' "${expected}"
-  printf '    binary: %s (%s)\n' "${binary}" "$("${binary}" --version)"
+  printf '    binary: %s (sha256 %s)\n' \
+    "${binary}" "$(shasum -a 256 "${binary}" | awk '{print $1}')"
   printf '    skills: %s, %s\n' \
     "${agents_root}/mosaico" "${agents_root}/mosaico-dev"
   "${binary}" install --status

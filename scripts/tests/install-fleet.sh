@@ -121,6 +121,7 @@ MOSAICO_FLEET_LOCAL_REPO="${LOCAL_REPO}" \
   || fail 'installed development skill is incomplete'
 assert_contains 'fleet verified: local + 1 remote host(s)' "${OUTPUT}" \
   'fleet success summary'
+assert_contains 'binary:' "${OUTPUT}" 'installed binary hash is reported'
 assert_contains 'ssh fake-host' "${LOG}" 'remote worker was streamed over SSH'
 [[ "$(grep -Fc 'mosaico daemon restart' "${LOG}")" -eq 2 ]] \
   || fail 'daemon was not restarted exactly once per host'
