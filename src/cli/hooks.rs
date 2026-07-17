@@ -321,7 +321,7 @@ async fn hook_dispatch(
         }
         "session-end" => {
             if !sid.is_empty() {
-                session_end_hook(sid)?;
+                session_end_hook(sid, host.name)?;
             }
         }
         "user-prompt-submit" => {

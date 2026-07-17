@@ -130,7 +130,7 @@ pub(in crate::daemon::server) async fn publish_backend_profile(state: &Arc<Daemo
     )
     .with_agents(agents);
     let ev = crate::domain::DomainEvent::Profile(profile);
-    if let Err(e) = state.provider.publish(&ev, &backend_keys).await {
+    if let Err(e) = state.provider.enqueue(&ev, &backend_keys).await {
         tracing::warn!(error = %e, "backend kind:0 profile publish failed");
     }
 }

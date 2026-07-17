@@ -12,6 +12,9 @@ mod launch;
 pub(crate) use launch::{
     configure_pty_agent, configure_pty_agent_with_args, install_test_harness_shim,
 };
+#[path = "harness/wedge_relay.rs"]
+mod wedge_relay;
+pub(crate) use wedge_relay::WedgeRelay;
 
 pub(crate) static ENV_LOCK: Mutex<()> = Mutex::new(());
 
@@ -75,6 +78,19 @@ impl Home {
         )
         .unwrap();
         Home { dir }
+    }
+
+    pub(crate) fn with_wedged_relay(relay_url: &str) -> Self {
+        let home = Self::new();
+        let cfg = home.dir.path().join("config.json");
+        let body = serde_json::json!({
+            "whitelistedPubkeys": [],
+            "backendName": "test-host",
+            "relays": [relay_url],
+            "indexerRelay": relay_url,
+        });
+        std::fs::write(&cfg, serde_json::to_string(&body).unwrap()).unwrap();
+        home
     }
     /// Rewrite the config to include a backend signing key (`mosaicoPrivateKey`).
     /// Needed by tests that start multiple CONCURRENT same-agent sessions in one

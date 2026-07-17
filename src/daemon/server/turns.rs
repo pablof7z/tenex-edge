@@ -194,7 +194,11 @@ pub(in crate::daemon::server) async fn rpc_turn_end(
     // reply so the channel sees a response instead of silence.
     if let Some(rec) = rec.as_ref() {
         if let Some(pending) = auto_reply::take(&rec.pubkey) {
-            auto_reply::publish_last_response(state, rec, pending).await;
+            let state = state.clone();
+            let rec = rec.clone();
+            tokio::spawn(async move {
+                auto_reply::publish_last_response(&state, &rec, pending).await;
+            });
         }
     }
     Ok(serde_json::json!({ "ok": true }))

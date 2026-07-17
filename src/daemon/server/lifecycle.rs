@@ -31,8 +31,8 @@ pub async fn run() -> Result<()> {
     let cfg = Config::load().context("loading config")?;
     let host = cfg.host.clone();
     let owners = cfg.whitelisted_pubkeys.clone();
-    // The narrow direct client handles profile indexer copies and one-shot
-    // fetches outside NMP. Its AUTH identity is irrelevant to delivery (verified:
+    // The narrow direct client handles one-shot reads and doctor probes. Its
+    // AUTH identity is irrelevant to delivery (verified:
     // an A-authed connection receives events p-tagged to B), so authenticate
     // with the backend's own key (`mosaicoPrivateKey`) rather than minting a
     // separate identity — a fresh keystore file would land in the same
@@ -42,9 +42,8 @@ pub async fn run() -> Result<()> {
         .backend_nsec()
         .and_then(|nsec| Keys::parse(nsec).ok())
         .unwrap_or_else(Keys::generate);
-    // The indexer is a direct-client target only for kind:0 profile copies and
-    // one-shot lookups. NIP-29 group writes are composed and routed by NMP, so
-    // the indexer can never receive or reject them accidentally.
+    // The indexer is a direct-client target for one-shot lookups. Every product
+    // write, including kind:0 copies to this indexer, is routed durably by NMP.
     let indexer = (!cfg.relays.contains(&cfg.indexer_relay)).then_some(cfg.indexer_relay.as_str());
     let transport = Arc::new(
         Transport::connect_with_indexer(&cfg.relays, indexer, auth_keys)
@@ -62,7 +61,7 @@ pub async fn run() -> Result<()> {
         Some(&cfg.indexer_relay),
         Some(&storage.nmp_store_path),
     )?);
-    pending_writes::spawn(&storage.state_db_path, &nmp, &transport);
+    pending_writes::spawn(&storage.state_db_path, &nmp);
     let provider = Arc::new(Nip29Provider::new(
         transport.clone(),
         nmp.clone(),
@@ -111,7 +110,7 @@ pub async fn run() -> Result<()> {
     });
 
     // Relay startup runs off the accept path, so store-only RPCs respond immediately.
-    // Warm the narrow direct connection before profile copies and fetches.
+    // Warm the narrow direct connection before fetches.
     let relay_state = state.clone();
     tokio::spawn(async move {
         relay_state.transport.warmup().await;

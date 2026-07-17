@@ -1789,6 +1789,7 @@ dependencies = [
  "mime_guess",
  "nix 0.29.0",
  "nmp",
+ "nmp-grammar",
  "nmp-nip29",
  "nostr-sdk",
  "owo-colors",

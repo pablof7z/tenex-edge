@@ -249,13 +249,13 @@ pub(super) fn session_pty_wrap_me(session: String) -> Result<()> {
     bail!("cannot pty-wrap-me: {reason}")
 }
 
-pub(super) fn session_end_hook(session: String) -> Result<()> {
+pub(super) fn session_end_hook(session: String, harness: &str) -> Result<()> {
     if crate::daemon::is_inhibited() {
         return Ok(());
     }
     if let Err(e) = crate::daemon::blocking::call_no_spawn(
         "session_end",
-        serde_json::json!({"session": session}),
+        serde_json::json!({"harness_session": session, "harness": harness}),
     ) {
         eprintln!("[mosaico] session-end hook skipped: {e:#}");
     }

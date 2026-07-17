@@ -49,7 +49,10 @@ pub(in crate::daemon::server) async fn end_runtime_generation(
         state: "end".into(),
         rel_cwd: String::new(),
     });
-    super::subscriptions::reconcile_subs_logged(state, "session_end").await;
+    let state = state.clone();
+    tokio::spawn(async move {
+        super::subscriptions::reconcile_subs_logged(&state, "session_end").await;
+    });
     Ok(true)
 }
 

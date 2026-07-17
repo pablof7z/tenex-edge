@@ -1,7 +1,7 @@
 //! Fabric abstraction layer around NMP I/O and provider materialization.
 //!
 //! Layering intent:
-//!   Acquisition + durable group writes ← NMP
+//!   Acquisition + all durable writes ← NMP
 //!   NostrEventCodec (encode, decode)  ← Nip29WireCodec
 //!   Materializer (store writes)       ← materialize()
 //!   Profile indexer + one-shot reads   ← Transport
