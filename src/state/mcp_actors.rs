@@ -72,20 +72,20 @@ impl Store {
 
     pub(crate) fn activate_mcp_actor(&self, actor_key: &str, pubkey: &str, now: u64) -> Result<()> {
         let idle_deadline = now.saturating_add(HEADLESS_IDLE_TIMEOUT_SECS);
-        let state: String = self.conn.query_row(
-            "SELECT runtime_state FROM sessions WHERE pubkey=?1",
+        let (state, recovery): (String, String) = self.conn.query_row(
+            "SELECT runtime_state, recovery_state FROM sessions WHERE pubkey=?1",
             [pubkey],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
         anyhow::ensure!(
             state != "stopping",
             "MCP actor is currently stopping; retry the call"
         );
+        anyhow::ensure!(recovery != "revoked", "MCP actor recovery is revoked");
         self.conn.execute(
             "UPDATE sessions SET
                  runtime_generation=runtime_generation+CASE WHEN runtime_state='stopped' THEN 1 ELSE 0 END,
                  runtime_state='running', presentation_state='headless', work_state='idle',
-                 recovery_state='ready',
                  lifecycle_epoch=lifecycle_epoch+CASE WHEN runtime_state='stopped' THEN 1 ELSE 0 END,
                  idle_since=?2, idle_deadline=?3, stopped_at=0, stop_reason=NULL,
                  last_seen=?2
@@ -140,6 +140,15 @@ mod tests {
         assert_eq!(reactivated.runtime_state, RuntimeState::Running);
         assert_eq!(reactivated.runtime_generation, 2);
         assert_eq!(reactivated.idle_deadline, 4 + HEADLESS_IDLE_TIMEOUT_SECS);
+        assert!(store
+            .mark_runtime_stopped("pk-one", StopReason::IdleEvicted, 5)
+            .unwrap());
+        assert!(store
+            .revoke_session_recovery_if_generation("pk-one", 2)
+            .unwrap());
+        assert!(store
+            .activate_mcp_actor("mcp1_redacted", "pk-one", 6)
+            .is_err());
         assert!(store
             .bind_mcp_actor("mcp1_redacted", "openai", "pk-two", 3)
             .is_err());
