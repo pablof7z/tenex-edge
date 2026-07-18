@@ -60,8 +60,13 @@ impl StoredKey {
 fn read_stored_key(path: &Path) -> Result<StoredKey> {
     let body = std::fs::read_to_string(path)
         .with_context(|| format!("reading agent record {}", path.display()))?;
-    let stored: StoredKey = serde_json::from_str(&body)
+    let mut stored: StoredKey = serde_json::from_str(&body)
         .with_context(|| format!("parsing agent record {}", path.display()))?;
+    if stored.migrate_redundant_per_session_keys() {
+        atomic_write(path, &serde_json::to_string_pretty(&stored)?)
+            .with_context(|| format!("migrating agent record {}", path.display()))?;
+        tracing::info!(path = %path.display(), "migrated redundant per-session agent keys");
+    }
     stored
         .identity_keys()
         .with_context(|| format!("validating agent record {}", path.display()))?;
@@ -184,6 +189,19 @@ pub fn load(mosaico_home: &Path, slug: &str) -> Result<AgentIdentity> {
 }
 
 impl StoredKey {
+    /// Records written before the keyless per-session schema could retain a
+    /// now-unused durable pair. This one-time state migration removes only
+    /// those redundant fields; strict validation still owns every other
+    /// malformed or contradictory record.
+    fn migrate_redundant_per_session_keys(&mut self) -> bool {
+        if !self.per_session_key || (self.secret_key.is_none() && self.public_key.is_none()) {
+            return false;
+        }
+        self.secret_key = None;
+        self.public_key = None;
+        true
+    }
+
     fn identity_keys(&self) -> Result<Option<Keys>> {
         if self.per_session_key {
             if self.secret_key.is_some() || self.public_key.is_some() {

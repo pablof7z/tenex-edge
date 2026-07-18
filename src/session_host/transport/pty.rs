@@ -22,6 +22,7 @@ impl SessionTransport for PtyTransport {
     ) -> Result<super::PreparedLaunch> {
         resolved.profile.materialize()?;
         let mut env = resolved.profile.extra_env.clone();
+        crate::host_env::apply_executable_path(&mut env);
         let mut env_remove = Vec::new();
         for directive in resolved.driver.base_env {
             match directive {

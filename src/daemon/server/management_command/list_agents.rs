@@ -47,6 +47,13 @@ mod tests {
         std::fs::write(path, body).unwrap();
     }
 
+    fn write_executable(path: &std::path::Path) {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        write(path, "#!/bin/sh\n");
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
     #[tokio::test]
     async fn lists_bare_harnesses_and_expanded_profile_conflicts() {
         let root = tempfile::tempdir().unwrap();
@@ -72,7 +79,10 @@ mod tests {
             &root.path().join(".claude/agents/writer.md"),
             "---\nname: writer\ndescription: Writes\n---\nWrite",
         );
-        std::fs::create_dir_all(root.path().join(".config/opencode")).unwrap();
+        for executable in ["claude", "codex"] {
+            write_executable(&root.path().join(".local/bin").join(executable));
+        }
+        write_executable(&root.path().join(".opencode/bin/opencode"));
         let state = DaemonState::new_for_test().await;
         state.refresh_agent_catalog().unwrap();
 

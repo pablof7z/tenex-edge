@@ -14,6 +14,8 @@ mod human_who;
 mod launch_mentions;
 #[path = "channels/list.rs"]
 mod list;
+#[path = "channels/management_commands.rs"]
+mod management_commands;
 #[path = "channels/native_context.rs"]
 mod native_context;
 #[path = "channels/orchestration.rs"]

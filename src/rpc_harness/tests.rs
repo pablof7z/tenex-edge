@@ -100,6 +100,44 @@ async fn fs_bridge_jails_writes() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn rpc_kill_terminates_the_owned_process_group() {
+    let cwd = tempfile::tempdir().unwrap();
+    let descendant_pid = cwd.path().join("descendant.pid");
+    let cfg = SpawnConfig {
+        program: "/bin/sh".into(),
+        args: vec![
+            "-c".into(),
+            "sleep 60 & echo $! > \"$1\"; wait".into(),
+            "mosaico-rpc-test".into(),
+            descendant_pid.to_string_lossy().into_owned(),
+        ],
+        cwd: cwd.path().to_path_buf(),
+        env: vec![],
+        env_remove: vec![],
+        dialect: Dialect::Acp,
+        callbacks: Callbacks::allow_all(cwd.path().to_path_buf()),
+    };
+    let (handle, _updates) = RpcHandle::spawn(cfg).await.unwrap();
+    for _ in 0..100 {
+        if descendant_pid.is_file() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    let descendant = std::fs::read_to_string(&descendant_pid)
+        .unwrap()
+        .trim()
+        .parse::<i32>()
+        .unwrap();
+    assert!(crate::liveness::pid_alive(descendant));
+
+    handle.kill().await.unwrap();
+
+    assert!(!crate::liveness::pid_alive(descendant));
+}
+
 /// LIVE smoke against real `opencode acp` on this machine. Gated so CI without
 /// auth skips it. Run with:
 ///   MOSAICO_RPC_LIVE=1 cargo test --lib -- --ignored rpc_harness::tests::live_opencode

@@ -115,6 +115,14 @@ protocol-skew re-exec. Runtime count does not control daemon lifetime: standing
 expiry, exact p-tag recovery, relay retry work, and persisted supervisor-exit
 reports all require an owner while no agent process is running.
 
+Detached PTY supervisors survive daemon replacement and are re-adopted. ACP and
+app-server children instead use daemon-owned stdio, which cannot be reattached
+after process replacement. An orderly daemon shutdown therefore terminates and
+confirms every owned RPC process group and marks those runtime generations
+superseded before releasing the registry. Their native resume locators and
+standing remain available for exact recovery; no wrapper or provider process is
+left orphaned.
+
 ## 4. Socket, lock, stale-reclaim, version handshake
 
 Files (all under `$MOSAICO_HOME`, default `~/.mosaico`):

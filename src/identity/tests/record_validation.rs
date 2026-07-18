@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn loading_ordinary_agent_rejects_redundant_keys_without_rewriting() {
+fn loading_pre_keyless_agent_migrates_redundant_keys_atomically() {
     let dir = tempfile::tempdir().unwrap();
     load_or_create(dir.path(), "coder", "codex", None, 1).unwrap();
     let path = dir.path().join("agents/coder.json");
@@ -10,15 +10,15 @@ fn loading_ordinary_agent_rejects_redundant_keys_without_rewriting() {
         serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
     config["secret_key"] = serde_json::json!(keys.secret_key().to_secret_hex());
     config["public_key"] = serde_json::json!(keys.public_key().to_hex());
-    let inconsistent = serde_json::to_string_pretty(&config).unwrap();
-    std::fs::write(&path, &inconsistent).unwrap();
+    std::fs::write(&path, serde_json::to_string_pretty(&config).unwrap()).unwrap();
 
-    let error = load(dir.path(), "coder").unwrap_err();
-    assert!(
-        format!("{error:#}").contains("perSessionKey:true forbids secret_key and public_key"),
-        "unexpected error: {error:#}"
-    );
-    assert_eq!(std::fs::read_to_string(path).unwrap(), inconsistent);
+    let loaded = load(dir.path(), "coder").unwrap();
+    assert!(loaded.per_session_key);
+    assert!(loaded.keys.is_none());
+    let migrated: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    assert!(migrated.get("secret_key").is_none());
+    assert!(migrated.get("public_key").is_none());
 }
 
 #[test]

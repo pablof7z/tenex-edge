@@ -22,6 +22,14 @@ pub struct SpawnSessionArgs {
 }
 
 pub fn spawn_session(args: SpawnSessionArgs) -> Result<LaunchMetadata> {
+    let bin = std::env::current_exe().context("locating current mosaico executable")?;
+    spawn_session_with_executable(args, bin)
+}
+
+fn spawn_session_with_executable(
+    args: SpawnSessionArgs,
+    bin: impl AsRef<std::ffi::OsStr>,
+) -> Result<LaunchMetadata> {
     if args.command.is_empty() {
         anyhow::bail!("pty launch command must not be empty");
     }
@@ -37,7 +45,6 @@ pub fn spawn_session(args: SpawnSessionArgs) -> Result<LaunchMetadata> {
         .open(&log_path)
         .with_context(|| format!("opening {}", log_path.display()))?;
     let log_err = log.try_clone()?;
-    let bin = std::env::current_exe().context("locating current mosaico executable")?;
     let mut child = std::process::Command::new(bin);
     child
         .arg("__pty-supervisor")
@@ -79,7 +86,7 @@ pub fn spawn_session(args: SpawnSessionArgs) -> Result<LaunchMetadata> {
             Ok(())
         });
     }
-    let supervisor = child.spawn().context("spawning portable-pty supervisor")?;
+    let mut supervisor = child.spawn().context("spawning portable-pty supervisor")?;
 
     let meta = LaunchMetadata {
         id,
@@ -94,8 +101,64 @@ pub fn spawn_session(args: SpawnSessionArgs) -> Result<LaunchMetadata> {
         ephemeral: args.ephemeral,
         command: args.command,
     };
-    super::meta::write_metadata(&meta)?;
+    let startup = super::meta::write_metadata(&meta)
+        .and_then(|()| wait_until_ready(&mut supervisor, &meta, &log_path));
+    if let Err(error) = startup {
+        let rollback = super::meta::rollback_spawned_supervisor(&meta);
+        if let Err(rollback) = rollback {
+            return Err(error.context(format!("PTY launch rollback also failed: {rollback:#}")));
+        }
+        let _ = supervisor.wait();
+        cleanup_failed_launch(&meta);
+        return Err(error);
+    }
+    std::thread::spawn(move || {
+        let _ = supervisor.wait();
+    });
     Ok(meta)
+}
+
+fn wait_until_ready(
+    supervisor: &mut std::process::Child,
+    meta: &LaunchMetadata,
+    log_path: &std::path::Path,
+) -> Result<()> {
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        if let Some(status) = supervisor
+            .try_wait()
+            .context("checking PTY supervisor startup")?
+        {
+            let detail = std::fs::read_to_string(log_path)
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+            let detail = if detail.is_empty() {
+                "no supervisor diagnostic was written".to_string()
+            } else {
+                detail
+            };
+            anyhow::bail!(
+                "PTY supervisor for {:?} exited during startup ({status}): {detail}",
+                meta.agent
+            );
+        }
+        if super::client::startup_ready(&meta.id) {
+            return Ok(());
+        }
+        if std::time::Instant::now() >= deadline {
+            anyhow::bail!(
+                "PTY supervisor for {:?} did not become ready within 5 seconds",
+                meta.agent
+            );
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+}
+
+fn cleanup_failed_launch(meta: &LaunchMetadata) {
+    let _ = std::fs::remove_file(&meta.socket);
+    let _ = super::meta::remove_metadata(&meta.id);
 }
 
 pub(crate) fn new_endpoint_id(agent: &str) -> String {
@@ -153,20 +216,5 @@ fn unique_token() -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    #[test]
-    fn endpoint_ids_are_unique_within_the_same_process_and_second() {
-        let first = super::new_endpoint_id("grok");
-        let second = super::new_endpoint_id("grok");
-        assert_ne!(first, second);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn generated_endpoint_stays_within_unix_socket_limits() {
-        use std::os::unix::ffi::OsStrExt;
-
-        let id = super::new_endpoint_id(&"very-long-agent-name-".repeat(8));
-        assert!(super::session_socket(&id).as_os_str().as_bytes().len() < 100);
-    }
-}
+#[path = "launch/tests.rs"]
+mod tests;

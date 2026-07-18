@@ -16,13 +16,16 @@ pub(super) async fn launch(request: FreshLaunchRequest) -> Result<()> {
     let spawned = super::super::daemon_call_async("pty_spawn", params)
         .await
         .with_context(|| format!("launch of agent {agent:?} failed"))?;
-    match spawned["transport"]
+    let transport = spawned["transport"]
         .as_str()
-        .context("pty_spawn did not return transport")?
-    {
-        crate::state::LOCATOR_PTY => attach_pty(&spawned),
-        crate::state::LOCATOR_ACP | crate::state::LOCATOR_APP_SERVER => report_headless(&spawned),
-        transport => bail!("pty_spawn returned unknown transport {transport:?}"),
+        .context("pty_spawn did not return transport")?;
+    match crate::session_host::transport::TransportKind::parse(transport) {
+        Some(crate::session_host::transport::TransportKind::Pty) => attach_pty(&spawned),
+        Some(
+            crate::session_host::transport::TransportKind::Acp
+            | crate::session_host::transport::TransportKind::AppServer,
+        ) => report_headless(&spawned),
+        None => bail!("pty_spawn returned unknown transport {transport:?}"),
     }
 }
 
@@ -89,5 +92,18 @@ mod tests {
                 "prompt": "start here",
             })
         );
+    }
+
+    #[test]
+    fn daemon_transport_contract_keeps_app_server_headless() {
+        use crate::session_host::transport::TransportKind;
+
+        assert_eq!(TransportKind::parse("pty"), Some(TransportKind::Pty));
+        assert_eq!(TransportKind::parse("acp"), Some(TransportKind::Acp));
+        assert_eq!(
+            TransportKind::parse("app-server"),
+            Some(TransportKind::AppServer)
+        );
+        assert_eq!(TransportKind::parse("app_server"), None);
     }
 }

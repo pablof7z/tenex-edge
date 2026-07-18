@@ -6,6 +6,8 @@ use std::time::Duration;
 mod launch;
 #[path = "pty_bootstrap/named.rs"]
 mod named;
+#[path = "pty_bootstrap/startup_failure.rs"]
+mod startup_failure;
 
 fn add_workspace_mapping(home: &Home, channel: &str, path: &Path) {
     std::fs::create_dir_all(path).unwrap();

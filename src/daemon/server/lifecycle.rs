@@ -171,11 +171,44 @@ pub async fn run() -> Result<()> {
     }
     tracing::info!("daemon shutting down");
     accept.abort();
+    shutdown_rpc_sessions(&state).await;
     cleanup();
     state.nmp.shutdown();
     state.transport.shutdown().await;
     drop(lock);
     Ok(())
+}
+
+async fn shutdown_rpc_sessions(state: &Arc<DaemonState>) {
+    for (kind, endpoint, confirmation) in
+        crate::session_host::transport::acp::shutdown_owned_sessions().await
+    {
+        match confirmation {
+            Ok(()) => {
+                let session = state
+                    .with_store(|store| {
+                        store.session_for_runtime_locator(kind.locator_kind(), &endpoint)
+                    })
+                    .ok()
+                    .flatten();
+                if let Some(session) = session {
+                    if let Err(error) = state.with_store(|store| {
+                        store.mark_runtime_stopped_if_generation(
+                            &session.pubkey,
+                            session.runtime_generation,
+                            crate::state::StopReason::Superseded,
+                            crate::util::now_secs(),
+                        )
+                    }) {
+                        tracing::error!(%endpoint, %error, "RPC shutdown state update failed");
+                    }
+                }
+            }
+            Err(error) => {
+                tracing::error!(%endpoint, %error, "RPC process-group shutdown failed");
+            }
+        }
+    }
 }
 
 pub(in crate::daemon::server) fn bind_socket() -> Result<UnixListener> {

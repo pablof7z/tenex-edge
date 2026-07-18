@@ -157,6 +157,37 @@ fn configured_bundles_select_exact_transport() {
 }
 
 #[test]
+fn every_hosted_transport_plan_receives_the_same_executable_path_policy() {
+    let cfg: crate::harness::HarnessesConfig = serde_json::from_str(
+        r#"{
+          "codex-pty":{"harness":"codex","transport":"pty"},
+          "codex-app":{"harness":"codex","transport":"app-server"}
+        }"#,
+    )
+    .unwrap();
+    let scratch = tempfile::tempdir().unwrap();
+
+    for (bundle, transport) in [
+        ("codex-pty", transport_for_kind(TransportKind::Pty)),
+        ("codex-app", transport_for_kind(TransportKind::AppServer)),
+    ] {
+        let mut resolved =
+            crate::harness::resolve_with(&cfg, bundle, None, scratch.path()).unwrap();
+        let prepared = transport
+            .prepare_launch(&mut resolved, format!("{bundle}-endpoint"))
+            .unwrap();
+        let env = prepared
+            .rpc
+            .as_ref()
+            .map(|rpc| &rpc.extra_env)
+            .unwrap_or(&prepared.pty.env);
+        assert!(env
+            .iter()
+            .any(|(key, value)| key == "PATH" && !value.is_empty()));
+    }
+}
+
+#[test]
 fn rpc_spawn_uses_the_admitted_plan_after_config_mutation() {
     let mut cfg: crate::harness::HarnessesConfig = serde_json::from_str(
         r#"{"codex-rpc":{"harness":"codex","transport":"app-server","args":["--admitted"]}}"#,
@@ -231,16 +262,23 @@ async fn pty_transport_reports_a_controlled_socket_live_and_delivers_to_it() {
     listener.set_nonblocking(true).unwrap();
     let (delivered_tx, delivered_rx) = std::sync::mpsc::channel();
     let fixture = std::thread::spawn(move || {
-        use std::io::Read as _;
+        use std::io::{BufRead as _, Read as _, Write as _};
 
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
         while std::time::Instant::now() < deadline {
             match listener.accept() {
-                Ok((mut stream, _)) => {
+                Ok((stream, _)) => {
                     stream.set_nonblocking(false).unwrap();
-                    let mut frame = Vec::new();
-                    stream.read_to_end(&mut frame).unwrap();
-                    if frame.starts_with(b"INJECT ") {
+                    let mut reader = std::io::BufReader::new(stream);
+                    let mut header = String::new();
+                    reader.read_line(&mut header).unwrap();
+                    if header == "PING\n" {
+                        let _ = reader.get_mut().write_all(b"READY\n");
+                        continue;
+                    }
+                    if header.starts_with("INJECT ") {
+                        let mut frame = header.into_bytes();
+                        reader.read_to_end(&mut frame).unwrap();
                         delivered_tx.send(frame).unwrap();
                         return;
                     }
