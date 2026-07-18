@@ -33,6 +33,7 @@ mod nmp_host;
 pub mod profile;
 pub mod session;
 pub mod session_state;
+pub mod slug;
 pub mod util;
 pub(crate) mod workspace;
 

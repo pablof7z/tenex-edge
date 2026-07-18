@@ -108,7 +108,7 @@ fn key_path(mosaico_home: &Path, slug: &str) -> PathBuf {
 
 /// True if `slug` satisfies the on-disk/wire slug charset as-is. Callers that
 /// accept free-text display names (e.g. a cross-harness agent profile's
-/// `name:`) use this to decide whether [`crate::util::slugify`] must run
+/// `name:`) use this to decide whether [`crate::slug::slugify`] must run
 /// first, rather than duplicating the accepted charset.
 pub(crate) fn is_valid_slug(slug: &str) -> bool {
     !slug.is_empty()

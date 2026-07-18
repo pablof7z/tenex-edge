@@ -61,8 +61,7 @@ pub(super) async fn edit(row: &AgentRow) -> Result<()> {
         options[choice]
     };
     let transport = mode_transport(harness, mode);
-    let Some(bundle) =
-        select_or_create_bundle(harness, transport, row.bundle.as_deref(), &theme)?
+    let Some(bundle) = select_or_create_bundle(harness, transport, row.bundle.as_deref(), &theme)?
     else {
         return Ok(());
     };
@@ -72,8 +71,7 @@ pub(super) async fn edit(row: &AgentRow) -> Result<()> {
     };
     let profile = profile_for_save(row);
     let slug = persistable_slug(&row.slug);
-    let saved =
-        super::save_agent_config(&slug, &bundle, profile, Some(per_session_key)).await?;
+    let saved = super::save_agent_config(&slug, &bundle, profile, Some(per_session_key)).await?;
     println!(
         "{} {} · {bundle} · {}",
         if saved.created { "Created" } else { "Updated" },
@@ -81,7 +79,10 @@ pub(super) async fn edit(row: &AgentRow) -> Result<()> {
         mode.label()
     );
     if slug != row.slug {
-        println!("  (native profile name {:?} isn't a valid agent slug — saved as {slug})", row.slug);
+        println!(
+            "  (native profile name {:?} isn't a valid agent slug — saved as {slug})",
+            row.slug
+        );
     }
     Ok(())
 }
@@ -93,7 +94,7 @@ fn persistable_slug(slug: &str) -> String {
     if crate::identity::is_valid_slug(slug) {
         slug.to_string()
     } else {
-        crate::util::slugify(slug)
+        crate::slug::slugify(slug)
     }
 }
 

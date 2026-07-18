@@ -75,7 +75,7 @@ impl AgentInventory {
                 }
             };
             // A configured slug may be a sanitized form of the native
-            // profile's free-text name (see `crate::util::slugify`), so fall
+            // profile's free-text name (see `crate::slug::slugify`), so fall
             // back to a sanitized comparison when the exact one misses.
             let native_profile = capabilities
                 .iter()
@@ -83,7 +83,7 @@ impl AgentInventory {
                 .find(|profile| {
                     profile.harness == harness
                         && (profile.slug == agent.slug
-                            || crate::util::slugify(&profile.slug) == agent.slug)
+                            || crate::slug::slugify(&profile.slug) == agent.slug)
                 })
                 .cloned();
             let use_criteria = agent
@@ -115,7 +115,7 @@ impl AgentInventory {
 
         for capability in capabilities {
             if configured.contains(&capability.slug)
-                || configured.contains(&crate::util::slugify(&capability.slug))
+                || configured.contains(&crate::slug::slugify(&capability.slug))
             {
                 continue;
             }
