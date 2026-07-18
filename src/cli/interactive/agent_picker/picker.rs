@@ -1,25 +1,31 @@
+mod delete_flow;
 mod render;
 #[cfg(test)]
 mod tests;
 
-use super::AgentPickerRow;
+use super::{AgentPickerRow, DeleteScope};
 use anyhow::{Context, Result};
 use crossterm::{
     cursor::Show,
     event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
     execute, terminal,
 };
+use delete_flow::PendingDelete;
 use ratatui::{backend::CrosstermBackend, layout::Rect, Terminal, TerminalOptions, Viewport};
+use std::collections::BTreeSet;
 use std::io;
 
 const MAX_VISIBLE_ROWS: u16 = 40;
 const CHROME_ROWS: u16 = 2;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::cli) enum PickerAction {
     Launch(usize),
     Edit(usize),
-    Delete(usize),
+    /// One `(row index, scope)` pair per agent to delete. A single-row
+    /// delete with both a configured entry and a native profile lets the
+    /// scope differ from `Both`; a multi-select delete always uses `Both`.
+    Delete(Vec<(usize, DeleteScope)>),
     Cancel,
 }
 
@@ -31,24 +37,33 @@ struct PickerState {
     filtering: bool,
     cursor: usize,
     offset: usize,
+    selected: BTreeSet<usize>,
+    pending_delete: Option<PendingDelete>,
 }
 
 impl PickerState {
-    fn new(rows: Vec<AgentPickerRow>) -> Self {
-        let visible = (0..rows.len()).collect();
+    fn new(rows: Vec<AgentPickerRow>, initial_cursor: usize) -> Self {
+        let visible: Vec<usize> = (0..rows.len()).collect();
+        let cursor = initial_cursor.min(visible.len().saturating_sub(1));
         Self {
             rows,
             visible,
             query: String::new(),
             filtering: false,
-            cursor: 0,
+            cursor,
             offset: 0,
+            selected: BTreeSet::new(),
+            pending_delete: None,
         }
     }
 
     fn handle_key(&mut self, key: KeyEvent, rows: usize) -> Option<PickerAction> {
         if key.kind == KeyEventKind::Release {
             return None;
+        }
+        if self.pending_delete.is_some() {
+            let pending = self.pending_delete.take().expect("checked above");
+            return self.handle_pending_delete(pending, key);
         }
         match key.code {
             KeyCode::Esc if self.filtering => {
@@ -64,8 +79,15 @@ impl PickerState {
             KeyCode::Char('e') if !self.filtering => {
                 return self.current().map(PickerAction::Edit);
             }
+            KeyCode::Char(' ') if !self.filtering => {
+                if let Some(index) = self.current() {
+                    if !self.selected.remove(&index) {
+                        self.selected.insert(index);
+                    }
+                }
+            }
             KeyCode::Char('d') if !self.filtering => {
-                return self.current().map(PickerAction::Delete);
+                self.begin_delete();
             }
             KeyCode::Char('/') if !self.filtering => {
                 self.filtering = true;
@@ -178,7 +200,10 @@ impl Drop for RawMode {
     }
 }
 
-pub(in crate::cli) fn select(rows: Vec<AgentPickerRow>) -> Result<PickerAction> {
+pub(in crate::cli) fn select(
+    rows: Vec<AgentPickerRow>,
+    initial_cursor: usize,
+) -> Result<PickerAction> {
     let (_, terminal_height) = terminal::size().unwrap_or((100, 28));
     let height = viewport_height(terminal_height);
     let _raw_mode = RawMode::enter()?;
@@ -192,7 +217,7 @@ pub(in crate::cli) fn select(rows: Vec<AgentPickerRow>) -> Result<PickerAction> 
     .context("creating inline agent picker")?;
     terminal.hide_cursor()?;
 
-    let mut state = PickerState::new(rows);
+    let mut state = PickerState::new(rows, initial_cursor);
     let mut last_area = Rect::new(0, 0, 0, height);
     let interaction = interaction_loop(&mut terminal, &mut state, &mut last_area);
     let cleanup = cleanup_terminal(&mut terminal, last_area);

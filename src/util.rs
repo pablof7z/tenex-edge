@@ -155,39 +155,6 @@ pub fn is_harness_envelope(text: &str) -> bool {
     text.trim_start().starts_with('<')
 }
 
-/// Convert a human-readable host label (e.g. "pablos' laptop") into a URL-safe
-/// slug (e.g. "pablos-laptop"). This is only for internal normalization;
-/// public agent/backend labels preserve config.json `backendName`.
-pub fn slugify_host(host: &str) -> String {
-    let slug: String = host
-        .to_lowercase()
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-        .collect();
-    // Collapse consecutive hyphens and strip leading/trailing ones.
-    let mut out = String::with_capacity(slug.len());
-    let mut prev_hyphen = true; // treat start as hyphen to strip leading ones
-    for c in slug.chars() {
-        if c == '-' {
-            if !prev_hyphen {
-                out.push('-');
-                prev_hyphen = true;
-            }
-        } else {
-            out.push(c);
-            prev_hyphen = false;
-        }
-    }
-    if out.ends_with('-') {
-        out.pop();
-    }
-    if out.is_empty() {
-        "unknown".to_string()
-    } else {
-        out
-    }
-}
-
 /// A fresh OPAQUE channel/group id: 8 lowercase hex chars (4 random bytes) from a
 /// freshly generated keypair's public key. NEVER derived from the channel's name —
 /// the human handle lives in the kind:39000 `name` tag, while this id is the
@@ -277,15 +244,6 @@ mod tests {
         assert!(!is_harness_envelope("fix the bug in <Foo/> please"));
         assert!(!is_harness_envelope("plain text prompt"));
         assert!(!is_harness_envelope(""));
-    }
-
-    #[test]
-    fn slugify_host_normalizes() {
-        assert_eq!(slugify_host("pablos' laptop"), "pablos-laptop");
-        assert_eq!(slugify_host("My MacBook Pro!"), "my-macbook-pro");
-        assert_eq!(slugify_host("tower"), "tower");
-        assert_eq!(slugify_host("  "), "unknown");
-        assert_eq!(slugify_host("abc--def"), "abc-def");
     }
 
     #[test]

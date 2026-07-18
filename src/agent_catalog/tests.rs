@@ -176,6 +176,29 @@ fn claude_and_opencode_use_their_native_agent_selector() {
 }
 
 #[test]
+fn claude_native_selector_uses_filename_stem_not_frontmatter_display_name() {
+    // The `claude` binary resolves native agents by filename stem; a
+    // frontmatter `name:` that's a free-text persona (with a space, here)
+    // must not leak into the CLI selector or the harness rejects it.
+    let home = TempDir::new().unwrap();
+    write(
+        &home.path().join(".claude/agents/Engineer.md"),
+        "---\nname: Marcus Webb\ndescription: Elite principal engineer\n---\nPrompt",
+    );
+    let catalog = AgentCatalog::discover(&roots(home.path()), &[]).unwrap();
+    assert_eq!(
+        catalog
+            .resolve("Marcus Webb", None, None)
+            .unwrap()
+            .activation()
+            .unwrap(),
+        NativeAgentActivation::NativeSelector {
+            name: "Engineer".to_string()
+        }
+    );
+}
+
+#[test]
 fn claude_discovers_nested_agents_and_requires_frontmatter_name() {
     let home = TempDir::new().unwrap();
     write(
