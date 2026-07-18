@@ -1,5 +1,15 @@
 use super::{TransportImpl, TransportKind};
 
+/// How the owner can observe the completion of a submitted turn.
+///
+/// PTY turns are projected by native harness hooks. RPC turns are daemon-owned,
+/// so delivery returns the exact request-completion signal that must close the
+/// durable Working -> Idle lifecycle edge.
+pub enum DeliveryCompletion {
+    ExternallyObserved,
+    Managed(tokio::sync::oneshot::Receiver<anyhow::Result<()>>),
+}
+
 /// Fully-resolved, transport-agnostic launch intent.
 #[derive(Clone)]
 pub struct LaunchSpec {

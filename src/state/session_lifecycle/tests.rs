@@ -133,6 +133,68 @@ fn pending_inbox_fences_idle_eviction() {
 }
 
 #[test]
+fn completed_turn_consumes_injected_fence_and_rearms_true_idle() {
+    let store = seed();
+    let session = running(&store);
+    store
+        .apply_session_presentation_edge(
+            "pk",
+            session.runtime_generation,
+            1,
+            PresentationState::Headless,
+            10,
+        )
+        .unwrap();
+    store
+        .enqueue_inbox("event", "pk", "human", "room", "hello", 20)
+        .unwrap();
+    store.claim_pending_for_pubkey("pk", 21).unwrap();
+    store
+        .mark_injected_for_echo(&["event".into()], "pk")
+        .unwrap();
+    store
+        .apply_session_turn_started("pk", session.runtime_generation, 22, None)
+        .unwrap();
+
+    assert!(store
+        .apply_session_turn_ended("pk", session.runtime_generation, 30)
+        .unwrap());
+    let completed = running(&store);
+    assert_eq!(completed.work_state, WorkState::Idle);
+    assert_eq!(completed.idle_since, 30);
+    assert_eq!(completed.idle_deadline, 30 + HEADLESS_IDLE_TIMEOUT_SECS);
+    assert!(store.injected_for_pubkey("pk").unwrap().is_empty());
+    assert_eq!(
+        store
+            .list_due_idle_evictions(30 + HEADLESS_IDLE_TIMEOUT_SECS)
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn idle_turn_end_cannot_invent_or_extend_an_idle_deadline() {
+    let store = seed();
+    let session = running(&store);
+    store
+        .apply_session_presentation_edge(
+            "pk",
+            session.runtime_generation,
+            1,
+            PresentationState::Headless,
+            10,
+        )
+        .unwrap();
+    let original = running(&store).idle_deadline;
+
+    assert!(!store
+        .apply_session_turn_ended("pk", session.runtime_generation, 100)
+        .unwrap());
+    assert_eq!(running(&store).idle_deadline, original);
+}
+
+#[test]
 fn initial_epoch_zero_snapshot_is_applied_once() {
     let store = seed();
     let session = running(&store);

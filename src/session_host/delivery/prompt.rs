@@ -1,5 +1,5 @@
 use crate::daemon::server::DaemonState;
-use crate::session_host::transport::{EndpointRef, TransportImpl};
+use crate::session_host::transport::{DeliveryCompletion, EndpointRef, TransportImpl};
 use crate::util::now_secs;
 use anyhow::Result;
 use std::sync::Arc;
@@ -85,12 +85,77 @@ pub(super) async fn inject_planned_messages(
         return Ok(false);
     };
 
-    if let Err(e) = transport.deliver(&endpoint, &prompt.text, true).await {
-        reenqueue_after_failure(state, rec, &prompt.chat_ids, "transport delivery");
-        return Err(e);
-    }
+    let completion = match transport.deliver(&endpoint, &prompt.text, true).await {
+        Ok(completion) => completion,
+        Err(error) => {
+            reenqueue_after_failure(state, rec, &prompt.chat_ids, "transport delivery");
+            return Err(error);
+        }
+    };
     finalize_injection(state, rec, &prompt)?;
+    track_managed_turn(state, rec, completion)?;
     Ok(true)
+}
+
+/// RPC transports own their turn boundary, unlike PTY transports whose native
+/// hooks project it. Start the durable turn only after the inbox rows are
+/// committed as injected, then close it from the exact RPC completion signal.
+/// This makes the resulting idle deadline mean "ten minutes since real work
+/// finished" and atomically releases the injected-message eviction fence.
+fn track_managed_turn(
+    state: &Arc<DaemonState>,
+    rec: &crate::state::Session,
+    completion: DeliveryCompletion,
+) -> Result<()> {
+    let DeliveryCompletion::Managed(completion) = completion else {
+        return Ok(());
+    };
+    let started_at = now_secs();
+    let started = state.with_store(|store| {
+        store.apply_session_turn_started(&rec.pubkey, rec.runtime_generation, started_at, None)
+    })?;
+    if !started {
+        anyhow::bail!(
+            "RPC turn started after session {} generation {} stopped",
+            rec.pubkey,
+            rec.runtime_generation
+        );
+    }
+
+    let state = state.clone();
+    let pubkey = rec.pubkey.clone();
+    let generation = rec.runtime_generation;
+    tokio::spawn(async move {
+        match completion.await {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => tracing::warn!(
+                session = %pubkey,
+                error = %format!("{error:#}"),
+                "managed RPC turn ended with an error"
+            ),
+            Err(_) => tracing::warn!(
+                session = %pubkey,
+                "managed RPC turn completion sender was dropped"
+            ),
+        }
+        match state
+            .with_store(|store| store.apply_session_turn_ended(&pubkey, generation, now_secs()))
+        {
+            Ok(true) => crate::session_host::ring_doorbells(state),
+            Ok(false) => tracing::debug!(
+                session = %pubkey,
+                generation,
+                "managed RPC completion was superseded by a lifecycle edge"
+            ),
+            Err(error) => tracing::error!(
+                session = %pubkey,
+                generation,
+                error = %error,
+                "failed to project managed RPC turn completion"
+            ),
+        }
+    });
+    Ok(())
 }
 
 /// Roll claimed inbox rows back to `pending` after a delivery failure so the

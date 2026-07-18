@@ -22,6 +22,18 @@ pub(super) fn registry() -> &'static Mutex<HashMap<String, AcpChild>> {
     REG.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// Commit registry removal only after the transport has confirmed process
+/// exit. Keeping this as one reducer makes it impossible for a failed kill to
+/// orphan a still-owned child merely because teardown was requested.
+pub(super) fn remove_after_exit_confirmation(
+    endpoint_id: &str,
+    confirmation: std::io::Result<()>,
+) -> std::io::Result<()> {
+    confirmation?;
+    registry().lock().unwrap().remove(endpoint_id);
+    Ok(())
+}
+
 /// Register a freshly-opened child, drain its updates into shared runtime state,
 /// and reap both the registry entry and zombie when it exits.
 pub(super) fn register_child(

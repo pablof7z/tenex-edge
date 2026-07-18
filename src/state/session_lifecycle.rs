@@ -62,19 +62,30 @@ impl Store {
     }
 
     pub fn apply_session_turn_ended(&self, pubkey: &str, generation: u64, at: u64) -> Result<bool> {
-        Ok(self.conn.execute(
+        let transaction = Transaction::new_unchecked(&self.conn, TransactionBehavior::Immediate)?;
+        let changed = transaction.execute(
             "UPDATE sessions
              SET work_state='idle', turn_started_at=0,
                  idle_since=CASE WHEN presentation_state='headless' THEN ?3 ELSE 0 END,
                  idle_deadline=CASE WHEN presentation_state='headless' THEN ?4 ELSE 0 END
-             WHERE pubkey=?1 AND runtime_generation=?2 AND runtime_state='running'",
+             WHERE pubkey=?1 AND runtime_generation=?2 AND runtime_state='running'
+               AND work_state='working'",
             params![
                 pubkey,
                 generation,
                 at,
                 at.saturating_add(HEADLESS_IDLE_TIMEOUT_SECS)
             ],
-        )? == 1)
+        )?;
+        if changed == 1 {
+            transaction.execute(
+                "UPDATE inbox SET state='echo_consumed'
+                 WHERE target_pubkey=?1 AND state='injected'",
+                [pubkey],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(changed == 1)
     }
 
     pub fn cancel_session_idle_deadline_for_delivery(

@@ -30,7 +30,20 @@ pub(in crate::daemon::server) fn drive_turn_ended(
         store.apply_session_turn_ended(&session.pubkey, session.runtime_generation, at)
     })?;
     if !applied {
-        anyhow::bail!("turn_end lost runtime generation for {}", session.pubkey);
+        let still_current_and_idle = state.with_store(|store| {
+            store
+                .get_session(&session.pubkey)
+                .ok()
+                .flatten()
+                .is_some_and(|current| {
+                    current.runtime_generation == session.runtime_generation
+                        && current.is_running()
+                        && !current.is_working()
+                })
+        });
+        if !still_current_and_idle {
+            anyhow::bail!("turn_end lost runtime generation for {}", session.pubkey);
+        }
     }
     Ok(())
 }

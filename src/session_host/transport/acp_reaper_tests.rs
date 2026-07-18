@@ -2,7 +2,9 @@
 
 use super::*;
 use crate::rpc_harness::{Callbacks, Dialect, RpcHandle, SpawnConfig};
-use crate::session_host::transport::{EndpointRef, SessionTransport};
+use crate::session_host::transport::{DeliveryCompletion, EndpointRef, SessionTransport};
+
+use super::registry::remove_after_exit_confirmation;
 
 fn short_lived_cfg() -> SpawnConfig {
     let cwd = std::env::temp_dir();
@@ -27,6 +29,7 @@ fn recording_cfg(capture: &std::path::Path, dialect: Dialect) -> SpawnConfig {
             r#"IFS= read -r line || exit 1
 printf '%s\n' "$line" > "$1"
 printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"stopReason":"end_turn"}}'
+printf '%s\n' '{"jsonrpc":"2.0","method":"turn/completed","params":{}}'
 while IFS= read -r line; do :; done"#
                 .into(),
             "mosaico-acp-fixture".into(),
@@ -51,6 +54,7 @@ async fn retained_rpc_transports_are_live_deliver_and_kill() {
         let (handle, updates) = RpcHandle::spawn(recording_cfg(&capture, dialect))
             .await
             .expect("spawn controlled RPC child");
+        let pid = i32::try_from(handle.pid.expect("controlled child pid")).unwrap();
         let endpoint_id = format!("{}-delivery-test-{}", kind.as_str(), std::process::id());
         register_child(
             &endpoint_id,
@@ -80,7 +84,7 @@ async fn retained_rpc_transports_are_live_deliver_and_kill() {
             .is_err());
         assert!(wrong_transport.kill(&wrong_endpoint).await.is_err());
         assert!(transport.is_live(&endpoint));
-        transport
+        let completion = transport
             .deliver(&endpoint, "positive RPC delivery", true)
             .await
             .unwrap();
@@ -103,9 +107,52 @@ async fn retained_rpc_transports_are_live_deliver_and_kill() {
                 .or_else(|| request["params"]["threadId"].as_str()),
             Some("native-delivery-test")
         );
+        let DeliveryCompletion::Managed(completion) = completion else {
+            panic!("RPC delivery must return daemon-owned turn completion");
+        };
+        tokio::time::timeout(std::time::Duration::from_secs(2), completion)
+            .await
+            .expect("managed RPC turn did not complete")
+            .expect("managed completion sender dropped")
+            .expect("managed RPC turn failed");
         transport.kill(&endpoint).await.unwrap();
         assert!(!transport.is_live(&endpoint));
+        assert!(
+            !crate::liveness::pid_alive(pid),
+            "kill returned before RPC child {pid} exited"
+        );
     }
+}
+
+#[tokio::test]
+async fn failed_exit_confirmation_preserves_registry_ownership() {
+    let scratch = tempfile::tempdir().unwrap();
+    let capture = scratch.path().join("failed-confirmation.json");
+    let (handle, updates) = RpcHandle::spawn(recording_cfg(&capture, Dialect::Acp))
+        .await
+        .expect("spawn controlled RPC child");
+    let endpoint_id = format!("acp-failed-confirmation-{}", std::process::id());
+    register_child(
+        &endpoint_id,
+        handle,
+        "native-failed-confirmation".into(),
+        scratch.path().to_path_buf(),
+        updates,
+    );
+    let endpoint = EndpointRef {
+        kind: TransportKind::Acp,
+        endpoint_id: endpoint_id.clone(),
+    };
+    let transport = RpcTransport::new(TransportKind::Acp);
+
+    let forced = std::io::Error::other("forced kill confirmation failure");
+    assert!(remove_after_exit_confirmation(&endpoint_id, Err(forced)).is_err());
+    assert!(
+        transport.is_live(&endpoint),
+        "failed exit confirmation must retain registry ownership"
+    );
+
+    transport.kill(&endpoint).await.unwrap();
 }
 
 #[tokio::test]

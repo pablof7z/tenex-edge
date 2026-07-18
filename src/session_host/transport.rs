@@ -85,7 +85,12 @@ pub trait SessionTransport: Send + Sync {
     async fn resume(&self, spec: &LaunchSpec, resume: &ResumeSpec) -> Result<SessionEndpoint>;
 
     /// Deliver text; `submit` completes the turn.
-    async fn deliver(&self, ep: &EndpointRef, text: &str, submit: bool) -> Result<()>;
+    async fn deliver(
+        &self,
+        ep: &EndpointRef,
+        text: &str,
+        submit: bool,
+    ) -> Result<DeliveryCompletion>;
 
     fn is_live(&self, ep: &EndpointRef) -> bool;
 
@@ -145,7 +150,12 @@ impl TransportImpl {
         self.0.resume(spec, resume).await
     }
 
-    pub async fn deliver(&self, ep: &EndpointRef, text: &str, submit: bool) -> Result<()> {
+    pub async fn deliver(
+        &self,
+        ep: &EndpointRef,
+        text: &str,
+        submit: bool,
+    ) -> Result<DeliveryCompletion> {
         self.0.deliver(ep, text, submit).await
     }
 

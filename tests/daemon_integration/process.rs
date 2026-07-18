@@ -43,13 +43,10 @@ fn sixteen_concurrent_writers_no_corruption_single_writer() {
                 rt.block_on(async {
                     let mut c = Client::connect_or_spawn().await.expect("connect");
                     for _ in 0..iters {
-                        c.call(
-                            "turn_start",
-                            serde_json::json!({"harness_session": &pubkey}),
-                        )
-                        .await
-                        .expect("turn_start");
-                        c.call("turn_end", serde_json::json!({"harness_session": &pubkey}))
+                        c.call("turn_start", serde_json::json!({"session": &pubkey}))
+                            .await
+                            .expect("turn_start");
+                        c.call("turn_end", serde_json::json!({"session": &pubkey}))
                             .await
                             .expect("turn_end");
                         c.call("who", serde_json::json!({"all": true}))
@@ -353,7 +350,10 @@ fn turn_lifecycle_drives_pubkey_row_resolved_from_harness_locator() {
 
         c.call(
             "turn_start",
-            serde_json::json!({"harness_session": &pubkey}),
+            serde_json::json!({
+                "harness_session": "harness-xyz",
+                "harness": "claude-code"
+            }),
         )
         .await
         .expect("turn_start");
@@ -378,13 +378,44 @@ fn turn_lifecycle_drives_pubkey_row_resolved_from_harness_locator() {
         started.turn_started_at > 0,
         "turn_start must stamp the pubkey row turn start time"
     );
+    store
+        .apply_session_presentation_edge(
+            &pubkey,
+            started.runtime_generation,
+            1,
+            mosaico::state::PresentationState::Headless,
+            started.turn_started_at,
+        )
+        .unwrap();
+    store
+        .enqueue_inbox(
+            "native-turn-injected-event",
+            &pubkey,
+            "operator",
+            "mosaico",
+            "keep working",
+            started.turn_started_at,
+        )
+        .unwrap();
+    store
+        .claim_pending_for_pubkey(&pubkey, started.turn_started_at)
+        .unwrap();
+    store
+        .mark_injected_for_echo(&["native-turn-injected-event".into()], &pubkey)
+        .unwrap();
 
     // turn_end via the harness alias must close the CANONICAL turn.
     rt().block_on(async {
         let mut c = Client::connect_or_spawn().await.expect("connect");
-        c.call("turn_end", serde_json::json!({"harness_session": &pubkey}))
-            .await
-            .expect("turn_end");
+        c.call(
+            "turn_end",
+            serde_json::json!({
+                "harness_session": "harness-xyz",
+                "harness": "claude-code"
+            }),
+        )
+        .await
+        .expect("turn_end");
     });
     let ended = store
         .get_session(&pubkey)
@@ -393,6 +424,12 @@ fn turn_lifecycle_drives_pubkey_row_resolved_from_harness_locator() {
     assert!(
         !ended.is_working(),
         "turn_end must clear working on the pubkey row"
+    );
+    assert!(ended.idle_since >= started.turn_started_at);
+    assert_eq!(ended.idle_deadline, ended.idle_since + 10 * 60);
+    assert!(
+        store.injected_for_pubkey(&pubkey).unwrap().is_empty(),
+        "the completed turn must release injected-message eviction fences"
     );
 
     stop_daemon(&home);

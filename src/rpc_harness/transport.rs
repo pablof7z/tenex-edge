@@ -248,11 +248,22 @@ impl RpcHandle {
         let _ = child.wait().await;
     }
 
-    /// Kill the child process. The reader task observes the resulting stdout EOF
-    /// and fires the exit signal, which the reaper turns into a `wait()`.
+    /// Kill and reap the child process. Returning success is an ownership
+    /// boundary: callers may remove endpoint registry and durable runtime state
+    /// only after this method has observed process exit.
     pub async fn kill(&self) -> std::io::Result<()> {
         let mut child = self.child.lock().await;
-        child.start_kill()?;
+        if child.try_wait()?.is_none() {
+            child.start_kill()?;
+            tokio::time::timeout(std::time::Duration::from_secs(5), child.wait())
+                .await
+                .map_err(|_| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "timed out waiting for RPC harness child to exit after kill",
+                    )
+                })??;
+        }
         self.alive.store(false, Ordering::Relaxed);
         Ok(())
     }

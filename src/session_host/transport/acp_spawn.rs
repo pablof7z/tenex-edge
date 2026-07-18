@@ -7,14 +7,18 @@ use std::sync::{Arc, Mutex};
 
 use crate::rpc_harness::{AcpClient, AppServerClient, RpcHandle};
 
-use super::acp_runtime::{AcpRuntime, SteerState};
+use super::{
+    acp_runtime::{AcpRuntime, SteerState},
+    DeliveryCompletion,
+};
 
 pub(crate) fn spawn_acp_prompt(
     handle: RpcHandle,
     native_id: String,
     text: String,
     runtime: Arc<Mutex<AcpRuntime>>,
-) {
+) -> DeliveryCompletion {
+    let (completion_tx, completion_rx) = tokio::sync::oneshot::channel();
     tokio::spawn(async move {
         let res = AcpClient::new(handle)
             .session_prompt(&native_id, &text)
@@ -24,8 +28,12 @@ pub(crate) fn spawn_acp_prompt(
         }
         if let Err(e) = res {
             tracing::warn!(session = %native_id, "ACP session/prompt failed: {e}");
+            let _ = completion_tx.send(Err(anyhow::anyhow!("ACP session/prompt failed: {e}")));
+        } else {
+            let _ = completion_tx.send(Ok(()));
         }
     });
+    DeliveryCompletion::Managed(completion_rx)
 }
 
 pub(crate) fn spawn_app_server_turn(
@@ -33,7 +41,8 @@ pub(crate) fn spawn_app_server_turn(
     native_id: String,
     text: String,
     runtime: Arc<Mutex<AcpRuntime>>,
-) {
+) -> DeliveryCompletion {
+    let (completion_tx, completion_rx) = tokio::sync::oneshot::channel();
     tokio::spawn(async move {
         let res = AppServerClient::new(handle)
             .turn_start(&native_id, &text)
@@ -43,8 +52,12 @@ pub(crate) fn spawn_app_server_turn(
         }
         if let Err(e) = res {
             tracing::warn!(thread = %native_id, "app-server turn/start failed: {e}");
+            let _ = completion_tx.send(Err(anyhow::anyhow!("app-server turn/start failed: {e}")));
+        } else {
+            let _ = completion_tx.send(Ok(()));
         }
     });
+    DeliveryCompletion::Managed(completion_rx)
 }
 
 pub(crate) fn spawn_app_server_steer(
