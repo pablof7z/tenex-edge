@@ -8,28 +8,38 @@ use super::require_shape;
 pub(super) fn migrate(conn: &mut Connection, _path: &Path) -> Result<()> {
     require_shape(
         conn,
-        8,
+        9,
         "sessions",
-        &["pubkey", "runtime_generation", "alive", "working"],
-        &["runtime_state", "lifecycle_epoch", "turn_count"],
+        &[
+            "pubkey",
+            "runtime_generation",
+            "observed_harness",
+            "claimed_harness",
+            "admitted_bundle",
+            "admitted_transport",
+            "endpoint_provenance",
+            "alive",
+            "working",
+        ],
+        &["runtime_state", "lifecycle_epoch", "turn_count", "harness"],
     )?;
     require_shape(
         conn,
-        8,
+        9,
         "session_channels",
         &["pubkey", "channel_h", "joined_at"],
         &["granted_at"],
     )?;
     require_shape(
         conn,
-        8,
+        9,
         "session_claims",
         &["pubkey", "channel_h", "expires_at"],
         &[],
     )?;
     require_shape(
         conn,
-        8,
+        9,
         "session_locators",
         &[
             "harness",
@@ -40,19 +50,16 @@ pub(super) fn migrate(conn: &mut Connection, _path: &Path) -> Result<()> {
         ],
         &["runtime_generation"],
     )?;
-    let tx = conn.transaction().context("starting schema-8 migration")?;
+    let tx = conn.transaction().context("starting schema-9 migration")?;
     tx.execute_batch(
         r#"
         DROP INDEX IF EXISTS idx_sessions_alive;
         DROP INDEX IF EXISTS idx_session_channels_channel;
         DROP INDEX IF EXISTS idx_session_claims_expires;
-        ALTER TABLE sessions RENAME TO migration_v8_sessions;
-        ALTER TABLE session_channels RENAME TO migration_v8_session_channels;
+        ALTER TABLE sessions RENAME TO migration_v9_sessions;
+        ALTER TABLE session_channels RENAME TO migration_v9_session_channels;
         DROP TABLE session_claims;
 
-        -- Schemas upgraded through v5 deliberately dropped rebuildable relay
-        -- caches. Recreate the one cache used to avoid fabricating standing;
-        -- deployed v8 databases retain their existing rows unchanged.
         CREATE TABLE IF NOT EXISTS relay_channel_members (
             channel_h TEXT NOT NULL, pubkey TEXT NOT NULL,
             role TEXT NOT NULL DEFAULT 'member', updated_at INTEGER NOT NULL,
@@ -63,7 +70,13 @@ pub(super) fn migrate(conn: &mut Connection, _path: &Path) -> Result<()> {
             pubkey TEXT PRIMARY KEY, runtime_generation INTEGER NOT NULL,
             agent_slug TEXT NOT NULL DEFAULT '', channel_h TEXT NOT NULL DEFAULT '',
             work_root TEXT NOT NULL DEFAULT '', readiness_parent TEXT NOT NULL DEFAULT '',
-            harness TEXT NOT NULL DEFAULT '', child_pid INTEGER, transcript_path TEXT,
+            observed_harness TEXT NOT NULL DEFAULT '', claimed_harness TEXT NOT NULL DEFAULT '',
+            admitted_bundle TEXT NOT NULL DEFAULT '',
+            admitted_transport TEXT NOT NULL DEFAULT ''
+                CHECK (admitted_transport IN ('', 'pty', 'acp', 'app-server')),
+            endpoint_provenance TEXT NOT NULL DEFAULT ''
+                CHECK (endpoint_provenance IN ('', 'launch', 'hook', 'migration')),
+            child_pid INTEGER, transcript_path TEXT,
             runtime_state TEXT NOT NULL DEFAULT 'running'
                 CHECK (runtime_state IN ('running', 'stopping', 'stopped')),
             presentation_state TEXT NOT NULL DEFAULT 'unavailable'
@@ -93,8 +106,10 @@ pub(super) fn migrate(conn: &mut Connection, _path: &Path) -> Result<()> {
 
         INSERT INTO sessions
         SELECT old.pubkey, old.runtime_generation, old.agent_slug, old.channel_h,
-               old.work_root, old.readiness_parent, old.harness, old.child_pid,
-               old.transcript_path,
+               old.work_root, old.readiness_parent,
+               old.observed_harness, old.claimed_harness, old.admitted_bundle,
+               old.admitted_transport, old.endpoint_provenance,
+               old.child_pid, old.transcript_path,
                CASE old.alive WHEN 1 THEN 'running' ELSE 'stopped' END,
                'unavailable',
                CASE old.working WHEN 1 THEN 'working' ELSE 'idle' END,
@@ -114,7 +129,7 @@ pub(super) fn migrate(conn: &mut Connection, _path: &Path) -> Result<()> {
                    ) THEN 1 ELSE 0 END,
                old.created_at, old.last_seen, old.turn_started_at, old.seen_cursor,
                old.title, old.explicit_chat_published_at
-          FROM migration_v8_sessions old;
+          FROM migration_v9_sessions old;
 
         ALTER TABLE session_locators
             ADD COLUMN runtime_generation INTEGER NOT NULL DEFAULT 0;
@@ -122,17 +137,17 @@ pub(super) fn migrate(conn: &mut Connection, _path: &Path) -> Result<()> {
            SET runtime_generation=COALESCE(
                (SELECT runtime_generation FROM sessions
                  WHERE sessions.pubkey=session_locators.pubkey), 0)
-         WHERE locator_kind IN ('pty', 'acp', 'pid');
+         WHERE locator_kind IN ('pty', 'acp', 'app_server', 'pid');
         DELETE FROM session_locators
-         WHERE locator_kind IN ('pty', 'acp', 'pid')
+         WHERE locator_kind IN ('pty', 'acp', 'app_server', 'pid')
            AND rowid NOT IN (
                SELECT MAX(rowid) FROM session_locators
-                WHERE locator_kind IN ('pty', 'acp', 'pid')
-                GROUP BY pubkey, locator_kind
+                WHERE locator_kind IN ('pty', 'acp', 'app_server', 'pid')
+                GROUP BY pubkey, harness, locator_kind
            );
         CREATE UNIQUE INDEX idx_session_locators_runtime_endpoint
-            ON session_locators(pubkey, locator_kind)
-            WHERE locator_kind IN ('pty', 'acp', 'pid');
+            ON session_locators(pubkey, harness, locator_kind)
+            WHERE locator_kind IN ('pty', 'acp', 'app_server', 'pid');
 
         CREATE TABLE session_channels (
             pubkey TEXT NOT NULL, channel_h TEXT NOT NULL, granted_at INTEGER NOT NULL,
@@ -140,7 +155,7 @@ pub(super) fn migrate(conn: &mut Connection, _path: &Path) -> Result<()> {
         );
         CREATE INDEX idx_session_channels_channel ON session_channels(channel_h, pubkey);
         INSERT OR IGNORE INTO session_channels
-        SELECT pubkey, channel_h, joined_at FROM migration_v8_session_channels;
+        SELECT pubkey, channel_h, joined_at FROM migration_v9_session_channels;
         INSERT OR IGNORE INTO session_channels
         SELECT pubkey, channel_h, created_at FROM sessions WHERE channel_h<>'';
 
@@ -168,10 +183,10 @@ pub(super) fn migrate(conn: &mut Connection, _path: &Path) -> Result<()> {
           LEFT JOIN relay_channel_members member
             ON member.pubkey=route.pubkey AND member.channel_h=route.channel_h;
 
-        DROP TABLE migration_v8_sessions;
-        DROP TABLE migration_v8_session_channels;
-        PRAGMA user_version = 9;
+        DROP TABLE migration_v9_sessions;
+        DROP TABLE migration_v9_session_channels;
+        PRAGMA user_version = 10;
         "#,
     )?;
-    tx.commit().context("committing schema-8 migration")
+    tx.commit().context("committing schema-9 migration")
 }

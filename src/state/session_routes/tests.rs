@@ -1,16 +1,26 @@
 use super::*;
 
 fn running(store: &Store) -> (u64, Session) {
+    let registration = RegisterSession {
+        pubkey: "pk".into(),
+        observed_harness: "grok".into(),
+        agent_slug: "grok".into(),
+        channel_h: "root".into(),
+        child_pid: None,
+        transcript_path: None,
+        now: 1,
+    };
     let generation = store
-        .reserve_session(&RegisterSession {
-            pubkey: "pk".into(),
-            harness: "grok".into(),
-            agent_slug: "grok".into(),
-            channel_h: "root".into(),
-            child_pid: None,
-            transcript_path: None,
-            now: 1,
-        })
+        .reserve_session_with_facts(
+            &registration,
+            &AdmittedRuntimeFacts {
+                observed_harness: "grok".into(),
+                claimed_harness: String::new(),
+                bundle: "grok-pty".into(),
+                transport: "pty".into(),
+                endpoint_provenance: "launch".into(),
+            },
+        )
         .unwrap();
     (generation, store.get_session("pk").unwrap().unwrap())
 }

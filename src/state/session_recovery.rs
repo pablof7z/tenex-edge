@@ -85,7 +85,7 @@ mod tests {
     fn registration(at: u64) -> RegisterSession {
         RegisterSession {
             pubkey: "pk".into(),
-            harness: "codex".into(),
+            observed_harness: "codex".into(),
             agent_slug: "codex".into(),
             channel_h: "root".into(),
             child_pid: None,
@@ -94,10 +94,23 @@ mod tests {
         }
     }
 
+    fn reserve(store: &Store, at: u64) -> Result<u64> {
+        store.reserve_session_with_facts(
+            &registration(at),
+            &AdmittedRuntimeFacts {
+                observed_harness: "codex".into(),
+                claimed_harness: String::new(),
+                bundle: "codex-pty".into(),
+                transport: "pty".into(),
+                endpoint_provenance: "launch".into(),
+            },
+        )
+    }
+
     #[test]
     fn revocation_fence_survives_exit_before_finalize_and_blocks_respawn() {
         let store = Store::open_memory().unwrap();
-        let generation = store.reserve_session(&registration(1)).unwrap();
+        let generation = reserve(&store, 1).unwrap();
         store.bind_session_signer("pk", "salt").unwrap();
         store
             .put_session_locator("codex", LOCATOR_PTY, "pty-1", "pk", 2)
@@ -112,7 +125,7 @@ mod tests {
         assert!(store
             .mark_runtime_stopped_if_generation("pk", generation, StopReason::Crash, 3)
             .unwrap());
-        assert!(store.reserve_session(&registration(4)).is_err());
+        assert!(reserve(&store, 4).is_err());
         assert!(store
             .runtime_locator_for_session("pk", generation, LOCATOR_PTY)
             .unwrap()
@@ -131,11 +144,11 @@ mod tests {
     #[test]
     fn stale_generation_cannot_revoke_a_new_current_runtime() {
         let store = Store::open_memory().unwrap();
-        let first = store.reserve_session(&registration(1)).unwrap();
+        let first = reserve(&store, 1).unwrap();
         store
             .mark_runtime_stopped_if_generation("pk", first, StopReason::Crash, 2)
             .unwrap();
-        let second = store.reserve_session(&registration(3)).unwrap();
+        let second = reserve(&store, 3).unwrap();
 
         assert!(!store
             .revoke_session_recovery_if_generation("pk", first)
@@ -152,7 +165,7 @@ mod tests {
     #[test]
     fn finalize_requires_a_durable_revocation_fence() {
         let store = Store::open_memory().unwrap();
-        let generation = store.reserve_session(&registration(1)).unwrap();
+        let generation = reserve(&store, 1).unwrap();
 
         assert!(!store
             .finalize_session_recovery_revocation("pk", generation, 2)

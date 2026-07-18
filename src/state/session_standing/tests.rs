@@ -1,19 +1,32 @@
 use super::*;
 
+fn reserve(store: &Store, at: u64) {
+    store
+        .reserve_session_with_facts(
+            &RegisterSession {
+                pubkey: "pk".into(),
+                observed_harness: "grok".into(),
+                agent_slug: "grok".into(),
+                channel_h: "room".into(),
+                child_pid: None,
+                transcript_path: None,
+                now: at,
+            },
+            &AdmittedRuntimeFacts {
+                observed_harness: "grok".into(),
+                claimed_harness: String::new(),
+                bundle: "grok-pty".into(),
+                transport: "pty".into(),
+                endpoint_provenance: "launch".into(),
+            },
+        )
+        .unwrap();
+}
+
 #[test]
 fn standing_epoch_fences_expiry_after_reactivation() {
     let store = Store::open_memory().unwrap();
-    store
-        .reserve_session(&RegisterSession {
-            pubkey: "pk".into(),
-            harness: "grok".into(),
-            agent_slug: "grok".into(),
-            channel_h: "room".into(),
-            child_pid: None,
-            transcript_path: None,
-            now: 1,
-        })
-        .unwrap();
+    reserve(&store, 1);
     let running = store.get_session("pk").unwrap().unwrap();
     store
         .mark_session_standing_member_if_running("pk", "room", running.lifecycle_epoch, 2)
@@ -28,17 +41,7 @@ fn standing_epoch_fences_expiry_after_reactivation() {
     assert_eq!(store.list_due_retained_standing(3_609).unwrap(), []);
     assert_eq!(store.list_due_retained_standing(3_610).unwrap().len(), 1);
 
-    store
-        .reserve_session(&RegisterSession {
-            pubkey: "pk".into(),
-            harness: "grok".into(),
-            agent_slug: "grok".into(),
-            channel_h: "room".into(),
-            child_pid: None,
-            transcript_path: None,
-            now: 90,
-        })
-        .unwrap();
+    reserve(&store, 90);
     let resumed = store.get_session("pk").unwrap().unwrap();
     let member = store
         .mark_session_standing_member_if_running("pk", "room", resumed.lifecycle_epoch, 90)

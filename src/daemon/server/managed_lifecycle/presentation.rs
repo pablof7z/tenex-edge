@@ -52,6 +52,7 @@ async fn reconcile_pty(state: &Arc<DaemonState>, session: &Session, pty_id: &str
     match crate::pty::presentation_snapshot(pty_id) {
         Ok(snapshot) => {
             state
+                .runtime
                 .pty_probe_failures
                 .lock()
                 .unwrap()
@@ -81,7 +82,7 @@ async fn handle_live_probe_failure(
     error: crate::pty::PresentationUnavailable,
 ) {
     let failures = {
-        let mut probes = state.pty_probe_failures.lock().unwrap();
+        let mut probes = state.runtime.pty_probe_failures.lock().unwrap();
         let count = probes
             .entry((session.pubkey.clone(), session.runtime_generation))
             .or_insert(0);
@@ -104,6 +105,7 @@ async fn handle_live_probe_failure(
                 )
             });
             state
+                .runtime
                 .pty_probe_failures
                 .lock()
                 .unwrap()

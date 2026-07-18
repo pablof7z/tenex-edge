@@ -49,7 +49,9 @@ async fn wait_for_registered_session(
             .ok()
             .flatten()
         {
-            return Some(session);
+            if session.is_running() {
+                return Some(session);
+            }
         }
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }

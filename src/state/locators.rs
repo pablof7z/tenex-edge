@@ -7,6 +7,7 @@ use rusqlite::{Transaction, TransactionBehavior};
 pub(crate) const LOCATOR_NATIVE_RESUME: &str = "native_resume";
 pub(crate) const LOCATOR_PTY: &str = "pty";
 pub(crate) const LOCATOR_ACP: &str = "acp";
+pub(crate) const LOCATOR_APP_SERVER: &str = "app_server";
 pub(crate) const LOCATOR_PID: &str = "pid";
 
 const COLS: &str = "harness, locator_kind, locator_value, pubkey, runtime_generation, created_at";
@@ -51,8 +52,9 @@ impl Store {
             )?;
         } else {
             tx.execute(
-                "DELETE FROM session_locators WHERE pubkey=?1 AND locator_kind=?2",
-                params![pubkey, locator_kind],
+                "DELETE FROM session_locators
+                 WHERE pubkey=?1 AND harness=?2 AND locator_kind=?3",
+                params![pubkey, harness, locator_kind],
             )?;
         }
         let locator_generation = if locator_kind == LOCATOR_NATIVE_RESUME {
@@ -231,7 +233,8 @@ impl Store {
             .query_row(
                 &format!(
                     "SELECT {COLS} FROM session_locators
-                     WHERE pubkey=?1 AND runtime_generation=?2 AND locator_kind=?3"
+                     WHERE pubkey=?1 AND runtime_generation=?2 AND locator_kind=?3
+                       AND harness=(SELECT observed_harness FROM sessions WHERE pubkey=?1)"
                 ),
                 params![pubkey, runtime_generation, locator_kind],
                 row_to_locator,
@@ -239,15 +242,40 @@ impl Store {
             .optional()?)
     }
 
-    pub fn native_resume_locator(&self, pubkey: &str) -> Result<Option<SessionLocator>> {
+    pub fn locator_for_session(
+        &self,
+        pubkey: &str,
+        harness: &str,
+        locator_kind: &str,
+    ) -> Result<Option<SessionLocator>> {
+        validate_locator_kind(locator_kind)?;
         Ok(self
             .conn
             .query_row(
                 &format!(
                     "SELECT {COLS} FROM session_locators
-                 WHERE pubkey=?1 AND locator_kind=?2"
+                     WHERE pubkey=?1 AND harness=?2 AND locator_kind=?3
+                     ORDER BY created_at DESC LIMIT 1"
                 ),
-                params![pubkey, LOCATOR_NATIVE_RESUME],
+                params![pubkey, harness, locator_kind],
+                row_to_locator,
+            )
+            .optional()?)
+    }
+
+    pub fn native_resume_locator(
+        &self,
+        pubkey: &str,
+        harness: &str,
+    ) -> Result<Option<SessionLocator>> {
+        Ok(self
+            .conn
+            .query_row(
+                &format!(
+                    "SELECT {COLS} FROM session_locators
+                 WHERE pubkey=?1 AND harness=?2 AND locator_kind=?3"
+                ),
+                params![pubkey, harness, LOCATOR_NATIVE_RESUME],
                 row_to_locator,
             )
             .optional()?)
@@ -280,15 +308,33 @@ impl Store {
         validate_locator_kind(locator_kind)?;
         Ok(self.conn.execute(
             "DELETE FROM session_locators
-             WHERE pubkey=?1 AND locator_kind=?2 AND runtime_generation=?3",
+             WHERE pubkey=?1 AND locator_kind=?2 AND runtime_generation=?3
+               AND harness=(SELECT observed_harness FROM sessions WHERE pubkey=?1)",
             params![pubkey, locator_kind, runtime_generation],
         )? > 0)
+    }
+
+    pub fn clear_session_locator_kind(
+        &self,
+        pubkey: &str,
+        harness: &str,
+        locator_kind: &str,
+    ) -> Result<()> {
+        validate_locator_kind(locator_kind)?;
+        self.conn.execute(
+            "DELETE FROM session_locators
+             WHERE pubkey=?1 AND harness=?2 AND locator_kind=?3",
+            params![pubkey, harness, locator_kind],
+        )?;
+        Ok(())
     }
 }
 
 fn validate_locator_kind(locator_kind: &str) -> Result<()> {
     match locator_kind {
-        LOCATOR_NATIVE_RESUME | LOCATOR_PTY | LOCATOR_ACP | LOCATOR_PID => Ok(()),
+        LOCATOR_NATIVE_RESUME | LOCATOR_PTY | LOCATOR_ACP | LOCATOR_APP_SERVER | LOCATOR_PID => {
+            Ok(())
+        }
         _ => anyhow::bail!("unknown session locator kind {locator_kind:?}"),
     }
 }
@@ -300,7 +346,7 @@ mod tests {
     fn registration(pubkey: &str, at: u64) -> RegisterSession {
         RegisterSession {
             pubkey: pubkey.into(),
-            harness: "codex".into(),
+            observed_harness: "codex".into(),
             agent_slug: "codex".into(),
             channel_h: "root".into(),
             child_pid: None,
@@ -312,7 +358,9 @@ mod tests {
     #[test]
     fn native_resume_is_stored_once_per_pubkey() {
         let store = Store::open_memory().unwrap();
-        store.reserve_session(&registration("pk", 1)).unwrap();
+        store
+            .reserve_hook_session_for_test(&registration("pk", 1))
+            .unwrap();
         store
             .put_session_locator("codex", LOCATOR_NATIVE_RESUME, "old", "pk", 2)
             .unwrap();
@@ -320,8 +368,12 @@ mod tests {
             .put_session_locator("codex", LOCATOR_NATIVE_RESUME, "new", "pk", 3)
             .unwrap();
 
-        let locator = store.native_resume_locator("pk").unwrap().unwrap();
+        let locator = store.native_resume_locator("pk", "codex").unwrap().unwrap();
         assert_eq!(locator.locator_value, "new");
+        assert!(store
+            .native_resume_locator("pk", "claude-code")
+            .unwrap()
+            .is_none());
         assert!(store
             .resolve_pubkey_by_locator("codex", LOCATOR_NATIVE_RESUME, "old")
             .unwrap()
@@ -331,7 +383,9 @@ mod tests {
     #[test]
     fn locator_vocabulary_is_closed() {
         let store = Store::open_memory().unwrap();
-        store.reserve_session(&registration("pk", 1)).unwrap();
+        store
+            .reserve_hook_session_for_test(&registration("pk", 1))
+            .unwrap();
         let error = store
             .put_session_locator("codex", "harness_session", "old", "pk", 2)
             .unwrap_err();
@@ -341,14 +395,18 @@ mod tests {
     #[test]
     fn runtime_endpoint_replacement_fences_stale_generation_callbacks() {
         let store = Store::open_memory().unwrap();
-        let first = store.reserve_session(&registration("pk", 1)).unwrap();
+        let first = store
+            .reserve_hook_session_for_test(&registration("pk", 1))
+            .unwrap();
         store
             .put_session_locator("codex", LOCATOR_PTY, "pty-old", "pk", 2)
             .unwrap();
         store
             .mark_runtime_stopped_if_generation("pk", first, StopReason::Crash, 3)
             .unwrap();
-        let second = store.reserve_session(&registration("pk", 4)).unwrap();
+        let second = store
+            .reserve_hook_session_for_test(&registration("pk", 4))
+            .unwrap();
         store
             .put_session_locator("codex", LOCATOR_PTY, "pty-new", "pk", 5)
             .unwrap();
@@ -367,6 +425,37 @@ mod tests {
                 .unwrap()
                 .runtime_generation,
             second
+        );
+    }
+
+    #[test]
+    fn session_locator_lookup_requires_the_observed_harness_dimension() {
+        let store = Store::open_memory().unwrap();
+        store
+            .reserve_hook_session_for_test(&registration("pk", 1))
+            .unwrap();
+        store
+            .put_session_locator("claude-code", LOCATOR_PTY, "foreign", "pk", 3)
+            .unwrap();
+        store
+            .put_session_locator("codex", LOCATOR_PTY, "owned", "pk", 2)
+            .unwrap();
+
+        assert_eq!(
+            store
+                .locator_for_session("pk", "codex", LOCATOR_PTY)
+                .unwrap()
+                .unwrap()
+                .locator_value,
+            "owned"
+        );
+        assert_eq!(
+            store
+                .locator_for_session("pk", "claude-code", LOCATOR_PTY)
+                .unwrap()
+                .unwrap()
+                .locator_value,
+            "foreign"
         );
     }
 }

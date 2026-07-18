@@ -109,7 +109,7 @@ async fn execute_claimed(
 }
 
 async fn add_agent(state: &Arc<DaemonState>, channel_h: &str, spec: &str) -> Result<String> {
-    let work_root = state.with_store(|s| work_root_for(s, channel_h));
+    let work_root = state.with_store(|s| work_root_for(s, channel_h))?;
     let out = super::invite_rpc::invite_agent(state, channel_h, &work_root, spec, None).await?;
     let who = out
         .get("online_agent")
@@ -158,7 +158,7 @@ async fn archive_named_channel(
     channel_ref: &str,
 ) -> Result<String> {
     let target = state.with_store(|s| {
-        let root = root_channel(s, command_channel);
+        let root = root_channel(s, command_channel)?;
         match resolve_channel_ref(s, &root, channel_ref) {
             ChannelResolution::Unique(h) => Ok(h),
             ChannelResolution::Ambiguous(refs) => {
@@ -222,44 +222,12 @@ async fn stop_local_process(
     state: &Arc<DaemonState>,
     rec: &crate::state::Session,
 ) -> Result<String> {
-    if let Some(pty_id) = pty_session_for_session(state, rec) {
-        crate::pty::kill(&pty_id).with_context(|| format!("killing PTY session {pty_id}"))?;
-        state.with_store(|s| {
-            s.clear_runtime_locator_if_generation(
-                &rec.pubkey,
-                crate::state::LOCATOR_PTY,
-                rec.runtime_generation,
-            )
-            .ok()
-        });
-        return Ok(format!(" pty={pty_id}"));
-    }
-    if let Some(pid) = rec.child_pid {
-        nix::sys::signal::kill(
-            nix::unistd::Pid::from_raw(pid),
-            Some(nix::sys::signal::Signal::SIGTERM),
-        )
-        .with_context(|| format!("sending SIGTERM to pid {pid}"))?;
-        return Ok(format!(" pid={pid}"));
-    }
-    Ok(String::new())
-}
-
-fn pty_session_for_session(
-    state: &Arc<DaemonState>,
-    session: &crate::state::Session,
-) -> Option<String> {
-    state
-        .with_store(|store| {
-            store.runtime_locator_for_session(
-                &session.pubkey,
-                session.runtime_generation,
-                crate::state::LOCATOR_PTY,
-            )
-        })
-        .ok()
-        .flatten()
-        .map(|locator| locator.locator_value)
+    let note = super::session_end::stop_local_process(state, rec).await?;
+    Ok(if note.is_empty() {
+        String::new()
+    } else {
+        format!(" {note}")
+    })
 }
 
 fn channel_label(state: &Arc<DaemonState>, channel_h: &str) -> String {

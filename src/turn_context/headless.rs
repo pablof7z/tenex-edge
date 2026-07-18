@@ -5,12 +5,16 @@ use super::HookContextStates;
 use crate::state::Session;
 
 pub(super) fn push_mode_notice(
+    store: &std::sync::Mutex<crate::state::Store>,
     states: &HookContextStates,
     rec: &Session,
     announce_initial: bool,
     warnings: &mut Vec<String>,
 ) {
-    let headless = crate::session_host::session_is_headless(rec);
+    let headless = {
+        let store = store.lock().expect("store mutex poisoned");
+        crate::session_host::session_is_headless(&store, rec)
+    };
     let changed = states
         .lock()
         .expect("hook-context mutex poisoned")

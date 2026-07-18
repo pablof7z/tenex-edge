@@ -6,16 +6,26 @@ fn running(store: &Store) -> Session {
 
 fn seed() -> Store {
     let store = Store::open_memory().unwrap();
+    let registration = RegisterSession {
+        pubkey: "pk".into(),
+        observed_harness: "grok".into(),
+        agent_slug: "grok".into(),
+        channel_h: "room".into(),
+        child_pid: Some(42),
+        transcript_path: None,
+        now: 1,
+    };
     store
-        .reserve_session(&RegisterSession {
-            pubkey: "pk".into(),
-            harness: "grok".into(),
-            agent_slug: "grok".into(),
-            channel_h: "room".into(),
-            child_pid: Some(42),
-            transcript_path: None,
-            now: 1,
-        })
+        .reserve_session_with_facts(
+            &registration,
+            &AdmittedRuntimeFacts {
+                observed_harness: "grok".into(),
+                claimed_harness: String::new(),
+                bundle: "grok-pty".into(),
+                transport: "pty".into(),
+                endpoint_provenance: "launch".into(),
+            },
+        )
         .unwrap();
     store
 }

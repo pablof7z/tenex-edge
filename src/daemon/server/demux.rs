@@ -41,7 +41,7 @@ pub(in crate::daemon::server) fn warm_profiles(state: &Arc<DaemonState>, pubkeys
         }
         // Release the in-flight claims; a fetch that failed (offline relay) is thus
         // retried the next time the pubkey is observed rather than being wedged.
-        let mut guard = st.warming.lock().unwrap();
+        let mut guard = st.dedup.warming_profiles.lock().unwrap();
         for pk in &to_fetch {
             guard.remove(pk);
         }
@@ -70,7 +70,7 @@ fn claim_pubkeys_to_warm(state: &Arc<DaemonState>, pubkeys: Vec<String>) -> Vec<
     });
     // Collapse concurrent duplicates: claim each pubkey; a fetch already in flight
     // for it keeps ownership until it completes.
-    let mut guard = state.warming.lock().unwrap();
+    let mut guard = state.dedup.warming_profiles.lock().unwrap();
     missing
         .into_iter()
         .filter(|pk| guard.insert(pk.clone()))
@@ -204,7 +204,7 @@ fn derive_and_emit_tail_events(
                 // "joined" signal for that channel.
                 let key = (s.agent.pubkey.clone(), channel.clone());
                 let is_new = {
-                    let mut map = state.peer_sessions.lock().unwrap();
+                    let mut map = state.dedup.peer_sessions.lock().unwrap();
                     if !map.contains_key(&key) {
                         map.insert(
                             key.clone(),
@@ -233,7 +233,7 @@ fn derive_and_emit_tail_events(
 
                 let cur = (s.title.clone(), s.state);
                 let should_emit = {
-                    let mut map = state.last_status.lock().unwrap();
+                    let mut map = state.dedup.last_status.lock().unwrap();
                     if map.get(&key) != Some(&cur) {
                         map.insert(key, cur);
                         true
@@ -254,7 +254,7 @@ fn derive_and_emit_tail_events(
         }
         DomainEvent::Profile(pf) => {
             let is_new = {
-                let mut set = state.seen_profiles.lock().unwrap();
+                let mut set = state.dedup.profiles.lock().unwrap();
                 set.insert(pf.agent.pubkey.clone())
             };
             if is_new {

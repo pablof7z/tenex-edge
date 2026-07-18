@@ -1,5 +1,9 @@
 use super::*;
 
+#[cfg(test)]
+#[path = "session_end/tests.rs"]
+mod tests;
+
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum SessionEndCause {
@@ -9,7 +13,6 @@ enum SessionEndCause {
 
 #[derive(serde::Deserialize)]
 struct SessionEndParams {
-    session: String,
     cause: SessionEndCause,
 }
 
@@ -17,16 +20,13 @@ pub(in crate::daemon::server) async fn rpc_session_end(
     state: &Arc<DaemonState>,
     params: &serde_json::Value,
 ) -> Result<serde_json::Value> {
-    let params: SessionEndParams =
+    let parsed: SessionEndParams =
         serde_json::from_value(params.clone()).context("parsing session_end params")?;
-    let anchor = CallerAnchor {
-        explicit: Some(&params.session),
-        ..CallerAnchor::default()
-    };
+    let anchor = CallerAnchor::from_params(params);
     let Some(session) = resolve_session_inner(state, &anchor, ResolveScope::Strict).ok() else {
         return Ok(serde_json::json!({"ended": false}));
     };
-    if matches!(params.cause, SessionEndCause::HarnessHook)
+    if matches!(parsed.cause, SessionEndCause::HarnessHook)
         && endpoint_locator(state, &session)
             .is_some_and(|locator| locator.locator_kind == crate::state::LOCATOR_PTY)
     {
@@ -257,7 +257,7 @@ async fn revoke_operator_session(
     match signing_keys {
         Ok(keys) => {
             crate::status_seam::drive(
-                &state.status,
+                &state.reconcilers.status,
                 state.fabric_provider(),
                 &keys,
                 &state.store,
@@ -281,52 +281,44 @@ async fn revoke_operator_session(
     failures
 }
 
-pub(super) async fn stop_local_process(
+pub(in crate::daemon::server) async fn stop_local_process(
     state: &Arc<DaemonState>,
     session: &crate::state::Session,
 ) -> Result<String> {
     if session.runtime_state == crate::state::RuntimeState::Stopped {
         return Ok("runtime already stopped".into());
     }
-    if let Some(locator) = endpoint_locator(state, session) {
-        match locator.locator_kind.as_str() {
-            crate::state::LOCATOR_PTY => {
-                if crate::pty::is_live(&locator.locator_value) {
-                    crate::pty::kill(&locator.locator_value).with_context(|| {
-                        format!("killing PTY endpoint {}", locator.locator_value)
-                    })?;
-                    wait_for_process_exit(|| !crate::pty::is_live(&locator.locator_value)).await?;
-                }
+    match state
+        .with_store(|store| crate::session_host::transport::hosted_endpoint_for(store, session))?
+    {
+        crate::session_host::transport::HostedEndpoint::Resolved {
+            transport,
+            endpoint,
+        } => {
+            if transport.is_live(&endpoint) {
+                transport
+                    .kill(&endpoint)
+                    .await
+                    .with_context(|| format!("killing {} endpoint", endpoint.kind.as_str()))?;
+                wait_for_process_exit(|| !transport.is_live(&endpoint)).await?;
             }
-            crate::state::LOCATOR_ACP => {
-                use crate::session_host::transport::{EndpointRef, SessionTransport};
-                let endpoint = EndpointRef {
-                    kind: crate::session_host::transport::TransportKind::Acp,
-                    endpoint_id: locator.locator_value.clone(),
-                };
-                if crate::session_host::transport::AcpTransport.is_live(&endpoint) {
-                    crate::session_host::transport::AcpTransport
-                        .kill(&endpoint)
-                        .await?;
-                    wait_for_process_exit(|| {
-                        !crate::session_host::transport::AcpTransport.is_live(&EndpointRef {
-                            kind: crate::session_host::transport::TransportKind::Acp,
-                            endpoint_id: locator.locator_value.clone(),
-                        })
-                    })
-                    .await?;
-                }
-            }
-            _ => unreachable!("endpoint_locator returned a non-runtime locator"),
+            state.with_store(|store| {
+                store.clear_runtime_locator_if_generation(
+                    &session.pubkey,
+                    endpoint.kind.locator_kind(),
+                    session.runtime_generation,
+                )
+            })?;
+            return Ok(format!("endpoint={}", endpoint.endpoint_id));
         }
-        state.with_store(|store| {
-            store.clear_runtime_locator_if_generation(
-                &session.pubkey,
-                &locator.locator_kind,
-                session.runtime_generation,
-            )
-        })?;
-        return Ok(format!("endpoint={}", locator.locator_value));
+        crate::session_host::transport::HostedEndpoint::Unavailable { kind } => {
+            anyhow::bail!(
+                "session {} was admitted on {} but its endpoint locator is unavailable; refusing PID fallback",
+                session.pubkey,
+                kind.as_str()
+            );
+        }
+        crate::session_host::transport::HostedEndpoint::Unhosted => {}
     }
     if let Some(pid) = session.child_pid {
         if !super::engine_lifecycle::pid_alive(pid) {
@@ -379,89 +371,4 @@ fn endpoint_locator(
                 })
         })
         .ok()?
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::state::RegisterSession;
-
-    fn registration(pubkey: &str, at: u64) -> RegisterSession {
-        RegisterSession {
-            pubkey: pubkey.into(),
-            harness: "codex".into(),
-            agent_slug: "codex".into(),
-            channel_h: "root".into(),
-            child_pid: None,
-            transcript_path: None,
-            now: at,
-        }
-    }
-
-    #[tokio::test]
-    async fn forget_fences_generation_reserved_after_selected_runtime_exits() {
-        let state = DaemonState::new_for_test().await;
-        let pubkey = "pk-forget-race";
-        let first = state
-            .with_store(|store| store.reserve_session(&registration(pubkey, 1)))
-            .unwrap();
-        let selected = state
-            .with_store(|store| store.get_session(pubkey))
-            .unwrap()
-            .unwrap();
-
-        state
-            .with_store(|store| {
-                store.mark_runtime_stopped_if_generation(
-                    pubkey,
-                    first,
-                    crate::state::StopReason::Crash,
-                    2,
-                )
-            })
-            .unwrap();
-        let second = state
-            .with_store(|store| store.reserve_session(&registration(pubkey, 3)))
-            .unwrap();
-
-        let fenced = revoke_current_generation(&state, &selected.pubkey).unwrap();
-        assert_eq!(fenced.runtime_generation, second);
-        assert_eq!(fenced.recovery_state, crate::state::RecoveryState::Revoked);
-        assert!(state
-            .with_store(|store| store.reserve_session(&registration(pubkey, 4)))
-            .is_err());
-    }
-
-    #[tokio::test]
-    async fn stopped_runtime_needs_no_stale_pid_signal_before_finalize() {
-        let state = DaemonState::new_for_test().await;
-        let pubkey = "pk-stopped-forget";
-        let generation = state
-            .with_store(|store| {
-                store.reserve_session(&RegisterSession {
-                    child_pid: Some(i32::MAX),
-                    ..registration(pubkey, 1)
-                })
-            })
-            .unwrap();
-        state
-            .with_store(|store| {
-                store.mark_runtime_stopped_if_generation(
-                    pubkey,
-                    generation,
-                    crate::state::StopReason::Crash,
-                    2,
-                )
-            })
-            .unwrap();
-        let stopped = state
-            .with_store(|store| store.get_session(pubkey))
-            .unwrap()
-            .unwrap();
-
-        assert_eq!(
-            stop_local_process(&state, &stopped).await.unwrap(),
-            "runtime already stopped"
-        );
-    }
 }

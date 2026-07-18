@@ -3,13 +3,12 @@ use super::super::*;
 use std::sync::Arc;
 
 mod claim;
-mod headless;
 pub(super) mod liveness;
+mod notice;
 mod target;
 
 use claim::RecoveryOutcome;
 pub(super) use claim::{dispatch_all, drive_retries};
-use headless::spawn_headless_mention;
 use liveness::has_alive_session_for;
 
 /// Spawn a local agent that was p-tagged in a kind:9 message but had no running
@@ -53,15 +52,31 @@ pub(super) async fn handle(
     let agent_slug = target.agent_slug;
     let target_session = target.session;
 
-    let work_root = state.with_store(|s| work_root_for(s, channel));
-    let has_path = state.with_store(|s| s.workspace_path(&work_root).ok().flatten().is_some());
+    let work_root = match state.with_store(|s| work_root_for(s, channel)) {
+        Ok(root) => root,
+        Err(error) => {
+            tracing::error!(channel, %error, "mention spawn workspace ancestry lookup failed");
+            return RecoveryOutcome::Retry;
+        }
+    };
+    let has_path = match state.with_store(|s| {
+        crate::daemon::workspace_path::WorkspacePathResolver::new(s).path_for_channel(&work_root)
+    }) {
+        Ok(path) => path.is_some(),
+        Err(error) => {
+            tracing::error!(channel, work_root, %error, "mention spawn workspace path lookup failed");
+            return RecoveryOutcome::Retry;
+        }
+    };
     if !has_path {
         tracing::warn!(agent = %agent_slug, work_root = %work_root, channel, "no local channel root found - cannot spawn");
         return RecoveryOutcome::Retry;
     }
 
     if let Some(target) = target_session.as_ref() {
-        let resume_locator = match state.with_store(|s| s.native_resume_locator(mentioned_pk)) {
+        let resume_locator = match state
+            .with_store(|s| s.native_resume_locator(mentioned_pk, &target.observed_harness))
+        {
             Ok(locator) => locator,
             Err(e) => {
                 tracing::error!(pubkey = %mentioned_pk, channel, error = %e, "exact mention resume lookup failed");
@@ -145,11 +160,11 @@ pub(super) async fn handle(
             )
             .await
             {
-                Ok(pty_id) => {
+                Ok(endpoint) => {
                     tracing::info!(
                         agent = %agent_slug,
                         pubkey = %mentioned_pk,
-                        pty_id = %pty_id,
+                        endpoint = %endpoint.endpoint_id,
                         channel,
                         "session relaunched with its exact pubkey"
                     );
@@ -212,40 +227,6 @@ pub(super) async fn handle(
     }
 
     tracing::info!(agent = %agent_slug, pubkey = %mentioned_pk, channel, work_root = %work_root, "starting stable agent on exact mention");
-    match spawn_headless_mention(
-        state,
-        &agent_slug,
-        &work_root,
-        channel,
-        body,
-        notice_context(state, mentioned_pk, &agent_slug, requester_pubkey),
-        mentioned_pk,
-    )
-    .await
-    {
-        Ok(true) => {
-            if let Err(error) = confirm_recovery_standing(state, mentioned_pk, channel).await {
-                tracing::warn!(pubkey = %mentioned_pk, channel, %error, "headless exact target is not yet relay-admitted");
-                return RecoveryOutcome::Retry;
-            }
-            if let Err(e) =
-                state.with_store(|s| s.mark_delivered(event_id, mentioned_pk, now_secs()))
-            {
-                tracing::error!(
-                    event_id,
-                    pubkey = %mentioned_pk,
-                    channel,
-                    error = %e,
-                    "headless mention ran but its inbox row could not be marked delivered"
-                );
-            }
-            return RecoveryOutcome::Complete;
-        }
-        Ok(false) => {}
-        Err(e) => {
-            tracing::warn!(agent = %agent_slug, channel, error = %e, "headless spawn failed - falling back to PTY spawn");
-        }
-    }
     match crate::session_host::spawn_ephemeral_agent_for_pubkey(
         state,
         &agent_slug,
@@ -256,8 +237,8 @@ pub(super) async fn handle(
     )
     .await
     {
-        Ok(pty_id) => {
-            tracing::info!(agent = %agent_slug, pty_id = %pty_id, channel, "agent spawned successfully");
+        Ok(endpoint) => {
+            tracing::info!(agent = %agent_slug, endpoint = %endpoint.endpoint_id, channel, "agent spawned successfully");
             match confirm_recovery_standing(state, mentioned_pk, channel).await {
                 Ok(()) => RecoveryOutcome::Complete,
                 Err(error) => {
@@ -268,7 +249,7 @@ pub(super) async fn handle(
         }
         Err(e) => {
             tracing::warn!(agent = %agent_slug, channel, error = %e, "agent spawn failed");
-            headless::publish_start_failure_notice(
+            notice::publish_start_failure_notice(
                 state,
                 &agent_slug,
                 &target_label(state, mentioned_pk, &agent_slug),
@@ -327,16 +308,4 @@ fn target_label(state: &Arc<DaemonState>, pubkey: &str, fallback: &str) -> Strin
                 .and_then(|p| (!p.name.is_empty()).then_some(p.name))
         })
         .unwrap_or_else(|| fallback.to_string())
-}
-
-fn notice_context(
-    state: &Arc<DaemonState>,
-    pubkey: &str,
-    fallback: &str,
-    requester_pubkey: Option<&str>,
-) -> headless::MentionNotice {
-    headless::MentionNotice {
-        requester_pubkey: requester_pubkey.map(str::to_string),
-        target_label: Some(target_label(state, pubkey, fallback)),
-    }
 }

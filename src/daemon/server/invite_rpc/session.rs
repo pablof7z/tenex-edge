@@ -155,13 +155,14 @@ async fn ensure_live_session_member(
 
 fn live_pty_for_session(state: &Arc<DaemonState>, rec: &crate::state::Session) -> Option<String> {
     let pty_id = state
-        .with_store(|s| s.locators_for_pubkey(&rec.pubkey))
-        .ok()?
-        .into_iter()
-        .find(|locator| {
-            locator.locator_kind == crate::state::LOCATOR_PTY
-                && locator.runtime_generation == rec.runtime_generation
-        })?
+        .with_store(|s| {
+            s.runtime_locator_for_session(
+                &rec.pubkey,
+                rec.runtime_generation,
+                crate::state::LOCATOR_PTY,
+            )
+        })
+        .ok()??
         .locator_value;
     if crate::pty::is_live(&pty_id) {
         return Some(pty_id);

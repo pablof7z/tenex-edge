@@ -1,9 +1,9 @@
-use super::{scope, StoreReader, WhoRow, WhoSource};
+use super::{scope, WhoRow, WhoSource};
 use anyhow::Result;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 pub(super) fn push_retained_rows(
-    store: StoreReader<'_>,
+    aggregation: &crate::who_aggregation::WhoAggregation,
     current_root: Option<&str>,
     now: u64,
     local_host: &str,
@@ -11,42 +11,34 @@ pub(super) fn push_retained_rows(
     other_agents: &mut BTreeMap<String, BTreeSet<String>>,
 ) -> Result<()> {
     let live_pubkeys: HashSet<String> = rows.iter().map(|row| row.pubkey.clone()).collect();
-    for standing in store.list_retained_session_standing(now)? {
+    for standing in &aggregation.retained_standing {
         if live_pubkeys.contains(&standing.pubkey)
-            || scope::is_archived_channel(store, &standing.channel_h)
+            || scope::is_archived_channel(aggregation, &standing.channel_h)
         {
             continue;
         }
-        let Some(session) = store.get_session(&standing.pubkey)? else {
+        let Some(session) = aggregation.session(&standing.pubkey) else {
             continue;
         };
-        let slug = store
-            .session_identity(&standing.pubkey)
-            .ok()
-            .flatten()
-            .map(|identity| identity.display_slug())
-            .or_else(|| {
-                store
-                    .resolve_slug_for_pubkey(&standing.pubkey)
-                    .ok()
-                    .flatten()
-            })
+        let slug = aggregation
+            .display_slug(&standing.pubkey)
             .unwrap_or_else(|| session.agent_slug.clone());
         if current_root
-            .map(|root| scope::scope_contains_channel(store, root, &standing.channel_h))
+            .map(|root| scope::scope_contains_channel(aggregation, root, &standing.channel_h))
+            .transpose()?
             .unwrap_or(true)
         {
             rows.push(retained_row(
-                store,
-                &session,
+                aggregation,
+                session,
                 &standing.channel_h,
                 slug,
                 local_host,
                 now,
-            ));
-        } else if scope::is_root_channel(store, &standing.channel_h) {
+            )?);
+        } else if scope::is_root_channel(aggregation, &standing.channel_h) {
             other_agents
-                .entry(standing.channel_h)
+                .entry(standing.channel_h.clone())
                 .or_default()
                 .insert(slug);
         }
@@ -55,15 +47,15 @@ pub(super) fn push_retained_rows(
 }
 
 fn retained_row(
-    store: StoreReader<'_>,
+    aggregation: &crate::who_aggregation::WhoAggregation,
     session: &crate::state::Session,
     channel: &str,
     slug: String,
     local_host: &str,
     now: u64,
-) -> WhoRow {
-    let work_root = scope::work_root_for(store, channel);
-    WhoRow {
+) -> Result<WhoRow> {
+    let work_root = scope::work_root_for(aggregation, channel)?;
+    Ok(WhoRow {
         source: WhoSource::Local,
         state: crate::session_state::SessionState::Offline,
         slug,
@@ -78,5 +70,5 @@ fn retained_row(
         work_root_display: work_root.clone(),
         work_root,
         pubkey: session.pubkey.clone(),
-    }
+    })
 }

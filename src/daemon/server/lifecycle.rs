@@ -31,8 +31,8 @@ pub async fn run() -> Result<()> {
     let cfg = Config::load().context("loading config")?;
     let host = cfg.host.clone();
     let owners = cfg.whitelisted_pubkeys.clone();
-    // The narrow direct client handles profile indexer copies and one-shot
-    // fetches outside NMP. Its AUTH identity is irrelevant to delivery (verified:
+    // The narrow direct client handles one-shot reads and doctor probes. Its
+    // AUTH identity is irrelevant to delivery (verified:
     // an A-authed connection receives events p-tagged to B), so authenticate
     // with the backend's own key (`mosaicoPrivateKey`) rather than minting a
     // separate identity — a fresh keystore file would land in the same
@@ -42,9 +42,8 @@ pub async fn run() -> Result<()> {
         .backend_nsec()
         .and_then(|nsec| Keys::parse(nsec).ok())
         .unwrap_or_else(Keys::generate);
-    // The indexer is a direct-client target only for kind:0 profile copies and
-    // one-shot lookups. NIP-29 group writes are composed and routed by NMP, so
-    // the indexer can never receive or reject them accidentally.
+    // The indexer is a direct-client target for one-shot lookups. Every product
+    // write, including kind:0 copies to this indexer, is routed durably by NMP.
     let indexer = (!cfg.relays.contains(&cfg.indexer_relay)).then_some(cfg.indexer_relay.as_str());
     let transport = Arc::new(
         Transport::connect_with_indexer(&cfg.relays, indexer, auth_keys)
@@ -62,7 +61,7 @@ pub async fn run() -> Result<()> {
         Some(&cfg.indexer_relay),
         Some(&storage.nmp_store_path),
     )?);
-    pending_writes::spawn(&storage.state_db_path, &nmp, &transport);
+    pending_writes::spawn(&storage.state_db_path, &nmp);
     let provider = Arc::new(Nip29Provider::new(
         transport.clone(),
         nmp.clone(),
@@ -79,33 +78,25 @@ pub async fn run() -> Result<()> {
         cfg,
         host,
         owners,
-        agent_catalog: Mutex::new(crate::agent_catalog::AgentCatalog::default()),
-        installed_harnesses: Mutex::new(Vec::new()),
-        hosted: Mutex::new(HashMap::new()),
-        sessions: Mutex::new(HashMap::new()),
-        subscribed_root_channels: Mutex::new(Vec::new()),
-        subs: Mutex::new(crate::reconcile::SubscriptionReconciler::new()),
-        subscription_sync: tokio::sync::Mutex::new(()),
+        agent_config: AgentConfigState::new(),
+        catalog: CatalogState::new(),
+        runtime: SessionRuntimeState::new(),
+        subscriptions: SubscriptionState::new(),
+        reconcilers: ReconcilerState::new(StatusReconciler::for_ttl(status_ttl_duration())),
+        connections: ConnectionState::new(),
+        dedup: DedupState::new(),
         standing_sync: tokio::sync::Mutex::new(()),
-        pty_probe_failures: Mutex::new(HashMap::new()),
-        status: Arc::new(Mutex::new(StatusReconciler::for_ttl(status_ttl_duration()))),
-        hook_contexts: Mutex::new(HashMap::new()),
-        tail_tx: tokio::sync::broadcast::channel(512).0,
-        open_clients: Mutex::new(0),
-        shutdown: Notify::new(),
-        peer_sessions: Mutex::new(HashMap::new()),
-        seen_events: Mutex::new((
-            std::collections::HashSet::new(),
-            std::collections::VecDeque::new(),
-        )),
-        seen_profiles: Mutex::new(std::collections::HashSet::new()),
-        warming: Mutex::new(std::collections::HashSet::new()),
-        last_status: Mutex::new(HashMap::new()),
     });
     // These tolerate a not-yet-connected relay, so they start now.
     spawn_demux(state.clone());
     spawn_pruner(state.clone());
     super::managed_lifecycle::spawn(state.clone());
+
+    // Freeze restart-recovery ownership before accepting RPCs. Relay warmup is
+    // intentionally asynchronous, but a session admitted through the accept
+    // loop after this point belongs to this daemon incarnation and must never be
+    // mistaken for an orphan left by the previous process.
+    let startup_sessions = state.with_store(|store| store.list_running_sessions())?;
 
     let accept_state = state.clone();
     let accept = tokio::spawn(async move {
@@ -128,7 +119,7 @@ pub async fn run() -> Result<()> {
     });
 
     // Relay startup runs off the accept path, so store-only RPCs respond immediately.
-    // Warm the narrow direct connection before profile copies and fetches.
+    // Warm the narrow direct connection before fetches.
     let relay_state = state.clone();
     tokio::spawn(async move {
         relay_state.transport.warmup().await;
@@ -164,7 +155,7 @@ pub async fn run() -> Result<()> {
 
         // Revive sessions a previous daemon left behind and reconcile their NMP
         // observations.
-        reconcile_sessions(&relay_state).await;
+        reconcile_sessions(&relay_state, startup_sessions).await;
         // Re-adopted sessions may already have inbox rows from before the daemon
         // restart. Session start rings these rows, but reconciliation does not;
         // ring once here so a restart cannot leave messages pending until an
@@ -175,7 +166,7 @@ pub async fn run() -> Result<()> {
     let mut sigterm =
         tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).ok();
     tokio::select! {
-        _ = state.shutdown.notified() => {}
+        _ = state.connections.shutdown.notified() => {}
         _ = async { match &mut sigterm { Some(s) => { s.recv().await; }, None => std::future::pending().await } } => {}
     }
     tracing::info!("daemon shutting down");
@@ -234,7 +225,7 @@ pub(in crate::daemon::server) async fn serve_connection(
                 client_protocol = hello.protocol,
                 "newer client; restarting daemon for re-exec"
             );
-            state.shutdown.notify_waiters();
+            state.connections.shutdown.notify_waiters();
         }
         let _ = write_json(
             &mut writer,
@@ -245,7 +236,7 @@ pub(in crate::daemon::server) async fn serve_connection(
     }
 
     {
-        *state.open_clients.lock().unwrap() += 1;
+        *state.connections.open_clients.lock().unwrap() += 1;
     }
     let _guard = ClientGuard(state.clone());
 
@@ -296,7 +287,7 @@ pub(in crate::daemon::server) async fn serve_connection(
 pub(in crate::daemon::server) struct ClientGuard(pub(in crate::daemon::server) Arc<DaemonState>);
 impl Drop for ClientGuard {
     fn drop(&mut self) {
-        let mut n = self.0.open_clients.lock().unwrap();
+        let mut n = self.0.connections.open_clients.lock().unwrap();
         *n = n.saturating_sub(1);
     }
 }

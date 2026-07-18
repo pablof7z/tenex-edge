@@ -1,5 +1,5 @@
 use super::*;
-use crate::session_host::transport::{EndpointRef, SessionTransport, TransportKind};
+use crate::session_host::transport::{HostedEndpoint, TransportKind};
 
 pub(super) async fn evict_due_idle_sessions(state: &Arc<DaemonState>) {
     let candidates = state
@@ -47,9 +47,20 @@ async fn evict_one(state: &Arc<DaemonState>, candidate: Session) -> Result<()> {
 }
 
 async fn finish_idle_eviction(state: &Arc<DaemonState>, stopping: Session) -> Result<()> {
-    let endpoint = runtime_endpoint(state, &stopping);
-    match endpoint.as_ref().map(|(kind, id)| (*kind, id.as_str())) {
-        Some((TransportKind::Pty, id)) => {
+    let endpoint = state.with_store(|store| {
+        crate::session_host::transport::hosted_endpoint_for(store, &stopping)
+    })?;
+    let locator_kind = match &endpoint {
+        HostedEndpoint::Resolved { endpoint, .. } => Some(endpoint.kind.locator_kind()),
+        HostedEndpoint::Unavailable { kind } => Some(kind.locator_kind()),
+        HostedEndpoint::Unhosted => None,
+    };
+    match &endpoint {
+        HostedEndpoint::Resolved {
+            endpoint,
+            transport: _,
+        } if endpoint.kind == TransportKind::Pty => {
+            let id = endpoint.endpoint_id.as_str();
             match crate::pty::kill_if_headless_at(id, stopping.attachment_epoch) {
                 Ok(crate::pty::ConditionalKillOutcome::Killed { .. }) => {}
                 Ok(crate::pty::ConditionalKillOutcome::PresentationChanged { presentation }) => {
@@ -95,15 +106,24 @@ async fn finish_idle_eviction(state: &Arc<DaemonState>, stopping: Session) -> Re
                 }
             }
         }
-        Some((TransportKind::Acp, id)) => {
-            crate::session_host::transport::AcpTransport
-                .kill(&EndpointRef {
-                    kind: TransportKind::Acp,
-                    endpoint_id: id.to_string(),
-                })
-                .await?;
+        HostedEndpoint::Resolved {
+            transport,
+            endpoint,
+        } => {
+            transport.kill(endpoint).await?;
         }
-        None => {
+        HostedEndpoint::Unavailable { kind } => {
+            if stopping
+                .child_pid
+                .is_some_and(super::super::engine_lifecycle::pid_alive)
+            {
+                anyhow::bail!(
+                    "refusing to stop {} runtime without its owned endpoint",
+                    kind.as_str()
+                );
+            }
+        }
+        HostedEndpoint::Unhosted => {
             if stopping
                 .child_pid
                 .is_some_and(super::super::engine_lifecycle::pid_alive)
@@ -129,11 +149,7 @@ async fn finish_idle_eviction(state: &Arc<DaemonState>, stopping: Session) -> Re
         state.with_store(|store| {
             store.clear_runtime_locator_if_generation(
                 &stopped.pubkey,
-                match endpoint.as_ref().map(|(kind, _)| kind) {
-                    Some(TransportKind::Pty) => crate::state::LOCATOR_PTY,
-                    Some(TransportKind::Acp) => crate::state::LOCATOR_ACP,
-                    None => crate::state::LOCATOR_PID,
-                },
+                locator_kind.unwrap_or(crate::state::LOCATOR_PID),
                 stopped.runtime_generation,
             )
         })?;
@@ -152,20 +168,4 @@ fn ensure_not_stuck_stopping(state: &Arc<DaemonState>, expected: &Session) -> Re
         anyhow::bail!("stopping lifecycle edge was not cancelled")
     }
     Ok(())
-}
-
-fn runtime_endpoint(
-    state: &Arc<DaemonState>,
-    session: &Session,
-) -> Option<(TransportKind, String)> {
-    state
-        .with_store(|store| store.locators_for_pubkey(&session.pubkey))
-        .ok()?
-        .into_iter()
-        .filter(|locator| locator.runtime_generation == session.runtime_generation)
-        .find_map(|locator| match locator.locator_kind.as_str() {
-            crate::state::LOCATOR_PTY => Some((TransportKind::Pty, locator.locator_value)),
-            crate::state::LOCATOR_ACP => Some((TransportKind::Acp, locator.locator_value)),
-            _ => None,
-        })
 }
