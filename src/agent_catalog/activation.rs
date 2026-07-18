@@ -18,7 +18,7 @@ pub(super) fn load(profile: &NativeAgentProfile) -> Result<NativeAgentActivation
     match profile.harness {
         Harness::Codex => load_codex(profile),
         Harness::ClaudeCode | Harness::Opencode => Ok(NativeAgentActivation::NativeSelector {
-            name: profile.slug.clone(),
+            name: native_selector_name(profile),
         }),
         Harness::Grok | Harness::Unknown => {
             anyhow::bail!(
@@ -27,6 +27,21 @@ pub(super) fn load(profile: &NativeAgentProfile) -> Result<NativeAgentActivation
             )
         }
     }
+}
+
+/// The harness's own CLI resolves native agents by filename stem, not by
+/// `slug` — for Claude Code, `slug` is the frontmatter `name:` field, which
+/// may be a free-text display name (e.g. "Marcus Webb" in a file named
+/// `Engineer.md`) that the harness doesn't recognize. OpenCode's `slug` is
+/// already the filename stem (`parse_opencode` derives it that way), so this
+/// is a no-op there.
+fn native_selector_name(profile: &NativeAgentProfile) -> String {
+    profile
+        .path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| profile.slug.clone())
 }
 
 fn load_codex(profile: &NativeAgentProfile) -> Result<NativeAgentActivation> {
