@@ -17,7 +17,14 @@ start from production-shaped deployed schemas and verify preservation through
 the complete chain to current. A malformed source schema fails before its
 version or tables are changed.
 
-## Current schema: 10
+## Current schema: 11
+
+Schema 11 keeps schema 10's lifecycle shape and closes the one-time delivery
+state gap for sessions migrated from the pre-lifecycle daemon. Historical
+`injected` inbox rows are converted to `echo_consumed` only when their target
+session is already idle. Pending delivery and injected work owned by a Working
+session remain fenced. This lets an adopted idle runtime enter its ten-minute
+headless eviction policy without pretending that in-flight work completed.
 
 Schema 10 keeps schema 9's admitted-runtime facts and makes managed lifecycle
 ownership explicit in each `sessions` row:
