@@ -19,7 +19,7 @@ pub use meta::{
     endpoint_socket, read_all_metadata, session_dir, session_socket, write_metadata, LaunchMetadata,
 };
 pub(crate) use presentation::{
-    kill_if_headless_at, presentation_snapshot, ConditionalKillOutcome, PresentationSnapshot,
-    PresentationUnavailable,
+    kill_if_headless_at, presentation_observation, ConditionalKillOutcome, PresentationObservation,
+    PresentationSnapshot, PresentationUnavailable,
 };
 pub use supervisor::{run_supervisor, SupervisorArgs};

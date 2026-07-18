@@ -56,14 +56,15 @@ fn has_live_rpc_locator(locators: &[crate::state::SessionLocator], generation: u
 }
 
 async fn reconcile_pty(state: &Arc<DaemonState>, session: &Session, pty_id: &str) {
-    match crate::pty::presentation_snapshot(pty_id) {
-        Ok(snapshot) => {
+    match crate::pty::presentation_observation(pty_id) {
+        Ok(observation) => {
             state
                 .runtime
                 .pty_probe_failures
                 .lock()
                 .unwrap()
                 .remove(&(session.pubkey.clone(), session.runtime_generation));
+            let snapshot = snapshot_for_observation(session, observation);
             if let Err(error) = apply(state, session, snapshot) {
                 tracing::warn!(pubkey = %session.pubkey, %error, "PTY presentation reconciliation failed");
             }
@@ -78,6 +79,32 @@ async fn reconcile_pty(state: &Arc<DaemonState>, session: &Session, pty_id: &str
         Err(error) => {
             tracing::warn!(pubkey = %session.pubkey, %error, "PTY supervisor is gone");
             let _ = super::stop_generation(state, session, StopReason::Crash, now_secs()).await;
+        }
+    }
+}
+
+fn snapshot_for_observation(
+    session: &Session,
+    observation: crate::pty::PresentationObservation,
+) -> crate::pty::PresentationSnapshot {
+    match observation {
+        crate::pty::PresentationObservation::Managed(snapshot) => snapshot,
+        crate::pty::PresentationObservation::AdoptedPreUpgrade { headless } => {
+            let presentation = if headless {
+                PresentationState::Headless
+            } else {
+                PresentationState::Headed
+            };
+            let attachment_epoch = if session.presentation_state == presentation {
+                session.attachment_epoch
+            } else {
+                session.attachment_epoch.saturating_add(1)
+            };
+            crate::pty::PresentationSnapshot {
+                attached_clients: u64::from(!headless),
+                attachment_epoch,
+                changed_at: now_secs(),
+            }
         }
     }
 }

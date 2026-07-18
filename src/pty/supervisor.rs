@@ -101,6 +101,11 @@ pub fn run_supervisor(args: SupervisorArgs) -> Result<()> {
     cmd.env_remove("CLAUDE_CODE_CHILD_SESSION");
 
     let mut child = pair.slave.spawn_command(cmd)?;
+    if let Err(error) =
+        super::meta::record_child_pid(&args.id, &args.instance_token, child.process_id())
+    {
+        eprintln!("[mosaico pty supervisor] could not persist child identity: {error:#}");
+    }
     let writer = Arc::new(Mutex::new(pair.master.take_writer()?));
     let backlog = Arc::new(Mutex::new(VecDeque::with_capacity(BACKLOG_LIMIT)));
 

@@ -86,6 +86,8 @@ pub fn spawn_session(args: SpawnSessionArgs) -> Result<LaunchMetadata> {
         socket: socket.to_string_lossy().to_string(),
         supervisor_pid: supervisor.id(),
         instance_token,
+        adopted_process_fingerprint: String::new(),
+        child_pid: None,
         agent: args.agent,
         root: args.root,
         cwd: args.cwd.to_string_lossy().to_string(),
