@@ -195,6 +195,33 @@ fn idle_turn_end_cannot_invent_or_extend_an_idle_deadline() {
 }
 
 #[test]
+fn rejected_old_end_does_not_clobber_a_superseding_turn_start() {
+    let store = seed();
+    let generation = running(&store).runtime_generation;
+    assert!(store
+        .apply_session_turn_started("pk", generation, 10, None)
+        .unwrap());
+    assert!(store
+        .apply_session_turn_ended("pk", generation, 20)
+        .unwrap());
+
+    // A duplicate end loses its conditional Working -> Idle race. Before its
+    // caller verifies generation ownership, the next turn may already begin.
+    assert!(!store
+        .apply_session_turn_ended("pk", generation, 21)
+        .unwrap());
+    assert!(store
+        .apply_session_turn_started("pk", generation, 22, None)
+        .unwrap());
+
+    let superseding = running(&store);
+    assert_eq!(superseding.runtime_generation, generation);
+    assert!(superseding.is_running());
+    assert_eq!(superseding.work_state, WorkState::Working);
+    assert_eq!(superseding.turn_started_at, 22);
+}
+
+#[test]
 fn initial_epoch_zero_snapshot_is_applied_once() {
     let store = seed();
     let session = running(&store);
