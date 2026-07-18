@@ -233,8 +233,14 @@ pub(super) fn session_pty_wrap_me(session: String) -> Result<()> {
     if crate::daemon::is_inhibited() {
         return Ok(());
     }
-    let v =
-        crate::daemon::blocking::call("session_pty_wrap", serde_json::json!({"session": session}))?;
+    let v = crate::daemon::blocking::call(
+        "session_pty_wrap",
+        serde_json::json!({
+            "session": session,
+            "interrupt_working": false,
+            "turn_count": 0,
+        }),
+    )?;
     if v["wrapped"].as_bool().unwrap_or(false) {
         let pty_id = v["pty_id"].as_str().unwrap_or("?");
         eprintln!("session {session} re-homed into daemon PTY {pty_id}");

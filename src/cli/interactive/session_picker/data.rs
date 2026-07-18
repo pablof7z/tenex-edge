@@ -34,11 +34,18 @@ pub(super) struct SessionRow {
     pub(super) endpoint_attachable: bool,
     pub(super) cwd: Option<String>,
     pub(super) transport: String,
+    pub(super) takeover_available: bool,
+    pub(super) turn_open: bool,
+    pub(super) turn_count: u64,
 }
 
 impl SessionRow {
     pub(super) fn attachable(&self) -> bool {
         self.pty_id.is_some() && self.endpoint_live && self.endpoint_attachable
+    }
+
+    pub(super) fn can_take_over(&self) -> bool {
+        self.takeover_available && !self.attachable()
     }
 
     pub(super) fn fuzzy_score(&self, input: &str) -> Option<i64> {
@@ -113,6 +120,15 @@ fn parse_row(value: &serde_json::Value) -> Option<SessionRow> {
     let pubkey = value["pubkey"].as_str()?.to_string();
     let npub = value["npub"].as_str()?.to_string();
     let endpoint = value.get("endpoint").filter(|value| !value.is_null());
+    let takeover = value.get("takeover").filter(|value| !value.is_null());
+    let (takeover_available, turn_open, turn_count) = match takeover {
+        Some(takeover) => (
+            true,
+            takeover["turn_open"].as_bool()?,
+            takeover["turn_count"].as_u64()?,
+        ),
+        None => (false, false, 0),
+    };
     let workspaces = value["workspaces"]
         .as_array()
         .map(Vec::as_slice)
@@ -155,6 +171,9 @@ fn parse_row(value: &serde_json::Value) -> Option<SessionRow> {
             .unwrap_or(false),
         cwd,
         transport: value["transport"].as_str().unwrap_or("").to_string(),
+        takeover_available,
+        turn_open,
+        turn_count,
     })
 }
 
@@ -188,106 +207,5 @@ fn parse_workspace(value: &serde_json::Value) -> Option<WorkspaceGroup> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_grouped_workspace_and_attach_endpoint() {
-        let value = serde_json::json!({
-            "sessions": [{
-                "pubkey": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                "npub": "npub1publicselector",
-                "handle": "opal-codex",
-                "agent": "codex",
-                "workspaces": [{
-                    "id": "root", "name": "mosaico", "path": "/repo",
-                    "channels": [{"id": "root", "name": "mosaico"}]
-                }],
-                "title": "shipping the picker",
-                "activity": "running tests",
-                "state": "working",
-                "last_seen": 12,
-                "host": "laptop",
-                "harness": "codex",
-                "endpoint": {"id": "pty-1", "kind": "pty", "live": true, "attachable": true, "cwd": "/repo"}
-            }]
-        });
-
-        let rows = rows_from_value(&value);
-        assert_eq!(rows.len(), 1);
-        assert_eq!(
-            rows[0].pubkey,
-            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-        );
-        assert_eq!(rows[0].npub, "npub1publicselector");
-        assert_eq!(rows[0].handle, "opal-codex");
-        assert_eq!(rows[0].title, "shipping the picker");
-        assert_eq!(rows[0].state, SessionState::Working);
-        assert!(rows[0].fuzzy_score("npub1public").is_some());
-        assert!(rows[0].fuzzy_score("repo").is_some());
-        assert_eq!(rows[0].workspaces[0].name, "mosaico");
-        assert_eq!(rows[0].pty_id.as_deref(), Some("pty-1"));
-        assert!(rows[0].endpoint_live);
-    }
-
-    #[test]
-    fn parses_live_unbound_endpoint_for_attach() {
-        let value = serde_json::json!({
-            "sessions": [{
-                "pubkey": "",
-                "npub": "",
-                "handle": "codex",
-                "agent": "codex",
-                "workspaces": [{
-                    "id": "root", "name": "mosaico", "path": "/repo",
-                    "channels": [{"id": "root", "name": "mosaico"}]
-                }],
-                "title": "codex --yolo",
-                "activity": "/repo",
-                "state": "suspended",
-                "last_seen": 0,
-                "host": "laptop",
-                "harness": "codex",
-                "bound": false,
-                "endpoint": {"id": "pty-orphan", "kind": "pty", "live": true, "attachable": true, "cwd": "/repo"}
-            }]
-        });
-
-        let rows = rows_from_value(&value);
-
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].handle, "codex");
-        assert_eq!(rows[0].pty_id.as_deref(), Some("pty-orphan"));
-        assert!(rows[0].endpoint_live);
-    }
-
-    #[test]
-    fn acp_transport_rows_are_not_attachable() {
-        let value = serde_json::json!({
-            "sessions": [{
-                "pubkey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-                "npub": "npub1acpselector",
-                "handle": "delta-claude",
-                "agent": "claude-code",
-                "workspaces": [{
-                    "id": "root", "name": "mosaico", "path": "/repo",
-                    "channels": [{"id": "root", "name": "mosaico"}]
-                }],
-                "title": "claude --yolo",
-                "activity": "/repo",
-                "state": "working",
-                "last_seen": 5,
-                "host": "laptop",
-                "harness": "claude-code",
-                "transport": "acp",
-                "endpoint": {"id": "acp-1", "kind": "acp", "live": true, "attachable": false}
-            }]
-        });
-
-        let rows = rows_from_value(&value);
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].transport, "acp");
-        assert!(!rows[0].attachable(), "ACP rows must not be attachable");
-        assert!(rows[0].pty_id.is_none());
-    }
-}
+#[path = "data_tests.rs"]
+mod tests;

@@ -46,6 +46,7 @@ fn projection_exposes_public_identity_without_private_runtime_id() {
     assert_eq!(rows[0]["workspaces"][1]["channels"][0]["name"], "review");
     assert_eq!(rows[0]["transport"], "process");
     assert!(rows[0]["endpoint"].is_null());
+    assert!(rows[0]["takeover"].is_null());
 
     store
         .mark_runtime_stopped(
@@ -57,6 +58,50 @@ fn projection_exposes_public_identity_without_private_runtime_id() {
     assert!(project_sessions(&store, "laptop", &HashMap::new())
         .unwrap()
         .is_empty());
+}
+
+#[test]
+fn unhosted_resumable_projection_exposes_open_turn_takeover_state() {
+    let store = Store::open_memory().unwrap();
+    store
+        .upsert_channel("root", "cut-tracker", "", "", 1)
+        .unwrap();
+    let pubkey = Keys::generate().public_key().to_hex();
+    store
+        .reserve_hook_session_for_test(&crate::state::RegisterSession {
+            pubkey: pubkey.clone(),
+            observed_harness: "codex".into(),
+            agent_slug: "codex".into(),
+            channel_h: "root".into(),
+            child_pid: Some(42),
+            transcript_path: None,
+            now: 10,
+        })
+        .unwrap();
+    store
+        .put_session_locator(
+            "codex",
+            crate::state::LOCATOR_NATIVE_RESUME,
+            "thread-1",
+            &pubkey,
+            11,
+        )
+        .unwrap();
+    let generation = store
+        .get_session(&pubkey)
+        .unwrap()
+        .unwrap()
+        .runtime_generation;
+    store
+        .apply_session_turn_started(&pubkey, generation, 12, None)
+        .unwrap();
+
+    let rows = project_sessions(&store, "laptop", &HashMap::new()).unwrap();
+
+    assert_eq!(rows[0]["state"], "working");
+    assert_eq!(rows[0]["transport"], "process");
+    assert_eq!(rows[0]["takeover"]["turn_open"], true);
+    assert_eq!(rows[0]["takeover"]["turn_count"], 1);
 }
 
 #[test]
@@ -138,6 +183,7 @@ fn bound_endpoint_projection_is_transport_owned_and_generic() {
     assert_eq!(rows[0]["endpoint"]["kind"], "app-server");
     assert_eq!(rows[0]["endpoint"]["live"], false);
     assert_eq!(rows[0]["endpoint"]["attachable"], false);
+    assert!(rows[0]["takeover"].is_null());
     assert!(rows[0].get("acp_endpoint_id").is_none());
     assert!(rows[0].get("acp_live").is_none());
 }

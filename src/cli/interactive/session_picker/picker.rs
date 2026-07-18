@@ -1,3 +1,4 @@
+mod confirmation;
 mod render;
 #[cfg(test)]
 mod tests;
@@ -18,6 +19,7 @@ const OPTION_HEIGHT: u16 = 2;
 #[derive(Debug)]
 pub(super) enum PickerAction {
     Attach(SessionChoice),
+    TakeOver(SessionChoice, Option<u64>),
     Kill(SessionChoice),
     Cancel,
 }
@@ -25,6 +27,7 @@ pub(super) enum PickerAction {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PickerExit {
     Attach(usize),
+    TakeOver(usize, Option<u64>),
     Kill(usize),
     Cancel,
 }
@@ -35,6 +38,7 @@ struct PickerState {
     visible: Vec<usize>,
     query: String,
     notice: Option<String>,
+    confirmation: Option<confirmation::Confirmation>,
     cursor: usize,
     offset: usize,
 }
@@ -47,6 +51,7 @@ impl PickerState {
             visible,
             query: String::new(),
             notice: None,
+            confirmation: None,
             cursor: 0,
             offset: 0,
         }
@@ -55,6 +60,9 @@ impl PickerState {
     fn handle_key(&mut self, key: KeyEvent, rows: usize) -> Option<PickerExit> {
         if key.kind == KeyEventKind::Release {
             return None;
+        }
+        if self.confirmation.is_some() {
+            return self.handle_confirmation(key);
         }
         self.notice = None;
         match key.code {
@@ -73,6 +81,10 @@ impl PickerState {
                     return Some(PickerExit::Attach(choice));
                 }
                 let row = &self.choices[choice].row;
+                if row.can_take_over() {
+                    self.confirmation = Some(confirmation::Confirmation::TakeOver(choice));
+                    return None;
+                }
                 self.notice = Some(if row.transport == "acp" {
                     "ACP sessions run without a harness terminal — nothing to attach to".into()
                 } else {
@@ -212,6 +224,9 @@ pub(super) fn select(choices: Vec<SessionChoice>, terminal_height: u16) -> Resul
 
     Ok(match interaction? {
         PickerExit::Attach(index) => PickerAction::Attach(state.choices.swap_remove(index)),
+        PickerExit::TakeOver(index, interrupt_turn) => {
+            PickerAction::TakeOver(state.choices.swap_remove(index), interrupt_turn)
+        }
         PickerExit::Kill(index) => PickerAction::Kill(state.choices.swap_remove(index)),
         PickerExit::Cancel => PickerAction::Cancel,
     })
