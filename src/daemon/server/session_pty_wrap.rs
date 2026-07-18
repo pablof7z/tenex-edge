@@ -1,10 +1,10 @@
-//! `session_pty_wrap` — re-home the CALLER's OWN session into a fresh
+//! `session_pty_wrap` — re-home a local resumable session into a fresh
 //! daemon-owned PTY supervisor.
 //!
 //! An agent whose harness was started manually outside a daemon-owned PTY
 //! (e.g. `codex --yolo resume <id>` typed directly into an iTerm tab) has no
 //! `pty_session` alias. Mentions remain queued between turns. This RPC lets
-//! that session re-home ITSELF:
+//! either that session or the local operator re-home it:
 //! kill the manually-started process and resume the SAME harness session
 //! (same resume token, same channel) inside a fresh daemon PTY supervisor,
 //! which registers the standard `pty_session` alias.
@@ -26,6 +26,8 @@ use super::*;
 #[derive(serde::Deserialize)]
 struct SessionPtyWrapParams {
     session: String,
+    interrupt_working: bool,
+    turn_count: u64,
 }
 
 /// How a re-home request resolves, as a pure function of the session's
@@ -37,7 +39,8 @@ pub(in crate::daemon::server) enum PtyWrapDecision {
     Wrap,
     /// A live `pty_session` alias already exists — nothing to do.
     AlreadyWrapped,
-    /// The session work state is `working` — refuse to interrupt it.
+    /// The session work state is `working`, but interrupting the unmatched
+    /// turn-start hook was not explicitly authorized.
     Working,
     /// The session carries no harness-native resume token, so it cannot be
     /// replayed into a fresh process.
@@ -46,12 +49,15 @@ pub(in crate::daemon::server) enum PtyWrapDecision {
 
 pub(in crate::daemon::server) fn decide_pty_wrap(
     working: bool,
+    turn_count: u64,
+    interrupt_working: bool,
+    confirmed_turn_count: u64,
     already_wrapped_live: bool,
     resumable: bool,
 ) -> PtyWrapDecision {
     if already_wrapped_live {
         PtyWrapDecision::AlreadyWrapped
-    } else if working {
+    } else if working && (!interrupt_working || confirmed_turn_count != turn_count) {
         PtyWrapDecision::Working
     } else if !resumable {
         PtyWrapDecision::NotResumable
@@ -93,7 +99,14 @@ pub(in crate::daemon::server) async fn rpc_session_pty_wrap(
 
     let already_wrapped = live_pty_locator(state, &rec).is_some();
     let resume_id = resume_token_for(state, &rec);
-    let decision = decide_pty_wrap(rec.is_working(), already_wrapped, resume_id.is_some());
+    let decision = decide_pty_wrap(
+        rec.is_working(),
+        rec.turn_count,
+        p.interrupt_working,
+        p.turn_count,
+        already_wrapped,
+        resume_id.is_some(),
+    );
 
     let resume_id = match decision {
         PtyWrapDecision::AlreadyWrapped => {
@@ -105,7 +118,7 @@ pub(in crate::daemon::server) async fn rpc_session_pty_wrap(
         PtyWrapDecision::Working => {
             return Ok(refusal(
                 "working",
-                "session is mid-turn (working); refusing to interrupt in-flight work",
+                "session has an unmatched turn-start hook; confirm interrupting in-flight work",
             ));
         }
         PtyWrapDecision::NotResumable => {
@@ -153,31 +166,63 @@ mod tests {
     use super::*;
 
     #[test]
+    fn interruption_authorization_fields_are_required() {
+        assert!(
+            serde_json::from_value::<SessionPtyWrapParams>(serde_json::json!({
+                "session": "npub1example"
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
     fn wraps_when_idle_unwrapped_and_resumable() {
-        assert_eq!(decide_pty_wrap(false, false, true), PtyWrapDecision::Wrap);
+        assert_eq!(
+            decide_pty_wrap(false, 0, false, 0, false, true),
+            PtyWrapDecision::Wrap
+        );
     }
 
     #[test]
     fn refuses_already_wrapped_regardless_of_working() {
         assert_eq!(
-            decide_pty_wrap(false, true, true),
+            decide_pty_wrap(false, 0, false, 0, true, true),
             PtyWrapDecision::AlreadyWrapped
         );
         assert_eq!(
-            decide_pty_wrap(true, true, true),
+            decide_pty_wrap(true, 1, true, 1, true, true),
             PtyWrapDecision::AlreadyWrapped
         );
     }
 
     #[test]
     fn refuses_mid_turn_session() {
-        assert_eq!(decide_pty_wrap(true, false, true), PtyWrapDecision::Working);
+        assert_eq!(
+            decide_pty_wrap(true, 1, false, 0, false, true),
+            PtyWrapDecision::Working
+        );
+    }
+
+    #[test]
+    fn wraps_mid_turn_only_with_explicit_interrupt_authorization() {
+        assert_eq!(
+            decide_pty_wrap(true, 4, true, 4, false, true),
+            PtyWrapDecision::Wrap
+        );
+    }
+
+    #[test]
+    fn stale_interrupt_confirmation_cannot_kill_a_newer_turn() {
+        assert_eq!(
+            decide_pty_wrap(true, 5, true, 4, false, true),
+            PtyWrapDecision::Working
+        );
     }
 
     #[test]
     fn refuses_when_no_resume_token() {
         assert_eq!(
-            decide_pty_wrap(false, false, false),
+            decide_pty_wrap(false, 0, false, 0, false, false),
             PtyWrapDecision::NotResumable
         );
     }

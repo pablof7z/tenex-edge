@@ -21,6 +21,19 @@ fn choice(handle: &str, activity: &str, attachable: bool) -> SessionChoice {
     }
 }
 
+fn takeover_choice(handle: &str, turn_open: bool) -> SessionChoice {
+    SessionChoice {
+        row: SessionRow {
+            handle: handle.into(),
+            transport: "process".into(),
+            takeover_available: true,
+            turn_open,
+            turn_count: 7,
+            ..SessionRow::default()
+        },
+    }
+}
+
 fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
 }
@@ -63,6 +76,45 @@ fn enter_on_acp_session_reports_no_harness_terminal() {
         notice.contains("without a harness") || notice.contains("no harness"),
         "notice should mention harness: {notice}"
     );
+}
+
+#[test]
+fn takeover_always_requires_confirmation() {
+    let mut state = PickerState::new(vec![takeover_choice("echo-codex", false)]);
+
+    assert_eq!(state.handle_key(key(KeyCode::Enter), 10), None);
+    assert!(state
+        .confirmation_text()
+        .unwrap()
+        .contains("Kill @echo-codex"));
+    assert_eq!(
+        state.handle_key(key(KeyCode::Char('y')), 10),
+        Some(PickerExit::TakeOver(0, None))
+    );
+}
+
+#[test]
+fn open_turn_requires_a_second_confirmation() {
+    let mut state = PickerState::new(vec![takeover_choice("echo-codex", true)]);
+
+    state.handle_key(key(KeyCode::Enter), 10);
+    assert_eq!(state.handle_key(key(KeyCode::Char('y')), 10), None);
+    let prompt = state.confirmation_text().unwrap();
+    assert!(prompt.contains("No end-of-turn hook"), "{prompt}");
+    assert_eq!(
+        state.handle_key(key(KeyCode::Char('y')), 10),
+        Some(PickerExit::TakeOver(0, Some(7)))
+    );
+}
+
+#[test]
+fn declining_takeover_returns_to_the_picker() {
+    let mut state = PickerState::new(vec![takeover_choice("echo-codex", false)]);
+
+    state.handle_key(key(KeyCode::Enter), 10);
+    assert_eq!(state.handle_key(key(KeyCode::Char('n')), 10), None);
+    assert!(state.confirmation.is_none());
+    assert_eq!(state.handle_key(key(KeyCode::Down), 10), None);
 }
 
 #[test]
@@ -136,4 +188,26 @@ fn renderer_gives_every_session_exactly_two_lines() {
     assert!(rows[2].starts_with("    (untitled)"));
     assert!(rows[3..11].iter().all(|row| row.trim().is_empty()));
     assert!(rows[11].starts_with("enter attach"));
+}
+
+#[test]
+fn renderer_keeps_takeover_confirmation_controls_visible() {
+    let mut state = PickerState::new(vec![takeover_choice("echo-codex", false)]);
+    state.handle_key(key(KeyCode::Enter), 10);
+    let backend = TestBackend::new(100, 12);
+    let mut terminal = Terminal::with_options(
+        backend,
+        TerminalOptions {
+            viewport: Viewport::Fixed(Rect::new(0, 0, 100, 12)),
+        },
+    )
+    .unwrap();
+
+    let completed = terminal.draw(|frame| render::draw(frame, &state)).unwrap();
+    let footer = completed.buffer.content()[1100..1200]
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
+
+    assert!(footer.starts_with("[y] take over  [n] cancel"), "{footer}");
 }

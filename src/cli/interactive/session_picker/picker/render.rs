@@ -10,7 +10,8 @@ use ratatui::{
 const ACCENT: Color = Color::Indexed(45);
 const MUTED: Color = Color::Indexed(245);
 const ERROR: Color = Color::Indexed(203);
-const HELP: &str = "enter attach · ⇧K kill · type filter · ↑↓ move · esc";
+const WARNING: Color = Color::Indexed(214);
+const HELP: &str = "enter attach/take over · ⇧K kill · type filter · ↑↓ move · esc";
 
 pub(super) fn draw(frame: &mut Frame<'_>, state: &PickerState) {
     let area = frame.area();
@@ -75,10 +76,11 @@ pub(super) fn draw(frame: &mut Frame<'_>, state: &PickerState) {
     } else {
         format!("{}/{}", state.cursor + 1, state.visible.len())
     };
-    let footer = state
-        .notice
-        .as_ref()
-        .map(|notice| (notice.as_str(), ERROR))
+    let confirmation = state.confirmation_text();
+    let footer = confirmation
+        .as_deref()
+        .map(|prompt| (prompt, WARNING))
+        .or_else(|| state.notice.as_ref().map(|notice| (notice.as_str(), ERROR)))
         .unwrap_or((HELP, MUTED));
     frame.render_widget(
         Paragraph::new(format!("{} · {position}", footer.0)).style(Style::default().fg(footer.1)),
