@@ -21,7 +21,9 @@ fn table_samples_prefer_alive_sessions_and_locators() {
     store
         .reserve_hook_session_for_test(&reg("dead", "room", 200))
         .unwrap();
-    store.mark_dead("dead").unwrap();
+    store
+        .mark_runtime_stopped("dead", StopReason::Unknown, 201)
+        .unwrap();
     store
         .put_session_locator("codex", LOCATOR_PTY, "alive-endpoint", "alive", 100)
         .unwrap();

@@ -238,7 +238,7 @@ public `handle`; private runtime ids are omitted.
 
 ### `operator_sessions`
 Returns the canonical local control projection consumed by `mosaico
-sessions`. It starts from alive rows in the daemon-owned `sessions` table,
+sessions`. It starts from `runtime_state='running'` rows in the daemon-owned `sessions` table,
 but exposes only `pubkey`, `npub`, and the current public `handle`; the private
 runtime row id never crosses this RPC boundary. Each row joins agent/harness
 state, workspace-grouped joined channels, filesystem bindings, local host, and
@@ -262,14 +262,14 @@ or bundle override.
 Accepts an npub, hex pubkey, or handle and returns the PTY target plus public identity.
 
 ### `pty_resume`
-Reconstitutes a dead harness session in pty (re-opens the agent in its worktree).
+Reconstitutes a stopped harness session in PTY (re-opens the agent in its worktree).
 ```jsonc
 params: {"session": "npub1…"}
 result: {"pty_id": "…", "npub": "npub1…", "agent": "coder"}
 ```
 
 ### `pty_resumable`
-Returns resumable rows with `pubkey`, `npub`, and an optional current `handle`.
+Returns resumable rows with `pubkey`, `npub`, `runtime_state`, and an optional current `handle`.
 Raw session ids are not exposed.
 
 ### Control / handshake (not user verbs)

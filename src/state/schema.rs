@@ -34,9 +34,9 @@ const CANONICAL_TABLES: &[&str] = &[
     "relay_reactions",
     "relay_status",
     "session_channels",
-    "session_claims",
     "session_locators",
     "session_signers",
+    "session_standing",
     "sessions",
     "workspace_roots",
 ];
@@ -83,24 +83,13 @@ fn validate_canonical(conn: &Connection, path: Option<&Path>) -> Result<()> {
             "locator_kind",
             "locator_value",
             "pubkey",
+            "runtime_generation",
             "created_at",
         ],
         &["external_id_kind", "external_id", "session_id"],
         path,
     )?;
-    ensure_columns(
-        conn,
-        "session_claims",
-        &["pubkey", "channel_h", "owner_backend_pubkey", "owner_host"],
-        &[
-            "codename",
-            "session_id",
-            "native_id",
-            "base_pubkey",
-            "ordinal",
-        ],
-        path,
-    )?;
+    ensure_absent_table(conn, "session_claims", path)?;
     ensure_columns(conn, "relay_profiles", &["agent_slug"], &[], path)?;
     ensure_columns(conn, "relay_status", &["state"], &["busy"], path)?;
     ensure_table(conn, "event_claims", path)?;
@@ -121,8 +110,22 @@ fn validate_canonical(conn: &Connection, path: Option<&Path>) -> Result<()> {
     ensure_columns(
         conn,
         "session_channels",
-        &["pubkey", "channel_h"],
-        &["session_id"],
+        &["pubkey", "channel_h", "granted_at"],
+        &["session_id", "joined_at"],
+        path,
+    )?;
+    ensure_columns(
+        conn,
+        "session_standing",
+        &[
+            "pubkey",
+            "channel_h",
+            "state",
+            "retain_until",
+            "standing_epoch",
+            "session_lifecycle_epoch",
+        ],
+        &[],
         path,
     )?;
     ensure_absent_table(conn, "llm_calls", path)?;
@@ -160,6 +163,17 @@ fn validate_canonical(conn: &Connection, path: Option<&Path>) -> Result<()> {
             "admitted_bundle",
             "admitted_transport",
             "endpoint_provenance",
+            "runtime_state",
+            "presentation_state",
+            "work_state",
+            "recovery_state",
+            "lifecycle_epoch",
+            "attachment_epoch",
+            "idle_since",
+            "idle_deadline",
+            "stopped_at",
+            "stop_reason",
+            "turn_count",
             "explicit_chat_published_at",
         ],
         &[
@@ -172,6 +186,8 @@ fn validate_canonical(conn: &Connection, path: Option<&Path>) -> Result<()> {
             "work_topic",
             "work_topic_set_at",
             "activity",
+            "alive",
+            "working",
             "harness",
         ],
         path,

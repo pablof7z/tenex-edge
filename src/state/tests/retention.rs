@@ -87,7 +87,8 @@ fn retention_prune_only_safe_rows() {
         .unwrap();
     s.reserve_hook_session_for_test(&reg("codex", "dead", "h1"))
         .unwrap();
-    s.mark_dead("dead").unwrap();
+    s.mark_runtime_stopped("dead", StopReason::Unknown, 2)
+        .unwrap();
     s.put_session_locator("codex", LOCATOR_NATIVE_RESUME, "resume-dead", "dead", 2)
         .unwrap();
 
@@ -99,4 +100,27 @@ fn retention_prune_only_safe_rows() {
     assert!(s.get_session("alive").unwrap().is_some());
     assert!(s.get_session("dead").unwrap().is_some());
     assert_eq!(count_rows(&s, "session_locators"), 1);
+}
+
+#[test]
+fn retention_keeps_offline_mention_replay_tombstones() {
+    let s = Store::open_memory().unwrap();
+    assert!(s
+        .claim_offline_mention("mention", "agent", "from", "room", "wake up", 1)
+        .unwrap());
+    s.complete_offline_mention("mention", "agent", 2).unwrap();
+    assert!(s
+        .claim_management_command("management", "from", "room", "who", 1)
+        .unwrap());
+    s.complete_management_command("management", 2).unwrap();
+
+    let report = s.prune_retained_state_before(0, 3).unwrap();
+
+    assert_eq!(report.completed_event_claims, 1);
+    assert!(!s
+        .claim_offline_mention("mention", "agent", "from", "room", "wake up", 4)
+        .unwrap());
+    assert!(s
+        .claim_management_command("management", "from", "room", "who", 4)
+        .unwrap());
 }

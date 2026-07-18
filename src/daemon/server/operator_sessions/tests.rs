@@ -30,9 +30,7 @@ fn projection_exposes_public_identity_without_private_runtime_id() {
             now: 10,
         })
         .unwrap();
-    store
-        .join_session_channel(&pubkey, "skill-dev", 11)
-        .unwrap();
+    store.grant_session_route(&pubkey, "skill-dev", 11).unwrap();
 
     let rows = project_sessions(&store, "laptop", &HashMap::new()).unwrap();
     assert_eq!(rows.len(), 1);
@@ -49,7 +47,13 @@ fn projection_exposes_public_identity_without_private_runtime_id() {
     assert_eq!(rows[0]["transport"], "process");
     assert!(rows[0]["endpoint"].is_null());
 
-    store.mark_dead(&pubkey).unwrap();
+    store
+        .mark_runtime_stopped(
+            &pubkey,
+            crate::state::StopReason::OperatorKill,
+            crate::util::now_secs(),
+        )
+        .unwrap();
     assert!(project_sessions(&store, "laptop", &HashMap::new())
         .unwrap()
         .is_empty());
@@ -66,6 +70,9 @@ fn projection_includes_live_unbound_supervisor() {
         id: "pty-1".into(),
         socket: "/tmp/pty-1.sock".into(),
         supervisor_pid: 42,
+        instance_token: String::new(),
+        adopted_process_fingerprint: String::new(),
+        child_pid: None,
         agent: "codex".into(),
         root: "workspace".into(),
         cwd: "/repo/subdir".into(),

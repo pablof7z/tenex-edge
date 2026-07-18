@@ -2,7 +2,7 @@ use super::{scope, WhoRow, WhoSource};
 use anyhow::Result;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
-pub(super) fn push_claim_rows(
+pub(super) fn push_retained_rows(
     aggregation: &crate::who_aggregation::WhoAggregation,
     current_root: Option<&str>,
     now: u64,
@@ -10,65 +10,65 @@ pub(super) fn push_claim_rows(
     rows: &mut Vec<WhoRow>,
     other_agents: &mut BTreeMap<String, BTreeSet<String>>,
 ) -> Result<()> {
-    let live_pubkeys: HashSet<String> = rows.iter().map(|r| r.pubkey.clone()).collect();
-    for claim in aggregation.claims.iter().cloned() {
-        if live_pubkeys.contains(&claim.pubkey) {
+    let live_pubkeys: HashSet<String> = rows.iter().map(|row| row.pubkey.clone()).collect();
+    for standing in &aggregation.retained_standing {
+        if live_pubkeys.contains(&standing.pubkey)
+            || scope::is_archived_channel(aggregation, &standing.channel_h)
+        {
             continue;
         }
-        let scope = claim.channel_h.clone();
-        if scope::is_archived_channel(aggregation, &scope) {
+        let Some(session) = aggregation.session(&standing.pubkey) else {
             continue;
-        }
+        };
         let slug = aggregation
-            .display_slug(&claim.pubkey)
-            .unwrap_or_else(|| claim.agent_slug.clone());
+            .display_slug(&standing.pubkey)
+            .unwrap_or_else(|| session.agent_slug.clone());
         if current_root
-            .map(|p| scope::scope_contains_channel(aggregation, p, &scope))
+            .map(|root| scope::scope_contains_channel(aggregation, root, &standing.channel_h))
             .transpose()?
             .unwrap_or(true)
         {
-            rows.push(dormant_row(aggregation, claim, slug, local_host, now)?);
-        } else if scope::is_root_channel(aggregation, &scope) {
-            other_agents.entry(scope).or_default().insert(slug);
+            rows.push(retained_row(
+                aggregation,
+                session,
+                &standing.channel_h,
+                slug,
+                local_host,
+                now,
+            )?);
+        } else if scope::is_root_channel(aggregation, &standing.channel_h) {
+            other_agents
+                .entry(standing.channel_h.clone())
+                .or_default()
+                .insert(slug);
         }
     }
     Ok(())
 }
 
-fn dormant_row(
+fn retained_row(
     aggregation: &crate::who_aggregation::WhoAggregation,
-    claim: crate::state::session_claims::SessionClaim,
+    session: &crate::state::Session,
+    channel: &str,
     slug: String,
     local_host: &str,
     now: u64,
 ) -> Result<WhoRow> {
-    let owner_host = claim.owner_host.trim();
-    let host = if owner_host.is_empty() {
-        local_host.to_string()
-    } else {
-        owner_host.to_string()
-    };
-    let remote = !owner_host.is_empty() && owner_host != local_host;
-    let title = aggregation
-        .session(&claim.pubkey)
-        .map(|s| s.title.clone())
-        .unwrap_or_default();
-    let work_root = scope::work_root_for(aggregation, &claim.channel_h)?;
-    let work_root_display = work_root.clone();
+    let work_root = scope::work_root_for(aggregation, channel)?;
     Ok(WhoRow {
         source: WhoSource::Local,
         state: crate::session_state::SessionState::Offline,
         slug,
-        channel: claim.channel_h.clone(),
-        status: title,
+        channel: channel.to_string(),
+        status: session.title.clone(),
         activity: String::new(),
         dormant: true,
-        host,
-        age_secs: Some(now.saturating_sub(claim.last_active_at)),
+        host: local_host.to_string(),
+        age_secs: Some(now.saturating_sub(session.stopped_at)),
         rel_cwd: String::new(),
-        remote,
+        remote: false,
+        work_root_display: work_root.clone(),
         work_root,
-        work_root_display,
-        pubkey: claim.pubkey,
+        pubkey: session.pubkey.clone(),
     })
 }

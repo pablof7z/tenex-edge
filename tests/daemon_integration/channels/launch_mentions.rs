@@ -115,7 +115,7 @@ fn pty_diagnostics() -> String {
 fn find_alive_session(home: &Home, slug: &str, scope: &str) -> Option<Session> {
     Store::open(&home.store_path())
         .ok()?
-        .list_alive_sessions()
+        .list_running_sessions()
         .ok()?
         .into_iter()
         .find(|rec| rec.agent_slug == slug && rec.channel_h == scope)
@@ -128,7 +128,7 @@ fn wait_for_alive_session(home: &Home, slug: &str, scope: &str) -> Session {
         wait_until(Duration::from_secs(25), || {
             found = find_alive_session(home, slug, scope);
             seen = Store::open(&home.store_path())
-                .and_then(|s| s.list_alive_sessions())
+                .and_then(|s| s.list_running_sessions())
                 .unwrap_or_default()
                 .into_iter()
                 .map(|rec| format!("{}:{}:{}", rec.agent_slug, rec.channel_h, rec.pubkey))

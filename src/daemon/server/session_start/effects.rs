@@ -5,12 +5,15 @@ use std::sync::Arc;
 pub(super) fn schedule_channel_ready(
     state: Arc<DaemonState>,
     pubkey: String,
+    runtime_generation: u64,
+    lifecycle_epoch: u64,
     check: Option<ChannelReadyIntent>,
 ) {
     let Some(check) = check else {
         return;
     };
     tokio::spawn(async move {
+        let _lane = state.standing_sync.lock().await;
         match channel_ready::verify_start_channel_ready(
             &state,
             &check.channel_h,
@@ -21,7 +24,25 @@ pub(super) fn schedule_channel_ready(
         )
         .await
         {
-            Ok(()) => publish_root_roster_if_needed(&state, &check.channel_h).await,
+            Ok(()) => {
+                match super::super::managed_lifecycle::commit_confirmed_admission(
+                    &state,
+                    &check.pubkey,
+                    &check.channel_h,
+                    runtime_generation,
+                    lifecycle_epoch,
+                )
+                .await
+                {
+                    Ok(true) => publish_root_roster_if_needed(&state, &check.channel_h).await,
+                    Ok(false) => {
+                        tracing::warn!(pubkey, channel = %check.channel_h, lifecycle_epoch, "confirmed channel admission became stale")
+                    }
+                    Err(error) => {
+                        tracing::error!(pubkey, channel = %check.channel_h, lifecycle_epoch, %error, "confirmed channel admission persistence failed")
+                    }
+                }
+            }
             Err(e) => {
                 tracing::warn!(
                     pubkey,

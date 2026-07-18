@@ -7,6 +7,17 @@ pub struct LaunchMetadata {
     pub id: String,
     pub socket: String,
     pub supervisor_pid: u32,
+    #[serde(default)]
+    pub instance_token: String,
+    /// One-time ownership fingerprint for a live supervisor launched before
+    /// instance tokens existed. Empty for token-authenticated supervisors.
+    #[serde(default)]
+    pub adopted_process_fingerprint: String,
+    /// The PTY child is a separate session leader. Persisting its pid lets a
+    /// daemon prove that fallback teardown stopped the harness, not just its
+    /// wrapper.
+    #[serde(default)]
+    pub child_pid: Option<u32>,
     pub agent: String,
     pub root: String,
     pub cwd: String,
@@ -67,6 +78,49 @@ pub fn write_metadata(meta: &LaunchMetadata) -> Result<()> {
     std::fs::write(metadata_path(&meta.id), bytes).context("writing pty metadata")
 }
 
+pub(super) fn record_child_pid(
+    id: &str,
+    instance_token: &str,
+    child_pid: Option<u32>,
+) -> Result<()> {
+    let Some(child_pid) = child_pid else {
+        anyhow::bail!("PTY child has no process id");
+    };
+    for _ in 0..20 {
+        let path = metadata_path(id);
+        if let Ok(bytes) = std::fs::read(&path) {
+            let mut metadata: LaunchMetadata = serde_json::from_slice(&bytes)?;
+            if metadata.instance_token != instance_token || instance_token.is_empty() {
+                anyhow::bail!("PTY metadata instance token changed before child binding");
+            }
+            metadata.child_pid = Some(child_pid);
+            return write_metadata(&metadata);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(25));
+    }
+    anyhow::bail!("PTY launch metadata did not appear before child binding")
+}
+
+/// Bind a tokenless pre-upgrade supervisor to the exact live process observed
+/// while its socket still answered the old presentation probe. This is a
+/// one-time runtime adoption record, not a legacy public protocol surface.
+pub(super) fn adopt_pre_token_supervisor(id: &str) -> Result<()> {
+    let Some(mut metadata) = read_all_metadata().into_iter().find(|meta| meta.id == id) else {
+        anyhow::bail!("PTY {id:?} has no launch metadata to adopt");
+    };
+    if !metadata.instance_token.is_empty() || !metadata.adopted_process_fingerprint.is_empty() {
+        return Ok(());
+    }
+    let pid = i32::try_from(metadata.supervisor_pid).context("supervisor pid overflow")?;
+    let command = process_command(pid)?.context("pre-upgrade supervisor is not running")?;
+    if !command_owns_pre_token_endpoint(&command, id) {
+        anyhow::bail!("refusing to adopt pid {pid}: command does not own PTY {id:?}");
+    }
+    metadata.adopted_process_fingerprint = command.trim().to_string();
+    metadata.child_pid = discover_owned_child(pid).map(|pid| pid as u32);
+    write_metadata(&metadata)
+}
+
 pub fn remove_metadata(id: &str) -> Result<()> {
     match std::fs::remove_file(metadata_path(id)) {
         Ok(()) => Ok(()),
@@ -87,6 +141,195 @@ pub fn read_all_metadata() -> Vec<LaunchMetadata> {
         .collect::<Vec<_>>();
     out.sort_by(|a, b| b.id.cmp(&a.id));
     out
+}
+
+/// Terminate only the supervisor whose persisted metadata and live command line
+/// both identify `endpoint_id`. The identity check prevents a recycled PID from
+/// turning stale metadata into an unrelated process kill.
+pub(crate) fn terminate_owned_supervisor(endpoint_id: &str) -> Result<bool> {
+    let Some(metadata) = read_all_metadata()
+        .into_iter()
+        .find(|metadata| metadata.id == endpoint_id)
+    else {
+        return Ok(false);
+    };
+    let pid = i32::try_from(metadata.supervisor_pid).context("supervisor pid overflow")?;
+    if pid <= 1 || !process_running(pid) {
+        remove_metadata(endpoint_id)?;
+        return Ok(true);
+    }
+    verify_owned_process(pid, endpoint_id, &metadata)?;
+    let child_pid = metadata
+        .child_pid
+        .and_then(|pid| i32::try_from(pid).ok())
+        .or_else(|| discover_owned_child(pid));
+    let Some(child_pid) = child_pid else {
+        anyhow::bail!("refusing to terminate PTY {endpoint_id:?}: owned child is unknown");
+    };
+    verify_owned_child(pid, child_pid)?;
+    terminate_owned_child(child_pid)?;
+    if process_running(pid) {
+        signal(pid, nix::sys::signal::Signal::SIGTERM)?;
+        wait_for_exit(pid, 20);
+    }
+    if process_running(pid) {
+        verify_owned_process(pid, endpoint_id, &metadata)?;
+        signal(pid, nix::sys::signal::Signal::SIGKILL)?;
+        wait_for_exit(pid, 20);
+    }
+    if process_running(pid) {
+        anyhow::bail!("PTY supervisor {endpoint_id:?} pid {pid} did not terminate");
+    }
+    remove_metadata(endpoint_id)?;
+    Ok(true)
+}
+
+fn signal(pid: i32, signal: nix::sys::signal::Signal) -> Result<()> {
+    nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), Some(signal))
+        .with_context(|| format!("sending {signal:?} to PTY supervisor pid {pid}"))
+}
+
+fn wait_for_exit(pid: i32, attempts: usize) {
+    for _ in 0..attempts {
+        if !process_running(pid) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
+fn verify_owned_process(pid: i32, endpoint_id: &str, metadata: &LaunchMetadata) -> Result<()> {
+    let command = process_command(pid)?.context("PTY supervisor is not running")?;
+    let token_owned = command_owns_endpoint(&command, endpoint_id, &metadata.instance_token);
+    let adopted_owned = metadata.instance_token.is_empty()
+        && !metadata.adopted_process_fingerprint.is_empty()
+        && command.trim() == metadata.adopted_process_fingerprint
+        && command_owns_pre_token_endpoint(&command, endpoint_id);
+    if !token_owned && !adopted_owned {
+        anyhow::bail!("refusing to terminate pid {pid}: command does not own PTY {endpoint_id:?}");
+    }
+    Ok(())
+}
+
+fn command_owns_pre_token_endpoint(command: &str, endpoint_id: &str) -> bool {
+    if endpoint_id.is_empty() {
+        return false;
+    }
+    let Some(argv) = shlex::split(command.trim()) else {
+        return false;
+    };
+    let supervisor_args = &argv[2..];
+    let option_end = supervisor_args
+        .iter()
+        .position(|arg| arg == "--")
+        .unwrap_or(supervisor_args.len());
+    let supervisor_options = &supervisor_args[..option_end];
+    argv.get(1).map(String::as_str) == Some("__pty-supervisor")
+        && exact_option(supervisor_options, "--id") == Some(endpoint_id)
+        && exact_option(supervisor_options, "--instance-token").is_none()
+}
+
+fn command_owns_endpoint(command: &str, endpoint_id: &str, instance_token: &str) -> bool {
+    if endpoint_id.is_empty() || instance_token.is_empty() {
+        return false;
+    }
+    let Some(argv) = shlex::split(command.trim()) else {
+        return false;
+    };
+    if argv.get(1).map(String::as_str) != Some("__pty-supervisor") {
+        return false;
+    }
+    let supervisor_args = &argv[2..];
+    let option_end = supervisor_args
+        .iter()
+        .position(|arg| arg == "--")
+        .unwrap_or(supervisor_args.len());
+    let supervisor_options = &supervisor_args[..option_end];
+    exact_option(supervisor_options, "--id") == Some(endpoint_id)
+        && exact_option(supervisor_options, "--instance-token") == Some(instance_token)
+}
+
+fn exact_option<'a>(argv: &'a [String], option: &str) -> Option<&'a str> {
+    argv.windows(2)
+        .find(|pair| pair[0] == option)
+        .map(|pair| pair[1].as_str())
+}
+
+fn process_command(pid: i32) -> Result<Option<String>> {
+    let output = std::process::Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "state=", "-o", "command="])
+        .output()
+        .context("inspecting PTY supervisor command")?;
+    if !output.status.success() {
+        return Ok(None);
+    }
+    let line = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let Some((state, command)) = line.split_once(char::is_whitespace) else {
+        return Ok(None);
+    };
+    if state.starts_with('Z') {
+        return Ok(None);
+    }
+    Ok(Some(command.trim().to_string()))
+}
+
+fn process_running(pid: i32) -> bool {
+    process_command(pid).ok().flatten().is_some()
+}
+
+fn process_rows() -> Result<Vec<(i32, i32, String)>> {
+    let output = std::process::Command::new("ps")
+        .args(["-ax", "-o", "pid=", "-o", "ppid=", "-o", "state="])
+        .output()
+        .context("inspecting PTY process ownership")?;
+    if !output.status.success() {
+        anyhow::bail!("ps failed while inspecting PTY process ownership");
+    }
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.split_whitespace();
+            Some((
+                fields.next()?.parse().ok()?,
+                fields.next()?.parse().ok()?,
+                fields.next()?.to_string(),
+            ))
+        })
+        .collect())
+}
+
+fn discover_owned_child(supervisor_pid: i32) -> Option<i32> {
+    let mut children = process_rows()
+        .ok()?
+        .into_iter()
+        .filter_map(|(pid, ppid, state)| {
+            (ppid == supervisor_pid && !state.starts_with('Z')).then_some(pid)
+        });
+    let child = children.next()?;
+    children.next().is_none().then_some(child)
+}
+
+fn verify_owned_child(supervisor_pid: i32, child_pid: i32) -> Result<()> {
+    let owned = process_rows()?.into_iter().any(|(pid, ppid, state)| {
+        pid == child_pid && ppid == supervisor_pid && !state.starts_with('Z')
+    });
+    if !owned {
+        anyhow::bail!("refusing to terminate child pid {child_pid}: PTY ownership changed");
+    }
+    Ok(())
+}
+
+fn terminate_owned_child(pid: i32) -> Result<()> {
+    signal(pid, nix::sys::signal::Signal::SIGHUP)?;
+    wait_for_exit(pid, 10);
+    if process_running(pid) {
+        signal(pid, nix::sys::signal::Signal::SIGKILL)?;
+        wait_for_exit(pid, 40);
+    }
+    if process_running(pid) {
+        anyhow::bail!("PTY child pid {pid} did not terminate");
+    }
+    Ok(())
 }
 
 /// Resolve a PTY endpoint id to its supervisor socket without inventing a
@@ -130,6 +373,9 @@ mod tests {
             id: "pty-1".into(),
             socket: "/tmp/pty-1.sock".into(),
             supervisor_pid: 42,
+            instance_token: "token-1".into(),
+            adopted_process_fingerprint: String::new(),
+            child_pid: None,
             agent: "agent".into(),
             root: "/tmp".into(),
             cwd: "/tmp".into(),
@@ -156,5 +402,83 @@ mod tests {
             super::socket_dir_for(mosaico_home, 501).join("testing-lead-1783399436-28334.sock");
 
         assert!(path.as_os_str().as_bytes().len() < 100);
+    }
+
+    #[test]
+    fn ownership_requires_exact_endpoint_and_instance_token_arguments() {
+        let command =
+            "/opt/mosaico __pty-supervisor --id grok-123-456 --instance-token token-2 -- echo";
+        assert!(super::command_owns_endpoint(
+            command,
+            "grok-123-456",
+            "token-2"
+        ));
+        assert!(!super::command_owns_endpoint(
+            command,
+            "grok-123-45",
+            "token-2"
+        ));
+        assert!(!super::command_owns_endpoint(
+            command,
+            "grok-123-456",
+            "token"
+        ));
+        assert!(!super::command_owns_endpoint(
+            "/opt/mosaico unrelated -- __pty-supervisor --id grok-123-456 --instance-token token-2",
+            "grok-123-456",
+            "token-2"
+        ));
+        assert!(!super::command_owns_endpoint(
+            "/opt/mosaico __pty-supervisor --id other --instance-token other -- --id grok-123-456 --instance-token token-2",
+            "grok-123-456",
+            "token-2"
+        ));
+    }
+
+    #[test]
+    fn old_metadata_without_instance_token_remains_readable_but_untrusted() {
+        let metadata: super::LaunchMetadata = serde_json::from_value(serde_json::json!({
+            "id": "grok-old",
+            "socket": "/tmp/grok-old.sock",
+            "supervisor_pid": 42,
+            "agent": "grok",
+            "root": "/tmp",
+            "cwd": "/tmp",
+            "command": ["grok"]
+        }))
+        .expect("old metadata should remain readable for live-session adoption");
+
+        assert!(metadata.instance_token.is_empty());
+        assert!(metadata.adopted_process_fingerprint.is_empty());
+        assert!(metadata.child_pid.is_none());
+        assert!(!super::command_owns_endpoint(
+            "/opt/mosaico __pty-supervisor --id grok-old -- grok",
+            &metadata.id,
+            &metadata.instance_token,
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn owned_child_fallback_escalates_past_ignored_hup() {
+        use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+
+        let pair = native_pty_system()
+            .openpty(PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .unwrap();
+        let mut command = CommandBuilder::new("/bin/sh");
+        command.args(["-c", "trap '' HUP; exec sleep 60"]);
+        let mut child = pair.slave.spawn_command(command).unwrap();
+        let pid = i32::try_from(child.process_id().unwrap()).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        super::terminate_owned_child(pid).unwrap();
+
+        assert!(child.try_wait().unwrap().is_some());
     }
 }

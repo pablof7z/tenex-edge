@@ -100,9 +100,12 @@ pub(super) async fn rpc_session_start_inner(
         harness_name,
         p.watch_pid,
         &work_root,
-    )?;
+    )
+    .await?;
     let existing = state.with_store(|store| store.get_session(&pubkey))?;
-    let already_running = existing.as_ref().is_some_and(|session| session.alive)
+    let already_running = existing
+        .as_ref()
+        .is_some_and(|session| session.is_running())
         && state.runtime.engines.lock().unwrap().contains_key(&pubkey);
     if already_running {
         if let Some(existing) = &existing {
@@ -145,7 +148,6 @@ pub(super) async fn rpc_session_start_inner(
         Ok(())
     })?;
     retire_reclaimed_profile(state, reclaimed_pubkey.as_deref()).await?;
-    membership_cleanup::cleanup_dead_local_sessions(state);
 
     let endpoint = p.pty_session.clone().filter(|value| !value.is_empty());
     let request = advisory::SessionStartRequest {
@@ -179,11 +181,28 @@ pub(super) async fn rpc_session_start_inner(
         return Ok(serde_json::json!({ "pubkey": pubkey }));
     }
 
-    effects::schedule_channel_ready(state.clone(), pubkey.clone(), plan.channel_ready);
+    let lifecycle_epoch = state
+        .with_store(|store| store.get_session(&pubkey))?
+        .map(|session| session.lifecycle_epoch)
+        .context("reserved session disappeared before channel readiness")?;
+    effects::schedule_channel_ready(
+        state.clone(),
+        pubkey.clone(),
+        runtime_generation,
+        lifecycle_epoch,
+        plan.channel_ready,
+    );
     if plan.replay_chat {
         effects::schedule_replay_chat(state.clone(), channel.clone());
     }
-    joined_channels::schedule_subscriptions(state, &joined, &channel);
+    joined_channels::schedule_admission(
+        state.clone(),
+        pubkey.clone(),
+        runtime_generation,
+        lifecycle_epoch,
+        &joined,
+        &channel,
+    );
 
     let spawn = plan
         .spawn
@@ -259,9 +278,14 @@ impl RuntimeReservation {
 impl Drop for RuntimeReservation {
     fn drop(&mut self) {
         if self.armed {
-            let _ = self
-                .state
-                .with_store(|store| store.mark_dead_if_generation(&self.pubkey, self.generation));
+            let _ = self.state.with_store(|store| {
+                store.mark_runtime_stopped_if_generation(
+                    &self.pubkey,
+                    self.generation,
+                    crate::state::StopReason::Unknown,
+                    now_secs(),
+                )
+            });
         }
     }
 }

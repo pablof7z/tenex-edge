@@ -44,6 +44,7 @@ pub(super) struct SessionRuntimeState {
     pub(super) hosted: Mutex<HashMap<String, HostedAgent>>,
     pub(super) engines: Mutex<HashMap<String, SessionHandle>>,
     pub(super) hook_contexts: crate::turn_context::HookContextStates,
+    pub(super) pty_probe_failures: Mutex<HashMap<(String, u64), u8>>,
 }
 
 impl SessionRuntimeState {
@@ -52,6 +53,7 @@ impl SessionRuntimeState {
             hosted: Mutex::new(HashMap::new()),
             engines: Mutex::new(HashMap::new()),
             hook_contexts: Mutex::new(HashMap::new()),
+            pty_probe_failures: Mutex::new(HashMap::new()),
         }
     }
 }

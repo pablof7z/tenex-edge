@@ -2,12 +2,11 @@
 //! this module only remembers which mode the agent has already been told.
 
 use super::HookContextStates;
-use crate::state::{Session, Store};
-use std::sync::Mutex;
+use crate::state::Session;
 
 pub(super) fn push_mode_notice(
+    store: &std::sync::Mutex<crate::state::Store>,
     states: &HookContextStates,
-    store: &Mutex<Store>,
     rec: &Session,
     announce_initial: bool,
     warnings: &mut Vec<String>,

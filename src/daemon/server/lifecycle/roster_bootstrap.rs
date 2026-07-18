@@ -59,41 +59,6 @@ fn roots_needing_workspace_name(
     Ok(roots)
 }
 
-pub(super) fn seed_spawn_on_mention_coverage(state: &Arc<DaemonState>) {
-    let member_groups: Vec<String> = state.with_store(|s| {
-        let mut pubkeys = s.list_local_session_pubkeys().unwrap_or_default();
-        if let Some(pk) = state.backend_pubkey() {
-            pubkeys.push(pk);
-        }
-        let mut groups = Vec::new();
-        for pk in &pubkeys {
-            if let Ok(gs) = s.list_channels_where_member(pk) {
-                groups.extend(gs);
-            }
-            if let Ok(gs) = s.list_channels_where_admin(pk) {
-                groups.extend(gs);
-            }
-        }
-        groups.sort_unstable();
-        groups.dedup();
-        groups
-    });
-    {
-        let mut projs = state.subscriptions.roots.lock().unwrap();
-        for group in &member_groups {
-            if !projs.iter().any(|p| p == group) {
-                projs.push(group.clone());
-            }
-        }
-    }
-    tracing::info!(
-        subscribed_session_pubkeys =
-            state.with_store(|s| s.list_local_session_pubkeys().unwrap_or_default().len()),
-        member_groups = member_groups.len(),
-        "spawn-on-mention coverage seeded"
-    );
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -36,12 +36,12 @@ fn project_sessions(
         .collect::<HashMap<_, _>>();
     let mut rows = Vec::new();
     let mut projected_endpoints = HashSet::new();
-    for rec in store.list_alive_sessions()? {
+    for rec in store.list_running_sessions()? {
         let identity = store
             .session_identity(&rec.pubkey)?
             .with_context(|| format!("live session {} has no identity projection", rec.pubkey))?;
         let mut grouped = BTreeMap::<String, Vec<String>>::new();
-        for (channel_id, _) in store.list_session_joined_channels(&rec.pubkey)? {
+        for (channel_id, _) in store.list_session_routes(&rec.pubkey)? {
             let root_id = crate::daemon::workspace_path::WorkspacePathResolver::new(store)
                 .root_for_channel(&channel_id)?;
             grouped.entry(root_id).or_default().push(channel_id);
@@ -81,7 +81,7 @@ fn project_sessions(
             "handle": identity.display_slug(),
             "agent": rec.agent_slug,
             "title": rec.title,
-            "busy": rec.working,
+            "busy": rec.is_working(),
             "last_seen": rec.last_seen,
             "host": host,
             "harness": rec.observed_harness,

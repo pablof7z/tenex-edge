@@ -56,7 +56,7 @@ pub(in crate::daemon::server) fn validate_agent_identity_admission(
 ) -> Result<()> {
     let conflict = state.with_store(|store| {
         for session in store
-            .list_alive_sessions()?
+            .list_running_sessions()?
             .into_iter()
             .filter(|session| session.agent_slug == agent.slug)
         {

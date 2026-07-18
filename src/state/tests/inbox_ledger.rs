@@ -30,7 +30,7 @@ fn offline_mention_claim_survives_store_reopen_per_recipient() {
             .unwrap());
         s.complete_offline_mention("event-1", "agent-a", 101)
             .unwrap();
-        s.prune_retained_state_before(1_000, 1_000).unwrap();
+        s.prune_retained_state_before(1_000, 100).unwrap();
     }
 
     let reopened = Store::open(&path).unwrap();
@@ -39,5 +39,34 @@ fn offline_mention_claim_survives_store_reopen_per_recipient() {
         .unwrap());
     assert!(reopened
         .claim_offline_mention("event-1", "agent-b", "from", "room", "do it", 200)
+        .unwrap());
+}
+
+#[test]
+fn failed_offline_mention_recovery_can_be_claimed_again() {
+    let s = Store::open_memory().unwrap();
+    assert!(s
+        .claim_offline_mention("event-1", "agent-a", "from", "room", "do it", 100)
+        .unwrap());
+
+    s.retry_offline_mention("event-1", "agent-a", 100).unwrap();
+
+    assert!(s
+        .list_retryable_offline_mentions(129, 10)
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        s.list_retryable_offline_mentions(130, 10).unwrap(),
+        vec![crate::state::event_claims::OfflineMentionClaim {
+            event_id: "event-1".into(),
+            mentioned_pubkey: "agent-a".into(),
+            from_pubkey: "from".into(),
+            channel_h: "room".into(),
+            body: "do it".into(),
+        }]
+    );
+
+    assert!(s
+        .claim_offline_mention("event-1", "agent-a", "from", "room", "do it", 101)
         .unwrap());
 }

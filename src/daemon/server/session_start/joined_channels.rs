@@ -1,35 +1,63 @@
 use super::*;
 
 pub(super) fn record(
-    state: &Arc<DaemonState>,
-    session_id: &str,
+    _state: &Arc<DaemonState>,
+    _session_id: &str,
     primary: String,
     mut requested: Vec<String>,
-    now: u64,
+    _now: u64,
 ) -> Vec<String> {
     requested.push(primary);
     requested.sort();
     requested.dedup();
-    state.with_store(|s| {
-        for joined in &requested {
-            if let Err(e) = s.join_session_channel(session_id, joined, now) {
-                tracing::error!(session = %session_id, channel = %joined, error = %e, "session_start: failed to join requested channel");
-            }
-        }
-    });
     requested
 }
 
-pub(super) fn schedule_subscriptions(
-    state: &Arc<DaemonState>,
+pub(super) fn schedule_admission(
+    state: Arc<DaemonState>,
+    pubkey: String,
+    runtime_generation: u64,
+    lifecycle_epoch: u64,
     joined_channels: &[String],
     active_channel: &str,
 ) {
-    for joined in joined_channels.iter().filter(|ch| *ch != active_channel) {
-        let st = state.clone();
-        let joined = joined.clone();
-        tokio::spawn(async move {
-            let _ = ensure_subscription(&st, &joined).await;
-        });
+    let passive = joined_channels
+        .iter()
+        .filter(|channel| channel.as_str() != active_channel)
+        .cloned()
+        .collect::<Vec<_>>();
+    if passive.is_empty() {
+        return;
     }
+    tokio::spawn(async move {
+        for channel in passive {
+            let _lane = state.standing_sync.lock().await;
+            let outcome = state
+                .provider
+                .grant_member_confirmed(&channel, &pubkey)
+                .await;
+            if !outcome.is_confirmed() {
+                tracing::warn!(pubkey, %channel, ?outcome, "session_start passive admission was not confirmed");
+                continue;
+            }
+            match super::super::managed_lifecycle::commit_confirmed_admission(
+                &state,
+                &pubkey,
+                &channel,
+                runtime_generation,
+                lifecycle_epoch,
+            )
+            .await
+            {
+                Ok(true) => {}
+                Ok(false) => {
+                    tracing::warn!(pubkey, %channel, "confirmed passive admission became stale")
+                }
+                Err(error) => {
+                    tracing::error!(pubkey, %channel, %error, "confirmed passive admission could not be persisted")
+                }
+            }
+        }
+        let _ = sync_subscriptions(&state).await;
+    });
 }

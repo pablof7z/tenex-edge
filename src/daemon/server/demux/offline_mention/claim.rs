@@ -1,5 +1,41 @@
 use super::super::super::*;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::daemon::server::demux) enum RecoveryOutcome {
+    Complete,
+    Retry,
+}
+
+const RETRY_BATCH_LIMIT: u32 = 64;
+
+pub(in crate::daemon::server::demux) fn drive_retries(state: &Arc<DaemonState>) {
+    let claims = match state
+        .with_store(|store| store.list_retryable_offline_mentions(now_secs(), RETRY_BATCH_LIMIT))
+    {
+        Ok(claims) => claims,
+        Err(error) => {
+            tracing::error!(%error, "offline mention retry scan failed");
+            return;
+        }
+    };
+    for claim in claims {
+        let chat = crate::domain::ChatMessage {
+            from: crate::domain::AgentRef::new(claim.from_pubkey, String::new()),
+            channel: claim.channel_h,
+            body: claim.body,
+            mentioned_pubkeys: vec![claim.mentioned_pubkey.clone()],
+        };
+        if begin(state, &claim.event_id, &claim.mentioned_pubkey, &chat) {
+            tracing::info!(
+                event_id = %claim.event_id,
+                mentioned_pk = %crate::util::pubkey_short(&claim.mentioned_pubkey),
+                "retrying durable offline mention recovery"
+            );
+            dispatch(state, &claim.event_id, &chat, &claim.mentioned_pubkey);
+        }
+    }
+}
+
 pub(in crate::daemon::server::demux) fn dispatch_all(
     state: &Arc<DaemonState>,
     event_id: &str,
@@ -67,7 +103,7 @@ fn dispatch(
         "dispatching offline-agent-mention handler"
     );
     tokio::spawn(async move {
-        super::handle(
+        let outcome = super::handle(
             &st,
             &event_id,
             &mentioned_pubkey,
@@ -76,19 +112,30 @@ fn dispatch(
             Some(&requester_pubkey),
         )
         .await;
-        complete(&st, &event_id, &mentioned_pubkey);
+        finish(&st, &event_id, &mentioned_pubkey, outcome);
     });
 }
 
-fn complete(state: &Arc<DaemonState>, event_id: &str, mentioned_pubkey: &str) {
-    if let Err(e) =
-        state.with_store(|s| s.complete_offline_mention(event_id, mentioned_pubkey, now_secs()))
-    {
+fn finish(
+    state: &Arc<DaemonState>,
+    event_id: &str,
+    mentioned_pubkey: &str,
+    outcome: RecoveryOutcome,
+) {
+    let result =
+        match outcome {
+            RecoveryOutcome::Complete => state
+                .with_store(|s| s.complete_offline_mention(event_id, mentioned_pubkey, now_secs())),
+            RecoveryOutcome::Retry => state
+                .with_store(|s| s.retry_offline_mention(event_id, mentioned_pubkey, now_secs())),
+        };
+    if let Err(e) = result {
         tracing::error!(
             event_id,
             mentioned_pk = %crate::util::pubkey_short(mentioned_pubkey),
+            outcome = ?outcome,
             error = %e,
-            "offline mention completion mark failed"
+            "offline mention claim state update failed"
         );
     }
 }

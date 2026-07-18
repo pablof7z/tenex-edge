@@ -129,7 +129,7 @@ async fn kill_session(state: &Arc<DaemonState>, selector: &str) -> Result<String
         .with_context(|| {
             format!("no local session matching {selector:?}; use its npub or current handle")
         })?;
-    if !rec.alive {
+    if !rec.is_running() {
         anyhow::bail!("session {selector:?} is not running");
     }
     let public_label = state
@@ -137,11 +137,11 @@ async fn kill_session(state: &Arc<DaemonState>, selector: &str) -> Result<String
         .or_else(|| crate::idref::npub(&rec.pubkey))
         .unwrap_or_else(|| rec.pubkey.clone());
     let stop_note = stop_local_process(state, &rec).await;
-    let _ = super::rpc_session_end(
+    let _ = super::session_end::end_runtime_generation(
         state,
-        &serde_json::json!({
-            "session": rec.pubkey,
-        }),
+        &rec.pubkey,
+        rec.runtime_generation,
+        crate::state::StopReason::OperatorKill,
     )
     .await?;
     match stop_note {

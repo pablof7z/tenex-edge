@@ -62,7 +62,7 @@ pub(crate) struct WhoRow {
     /// title while mid-turn; empty (and not rendered) when idle.
     #[serde(default)]
     pub(crate) activity: String,
-    /// A local Class A session that exited but still owns a soft route claim.
+    /// A stopped local session whose relay membership is still retained.
     #[serde(default)]
     pub(crate) dormant: bool,
     pub(crate) host: String,
@@ -143,7 +143,7 @@ pub(crate) fn build_who_snapshot(
                 .insert(local_instance(aggregation, s).display_slug());
         }
     }
-    dormant::push_claim_rows(
+    dormant::push_retained_rows(
         aggregation,
         current_root,
         now,

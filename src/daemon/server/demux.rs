@@ -17,6 +17,10 @@ mod chat_ops;
 mod offline_mention;
 mod route_reaction;
 
+pub(in crate::daemon::server) fn drive_offline_mention_retries(state: &Arc<DaemonState>) {
+    offline_mention::drive_retries(state);
+}
+
 /// Proactively fetch + cache the `kind:0` for any of `pubkeys` we do not already
 /// have a name for. Called on every inbound event (a peer newly seen in a
 /// 3900x/chat/status) and once at startup for the identities we already know
@@ -175,27 +179,6 @@ fn handle_incoming(state: &Arc<DaemonState>, event: &Event) {
     }
     if outcome.wake_mentions {
         crate::session_host::ring_doorbells(state.clone());
-    }
-
-    // When a kind:39002 membership snapshot arrives, ensure we have a group
-    // subscription for any group a local agent just joined. `ensure_subscription`
-    // is idempotent for already-subscribed groups.
-    if event.kind.as_u16() == crate::fabric::nip29::wire::KIND_GROUP_MEMBERS {
-        if let Some(channel) = crate::fabric::nip29::nostr_tag(event, "d") {
-            let local_pks = state.hosted_pubkeys();
-            let is_member = event.tags.iter().any(|t| {
-                let s = t.as_slice();
-                s.first().map(String::as_str) == Some("p")
-                    && s.get(1).map(|pk| local_pks.contains(pk)).unwrap_or(false)
-            });
-            if is_member {
-                let st = state.clone();
-                let proj = channel.to_string();
-                tokio::spawn(async move {
-                    let _ = ensure_subscription(&st, &proj).await;
-                });
-            }
-        }
     }
 
     chat_ops::dispatch(state, event);

@@ -27,7 +27,7 @@ pub(super) fn take_inbox(s: &Store, target_pubkey: &str, now: u64) -> Result<Vec
 }
 
 pub(super) fn joined_channels(s: &Store, rec: &Session) -> (Vec<(String, u64)>, bool) {
-    let (mut channels, read_failed) = match s.list_session_joined_channels(&rec.pubkey) {
+    let (mut channels, read_failed) = match s.list_session_routes(&rec.pubkey) {
         Ok(c) => (c, false),
         Err(e) => {
             tracing::error!(

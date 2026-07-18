@@ -13,7 +13,7 @@ pub(super) fn resolve_existing_pubkey(
     let endpoint_pubkey = match params.hosted_endpoint()? {
         Some((endpoint, kind)) => state.with_store(|store| {
             store
-                .alive_session_for_locator(harness, kind.locator_kind(), endpoint)
+                .running_session_for_locator(None, kind.locator_kind(), endpoint)
                 .map(|session| session.map(|session| session.pubkey))
         })?,
         None => None,
@@ -125,7 +125,7 @@ pub(super) fn reserve_generation(
                 params.agent
             );
         }
-        if existing.alive {
+        if existing.is_running() {
             return Ok(existing.runtime_generation);
         }
     }

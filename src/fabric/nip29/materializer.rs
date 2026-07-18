@@ -203,19 +203,19 @@ impl Nip29Materializer {
                     continue;
                 }
             };
-            let joined = match store.is_session_joined_channel(&session.pubkey, channel_h) {
-                Ok(joined) => joined,
+            let has_route = match store.has_session_route(&session.pubkey, channel_h) {
+                Ok(has_route) => has_route,
                 Err(e) => {
                     tracing::error!(
                         channel = channel_h,
                         session = %session.pubkey,
                         error = %e,
-                        "route_chat: session channel membership lookup failed"
+                        "route_chat: durable session route lookup failed"
                     );
                     continue;
                 }
             };
-            if !joined {
+            if !has_route {
                 continue;
             }
             match store.enqueue_inbox(

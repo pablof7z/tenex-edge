@@ -230,17 +230,17 @@ fn sample_order_sql(table: &str, table_columns: &[String]) -> Option<&'static st
         "session_locators" if has_columns(table_columns, &["pubkey", "created_at"]) => Some(
             "CASE WHEN EXISTS (\
                  SELECT 1 FROM sessions s \
-                 WHERE s.pubkey = session_locators.pubkey AND s.alive = 1\
+                 WHERE s.pubkey = session_locators.pubkey AND s.runtime_state = 'running'\
              ) THEN 0 ELSE 1 END, created_at DESC",
         ),
-        "session_channels" if has_columns(table_columns, &["pubkey", "joined_at"]) => Some(
+        "session_channels" if has_columns(table_columns, &["pubkey", "granted_at"]) => Some(
             "CASE WHEN EXISTS (\
                  SELECT 1 FROM sessions s \
-                 WHERE s.pubkey = session_channels.pubkey AND s.alive = 1\
-             ) THEN 0 ELSE 1 END, joined_at DESC",
+                 WHERE s.pubkey = session_channels.pubkey AND s.runtime_state = 'running'\
+             ) THEN 0 ELSE 1 END, granted_at DESC",
         ),
-        "sessions" if has_columns(table_columns, &["alive", "last_seen", "created_at"]) => {
-            Some("alive DESC, last_seen DESC, created_at DESC")
+        "sessions" if has_columns(table_columns, &["runtime_state", "last_seen", "created_at"]) => {
+            Some("(runtime_state='running') DESC, last_seen DESC, created_at DESC")
         }
         _ => None,
     }

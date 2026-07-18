@@ -53,10 +53,10 @@ pub(super) async fn turn_start(
             }),
         });
     }
-    let params = serde_json::json!({
+    let params = crate::cli::rpc_params(serde_json::json!({
         "harness_session": session,
         "transcript": transcript,
-    });
+    }));
     // The daemon RPC can itself fail (daemon down/restarting) — exactly the case a
     // degradation marker exists for. If we have one, don't `?`-return and drop it:
     // log the RPC error loudly and still surface the notice so the agent sees the
@@ -183,7 +183,7 @@ pub(super) async fn turn_end(session: String) -> Result<()> {
     if let Err(e) = super::run_hook_blocking(move || {
         crate::daemon::blocking::call_no_spawn(
             "turn_end",
-            serde_json::json!({"harness_session": session}),
+            crate::cli::rpc_params(serde_json::json!({"harness_session": session})),
         )?;
         Ok(())
     })

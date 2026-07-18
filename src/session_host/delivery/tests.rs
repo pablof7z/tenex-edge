@@ -183,7 +183,14 @@ fn headless_mode_separates_output_visibility_from_reachability() {
         let mut reader = std::io::BufReader::new(stream);
         let mut command = String::new();
         reader.read_line(&mut command).unwrap();
-        reader.get_mut().write_all(b"headed\n").unwrap();
+        assert_eq!(command, "PRESENTATION\n");
+        reader
+            .get_mut()
+            .write_all(
+                br#"{"attached_clients":1,"attachment_epoch":1,"changed_at":3}
+"#,
+            )
+            .unwrap();
     });
     store
         .put_session_locator(

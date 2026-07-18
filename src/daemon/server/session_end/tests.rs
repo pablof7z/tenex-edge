@@ -63,13 +63,22 @@ async fn native_process_without_admitted_transport_keeps_pid_fallback() {
         .arg("30")
         .spawn()
         .unwrap();
-    let rec = register(&state, "pk-native-process", "", child.id() as i32);
+    let child_pid = child.id();
+    let rec = register(&state, "pk-native-process", "", child_pid as i32);
+    // Reap concurrently, as the owning launcher would. Until its parent waits,
+    // a terminated child remains a zombie and `kill(pid, 0)` still reports the
+    // PID as present, so waiting only after `stop_local_process` creates an
+    // artificial five-second timeout.
+    let waiter = tokio::task::spawn_blocking(move || child.wait());
 
     let result = stop_local_process(&state, &rec).await;
     if result.is_err() {
-        let _ = child.kill();
+        let _ = nix::sys::signal::kill(
+            nix::unistd::Pid::from_raw(child_pid as i32),
+            Some(nix::sys::signal::Signal::SIGKILL),
+        );
     }
-    assert_eq!(result.unwrap(), format!("pid={}", child.id()));
-    let status = child.wait().unwrap();
+    let status = waiter.await.unwrap().unwrap();
+    assert_eq!(result.unwrap(), format!("pid={child_pid}"));
     assert!(!status.success());
 }

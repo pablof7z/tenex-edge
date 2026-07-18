@@ -85,10 +85,18 @@ pub async fn run() -> Result<()> {
         reconcilers: ReconcilerState::new(StatusReconciler::for_ttl(status_ttl_duration())),
         connections: ConnectionState::new(),
         dedup: DedupState::new(),
+        standing_sync: tokio::sync::Mutex::new(()),
     });
     // These tolerate a not-yet-connected relay, so they start now.
     spawn_demux(state.clone());
     spawn_pruner(state.clone());
+    super::managed_lifecycle::spawn(state.clone());
+
+    // Freeze restart-recovery ownership before accepting RPCs. Relay warmup is
+    // intentionally asynchronous, but a session admitted through the accept
+    // loop after this point belongs to this daemon incarnation and must never be
+    // mistaken for an orphan left by the previous process.
+    let startup_sessions = state.with_store(|store| store.list_running_sessions())?;
 
     let accept_state = state.clone();
     let accept = tokio::spawn(async move {
@@ -136,8 +144,6 @@ pub async fn run() -> Result<()> {
         }
 
         roster_bootstrap::publish_startup_roster(&relay_state).await;
-        membership_cleanup::cleanup_dead_local_sessions(&relay_state);
-        roster_bootstrap::seed_spawn_on_mention_coverage(&relay_state);
 
         // Seed the daemon-lifetime kind:9000 discovery observation plus the
         // refcounted per-entity #h / #p / group-state observations. No kind:0 is
@@ -149,7 +155,7 @@ pub async fn run() -> Result<()> {
 
         // Revive sessions a previous daemon left behind and reconcile their NMP
         // observations.
-        reconcile_sessions(&relay_state).await;
+        reconcile_sessions(&relay_state, startup_sessions).await;
         // Re-adopted sessions may already have inbox rows from before the daemon
         // restart. Session start rings these rows, but reconciliation does not;
         // ring once here so a restart cannot leave messages pending until an

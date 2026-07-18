@@ -3,7 +3,6 @@ use super::*;
 use std::path::PathBuf;
 
 mod applicability;
-mod class_b;
 mod hook_forensics;
 mod observation;
 
@@ -435,7 +434,6 @@ async fn hook_dispatch(
         "stop" => {
             if !sid.is_empty() {
                 turn_end(sid).await?;
-                class_b::inject_idle_nudge();
             }
         }
         other => {

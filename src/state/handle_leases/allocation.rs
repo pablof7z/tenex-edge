@@ -96,7 +96,8 @@ fn allocate_handle_in(
                 "SELECT lease.pubkey,
                         (lease.live=1 OR EXISTS(
                             SELECT 1 FROM sessions AS session
-                            WHERE session.pubkey=lease.pubkey AND session.alive=1
+                            WHERE session.pubkey=lease.pubkey
+                              AND session.runtime_state='running'
                         )),
                         lease.last_active_at
                  FROM handle_leases AS lease WHERE lease.handle=?1",
@@ -159,7 +160,8 @@ fn allocate_custom_handle_in(
             "SELECT lease.pubkey,
                     (lease.live=1 OR EXISTS(
                         SELECT 1 FROM sessions AS session
-                        WHERE session.pubkey=lease.pubkey AND session.alive=1
+                        WHERE session.pubkey=lease.pubkey
+                          AND session.runtime_state='running'
                     ))
              FROM handle_leases AS lease WHERE lease.handle=?1",
             [&handle],

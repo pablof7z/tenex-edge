@@ -92,10 +92,14 @@ fn recipient_presence(
 }
 
 fn local_state(store: &Store, session: &Session) -> SessionState {
-    let automatic_delivery = session.alive
-        && !session.working
+    let automatic_delivery = session.is_running()
+        && !session.is_working()
         && crate::session_host::session_has_live_delivery_path(store, session);
-    SessionState::classify(session.alive, session.working, automatic_delivery)
+    SessionState::classify(
+        session.is_running(),
+        session.is_working(),
+        automatic_delivery,
+    )
 }
 
 fn normalize_label(label: &str) -> Option<&str> {

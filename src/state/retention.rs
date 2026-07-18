@@ -7,11 +7,12 @@ pub const COMPLETED_LEDGER_RETENTION_SECS: u64 = 7 * 24 * 60 * 60;
 pub struct RetentionPruneReport {
     pub relay_events: usize,
     pub delivered_inbox: usize,
+    pub completed_event_claims: usize,
 }
 
 impl RetentionPruneReport {
     pub fn total(self) -> usize {
-        self.relay_events + self.delivered_inbox
+        self.relay_events + self.delivered_inbox + self.completed_event_claims
     }
 }
 
@@ -38,9 +39,22 @@ impl Store {
                AND delivered_at > 0 AND delivered_at < ?1",
             params![completed_ledgers_before],
         )?;
+        // Offline mentions can start processes, and Nostr observations can
+        // replay indefinitely. Their compact completed rows are durable
+        // idempotency tombstones, not expiring operational ledgers.
+        let completed_event_claims = self.conn.execute(
+            "DELETE FROM event_claims
+             WHERE state='completed' AND updated_at>0 AND updated_at<?1
+               AND claim_key NOT LIKE ?2",
+            params![
+                completed_ledgers_before,
+                format!("{}%", super::event_claims::OFFLINE_MENTION_CLAIM_PREFIX)
+            ],
+        )?;
         Ok(RetentionPruneReport {
             relay_events,
             delivered_inbox,
+            completed_event_claims,
         })
     }
 }

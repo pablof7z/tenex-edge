@@ -57,9 +57,10 @@ mosaico my session kill --self
 mosaico my session pty-wrap-me --self
 ```
 
-`end` marks a session ended without killing its hosted process. `kill` stops
-the hosted process. Use either only when the user asks to end the session or
-the work is conclusively finished.
+`end` explicitly stops the runtime record without killing its hosted process;
+harness exit hooks defer PTY-bound classification to the supervisor. `kill`
+stops the hosted process. Use either only when the user asks to end the session
+or the work is conclusively finished.
 
 Use `pty-wrap-me` only when a session was started outside a daemon-owned PTY
 and needs durable between-turn mention delivery. It kills the manually started

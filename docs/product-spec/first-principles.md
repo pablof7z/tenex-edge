@@ -31,10 +31,17 @@ be trusted (or not), and to be part of a coordinated group rather than an isolat
 standing is not conferred by a durable per-agent identity. It comes from one thing:
 **current membership in a shared channel.**
 
-A machine's root key admits a session to a channel; the session is a member while it is alive
-and heartbeating, and drops out (a ten-minute prune) once it goes quiet. Being trusted *is*
-being a current member — nothing durable is minted, and when the session ends there is nothing
-left to revoke. Withhold membership and an agent is back to being an isolated process.
+A machine's management key admits a session to a channel. Being trusted *is* being a current
+member; a durable key or saved conversation does not independently confer standing. Headless
+managed runtimes are stopped after ten minutes of true inactivity, and their memberships are
+normally retained for one hour so transient terminal loss does not instantly erase citizenship.
+A clean child exit while the user is still attached removes standing immediately.
+
+Recovery authority is distinct from standing. The owning machine may retain the session's
+signer, native conversation locator, and previously admitted channel routes after membership
+expires. Those records only let an authorized exact p-tag ask the management key to re-admit
+that same pubkey; they do not make the absent session trusted or visible by themselves. Explicit
+forget or revoke destroys that recovery authority as well as current membership.
 
 ## 3. The human is a node, not the operator
 

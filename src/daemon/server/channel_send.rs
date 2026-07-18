@@ -165,13 +165,13 @@ pub(in crate::daemon::server) async fn rpc_channel_send(
 
     // Local live delivery: relays often don't echo an event back to the same
     // connection that published it. Seed the verbatim log and park inbox rows for
-    // sessions already alive in the same routing scope.
+    // sessions already running in the same routing scope.
     let routed = state.with_store(|s| {
         let mut routed = false;
         // Best-effort local delivery (the publish already succeeded), but a store
         // failure listing targets must not silently drop a direct mention — log it
         // loudly and skip local routing this call rather than abort.
-        let targets = match s.list_alive_sessions() {
+        let targets = match s.list_running_sessions() {
             Ok(t) => t,
             Err(e) => {
                 tracing::error!(
@@ -188,7 +188,7 @@ pub(in crate::daemon::server) async fn rpc_channel_send(
                 .iter()
                 .any(|recipient| recipient.pubkey == target.pubkey);
             let joined_target = s
-                .is_session_joined_channel(&target.pubkey, &deliver_scope)
+                .has_session_route(&target.pubkey, &deliver_scope)
                 .unwrap_or(target.channel_h == deliver_scope);
             if !is_direct_target && !joined_target {
                 continue;

@@ -14,7 +14,7 @@ fn deployed_schema_four_migrates_to_current_without_losing_local_state() {
     drop(Store::open(&path).expect("schema four upgrades to current"));
 
     let conn = Connection::open(&path).unwrap();
-    assert_eq!(version(&conn), 9);
+    assert_eq!(version(&conn), 10);
     assert_eq!(
         conn.query_row("SELECT title FROM sessions WHERE pubkey='pk1'", [], |row| {
             row.get::<_, String>(0)
@@ -40,6 +40,34 @@ fn deployed_schema_four_migrates_to_current_without_losing_local_state() {
         .unwrap(),
         "native_resume:resume-new"
     );
+    assert_eq!(
+        conn.query_row(
+            "SELECT runtime_state || ':' || recovery_state || ':' || turn_count
+             FROM sessions WHERE pubkey='pk1'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .unwrap(),
+        "running:ready:1"
+    );
+    assert_eq!(
+        conn.query_row(
+            "SELECT channel_h || ':' || granted_at FROM session_channels WHERE pubkey='pk1'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .unwrap(),
+        "room:8"
+    );
+    assert_eq!(
+        conn.query_row(
+            "SELECT state FROM session_standing WHERE pubkey='pk1' AND channel_h='room'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .unwrap(),
+        "absent"
+    );
     assert_eq!(count(&conn, "messages"), 1);
     assert_eq!(count(&conn, "message_recipients"), 1);
     assert_eq!(
@@ -56,6 +84,7 @@ fn deployed_schema_four_migrates_to_current_without_losing_local_state() {
         "trellis_commits",
         "trellis_replay_capsules",
         "llm_calls",
+        "session_claims",
     ] {
         assert!(!fixture::table_exists(&conn, removed), "{removed} removed");
     }
@@ -93,7 +122,7 @@ fn schema_eight_transport_backfill_is_harness_scoped_and_defaults_are_canonical(
     drop(Store::open(&migrated_path).expect("schema eight upgrades to current"));
 
     let migrated = Connection::open(&migrated_path).unwrap();
-    assert_eq!(version(&migrated), 9);
+    assert_eq!(version(&migrated), 10);
     assert_eq!(
         session_runtime_facts(&migrated, "pk-pty"),
         ("pty".to_string(), "migration".to_string())
@@ -134,7 +163,7 @@ fn schema_eight_transport_backfill_is_harness_scoped_and_defaults_are_canonical(
 fn migration_chain_covers_every_version_before_current() {
     assert_eq!(
         super::super::migration::supported_versions(),
-        [4, 5, 6, 7, 8]
+        [4, 5, 6, 7, 8, 9]
     );
 }
 

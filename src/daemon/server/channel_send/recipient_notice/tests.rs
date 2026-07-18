@@ -84,12 +84,21 @@ fn suspended_reply_author_gets_the_same_reminder_contract() {
 fn working_and_offline_local_recipients_do_not_get_reminders() {
     let store = Store::open_memory().unwrap();
     local_session(&store);
-    store.set_working("local-pk", true, 11).unwrap();
+    let generation = store
+        .get_session("local-pk")
+        .unwrap()
+        .unwrap()
+        .runtime_generation;
+    store
+        .apply_session_turn_started("local-pk", generation, 11, None)
+        .unwrap();
     assert!(suspension_reminder(&store, "local-pk", "room", None, 11)
         .unwrap()
         .is_none());
 
-    store.mark_dead("local-pk").unwrap();
+    store
+        .mark_runtime_stopped("local-pk", crate::state::StopReason::HeadlessExit, 12)
+        .unwrap();
     assert!(suspension_reminder(&store, "local-pk", "room", None, 12)
         .unwrap()
         .is_none());

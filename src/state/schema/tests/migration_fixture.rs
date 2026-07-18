@@ -12,7 +12,8 @@ pub(super) fn create_schema_four(path: &Path) {
         DROP TABLE messages;
         DROP TABLE session_locators;
         DROP TABLE session_channels;
-        DROP TABLE session_claims;
+        DROP TABLE IF EXISTS session_claims;
+        DROP TABLE IF EXISTS session_standing;
         DROP TABLE sessions;
         DROP TABLE relay_status;
 
@@ -185,6 +186,40 @@ pub(super) fn create_schema_eight(path: &Path) {
         .unwrap();
     conn.execute_batch(
         r#"
+        DROP INDEX idx_sessions_runtime;
+        DROP INDEX idx_sessions_idle_deadline;
+        DROP INDEX idx_session_locators_runtime_endpoint;
+        DROP INDEX idx_session_channels_channel;
+        DROP INDEX idx_session_standing_due;
+        DROP TABLE session_standing;
+        DROP TABLE session_channels;
+        CREATE TABLE session_channels (
+            pubkey TEXT NOT NULL, channel_h TEXT NOT NULL, joined_at INTEGER NOT NULL,
+            PRIMARY KEY (pubkey, channel_h)
+        );
+        CREATE INDEX idx_session_channels_channel ON session_channels(channel_h, pubkey);
+        CREATE TABLE session_claims (
+            pubkey TEXT NOT NULL, agent_slug TEXT NOT NULL DEFAULT '',
+            channel_h TEXT NOT NULL DEFAULT '', harness TEXT NOT NULL DEFAULT '',
+            last_active_at INTEGER NOT NULL, expires_at INTEGER NOT NULL,
+            owner_backend_pubkey TEXT NOT NULL DEFAULT '', owner_host TEXT NOT NULL DEFAULT '',
+            PRIMARY KEY (pubkey, channel_h)
+        );
+        CREATE INDEX idx_session_claims_expires ON session_claims(expires_at);
+        ALTER TABLE session_locators DROP COLUMN runtime_generation;
+        ALTER TABLE sessions DROP COLUMN runtime_state;
+        ALTER TABLE sessions DROP COLUMN presentation_state;
+        ALTER TABLE sessions DROP COLUMN work_state;
+        ALTER TABLE sessions DROP COLUMN recovery_state;
+        ALTER TABLE sessions DROP COLUMN lifecycle_epoch;
+        ALTER TABLE sessions DROP COLUMN attachment_epoch;
+        ALTER TABLE sessions DROP COLUMN idle_since;
+        ALTER TABLE sessions DROP COLUMN idle_deadline;
+        ALTER TABLE sessions DROP COLUMN stopped_at;
+        ALTER TABLE sessions DROP COLUMN stop_reason;
+        ALTER TABLE sessions DROP COLUMN turn_count;
+        ALTER TABLE sessions ADD COLUMN alive INTEGER NOT NULL DEFAULT 1;
+        ALTER TABLE sessions ADD COLUMN working INTEGER NOT NULL DEFAULT 0;
         ALTER TABLE sessions DROP COLUMN claimed_harness;
         ALTER TABLE sessions DROP COLUMN admitted_bundle;
         ALTER TABLE sessions DROP COLUMN admitted_transport;

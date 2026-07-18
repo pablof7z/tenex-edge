@@ -79,22 +79,41 @@ Any invocation that needs state does `Daemon::connect_or_spawn()`:
    the daemon (double-fork / `setsid`, detach stdio → `~/.mosaico/daemon.log`),
    then poll-connect with a short timeout.
 
-### Idle exit
+### Managed-session lifecycle
 
-The daemon **idle-exits** when no sessions are alive. It reuses the existing
-liveness/heartbeat machinery:
+The daemon owns one durable lifecycle aggregate for each managed session. The
+aggregate separates four facts that must not be inferred from one another:
 
-- A session is "alive" when its `SessionTask` is running (it ends on `watch_pid`
-  death, `session-end` RPC, or SIGTERM-equivalent intent).
-- When the alive-session count drops to zero, start a **grace timer**
-  (`MOSAICO_DAEMON_GRACE_S`, default 120s). If no new `session-start` /
-  client connection arrives before it fires, the daemon shuts down cleanly
-  (publishes offline presence for any lingering state, drops the socket,
-  releases the lock).
-- Any inbound client connection or `session-start` cancels the grace timer.
+- runtime incarnation and endpoint;
+- presentation (`headed`, `headless`, or `unavailable`) plus attachment epoch;
+- work (`working` or `idle`) and its generation-fenced eviction deadline;
+- recovery authority and per-channel fabric standing.
 
-This keeps the daemon from outliving the fabric while avoiding flapping when
-sessions briefly come and go.
+PTY supervisors report attachment edges and child exit status. They also expose
+an atomic conditional stop that succeeds only when the expected attachment
+epoch is still headless, so an attach at the ten-minute boundary wins safely.
+The daemon never treats a failed supervisor probe as headlessness.
+
+When a headless, idle runtime has no pending delivery for ten minutes, the
+lifecycle coordinator stops that exact incarnation. Its channel standing moves
+to a persisted one-hour retention deadline. A clean successful child exit while
+headed moves standing directly to absent. Both paths preserve exact recovery
+identity and route affinity; only explicit forget or revoke destroys them.
+
+Membership writes are serialized with lifecycle reconciliation. Expiry removes
+standing only after the relay confirms it; a failed write remains retryable. An
+authorized p-tag to a recoverable exact pubkey cancels stale eviction/removal
+and re-admits absent standing. It resumes the native harness conversation when
+a native locator exists; otherwise it fresh-launches the harness under the same
+session pubkey. All timers and supervisor presentation are reconciled again
+after daemon restart.
+
+### Daemon process lifetime
+
+The daemon remains running until an explicit stop, service-manager stop, or
+protocol-skew re-exec. Runtime count does not control daemon lifetime: standing
+expiry, exact p-tag recovery, relay retry work, and persisted supervisor-exit
+reports all require an owner while no agent process is running.
 
 ## 4. Socket, lock, stale-reclaim, version handshake
 
@@ -234,7 +253,7 @@ The `session_start` RPC makes the daemon spawn a tokio task running
   backpressured single-consumer channel into the materializer; relay bursts can
   slow observation drains but cannot silently drop read-model updates. Events
   are demuxed once, daemon-side, and routed to the right session chat queue(s).
-  Mentions route via the `compute_targets` / `route_mention` logic over all alive
+  Mentions route via the `compute_targets` / `route_mention` logic over all running
   sessions.
 - Presence/status publishing, heartbeats, and `watch_pid` death detection all
   run in the per-session task. Every runtime and kind:0 profile write is signed
@@ -312,27 +331,22 @@ runtime is replaced before delivery, the replacement claims the same pending row
 
 ## 8c. Session reconciliation on daemon (re)start (correctness)
 
-The version-skew handshake (§4) and idle-exit can stop a daemon while session
-rows are still `alive=1` in the db, and the new daemon's in-process
-`SessionTask`s don't exist yet. On startup the daemon **reconciles**: for each
-`alive=1` session row,
+Protocol-skew re-exec, service restart, or a daemon crash can stop a daemon while session
+rows are still `runtime_state='running'`, and the new daemon's in-process
+`SessionTask`s don't exist yet. On startup the daemon first replays persisted
+supervisor-exit reports, resumes any fenced `stopping` eviction, and then
+reconciles each running row:
 
 - `watch_pid` set and `pid_alive(watch_pid)` → respawn a `SessionTask` for it;
-- else → remove that local agent pubkey from joined channel membership and
-  `mark_session_dead`.
+- else → atomically stop that generation and begin its one-hour standing retention.
 
 Without this, `who` and routing membership would lie after every daemon restart.
-(Idle-exit only fires at zero alive sessions, so it doesn't orphan; the skew
-re-exec can, hence reconciliation.)
 
-## 8d. Clientful-but-sessionless connections vs idle-exit (§3)
+## 8d. Clientful-but-sessionless connections
 
 The streaming `tail` RPC and `who --live` hold a client connection open
-without owning a session. Decision: **an open client connection cancels the
-idle-grace timer** (the daemon counts "live sessions + open client connections"
-for liveness). So a lone tail-stream client keeps the daemon up; when it disconnects and no
-sessions remain, the grace timer starts. This avoids live readers being silently
-killed by an idle-exit mid-stream.
+without owning a session. They do not affect runtime lifecycle or standing;
+the daemon already persists independently until an explicit stop or re-exec.
 
 ## 8e. Working directory in presence and awareness (implemented)
 

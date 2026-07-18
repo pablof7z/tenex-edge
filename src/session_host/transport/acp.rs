@@ -146,6 +146,9 @@ impl RpcTransport {
             // registry, not by pid (defect #3). Do NOT rely on this pid to prove an
             // ACP session live.
             supervisor_pid: pid.unwrap_or(0),
+            instance_token: String::new(),
+            adopted_process_fingerprint: String::new(),
+            child_pid: None,
             agent: spec.slug.clone(),
             root: spec.root.clone(),
             cwd: spec.abs_path.clone(),

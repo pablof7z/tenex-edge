@@ -5,8 +5,9 @@
 //! of this module.
 
 use crate::identity::SessionIdentity;
-use crate::state::session_claims::SessionClaim;
-use crate::state::{AgentAvailability, Channel, ChannelMember, Profile, Session, Status, Store};
+use crate::state::{
+    AgentAvailability, Channel, ChannelMember, Profile, Session, SessionStanding, Status, Store,
+};
 use anyhow::{Context, Result};
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet};
@@ -17,7 +18,7 @@ pub(crate) struct WhoAggregation {
     pub(crate) channels: Vec<Channel>,
     pub(crate) local_sessions: Vec<Session>,
     pub(crate) local_pubkeys: BTreeSet<String>,
-    pub(crate) claims: Vec<SessionClaim>,
+    pub(crate) retained_standing: Vec<SessionStanding>,
     pub(crate) agents: Vec<AgentAvailability>,
     now: u64,
     channels_by_id: BTreeMap<String, Channel>,
@@ -36,7 +37,7 @@ impl WhoAggregation {
             .list_channels()
             .context("who aggregation: failed to list channels")?;
         let local_sessions = store
-            .list_alive_sessions()
+            .list_running_sessions()
             .context("who aggregation: failed to list live local sessions")?;
         let local_pubkeys = store
             .list_local_session_pubkeys()
@@ -46,9 +47,9 @@ impl WhoAggregation {
         let agents = store
             .list_agent_roster()
             .context("who aggregation: failed to list agent capabilities")?;
-        let claims = store
-            .list_active_session_claims(now)
-            .context("who aggregation: failed to list active session claims")?;
+        let retained_standing = store
+            .list_retained_session_standing(now)
+            .context("who aggregation: failed to list retained session standing")?;
         let channels_by_id = channels
             .iter()
             .cloned()
@@ -85,7 +86,11 @@ impl WhoAggregation {
         }
         let mut referenced_pubkeys = BTreeSet::new();
         referenced_pubkeys.extend(local_sessions.iter().map(|session| session.pubkey.clone()));
-        referenced_pubkeys.extend(claims.iter().map(|claim| claim.pubkey.clone()));
+        referenced_pubkeys.extend(
+            retained_standing
+                .iter()
+                .map(|standing| standing.pubkey.clone()),
+        );
         referenced_pubkeys.extend(
             members
                 .values()
@@ -127,7 +132,7 @@ impl WhoAggregation {
                     now.saturating_sub(session.last_seen) <= crate::session::STATUS_TTL_SECS;
                 let state = crate::session_state::SessionState::classify(
                     fresh,
-                    session.working,
+                    session.is_working(),
                     crate::session_host::session_has_live_delivery_path(store, session),
                 );
                 (session.pubkey.clone(), state)
@@ -143,7 +148,7 @@ impl WhoAggregation {
             channels,
             local_sessions,
             local_pubkeys,
-            claims,
+            retained_standing,
             agents,
             now,
             channels_by_id,

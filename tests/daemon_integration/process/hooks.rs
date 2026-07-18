@@ -201,7 +201,7 @@ fn hook_serving_rpcs_return_while_relay_is_wedged() {
         store
             .get_session(&old_pubkey)
             .expect("session lookup")
-            .is_some_and(|session| !session.alive),
+            .is_some_and(|session| !session.is_running()),
         "session-end store projection must survive a wedged relay"
     );
     stop_daemon(&home);

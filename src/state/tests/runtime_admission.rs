@@ -20,13 +20,15 @@ fn facts(
 fn hook_claim_cannot_rewrite_launch_facts_even_after_the_row_is_dead() {
     let store = Store::open_memory().unwrap();
     let registration = reg("grok", "pk", "room");
-    store
+    let generation = store
         .reserve_session_with_facts(
             &registration,
             &facts("grok", "", "grok-pty", "pty", "launch"),
         )
         .unwrap();
-    store.mark_dead("pk").unwrap();
+    assert!(store
+        .mark_runtime_stopped_if_generation("pk", generation, StopReason::Unknown, 1_500)
+        .unwrap());
 
     let hook_registration = RegisterSession {
         observed_harness: "claude-code".into(),

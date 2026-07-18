@@ -37,13 +37,21 @@ The workspace and root channel are one entity with the public address
 ## `session_end`
 
 ```jsonc
-params: {"session": "npub1…"|"hex"|"handle"}
-result: {"ended": true|false}    // false ⇒ no such session
+params: {"session": "npub1…"|"hex"|"handle"|null,
+         "harness_session": "native-id"|null, "harness": "…"|null,
+         "cause": "manual"|"harness_hook"}
+result: {"ended": true|false, "deferred": true|absent}
 ```
 
-Metadata-only. Stops the `SessionTask` (which publishes idle presence/status
-and marks the session dead) but does **not** touch the hosted PTY/child process
-— a process left running after `session_end` keeps executing unsupervised.
+Stops exactly the resolved runtime generation but does **not** signal its
+hosted process. A process left running after a manual `session_end` therefore
+keeps executing unsupervised. A PTY harness hook is deferred because only the
+supervisor can atomically classify child status with attachment state: a clean
+zero-status exit while headed is intentional user exit, while a headless or
+non-clean exit retains standing for one hour.
+Manual calls resolve the explicit public `session`; hooks resolve the same
+daemon-owned caller anchor chain as other lifecycle RPCs, including the typed
+native harness locator when no public identity is present.
 stderr message (`session … ended` / `no such session: …`) is produced
 client-side to match today's output. CLI: `mosaico my session end --self`;
 agents cannot target another session.
@@ -51,22 +59,34 @@ agents cannot target another session.
 ## `session_kill`
 
 ```jsonc
-params: {"session": "npub1…"|"hex"|"handle", "revoke_memberships": bool}
-result: {"killed": true|false, "ended": true|false, "note": "endpoint=…"|"pid=…", "cleanup_confirmed": bool, "cleanup_failures": ["…"], "reason": "…"}
+params: {"session": "npub1…"|"hex"|"handle", "forget": bool}
+result: {"killed": true|false, "ended": true|false,
+         "recovery_revoked": true|absent,
+         "note": "endpoint=…"|"pid=…", "cleanup_confirmed": bool,
+         "cleanup_failures": ["…"], "reason": "…"}
 ```
 
 Process-kill, the counterpart to `session_end`. Stops the session's hosted
 endpoint through its transport if one is tracked, else `SIGTERM`s the tracked
-child pid, then internally calls `session_end` to mark the session's metadata
-dead. `killed` reflects whether process termination itself succeeded; `reason`
+child pid, then marks the exact generation stopped. `killed` reflects whether
+process termination itself was confirmed; `reason`
 is populated on failure (including "no local session matched" when `session`
-doesn't resolve). `mosaico sessions` sets `revoke_memberships`: the daemon also
-expires presence now, clears the resume claim, confirms removal from every
-recorded NIP-29 channel, and clears local channel bindings. `mosaico my session
-kill --self` leaves that flag false, resolves the caller from the PTY/session
-environment, and refuses a positional target — an agent may only kill its own
-session. The CLI exits non-zero when process termination or requested fabric
-cleanup is not confirmed.
+doesn't resolve).
+
+`forget: true` is the destructive recovery boundary used by the operator
+session picker. The daemon first persists `recovery_state='revoked'`, then
+re-reads and terminates the current generation. If termination fails, the
+runtime and locators remain tracked for retry but exact recovery stays revoked.
+Only after confirmed process absence does one transaction stop the runtime and
+remove signer, route, and locator authority; relay removals remain durable
+retry work until confirmed. `mosaico my session kill --self` leaves `forget`
+false and may only kill the caller's own session.
+
+Ordinary stops do not revoke recovery. A stopped pubkey retains channel
+standing for one hour, and exact p-tag routing can re-admit it after standing
+expires. A native resume locator restores the same provider conversation;
+without one, Mosaico launches a fresh provider conversation under the same
+session pubkey.
 
 ## `session_pty_wrap`
 

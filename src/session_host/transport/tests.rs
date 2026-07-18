@@ -37,6 +37,7 @@ fn persisted_locator_selects_the_transport_without_agent_config() {
             locator_kind: kind.locator_kind().into(),
             locator_value: format!("{}-owned-endpoint", kind.as_str()),
             pubkey: "pk".into(),
+            runtime_generation: 0,
             created_at: 1,
         };
 

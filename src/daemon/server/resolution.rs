@@ -65,7 +65,7 @@ pub(in crate::daemon::server) enum ResolveScope {
     /// (channel switch/join/leave, invite, create) where guessing the wrong
     /// session is harmful.
     Strict,
-    /// Exact anchors, then the cwd+agent scan (latest-alive in the channel). For
+    /// Exact anchors, then the cwd+agent scan (latest running in the channel). For
     /// reads and host-facing commands (who/turn/chat/propose) run from a repo.
     Channel,
 }
@@ -84,12 +84,12 @@ pub(in crate::daemon::server) fn work_root_for(s: &Store, scope: &str) -> Result
 }
 
 /// Resolve the caller's session through the single priority order:
-///   1. explicit `--session` (operator/host override; may name a dead session)
+///   1. explicit `--session` (operator/host override; may name a stopped session)
 ///   2. PTY session alias  (live only)
 ///   3. harness-session alias  (live only)
 ///   4. watch pid alias  (live only)
 ///
-/// Typed locators never become public selectors and never return a dead row.
+/// Typed runtime locators never become public selectors and never cross generations.
 pub(in crate::daemon::server) fn resolve_session_inner(
     state: &Arc<DaemonState>,
     anchor: &CallerAnchor,
@@ -105,20 +105,14 @@ pub(in crate::daemon::server) fn resolve_session_inner(
     }
     // 2. Hosted PTY endpoint.
     if let Some(pty_session) = anchor.pty_session.filter(|s| !s.is_empty()) {
-        if let Some(harness) = anchor.harness.filter(|harness| !harness.is_empty()) {
-            if let Some(rec) = state
-                .with_store(|s| {
-                    s.alive_session_for_locator(
-                        crate::session::Harness::from_str(harness).as_str(),
-                        crate::state::LOCATOR_PTY,
-                        pty_session,
-                    )
-                })
-                .ok()
-                .flatten()
-            {
-                return Ok(rec);
-            }
+        if let Some(rec) = state
+            .with_store(|s| {
+                s.running_session_for_locator(None, crate::state::LOCATOR_PTY, pty_session)
+            })
+            .ok()
+            .flatten()
+        {
+            return Ok(rec);
         }
     }
     // 3. Harness-native resume locator reported by a hook (live only).
@@ -129,7 +123,11 @@ pub(in crate::daemon::server) fn resolve_session_inner(
         let harness = crate::session::Harness::from_str(harness).as_str();
         if let Some(rec) = state
             .with_store(|s| {
-                s.alive_session_for_locator(harness, crate::state::LOCATOR_NATIVE_RESUME, hs)
+                s.running_session_for_locator(
+                    Some(harness),
+                    crate::state::LOCATOR_NATIVE_RESUME,
+                    hs,
+                )
             })
             .ok()
             .flatten()
@@ -143,7 +141,9 @@ pub(in crate::daemon::server) fn resolve_session_inner(
         let harness = crate::session::Harness::from_str(harness).as_str();
         let pid = pid.to_string();
         if let Some(rec) = state
-            .with_store(|s| s.alive_session_for_locator(harness, crate::state::LOCATOR_PID, &pid))
+            .with_store(|s| {
+                s.running_session_for_locator(Some(harness), crate::state::LOCATOR_PID, &pid)
+            })
             .ok()
             .flatten()
         {

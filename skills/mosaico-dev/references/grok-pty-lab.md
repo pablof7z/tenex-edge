@@ -45,7 +45,7 @@ consumed without printing it:
 ```bash
 source "${LAB_ENV}"
 GROK_SESSION_PUBKEY="$(sqlite3 .container-state/grok/mosaico/state.db \
-  "select pubkey from sessions where alive=1 and agent_slug='grok' limit 1")"
+  "select pubkey from sessions where runtime_state='running' and agent_slug='grok' limit 1")"
 nak event -k 9 -h workspace -p "${GROK_SESSION_PUBKEY}" \
   --sec "$(<"${OWNER_SK_FILE}")" \
   -c "Reply with exactly LAB-GROK-INJECT." "${RELAY_WS}"

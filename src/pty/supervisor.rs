@@ -12,14 +12,17 @@ use std::time::Duration;
 mod clients;
 #[path = "supervisor/session_exit.rs"]
 mod session_exit;
+#[path = "supervisor/termination.rs"]
+mod termination;
 
-use clients::{attach_client, fanout, output_mode, Clients};
+use clients::{attach_client, fanout, kill_if_headless, snapshot, Clients};
 
 const BACKLOG_LIMIT: usize = 256 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct SupervisorArgs {
     pub id: String,
+    pub instance_token: String,
     pub socket: PathBuf,
     pub cwd: PathBuf,
     pub agent: String,
@@ -30,7 +33,9 @@ pub struct SupervisorArgs {
 }
 
 pub fn run_supervisor(args: SupervisorArgs) -> Result<()> {
-    let _session_exit_guard = session_exit::SessionExitGuard::new(args.id.clone());
+    let clients = clients::new(args.id.clone());
+    let mut session_exit_guard =
+        session_exit::SessionExitGuard::new(args.id.clone(), clients.clone());
     if args.command.is_empty() {
         bail!("pty supervisor command must not be empty");
     }
@@ -96,9 +101,12 @@ pub fn run_supervisor(args: SupervisorArgs) -> Result<()> {
     cmd.env_remove("CLAUDE_CODE_CHILD_SESSION");
 
     let mut child = pair.slave.spawn_command(cmd)?;
-    let killer = Arc::new(Mutex::new(child.clone_killer()));
+    if let Err(error) =
+        super::meta::record_child_pid(&args.id, &args.instance_token, child.process_id())
+    {
+        eprintln!("[mosaico pty supervisor] could not persist child identity: {error:#}");
+    }
     let writer = Arc::new(Mutex::new(pair.master.take_writer()?));
-    let clients: Clients = Arc::new(Mutex::new(Vec::new()));
     let backlog = Arc::new(Mutex::new(VecDeque::with_capacity(BACKLOG_LIMIT)));
 
     {
@@ -118,7 +126,8 @@ pub fn run_supervisor(args: SupervisorArgs) -> Result<()> {
     }
 
     loop {
-        if child.try_wait()?.is_some() {
+        if let Some(status) = child.try_wait()? {
+            session_exit_guard.record_child_exit(&status, snapshot(&clients));
             break;
         }
         match listener.accept() {
@@ -126,15 +135,20 @@ pub fn run_supervisor(args: SupervisorArgs) -> Result<()> {
                 stream
                     .set_nonblocking(false)
                     .context("setting accepted pty client socket blocking")?;
-                if let Err(e) = handle_client(
+                match handle_client(
                     stream,
                     pair.master.as_ref(),
                     &writer,
-                    &killer,
+                    child.as_mut(),
                     &clients,
                     &backlog,
                 ) {
-                    eprintln!("[mosaico pty supervisor] client error: {e:#}");
+                    Ok(Some((status, presentation))) => {
+                        session_exit_guard.record_child_exit(&status, presentation);
+                        break;
+                    }
+                    Ok(None) => {}
+                    Err(e) => eprintln!("[mosaico pty supervisor] client error: {e:#}"),
                 }
             }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
@@ -152,10 +166,10 @@ fn handle_client(
     stream: UnixStream,
     master: &(dyn portable_pty::MasterPty + Send),
     writer: &Arc<Mutex<Box<dyn Write + Send>>>,
-    killer: &Arc<Mutex<Box<dyn portable_pty::ChildKiller + Send + Sync>>>,
+    child: &mut (dyn portable_pty::Child + Send + Sync),
     clients: &Clients,
     backlog: &Arc<Mutex<VecDeque<u8>>>,
-) -> Result<()> {
+) -> Result<Option<(portable_pty::ExitStatus, crate::pty::PresentationSnapshot)>> {
     let mut reader = BufReader::new(stream);
     let mut line = String::new();
     reader.read_line(&mut line)?;
@@ -170,7 +184,8 @@ fn handle_client(
                     pixel_height: 0,
                 });
             }
-            attach_client(reader, writer.clone(), clients, backlog)
+            attach_client(reader, writer.clone(), clients, backlog)?;
+            Ok(None)
         }
         ["INJECT", len] => {
             let len = len.parse::<usize>().context("invalid INJECT length")?;
@@ -180,7 +195,7 @@ fn handle_client(
             let mut writer = writer.lock().unwrap();
             writer.write_all(&payload)?;
             writer.flush()?;
-            Ok(())
+            Ok(None)
         }
         ["RESIZE", rows, cols] => {
             if let (Ok(rows), Ok(cols)) = (rows.parse::<u16>(), cols.parse::<u16>()) {
@@ -191,18 +206,33 @@ fn handle_client(
                     pixel_height: 0,
                 })?;
             }
-            Ok(())
+            Ok(None)
         }
         ["KILL"] => {
-            killer.lock().unwrap().kill()?;
-            Ok(())
+            let status = termination::terminate_child_confirmed(child)?;
+            Ok(Some((status, snapshot(clients))))
         }
-        ["PING"] => Ok(()),
-        ["OUTPUT_MODE"] => {
-            let mode = output_mode(clients);
-            writeln!(reader.get_mut(), "{mode}")?;
+        ["PING"] => Ok(None),
+        ["PRESENTATION"] => {
+            let presentation = snapshot(clients);
+            serde_json::to_writer(reader.get_mut(), &presentation)?;
+            reader.get_mut().write_all(b"\n")?;
             reader.get_mut().flush()?;
-            Ok(())
+            Ok(None)
+        }
+        ["KILL_IF_HEADLESS", expected_epoch] => {
+            let expected_epoch = expected_epoch
+                .parse::<u64>()
+                .context("invalid attachment epoch")?;
+            let mut confirmed_status = None;
+            let outcome = kill_if_headless(clients, expected_epoch, |_| {
+                confirmed_status = Some(termination::terminate_child_confirmed(child)?);
+                Ok(())
+            })?;
+            serde_json::to_writer(reader.get_mut(), &outcome)?;
+            reader.get_mut().write_all(b"\n")?;
+            reader.get_mut().flush()?;
+            Ok(confirmed_status.map(|status| (status, snapshot(clients))))
         }
         _ => bail!("unknown pty supervisor command: {}", line.trim()),
     }

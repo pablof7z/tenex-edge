@@ -21,6 +21,39 @@ every viewer. Heartbeats refresh liveness without advancing the semantic
 `updated_at` clock; only a title, activity, slug, or normalized-state change
 produces a presence delta.
 
+## Managed runtime lifecycle
+
+The public state above is a projection, not the lifecycle store. A managed
+session separately records its runtime incarnation, presentation, work state,
+recovery authority, and per-channel fabric standing:
+
+- `headed` means at least one client is attached to the PTY supervisor.
+  Losing the last client only makes the still-running runtime `headless`; it
+  does not unwrap or terminate the PTY child.
+- A headless runtime becomes eviction-eligible only when it is idle and has no
+  pending delivery. Ten minutes of that true inactivity conditionally stops
+  the same runtime incarnation. Reattachment, a turn start, or accepted work
+  cancels the old deadline.
+- A stopped runtime normally retains its current channel memberships for one
+  hour. A clean zero-status child exit while headed is treated as the user's
+  intentional exit and removes current memberships immediately.
+- Membership retention is fabric standing, while a session's recorded channel
+  routes are recovery authority. Expiring standing does not erase the route,
+  signer, or native conversation locator. An authorized exact p-tag re-admits
+  the same pubkey after standing expires. When a native locator exists it also
+  resumes that harness conversation; without one it starts a fresh harness
+  conversation under the same durable session identity.
+- Explicit forget or revoke is the destructive boundary. It removes recovery
+  authority locally in one transaction and makes every recorded standing
+  removal immediately due; unconfirmed relay removals remain durable retry
+  work. Ordinary exit, eviction, and retention expiry do not revoke recovery.
+
+Every deadline and runtime endpoint is fenced by the runtime/lifecycle
+generation that created it. Supervisors persist exit reports before notifying
+the daemon. A daemon restart replays those reports, reconciles a reserved
+`stopping` transition, and resumes deadline processing without treating an
+unavailable supervisor probe as proof that a session is headless.
+
 The unavoidable distributed limit is abrupt host or network loss. A remote
 viewer retains the last published state until expiration because, without a new
 trusted signal, it cannot distinguish a partition from a silent host sooner.

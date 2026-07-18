@@ -93,7 +93,6 @@ async fn spawn_dispatched(
     .await
     {
         Ok(spawned) => {
-            grant_joined_channels(state, &spawned.pubkey, &op.target.channels).await;
             tracing::info!(
                 slug = %slug,
                 workspace = %op.target.workspace,
@@ -107,24 +106,5 @@ async fn spawn_dispatched(
             tracing::error!(slug = %slug, workspace = %op.target.workspace, error = %e, "session dispatch: spawn failed");
             false
         }
-    }
-}
-
-async fn grant_joined_channels(state: &Arc<DaemonState>, pubkey: &str, channels: &[String]) {
-    let Some(rec) = state.with_store(|s| s.get_session(pubkey).ok().flatten()) else {
-        return;
-    };
-    for channel in channels {
-        let _ = ensure_subscription(state, channel).await;
-        let confirmed = state
-            .provider
-            .grant_member_confirmed(channel, &rec.pubkey)
-            .await;
-        if !confirmed.is_confirmed() {
-            tracing::warn!(pubkey, channel = %channel, "session dispatch: membership was not confirmed");
-        }
-        state.with_store(|s| {
-            let _ = s.join_session_channel(pubkey, channel, now_secs());
-        });
     }
 }

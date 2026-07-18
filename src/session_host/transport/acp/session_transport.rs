@@ -1,3 +1,4 @@
+use super::registry::remove_after_exit_confirmation;
 use super::{register_child, registry, RpcTransport};
 use crate::rpc_harness::{AcpClient, AppServerClient, Dialect};
 use crate::session_host::transport::acp_runtime::SteerState;
@@ -5,8 +6,8 @@ use crate::session_host::transport::acp_spawn::{
     spawn_acp_prompt, spawn_app_server_steer, spawn_app_server_steer_pending, spawn_app_server_turn,
 };
 use crate::session_host::transport::{
-    EndpointRef, LaunchSpec, PreparedLaunch, ResumeSpec, RpcLaunchSpec, SessionEndpoint,
-    SessionTransport, TransportKind,
+    DeliveryCompletion, EndpointRef, LaunchSpec, PreparedLaunch, ResumeSpec, RpcLaunchSpec,
+    SessionEndpoint, SessionTransport, TransportKind,
 };
 use anyhow::{Context, Result};
 
@@ -98,7 +99,12 @@ impl SessionTransport for RpcTransport {
         })
     }
 
-    async fn deliver(&self, ep: &EndpointRef, text: &str, submit: bool) -> Result<()> {
+    async fn deliver(
+        &self,
+        ep: &EndpointRef,
+        text: &str,
+        submit: bool,
+    ) -> Result<DeliveryCompletion> {
         if ep.kind != self.kind {
             anyhow::bail!(
                 "{} transport cannot deliver to {} endpoint",
@@ -127,12 +133,12 @@ impl SessionTransport for RpcTransport {
             );
         }
         let text = text.to_string();
-        match dialect {
+        let completion = match dialect {
             Dialect::Acp => {
                 if let Ok(mut runtime) = runtime.lock() {
                     runtime.mark_turn_started();
                 }
-                spawn_acp_prompt(handle, native_id, text, runtime);
+                spawn_acp_prompt(handle, native_id, text, runtime)
             }
             Dialect::AppServer => {
                 let steer = if submit {
@@ -146,21 +152,23 @@ impl SessionTransport for RpcTransport {
                 };
                 match steer {
                     SteerState::Ready(turn_id) => {
-                        spawn_app_server_steer(handle, native_id, turn_id, text)
+                        spawn_app_server_steer(handle, native_id, turn_id, text);
+                        DeliveryCompletion::ExternallyObserved
                     }
                     SteerState::AwaitingId => {
-                        spawn_app_server_steer_pending(handle, native_id, text, runtime)
+                        spawn_app_server_steer_pending(handle, native_id, text, runtime);
+                        DeliveryCompletion::ExternallyObserved
                     }
                     SteerState::Idle => {
                         if let Ok(mut runtime) = runtime.lock() {
                             runtime.mark_turn_started();
                         }
-                        spawn_app_server_turn(handle, native_id, text, runtime);
+                        spawn_app_server_turn(handle, native_id, text, runtime)
                     }
                 }
             }
-        }
-        Ok(())
+        };
+        Ok(completion)
     }
 
     fn is_live(&self, ep: &EndpointRef) -> bool {
@@ -184,29 +192,28 @@ impl SessionTransport for RpcTransport {
             );
         }
         let child = {
-            let mut registry = registry().lock().unwrap();
-            if let Some(child) = registry.get(&ep.endpoint_id) {
-                if child.handle.dialect != self.dialect() {
-                    anyhow::bail!(
-                        "{} endpoint {:?} is registered as {:?}",
-                        self.kind.as_str(),
-                        ep.endpoint_id,
-                        child.handle.dialect
-                    );
-                }
+            let registry = registry().lock().unwrap();
+            let Some(child) = registry.get(&ep.endpoint_id) else {
+                return Ok(());
+            };
+            if child.handle.dialect != self.dialect() {
+                anyhow::bail!(
+                    "{} endpoint {:?} is registered as {:?}",
+                    self.kind.as_str(),
+                    ep.endpoint_id,
+                    child.handle.dialect
+                );
             }
-            registry.remove(&ep.endpoint_id)
+            (child.handle.clone(), child.native_id.clone())
         };
-        if let Some(child) = child {
-            let _ = child.cwd;
-            let _ = child.runtime;
-            if child.handle.dialect == Dialect::Acp {
-                AcpClient::new(child.handle.clone())
-                    .session_cancel(&child.native_id)
-                    .await;
-            }
-            child.handle.kill().await;
+        if child.0.dialect == Dialect::Acp {
+            AcpClient::new(child.0.clone())
+                .session_cancel(&child.1)
+                .await;
         }
+        let confirmation = child.0.kill().await;
+        remove_after_exit_confirmation(&ep.endpoint_id, confirmation)
+            .with_context(|| format!("killing RPC endpoint {:?}", ep.endpoint_id))?;
         Ok(())
     }
 }

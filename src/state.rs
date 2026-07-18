@@ -193,6 +193,9 @@ pub struct SessionLocator {
     pub locator_kind: String,
     pub locator_value: String,
     pub pubkey: String,
+    /// Zero for durable recovery locators; otherwise the sole runtime
+    /// generation allowed to act through this endpoint.
+    pub runtime_generation: u64,
     pub created_at: u64,
 }
 
@@ -247,15 +250,23 @@ pub use retention::{
     RetentionPruneReport, COMPLETED_LEDGER_RETENTION_SECS, RELAY_EVENT_RETENTION_SECS,
 };
 mod session_chat;
-pub(crate) mod session_claims;
-mod session_membership_cleanup;
+mod session_context;
+mod session_cursor;
+mod session_lifecycle;
 mod session_native;
+mod session_recovery;
+pub use session_lifecycle::{HEADLESS_IDLE_TIMEOUT_SECS, STOPPED_STANDING_RETENTION_SECS};
 mod session_resume;
+mod session_routes;
+pub use session_routes::ConfirmedAdmissionCommit;
+mod session_standing;
+pub use session_standing::{SessionStanding, StandingState};
 mod session_title;
 mod session_ty;
-pub use session_ty::Session;
+pub use session_ty::{
+    PresentationState, RecoveryState, RuntimeState, Session, StopReason, WorkState,
+};
 mod sessions;
 mod status;
 #[cfg(test)]
 mod tests;
-mod turn_projection;

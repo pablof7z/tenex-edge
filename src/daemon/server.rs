@@ -32,6 +32,7 @@ mod background;
 mod delivery_drive;
 mod demux;
 mod invite_rpc;
+mod managed_lifecycle;
 mod management_command;
 mod membership_cleanup;
 mod my_session;
@@ -62,6 +63,10 @@ pub struct DaemonState {
     cfg: Config,
     host: String,
     owners: Vec<String>,
+    /// Serializes lifecycle-owned NIP-29 standing transitions. Relay writes
+    /// are asynchronous, so an expired removal finishes before a concurrent
+    /// exact-session re-admission decides whether it must add again.
+    standing_sync: tokio::sync::Mutex<()>,
     agent_config: AgentConfigState,
     catalog: CatalogState,
     runtime: SessionRuntimeState,
@@ -236,6 +241,9 @@ async fn dispatch(state: &Arc<DaemonState>, req: &Request) -> Response {
         "agent_remove" => agent_config::rpc_agent_remove(&state.agent_config, &req.params),
         "agent_usage" => agent_usage::rpc_agent_usage(state, &req.params),
         "pty_supervisor_exit" => rpc::rpc_pty_supervisor_exit(state, &req.params).await,
+        "pty_presentation_changed" => {
+            managed_lifecycle::rpc_pty_presentation_changed(state, &req.params)
+        }
         "agent_roster_refresh" => rpc_agent_roster_refresh(state, &req.params),
         "channel_create" => rpc_channel_create(state, &req.params).await,
         "channel_edit" => rpc_channel_edit(state, &req.params).await,

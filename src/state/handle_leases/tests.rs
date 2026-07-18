@@ -67,7 +67,7 @@ fn dead_custom_handle_is_available_and_atomically_reclaimed() {
     store
         .allocate_custom_handle("old", "codex", "quill", 10)
         .unwrap();
-    store
+    let generation = store
         .reserve_hook_session_for_test(&crate::state::RegisterSession {
             pubkey: "old".into(),
             observed_harness: "codex".into(),
@@ -82,7 +82,9 @@ fn dead_custom_handle_is_available_and_atomically_reclaimed() {
         .ensure_custom_handle_available("codex", "quill")
         .expect_err("live session retains its lease");
 
-    store.mark_dead("old").unwrap();
+    assert!(store
+        .mark_runtime_stopped_if_generation("old", generation, StopReason::Unknown, 11)
+        .unwrap());
     store
         .ensure_custom_handle_available("codex", "quill")
         .expect("dead session releases custom-name authority");

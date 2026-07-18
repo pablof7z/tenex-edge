@@ -53,10 +53,16 @@ later, much harder problem. (Tenet #5.) The household case (spouse's todo agent)
 end; "anyone on the internet's agent" is the far end and may never be fully safe.
 
 Within the fabric, trust is exactly NIP-29 channel membership. A machine's management key
-adds a session's pubkey as a member. Ordinary end or heartbeat loss retains a 10-minute grace
-window before TTL pruning; an explicit human operator kill removes the session from every joined
-channel immediately. There is no durable per-agent or keystore identity conferring standing —
-being trusted in a channel *is* being a current member of it.
+adds a session's pubkey as a member. A headless managed runtime stops after ten minutes of true
+inactivity; ordinary headless stop or failure retains membership for one hour, while a clean
+zero-status child exit observed while headed removes membership immediately. Explicit human
+forget or revoke also removes every joined membership immediately.
+
+Saved recovery data does not confer trust. The owning management key may preserve an exact
+session's signer, native conversation locator, and previously admitted channel routes after
+membership expires. An exact p-tag from a sender who is currently authorized in that channel may
+use that route to re-admit the same pubkey. Until the relay confirms re-admission the session is
+absent, and a slug, durable key, or local database row cannot substitute for membership.
 
 ### 4. Human-in-the-loop at the boundary, by default
 Crossing the person boundary — especially *answering* a peer or *acting on* a peer's input —

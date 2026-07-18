@@ -8,7 +8,7 @@ pub(in crate::daemon::server::demux) fn has_alive_session_for(
     let Some(rec) = store.get_session(mentioned_pk).ok().flatten() else {
         return false;
     };
-    if !rec.alive {
+    if !rec.is_running() {
         return false;
     }
     if !store
@@ -18,7 +18,7 @@ pub(in crate::daemon::server::demux) fn has_alive_session_for(
         return true;
     }
     store
-        .is_session_joined_channel(&rec.pubkey, channel)
+        .has_session_route(&rec.pubkey, channel)
         .unwrap_or(rec.channel_h == channel)
 }
 

@@ -4,60 +4,67 @@ use super::*;
 #[path = "session_end/tests.rs"]
 mod tests;
 
-const CLAIM_GRACE_ENV: &str = "MOSAICO_EPHEMERAL_GRACE_SECS";
-const DEFAULT_CLAIM_GRACE_SECS: u64 = 15 * 60;
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum SessionEndCause {
+    Manual,
+    HarnessHook,
+}
+
+#[derive(serde::Deserialize)]
+struct SessionEndParams {
+    cause: SessionEndCause,
+}
 
 pub(in crate::daemon::server) async fn rpc_session_end(
     state: &Arc<DaemonState>,
     params: &serde_json::Value,
 ) -> Result<serde_json::Value> {
+    let parsed: SessionEndParams =
+        serde_json::from_value(params.clone()).context("parsing session_end params")?;
     let anchor = CallerAnchor::from_params(params);
-    let rec = resolve_session_inner(state, &anchor, ResolveScope::Strict).ok();
-    let Some(rec) = rec else {
-        return Ok(serde_json::json!({ "ended": false }));
+    let Some(session) = resolve_session_inner(state, &anchor, ResolveScope::Strict).ok() else {
+        return Ok(serde_json::json!({"ended": false}));
     };
-    let ended = end_runtime_generation(state, &rec.pubkey, rec.runtime_generation).await?;
-    Ok(serde_json::json!({ "ended": ended }))
+    if matches!(parsed.cause, SessionEndCause::HarnessHook)
+        && endpoint_locator(state, &session)
+            .is_some_and(|locator| locator.locator_kind == crate::state::LOCATOR_PTY)
+    {
+        // The PTY supervisor owns the only atomic observation of child status
+        // plus attachment state. A harness hook may arrive just before that
+        // observation and must not pre-classify a headed clean exit as headless.
+        return Ok(serde_json::json!({"ended": false, "deferred": true}));
+    }
+    let ended = end_runtime_generation(
+        state,
+        &session.pubkey,
+        session.runtime_generation,
+        crate::state::StopReason::HeadlessExit,
+    )
+    .await?;
+    Ok(serde_json::json!({"ended": ended}))
 }
 
-/// End exactly one runtime incarnation. A callback from an older incarnation
-/// cannot retire a newer process that reused the same authoritative pubkey.
+/// End exactly one runtime incarnation. The explicit reason prevents endpoint
+/// exit, operator stop, and idle eviction from collapsing into one lifecycle.
 pub(in crate::daemon::server) async fn end_runtime_generation(
     state: &Arc<DaemonState>,
     pubkey: &str,
     runtime_generation: u64,
+    reason: crate::state::StopReason,
 ) -> Result<bool> {
-    let Some(rec) = state.with_store(|store| store.get_session(pubkey))? else {
+    let Some(session) = state.with_store(|store| store.get_session(pubkey))? else {
         return Ok(false);
     };
-    if rec.runtime_generation != runtime_generation || !rec.alive {
+    if session.runtime_generation != runtime_generation || !session.is_running() {
         return Ok(false);
     }
-
-    let ended_at = now_secs();
-    cancel_session(state, pubkey);
-    record_resumable_claim(state, &rec);
-    let ended = state.with_store(|store| {
-        store.touch_session(pubkey, ended_at)?;
-        store.mark_dead_if_generation(pubkey, runtime_generation)
-    })?;
-    if !ended {
-        return Ok(false);
+    let ended =
+        super::managed_lifecycle::stop_generation(state, &session, reason, now_secs()).await?;
+    if ended {
+        super::subscriptions::reconcile_subs_logged(state, "session_end").await;
     }
-
-    state.emit_tail(TailEvent::Sess {
-        ts: ended_at,
-        channel: rec.channel_h.clone(),
-        agent: rec.agent_slug.clone(),
-        session: pubkey.to_string(),
-        state: "end".into(),
-        rel_cwd: String::new(),
-    });
-    let state = state.clone();
-    tokio::spawn(async move {
-        super::subscriptions::reconcile_subs_logged(&state, "session_end").await;
-    });
-    Ok(true)
+    Ok(ended)
 }
 
 #[derive(serde::Deserialize)]
@@ -67,57 +74,154 @@ struct SessionKillParams {
     #[serde(default)]
     pty_id: Option<String>,
     #[serde(default)]
-    revoke_memberships: bool,
+    forget: bool,
 }
 
 pub(in crate::daemon::server) async fn rpc_session_kill(
     state: &Arc<DaemonState>,
     params: &serde_json::Value,
 ) -> Result<serde_json::Value> {
-    let p: SessionKillParams =
+    let params: SessionKillParams =
         serde_json::from_value(params.clone()).context("parsing session_kill params")?;
-    let selector = p.session.as_deref().filter(|session| !session.is_empty());
+    let selector = params
+        .session
+        .as_deref()
+        .filter(|session| !session.is_empty());
     let public = selector
-        .map(|session| state.with_store(|s| super::resolution::resolve_public_session(s, session)))
+        .map(|session| {
+            state.with_store(|store| super::resolution::resolve_public_session(store, session))
+        })
         .transpose()?
         .flatten();
-    let Some(rec) = public else {
-        return kill_unbound_endpoint(p.pty_id.as_deref(), p.revoke_memberships);
+    let Some(session) = public else {
+        return kill_unbound_endpoint(params.pty_id.as_deref(), params.forget);
+    };
+    if params.forget {
+        return forget_session(state, &session).await;
+    }
+
+    let stop = match stop_local_process(state, &session).await {
+        Ok(note) => note,
+        Err(error) => {
+            return Ok(serde_json::json!({
+                "killed": false,
+                "ended": false,
+                "reason": format!("{error:#}"),
+            }));
+        }
+    };
+    let transitioned = super::managed_lifecycle::stop_generation(
+        state,
+        &session,
+        crate::state::StopReason::OperatorKill,
+        now_secs(),
+    )
+    .await?;
+    let ended = transitioned
+        || state
+            .with_store(|store| store.get_session(&session.pubkey))?
+            .is_some_and(|current| {
+                current.runtime_generation == session.runtime_generation && !current.is_running()
+            });
+
+    Ok(serde_json::json!({
+        "killed": true,
+        "ended": ended,
+        "note": stop,
+        "cleanup_confirmed": true,
+        "cleanup_failures": [],
+    }))
+}
+
+async fn forget_session(
+    state: &Arc<DaemonState>,
+    selected: &crate::state::Session,
+) -> Result<serde_json::Value> {
+    // Recovery revocation is the first durable write. The standing lane makes
+    // the channel/signing snapshots complete with respect to an admission that
+    // was already in flight; future reservations fail on recovery_state.
+    let (current, channels, signing_keys) = {
+        let _lane = state.standing_sync.lock().await;
+        let current = revoke_current_generation(state, &selected.pubkey)?;
+        super::engine_lifecycle::cancel_session(state, &current.pubkey, current.runtime_generation);
+        let channels = super::membership_cleanup::recorded_channels(state, &current.pubkey);
+        let signing_keys = state.session_signing_keys(&current.pubkey);
+        (current, channels, signing_keys)
     };
 
-    let stop = stop_local_process(state, &rec).await;
-    let ended = end_runtime_generation(state, &rec.pubkey, rec.runtime_generation).await?;
-    let cleanup_failures = if p.revoke_memberships {
-        revoke_operator_session(state, &rec).await
-    } else {
-        Vec::new()
+    let stop = match stop_local_process(state, &current).await {
+        Ok(note) => note,
+        Err(error) => {
+            return Ok(serde_json::json!({
+                "killed": false,
+                "ended": false,
+                "recovery_revoked": true,
+                "reason": format!(
+                    "recovery was revoked, but runtime termination was not confirmed: {error:#}"
+                ),
+            }));
+        }
     };
 
-    match stop {
-        Ok(note) => Ok(serde_json::json!({
+    let finalized = {
+        let _lane = state.standing_sync.lock().await;
+        state.with_store(|store| {
+            store.finalize_session_recovery_revocation(
+                &current.pubkey,
+                current.runtime_generation,
+                now_secs(),
+            )
+        })?
+    };
+    if !finalized {
+        return Ok(serde_json::json!({
             "killed": true,
-            "ended": ended,
-            "note": note,
-            "cleanup_confirmed": cleanup_failures.is_empty(),
-            "cleanup_failures": cleanup_failures,
-        })),
-        Err(error) => Ok(serde_json::json!({
-            "killed": false,
-            "ended": ended,
-            "reason": format!("{error:#}"),
-        })),
+            "ended": false,
+            "recovery_revoked": true,
+            "note": stop,
+            "reason": "runtime terminated, but recovery finalization lost its generation fence",
+        }));
+    }
+
+    let cleanup_failures = revoke_operator_session(state, &current, signing_keys, channels).await;
+    Ok(serde_json::json!({
+        "killed": true,
+        "ended": true,
+        "recovery_revoked": true,
+        "note": stop,
+        "cleanup_confirmed": cleanup_failures.is_empty(),
+        "cleanup_failures": cleanup_failures,
+    }))
+}
+
+fn revoke_current_generation(
+    state: &Arc<DaemonState>,
+    pubkey: &str,
+) -> Result<crate::state::Session> {
+    loop {
+        let current = state
+            .with_store(|store| store.get_session(pubkey))?
+            .with_context(|| format!("session {pubkey} disappeared during recovery revocation"))?;
+        if !state.with_store(|store| {
+            store.revoke_session_recovery_if_generation(pubkey, current.runtime_generation)
+        })? {
+            continue;
+        }
+        let fenced = state
+            .with_store(|store| store.get_session(pubkey))?
+            .with_context(|| format!("session {pubkey} disappeared after recovery revocation"))?;
+        if fenced.runtime_generation == current.runtime_generation
+            && fenced.recovery_state == crate::state::RecoveryState::Revoked
+        {
+            return Ok(fenced);
+        }
     }
 }
 
-fn kill_unbound_endpoint(
-    pty_id: Option<&str>,
-    revoke_memberships: bool,
-) -> Result<serde_json::Value> {
+fn kill_unbound_endpoint(pty_id: Option<&str>, forget: bool) -> Result<serde_json::Value> {
     let Some(pty_id) = pty_id else {
         return Ok(serde_json::json!({
-            "killed": false,
-            "ended": false,
-            "reason": "no local session matched"
+            "killed": false, "ended": false, "reason": "no local session matched"
         }));
     };
     let Some(endpoint) = crate::pty::read_all_metadata()
@@ -125,18 +229,13 @@ fn kill_unbound_endpoint(
         .find(|metadata| metadata.id == pty_id && crate::pty::is_live(&metadata.id))
     else {
         return Ok(serde_json::json!({
-            "killed": false,
-            "ended": false,
-            "reason": "no live local endpoint matched"
+            "killed": false, "ended": false, "reason": "no live local endpoint matched"
         }));
     };
     crate::pty::kill(&endpoint.id)
         .with_context(|| format!("killing unbound PTY endpoint {}", endpoint.id))?;
-    let cleanup_failures = if revoke_memberships {
-        vec![
-            "endpoint had no current session identity; fabric cleanup could not be confirmed"
-                .to_string(),
-        ]
+    let cleanup_failures = if forget {
+        vec!["endpoint has no session identity; recovery cannot be forgotten".to_string()]
     } else {
         Vec::new()
     };
@@ -151,15 +250,13 @@ fn kill_unbound_endpoint(
 
 async fn revoke_operator_session(
     state: &Arc<DaemonState>,
-    rec: &crate::state::Session,
+    session: &crate::state::Session,
+    signing_keys: Result<nostr_sdk::Keys>,
+    channels: Vec<String>,
 ) -> Vec<String> {
     let now = now_secs();
     let mut failures = Vec::new();
-    if let Err(error) = state.with_store(|store| store.clear_session_claim_for_pubkey(&rec.pubkey))
-    {
-        failures.push(format!("session claim cleanup: {error:#}"));
-    }
-    match state.session_signing_keys(&rec.pubkey) {
+    match signing_keys {
         Ok(keys) => {
             crate::status_seam::drive(
                 &state.reconcilers.status,
@@ -169,37 +266,49 @@ async fn revoke_operator_session(
                 crate::status_seam::DriveMeta {
                     trigger: "operator_session_revoke",
                 },
-                |status| status.on_session_revoked(&rec.pubkey, now),
+                |status| status.on_session_revoked(&session.pubkey, now),
             )
             .await;
         }
         Err(error) => failures.push(format!("status expiration: {error:#}")),
     }
-    failures
-        .extend(super::membership_cleanup::revoke_session_memberships(state, &rec.pubkey).await);
+    failures.extend(
+        super::membership_cleanup::remove_revoked_session_memberships(
+            state,
+            &session.pubkey,
+            channels,
+        )
+        .await,
+    );
     failures
 }
 
 pub(in crate::daemon::server) async fn stop_local_process(
     state: &Arc<DaemonState>,
-    rec: &crate::state::Session,
+    session: &crate::state::Session,
 ) -> Result<String> {
+    if session.runtime_state == crate::state::RuntimeState::Stopped {
+        return Ok("runtime already stopped".into());
+    }
     match state
-        .with_store(|store| crate::session_host::transport::hosted_endpoint_for(store, rec))?
+        .with_store(|store| crate::session_host::transport::hosted_endpoint_for(store, session))?
     {
         crate::session_host::transport::HostedEndpoint::Resolved {
             transport,
             endpoint,
         } => {
-            transport
-                .kill(&endpoint)
-                .await
-                .with_context(|| format!("killing {} endpoint", endpoint.kind.as_str()))?;
+            if transport.is_live(&endpoint) {
+                transport
+                    .kill(&endpoint)
+                    .await
+                    .with_context(|| format!("killing {} endpoint", endpoint.kind.as_str()))?;
+                wait_for_process_exit(|| !transport.is_live(&endpoint)).await?;
+            }
             state.with_store(|store| {
-                store.clear_session_locator_kind(
-                    &rec.pubkey,
-                    &rec.observed_harness,
+                store.clear_runtime_locator_if_generation(
+                    &session.pubkey,
                     endpoint.kind.locator_kind(),
+                    session.runtime_generation,
                 )
             })?;
             return Ok(format!("endpoint={}", endpoint.endpoint_id));
@@ -207,53 +316,61 @@ pub(in crate::daemon::server) async fn stop_local_process(
         crate::session_host::transport::HostedEndpoint::Unavailable { kind } => {
             anyhow::bail!(
                 "session {} was admitted on {} but its endpoint locator is unavailable; refusing PID fallback",
-                rec.pubkey,
+                session.pubkey,
                 kind.as_str()
             );
         }
         crate::session_host::transport::HostedEndpoint::Unhosted => {}
     }
-    if let Some(pid) = rec.child_pid {
+    if let Some(pid) = session.child_pid {
+        if !super::engine_lifecycle::pid_alive(pid) {
+            return Ok(format!("pid={pid} (already exited)"));
+        }
         nix::sys::signal::kill(
             nix::unistd::Pid::from_raw(pid),
             Some(nix::sys::signal::Signal::SIGTERM),
         )
         .with_context(|| format!("sending SIGTERM to pid {pid}"))?;
+        wait_for_process_exit(|| !super::engine_lifecycle::pid_alive(pid)).await?;
         return Ok(format!("pid={pid}"));
     }
-    Ok(String::new())
+    anyhow::bail!(
+        "runtime generation {} for {} has no tracked process endpoint",
+        session.runtime_generation,
+        session.pubkey
+    )
 }
 
-fn record_resumable_claim(state: &Arc<DaemonState>, rec: &crate::state::Session) {
-    if rec.channel_h.is_empty()
-        || state
-            .with_store(|store| store.native_resume_locator(&rec.pubkey, &rec.observed_harness))
-            .ok()
-            .flatten()
-            .is_none()
-    {
-        return;
+async fn wait_for_process_exit(mut exited: impl FnMut() -> bool) -> Result<()> {
+    for _ in 0..100 {
+        if exited() {
+            return Ok(());
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
-    let now = now_secs();
-    let claim = crate::state::session_claims::SessionClaim {
-        pubkey: rec.pubkey.clone(),
-        agent_slug: rec.agent_slug.clone(),
-        channel_h: rec.channel_h.clone(),
-        harness: rec.observed_harness.clone(),
-        last_active_at: now,
-        expires_at: now.saturating_add(claim_grace_secs()),
-        owner_backend_pubkey: state.backend_pubkey().unwrap_or_default(),
-        owner_host: state.host.clone(),
-    };
-    if let Err(error) = state.with_store(|store| store.upsert_session_claim(&claim)) {
-        tracing::warn!(pubkey = %rec.pubkey, error = %error, "failed to record resumable claim");
-    }
+    anyhow::bail!("process termination was not confirmed within 5 seconds")
 }
 
-fn claim_grace_secs() -> u64 {
-    std::env::var(CLAIM_GRACE_ENV)
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok())
-        .filter(|value| *value > 0)
-        .unwrap_or(DEFAULT_CLAIM_GRACE_SECS)
+fn endpoint_locator(
+    state: &Arc<DaemonState>,
+    session: &crate::state::Session,
+) -> Option<crate::state::SessionLocator> {
+    state
+        .with_store(|store| {
+            store
+                .runtime_locator_for_session(
+                    &session.pubkey,
+                    session.runtime_generation,
+                    crate::state::LOCATOR_PTY,
+                )
+                .and_then(|pty| match pty {
+                    Some(pty) => Ok(Some(pty)),
+                    None => store.runtime_locator_for_session(
+                        &session.pubkey,
+                        session.runtime_generation,
+                        crate::state::LOCATOR_ACP,
+                    ),
+                })
+        })
+        .ok()?
 }

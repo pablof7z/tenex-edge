@@ -3,7 +3,10 @@ use super::super::*;
 #[derive(serde::Deserialize)]
 struct PtySupervisorExitParams {
     pty_id: String,
-    pubkey: String,
+    child_success: Option<bool>,
+    child_exit_code: Option<u32>,
+    presentation: crate::pty::PresentationSnapshot,
+    recorded_at: u64,
 }
 
 pub(in crate::daemon::server) async fn rpc_pty_supervisor_exit(
@@ -12,41 +15,41 @@ pub(in crate::daemon::server) async fn rpc_pty_supervisor_exit(
 ) -> Result<serde_json::Value> {
     let p: PtySupervisorExitParams =
         serde_json::from_value(params.clone()).context("parsing pty_supervisor_exit params")?;
-    let Some(session) = wait_for_registered_session(state, &p.pubkey, &p.pty_id).await else {
-        return Ok(serde_json::json!({ "ended": false }));
+    tracing::info!(
+        pty_id = %p.pty_id,
+        child_success = ?p.child_success,
+        child_exit_code = ?p.child_exit_code,
+        attached_clients = p.presentation.attached_clients,
+        attachment_epoch = p.presentation.attachment_epoch,
+        "PTY supervisor exited"
+    );
+    let Some(_) = wait_for_registered_session(state, &p.pty_id).await else {
+        return Ok(serde_json::json!({ "accepted": false, "ended": false }));
     };
-    let ended = super::super::session_end::end_runtime_generation(
+    let ended = super::super::managed_lifecycle::supervisor_exited(
         state,
-        &session.pubkey,
-        session.runtime_generation,
+        &p.pty_id,
+        p.child_success,
+        p.presentation,
+        p.recorded_at,
     )
     .await?;
-    Ok(serde_json::json!({ "ended": ended }))
+    Ok(serde_json::json!({ "accepted": true, "ended": ended }))
 }
 
 async fn wait_for_registered_session(
     state: &Arc<DaemonState>,
-    pubkey: &str,
     pty_id: &str,
 ) -> Option<crate::state::Session> {
     for _ in 0..40 {
         if let Some(session) = state
-            .with_store(|store| store.get_session(pubkey))
+            .with_store(|store| {
+                store.session_for_runtime_locator(crate::state::LOCATOR_PTY, pty_id)
+            })
             .ok()
             .flatten()
         {
-            let owns_endpoint = state
-                .with_store(|store| {
-                    store.locator_for_session(
-                        pubkey,
-                        &session.observed_harness,
-                        crate::state::LOCATOR_PTY,
-                    )
-                })
-                .ok()
-                .flatten()
-                .is_some_and(|locator| locator.locator_value == pty_id);
-            if session.alive && owns_endpoint {
+            if session.is_running() {
                 return Some(session);
             }
         }

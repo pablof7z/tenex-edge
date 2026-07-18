@@ -24,7 +24,8 @@ impl Store {
                  WHERE lease.handle=?1 AND (
                      lease.live=1 OR EXISTS(
                          SELECT 1 FROM sessions AS session
-                         WHERE session.pubkey=lease.pubkey AND session.alive=1
+                         WHERE session.pubkey=lease.pubkey
+                           AND session.runtime_state='running'
                      )
                  )
              )",
@@ -64,17 +65,6 @@ impl Store {
             "UPDATE handle_leases SET last_active_at=?2
              WHERE live=1 AND pubkey=?1",
             params![pubkey, at],
-        )?;
-        Ok(())
-    }
-
-    pub(crate) fn mark_handle_offline_for_pubkey(&self, pubkey: &str) -> Result<()> {
-        self.conn.execute(
-            "UPDATE handle_leases SET live=0,
-                 last_active_at=MAX(last_active_at,
-                     COALESCE((SELECT last_seen FROM sessions WHERE pubkey=?1), 0))
-             WHERE pubkey=?1",
-            [pubkey],
         )?;
         Ok(())
     }

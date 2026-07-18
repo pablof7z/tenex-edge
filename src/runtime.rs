@@ -49,7 +49,7 @@ impl EngineParams {
 fn status_channels(p: &EngineParams, store: &Mutex<Store>, session: &Session) -> Vec<String> {
     let mut channels = match store.lock() {
         Ok(g) => g
-            .list_session_joined_channels(&session.pubkey)
+            .list_session_routes(&session.pubkey)
             .unwrap_or_default()
             .into_iter()
             .map(|(channel, _)| channel)
@@ -86,7 +86,7 @@ fn channel_set(
 /// subscription and demuxes incoming events centrally; this task only:
 ///   - publishes the profile once (signed with the agent's keys),
 ///   - heartbeats `last_seen` and submits a re-armed kind:30315 to NMP,
-///   - watches the host pid and marks the session dead (title RETAINED) on pid
+///   - watches the host pid and stops the runtime (title retained) on pid
 ///     death or `cancel` (the `session-end` path).
 ///
 /// Store access goes through the shared `Arc<Mutex<Store>>`; the guard is held
@@ -172,7 +172,7 @@ pub async fn run_session_in_daemon(
                 &aref.slug,
                 &p.rel_cwd,
                 chans,
-                session.working,
+                session.is_working(),
                 automatic_delivery,
                 &session.title,
                 p.dispatch_event.clone(),
@@ -206,7 +206,7 @@ pub async fn run_session_in_daemon(
                 let session = load_session("observe-tick");
                 let working = session
                     .as_ref()
-                    .is_some_and(|s| s.working);
+                    .is_some_and(|s| s.is_working());
 
                 if working != prev_working {
                     drive_status!("turn_edge", |r| {

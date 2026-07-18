@@ -4,7 +4,6 @@ const CONTEXT_PROFILE_WARM_WINDOW_SECS: u64 = 4 * 60 * 60;
 
 #[derive(serde::Deserialize, Default)]
 pub(in crate::daemon::server) struct TurnStartParams {
-    harness_session: String,
     #[serde(default)]
     transcript: Option<String>,
 }
@@ -15,7 +14,12 @@ pub(in crate::daemon::server) async fn rpc_turn_start(
 ) -> Result<serde_json::Value> {
     let p: TurnStartParams =
         serde_json::from_value(params.clone()).context("parsing turn_start params")?;
-    if p.harness_session.is_empty() {
+    let anchor = CallerAnchor::from_params(params);
+    if anchor.explicit.is_none()
+        && anchor.pty_session.is_none()
+        && anchor.harness_session.is_none()
+        && anchor.watch_pid.is_none()
+    {
         return Ok(serde_json::json!({
             "context": serde_json::Value::Null,
             "audit": {
@@ -25,11 +29,13 @@ pub(in crate::daemon::server) async fn rpc_turn_start(
             },
         }));
     }
-    // Hooks speak a typed harness locator; the daemon resolves it to the pubkey.
+    // Hooks speak typed runtime locators while managed launches also carry their
+    // assigned public session identity. Resolve either through the one canonical
+    // caller-anchor path; a native id is never itself a session identity.
     // Read the previous
     // turn_started_at BEFORE opening the turn for audit/debug context; durable
     // snapshot-vs-delta gating lives on the session's seen_cursor.
-    let before = state.with_store(|s| s.get_session(&p.harness_session).ok().flatten());
+    let before = resolve_session_inner(state, &anchor, ResolveScope::Strict).ok();
     let prev_started = before.as_ref().map(|r| r.turn_started_at).unwrap_or(0);
 
     let now = now_secs();
@@ -41,7 +47,7 @@ pub(in crate::daemon::server) async fn rpc_turn_start(
                 "audit": {
                     "kind": "turn_start",
                     "skipped": "session-not-found",
-                    "input_harness_session": p.harness_session,
+                    "input_harness_session": anchor.harness_session,
                     "prev_turn_started_at": prev_started,
                     "output": { "emitted": false, "bytes": 0, "text": null },
                 },
@@ -124,7 +130,7 @@ pub(in crate::daemon::server) async fn rpc_turn_check(
 ) -> Result<serde_json::Value> {
     let rec = resolve_session(state, &CallerAnchor::from_params(params))?;
     let now = now_secs();
-    let delta_since = cursor::drive_cursor_request(state, &rec, now, rec.working)
+    let delta_since = cursor::drive_cursor_request(state, &rec, now, rec.is_working())
         .context("applying cursor turn_check projection")?;
     schedule_context_profile_warm(state.clone(), rec.clone(), delta_since.unwrap_or(now));
     let turn = crate::turn_context::assemble_turn_check(
@@ -144,34 +150,37 @@ pub(in crate::daemon::server) async fn rpc_turn_check(
     Ok(serde_json::json!({ "context": context, "audit": audit }))
 }
 
-#[derive(serde::Deserialize)]
-pub(in crate::daemon::server) struct TurnEndParams {
-    harness_session: String,
-}
-
 pub(in crate::daemon::server) async fn rpc_turn_end(
     state: &Arc<DaemonState>,
     params: &serde_json::Value,
 ) -> Result<serde_json::Value> {
-    let p: TurnEndParams =
-        serde_json::from_value(params.clone()).context("parsing turn_end params")?;
-    if p.harness_session.is_empty() {
+    let anchor = CallerAnchor::from_params(params);
+    if anchor.explicit.is_none()
+        && anchor.pty_session.is_none()
+        && anchor.harness_session.is_none()
+        && anchor.watch_pid.is_none()
+    {
         return Ok(serde_json::json!({ "ok": true }));
     }
     // Read working/turn_started_at BEFORE closing the turn so we can compute
-    // elapsed (alias-resolving read).
-    let pre = state.with_store(|s| s.get_session(&p.harness_session).ok().flatten());
+    // elapsed. Runtime locators resolve to the canonical pubkey-owned row.
+    let pre = resolve_session_inner(state, &anchor, ResolveScope::Strict).ok();
     let (was_working, turn_started_at) = pre
         .as_ref()
-        .map(|r| (r.working, r.turn_started_at))
+        .map(|r| (r.is_working(), r.turn_started_at))
         .unwrap_or((false, 0));
     let now = now_secs();
     if let Some(rec) = pre.as_ref() {
-        turn_lifecycle::drive_turn_ended(state, rec)
+        turn_lifecycle::drive_turn_ended(state, rec, now)
             .context("applying turn_end lifecycle projection")?;
     }
 
-    let rec = state.with_store(|s| s.get_session(&p.harness_session).ok().flatten());
+    let rec = pre.as_ref().and_then(|session| {
+        state
+            .with_store(|s| s.get_session(&session.pubkey))
+            .ok()
+            .flatten()
+    });
 
     if was_working {
         let elapsed_s = (turn_started_at > 0).then(|| now.saturating_sub(turn_started_at));
@@ -237,7 +246,7 @@ fn context_profile_pubkeys(
         pubkeys.extend(crate::profile::body_mention_pubkeys(&row.body));
     }
 
-    let channels = match store.list_session_joined_channels(&rec.pubkey) {
+    let channels = match store.list_session_routes(&rec.pubkey) {
         Ok(channels) => channels,
         Err(error) => {
             tracing::warn!(

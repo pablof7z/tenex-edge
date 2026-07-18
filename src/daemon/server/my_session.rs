@@ -15,15 +15,16 @@ pub(in crate::daemon::server) fn rpc_my_session(
     let roots = state.with_store(super::who::root_channels)?;
     let instance = state.session_instance(&rec);
     let headless = state.with_store(|store| crate::session_host::session_is_headless(store, &rec));
-    let expanded_workspaces = state.with_store(|store| -> Result<BTreeSet<String>> {
+    let expanded_workspaces = state.with_store(|store| {
         store
-            .list_session_joined_channels(&rec.pubkey)?
+            .list_session_routes(&rec.pubkey)
+            .unwrap_or_default()
             .into_iter()
             .map(|(channel, _)| {
                 crate::daemon::workspace_path::WorkspacePathResolver::new(store)
                     .root_for_channel(&channel)
             })
-            .collect()
+            .collect::<Result<BTreeSet<_>>>()
     })?;
     let host = state.host.clone();
     let backend_pubkey = state.backend_pubkey().unwrap_or_default();
@@ -86,23 +87,32 @@ mod tests {
                 .unwrap();
             s.upsert_channel_member("alpha", "pk", "member", 1).unwrap();
             s.upsert_channel_member("beta", "pk", "member", 1).unwrap();
-            s.reserve_session_with_facts(
-                &RegisterSession {
-                    pubkey: "pk".into(),
-                    observed_harness: "codex".into(),
-                    agent_slug: "codex".into(),
-                    channel_h: "alpha".into(),
-                    child_pid: Some(42),
-                    transcript_path: None,
-                    now: 10,
-                },
-                &crate::state::AdmittedRuntimeFacts {
-                    observed_harness: "codex".into(),
-                    claimed_harness: String::new(),
-                    bundle: "codex-pty".into(),
-                    transport: "pty".into(),
-                    endpoint_provenance: "launch".into(),
-                },
+            let generation = s
+                .reserve_session_with_facts(
+                    &RegisterSession {
+                        pubkey: "pk".into(),
+                        observed_harness: "codex".into(),
+                        agent_slug: "codex".into(),
+                        channel_h: "alpha".into(),
+                        child_pid: Some(42),
+                        transcript_path: None,
+                        now: 10,
+                    },
+                    &crate::state::AdmittedRuntimeFacts {
+                        observed_harness: "codex".into(),
+                        claimed_harness: String::new(),
+                        bundle: "codex-pty".into(),
+                        transport: "pty".into(),
+                        endpoint_provenance: "launch".into(),
+                    },
+                )
+                .unwrap();
+            s.apply_session_presentation_edge(
+                "pk",
+                generation,
+                1,
+                crate::state::PresentationState::Headless,
+                10,
             )
             .unwrap();
             s.put_session_locator("codex", crate::state::LOCATOR_PTY, "pty-briefing", "pk", 10)
@@ -128,7 +138,7 @@ mod tests {
         assert!(first
             .contains("<workspace name=\"beta\" channel=\"beta\" about=\"Beta\" members=\"1\" />"));
 
-        state.with_store(|s| s.join_session_channel(&pubkey, "beta", 20).unwrap());
+        state.with_store(|s| s.grant_session_route(&pubkey, "beta", 20).unwrap());
         let second = rpc_my_session(
             &state,
             &serde_json::json!({

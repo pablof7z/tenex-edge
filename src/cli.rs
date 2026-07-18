@@ -61,10 +61,6 @@ pub(crate) fn channel_env() -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
-pub(crate) fn ephemeral_session_env() -> bool {
-    std::env::var("MOSAICO_EPHEMERAL").ok().as_deref() == Some("1")
-}
-
 /// The hosted PTY session this CLI invocation runs in. It is present in the
 /// harness env from process birth and is 1:1 with the session, so the daemon
 /// resolves its typed PTY locator to the caller's pubkey. Native harness shells
@@ -201,7 +197,10 @@ pub(super) fn session_end(session: String) -> Result<()> {
     if crate::daemon::is_inhibited() {
         return Ok(());
     }
-    let v = crate::daemon::blocking::call("session_end", serde_json::json!({"session": session}))?;
+    let v = crate::daemon::blocking::call(
+        "session_end",
+        serde_json::json!({"session": session, "cause": "manual"}),
+    )?;
     if v["ended"].as_bool().unwrap_or(false) {
         eprintln!("session {session} ended");
     } else {
@@ -262,6 +261,7 @@ pub(super) fn session_end_hook(session: String, harness: &str) -> Result<()> {
             "session": pubkey,
             "harness_session": session,
             "harness": harness,
+            "cause": "harness_hook",
         }),
     ) {
         eprintln!("[mosaico] session-end hook skipped: {e:#}");

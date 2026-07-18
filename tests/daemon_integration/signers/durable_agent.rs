@@ -195,7 +195,10 @@ fn durable_agent_reuses_key_and_rejects_concurrency() {
         );
 
         client
-            .call("session_end", serde_json::json!({ "session": first }))
+            .call(
+                "session_end",
+                serde_json::json!({ "session": first, "cause": "manual" }),
+            )
             .await
             .expect("end first durable session");
         let third =

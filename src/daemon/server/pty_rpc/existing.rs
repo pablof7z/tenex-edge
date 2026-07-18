@@ -55,10 +55,10 @@ async fn live_pty_for_session(
     state: &Arc<DaemonState>,
     rec: &crate::state::Session,
 ) -> Option<String> {
-    if !rec.alive {
+    if !rec.is_running() {
         return None;
     }
-    let pty_id = super::pty_session_for_pubkey(state, &rec.pubkey)?;
+    let pty_id = super::pty_session_for(state, rec)?;
     for _ in 0..40 {
         if crate::pty::is_live(&pty_id) {
             return Some(pty_id);

@@ -3,8 +3,8 @@
 use anyhow::Result;
 
 use super::{
-    EndpointDescriptor, EndpointRef, LaunchSpec, ResumeSpec, SessionEndpoint, SessionTransport,
-    TransportKind,
+    DeliveryCompletion, EndpointDescriptor, EndpointRef, LaunchSpec, ResumeSpec, SessionEndpoint,
+    SessionTransport, TransportKind,
 };
 
 pub struct PtyTransport;
@@ -80,7 +80,12 @@ impl SessionTransport for PtyTransport {
         self.launch(spec).await
     }
 
-    async fn deliver(&self, ep: &EndpointRef, text: &str, submit: bool) -> Result<()> {
+    async fn deliver(
+        &self,
+        ep: &EndpointRef,
+        text: &str,
+        submit: bool,
+    ) -> Result<DeliveryCompletion> {
         if !self.is_live(ep) {
             anyhow::bail!("pty session {} is not live", ep.endpoint_id);
         }
@@ -89,7 +94,7 @@ impl SessionTransport for PtyTransport {
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
             crate::pty::inject(&ep.endpoint_id, "", false, true)?;
         }
-        Ok(())
+        Ok(DeliveryCompletion::ExternallyObserved)
     }
 
     fn is_live(&self, ep: &EndpointRef) -> bool {
@@ -97,7 +102,9 @@ impl SessionTransport for PtyTransport {
     }
 
     fn output_is_visible(&self, ep: &EndpointRef) -> bool {
-        crate::pty::output_is_visible(&ep.endpoint_id)
+        crate::pty::presentation_observation(&ep.endpoint_id)
+            .map(|presentation| !presentation.is_headless())
+            .unwrap_or(false)
     }
 
     fn describe(&self, ep: &EndpointRef) -> EndpointDescriptor {

@@ -39,7 +39,11 @@ impl Store {
         body: &str,
         created_at: u64,
     ) -> Result<bool> {
-        let n = self.conn.execute(
+        let transaction = rusqlite::Transaction::new_unchecked(
+            &self.conn,
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
+        let n = transaction.execute(
             "INSERT OR IGNORE INTO inbox
                  (event_id, target_pubkey, state, from_pubkey, channel_h, body, created_at)
              VALUES (?1, ?2, 'pending', ?3, ?4, ?5, ?6)",
@@ -52,6 +56,14 @@ impl Store {
                 created_at
             ],
         )?;
+        if n > 0 {
+            transaction.execute(
+                "UPDATE sessions SET idle_since=0, idle_deadline=0
+                 WHERE pubkey=?1 AND runtime_state='running'",
+                [target_pubkey],
+            )?;
+        }
+        transaction.commit()?;
         Ok(n > 0)
     }
 

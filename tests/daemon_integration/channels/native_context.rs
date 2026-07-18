@@ -266,7 +266,7 @@ fn channel_membership_commands_use_watch_pid_as_exact_session_anchor() {
     assert_eq!(rec.channel_h, parent_h);
     assert!(
         !store
-            .is_session_joined_channel(&pubkey, &child_h)
+            .has_session_route(&pubkey, &child_h)
             .expect("joined-channel check"),
         "leave should remove the passive child-channel join"
     );

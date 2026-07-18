@@ -14,42 +14,6 @@ pub const STATUS_TTL_SECS: u64 = 90;
 /// Heartbeat cadence. 3x re-arm margin under `STATUS_TTL_SECS` (no flicker).
 pub const HEARTBEAT_SECS: u64 = 30;
 
-/// The lifecycle of a session aggregate. Stored on `sessions` so readers and
-/// `derive_status` can suppress a finished session locally before remote
-/// liveness expires.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Lifecycle {
-    /// Running or idle-but-resumable; the normal state.
-    #[default]
-    Active,
-    /// The session finished (clean exit / session-end). Title retained.
-    Ended,
-    /// A newer logical session took this one's PTY/pid slot.
-    Superseded,
-}
-
-impl Lifecycle {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Lifecycle::Active => "active",
-            Lifecycle::Ended => "ended",
-            Lifecycle::Superseded => "superseded",
-        }
-    }
-    #[allow(clippy::should_implement_trait)]
-    pub fn from_str(s: &str) -> Self {
-        match s {
-            "ended" => Lifecycle::Ended,
-            "superseded" => Lifecycle::Superseded,
-            _ => Lifecycle::Active,
-        }
-    }
-    /// Whether this session may still be reported live (only `Active`).
-    pub fn is_active(&self) -> bool {
-        matches!(self, Lifecycle::Active)
-    }
-}
-
 /// A reference to an agent: its sovereign pubkey and the slug it goes by.
 /// Identity is `(agent, machine)` — the same tool on another machine is a
 /// different agent with a different pubkey (M1 §4).

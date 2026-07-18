@@ -36,8 +36,7 @@ impl Store {
     pub(crate) fn list_local_session_pubkeys(&self) -> Result<Vec<String>> {
         let mut stmt = self.conn.prepare(
             "SELECT pubkey FROM session_signers
-             UNION SELECT pubkey FROM sessions
-             UNION SELECT pubkey FROM session_claims
+             UNION SELECT pubkey FROM sessions WHERE recovery_state<>'revoked'
              ORDER BY pubkey",
         )?;
         let rows = stmt.query_map([], |row| row.get(0))?;

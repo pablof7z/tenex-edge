@@ -1,7 +1,6 @@
 //! Process-global ACP child registry and exit reaper.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use tokio::sync::mpsc;
@@ -14,7 +13,6 @@ pub(super) struct AcpChild {
     pub(super) handle: RpcHandle,
     /// ACP `sessionId` or app-server `threadId`.
     pub(super) native_id: String,
-    pub(super) cwd: PathBuf,
     /// Captured transcript + running-turn state, fed by the update-drain task.
     pub(super) runtime: Arc<Mutex<AcpRuntime>>,
 }
@@ -24,13 +22,25 @@ pub(super) fn registry() -> &'static Mutex<HashMap<String, AcpChild>> {
     REG.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// Commit registry removal only after the transport has confirmed process
+/// exit. Keeping this as one reducer makes it impossible for a failed kill to
+/// orphan a still-owned child merely because teardown was requested.
+pub(super) fn remove_after_exit_confirmation(
+    endpoint_id: &str,
+    confirmation: std::io::Result<()>,
+) -> std::io::Result<()> {
+    confirmation?;
+    registry().lock().unwrap().remove(endpoint_id);
+    Ok(())
+}
+
 /// Register a freshly-opened child, drain its updates into shared runtime state,
 /// and reap both the registry entry and zombie when it exits.
 pub(super) fn register_child(
     endpoint_id: &str,
     handle: RpcHandle,
     native_id: String,
-    cwd: PathBuf,
+    _cwd: std::path::PathBuf,
     mut updates: mpsc::UnboundedReceiver<SessionUpdate>,
 ) {
     let runtime = Arc::new(Mutex::new(AcpRuntime::default()));
@@ -55,7 +65,6 @@ pub(super) fn register_child(
         AcpChild {
             handle,
             native_id,
-            cwd,
             runtime,
         },
     );

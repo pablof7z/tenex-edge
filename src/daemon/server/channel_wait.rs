@@ -149,7 +149,7 @@ fn resolve_active_scopes(
     rec: &Session,
     requested: &[String],
 ) -> Result<Vec<String>> {
-    let active = state.with_store(|store| store.list_session_joined_channels(&rec.pubkey))?;
+    let active = state.with_store(|store| store.list_session_routes(&rec.pubkey))?;
     let active = active
         .into_iter()
         .map(|(channel, _)| channel)

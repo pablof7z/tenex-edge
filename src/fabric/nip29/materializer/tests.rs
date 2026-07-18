@@ -305,7 +305,13 @@ fn mention_to_dead_session_stays_pending_for_that_exact_pubkey() {
 
     register(&store, &target_pk, "proj", "target-ext");
     register(&store, &sibling_pk, "proj", "sibling-ext");
-    store.mark_dead(&target_pk).unwrap();
+    store
+        .mark_runtime_stopped(&target_pk, crate::state::StopReason::HeadlessExit, 1)
+        .unwrap();
+    assert!(
+        !store.is_channel_member("proj", &target_pk).unwrap(),
+        "relay membership is not the durable exact-resume affinity"
+    );
 
     let event = build(
         &sender,
@@ -326,7 +332,7 @@ fn mention_to_dead_session_stays_pending_for_that_exact_pubkey() {
         .peek_pending_for_pubkey(&sibling_pk)
         .unwrap()
         .is_empty());
-    assert!(!store.get_session(&target_pk).unwrap().unwrap().alive);
+    assert!(!store.get_session(&target_pk).unwrap().unwrap().is_running());
 }
 
 #[test]

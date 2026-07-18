@@ -35,7 +35,7 @@ fn seed_store() -> Store {
 
 fn session(store: &Store) -> Session {
     let rec = session_record(store, "sess", "root");
-    store.join_session_channel(&rec.pubkey, "task", 20).unwrap();
+    store.grant_session_route(&rec.pubkey, "task", 20).unwrap();
     rec
 }
 
@@ -133,7 +133,7 @@ fn archived_joined_channels_are_hidden_from_fabric_context() {
         .upsert_channel("archived", "archived", "[ARCHIVED] done", "root", 30)
         .unwrap();
     store
-        .join_session_channel(&rec.pubkey, "archived", 30)
+        .grant_session_route(&rec.pubkey, "archived", 30)
         .unwrap();
     chat(
         &store,
