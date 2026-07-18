@@ -6,6 +6,13 @@ fn write(path: &std::path::Path, body: &str) {
     std::fs::write(path, body).unwrap();
 }
 
+fn write_executable(path: &std::path::Path) {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    write(path, "#!/bin/sh\n");
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
 #[test]
 fn only_absent_capabilities_are_tombstoned() {
     let advertised = vec![CapabilityAdvertisement {
@@ -37,6 +44,7 @@ async fn discovered_capabilities_are_global_or_workspace_scoped() {
         &codex_home.join("agents/global.toml"),
         "name='global'\ndescription='Everywhere'\ndeveloper_instructions='Work'",
     );
+    write_executable(&home.path().join(".local/bin/codex"));
     let work_a = home.path().join("work-a");
     let work_b = home.path().join("work-b");
     std::fs::create_dir_all(&work_b).unwrap();

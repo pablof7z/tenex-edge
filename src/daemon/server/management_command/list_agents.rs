@@ -79,6 +79,9 @@ mod tests {
             &root.path().join(".claude/agents/writer.md"),
             "---\nname: writer\ndescription: Writes\n---\nWrite",
         );
+        for executable in ["claude", "codex"] {
+            write_executable(&root.path().join(".local/bin").join(executable));
+        }
         write_executable(&root.path().join(".opencode/bin/opencode"));
         let state = DaemonState::new_for_test().await;
         state.refresh_agent_catalog().unwrap();

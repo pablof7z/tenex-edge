@@ -30,6 +30,7 @@ async fn installed_codex_agent_resolves_without_agent_json() {
         &codex_home.join("agents/reviewer.toml"),
         "name='reviewer'\ndescription='Reviews code'\ndeveloper_instructions='Review carefully'",
     );
+    write_executable(&home.path().join(".local/bin/codex"));
     let workspace = home.path().join("work");
     std::fs::create_dir_all(&workspace).unwrap();
     let state = DaemonState::new_for_test().await;
@@ -89,6 +90,7 @@ async fn interactive_generic_creates_pty_bundle_from_live_detection() {
     env.set_var("MOSAICO_ISOLATED_HOME_OK", "1");
     env.set_var("HOME", home.path());
     std::fs::create_dir_all(home.path().join(".codex")).unwrap();
+    write_executable(&home.path().join(".local/bin/codex"));
     let workspace = home.path().join("work");
     std::fs::create_dir_all(&workspace).unwrap();
     let state = DaemonState::new_for_test().await;
@@ -116,6 +118,7 @@ async fn invalid_same_named_agent_does_not_shadow_available_harness() {
         &mosaico_home.join("harnesses.json"),
         r#"{"codex-pty":{"harness":"codex","transport":"pty","args":["--yolo"]}}"#,
     );
+    write_executable(&home.path().join(".local/bin/codex"));
     crate::identity::add_local_agent(&mosaico_home, "codex", "codex", None, 10).unwrap();
     let workspace = home.path().join("work");
     std::fs::create_dir_all(&workspace).unwrap();
@@ -153,6 +156,9 @@ async fn conflict_combination_resolves_and_persists_selected_binding() {
         &home.path().join(".claude/agents/writer.md"),
         "---\nname: writer\ndescription: Writes\n---\nWrite",
     );
+    for executable in ["claude", "codex"] {
+        write_executable(&home.path().join(".local/bin").join(executable));
+    }
     let workspace = home.path().join("work");
     std::fs::create_dir_all(&workspace).unwrap();
     let state = DaemonState::new_for_test().await;
@@ -185,6 +191,7 @@ async fn managed_generic_creates_preferred_rpc_bundle() {
     env.set_var("MOSAICO_ISOLATED_HOME_OK", "1");
     env.set_var("HOME", home.path());
     std::fs::create_dir_all(home.path().join(".codex")).unwrap();
+    write_executable(&home.path().join(".local/bin/codex"));
     let workspace = home.path().join("work");
     std::fs::create_dir_all(&workspace).unwrap();
     let state = DaemonState::new_for_test().await;

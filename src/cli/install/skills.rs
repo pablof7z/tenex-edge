@@ -250,6 +250,14 @@ mod tests {
     use super::*;
     use crate::test_env::EnvGuard;
 
+    fn write_executable(path: &Path) {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
     fn opts(dry_run: bool, uninstall: bool) -> InstallOpts {
         InstallOpts {
             all: false,
@@ -277,6 +285,7 @@ mod tests {
     fn install_symlinks_claude_skill_when_claude_dir_exists() {
         let temp = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(temp.path().join(".claude")).unwrap();
+        write_executable(&temp.path().join(".local/bin/claude"));
         let _home = EnvGuard::set("HOME", temp.path());
         let source = skill_source_dir().unwrap();
 
