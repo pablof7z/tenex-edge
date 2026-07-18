@@ -234,9 +234,11 @@ fn kill_unbound_endpoint(pty_id: Option<&str>, forget: bool) -> Result<serde_jso
     };
     crate::pty::kill(&endpoint.id)
         .with_context(|| format!("killing unbound PTY endpoint {}", endpoint.id))?;
-    let cleanup_failures = forget
-        .then(|| vec!["endpoint has no session identity; recovery cannot be forgotten".to_string()])
-        .unwrap_or_default();
+    let cleanup_failures = if forget {
+        vec!["endpoint has no session identity; recovery cannot be forgotten".to_string()]
+    } else {
+        Vec::new()
+    };
     Ok(serde_json::json!({
         "killed": true,
         "ended": false,

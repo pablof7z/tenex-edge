@@ -8,7 +8,7 @@ pub(super) struct MentionTarget {
 }
 
 pub(super) enum Resolution {
-    Ready(MentionTarget),
+    Ready(Box<MentionTarget>),
     Retry,
     Reject,
 }
@@ -106,10 +106,10 @@ pub(super) fn resolve_and_persist(
         );
         return Resolution::Retry;
     }
-    Resolution::Ready(MentionTarget {
+    Resolution::Ready(Box::new(MentionTarget {
         agent_slug,
         session,
-    })
+    }))
 }
 
 fn configured_agent_slug(state: &DaemonState, pubkey: &str) -> anyhow::Result<Option<String>> {

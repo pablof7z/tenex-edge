@@ -58,7 +58,7 @@ async fn live_pty_for_session(
     if !rec.is_running() {
         return None;
     }
-    let pty_id = super::pty_session_for(state, &rec)?;
+    let pty_id = super::pty_session_for(state, rec)?;
     for _ in 0..40 {
         if crate::pty::is_live(&pty_id) {
             return Some(pty_id);
