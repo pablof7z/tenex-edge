@@ -292,7 +292,10 @@ fn channel_send_stdin_enqueues_live_channel_chat_for_receiver() {
 
         c.call(
             "turn_start",
-            serde_json::json!({"harness_session": &receiver_pubkey}),
+            serde_json::json!({
+                "harness_session": "chat-receiver-session",
+                "harness": "claude-code"
+            }),
         )
         .await
         .expect("turn_start");

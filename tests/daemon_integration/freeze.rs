@@ -188,7 +188,8 @@ fn freeze_status_presence_is_unified() {
         c.call(
             "turn_start",
             serde_json::json!({
-                "harness_session": &pubkey,
+                "harness_session": "freeze-status-1",
+                "harness": "claude-code",
                 "cwd": "/tmp",
                 "prompt": "investigate unified presence state",
                 "json": false

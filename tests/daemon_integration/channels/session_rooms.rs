@@ -87,7 +87,10 @@ fn first_turn_injects_channel_context_block() {
         let v = c
             .call(
                 "turn_start",
-                serde_json::json!({"harness_session": &agent_pubkey}),
+                serde_json::json!({
+                    "harness_session": "sess-ctx-1",
+                    "harness": "claude-code"
+                }),
             )
             .await
             .expect("turn_start");
@@ -134,7 +137,7 @@ fn first_turn_resolves_member_profiles_from_kind0() {
         let mut c = Client::connect_or_spawn().await.expect("connect");
         let started = c.call(
             "session_start",
-            hook_session_start(serde_json::json!({"agent": "coder", "harness_session": sid, "cwd": "/tmp", "watch_pid": std::process::id()}), "claude-code"),
+            hook_session_start(serde_json::json!({"agent": "coder", "harness_session": &sid, "cwd": "/tmp", "watch_pid": std::process::id()}), "claude-code"),
         )
         .await
         .expect("session_start");
@@ -162,7 +165,10 @@ fn first_turn_resolves_member_profiles_from_kind0() {
         let v = c
             .call(
                 "turn_start",
-                serde_json::json!({"harness_session": pubkey}),
+                serde_json::json!({
+                    "harness_session": sid,
+                    "harness": "claude-code"
+                }),
             )
             .await
             .expect("turn_start");
