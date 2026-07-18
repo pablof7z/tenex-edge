@@ -19,9 +19,12 @@ pub(crate) fn stop_daemon(home: &Home) {
         let mut response = String::new();
         let _ = reader.read_line(&mut response);
     }
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(10);
     while Instant::now() < deadline && home.sock().exists() {
         std::thread::sleep(Duration::from_millis(25));
     }
-    let _ = std::fs::remove_file(home.dir.path().join("daemon.lock"));
+    assert!(
+        !home.sock().exists(),
+        "daemon did not complete orderly shutdown before the deadline"
+    );
 }

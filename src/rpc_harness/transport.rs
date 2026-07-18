@@ -21,6 +21,10 @@ use super::callbacks::Callbacks;
 use super::io_tasks::{reader_task, stderr_task, writer_task};
 use super::protocol::{Dialect, RpcErrorObject, SessionUpdate};
 
+#[cfg(unix)]
+#[path = "transport/process_group.rs"]
+mod process_group;
+
 /// Error surface for RPC calls.
 #[derive(Debug)]
 pub enum RpcError {
@@ -69,6 +73,8 @@ pub struct RpcHandle {
     turn_waiters: TurnWaiters,
     alive: Arc<AtomicBool>,
     child: Arc<tokio::sync::Mutex<Child>>,
+    #[cfg(unix)]
+    process_group: Option<i32>,
     /// Flips to `true` exactly once when the child's stdout closes (reader EOF)
     /// or `kill()` is called. A reaper task awaits this to remove the child from
     /// its registry and `wait()` the zombie — no per-child polling.
@@ -97,9 +103,13 @@ impl RpcHandle {
         for (k, v) in &cfg.env {
             cmd.env(k, v);
         }
+        #[cfg(unix)]
+        process_group::isolate(&mut cmd);
 
         let mut child = cmd.spawn().map_err(RpcError::Transport)?;
         let pid = child.id();
+        #[cfg(unix)]
+        let process_group = pid.and_then(|pid| i32::try_from(pid).ok());
         let stdin = child.stdin.take().expect("piped stdin");
         let stdout = child.stdout.take().expect("piped stdout");
         let stderr = child.stderr.take().expect("piped stderr");
@@ -141,6 +151,8 @@ impl RpcHandle {
                 turn_waiters,
                 alive,
                 child: Arc::new(tokio::sync::Mutex::new(child)),
+                #[cfg(unix)]
+                process_group,
                 exit: exit_rx,
                 dialect: cfg.dialect,
                 pid,
@@ -253,8 +265,19 @@ impl RpcHandle {
     /// only after this method has observed process exit.
     pub async fn kill(&self) -> std::io::Result<()> {
         let mut child = self.child.lock().await;
-        if child.try_wait()?.is_none() {
-            child.start_kill()?;
+        let running = child.try_wait()?.is_none();
+        #[cfg(unix)]
+        let killed_group = if let Some(group) = self.process_group {
+            process_group::signal(group)?
+        } else {
+            false
+        };
+        #[cfg(not(unix))]
+        let killed_group = false;
+        if running {
+            if !killed_group {
+                child.start_kill()?;
+            }
             tokio::time::timeout(std::time::Duration::from_secs(5), child.wait())
                 .await
                 .map_err(|_| {
@@ -263,6 +286,11 @@ impl RpcHandle {
                         "timed out waiting for RPC harness child to exit after kill",
                     )
                 })??;
+        }
+        drop(child);
+        #[cfg(unix)]
+        if let Some(group) = self.process_group {
+            process_group::wait_exit(group).await?;
         }
         self.alive.store(false, Ordering::Relaxed);
         Ok(())

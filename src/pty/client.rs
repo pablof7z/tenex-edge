@@ -99,6 +99,22 @@ pub fn is_live(id_or_path: &str) -> bool {
         .is_ok()
 }
 
+pub(super) fn startup_ready(id_or_path: &str) -> bool {
+    let path = meta::resolve_socket(id_or_path);
+    let Ok(mut stream) = UnixStream::connect(&path) else {
+        return false;
+    };
+    if stream
+        .set_read_timeout(Some(Duration::from_millis(250)))
+        .is_err()
+        || stream.write_all(b"STARTED\n").is_err()
+    {
+        return false;
+    }
+    let mut response = [0_u8; 6];
+    stream.read_exact(&mut response).is_ok() && &response == b"READY\n"
+}
+
 pub fn inject(id_or_path: &str, text: &str, bracketed: bool, submit: bool) -> Result<()> {
     let mut payload = Vec::new();
     if bracketed {

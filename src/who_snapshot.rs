@@ -204,10 +204,7 @@ pub(crate) fn build_who_snapshot(
         })
         .collect();
 
-    let local_spawnable = crate::session_host::spawnable_agents()
-        .into_iter()
-        .map(|(slug, command, byline)| (slug, (command, byline)))
-        .collect::<BTreeMap<_, _>>();
+    let local_spawnable = &aggregation.local_spawnable;
     let roster_scope = current_root
         .map(|p| work_root_for(aggregation, p))
         .transpose()?;
@@ -238,9 +235,9 @@ pub(crate) fn build_who_snapshot(
         }
         spawnable.push(SpawnableRow {
             host: local_host.clone(),
-            slug,
-            command,
-            byline,
+            slug: slug.clone(),
+            command: command.clone(),
+            byline: byline.clone(),
         });
     }
     spawnable.sort_by(|a, b| {

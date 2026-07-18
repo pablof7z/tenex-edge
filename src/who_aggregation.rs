@@ -20,6 +20,7 @@ pub(crate) struct WhoAggregation {
     pub(crate) local_pubkeys: BTreeSet<String>,
     pub(crate) retained_standing: Vec<SessionStanding>,
     pub(crate) agents: Vec<AgentAvailability>,
+    pub(crate) local_spawnable: BTreeMap<String, (String, Option<String>)>,
     now: u64,
     channels_by_id: BTreeMap<String, Channel>,
     members: BTreeMap<String, Vec<ChannelMember>>,
@@ -47,6 +48,10 @@ impl WhoAggregation {
         let agents = store
             .list_agent_roster()
             .context("who aggregation: failed to list agent capabilities")?;
+        let local_spawnable = crate::session_host::spawnable_agents()
+            .into_iter()
+            .map(|(slug, command, byline)| (slug, (command, byline)))
+            .collect();
         let retained_standing = store
             .list_retained_session_standing(now)
             .context("who aggregation: failed to list retained session standing")?;
@@ -150,6 +155,7 @@ impl WhoAggregation {
             local_pubkeys,
             retained_standing,
             agents,
+            local_spawnable,
             now,
             channels_by_id,
             members,

@@ -37,12 +37,14 @@ impl SessionTransport for RpcTransport {
             );
         }
         resolved.profile.materialize()?;
+        let mut extra_env = resolved.profile.extra_env.clone();
+        crate::host_env::apply_executable_path(&mut extra_env);
         Ok(PreparedLaunch {
             pty: Default::default(),
             rpc: Some(RpcLaunchSpec {
                 driver: resolved.driver,
                 argv: resolved.base_argv.clone(),
-                extra_env: resolved.profile.extra_env.clone(),
+                extra_env,
                 harness: resolved.harness,
             }),
         })
@@ -64,29 +66,36 @@ impl SessionTransport for RpcTransport {
         }
         let (handle, dialect, updates, argv, _harness) = self.spawn_child(spec).await?;
         let cwd = std::path::PathBuf::from(&spec.abs_path);
-        match dialect {
-            Dialect::Acp => {
-                let client = AcpClient::new(handle.clone());
-                client
-                    .initialize()
-                    .await
-                    .map_err(|e| anyhow::anyhow!("ACP initialize (resume): {e}"))?;
-                client
-                    .session_load(&resume.native_id, &cwd)
-                    .await
-                    .map_err(|e| anyhow::anyhow!("ACP session/load: {e}"))?;
+        let handshake: Result<()> = async {
+            match dialect {
+                Dialect::Acp => {
+                    let client = AcpClient::new(handle.clone());
+                    client
+                        .initialize()
+                        .await
+                        .map_err(|e| anyhow::anyhow!("ACP initialize (resume): {e}"))?;
+                    client
+                        .session_load(&resume.native_id, &cwd)
+                        .await
+                        .map_err(|e| anyhow::anyhow!("ACP session/load: {e}"))?;
+                }
+                Dialect::AppServer => {
+                    let client = AppServerClient::new(handle.clone());
+                    client
+                        .initialize("mosaico", env!("CARGO_PKG_VERSION"))
+                        .await
+                        .map_err(|e| anyhow::anyhow!("app-server initialize (resume): {e}"))?;
+                    client
+                        .thread_resume(&resume.native_id, &cwd)
+                        .await
+                        .map_err(|e| anyhow::anyhow!("app-server thread/resume: {e}"))?;
+                }
             }
-            Dialect::AppServer => {
-                let client = AppServerClient::new(handle.clone());
-                client
-                    .initialize("mosaico", env!("CARGO_PKG_VERSION"))
-                    .await
-                    .map_err(|e| anyhow::anyhow!("app-server initialize (resume): {e}"))?;
-                client
-                    .thread_resume(&resume.native_id, &cwd)
-                    .await
-                    .map_err(|e| anyhow::anyhow!("app-server thread/resume: {e}"))?;
-            }
+            Ok(())
+        }
+        .await;
+        if let Err(error) = handshake {
+            return Err(Self::failed_spawn(&handle, error).await);
         }
         let endpoint_id = self.endpoint_id(&spec.slug);
         let pid = handle.pid;

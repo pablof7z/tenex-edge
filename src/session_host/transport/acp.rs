@@ -131,6 +131,15 @@ impl RpcTransport {
         )
     }
 
+    async fn failed_spawn(handle: &RpcHandle, error: anyhow::Error) -> anyhow::Error {
+        match handle.kill().await {
+            Ok(()) => error,
+            Err(teardown) => error.context(format!(
+                "failed RPC handshake teardown also failed: {teardown}"
+            )),
+        }
+    }
+
     fn synth_meta(
         spec: &LaunchSpec,
         endpoint_id: &str,
@@ -164,7 +173,12 @@ impl RpcTransport {
         let (handle, dialect, updates, argv, harness) = self.spawn_child(spec).await?;
         let cwd = std::path::PathBuf::from(&spec.abs_path);
         let native_id =
-            open_session::open(&handle, dialect, &cwd, spec.native_agent.as_ref(), harness).await?;
+            match open_session::open(&handle, dialect, &cwd, spec.native_agent.as_ref(), harness)
+                .await
+            {
+                Ok(native_id) => native_id,
+                Err(error) => return Err(Self::failed_spawn(&handle, error).await),
+            };
         let endpoint_id = self.endpoint_id(&spec.slug);
         let pid = handle.pid;
         register_child(&endpoint_id, handle, native_id.clone(), cwd, updates);
@@ -175,6 +189,10 @@ impl RpcTransport {
             argv,
         })
     }
+}
+
+pub(crate) async fn shutdown_owned_sessions() -> Vec<(TransportKind, String, std::io::Result<()>)> {
+    registry::shutdown_all().await
 }
 
 #[cfg(test)]

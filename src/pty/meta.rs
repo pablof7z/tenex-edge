@@ -184,6 +184,42 @@ pub(crate) fn terminate_owned_supervisor(endpoint_id: &str) -> Result<bool> {
     Ok(true)
 }
 
+/// Roll back a supervisor that this process just spawned, even if its metadata
+/// could not be persisted. The instance token and exact command line prove
+/// ownership; stopping the supervisor before child discovery closes the race
+/// where the provider could otherwise appear between inspection and teardown.
+pub(crate) fn rollback_spawned_supervisor(metadata: &LaunchMetadata) -> Result<()> {
+    let pid = i32::try_from(metadata.supervisor_pid).context("supervisor pid overflow")?;
+    if pid <= 1 || !process_running(pid) {
+        return Ok(());
+    }
+    verify_owned_process(pid, &metadata.id, metadata)?;
+    signal(pid, nix::sys::signal::Signal::SIGSTOP)?;
+    wait_for_stop(pid, 20);
+    if process_running(pid) && !process_stopped(pid) {
+        anyhow::bail!(
+            "PTY startup supervisor {:?} pid {pid} did not stop for rollback",
+            metadata.id
+        );
+    }
+    if let Some(child_pid) = discover_owned_child(pid) {
+        verify_owned_child(pid, child_pid)?;
+        terminate_owned_child(child_pid)?;
+    }
+    if process_running(pid) {
+        verify_owned_process(pid, &metadata.id, metadata)?;
+        signal(pid, nix::sys::signal::Signal::SIGKILL)?;
+        wait_for_exit(pid, 40);
+    }
+    if process_running(pid) {
+        anyhow::bail!(
+            "PTY startup supervisor {:?} pid {pid} did not terminate",
+            metadata.id
+        );
+    }
+    Ok(())
+}
+
 fn signal(pid: i32, signal: nix::sys::signal::Signal) -> Result<()> {
     nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), Some(signal))
         .with_context(|| format!("sending {signal:?} to PTY supervisor pid {pid}"))
@@ -195,6 +231,15 @@ fn wait_for_exit(pid: i32, attempts: usize) {
             break;
         }
         std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
+fn wait_for_stop(pid: i32, attempts: usize) {
+    for _ in 0..attempts {
+        if !process_running(pid) || process_stopped(pid) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(25));
     }
 }
 
@@ -275,6 +320,19 @@ fn process_command(pid: i32) -> Result<Option<String>> {
 
 fn process_running(pid: i32) -> bool {
     process_command(pid).ok().flatten().is_some()
+}
+
+fn process_stopped(pid: i32) -> bool {
+    let Ok(output) = std::process::Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "state="])
+        .output()
+    else {
+        return false;
+    };
+    output.status.success()
+        && String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .starts_with('T')
 }
 
 fn process_rows() -> Result<Vec<(i32, i32, String)>> {
@@ -366,119 +424,5 @@ pub fn resolve_socket(id_or_path: &str) -> PathBuf {
 }
 
 #[cfg(test)]
-mod tests {
-    #[test]
-    fn endpoint_socket_comes_from_launch_metadata() {
-        let meta = super::LaunchMetadata {
-            id: "pty-1".into(),
-            socket: "/tmp/pty-1.sock".into(),
-            supervisor_pid: 42,
-            instance_token: "token-1".into(),
-            adopted_process_fingerprint: String::new(),
-            child_pid: None,
-            agent: "agent".into(),
-            root: "/tmp".into(),
-            cwd: "/tmp".into(),
-            ephemeral: false,
-            command: vec!["codex".into()],
-        };
-
-        assert_eq!(
-            super::endpoint_socket_in("pty-1", [meta]),
-            Some("/tmp/pty-1.sock".into())
-        );
-        assert_eq!(super::endpoint_socket_in("acp-1", std::iter::empty()), None);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn socket_path_stays_short_for_long_mosaico_home() {
-        use std::os::unix::ffi::OsStrExt;
-
-        let mosaico_home = std::path::Path::new(
-            "/var/folders/kx/13lj0yd976x0tn90z1ntqbn80000gn/T/mosaico-e2e/mosaico-b/mosaico",
-        );
-        let path =
-            super::socket_dir_for(mosaico_home, 501).join("testing-lead-1783399436-28334.sock");
-
-        assert!(path.as_os_str().as_bytes().len() < 100);
-    }
-
-    #[test]
-    fn ownership_requires_exact_endpoint_and_instance_token_arguments() {
-        let command =
-            "/opt/mosaico __pty-supervisor --id grok-123-456 --instance-token token-2 -- echo";
-        assert!(super::command_owns_endpoint(
-            command,
-            "grok-123-456",
-            "token-2"
-        ));
-        assert!(!super::command_owns_endpoint(
-            command,
-            "grok-123-45",
-            "token-2"
-        ));
-        assert!(!super::command_owns_endpoint(
-            command,
-            "grok-123-456",
-            "token"
-        ));
-        assert!(!super::command_owns_endpoint(
-            "/opt/mosaico unrelated -- __pty-supervisor --id grok-123-456 --instance-token token-2",
-            "grok-123-456",
-            "token-2"
-        ));
-        assert!(!super::command_owns_endpoint(
-            "/opt/mosaico __pty-supervisor --id other --instance-token other -- --id grok-123-456 --instance-token token-2",
-            "grok-123-456",
-            "token-2"
-        ));
-    }
-
-    #[test]
-    fn old_metadata_without_instance_token_remains_readable_but_untrusted() {
-        let metadata: super::LaunchMetadata = serde_json::from_value(serde_json::json!({
-            "id": "grok-old",
-            "socket": "/tmp/grok-old.sock",
-            "supervisor_pid": 42,
-            "agent": "grok",
-            "root": "/tmp",
-            "cwd": "/tmp",
-            "command": ["grok"]
-        }))
-        .expect("old metadata should remain readable for live-session adoption");
-
-        assert!(metadata.instance_token.is_empty());
-        assert!(metadata.adopted_process_fingerprint.is_empty());
-        assert!(metadata.child_pid.is_none());
-        assert!(!super::command_owns_endpoint(
-            "/opt/mosaico __pty-supervisor --id grok-old -- grok",
-            &metadata.id,
-            &metadata.instance_token,
-        ));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn owned_child_fallback_escalates_past_ignored_hup() {
-        use portable_pty::{native_pty_system, CommandBuilder, PtySize};
-
-        let pair = native_pty_system()
-            .openpty(PtySize {
-                rows: 24,
-                cols: 80,
-                pixel_width: 0,
-                pixel_height: 0,
-            })
-            .unwrap();
-        let mut command = CommandBuilder::new("/bin/sh");
-        command.args(["-c", "trap '' HUP; exec sleep 60"]);
-        let mut child = pair.slave.spawn_command(command).unwrap();
-        let pid = i32::try_from(child.process_id().unwrap()).unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(100));
-
-        super::terminate_owned_child(pid).unwrap();
-
-        assert!(child.try_wait().unwrap().is_some());
-    }
-}
+#[path = "meta/tests.rs"]
+mod tests;

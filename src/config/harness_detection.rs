@@ -14,22 +14,16 @@ pub fn detect() -> Result<Vec<Harness>> {
 
 fn detect_with(home: &Path, path: Option<&std::ffi::OsStr>) -> Vec<Harness> {
     let candidates = [
-        (Harness::ClaudeCode, ".claude", "claude"),
-        (Harness::Codex, ".codex", "codex"),
-        (Harness::Opencode, ".config/opencode", "opencode"),
-        (Harness::Grok, ".grok", "grok"),
+        (Harness::ClaudeCode, "claude"),
+        (Harness::Codex, "codex"),
+        (Harness::Opencode, "opencode"),
+        (Harness::Grok, "grok"),
     ];
     candidates
         .into_iter()
-        .filter(|(_, dir, bin)| home.join(dir).exists() || bin_on_path(path, bin))
-        .map(|(harness, _, _)| harness)
+        .filter(|(_, bin)| crate::host_env::resolve_executable(home, path, bin).is_some())
+        .map(|(harness, _)| harness)
         .collect()
-}
-
-fn bin_on_path(path: Option<&std::ffi::OsStr>, bin: &str) -> bool {
-    path.into_iter()
-        .flat_map(std::env::split_paths)
-        .any(|dir| dir.join(bin).is_file())
 }
 
 #[cfg(test)]
@@ -37,16 +31,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn detects_home_directories_and_path_binaries_in_stable_order() {
+    fn detects_only_launchable_binaries_in_stable_order() {
+        use std::os::unix::fs::PermissionsExt as _;
+
         let root = tempfile::tempdir().unwrap();
         std::fs::create_dir(root.path().join(".codex")).unwrap();
         let bin = root.path().join("bin");
         std::fs::create_dir(&bin).unwrap();
-        std::fs::write(bin.join("opencode"), "").unwrap();
+        for executable in ["codex", "opencode"] {
+            let path = bin.join(executable);
+            std::fs::write(&path, "#!/bin/sh\n").unwrap();
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
 
         assert_eq!(
             detect_with(root.path(), Some(bin.as_os_str())),
             [Harness::Codex, Harness::Opencode]
         );
+    }
+
+    #[test]
+    fn config_directory_without_launchable_binary_is_not_advertised() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join(".codex")).unwrap();
+
+        assert!(detect_with(root.path(), Some(std::ffi::OsStr::new("/usr/bin:/bin"))).is_empty());
     }
 }

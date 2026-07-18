@@ -7,6 +7,7 @@ use tokio::sync::mpsc;
 
 use super::super::acp_runtime::AcpRuntime;
 use crate::rpc_harness::{RpcHandle, SessionUpdate};
+use crate::session_host::transport::TransportKind;
 
 /// A live ACP/app-server child plus its native session token.
 pub(super) struct AcpChild {
@@ -68,4 +69,41 @@ pub(super) fn register_child(
             runtime,
         },
     );
+}
+
+/// Explicitly terminate every RPC process group before the daemon releases its
+/// in-memory registry. Stdio RPC sessions cannot be re-adopted by a replacement
+/// daemon, so orderly shutdown must never abandon them as unowned processes.
+pub(super) async fn shutdown_all() -> Vec<(TransportKind, String, std::io::Result<()>)> {
+    let owned = registry()
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(endpoint, child)| {
+            let kind = match child.handle.dialect {
+                crate::rpc_harness::Dialect::Acp => TransportKind::Acp,
+                crate::rpc_harness::Dialect::AppServer => TransportKind::AppServer,
+            };
+            (kind, endpoint.clone(), child.handle.clone())
+        })
+        .collect::<Vec<_>>();
+    let mut kills = tokio::task::JoinSet::new();
+    for (kind, endpoint, handle) in owned {
+        kills.spawn(async move { (kind, endpoint, handle.kill().await) });
+    }
+    let mut results = Vec::with_capacity(kills.len());
+    while let Some(joined) = kills.join_next().await {
+        let (kind, endpoint, confirmation) = match joined {
+            Ok(result) => result,
+            Err(error) => {
+                tracing::error!(%error, "RPC shutdown task failed");
+                continue;
+            }
+        };
+        if confirmation.is_ok() {
+            registry().lock().unwrap().remove(&endpoint);
+        }
+        results.push((kind, endpoint, confirmation));
+    }
+    results
 }

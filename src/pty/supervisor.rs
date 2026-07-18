@@ -47,11 +47,6 @@ pub fn run_supervisor(args: SupervisorArgs) -> Result<()> {
             std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700))?;
         }
     }
-    let _ = std::fs::remove_file(&args.socket);
-    let listener = UnixListener::bind(&args.socket)
-        .with_context(|| format!("binding {}", args.socket.display()))?;
-    listener.set_nonblocking(true)?;
-
     let pair = native_pty_system().openpty(PtySize {
         rows: 24,
         cols: 80,
@@ -124,6 +119,14 @@ pub fn run_supervisor(args: SupervisorArgs) -> Result<()> {
             }
         });
     }
+
+    // Binding is the public readiness boundary. Do it only after the harness
+    // child exists and the output pump is installed; otherwise launchers can
+    // attach to a socket whose supervisor is already failing startup.
+    let _ = std::fs::remove_file(&args.socket);
+    let listener = UnixListener::bind(&args.socket)
+        .with_context(|| format!("binding {}", args.socket.display()))?;
+    listener.set_nonblocking(true)?;
 
     loop {
         if let Some(status) = child.try_wait()? {
@@ -213,6 +216,14 @@ fn handle_client(
             Ok(Some((status, snapshot(clients))))
         }
         ["PING"] => Ok(None),
+        ["STARTED"] => {
+            if let Some(status) = child.try_wait()? {
+                return Ok(Some((status, snapshot(clients))));
+            }
+            reader.get_mut().write_all(b"READY\n")?;
+            reader.get_mut().flush()?;
+            Ok(None)
+        }
         ["PRESENTATION"] => {
             let presentation = snapshot(clients);
             serde_json::to_writer(reader.get_mut(), &presentation)?;

@@ -19,11 +19,32 @@ fn launch_target(home: &Home, agent: &str, channel: &str, work_dir: &Path) -> (S
     });
     let session = wait_for_alive_session(home, agent, channel);
     wait_for_group_member(home, channel, &session.pubkey);
-    let resume = Store::open(&home.store_path())
-        .unwrap()
-        .native_resume_locator(&session.pubkey, &session.observed_harness)
-        .unwrap();
-    assert!(resume.is_some(), "launched target must be resumable");
+    let mut resume = None;
+    assert!(wait_until(Duration::from_secs(10), || {
+        resume = Store::open(&home.store_path())
+            .and_then(|store| {
+                store.native_resume_locator(&session.pubkey, &session.observed_harness)
+            })
+            .unwrap_or(None);
+        resume.is_some()
+    }));
+    assert!(
+        resume.is_some(),
+        "launched target must be resumable; daemon_log={}; hook_logs={:?}",
+        std::fs::read_to_string(home.dir.path().join("daemon.log")).unwrap_or_default(),
+        std::fs::read_dir(home.dir.path())
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(
+                |entry| entry.path().extension().and_then(|value| value.to_str()) == Some("log")
+            )
+            .map(|entry| (
+                entry.path(),
+                std::fs::read_to_string(entry.path()).unwrap_or_default()
+            ))
+            .collect::<Vec<_>>()
+    );
     (pty_id, session)
 }
 

@@ -6,6 +6,13 @@ fn write(path: &std::path::Path, body: &str) {
     std::fs::write(path, body).unwrap();
 }
 
+fn write_executable(path: &std::path::Path) {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    write(path, "#!/bin/sh\n");
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
 #[tokio::test]
 async fn installed_codex_agent_resolves_without_agent_json() {
     let home = tempfile::tempdir().unwrap();
@@ -56,6 +63,7 @@ async fn installed_opencode_agent_resolves_to_native_agent_argv() {
         &home.path().join(".config/opencode/agents/new-profile.md"),
         "---\ndescription: Handles backend changes\n---\nWork carefully",
     );
+    write_executable(&home.path().join(".opencode/bin/opencode"));
     let workspace = home.path().join("work");
     std::fs::create_dir_all(&workspace).unwrap();
     let state = DaemonState::new_for_test().await;

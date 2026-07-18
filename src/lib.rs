@@ -23,6 +23,7 @@ pub mod domain;
 pub mod explain;
 mod fabric_context;
 pub mod harness;
+pub(crate) mod host_env;
 pub mod identity;
 pub mod idref;
 pub mod injection;
