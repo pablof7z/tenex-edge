@@ -7,38 +7,44 @@ use std::time::Duration;
 fn cli_my_session_status_sets_the_exact_pty_session_title() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let home = Home::new().with_backend_key();
-    let pubkey = rt().block_on(async {
+    configure_pty_agent(&home, "codex", "forever");
+    let pty_id = rt().block_on(async {
         let mut client = Client::connect_or_spawn().await.expect("connect");
         let response = client
             .call(
-                "session_start",
+                "pty_spawn",
                 serde_json::json!({
                     "agent": "codex",
-                    "harness_session": "native-title-session",
+                    "root": "tmp",
+                    "channel": "tmp",
                     "cwd": "/tmp",
-                    "observed_harness": "codex",
-                    "admitted_bundle": "codex-pty",
-                    "admitted_transport": "pty",
-                    "endpoint_provenance": "launch",
-                    "pty_session": "pty-title-session",
-                    "endpoint_kind": "pty",
                 }),
             )
             .await
-            .expect("session start");
-        response["pubkey"]
-            .as_str()
-            .expect("public session key")
-            .to_string()
+            .expect("pty spawn");
+        response["pty_id"].as_str().expect("pty id").to_string()
     });
+    let mut session = None;
+    assert!(
+        wait_until(Duration::from_secs(10), || {
+            session = Store::open(&home.store_path())
+                .and_then(|store| store.list_running_sessions())
+                .unwrap_or_default()
+                .into_iter()
+                .find(|row| row.agent_slug == "codex");
+            session.is_some()
+        }),
+        "spawned PTY session did not become live"
+    );
+    let pubkey = session.unwrap().pubkey;
 
     let title = "Researching MCP improvements around resource allocation";
     let out = run_cli_with_env(
         &home,
         &["my", "session", "status", title],
         &[
-            ("MOSAICO_PTY_SESSION", "pty-title-session"),
-            ("MOSAICO_OBSERVED_HARNESS", "codex"),
+            ("MOSAICO_PTY_SESSION", &pty_id),
+            ("MOSAICO_OBSERVED_HARNESS", "opencode"),
         ],
     );
     assert!(
@@ -72,5 +78,6 @@ fn cli_my_session_status_sets_the_exact_pty_session_title() {
         "my session status should publish the title as kind:30315"
     );
 
+    let _ = mosaico::pty::kill(&pty_id);
     stop_daemon(&home);
 }
