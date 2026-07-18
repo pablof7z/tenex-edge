@@ -61,6 +61,11 @@ deadlines let restart reconciliation continue the same ten-minute headless-idle
 policy. Only explicit forget/revoke changes recovery to `revoked` and removes
 the local signer, routes, and locators after process termination is confirmed.
 
+Completed offline-mention claims are compact durable tombstones keyed by event
+and exact recipient. Unlike ordinary completed operation ledgers, they do not
+expire: relay observations can replay old Nostr events, and recovery or process
+launch must remain idempotent independently of local chat-cache retention.
+
 The schema-9-to-10 migration replaces the old `alive`/`working` booleans and
 session-claim cleanup model with the typed lifecycle and standing tables. It
 preserves every schema 9 admission field, keeps ACP and app-server locator

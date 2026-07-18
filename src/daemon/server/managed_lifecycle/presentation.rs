@@ -30,10 +30,8 @@ pub(super) async fn reconcile(state: &Arc<DaemonState>) {
                 && locator.runtime_generation == session.runtime_generation
         }) {
             reconcile_pty(state, &session, &pty.locator_value).await;
-        } else if locators.iter().any(|locator| {
-            locator.locator_kind == crate::state::LOCATOR_ACP
-                && locator.runtime_generation == session.runtime_generation
-        }) && session.presentation_state != PresentationState::Headless
+        } else if has_live_rpc_locator(&locators, session.runtime_generation)
+            && session.presentation_state != PresentationState::Headless
         {
             let _ = state.with_store(|store| {
                 store.apply_session_presentation_edge(
@@ -46,6 +44,15 @@ pub(super) async fn reconcile(state: &Arc<DaemonState>) {
             });
         }
     }
+}
+
+fn has_live_rpc_locator(locators: &[crate::state::SessionLocator], generation: u64) -> bool {
+    locators.iter().any(|locator| {
+        matches!(
+            locator.locator_kind.as_str(),
+            crate::state::LOCATOR_ACP | crate::state::LOCATOR_APP_SERVER
+        ) && locator.runtime_generation == generation
+    })
 }
 
 async fn reconcile_pty(state: &Arc<DaemonState>, session: &Session, pty_id: &str) {
@@ -149,3 +156,7 @@ pub(super) fn apply(
         RuntimeState::Stopped => Ok(false),
     })
 }
+
+#[cfg(test)]
+#[path = "presentation/tests.rs"]
+mod tests;

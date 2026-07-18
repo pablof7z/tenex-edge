@@ -7,6 +7,7 @@ use super::*;
 
 const PROCESSING_LEASE_SECS: u64 = 10 * 60;
 const OFFLINE_MENTION_RETRY_DELAY_SECS: u64 = 30;
+pub(super) const OFFLINE_MENTION_CLAIM_PREFIX: &str = "offline-mention:";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct OfflineMentionClaim {
@@ -119,7 +120,16 @@ impl Store {
         mentioned_pubkey: &str,
         now: u64,
     ) -> Result<()> {
-        self.complete_orchestration_target(event_id, &offline_mention_claim(mentioned_pubkey), now)
+        // Nostr observations may replay an event long after the local message
+        // cache is pruned. Keep a compact tombstone for this process-spawning
+        // side effect instead of applying the generic completed-ledger TTL.
+        self.conn.execute(
+            "UPDATE event_claims
+             SET state='completed', from_pubkey='', channel_h='', body='', updated_at=?3
+             WHERE event_id=?1 AND claim_key=?2",
+            params![event_id, offline_mention_claim(mentioned_pubkey), now],
+        )?;
+        Ok(())
     }
 
     /// Return a claimed offline mention to the retryable state. Recovery owns
@@ -148,7 +158,7 @@ impl Store {
     ) -> Result<Vec<OfflineMentionClaim>> {
         let retry_before = now.saturating_sub(OFFLINE_MENTION_RETRY_DELAY_SECS);
         let stale_before = now.saturating_sub(PROCESSING_LEASE_SECS);
-        let prefix = "offline-mention:";
+        let prefix = OFFLINE_MENTION_CLAIM_PREFIX;
         let mut statement = self.conn.prepare(
             "SELECT event_id, substr(claim_key, length(?1) + 1),
                     from_pubkey, channel_h, body
@@ -182,7 +192,7 @@ impl Store {
 }
 
 fn offline_mention_claim(mentioned_pubkey: &str) -> String {
-    format!("offline-mention:{mentioned_pubkey}")
+    format!("{OFFLINE_MENTION_CLAIM_PREFIX}{mentioned_pubkey}")
 }
 
 #[cfg(test)]
