@@ -5,7 +5,6 @@ use anyhow::Result;
 use std::sync::Arc;
 
 pub(super) fn list_agents(state: &Arc<DaemonState>) -> Result<String> {
-    let now = crate::util::now_secs();
     let (agents, failures) = super::super::agent_roster::capability_advertisements(state)?;
     if agents.is_empty() {
         return Ok(format!("mgmt ok: no agents known on {}", state.host));
@@ -16,19 +15,11 @@ pub(super) fn list_agents(state: &Arc<DaemonState>) -> Result<String> {
         state.host
     )];
     for agent in agents {
-        let criteria = agent.use_criteria.trim();
-        let age = (agent.available_since > 0)
-            .then(|| crate::util::relative_time(agent.available_since, now));
-        if criteria.is_empty() && age.is_none() {
+        let description = crate::agent_about::for_injection(&agent.use_criteria);
+        if description.is_empty() {
             lines.push(format!("- {}", agent.slug));
-        } else if criteria.is_empty() {
-            let age = age.as_deref().unwrap_or_default();
-            lines.push(format!("- {} (available {age})", agent.slug));
-        } else if age.is_none() {
-            lines.push(format!("- {}: {criteria}", agent.slug));
         } else {
-            let age = age.as_deref().unwrap_or_default();
-            lines.push(format!("- {}: {criteria} (available {age})", agent.slug));
+            lines.push(format!("- {}: {description}", agent.slug));
         }
     }
     for failure in failures {
@@ -75,6 +66,13 @@ mod tests {
             &codex_home.join("agents/writer.toml"),
             "name='writer'\ndescription='Writes'\ndeveloper_instructions='Write'",
         );
+        let verbose_description = "é".repeat(crate::agent_about::AGENT_ABOUT_MAX_CHARS + 1);
+        write(
+            &codex_home.join("agents/verbose.toml"),
+            &format!(
+                "name='verbose'\ndescription='{verbose_description}'\ndeveloper_instructions='Write'"
+            ),
+        );
         write(
             &root.path().join(".claude/agents/writer.md"),
             "---\nname: writer\ndescription: Writes\n---\nWrite",
@@ -97,5 +95,23 @@ mod tests {
         ] {
             assert!(listed.contains(slug), "missing {slug:?} in {listed}");
         }
+        assert!(!listed.contains("available"), "{listed}");
+        let verbose_line = listed
+            .lines()
+            .find(|line| line.starts_with("- verbose: "))
+            .unwrap_or_else(|| panic!("missing verbose agent in {listed}"));
+        let description = verbose_line.strip_prefix("- verbose: ").unwrap();
+        assert_eq!(
+            description.chars().count(),
+            crate::agent_about::AGENT_ABOUT_MAX_CHARS
+        );
+        assert!(description.ends_with('…'), "{description}");
+        assert_eq!(
+            description
+                .chars()
+                .take(crate::agent_about::AGENT_ABOUT_MAX_CHARS - 1)
+                .collect::<String>(),
+            "é".repeat(crate::agent_about::AGENT_ABOUT_MAX_CHARS - 1)
+        );
     }
 }
