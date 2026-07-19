@@ -1,5 +1,6 @@
 mod confirmation;
 mod project;
+mod range;
 mod render;
 mod state;
 #[cfg(test)]
@@ -37,29 +38,6 @@ enum PickerExit {
     TakeOver(usize, Option<u64>),
     Kill(usize),
     Cancel,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-enum SessionScope {
-    #[default]
-    Live,
-    All,
-}
-
-impl SessionScope {
-    fn toggle(&mut self) {
-        *self = match self {
-            Self::Live => Self::All,
-            Self::All => Self::Live,
-        };
-    }
-
-    fn label(self) -> &'static str {
-        match self {
-            Self::Live => "Live",
-            Self::All => "All",
-        }
-    }
 }
 
 struct RawMode;

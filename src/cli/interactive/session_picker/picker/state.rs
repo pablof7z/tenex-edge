@@ -1,4 +1,4 @@
-use super::{confirmation, project::ProjectPicker, PickerExit, SessionScope};
+use super::{confirmation, project::ProjectPicker, range::HistoryRange, PickerExit};
 use crate::cli::interactive::session_picker::SessionChoice;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
@@ -7,7 +7,7 @@ pub(super) struct PickerState {
     pub(super) choices: Vec<SessionChoice>,
     pub(super) visible: Vec<usize>,
     pub(super) query: String,
-    pub(super) scope: SessionScope,
+    pub(super) range: HistoryRange,
     pub(super) project_filter: Option<String>,
     pub(super) project_picker: Option<ProjectPicker>,
     pub(super) notice: Option<String>,
@@ -22,7 +22,7 @@ impl PickerState {
             choices,
             visible: Vec::new(),
             query: String::new(),
-            scope: SessionScope::Live,
+            range: HistoryRange::Live,
             project_filter: None,
             project_picker: None,
             notice: None,
@@ -62,8 +62,22 @@ impl PickerState {
                     self.project_filter.as_deref(),
                 ));
             }
-            KeyCode::Tab => {
-                self.scope.toggle();
+            KeyCode::Char('+')
+                if self.query.is_empty()
+                    && !key
+                        .modifiers
+                        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+            {
+                self.range.expand();
+                self.refilter();
+            }
+            KeyCode::Char('-')
+                if self.query.is_empty()
+                    && !key
+                        .modifiers
+                        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+            {
+                self.range.narrow();
                 self.refilter();
             }
             KeyCode::Enter => {
@@ -174,13 +188,13 @@ impl PickerState {
     }
 
     fn refilter(&mut self) {
+        let now = crate::util::now_secs();
         let mut scored = self
             .choices
             .iter()
             .enumerate()
             .filter(|(_, choice)| {
-                (self.query.is_empty() && (self.scope == SessionScope::All || choice.row.running)
-                    || !self.query.is_empty())
+                (!self.query.is_empty() || self.range.includes(&choice.row, now))
                     && self
                         .project_filter
                         .as_deref()

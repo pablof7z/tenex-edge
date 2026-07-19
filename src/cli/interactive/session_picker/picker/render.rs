@@ -12,7 +12,7 @@ const MUTED: Color = Color::Indexed(245);
 const ERROR: Color = Color::Indexed(203);
 const WARNING: Color = Color::Indexed(214);
 const HELP: &str =
-    "enter attach/restart · p project · tab live/all · ⇧K kill · type search · ↑↓ · esc";
+    "enter attach/restart · -/+ range · p project · ⇧K kill · type search · ↑↓ · esc";
 
 pub(super) fn draw(frame: &mut Frame<'_>, state: &PickerState) {
     let area = frame.area();
@@ -42,7 +42,9 @@ pub(super) fn draw(frame: &mut Frame<'_>, state: &PickerState) {
         Paragraph::new(Line::from(vec![
             Span::styled("Sessions", Style::default().add_modifier(Modifier::BOLD)),
             Span::raw("  Range: "),
-            Span::styled(state.scope.label(), Style::default().fg(ACCENT)),
+            Span::raw("- "),
+            Span::styled(state.range.label(), Style::default().fg(ACCENT)),
+            Span::raw(" +"),
             Span::raw("  Project: "),
             Span::styled(state.project_label(), Style::default().fg(ACCENT)),
             Span::raw("  Filter: "),

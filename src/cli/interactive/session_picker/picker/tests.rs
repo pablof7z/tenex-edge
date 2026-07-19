@@ -129,7 +129,7 @@ fn shift_k_kills_the_highlighted_session_without_selection_state() {
 }
 
 #[test]
-fn search_reaches_exited_sessions_while_live_scope_is_selected() {
+fn search_reaches_exited_sessions_while_the_live_range_is_selected() {
     let mut exited = choice("juno-codex", "finished earlier", false);
     exited.row.running = false;
     exited.row.state = crate::session_state::SessionState::Offline;
@@ -137,7 +137,7 @@ fn search_reaches_exited_sessions_while_live_scope_is_selected() {
     let mut state = PickerState::new(vec![choice("opal-codex", "working", true), exited]);
 
     assert_eq!(state.visible, vec![0]);
-    for character in "juno".chars() {
+    for character in "juno-codex".chars() {
         state.handle_key(key(KeyCode::Char(character)), 10);
     }
     assert_eq!(state.visible, vec![1]);
@@ -145,19 +145,6 @@ fn search_reaches_exited_sessions_while_live_scope_is_selected() {
         state.handle_key(key(KeyCode::Enter), 10),
         Some(PickerExit::Resume(1))
     );
-}
-
-#[test]
-fn tab_expands_the_empty_query_from_live_sessions_to_all_history() {
-    let mut exited = choice("juno-codex", "finished earlier", false);
-    exited.row.running = false;
-    exited.row.state = crate::session_state::SessionState::Offline;
-    let mut state = PickerState::new(vec![choice("opal-codex", "working", true), exited]);
-
-    state.handle_key(key(KeyCode::Tab), 10);
-
-    assert_eq!(state.scope, SessionScope::All);
-    assert_eq!(state.visible, vec![0, 1]);
 }
 
 #[test]
@@ -268,11 +255,12 @@ fn renderer_gives_every_session_exactly_two_lines() {
         .map(|cells| cells.iter().map(|cell| cell.symbol()).collect::<String>())
         .collect::<Vec<_>>();
 
-    assert!(rows[0].starts_with("Sessions"));
+    assert!(rows[0].starts_with("Sessions  Range: - Live +"));
     assert!(rows[1].starts_with("❯ ● @one"));
     assert!(rows[2].starts_with("    (untitled)"));
     assert!(rows[3..11].iter().all(|row| row.trim().is_empty()));
     assert!(rows[11].starts_with("enter attach"));
+    assert!(rows[11].contains("-/+ range"));
 }
 
 #[test]
