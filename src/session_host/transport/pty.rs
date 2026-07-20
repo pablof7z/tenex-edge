@@ -73,6 +73,9 @@ impl SessionTransport for PtyTransport {
             kind: TransportKind::Pty,
             endpoint_id: meta.id.clone(),
             watch_pid: i32::try_from(meta.supervisor_pid).ok(),
+            // PTY doesn't own a native resume token; the wrapped harness reports
+            // its own session id through the mosaico hook.
+            native_id: None,
             meta,
         })
     }

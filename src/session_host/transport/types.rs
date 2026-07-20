@@ -66,6 +66,12 @@ pub struct SessionEndpoint {
     pub kind: TransportKind,
     pub endpoint_id: String,
     pub watch_pid: Option<i32>,
+    /// The harness-native resume token this session opened with, when the
+    /// transport owns it directly (ACP `sessionId` / app-server thread id).
+    /// `None` for transports that rely on the harness's own mosaico hook to
+    /// report a resume token (PTY). Recorded as the `native_resume` locator at
+    /// registration so an online hosted session is resumable without a hook.
+    pub native_id: Option<String>,
     pub meta: crate::pty::LaunchMetadata,
 }
 
