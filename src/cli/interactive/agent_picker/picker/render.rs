@@ -1,15 +1,22 @@
-use super::{AgentPickerRow, DeleteScope, PendingDelete, PickerState};
+mod briefs;
+mod index;
+mod inspector;
+
+use super::{DeleteScope, PendingDelete, PickerState, PickerView};
 use ratatui::{
-    layout::{Constraint, Layout},
+    layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Clear, List, ListItem, Paragraph},
+    widgets::{Clear, Paragraph},
     Frame,
 };
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-const ACCENT: Color = Color::Indexed(45);
-const MUTED: Color = Color::Indexed(245);
-const ERROR: Color = Color::Indexed(203);
+pub(super) const ACCENT: Color = Color::Indexed(45);
+pub(super) const MUTED: Color = Color::Indexed(245);
+pub(super) const ERROR: Color = Color::Indexed(203);
+pub(super) const FOCUS_BG: Color = Color::Indexed(236);
+const WIDE_INSPECTOR: u16 = 88;
 
 pub(super) fn draw(frame: &mut Frame<'_>, state: &PickerState) {
     let area = frame.area();
@@ -18,132 +25,111 @@ pub(super) fn draw(frame: &mut Frame<'_>, state: &PickerState) {
         frame.render_widget(Paragraph::new("Agents"), area);
         return;
     }
-    let [title_area, options_area, help_area] = Layout::vertical([
+    let [title, body, footer] = Layout::vertical([
         Constraint::Length(1),
         Constraint::Min(1),
         Constraint::Length(1),
     ])
     .areas(area);
-
-    let query = if state.filtering && state.query.is_empty() {
-        Span::styled("type to filter", Style::default().fg(MUTED))
-    } else if state.filtering {
-        Span::styled(state.query.as_str(), Style::default().fg(ACCENT))
-    } else {
-        Span::styled("press / to filter", Style::default().fg(MUTED))
-    };
-    frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled("Agents", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw("  Filter: "),
-            query,
-        ])),
-        title_area,
-    );
-
-    const CARET_WIDTH: usize = 2; // "❯ " / "  "
-    const MARKER_WIDTH: usize = 2; // "✓ " / "  " multi-select marker
-    const PREFIX_WIDTH: usize = CARET_WIDTH + MARKER_WIDTH;
-    const GAP_WIDTH: usize = 2; // spacing between name and description columns
-    const RIGHT_MARGIN: usize = 1; // keeps text off the terminal's raw edge
-    const MAX_NAME_WIDTH: usize = 24;
-
-    // Sized from the currently visible (filtered) rows, so filtering down to
-    // short names shrinks the gap instead of leaving it fixed to the widest
-    // name in the whole roster.
-    let name_width = state
-        .visible
-        .iter()
-        .map(|&index| state.rows[index].name.chars().count())
-        .max()
-        .unwrap_or(0)
-        .min(MAX_NAME_WIDTH);
-    let description_width = usize::from(options_area.width)
-        .saturating_sub(PREFIX_WIDTH + name_width + GAP_WIDTH + RIGHT_MARGIN);
-    // Unconfigured native-profile-only agents are visually separated from
-    // the rest by a blank line — but only in the natural (unfiltered)
-    // order; fuzzy-filtered results are sorted by relevance instead, where
-    // a group boundary wouldn't mean anything.
-    let show_groups = state.query.is_empty();
-    let mut items = Vec::with_capacity(usize::from(options_area.height));
-    for (visible_index, row) in state.window(usize::from(options_area.height)) {
-        if show_groups && visible_index > 0 {
-            let previous = &state.rows[state.visible[visible_index - 1]];
-            if !is_profile_only(previous) && is_profile_only(row) {
-                items.push(ListItem::new(Line::from("")));
-            }
+    draw_title(frame, state, title);
+    match state.view {
+        PickerView::Inspector if area.width >= WIDE_INSPECTOR => {
+            inspector::draw(frame, state, body)
         }
-        let focused = visible_index == state.cursor;
-        let selected = state.selected.contains(&state.visible[visible_index]);
-        let name = truncate(&row.name, name_width);
-        let description = truncate(&row.description, description_width);
-        let spans = vec![
-            Span::styled(
-                if focused { "❯ " } else { "  " },
-                Style::default().fg(if focused { ACCENT } else { MUTED }),
-            ),
-            Span::styled(
-                if selected { "✓ " } else { "  " },
-                Style::default().fg(if selected { ACCENT } else { MUTED }),
-            ),
-            Span::styled(
-                format!("{name:<name_width$}"),
-                Style::default()
-                    .fg(if focused { ACCENT } else { Color::White })
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw("  "),
-            Span::styled(description, Style::default().fg(MUTED)),
-        ];
-        items.push(ListItem::new(Line::from(spans)));
+        PickerView::Inspector | PickerView::Briefs => briefs::draw(frame, state, body),
+        PickerView::Index => index::draw(frame, state, body),
     }
-    if items.is_empty() {
-        frame.render_widget(
-            Paragraph::new("  No matching agents").style(Style::default().fg(MUTED)),
-            options_area,
-        );
-    } else {
-        frame.render_widget(List::new(items), options_area);
-    }
+    draw_footer(frame, state, footer);
+}
 
-    let position = if state.visible.is_empty() {
-        "0/0".to_string()
+pub(super) fn option_capacity(view: PickerView, area: Rect) -> usize {
+    let body = usize::from(area.height.saturating_sub(2));
+    match view {
+        PickerView::Briefs => body / 2,
+        PickerView::Inspector if area.width < WIDE_INSPECTOR => body / 2,
+        PickerView::Inspector | PickerView::Index => body,
+    }
+    .max(1)
+}
+
+fn draw_title(frame: &mut Frame<'_>, state: &PickerState, area: Rect) {
+    let count = if state.query.is_empty() {
+        format!("{} available", state.visible.len())
     } else {
-        format!("{}/{}", state.cursor + 1, state.visible.len())
+        format!("{} matches", state.visible.len())
     };
-    let line = if let Some(notice) = delete_notice(state) {
-        Line::from(Span::styled(
-            format!("{notice} · {position}"),
-            Style::default().fg(ERROR),
-        ))
-    } else {
-        let mut status = Vec::new();
-        if let Some(configuration) = state.current_row().and_then(|row| row.status.as_ref()) {
-            status.push(Span::styled(
-                configuration.label.clone(),
-                Style::default().fg(crate::console_style::harness_ratatui_color(
-                    configuration.harness,
-                )),
-            ));
-            status.push(Span::styled("  ·  ", Style::default().fg(MUTED)));
-        }
-        status.push(Span::styled(
-            format!("{} · {position}", help(state)),
-            Style::default().fg(MUTED),
+    let mut spans = vec![
+        Span::styled(
+            "Launch an agent",
+            Style::default().add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(format!("  {count}"), Style::default().fg(MUTED)),
+        Span::styled("   View  ", Style::default().fg(MUTED)),
+    ];
+    for view in [PickerView::Inspector, PickerView::Briefs, PickerView::Index] {
+        let style = if state.view == view {
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(MUTED)
+        };
+        spans.push(Span::styled(
+            format!("{} {}", view.number(), view.label()),
+            style,
         ));
-        Line::from(status)
+        if view != PickerView::Index {
+            spans.push(Span::styled("  ", Style::default().fg(MUTED)));
+        }
+    }
+    if state.filtering {
+        spans.push(Span::styled("   Search  ", Style::default().fg(MUTED)));
+        spans.push(Span::styled(
+            if state.query.is_empty() {
+                "type to filter"
+            } else {
+                state.query.as_str()
+            },
+            Style::default().fg(ACCENT),
+        ));
+    } else if area.width >= 82 {
+        spans.push(Span::styled("   / search", Style::default().fg(MUTED)));
+    }
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
+fn draw_footer(frame: &mut Frame<'_>, state: &PickerState, area: Rect) {
+    let line = if let Some(notice) = delete_notice(state) {
+        Line::from(Span::styled(notice, Style::default().fg(ERROR)))
+    } else {
+        let position = if state.visible.is_empty() {
+            "0/0".to_string()
+        } else {
+            format!("{}/{}", state.cursor + 1, state.visible.len())
+        };
+        let help = if state.filtering {
+            "enter launch  ·  type search  ·  esc clear"
+        } else if !state.selected.is_empty() {
+            "space unmark  ·  d delete marked  ·  esc close"
+        } else if area.width >= 90 {
+            "enter launch  ·  e edit  ·  space mark  ·  d delete  ·  / search  ·  1–3 view  ·  esc"
+        } else {
+            "enter launch  ·  e edit  ·  / search  ·  1–3 view  ·  esc"
+        };
+        Line::from(vec![
+            Span::styled(help, Style::default().fg(MUTED)),
+            Span::styled(format!("  ·  {position}"), Style::default().fg(MUTED)),
+        ])
     };
-    frame.render_widget(Paragraph::new(line), help_area);
+    frame.render_widget(Paragraph::new(line), area);
 }
 
 fn delete_notice(state: &PickerState) -> Option<String> {
     match state.pending_delete.as_ref()? {
         PendingDelete::Nothing { index } => Some(format!(
-            "{} is a generic agent — nothing to delete · any key cancels",
+            "{} is built in — nothing to delete · any key cancels",
             state.rows[*index].name
         )),
         PendingDelete::ChooseScope { index } => Some(format!(
-            "Delete {}: a) agent config · p) native profile · b) both · esc cancel",
+            "Delete {}: a agent config · p native profile · b both · esc cancel",
             state.rows[*index].name
         )),
         PendingDelete::Confirm { plan } => {
@@ -155,37 +141,57 @@ fn delete_notice(state: &PickerState) -> Option<String> {
                 };
                 format!("{target} for {}", state.rows[*index].name)
             } else {
-                format!("{} selected agents", plan.len())
+                format!("{} marked agents", plan.len())
             };
             Some(format!("Delete {what}? y/d confirm · esc cancel"))
         }
     }
 }
 
-fn is_profile_only(row: &AgentPickerRow) -> bool {
-    !row.has_configured && row.has_native_profile
+pub(super) fn harness_style(row: &super::AgentPickerRow) -> Style {
+    let color = row
+        .status
+        .as_ref()
+        .map(|status| crate::console_style::harness_ratatui_color(status.harness))
+        .unwrap_or(MUTED);
+    Style::default().fg(color).add_modifier(Modifier::BOLD)
 }
 
-fn help(state: &PickerState) -> &'static str {
-    if state.filtering {
-        "enter launch · type filter · ↑↓ move · esc clear"
+pub(super) fn focus_style(focused: bool) -> Style {
+    if focused {
+        Style::default().bg(FOCUS_BG)
     } else {
-        "enter launch · e edit · d delete · space select · / filter · ↑↓ move · esc"
+        Style::default()
     }
 }
 
-fn truncate(value: &str, max_chars: usize) -> String {
-    let mut chars = value.chars();
-    let prefix = chars.by_ref().take(max_chars).collect::<String>();
-    if chars.next().is_none() {
-        prefix
-    } else {
-        format!(
-            "{}…",
-            prefix
-                .chars()
-                .take(max_chars.saturating_sub(1))
-                .collect::<String>()
-        )
+pub(super) fn marker(focused: bool, marked: bool) -> String {
+    match (focused, marked) {
+        (true, true) => "❯✓ ".to_string(),
+        (true, false) => "❯  ".to_string(),
+        (false, true) => " ✓ ".to_string(),
+        (false, false) => "   ".to_string(),
     }
+}
+
+pub(super) fn truncate(value: &str, width: usize) -> String {
+    if UnicodeWidthStr::width(value) <= width {
+        return value.to_string();
+    }
+    if width == 0 {
+        return String::new();
+    }
+    let target = width.saturating_sub(1);
+    let mut used = 0;
+    let mut output = String::new();
+    for character in value.chars() {
+        let character_width = character.width().unwrap_or(0);
+        if used + character_width > target {
+            break;
+        }
+        output.push(character);
+        used += character_width;
+    }
+    output.push('…');
+    output
 }

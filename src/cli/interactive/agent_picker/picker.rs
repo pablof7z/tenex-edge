@@ -2,6 +2,7 @@ mod delete_flow;
 mod render;
 #[cfg(test)]
 mod tests;
+mod view;
 
 use super::{AgentPickerRow, DeleteScope};
 use anyhow::{Context, Result};
@@ -14,9 +15,11 @@ use delete_flow::PendingDelete;
 use ratatui::{backend::CrosstermBackend, layout::Rect, Terminal, TerminalOptions, Viewport};
 use std::collections::BTreeSet;
 use std::io;
+use view::PickerView;
 
 const MAX_VISIBLE_ROWS: u16 = 40;
 const CHROME_ROWS: u16 = 2;
+const MAX_VIEWPORT_HEIGHT: u16 = 32;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::cli) enum PickerAction {
@@ -37,6 +40,7 @@ struct PickerState {
     filtering: bool,
     cursor: usize,
     offset: usize,
+    view: PickerView,
     selected: BTreeSet<usize>,
     pending_delete: Option<PendingDelete>,
 }
@@ -52,6 +56,7 @@ impl PickerState {
             filtering: false,
             cursor,
             offset: 0,
+            view: PickerView::Inspector,
             selected: BTreeSet::new(),
             pending_delete: None,
         }
@@ -89,6 +94,9 @@ impl PickerState {
             KeyCode::Char('d') if !self.filtering => {
                 self.begin_delete();
             }
+            KeyCode::Char('1') if !self.filtering => self.view = PickerView::Inspector,
+            KeyCode::Char('2') if !self.filtering => self.view = PickerView::Briefs,
+            KeyCode::Char('3') if !self.filtering => self.view = PickerView::Index,
             KeyCode::Char('/') if !self.filtering => {
                 self.filtering = true;
             }
@@ -205,7 +213,7 @@ pub(in crate::cli) fn select(
     initial_cursor: usize,
 ) -> Result<PickerAction> {
     let (_, terminal_height) = terminal::size().unwrap_or((100, 28));
-    let height = viewport_height(terminal_height);
+    let height = viewport_height(terminal_height, rows.len());
     let _raw_mode = RawMode::enter()?;
     let backend = CrosstermBackend::new(io::stdout());
     let mut terminal = Terminal::with_options(
@@ -232,7 +240,7 @@ fn interaction_loop(
     last_area: &mut Rect,
 ) -> Result<PickerAction> {
     loop {
-        let rows = option_rows(last_area.height);
+        let rows = render::option_capacity(state.view, *last_area);
         state.ensure_visible(rows);
         *last_area = terminal
             .draw(|frame| render::draw(frame, state))
@@ -241,9 +249,11 @@ fn interaction_loop(
         let Event::Key(key) = event::read().context("reading agent picker input")? else {
             continue;
         };
-        if let Some(action) = state.handle_key(key, option_rows(last_area.height)) {
+        let rows = render::option_capacity(state.view, *last_area);
+        if let Some(action) = state.handle_key(key, rows) {
             return Ok(action);
         }
+        state.ensure_visible(render::option_capacity(state.view, *last_area));
     }
 }
 
@@ -260,10 +270,11 @@ fn cleanup_terminal(
     Ok(())
 }
 
-fn option_rows(height: u16) -> usize {
-    usize::from(height.saturating_sub(CHROME_ROWS))
-}
-
-fn viewport_height(terminal_height: u16) -> u16 {
-    terminal_height.clamp(1, MAX_VISIBLE_ROWS + CHROME_ROWS)
+fn viewport_height(terminal_height: u16, row_count: usize) -> u16 {
+    let desired = row_count
+        .min(usize::from(MAX_VISIBLE_ROWS))
+        .saturating_mul(2)
+        .saturating_add(usize::from(CHROME_ROWS))
+        .clamp(8, usize::from(MAX_VIEWPORT_HEIGHT)) as u16;
+    terminal_height.clamp(1, desired)
 }

@@ -24,6 +24,57 @@ pub(in crate::cli) struct AgentPickerRow {
 }
 
 impl AgentPickerRow {
+    pub(super) fn source_label(&self) -> &'static str {
+        if self.has_configured {
+            "configured"
+        } else if self.has_native_profile {
+            "installed profile"
+        } else {
+            "built in"
+        }
+    }
+
+    pub(super) fn source_short_label(&self) -> &'static str {
+        if self.has_configured {
+            "config"
+        } else if self.has_native_profile {
+            "profile"
+        } else {
+            "core"
+        }
+    }
+
+    pub(super) fn harness_label(&self) -> &str {
+        self.status
+            .as_ref()
+            .map(|value| value.label.as_str())
+            .unwrap_or("Unknown")
+    }
+
+    pub(super) fn clean_description(&self) -> String {
+        let decoded = self.description.replace("\\n", "\n").replace("\\t", " ");
+        let end = ["<example>", "<examples>", "<instructions>"]
+            .into_iter()
+            .filter_map(|marker| decoded.find(marker))
+            .min()
+            .unwrap_or(decoded.len());
+        let primary = &decoded[..end];
+        let clean = crate::agent_about::for_injection(primary).replace(" -- ", " — ");
+        if clean.is_empty() {
+            format!("{} agent", self.source_label())
+        } else {
+            clean
+        }
+    }
+
+    pub(super) fn description_summary(&self) -> String {
+        let clean = self.clean_description();
+        clean
+            .split_once(". ")
+            .map(|(first, _)| format!("{first}."))
+            .unwrap_or(clean)
+    }
+
     pub(super) fn fuzzy_score(&self, input: &str) -> Option<i64> {
         if input.is_empty() {
             return Some(0);
