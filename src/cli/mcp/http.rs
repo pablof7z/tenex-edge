@@ -46,7 +46,7 @@ impl Default for HttpSubscriptions {
 pub(super) async fn serve(args: super::McpArgs) -> Result<()> {
     let addr = SocketAddr::new(args.host.parse::<IpAddr>()?, args.port);
     let path = normalize_path(&args.path)?;
-    let auth = auth_state(&args)?;
+    let auth = auth_state(&args, &path)?;
     let state = HttpState {
         subscriptions: HttpSubscriptions::default(),
         auth,
@@ -194,7 +194,10 @@ impl HttpState {
     }
 }
 
-fn auth_state(args: &super::McpArgs) -> Result<Option<super::auth::AuthState>> {
+fn auth_state(
+    args: &super::McpArgs,
+    resource_path: &str,
+) -> Result<Option<super::auth::AuthState>> {
     if !args.oauth {
         return Ok(None);
     }
@@ -202,7 +205,7 @@ fn auth_state(args: &super::McpArgs) -> Result<Option<super::auth::AuthState>> {
         .public_url
         .clone()
         .context("--public-url is required with --oauth")?;
-    super::auth::AuthState::new(public_url).map(Some)
+    super::auth::AuthState::new(public_url, resource_path).map(Some)
 }
 
 fn required_scope(method: &str, params: &Value) -> &'static str {

@@ -23,6 +23,7 @@ const SCOPES: &[&str] = &["mosaico:read", "mosaico:write"];
 #[derive(Clone)]
 pub(super) struct AuthState {
     public_url: String,
+    resource_url: String,
     secret: Vec<u8>,
     whitelisted: Arc<Vec<String>>,
     codes: Arc<Mutex<HashMap<String, AuthCode>>>,
@@ -44,14 +45,17 @@ pub(super) struct Authenticated {
 }
 
 impl AuthState {
-    pub(super) fn new(public_url: String) -> Result<Self> {
+    pub(super) fn new(public_url: String, resource_path: &str) -> Result<Self> {
         let cfg = crate::config::Config::load()?;
         let secret = match cfg.management_nsec().cloned() {
             Some(secret) => secret,
             None => crate::config::ensure_mosaico_private_key()?,
         };
+        let public_url = public_url.trim_end_matches('/').to_string();
+        let resource_url = format!("{public_url}{resource_path}");
         Ok(Self {
-            public_url: public_url.trim_end_matches('/').to_string(),
+            public_url,
+            resource_url,
             secret: secret.into_bytes(),
             whitelisted: Arc::new(cfg.whitelisted_pubkeys),
             codes: Arc::new(Mutex::new(HashMap::new())),
@@ -61,7 +65,7 @@ impl AuthState {
 
     pub(super) fn protected_resource(&self) -> Value {
         json!({
-            "resource": self.public_url,
+            "resource": self.resource_url,
             "authorization_servers": [self.public_url],
             "scopes_supported": SCOPES,
             "resource_documentation": "https://github.com/pablof7z/mosaico",
@@ -84,7 +88,7 @@ impl AuthState {
     }
 
     pub(super) async fn authorize_page(&self, params: AuthorizeParams) -> Response {
-        if let Err(err) = params.validate(&self.public_url) {
+        if let Err(err) = params.validate(&self.resource_url) {
             return oauth_error(StatusCode::BAD_REQUEST, err.to_string());
         }
         self.login_page(&params, None).await
@@ -92,7 +96,7 @@ impl AuthState {
 
     pub(super) async fn authorize_submit(&self, form: AuthorizeForm) -> Response {
         let params = form.params();
-        if let Err(err) = params.validate(&self.public_url) {
+        if let Err(err) = params.validate(&self.resource_url) {
             return oauth_error(StatusCode::BAD_REQUEST, err.to_string());
         }
         let challenge = match self.consume_challenge(&form, &params).await {
@@ -111,7 +115,7 @@ impl AuthState {
             client_id: params.client_id.clone(),
             redirect_uri: params.redirect_uri.clone(),
             code_challenge: params.code_challenge.clone(),
-            resource: params.resource_url(&self.public_url),
+            resource: params.resource_url(&self.resource_url),
             scope: params.scope.clone().unwrap_or_else(default_scope),
             pubkey,
             expires_at: crate::util::now_secs() + 300,
@@ -127,7 +131,7 @@ impl AuthState {
         let Some(code) = self.codes.lock().await.remove(&form.code) else {
             return oauth_json_error("invalid_grant", "unknown authorization code");
         };
-        if let Err(err) = validate_token_request(&form, &code, &self.public_url) {
+        if let Err(err) = validate_token_request(&form, &code, &self.resource_url) {
             return oauth_json_error("invalid_grant", &err.to_string());
         }
         match self.issue_token(&code) {
@@ -210,7 +214,7 @@ impl AuthState {
         challenges.retain(|_, value| value.expires_at > now);
         challenges.insert(
             challenge.clone(),
-            LoginChallenge::from_params(params, &self.public_url, now + 300),
+            LoginChallenge::from_params(params, &self.resource_url, now + 300),
         );
         Ok(params.login_fields(&challenge))
     }
@@ -223,7 +227,7 @@ impl AuthState {
         let Some(challenge) = self.challenges.lock().await.remove(&form.login_challenge) else {
             anyhow::bail!("unknown login challenge");
         };
-        challenge.validate(params, &self.public_url)?;
+        challenge.validate(params, &self.resource_url)?;
         Ok(form.login_challenge.clone())
     }
 
@@ -287,7 +291,7 @@ impl AuthState {
         let claims: TokenClaims = serde_json::from_slice(&URL_SAFE_NO_PAD.decode(parts[1])?)?;
         let now = crate::util::now_secs();
         anyhow::ensure!(claims.iss == self.public_url, "bad issuer");
-        anyhow::ensure!(claims.aud == self.public_url, "bad audience");
+        anyhow::ensure!(claims.aud == self.resource_url, "bad audience");
         anyhow::ensure!(claims.exp > now, "expired token");
         Ok(claims)
     }
@@ -298,28 +302,5 @@ fn default_scope() -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn auth() -> AuthState {
-        AuthState {
-            public_url: "https://mosaico.example".into(),
-            secret: b"test-secret".to_vec(),
-            whitelisted: Arc::new(Vec::new()),
-            codes: Arc::new(Mutex::new(HashMap::new())),
-            challenges: Arc::new(Mutex::new(HashMap::new())),
-        }
-    }
-
-    #[test]
-    fn actor_correlation_is_keyed_stable_and_contains_no_raw_identifiers() {
-        let auth = auth();
-        let first = auth.redact_actor_key(&["openai-v1", "subject", "conversation-one"]);
-        let repeat = auth.redact_actor_key(&["openai-v1", "subject", "conversation-one"]);
-        let second = auth.redact_actor_key(&["openai-v1", "subject", "conversation-two"]);
-        assert_eq!(first, repeat);
-        assert_ne!(first, second);
-        assert!(!first.contains("subject"));
-        assert!(!first.contains("conversation"));
-    }
-}
+#[path = "auth/tests.rs"]
+mod tests;
