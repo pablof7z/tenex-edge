@@ -56,6 +56,7 @@ impl SessionTransport for RpcTransport {
             kind: self.kind,
             endpoint_id: open.endpoint_id.clone(),
             watch_pid: open.pid.and_then(|p| i32::try_from(p).ok()),
+            native_id: Some(open.native_id.clone()),
             meta: Self::synth_meta(spec, &open.endpoint_id, open.pid, &open.argv),
         })
     }
@@ -104,6 +105,7 @@ impl SessionTransport for RpcTransport {
             kind: self.kind,
             endpoint_id: endpoint_id.clone(),
             watch_pid: pid.and_then(|p| i32::try_from(p).ok()),
+            native_id: Some(resume.native_id.clone()),
             meta: Self::synth_meta(spec, &endpoint_id, pid, &argv),
         })
     }
