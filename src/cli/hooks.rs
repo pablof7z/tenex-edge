@@ -341,7 +341,20 @@ async fn hook_dispatch(
             )
             .await
             {
-                eprintln!("[mosaico] session-start hook skipped: {e:#}");
+                let detail = format!("{e:#}");
+                eprintln!("[mosaico] session-start hook skipped: {detail}");
+                // This is the FIRST point registration is attempted — if it's
+                // a deterministic misconfiguration (see `is_persistent_identity_conflict`)
+                // it will fail identically on every subsequent reassert too, so
+                // it must be durably recorded here, not just at the point it's
+                // later rediscovered.
+                call_log.note(
+                    "session-start-failed",
+                    serde_json::json!({
+                        "observed_harness": observed_harness,
+                        "error": detail,
+                    }),
+                );
                 return Ok(());
             }
         }
@@ -386,7 +399,20 @@ async fn hook_dispatch(
                     )
                     .await
                     {
-                        eprintln!("[mosaico] session reassert skipped: {e:#}");
+                        let detail = format!("{e:#}");
+                        eprintln!("[mosaico] session reassert skipped: {detail}");
+                        // `eprintln!` alone is not durable: harness hook runners
+                        // don't surface a hook's stderr to the transcript or
+                        // persist it anywhere, so without this the real cause
+                        // is unrecoverable after the fact (see issue: a
+                        // degraded-notice turn left no trace of *why*).
+                        call_log.note(
+                            "reassert-failed",
+                            serde_json::json!({
+                                "observed_harness": observed_harness,
+                                "error": detail,
+                            }),
+                        );
                         degraded_notice = Some(
                             "<mosaico>\n⚠ Fabric temporarily unavailable — this session could not be \
                              reasserted with the daemon, so your inbox and channel awareness for this \
@@ -398,6 +424,13 @@ async fn hook_dispatch(
                 } else {
                     eprintln!(
                         "[mosaico] session reassert skipped: could not observe a supported harness process"
+                    );
+                    call_log.note(
+                        "reassert-failed",
+                        serde_json::json!({
+                            "observed_harness": Option::<&str>::None,
+                            "error": "could not observe a supported harness process",
+                        }),
                     );
                     // Don't silently drop awareness for the turn: hand the turn a
                     // visible degradation marker so the agent knows the fabric was

@@ -19,9 +19,15 @@ pub(crate) fn validate_live_session_identity(
     if derived != agent.per_session_key {
         anyhow::bail!(
             "agent {:?} identity configuration changed while pubkey {} is live; \
-             end the live runtime before changing perSessionKey",
+             end the live runtime before changing perSessionKey \
+             (diagnostic: session.agent_slug={:?} agent.slug={:?} derived={derived} \
+             agent.per_session_key={} agent.pubkey_hex={:?})",
             session.agent_slug,
-            session.pubkey
+            session.pubkey,
+            session.agent_slug,
+            agent.slug,
+            agent.per_session_key,
+            agent.pubkey_hex(),
         );
     }
     let expected = if derived {
