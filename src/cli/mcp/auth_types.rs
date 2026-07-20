@@ -175,3 +175,36 @@ pub(super) fn validate_token_request(
     anyhow::ensure!(expected == code.code_challenge, "PKCE verifier mismatch");
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn params(resource: Option<&str>) -> AuthorizeParams {
+        AuthorizeParams {
+            response_type: "code".into(),
+            client_id: "https://client.example/client.json".into(),
+            redirect_uri: "https://client.example/callback".into(),
+            state: Some("state".into()),
+            code_challenge: "challenge".into(),
+            code_challenge_method: "S256".into(),
+            resource: resource.map(str::to_string),
+            scope: Some("mosaico:read".into()),
+        }
+    }
+
+    #[test]
+    fn authorization_accepts_canonical_mcp_resource() {
+        assert!(params(Some("https://mosaico.example/mcp"))
+            .validate("https://mosaico.example/mcp")
+            .is_ok());
+    }
+
+    #[test]
+    fn authorization_rejects_authorization_server_origin_as_resource() {
+        let error = params(Some("https://mosaico.example"))
+            .validate("https://mosaico.example/mcp")
+            .expect_err("origin must not identify the path-hosted MCP resource");
+        assert_eq!(error.to_string(), "resource does not match this MCP server");
+    }
+}
