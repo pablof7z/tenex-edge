@@ -272,7 +272,15 @@ async fn dispatch(state: &Arc<DaemonState>, req: &Request) -> Response {
     };
     match result {
         Ok(v) => Response::ok(req.id, v),
-        Err(e) => Response::err(req.id, "rpc_error", format!("{e:#}")),
+        Err(e) => {
+            // Every RPC failure reaches a caller as a wire response regardless
+            // (`Response::err`), but until now that was the *only* place the
+            // error existed — nothing server-side recorded that a call failed
+            // or why, making a hook-path failure (which itself only logs to a
+            // stderr no one durably captures) unrecoverable after the fact.
+            tracing::error!(method = %req.method, error = %format!("{e:#}"), "rpc call failed");
+            Response::err(req.id, "rpc_error", format!("{e:#}"))
+        }
     }
 }
 
