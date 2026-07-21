@@ -11,20 +11,6 @@ fn parse_err(args: &[&str]) -> clap::Error {
 }
 
 #[test]
-fn removed_agent_add_command_stays_unavailable() {
-    let err = parse_err(&[
-        "mosaico",
-        "agent",
-        "add",
-        "reviewer",
-        "--workspace",
-        "mosaico",
-    ]);
-
-    assert_eq!(err.kind(), ErrorKind::InvalidSubcommand);
-}
-
-#[test]
 fn channel_list_workspace_flags_parse() {
     let one = crate::cli::args::Cli::try_parse_from([
         "mosaico",
@@ -168,12 +154,6 @@ fn channel_switch_accepts_explicit_session_anchor() {
 }
 
 #[test]
-fn removed_invite_command_stays_unavailable() {
-    let err = parse_err(&["mosaico", "invite", "--channel", "ops", "--agent", "x"]);
-    assert_eq!(err.kind(), ErrorKind::InvalidSubcommand);
-}
-
-#[test]
 fn channel_edit_about_parses() {
     let cli = crate::cli::args::Cli::try_parse_from([
         "mosaico",
@@ -241,13 +221,6 @@ fn channel_read_channel_still_parses() {
         } => assert_eq!(channel.as_deref(), Some("ops")),
         _ => panic!("expected channel read command"),
     }
-}
-
-#[test]
-fn channel_read_alias_via_channels_is_removed() {
-    let err = parse_err(&["mosaico", "channels", "read", "--channel", "ops"]);
-
-    assert_eq!(err.kind(), ErrorKind::InvalidSubcommand);
 }
 
 #[test]

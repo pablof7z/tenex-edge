@@ -200,6 +200,8 @@ agent-only commands and are intentionally hidden from default human CLI help:
 |---|---|
 | `mosaico my session` | Give the current agent a full XML briefing: self identity, available capabilities, every workspace, joined channels, and member sessions. Exact-session joined workspaces expand; merely known workspaces stay compact. |
 | `mosaico agents list` | List agents available to spawn on demand. |
+| `mosaico <agent> [prompt] [-- <args>…]` | Launch an agent directly, appending any arguments after `--` to its harness command. |
+| `mosaico <session-handle>` | Attach to a live matching session or resume it when supported. |
 | `mosaico my session status <TITLE>` | Change the current agent session's broadcast title/status. |
 | `mosaico who [--live] [--all-workspaces]` | Show the operator-oriented fabric view as terminal text. Hidden from default agent help, but available when invoked explicitly. |
 | `mosaico` | Open the unified operator home. Existing sessions and launchable agents share one searchable view; Enter performs the row's natural action, while session and agent management keys remain contextual. |
@@ -217,14 +219,17 @@ with one cursor and search field. Session rows attach, resume, take over, or kil
 launch, edit, delete, and support bulk selection. History and project controls narrow sessions
 without hiding available agents. Non-interactively, it prints Sessions and Start a session sections.
 
-`mosaico agents` remains the direct agent inventory and configuration surface over configured
+`mosaico agents` is the agent inventory and configuration surface over configured
 agents, unique native profiles, expanded profile/harness conflicts, and harness defaults.
 Catalog membership is bundle-independent; direct launch resolves a PTY bundle and creates its
 canonical zero-argument policy when none is configured. Start one directly with
-`mosaico agents <agent> [prompt]`. A conflicted
+`mosaico <agent> [prompt]`; append one-launch harness arguments after `--`, for example
+`mosaico codex -- --yolo`. The workspace is resolved from the current directory;
+use `--channel [room]` to choose a channel and `--name <name>` to set the new
+session's public name. A conflicted
 native profile opens a harness radio picker; its expanded name such as `writer-codex` selects
 the same choice non-interactively. A bare
-`mosaico agents <session-handle>` reattaches a live terminal or resumes that session when its
+`mosaico <session-handle>` reattaches a live terminal or resumes that session when its
 harness has a native resume token. `mosaico dispatch` accepts the same harness defaults and
 expanded conflict names, preferring ACP or Codex app-server realization when supported.
 Use `mosaico resume <HARNESS_ID>` when the only identifier at hand belongs to the native harness;

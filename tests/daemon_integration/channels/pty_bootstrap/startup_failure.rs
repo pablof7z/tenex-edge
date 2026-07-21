@@ -22,14 +22,15 @@ fn missing_provider_is_a_cli_failure_without_live_metadata_or_session() {
     )
     .unwrap();
 
+    let isolated_home = home.dir.path().to_string_lossy().into_owned();
     let output = run_cli_with_env_in_dir(
         &home,
-        &["agents", "missing-provider-role", "--workspace", &channel],
-        &[("PATH", "/usr/bin:/bin")],
+        &["missing-provider-role"],
+        &[("HOME", &isolated_home), ("PATH", "/usr/bin:/bin")],
         &work_dir,
     );
 
-    assert!(!output.status.success());
+    assert!(!output.status.success(), "{output:?}");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("launch of agent"), "{stderr}");
     assert!(stderr.contains("exited during startup"), "{stderr}");

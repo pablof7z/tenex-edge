@@ -112,9 +112,10 @@ MOSAICO_DEV_PROMPT="Run mosaico my session." \
   skills/mosaico-dev/scripts/launch-agent "${LAB_ENV}" launch claude-acp
 ```
 
-The helper calls the current `mosaico agents <slug> [prompt]` form. It supplies
-no provider arguments or launch override flags. The selected bundle transport
-causes the helper to keep the container alive after the launch command returns.
+The helper calls the current `mosaico <slug> [prompt] [-- <args>...]` form. Any
+trailing helper arguments are forwarded after the separator for that launch.
+The selected bundle transport causes the helper to keep the container alive
+after the launch command returns.
 
 Expected output includes `[mosaico acp] session: ...`. There is no PTY to
 attach. While the container is alive, inspect bind-mounted logs and host-side

@@ -14,20 +14,19 @@ pub(in crate::cli) async fn launch(request: LaunchRequest) -> Result<()> {
     }
     let LaunchRequest {
         agent: requested_agent,
-        root,
         channel,
         session_name,
         prompt,
+        extra_args,
     } = request;
     let cwd = std::env::current_dir().unwrap_or_default();
     let selection = resolve_fresh_agent(&requested_agent, &cwd).await?;
     let agent = selection.slug;
-    let root = match root {
-        Some(p) => p,
-        None => crate::daemon::workspace_path::channel_for_path_or_bail(
-            &std::env::current_dir().unwrap_or_default(),
-        )?,
-    };
+    let root = crate::daemon::workspace_path::channel_for_path(&cwd).map_err(|error| {
+        anyhow::anyhow!(
+            "{error}; direct launches resolve their workspace from the current directory — run `mosaico channel init` or `git init` there first"
+        )
+    })?;
 
     let channel = resolve_launch_channel(&root, &agent, channel).await?;
     super::fresh::launch(super::fresh::FreshLaunchRequest {
@@ -36,6 +35,7 @@ pub(in crate::cli) async fn launch(request: LaunchRequest) -> Result<()> {
         channel,
         session_name,
         prompt,
+        extra_args,
     })
     .await
 }

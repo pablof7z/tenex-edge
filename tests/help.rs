@@ -85,12 +85,12 @@ fn bare_invocation_with_installation_shows_sessions_and_agents() {
 }
 
 #[test]
-fn removed_launch_subcommand_is_rejected() {
+fn removed_agents_target_is_rejected() {
     let home = installed_codex_home();
-    let output = isolated_command(home.path(), &["launch"]);
+    let output = isolated_command(home.path(), &["agents", "codex"]);
 
     assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("unrecognized subcommand 'launch'"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("unrecognized subcommand 'codex'"));
 }
 
 #[test]

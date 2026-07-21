@@ -7,14 +7,6 @@ fn agents_command_parses_without_an_action() {
 }
 
 #[test]
-fn removed_mgmt_command_stays_unavailable() {
-    assert_eq!(
-        parse_err(&["mosaico", "mgmt", "agent", "list"]).kind(),
-        ErrorKind::InvalidSubcommand
-    );
-}
-
-#[test]
 fn contextual_help_shows_agents_only_to_humans() {
     let agent_help = super::super::command_for_context(true)
         .render_long_help()

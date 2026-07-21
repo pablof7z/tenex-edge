@@ -72,10 +72,10 @@ pub(in crate::cli) async fn home() -> Result<()> {
                 return crate::cli::launch_cli::verbs::launch(
                     crate::cli::launch_cli::LaunchRequest {
                         agent: row.slug,
-                        root: None,
                         channel: None,
                         session_name: None,
                         prompt: None,
+                        extra_args: Vec::new(),
                     },
                 )
                 .await;

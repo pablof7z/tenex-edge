@@ -14,10 +14,7 @@ pub(in crate::cli) use data::{harness_name, AgentKind, AgentRow};
 
 pub(in crate::cli) async fn agents(args: AgentsArgs) -> Result<()> {
     if args.action.is_none() {
-        return match args.launch_request()? {
-            Some(request) => crate::cli::launch_cli::verbs::launch(request).await,
-            None => interactive().await,
-        };
+        return interactive().await;
     }
     match args.action.expect("checked above") {
         AgentAction::List => list().await,
@@ -48,10 +45,10 @@ async fn interactive() -> Result<()> {
                 return crate::cli::launch_cli::verbs::launch(
                     crate::cli::launch_cli::LaunchRequest {
                         agent: row.slug.clone(),
-                        root: None,
                         channel: None,
                         session_name: None,
                         prompt: None,
+                        extra_args: Vec::new(),
                     },
                 )
                 .await;

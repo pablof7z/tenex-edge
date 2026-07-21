@@ -43,8 +43,8 @@ assert_json() {
   echo "ok: ${label}"
 }
 
-agents_tail() {
-  awk 'seen || $0 == "<agents>" { seen = 1; print }'
+launch_tail() {
+  awk '$0 == "<mosaico>" || $0 == "<mosaico-hosted>" { seen = 1; next } seen'
 }
 
 mkdir -p "${TMP}/launcher-bin" "${TMP}/work"
@@ -65,9 +65,9 @@ ACP_OUTPUT="$(
     MOSAICO_DEV_PROMPT='prompt with spaces' \
     bash "${SKILL}/scripts/launch-agent" "${ACP_ENV}" launch claude-acp
 )"
-ACP_TAIL="$(printf '%s\n' "${ACP_OUTPUT}" | agents_tail | sed -n '1,3p')"
-assert_eq $'<agents>\n<claude>\n<prompt with spaces>' "${ACP_TAIL}" \
-  'ACP launch uses the positional prompt contract'
+ACP_TAIL="$(printf '%s\n' "${ACP_OUTPUT}" | launch_tail | sed -n '1,2p')"
+assert_eq $'<claude>\n<prompt with spaces>' "${ACP_TAIL}" \
+  'ACP launch uses the direct fallback prompt contract'
 if printf '%s\n' "${ACP_OUTPUT}" | grep -Eq '^<--(prompt|headless)>$'; then
   fail 'ACP launch emits a removed launch flag'
 fi
@@ -82,21 +82,17 @@ PTY_OUTPUT="$(
     MOSAICO_DEV_PROMPT='inspect identity' \
     bash "${SKILL}/scripts/launch-agent" "${PTY_ENV}" launch claude
 )"
-PTY_TAIL="$(printf '%s\n' "${PTY_OUTPUT}" | agents_tail | sed -n '1,3p')"
-assert_eq $'<agents>\n<claude>\n<inspect identity>' \
-  "${PTY_TAIL}" 'PTY launch uses only target and positional prompt'
+PTY_TAIL="$(printf '%s\n' "${PTY_OUTPUT}" | launch_tail | sed -n '1,2p')"
+assert_eq $'<claude>\n<inspect identity>' \
+  "${PTY_TAIL}" 'PTY launch uses target and positional prompt'
 
-set +e
 PTY_ARGS_OUTPUT="$(
   PATH="${TMP}/launcher-bin:${PATH}" \
     bash "${SKILL}/scripts/launch-agent" "${PTY_ENV}" launch claude --model haiku 2>&1
 )"
-PTY_ARGS_STATUS=$?
-set -e
-[[ "${PTY_ARGS_STATUS}" -eq 2 ]] || fail 'launch provider arguments were not rejected'
-grep -Fq 'put operational args in the harness bundle' <<<"${PTY_ARGS_OUTPUT}" \
-  || fail 'launch argument rejection did not explain the bundle contract'
-echo 'ok: launch rejects provider arguments'
+PTY_ARGS_TAIL="$(printf '%s\n' "${PTY_ARGS_OUTPUT}" | launch_tail | sed -n '1,4p')"
+assert_eq $'<claude>\n<-->\n<--model>\n<haiku>' "${PTY_ARGS_TAIL}" \
+  'launch forwards provider arguments after the separator'
 
 DIRECT_OUTPUT="$(
   PATH="${TMP}/launcher-bin:${PATH}" \
@@ -120,8 +116,8 @@ GROK_OUTPUT="$(
     MOSAICO_DEV_PROMPT='inspect grok identity' \
     bash "${SKILL}/scripts/launch-agent" "${GROK_ENV}" launch grok
 )"
-GROK_TAIL="$(printf '%s\n' "${GROK_OUTPUT}" | agents_tail | sed -n '1,3p')"
-assert_eq $'<agents>\n<grok>\n<inspect grok identity>' \
+GROK_TAIL="$(printf '%s\n' "${GROK_OUTPUT}" | launch_tail | sed -n '1,2p')"
+assert_eq $'<grok>\n<inspect grok identity>' \
   "${GROK_TAIL}" 'Grok uses the current PTY launch contract'
 
 HOST_HOME="${TMP}/host-home"

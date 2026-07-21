@@ -15,66 +15,13 @@ fn parse_err(args: &[&str]) -> clap::Error {
 }
 
 #[test]
-fn removed_tail_command_stays_unavailable() {
-    let err = parse_err(&["mosaico", "tail", "--live"]);
+fn unknown_top_level_command_routes_to_direct_fallback() {
+    let cli = Cli::try_parse_from(["mosaico", "help", "--", "--yolo"]).unwrap();
 
-    assert_eq!(err.kind(), ErrorKind::InvalidSubcommand);
-}
-
-#[test]
-fn removed_chat_command_stays_unavailable() {
-    let err = parse_err(&["mosaico", "chat", "read"]);
-
-    assert_eq!(err.kind(), ErrorKind::InvalidSubcommand);
-}
-
-#[test]
-fn removed_publish_command_stays_unavailable() {
-    let err = parse_err(&["mosaico", "publish", "--title", "T"]);
-
-    assert_eq!(err.kind(), ErrorKind::InvalidSubcommand);
-}
-
-#[test]
-fn duplicate_top_level_send_surface_stays_unavailable() {
-    let err = parse_err(&["mosaico", "send", "hello"]);
-
-    assert_eq!(err.kind(), ErrorKind::InvalidSubcommand);
-}
-
-#[test]
-fn removed_project_command_stays_unavailable() {
-    let err = parse_err(&["mosaico", "project", "list"]);
-
-    assert_eq!(err.kind(), ErrorKind::InvalidSubcommand);
-}
-
-#[test]
-fn removed_agent_command_stays_unavailable() {
-    let err = parse_err(&["mosaico", "agent", "list"]);
-
-    assert_eq!(err.kind(), ErrorKind::InvalidSubcommand);
-}
-
-#[test]
-fn removed_config_command_stays_unavailable() {
-    let err = parse_err(&["mosaico", "config", "providers"]);
-
-    assert_eq!(err.kind(), ErrorKind::InvalidSubcommand);
-}
-
-#[test]
-fn removed_session_command_stays_unavailable() {
-    let err = parse_err(&["mosaico", "session", "end", "--self"]);
-
-    assert_eq!(err.kind(), ErrorKind::InvalidSubcommand);
-}
-
-#[test]
-fn removed_channels_alias_stays_unavailable() {
-    let err = parse_err(&["mosaico", "channels", "list"]);
-
-    assert_eq!(err.kind(), ErrorKind::InvalidSubcommand);
+    match cli.cmd.expect("expected fallback") {
+        Cmd::Fallback(args) => assert_eq!(args, ["help", "--", "--yolo"]),
+        _ => panic!("expected fallback command"),
+    }
 }
 
 #[test]
@@ -265,27 +212,4 @@ fn mcp_http_command_parses() {
 fn bare_invocation_has_no_subcommand() {
     let cli = Cli::try_parse_from(["mosaico"]).unwrap();
     assert!(cli.cmd.is_none());
-}
-
-#[test]
-fn removed_sessions_command_stays_unavailable() {
-    assert_eq!(
-        parse_err(&["mosaico", "sessions"]).kind(),
-        ErrorKind::InvalidSubcommand
-    );
-}
-
-#[test]
-fn removed_pty_command_tree_stays_unavailable() {
-    assert_eq!(
-        parse_err(&["mosaico", "pty", "list"]).kind(),
-        ErrorKind::InvalidSubcommand
-    );
-}
-
-#[test]
-fn removed_top_level_tui_stays_unavailable() {
-    let err = parse_err(&["mosaico", "tui"]);
-
-    assert_eq!(err.kind(), ErrorKind::InvalidSubcommand);
 }

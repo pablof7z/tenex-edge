@@ -14,14 +14,15 @@ root channel used by launch.
 
 ## Launch configuration is transport-owned
 
-`mosaico agents <target> [prompt]` does not accept provider argv, a harness
-override, a command override, or a transport selector. The selected
+`mosaico <target> [prompt] [-- <args>...]` accepts explicit one-launch provider
+arguments only after `--`; it does not accept a harness, command, or transport
+override. The selected
 agent's `harness` points to one `harnesses.json` bundle; that bundle owns
 `harness`, `transport`, and `args`. The transport selects PTY, ACP, or app-server.
 
-Put operational provider flags in bundle `args`. Put a supported native profile
-name in the agent's optional `profile` string. Use direct mode when testing raw
-provider arguments.
+Put durable operational provider flags in bundle `args`; separator arguments
+are appended for one launch. Put a supported native profile name in the agent's
+optional `profile` string. Use direct mode when testing outside Mosaico hosting.
 
 ## Per-session agents are keyless on disk
 

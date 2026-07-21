@@ -106,9 +106,9 @@ async fn hook_dispatch(
         return Ok(());
     }
 
-    // A slug from MOSAICO_AGENT (set by `mosaico agents`) is always
+    // A slug from MOSAICO_AGENT (set by a Mosaico-hosted launch) is always
     // authoritative. Otherwise, look for a live ancestor directly running
-    // `claude --agent <name>` (bypassing `mosaico agents`) and treat it the
+    // `claude --agent <name>` (bypassing Mosaico hosting) and treat it the
     // same as if it had been launched under that identity. The profile name is
     // retained, but argv remains owned by harnesses.json.
     let env_slug = agent_env_slug();
