@@ -103,6 +103,15 @@ native profile for Goose; neither capability is supported.
 
 Hermes named profiles are discovered from `<HERMES_HOME>/profiles/<name>` and
 activate natively as `hermes --profile <name> acp` for managed launch.
+Prove the exact profile across both ACP processes with:
+
+```bash
+skills/mosaico-dev/scripts/launch-agent "${LAB_ENV}" smoke hermes-acp \
+  --profile builder
+```
+
+The smoke prints the resolved argv, first session ID, successful cross-process
+`session/load`, both `end_turn` results, and `PASS`.
 
 ## Launch
 

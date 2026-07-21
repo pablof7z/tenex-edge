@@ -88,8 +88,9 @@ end-to-end demos against a live relay across multiple hosts. If it's here, it ru
   same fabric through a thin hook. A real OpenCode agent and a real Codex agent have
   messaged each other on `relay.tenex.chat`; a real Claude Code agent auto-received and
   acted on a peer's message. Goose native ACP passed two turns around exact `session/load`;
-  Hermes' installed ACP runtime passed initialization, prompt lifecycle, and cross-process
-  resume, with its native PTY resume path verified separately.
+  Hermes' installed ACP runtime passed two authenticated turns through a named native profile
+  around exact cross-process `session/load`; a daemon-hosted profile also received a tagged
+  relay message and published its reply. Its native PTY resume path is verified separately.
 
 ```console
 $ mosaico who --live
