@@ -16,11 +16,20 @@ pub(super) async fn call_as(params: &Value, caller: Option<&str>) -> Result<Valu
         .get("arguments")
         .cloned()
         .unwrap_or_else(|| json!({}));
+    if name == "mosaico.skill" {
+        return Ok(
+            match super::skill::tool_result(opt_string(&args, "name").as_deref()) {
+                Ok(value) => value,
+                Err(err) => tool_error(format!("{err:#}")),
+            },
+        );
+    }
     let result = match name.as_str() {
         "mosaico.my_session" => my_session(caller).await,
         "mosaico.channel_list" => channel_list(&args, caller).await,
         "mosaico.channel_read" => channel_read(&args, caller).await,
         "mosaico.channel_send" => channel_send(&args, caller).await,
+        "mosaico.dispatch" => dispatch(&args, caller).await,
         "mosaico.react" => react(&args, caller).await,
         "mosaico.channel_create" => channel_create(&args, caller).await,
         "mosaico.channel_join" => channel_mutation("channel_join", &args, caller).await,
@@ -71,7 +80,38 @@ async fn channel_read(args: &Value, caller: Option<&str>) -> Result<Value> {
 }
 
 async fn channel_send(args: &Value, caller: Option<&str>) -> Result<Value> {
+    if let Some(reply_to) = opt_string(args, "reply_to") {
+        let params = with_session(
+            json!({
+                "id": reply_to,
+                "message": required_string(args, "message")?,
+                "long_message": args
+                    .get("long_message")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+            }),
+            args,
+        );
+        return daemon_identity("channel_reply", params, caller).await;
+    }
     daemon_identity("channel_send", channel_send_params(args)?, caller).await
+}
+
+async fn dispatch(args: &Value, caller: Option<&str>) -> Result<Value> {
+    let params = with_session(
+        json!({
+            "target": required_string(args, "target")?,
+            "workspace": required_string(args, "workspace")?,
+            "channels": args
+                .get("channels")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default(),
+            "message": required_string(args, "message")?,
+        }),
+        args,
+    );
+    daemon_identity("dispatch", params, caller).await
 }
 
 async fn react(args: &Value, caller: Option<&str>) -> Result<Value> {

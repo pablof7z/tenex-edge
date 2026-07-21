@@ -17,11 +17,12 @@ pub(super) struct Subscriptions {
 enum ResourceUri {
     MySession,
     ChannelStatus(String),
+    Skill(String),
 }
 
 pub(super) fn subscription_channel(uri: &str) -> Result<Option<String>> {
     Ok(match parse_uri(uri)? {
-        ResourceUri::MySession => None,
+        ResourceUri::MySession | ResourceUri::Skill(_) => None,
         ResourceUri::ChannelStatus(channel) => Some(channel),
     })
 }
@@ -34,11 +35,12 @@ pub(super) fn event_updates_status_resource(item: &Value) -> bool {
 }
 
 pub(super) fn list() -> Value {
-    let mut resources = vec![resource(
+    let mut resources = super::skill::resource_list_entries();
+    resources.push(resource(
         MY_SESSION_URI,
         "my-session",
         "Current agent session and full mosaico awareness",
-    )];
+    ));
     if let Some(channel) = super::super::channel_env() {
         resources.push(resource(
             &status_uri(&channel),
@@ -50,15 +52,18 @@ pub(super) fn list() -> Value {
 }
 
 pub(super) fn templates() -> Value {
-    json!({
-        "resourceTemplates": [{
-            "uriTemplate": "mosaico://channels/status/{channel}",
-            "name": "channel-status",
-            "title": "Channel Status",
-            "description": "Current roster, activity, and fabric context for a mosaico channel.",
-            "mimeType": "application/json"
-        }]
-    })
+    let mut templates = super::skill::resource_templates()
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    templates.push(json!({
+        "uriTemplate": "mosaico://channels/status/{channel}",
+        "name": "channel-status",
+        "title": "Channel Status",
+        "description": "Current roster, activity, and fabric context for a mosaico channel.",
+        "mimeType": "application/json"
+    }));
+    json!({ "resourceTemplates": templates })
 }
 
 pub(super) async fn read(params: &Value) -> Result<Value> {
@@ -68,6 +73,21 @@ pub(super) async fn read(params: &Value) -> Result<Value> {
 pub(super) async fn read_as(params: &Value, caller: Option<&str>) -> Result<Value> {
     let uri = required_string(params, "uri")?;
     let parsed = parse_uri(&uri)?;
+    if let ResourceUri::Skill(name) = parsed {
+        let text = super::skill::content(if name == "skill" {
+            None
+        } else {
+            Some(name.as_str())
+        })?
+        .2;
+        return Ok(json!({
+            "contents": [{
+                "uri": uri,
+                "mimeType": "text/markdown",
+                "text": text,
+            }]
+        }));
+    }
     let value = match parsed {
         ResourceUri::MySession => {
             daemon_call("my_session", caller_params(json!({}), caller)).await?
@@ -79,6 +99,7 @@ pub(super) async fn read_as(params: &Value, caller: Option<&str>) -> Result<Valu
             )
             .await?
         }
+        ResourceUri::Skill(_) => unreachable!("skill handled above"),
     };
     let text = serde_json::to_string_pretty(&value)?;
     Ok(json!({
@@ -101,7 +122,7 @@ impl Subscriptions {
     pub(super) async fn add(&self, params: &Value, writer: SharedWriter) -> Result<()> {
         let uri = required_string(params, "uri")?;
         let channel = match parse_uri(&uri)? {
-            ResourceUri::MySession => None,
+            ResourceUri::MySession | ResourceUri::Skill(_) => None,
             ResourceUri::ChannelStatus(channel) => Some(channel),
         };
         let mut tasks = self.tasks.lock().await;
@@ -170,6 +191,17 @@ fn parse_uri(uri: &str) -> Result<ResourceUri> {
     if uri == MY_SESSION_URI {
         return Ok(ResourceUri::MySession);
     }
+    if uri == super::skill::SKILL_URI {
+        return Ok(ResourceUri::Skill("skill".into()));
+    }
+    if let Some(name) = uri.strip_prefix("mosaico://skill/") {
+        let name = name.trim();
+        if !name.is_empty() {
+            // Validate early so list/unknown fail at read time with a clear error.
+            let _ = super::skill::content(Some(name))?;
+            return Ok(ResourceUri::Skill(name.to_string()));
+        }
+    }
     if let Some(channel) = uri.strip_prefix(STATUS_PREFIX) {
         let channel = channel.trim();
         if !channel.is_empty() {
@@ -223,6 +255,14 @@ mod tests {
         assert!(matches!(
             parse_uri(MY_SESSION_URI).unwrap(),
             ResourceUri::MySession
+        ));
+        assert!(matches!(
+            parse_uri(super::super::skill::SKILL_URI).unwrap(),
+            ResourceUri::Skill(name) if name == "skill"
+        ));
+        assert!(matches!(
+            parse_uri("mosaico://skill/identity-and-capabilities").unwrap(),
+            ResourceUri::Skill(name) if name == "identity-and-capabilities"
         ));
         assert!(matches!(
             parse_uri("mosaico://channels/status/root/task").unwrap(),

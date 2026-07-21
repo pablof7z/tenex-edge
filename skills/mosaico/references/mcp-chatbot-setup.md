@@ -14,8 +14,11 @@ MCP client to Mosaico.
 
 ## Know The Current Boundary
 
-`mosaico mcp` exposes Mosaico resources and channel tools to MCP clients. Remote
-HTTP calls do not borrow the server process's caller context:
+`mosaico mcp` exposes Mosaico resources and channel tools to MCP clients. The
+agent skill is also packaged for clients that cannot load a local skill install:
+read-only resource `mosaico://skill` (and `mosaico://skill/{name}`), plus the
+`mosaico.skill` tool (prefer the tool when the client does not support resources).
+Remote HTTP calls do not borrow the server process's caller context:
 
 - ChatGPT gets a first-class `mcp-openai` session and pubkey per stable remote
   conversation. Calls in the same conversation reuse it; different
@@ -115,14 +118,16 @@ curl -fsS https://mosaico.example.com/.well-known/oauth-protected-resource
 
 Then use the MCP client to scan tools and resources. Verify in this order:
 
-1. Read `mosaico://my/session`. A remote ChatGPT call must report an
+1. Call `mosaico.skill` (or read `mosaico://skill`) and confirm the skill entry
+   markdown returns without a daemon dependency.
+2. Read `mosaico://my/session`. A remote ChatGPT call must report an
    `mcp-openai` session, never the MCP server process session and never a demand
    to run inside a registered agent session.
-2. Repeat the read in the same conversation and confirm the exact session
+3. Repeat the read in the same conversation and confirm the exact session
    pubkey is stable. A separate conversation must receive a different pubkey.
-3. Read a channel or call `mosaico.channel_list`.
-4. Restrict the client to read-only tools when its allowlist supports that.
-5. With user approval, send one clearly labeled test message to a narrow test
+4. Read a channel or call `mosaico.channel_list`.
+5. Restrict the client to read-only tools when its allowlist supports that.
+6. With user approval, send one clearly labeled test message to a narrow test
    channel and confirm it appears under the derived MCP actor handle.
 
 Use `tools/list` and `resources/list` as the authority for what this server

@@ -52,6 +52,10 @@ coordination overhead.
 - Read [Identity And Agent Capabilities](references/identity-and-capabilities.md)
   when identity, installed-agent discovery, backend availability, or a
   secret-bearing environment affects the work.
+- If local CLI and MCP fabric tools are both available, resolve **self** from
+  the local CLI session (`mosaico my session` / `MOSAICO_PUBKEY`). A remote
+  MCP actor (for example a grok.com OAuth `mcp-grok` session) is a separate
+  fabric participant even when those tools appear in this conversation.
 - Expect every known workspace to be listed. Workspaces joined by this exact
   session are expanded; merely known workspaces remain compact.
 - Expect a channel's descendants and typed member rows only when you belong to
