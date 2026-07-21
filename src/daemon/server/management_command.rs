@@ -8,6 +8,7 @@ use nostr_sdk::prelude::Event;
 
 mod list_agents;
 mod parse;
+mod reaction;
 mod sessions;
 
 use parse::parse_command;
@@ -61,8 +62,17 @@ pub(super) async fn handle_management_command(state: &Arc<DaemonState>, event: &
         return;
     }
 
-    let reply = match execute_claimed(state, event, &channel_h).await {
-        Ok(reply) => reply,
+    let reply = match accept_command(state, event, &channel_h).await {
+        Ok(command) => {
+            // The command is now parsed, authorized, and durably claimed. React
+            // before executing it so a potentially slow add/kill/archive gives
+            // the requester immediate, truthful acknowledgement from mgmt.
+            reaction::publish_thumbs_up(state, event, &channel_h).await;
+            match execute_command(state, command, &channel_h).await {
+                Ok(reply) => reply,
+                Err(e) => format!("mgmt error: {e:#}"),
+            }
+        }
         Err(e) => format!("mgmt error: {e:#}"),
     };
     if let Err(e) = state.with_store(|s| s.complete_management_command(&event_id, now_secs())) {
@@ -81,11 +91,11 @@ pub(super) async fn handle_management_command(state: &Arc<DaemonState>, event: &
     }
 }
 
-async fn execute_claimed(
+async fn accept_command(
     state: &Arc<DaemonState>,
     event: &Event,
     channel_h: &str,
-) -> Result<String> {
+) -> Result<ManagementCommand> {
     let command = parse_command(&event.content)?;
     let signer = event.pubkey.to_hex();
     if !is_admin(state, channel_h, &signer).await? {
@@ -95,6 +105,14 @@ async fn execute_claimed(
             channel_h
         );
     }
+    Ok(command)
+}
+
+async fn execute_command(
+    state: &Arc<DaemonState>,
+    command: ManagementCommand,
+    channel_h: &str,
+) -> Result<String> {
     match command {
         ManagementCommand::Add { spec } => add_agent(state, channel_h, &spec).await,
         ManagementCommand::ListAgents => list_agents::list_agents(state),
