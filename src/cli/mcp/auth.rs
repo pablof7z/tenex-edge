@@ -37,7 +37,6 @@ struct TokenClaims {
     sub: String,
     scope: String,
     iat: u64,
-    exp: u64,
 }
 
 pub(super) struct Authenticated {
@@ -138,7 +137,6 @@ impl AuthState {
             Ok(token) => Json(json!({
                 "access_token": token,
                 "token_type": "Bearer",
-                "expires_in": 3600,
                 "scope": code.scope,
             }))
             .into_response(),
@@ -269,14 +267,15 @@ impl AuthState {
     }
 
     fn issue_token(&self, code: &AuthCode) -> Result<String> {
-        let now = crate::util::now_secs();
+        // Access tokens do not expire: they are stateless, signed with the
+        // persistent management key, so they remain valid across MCP server
+        // restarts. Revocation, if ever needed, is via rotating that key.
         let claims = TokenClaims {
             iss: self.public_url.clone(),
             aud: code.resource.clone(),
             sub: code.pubkey.clone(),
             scope: code.scope.clone(),
-            iat: now,
-            exp: now + 3600,
+            iat: crate::util::now_secs(),
         };
         let payload = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&claims)?);
         let sig = sign(&self.secret, payload.as_bytes());
@@ -289,10 +288,8 @@ impl AuthState {
         let expected = sign(&self.secret, parts[1].as_bytes());
         anyhow::ensure!(expected == parts[2], "bad signature");
         let claims: TokenClaims = serde_json::from_slice(&URL_SAFE_NO_PAD.decode(parts[1])?)?;
-        let now = crate::util::now_secs();
         anyhow::ensure!(claims.iss == self.public_url, "bad issuer");
         anyhow::ensure!(claims.aud == self.resource_url, "bad audience");
-        anyhow::ensure!(claims.exp > now, "expired token");
         Ok(claims)
     }
 }
