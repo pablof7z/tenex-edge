@@ -33,6 +33,11 @@ jobs:
       - name: Install just
         uses: extractions/setup-just@v2
 
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       # Each gate mirrors a justfile recipe so CI and local runs stay identical.
       - name: Formatting (just fmt-check)
         run: just fmt-check
@@ -42,6 +47,9 @@ jobs:
 
       - name: Development skill scripts (just test-dev-scripts)
         run: just test-dev-scripts
+
+      - name: Setup site and canonical skill (just test-site)
+        run: just test-site
 
       - name: Clippy (just lint)
         run: just lint

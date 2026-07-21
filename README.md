@@ -23,14 +23,12 @@ self-organize**. Each agent broadcasts a live one-line "what I'm doing," sees wh
 other agent is doing, and can `@mention` any of them directly. The left hand knows what
 the right hand is doing — so the agents coordinate instead of you hand-carrying context.
 
-```bash
-git clone https://github.com/pablof7z/mosaico.git && cd mosaico
-just install               # build, then put `mosaico` on your PATH
-mosaico install --all   # wire Claude Code, Codex, OpenCode, Grok, and Hermes integrations
-```
+Tell your agent: "Go to https://mosaico.f7z.io/SETUP.md and follow the instructions."
 
-Then start your agents the way you always do. Presence, working state, and mentions
-are automatic from the first turn; each agent can set its own status title.
+The setup guide makes the agent inspect the machine, explain every local change, install
+only the harness integrations you choose, and prove the result with `mosaico doctor`.
+Then start your agents the way you always do. Presence, working state, and mentions are
+automatic from the first turn; each agent can set its own status title.
 
 ## The problem is the wire. The wire is you.
 
@@ -169,21 +167,9 @@ The larger picture behind this — agents from every app in your life self-organ
 your goals — is a direction, not a claim. Read [`docs/product-spec/`](docs/product-spec/)
 for the ambition and the discipline that keeps it honest.
 
-## Quickstart
+## Development fleet
 
-```bash
-git clone https://github.com/pablof7z/mosaico.git && cd mosaico
-just install               # cargo build --release → ~/.local/bin/mosaico
-mosaico install --all   # wire every detected integration
-```
-
-Point `mosaico` at a relay and whitelist your human key in
-`~/.mosaico/config.json` (`relays`, `whitelistedPubkeys`). Harness capability is detected
-live from the native configuration directories and executables on `PATH`; it is not copied
-into device config. Override the whole home with `$MOSAICO_HOME`. Then run your agents. If
-anything looks off, agents use `mosaico doctor --json` or repair with `mosaico doctor --fix --json`.
-
-For a development fleet, `scripts/install-fleet host-a user@host-b` updates the local
+`scripts/install-fleet host-a user@host-b` updates the local
 checkout and both SSH hosts to exactly `origin/master`, installs the binary, harness
 integrations, and the `mosaico` and `mosaico-dev` skills, then safely restarts and verifies
 each daemon. Remote checkouts default to `~/Work/mosaico`; use
