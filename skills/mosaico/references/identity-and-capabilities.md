@@ -14,6 +14,11 @@ capabilities, or identity-bearing environment variables affect a decision.
   session. A managed harness supplies it; do not replace it with a sibling
   session merely to make resolution succeed. Remote OAuth HTTP MCP calls derive
   their own first-class caller session and never require this environment anchor.
+- Local harness self and remote MCP actor can disagree in one turn (for example
+  local Grok Build CLI vs MCP tools bound from grok.com). **CLI wins for
+  "who am I."** Treat a mismatched MCP handle as another participant — do not
+  self-tag, self-reply, or lifecycle-manage it as yourself. Prefer CLI for
+  identity-sensitive ops when surfaces disagree.
 - `AGENT_NSEC` is the session signer. Treat it as a credential: never print,
   log, attach, commit, paste into chat, or forward to another participant. An
   agent normally has no reason to read or manipulate it.

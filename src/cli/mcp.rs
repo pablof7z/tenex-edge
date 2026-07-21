@@ -17,6 +17,7 @@ mod catalog;
 mod http;
 mod protocol;
 mod resources;
+mod skill;
 mod tools;
 
 use protocol::{

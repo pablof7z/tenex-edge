@@ -28,6 +28,21 @@ pub(super) fn requires_write(name: &str) -> bool {
 
 const SPECS: &[ToolSpec] = &[
     ToolSpec {
+        name: "mosaico.skill",
+        description: "Load the mosaico agent skill (or a named reference page). \
+                      Use before coordinating on the fabric when you lack a local \
+                      skill install. Omit name for the entry; name=list for the index; \
+                      name=identity-and-capabilities|coordination-guide|… for a page.",
+        props: &[Prop::new(
+            "name",
+            "string",
+            "Skill page: omit or \"skill\" for entry; \"list\" for index; or a reference stem.",
+        )],
+        required: &[],
+        read_only: true,
+        destructive: false,
+    },
+    ToolSpec {
         name: "mosaico.my_session",
         description: "Read the current agent session and full mosaico awareness.",
         props: &[],
@@ -235,6 +250,7 @@ mod tests {
             .filter_map(|tool| tool["name"].as_str().map(str::to_string))
             .collect::<Vec<_>>();
 
+        assert!(names.contains(&"mosaico.skill".to_string()));
         assert!(names.contains(&"mosaico.channel_join".to_string()));
         assert!(names.contains(&"mosaico.channel_send".to_string()));
         assert!(names.contains(&"mosaico.my_session".to_string()));

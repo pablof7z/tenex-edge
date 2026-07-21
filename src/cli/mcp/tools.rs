@@ -16,6 +16,12 @@ pub(super) async fn call_as(params: &Value, caller: Option<&str>) -> Result<Valu
         .get("arguments")
         .cloned()
         .unwrap_or_else(|| json!({}));
+    if name == "mosaico.skill" {
+        return Ok(match super::skill::tool_result(opt_string(&args, "name").as_deref()) {
+            Ok(value) => value,
+            Err(err) => tool_error(format!("{err:#}")),
+        });
+    }
     let result = match name.as_str() {
         "mosaico.my_session" => my_session(caller).await,
         "mosaico.channel_list" => channel_list(&args, caller).await,
