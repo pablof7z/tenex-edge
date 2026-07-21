@@ -18,11 +18,15 @@ install-hooks:
 
 test: test-all-local
 
-test-all-local: test-dev-scripts test-unit test-local-relay test-local-nip29
+test-all-local: test-dev-scripts test-site test-unit test-local-relay test-local-nip29
 
 test-dev-scripts:
     bash skills/mosaico-dev/tests/scripts.sh
     bash scripts/tests/install-fleet.sh
+
+test-site:
+    node site/build.mjs
+    node site/test.mjs
 
 # Hermetic unit tests only. This is what CI runs.
 test-unit:

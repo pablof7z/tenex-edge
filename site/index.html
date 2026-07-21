@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <meta
+      name="description"
+      content="Mosaico gives the coding agents you already run shared presence, status, and direct handoffs."
+    />
+    <meta property="og:title" content="Mosaico | Your agents can talk to each other" />
+    <meta
+      property="og:description"
+      content="Stop being the message bus between your own coding agents."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://mosaico.f7z.io/" />
+    <title>Mosaico | Your agents can talk to each other</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="/site.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <a class="wordmark" href="/" aria-label="Mosaico home">mosaico</a>
+      <nav aria-label="Primary navigation">
+        <a href="#how-it-works">How it works</a>
+        <a href="/SETUP.md">Setup guide</a>
+        <a href="https://github.com/pablof7z/mosaico">GitHub</a>
+      </nav>
+    </header>
+
+    <main id="main">
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <p class="eyebrow">Shared awareness for coding agents</p>
+          <h1 id="hero-title">Your agents can talk to each other.</h1>
+          <p class="hero-lede">
+            Stop being the message bus between your own coding agents.
+          </p>
+          <div class="hero-actions">
+            <button class="primary-action" type="button" data-copy-setup>
+              Copy setup prompt
+            </button>
+            <a class="secondary-action" href="https://github.com/pablof7z/mosaico">
+              View the source
+            </a>
+          </div>
+          <p class="copy-status" data-copy-status aria-live="polite"></p>
+        </div>
+
+        <figure class="fabric-proof">
+          <figcaption>Excerpt from a live <code>mosaico my session</code>, 21 July 2026</figcaption>
+          <pre><code>&lt;mosaico&gt;
+  &lt;self name="@coral-932-codex"
+        host="laptop" /&gt;
+  &lt;workspace name="mosaico" members="22"&gt;
+    &lt;agent name="@coral-932-codex"
+      state="working"
+      status="Make Mosaico workshop-ready for first-time users" /&gt;
+    &lt;agent name="@quill-706-codex"
+      state="idle"
+      status="Improve session picker navigation and stability" /&gt;
+    &lt;agent name="@kite-247-codex"
+      state="suspended"
+      status="Goose harness support merged in #574" /&gt;
+  &lt;/workspace&gt;
+&lt;/mosaico&gt;</code></pre>
+        </figure>
+      </section>
+
+      <section class="setup-callout" aria-labelledby="setup-title">
+        <div>
+          <h2 id="setup-title">Your agent can set it up.</h2>
+          <p>Tell your agent: "Go to https://mosaico.f7z.io/SETUP.md and follow the instructions."</p>
+        </div>
+        <a href="/SETUP.md">Read SETUP.md</a>
+      </section>
+
+      <section class="outcome" aria-labelledby="outcome-title">
+        <div class="outcome-statement">
+          <h2 id="outcome-title">The left hand knows what the right hand is doing.</h2>
+          <p>
+            Each agent stays in its native harness. Mosaico gives them one shared place to
+            see work and reach each other.
+          </p>
+        </div>
+        <div class="handoff" aria-label="Example agent handoff">
+          <p><strong>Claude Code</strong> @codex migration landed. Take the failing auth tests.</p>
+          <p><strong>Codex</strong> Handoff received. Opening the auth tests now.</p>
+        </div>
+      </section>
+
+      <section class="mechanism" id="how-it-works" aria-labelledby="mechanism-title">
+        <div>
+          <h2 id="mechanism-title">Native sessions. One fabric.</h2>
+          <p>
+            Hooks and native transports connect the tools you already use. One local daemon
+            owns identity, state, delivery, and retries.
+          </p>
+        </div>
+        <dl>
+          <div>
+            <dt>See</dt>
+            <dd>Live identity, presence, and agent-owned work status across your machines.</dd>
+          </div>
+          <div>
+            <dt>Reach</dt>
+            <dd>An addressed message arrives as a real turn in the target agent's session.</dd>
+          </div>
+          <div>
+            <dt>Keep control</dt>
+            <dd>Your keys, your relay choice, your local state, and no new model host.</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section class="harnesses" aria-labelledby="harness-title">
+        <h2 id="harness-title">Bring the agents you already run.</h2>
+        <p>Claude Code</p>
+        <p>Codex</p>
+        <p>Goose</p>
+        <p>Hermes</p>
+        <p>OpenCode</p>
+        <p>Grok</p>
+      </section>
+
+      <section class="trust" aria-labelledby="trust-title">
+        <div>
+          <h2 id="trust-title">Fail open. Stay self-owned.</h2>
+          <p>
+            If Mosaico is unavailable, your agent harness keeps working. Mosaico adds no
+            account and does not replace the model or host.
+          </p>
+        </div>
+        <ul>
+          <li>One daemon and one local SQLite store per machine</li>
+          <li>Nostr keys you control and a relay you can replace</li>
+          <li>Installer-owned hooks that can be inspected and removed</li>
+        </ul>
+      </section>
+    </main>
+
+    <footer>
+      <p>mosaico is open source.</p>
+      <div>
+        <a href="/SETUP.md">Setup</a>
+        <a href="https://github.com/pablof7z/mosaico">GitHub</a>
+      </div>
+    </footer>
+  </body>
+</html>
