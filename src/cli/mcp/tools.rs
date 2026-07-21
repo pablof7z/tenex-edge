@@ -2,6 +2,8 @@ use super::protocol::required_string;
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 
+mod wait;
+
 pub(super) fn list() -> Value {
     json!({ "tools": super::catalog::list() })
 }
@@ -26,6 +28,7 @@ pub(super) async fn call_as(params: &Value, caller: Option<&str>) -> Result<Valu
     }
     let result = match name.as_str() {
         "mosaico.my_session" => my_session(caller).await,
+        "mosaico.wait" => wait::ambient(&args, caller).await,
         "mosaico.channel_list" => channel_list(&args, caller).await,
         "mosaico.channel_read" => channel_read(&args, caller).await,
         "mosaico.channel_send" => channel_send(&args, caller).await,
@@ -80,7 +83,11 @@ async fn channel_read(args: &Value, caller: Option<&str>) -> Result<Value> {
 }
 
 async fn channel_send(args: &Value, caller: Option<&str>) -> Result<Value> {
+    let wait_seconds = wait::send_timeout(args)?;
     if let Some(reply_to) = opt_string(args, "reply_to") {
+        if wait_seconds.is_some() {
+            anyhow::bail!("wait_seconds is only valid when sending a new message");
+        }
         let params = with_session(
             json!({
                 "id": reply_to,
@@ -94,7 +101,12 @@ async fn channel_send(args: &Value, caller: Option<&str>) -> Result<Value> {
         );
         return daemon_identity("channel_reply", params, caller).await;
     }
-    daemon_identity("channel_send", channel_send_params(args)?, caller).await
+    let send = daemon_identity("channel_send", channel_send_params(args)?, caller).await?;
+    let Some(timeout_seconds) = wait_seconds else {
+        return Ok(send);
+    };
+    let outcome = wait::for_reply(&send, timeout_seconds, args, caller).await?;
+    Ok(json!({ "send": send, "wait": outcome }))
 }
 
 async fn dispatch(args: &Value, caller: Option<&str>) -> Result<Value> {
