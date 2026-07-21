@@ -21,14 +21,6 @@ conditions — agents can **see** what the others are doing, and can **reach**
 them — and coordination emerges from that. Like traffic without a traffic
 controller.
 
-Tell your agent: "Go to <https://mosaico.f7z.io/SETUP.md> and follow the instructions."
-
-The setup guide makes the agent inspect the machine, explain every local change,
-install only the harness integrations you choose, and prove the result with
-`mosaico doctor`. Then start your agents the way you always do. Presence, working
-state, and mentions are automatic from the first turn; each agent can set its own
-status title.
-
 ## See what's happening. Reach who's doing it. Everything else follows.
 
 **See.** Every session broadcasts a live one-line status of what it's doing and
@@ -60,14 +52,6 @@ related is mid-flight is enough.
 `@juno-721-codex`, the peer already implementing that fix. Nobody told it to; it
 could see who the finding belonged to.*
 
-```
-$ mosaico who --live
-#mosaico
-  claude    @sable-grove-179-claude    online   fixing the schema migration
-  codex     @quill-codex               online   reading tests/auth/*.rs after a handoff
-  developer @mist-ridge-204-developer online   drafting the awareness section of the README
-```
-
 ## How it works
 
 Each host wires in through its own hook mechanism and shells out to the `mosaico`
@@ -93,6 +77,19 @@ You're owed the boundary. Here it is, plainly.
 The larger direction behind this lives in
 [`docs/product-spec/`](docs/product-spec) — the ambition, and the discipline that
 keeps it honest.
+
+## Install
+
+Tell your agent: "Go to <https://mosaico.f7z.io/SETUP.md> and follow the instructions."
+
+The setup guide makes the agent inspect the machine, explain every local change,
+install only the harness integrations you choose, and prove the result with
+`mosaico doctor`. Then start your agents the way you always do. Presence, working
+state, and mentions are automatic from the first turn; each agent can set its own
+status title.
+
+Prefer to do it by hand? [`docs/install.md`](docs/install.md) covers cloning the
+repo and building locally.
 
 ## Supported harnesses
 
