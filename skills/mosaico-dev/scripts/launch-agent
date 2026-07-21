@@ -18,6 +18,7 @@ backend_command_for_profile() {
     codex-ollama*) echo "codex-ollama" ;;
     codex*) echo "codex" ;;
     grok*) echo "grok" ;;
+    goose*) echo "goose" ;;
     opencode-ollama*) echo "opencode-ollama" ;;
     opencode*) echo "opencode" ;;
     *) echo "$1" ;;
@@ -29,6 +30,7 @@ agent_slug_for_profile() {
     claude*) echo "claude" ;;
     codex*) echo "codex" ;;
     grok*) echo "grok" ;;
+    goose*) echo "goose" ;;
     opencode*) echo "opencode" ;;
     *) echo "$1" ;;
   esac

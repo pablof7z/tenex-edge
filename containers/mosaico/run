@@ -22,6 +22,7 @@ Commands:
   codex-login [args]       Run isolated `codex login` for subscription auth.
   codex-ollama [args]      Run isolated Codex with --oss --local-provider ollama.
   grok [args]              Run isolated Grok using host auth/config.
+  goose [args]             Run isolated Goose using host auth/config.
   opencode [args]          Run isolated OpenCode using the opencode profile.
   opencode-auth [args]     Run isolated `opencode providers`.
   opencode-ollama [args]   Run isolated OpenCode with an Ollama model.
@@ -53,6 +54,7 @@ agent_for_profile() {
     claude*) echo "claude" ;;
     codex*) echo "codex" ;;
     grok*) echo "grok" ;;
+    goose*) echo "goose" ;;
     *) echo "opencode" ;;
   esac
 }
@@ -132,8 +134,10 @@ prepare_state() {
     "${STATE_DIR}/home/.claude" \
     "${STATE_DIR}/home/.grok/hooks" \
     "${STATE_DIR}/home/.config/opencode" \
+    "${STATE_DIR}/home/.config/goose" \
     "${STATE_DIR}/home/.local/share" \
     "${STATE_DIR}/home/.local/share/opencode" \
+    "${STATE_DIR}/home/.local/state" \
     "${STATE_DIR}/home/.cache" \
     "${STATE_DIR}/cargo" \
     "${STATE_DIR}/target" \
@@ -214,11 +218,13 @@ container_run() {
     --env XDG_CONFIG_HOME=/state/home/.config \
     --env XDG_CACHE_HOME=/state/home/.cache \
     --env XDG_DATA_HOME=/state/home/.local/share \
+    --env XDG_STATE_HOME=/state/home/.local/state \
     --env CARGO_HOME=/state/cargo \
     --env CARGO_TARGET_DIR=/state/target \
     --env CODEX_HOME=/state/home/.codex \
     --env CLAUDE_CONFIG_DIR=/state/home/.claude \
     --env GROK_HOME=/state/home/.grok \
+    --env GOOSE_DISABLE_KEYRING=1 \
     --env OLLAMA_HOST="${OLLAMA_HOST}" \
     --env MOSAICO_CONFIG=/state/mosaico/config.json \
     --env MOSAICO_HOME=/state/mosaico \
@@ -331,6 +337,10 @@ main() {
     grok)
       select_command_profile grok grok
       with_mosaico_direct grok grok "$@"
+      ;;
+    goose)
+      select_command_profile goose goose
+      with_mosaico_direct goose goose "$@"
       ;;
     opencode)
       select_command_profile opencode opencode

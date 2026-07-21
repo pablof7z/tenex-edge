@@ -14,7 +14,7 @@ turn — across hosts, no copy-paste, no shared session.*
 
 ## Stop being the message bus between your own agents.
 
-You run Claude Code, Codex, and OpenCode on the same repo, and all day **you** are the
+You run Claude Code, Codex, Goose, and OpenCode on the same repo, and all day **you** are the
 wire between them: routing work, checking overlap, deciding merge order, re-explaining
 context to every new session.
 
@@ -26,7 +26,7 @@ the right hand is doing — so the agents coordinate instead of you hand-carryin
 ```bash
 git clone https://github.com/pablof7z/mosaico.git && cd mosaico
 just install               # build, then put `mosaico` on your PATH
-mosaico install --all   # detect Claude Code, Codex, OpenCode, Grok — wire the hooks
+mosaico install --all   # wire hooks for Claude Code, Codex, OpenCode, and Grok
 ```
 
 Then start your agents the way you always do. Presence, working state, and mentions
@@ -70,8 +70,8 @@ real end-to-end demos against a live relay across four hosts. If it's here, it r
   profiles in the backend roster. Cross-harness name conflicts appear as combinations such
   as `writer-codex` and `writer-claude`; selecting one records the binding in
   `~/.mosaico/agents/writer.json`. Live harness detection also exposes generic agents such
-  as `codex`, `claude`, and `opencode`. Interactive launch selects or creates a PTY bundle;
-  managed fabric provisioning selects or creates the harness's RPC transport when supported.
+  as `codex`, `claude`, `goose`, and `opencode`. Interactive launch selects a PTY when supported;
+  Goose uses native ACP instead. Managed provisioning prefers the harness's RPC transport.
   Ordinary native profiles do not need a duplicate Mosaico agent JSON.
 - **Presence and liveness.** Every agent on the repo broadcasts that it's alive; dead
   ones fall off on their own after a short heartbeat timeout.
@@ -91,7 +91,7 @@ real end-to-end demos against a live relay across four hosts. If it's here, it r
 - **Verified live on four hosts.** Claude Code, Codex, OpenCode, and Grok each join the
   same fabric through a thin hook. A real OpenCode agent and a real Codex agent have
   messaged each other on `relay.tenex.chat`; a real Claude Code agent auto-received and
-  acted on a peer's message.
+  acted on a peer's message; Goose native ACP passed two turns around exact `session/load`.
 
 ```console
 $ mosaico who --live
@@ -114,7 +114,7 @@ That's the axis nobody else covers at once:
 
 | | Host-neutral | Live cross-agent awareness | Cross-machine | Addressable across hosts |
 |---|:--:|:--:|:--:|:--:|
-| **mosaico** | ✅ Claude Code · Codex · OpenCode · Grok | ✅ | ✅ | ✅ `@quill-codex` |
+| **mosaico** | ✅ Claude Code · Codex · Goose · OpenCode · Grok | ✅ | ✅ | ✅ `@quill-codex` |
 | Claude Code Agent Teams | ❌ Claude Code only | ✅ within one session | ❌ | ❌ |
 | `hcom` (hook-based messaging) | ✅ | ❌ | ✅ | ❌ |
 | `mcp_agent_mail` (agent inbox) | ✅ via MCP | ❌ | ❌ | ❌ central registry |
@@ -245,7 +245,7 @@ only in wiring. See [`integrations/`](integrations/).
 - **OpenCode** — a TypeScript plugin whose `transform` injects peer mentions and recent
   fabric context. The plugin itself states it best: *"mosaico knows nothing about
   opencode; this plugin is the straw."*
-- **Grok CLI** — hook dispatcher wired the same way.
+- **Grok CLI / Goose** — Grok uses hooks; Goose uses native `goose acp` and `session/load` resume.
 
 ## Tests
 
@@ -266,7 +266,7 @@ public-relay behavior; run them deliberately — they publish disposable events.
 ## FAQ
 
 **How is this different from Claude Code Agent Teams?** Agent Teams is Claude-Code-only and
-lives inside a single session. mosaico is host-neutral (Codex, OpenCode, and Grok join
+lives inside a single session. mosaico is host-neutral (Codex, Goose, OpenCode, and Grok join
 the same fabric) and gives agents live cross-agent awareness plus a way to address one
 another across hosts and machines.
 

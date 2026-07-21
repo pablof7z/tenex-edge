@@ -214,13 +214,17 @@ fn desired_transport(
     native_profile: bool,
 ) -> Result<Transport> {
     let preferred = match intent {
-        LaunchIntent::Interactive => [Some(Transport::Pty), None],
+        LaunchIntent::Interactive => match harness {
+            crate::session::Harness::Goose => [Some(Transport::Acp), None],
+            _ => [Some(Transport::Pty), None],
+        },
         LaunchIntent::Managed => match harness {
             crate::session::Harness::Codex => [Some(Transport::AppServer), Some(Transport::Pty)],
             crate::session::Harness::ClaudeCode | crate::session::Harness::Opencode => {
                 [Some(Transport::Acp), Some(Transport::Pty)]
             }
             crate::session::Harness::Grok => [Some(Transport::Pty), None],
+            crate::session::Harness::Goose => [Some(Transport::Acp), None],
             crate::session::Harness::Unknown => [None, None],
         },
     };

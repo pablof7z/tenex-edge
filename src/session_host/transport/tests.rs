@@ -136,8 +136,8 @@ fn missing_bundle_fails_without_pty_fallback() {
 fn configured_bundles_select_exact_transport() {
     let cfg: crate::harness::HarnessesConfig = serde_json::from_str(
         r#"{
-          "claude-pty":{"harness":"claude","transport":"pty"},
-          "claude-acp":{"harness":"claude","transport":"acp"},
+          "claude-pty":{"harness":"claude-code","transport":"pty"},
+          "claude-acp":{"harness":"claude-code","transport":"acp"},
           "codex-app":{"harness":"codex","transport":"app-server"}
         }"#,
     )

@@ -15,8 +15,8 @@ validate_mosaico_configs() {
     all(.[];
       type == "object" and
       ((keys - ["args", "harness", "transport"]) | length == 0) and
-      (.harness == "claude" or .harness == "claude-code" or
-        .harness == "codex" or .harness == "opencode" or .harness == "grok") and
+      (.harness == "claude-code" or .harness == "codex" or
+        .harness == "opencode" or .harness == "grok" or .harness == "goose") and
       (.transport == "pty" or .transport == "acp" or
         .transport == "app-server") and
       ((.args // []) | type == "array") and
@@ -58,12 +58,14 @@ echo "cargo: $(cargo --version)"
 echo "claude: $(claude --version)"
 echo "codex: $(codex --version)"
 echo "grok: $(grok --version)"
+echo "goose: $(goose --version)"
 echo "opencode: $(opencode --version)"
 echo "node: $(node --version)"
 echo "claude-acp-adapter: $(command -v claude-agent-acp)"
 codex app-server --help >/dev/null 2>&1
 opencode acp --help >/dev/null 2>&1
-echo "rpc harnesses: claude acp adapter, codex app-server, opencode acp"
+goose acp --help >/dev/null 2>&1
+echo "rpc harnesses: claude acp adapter, codex app-server, opencode acp, goose acp"
 echo "nak: $(nak --version 2>/dev/null | head -1)"
 echo "ollama_host: ${OLLAMA_HOST}"
 echo "host_auth: ${HOST_AUTH}"
@@ -98,6 +100,12 @@ case "${AGENT}" in
     test -s "${GROK_HOME}/auth.json"
     HARNESS=grok
     ;;
+  goose)
+    test -s "${XDG_CONFIG_HOME}/goose/config.yaml"
+    test -s "${XDG_CONFIG_HOME}/goose/secrets.yaml"
+    jq -e 'type == "object"' "${XDG_CONFIG_HOME}/goose/secrets.yaml" >/dev/null
+    HARNESS=goose
+    ;;
   opencode)
     test -f "${XDG_DATA_HOME}/opencode/auth.json"
     HARNESS=opencode
@@ -109,14 +117,18 @@ case "${AGENT}" in
 esac
 
 cargo build >/dev/null
-mosaico install --harness "${HARNESS}" >/dev/null
-case "${AGENT}" in
-  claude) test -f "${HOME}/.claude/settings.json" ;;
-  codex) test -f "${CODEX_HOME}/hooks.json" ;;
-  grok) test -f "${GROK_HOME}/hooks/mosaico.json" ;;
-  opencode) test -f "${XDG_CONFIG_HOME}/opencode/plugin/mosaico.ts" ;;
-esac
-echo "${AGENT} auth/hooks: mounted"
+if [[ "${AGENT}" == "goose" ]]; then
+  echo "goose auth/config: staged"
+else
+  mosaico install --harness "${HARNESS}" >/dev/null
+  case "${AGENT}" in
+    claude) test -f "${HOME}/.claude/settings.json" ;;
+    codex) test -f "${CODEX_HOME}/hooks.json" ;;
+    grok) test -f "${GROK_HOME}/hooks/mosaico.json" ;;
+    opencode) test -f "${XDG_CONFIG_HOME}/opencode/plugin/mosaico.ts" ;;
+  esac
+  echo "${AGENT} auth/hooks: mounted"
+fi
 
 validate_mosaico_configs
 

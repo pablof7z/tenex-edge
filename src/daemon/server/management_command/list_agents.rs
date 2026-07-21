@@ -57,7 +57,7 @@ mod tests {
         write(
             &mosaico_home.join("harnesses.json"),
             r#"{
-              "claude-pty":{"harness":"claude","transport":"pty"},
+              "claude-pty":{"harness":"claude-code","transport":"pty"},
               "codex-pty":{"harness":"codex","transport":"pty"},
               "opencode-pty":{"harness":"opencode","transport":"pty"}
             }"#,

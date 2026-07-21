@@ -15,6 +15,7 @@ bash containers/mosaico/run claude
 bash containers/mosaico/run codex-login --device-auth
 bash containers/mosaico/run codex
 bash containers/mosaico/run codex-ollama
+bash containers/mosaico/run goose
 
 bash containers/mosaico/run opencode
 bash containers/mosaico/run opencode-ollama ollama/qwen2.5-coder:7b
@@ -26,6 +27,7 @@ The `mosaico-dev` profile writer also supports structured agent profiles:
 claude-acp       -> Claude Code through the installed ACP adapter
 codex-app-server -> Codex app-server JSON-RPC
 opencode-acp     -> native OpenCode ACP
+goose-acp        -> native Goose ACP
 ```
 
 Each generated profile writes `/state/mosaico/harnesses.json` plus a keyless
@@ -56,6 +58,10 @@ Claude auth is staged into `/state/home/.claude` because Claude Code may keep
 the fresh OAuth credential in the macOS `Claude Code-credentials` Keychain item
 while the host JSON file is stale. The runner also sanitizes Claude settings so
 container hooks use `/state/target/debug/mosaico`, not a host binary path.
+
+Goose config is copied into `/state/home/.config/goose`; on macOS its
+`goose`/`secrets` Keychain item is staged as a private profile-local
+`secrets.yaml`. Goose runs through native ACP and needs no hook installation.
 
 `claude`, `codex`, `codex-ollama`, `opencode`, and `opencode-ollama` build the current
 checkout and run `mosaico install --harness <name>` inside the isolated home
@@ -91,6 +97,7 @@ from inside the container.
 | Codex config/auth | selected host credentials and `agents/` projected into `/state/home/.codex` |
 | OpenCode config | selected host credentials and `agents/` projected into `/state/home/.config/opencode` |
 | OpenCode data/cache | `/state/home/.local/share`, `/state/home/.cache` |
+| Goose config/auth | copied into `/state/home/.config/goose`; sessions remain profile-local under XDG data |
 | Cargo registry/cache | `/state/cargo` |
 | Cargo target | `/state/target` |
 | Mosaico config | `/state/mosaico/config.json` |

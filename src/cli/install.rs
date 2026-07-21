@@ -32,6 +32,7 @@ fn print_install_guide() {
         "This detects Claude Code, Codex, OpenCode, and Grok and lets you choose integrations."
     );
     println!("Use `mosaico install --all` to install every detected harness.");
+    println!("Goose uses native `goose acp` and needs no hook installation.");
 }
 
 /// Route a bare operator invocation into the primary launch flow. When no

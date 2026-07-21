@@ -1,9 +1,9 @@
 //! `mosaico __acp-smoke <harness>` — debug driver that exercises the ACP /
 //! app-server transport end-to-end without any agent.json / StoredKey wiring.
 //!
-//! For an ACP harness (opencode / claude): initialize -> session/new ->
+//! For an ACP harness (Claude / Goose / OpenCode): initialize -> session/new ->
 //! session/prompt("reply PONG") -> assert stopReason end_turn -> session/load
-//! in a FRESH child process -> assert cross-process resume.
+//! in a FRESH child process -> second session/prompt -> assert exact resume.
 //!
 //! For codex (app-server): initialize -> config/read -> thread/start ->
 //! turn/start -> fresh process -> thread/resume -> second turn/start.
@@ -148,6 +148,14 @@ async fn run_acp(
         .await
         .map_err(|e| anyhow::anyhow!("session/load (cross-process resume): {e}"))?;
     println!("[acp-smoke] session/load cross-process resume ok for {session_id}");
+    let resumed_stop = client2
+        .session_prompt(&session_id, "Reply with exactly one word: RESUMED")
+        .await
+        .map_err(|e| anyhow::anyhow!("session/prompt after resume: {e}"))?;
+    println!("[acp-smoke] resumed session/prompt -> stopReason={resumed_stop:?}");
+    if resumed_stop != StopReason::EndTurn {
+        anyhow::bail!("expected resumed stopReason end_turn, got {resumed_stop:?}");
+    }
     handle2.kill().await?;
 
     println!("[acp-smoke] PASS");
