@@ -185,14 +185,19 @@ launch inventory. It includes configured agents, eligible raw harnesses, and
 native agent profiles discovered from:
 
 - `$CODEX_HOME/agents` or `~/.codex/agents`
+- agent-like `$CODEX_HOME/*.config.toml` files with non-empty
+  `developer_instructions`
 - `~/.claude/agents`
 - `$XDG_CONFIG_HOME/opencode/agents` or `~/.config/opencode/agents`
 - workspace-local `.codex/agents`, `.claude/agents`, and `.opencode/agents`
 
-Workspace-local definitions override the matching global profile. A slug
-provided by multiple harnesses appears as harness-suffixed choices; selecting a
-choice persists the binding. Do not manufacture an agent JSON merely to hide an
-inventory-routing failure.
+Workspace-local definitions override the matching global profile. Codex named
+configuration profiles take precedence over same-slug global Codex custom-agent
+files because the inventory launches root sessions. A slug provided by multiple
+harnesses appears as harness-suffixed choices; selecting a choice persists the
+binding. An existing binding owns the bare slug without hiding other harness
+choices. Do not manufacture an agent JSON merely to hide an inventory-routing
+failure.
 
 ## Prewarm and doctor
 

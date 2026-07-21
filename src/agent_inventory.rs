@@ -7,7 +7,7 @@
 use crate::agent_catalog::{AgentCatalog, NativeAgentProfile};
 use crate::harness::HarnessesConfig;
 use crate::session::Harness;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::Path;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -55,7 +55,7 @@ impl AgentInventory {
         workspace: Option<&Path>,
     ) -> Self {
         let mut inventory = Self::default();
-        let mut configured = BTreeSet::new();
+        let mut configured = BTreeMap::new();
         let entries = crate::identity::keystore_entries(mosaico_home);
         let created = entries
             .iter()
@@ -95,7 +95,7 @@ impl AgentInventory {
                         .map(|profile| profile.use_criteria.clone())
                 })
                 .unwrap_or_default();
-            configured.insert(agent.slug.clone());
+            configured.insert(agent.slug.clone(), harness);
             inventory.agents.push(Agent {
                 slug: agent.slug.clone(),
                 agent_slug: agent.slug.clone(),
@@ -114,17 +114,17 @@ impl AgentInventory {
         }
 
         for capability in capabilities {
-            if configured.contains(&capability.slug)
-                || configured.contains(&crate::slug::slugify(&capability.slug))
-            {
-                continue;
-            }
+            let configured_harness = configured
+                .get(&capability.slug)
+                .or_else(|| configured.get(&crate::slug::slugify(&capability.slug)))
+                .copied();
             let profiles = capability
                 .profiles
                 .into_iter()
                 .filter(|profile| installed_harnesses.contains(&profile.harness))
+                .filter(|profile| configured_harness != Some(profile.harness))
                 .collect::<Vec<_>>();
-            let conflicted = profiles.len() > 1;
+            let conflicted = configured_harness.is_some() || profiles.len() > 1;
             for profile in profiles {
                 let slug = if conflicted {
                     format!("{}-{}", capability.slug, profile.harness.agent_slug())

@@ -170,10 +170,13 @@ smoke must pass both ACP turns across a process restart using `session/load`.
 
 To audit launch inventory, run `mosaico agents` without an action. In a
 non-interactive command it prints the available configured agents, raw harness
-targets, and installed native profiles. Native profiles are discovered from
-Codex, Claude, and OpenCode global/workspace directories plus global Hermes
-named-profile directories. If one slug exists in multiple harnesses, select the
-suffixed target printed by the inventory; that selection persists the binding.
+targets, and installed native profiles. Codex discovery includes custom agents
+plus named `$CODEX_HOME/*.config.toml` profiles that carry non-empty
+`developer_instructions`; other harnesses use their global/workspace native
+directories. If one slug exists in multiple harnesses, select the suffixed
+target printed by the inventory; that selection persists the binding. An
+existing binding keeps the bare slug while other harness implementations remain
+available as suffixed rebinding choices.
 
 ## Safe inspection
 

@@ -12,7 +12,7 @@ mod activation;
 mod parse;
 mod removal;
 pub use activation::{CodexRootConfig, NativeAgentActivation};
-use parse::{discover_dir, discover_hermes_profiles};
+use parse::{discover_codex_named_profiles, discover_dir, discover_hermes_profiles};
 pub use removal::remove_native_profile;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -42,6 +42,7 @@ pub struct AgentCapability {
 #[derive(Debug, Clone)]
 pub struct DiscoveryRoots {
     pub codex: PathBuf,
+    pub codex_profiles: PathBuf,
     pub claude: PathBuf,
     pub opencode: PathBuf,
     pub hermes: PathBuf,
@@ -51,6 +52,7 @@ impl DiscoveryRoots {
     pub fn for_user_home(home: &Path) -> Self {
         Self {
             codex: home.join(".codex/agents"),
+            codex_profiles: home.join(".codex"),
             claude: home.join(".claude/agents"),
             opencode: home.join(".config/opencode/agents"),
             hermes: home.join(".hermes/profiles"),
@@ -63,7 +65,8 @@ impl DiscoveryRoots {
             .context("HOME is required to discover installed harness agents")?;
         let mut roots = Self::for_user_home(&home);
         if let Some(codex_home) = std::env::var_os("CODEX_HOME").filter(|v| !v.is_empty()) {
-            roots.codex = PathBuf::from(codex_home).join("agents");
+            roots.codex_profiles = PathBuf::from(codex_home);
+            roots.codex = roots.codex_profiles.join("agents");
         }
         if let Some(xdg) = std::env::var_os("XDG_CONFIG_HOME").filter(|v| !v.is_empty()) {
             roots.opencode = PathBuf::from(xdg).join("opencode/agents");
@@ -100,6 +103,7 @@ impl AgentCatalog {
             AgentScope::Global,
             &mut profiles,
         )?;
+        discover_codex_named_profiles(&roots.codex_profiles, AgentScope::Global, &mut profiles)?;
         discover_dir(
             &roots.claude,
             Harness::ClaudeCode,

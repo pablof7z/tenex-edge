@@ -4,6 +4,9 @@ use anyhow::{Context, Result};
 use std::collections::BTreeMap;
 use std::path::Path;
 
+mod codex_named;
+pub(super) use codex_named::discover_codex_named_profiles;
+
 #[derive(Default, serde::Deserialize)]
 struct HermesProfileMeta {
     #[serde(default)]
