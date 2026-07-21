@@ -66,3 +66,26 @@ fn tokens_are_audience_bound_to_mcp_resource() {
         .expect("issue origin-audience token");
     assert!(auth.verify_token(&origin_token).is_err());
 }
+
+#[test]
+fn tokens_do_not_expire() {
+    let auth = auth();
+    let code = AuthCode {
+        client_id: "client".into(),
+        redirect_uri: "https://client.example/callback".into(),
+        code_challenge: "challenge".into(),
+        resource: auth.resource_url.clone(),
+        scope: default_scope(),
+        pubkey: "pubkey".into(),
+        expires_at: crate::util::now_secs() + 60,
+    };
+    let token = auth.issue_token(&code).expect("issue token");
+    // The signed payload must carry no expiry claim.
+    let payload = token.split('.').nth(1).expect("token payload segment");
+    let decoded = URL_SAFE_NO_PAD.decode(payload).expect("decode payload");
+    let claims: Value = serde_json::from_slice(&decoded).expect("parse claims");
+    assert!(claims.get("exp").is_none(), "tokens must not carry exp");
+    // And verification never rejects on time.
+    auth.verify_token(&token)
+        .expect("non-expiring token verifies");
+}
