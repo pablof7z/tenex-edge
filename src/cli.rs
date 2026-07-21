@@ -115,6 +115,9 @@ pub async fn run(cli: Cli) -> Result<()> {
         Some(Cmd::PtySupervisor(args)) => pty::pty_supervisor(args),
         Some(Cmd::Install(args)) => install::install(args).await,
         Some(Cmd::AcpSmoke(args)) => acp_smoke::acp_smoke(args).await,
+        Some(Cmd::Fallback(args)) => {
+            launch_cli::verbs::launch(launch_cli::LaunchRequest::from_external(args)?).await
+        }
     }
 }
 

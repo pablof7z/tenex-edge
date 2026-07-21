@@ -38,7 +38,8 @@ pub fn print_help_contextual() {
     let mut cmd = command_for_context(in_agent);
     if !in_agent {
         cmd = cmd.after_help(
-            "Run `mosaico` without a command to browse sessions and launchable agents together.",
+            "Run `mosaico` without a command to browse sessions and launchable agents together.\n\
+             Run `mosaico <name>` to attach to a session or launch an agent directly.",
         );
     }
     let _ = cmd.print_help();
@@ -63,7 +64,8 @@ fn command_for_context(in_agent: bool) -> Command {
 #[derive(Parser)]
 #[command(
     name = "mosaico",
-    about = "An identity and awareness fabric for the coding agents you already run."
+    about = "An identity and awareness fabric for the coding agents you already run.",
+    disable_help_subcommand = true
 )]
 pub struct Cli {
     /// Show all commands, including hidden ones.
@@ -134,6 +136,9 @@ pub(super) enum Cmd {
     /// Debug: drive a harness over the ACP / app-server transport end-to-end.
     #[command(name = "__acp-smoke", hide = true)]
     AcpSmoke(super::acp_smoke::AcpSmokeArgs),
+    /// Attach to a matching session or launch a matching agent.
+    #[command(external_subcommand)]
+    Fallback(Vec<String>),
 }
 
 #[derive(Args)]

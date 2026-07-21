@@ -162,7 +162,7 @@ skills/mosaico-dev/scripts/launch-agent "${LAB_ENV}" direct claude \
 
 Use direct mode for auth, provider startup, and hook/plugin staging checks.
 
-Launch mode takes no provider arguments:
+Launch mode accepts one-launch provider arguments after its profile:
 
 ```bash
 bash containers/mosaico/run --profile claude mosaico channel init
@@ -170,13 +170,14 @@ MOSAICO_DEV_PROMPT="Run mosaico my session." \
   skills/mosaico-dev/scripts/launch-agent "${LAB_ENV}" launch claude
 ```
 
-Use launch mode for bundle/transport routing, native-profile activation,
+The helper forwards those arguments after Mosaico's `--` separator. Use launch
+mode for bundle/transport routing, native-profile activation,
 hosted lifecycle, PTY behavior, and channel delivery. Configure provider flags
 in bundle `args`, then regenerate the profile.
 
 ## Native profile inventory
 
-`mosaico agents` without a target prints or interactively selects the full
+`mosaico agents` without an action prints or interactively selects the full
 launch inventory. It includes configured agents, eligible raw harnesses, and
 native agent profiles discovered from:
 

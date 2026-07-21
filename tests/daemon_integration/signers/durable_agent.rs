@@ -15,6 +15,13 @@ fn durable_agent_reuses_key_and_rejects_concurrency() {
     let slug = "chief-of-staff";
     let durable_pubkey = configure_durable_agent(&home, slug);
     let channel = unique_channel("durable-agent");
+    let launch_cwd = home.dir.path().join("work");
+    std::fs::create_dir_all(&launch_cwd).unwrap();
+    std::fs::write(
+        home.dir.path().join("workspaces.json"),
+        serde_json::json!({"tmp": &launch_cwd}).to_string(),
+    )
+    .unwrap();
 
     let (first_id, third_id, normal_id, chat_event_id) = rt().block_on(async {
         let mut client = Client::connect_or_spawn().await.expect("connect");
@@ -50,7 +57,13 @@ fn durable_agent_reuses_key_and_rejects_concurrency() {
             .expect("send as durable agent");
         let chat_event_id = sent["event_id"].as_str().unwrap().to_string();
 
-        let refused = run_cli(&home, &["agents", slug, "--workspace", "tmp"]);
+        let isolated_home = home.dir.path().to_string_lossy().into_owned();
+        let refused = run_cli_with_env_in_dir(
+            &home,
+            &[slug, "--", "--fresh"],
+            &[("HOME", &isolated_home)],
+            &launch_cwd,
+        );
         assert!(!refused.status.success());
         let refused = String::from_utf8_lossy(&refused.stderr);
         assert!(refused.contains("active runtime"), "{refused}");
@@ -79,7 +92,12 @@ fn durable_agent_reuses_key_and_rejects_concurrency() {
             fresh_alias_error.to_string().contains("active runtime"),
             "{fresh_alias_error:#}"
         );
-        let manual_flip = run_cli(&home, &["agents", slug, "--workspace", "tmp"]);
+        let manual_flip = run_cli_with_env_in_dir(
+            &home,
+            &[slug, "--", "--fresh"],
+            &[("HOME", &isolated_home)],
+            &launch_cwd,
+        );
         assert!(!manual_flip.status.success());
         assert!(
             String::from_utf8_lossy(&manual_flip.stderr).contains("active runtime"),

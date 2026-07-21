@@ -47,10 +47,10 @@ pub(in crate::cli) async fn attach_or_resume(selector: &str) -> Result<bool> {
 }
 
 fn is_plain_session_selector(request: &super::args::LaunchRequest) -> bool {
-    request.root.is_none()
-        && request.channel.is_none()
+    request.channel.is_none()
         && request.session_name.is_none()
         && request.prompt.is_none()
+        && request.extra_args.is_empty()
 }
 
 #[cfg(test)]
@@ -61,10 +61,10 @@ mod tests {
     fn request() -> LaunchRequest {
         LaunchRequest {
             agent: "echo-codex".into(),
-            root: None,
             channel: None,
             session_name: None,
             prompt: None,
+            extra_args: Vec::new(),
         }
     }
 
@@ -74,5 +74,11 @@ mod tests {
         assert!(is_plain_session_selector(&plain));
         plain.prompt = Some("fresh prompt".into());
         assert!(!is_plain_session_selector(&plain));
+        let mut named = request();
+        named.session_name = Some("hi".into());
+        assert!(!is_plain_session_selector(&named));
+        let mut with_args = request();
+        with_args.extra_args.push("--yolo".into());
+        assert!(!is_plain_session_selector(&with_args));
     }
 }

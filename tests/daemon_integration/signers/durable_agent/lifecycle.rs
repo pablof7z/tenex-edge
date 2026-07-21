@@ -2,7 +2,13 @@ use super::*;
 
 fn launch(home: &Home, slug: &str, mode: &str) -> std::process::Output {
     configure_pty_agent(home, slug, mode);
-    run_cli(home, &["agents", slug, "--workspace", "tmp"])
+    let isolated_home = home.dir.path().to_string_lossy().into_owned();
+    run_cli_with_env_in_dir(
+        home,
+        &[slug, "--", "--fresh"],
+        &[("HOME", &isolated_home)],
+        &home.dir.path().join("work"),
+    )
 }
 
 pub(super) async fn assert_supervisor_releases_reservations(home: &Home, slug: &str) {

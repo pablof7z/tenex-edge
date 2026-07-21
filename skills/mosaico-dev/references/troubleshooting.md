@@ -68,17 +68,20 @@ Each bundle allows only `harness`, `transport`, and optional string-array
 must be keyless. Regenerate invalid state; do not add aliases or duplicate old
 fields.
 
-## Launch rejects arguments
+## Launch arguments are rejected
 
 The current surface is:
 
 ```text
-mosaico agents [TARGET] [PROMPT] [--workspace ...] [--channel [ROOM]] [--name ...]
+mosaico <TARGET> [PROMPT] [--channel [ROOM]] [--name ...] [-- <ARGS>...]
 ```
 
-Provider flags belong in bundle `args`, not after a separator or in launch-time
-override flags. Regenerate the profile and call the helper with no trailing
-launch args. Direct mode may still receive provider CLI args.
+Durable provider flags belong in bundle `args`. One-launch provider arguments
+must follow `--`; options before it belong to Mosaico. Direct mode receives
+provider CLI arguments without the Mosaico separator.
+
+The launch workspace always resolves from the current directory. Change into
+the intended workspace before launching; there is no launch `--workspace` flag.
 
 ## Launch target is missing or ambiguous
 
@@ -162,9 +165,10 @@ relay. Prefer a fresh auto-selected port and freshly generated profile state.
 ## Model or provider arg rejected
 
 Capture the provider's exact error. For direct mode, choose the cheapest model
-the installed CLI accepts. For launch mode, change the profile's explicit
-`MOSAICO_DEV_*_ARGS_JSON` override and regenerate it. Do not append flags to
-`mosaico agents`.
+the installed CLI accepts. For durable launch defaults, change the profile's
+explicit `MOSAICO_DEV_*_ARGS_JSON` override and regenerate it. For a one-launch
+override, pass flags after the profile to `scripts/launch-agent`, which inserts
+`--`.
 
 ## Missing events
 

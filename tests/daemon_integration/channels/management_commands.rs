@@ -217,12 +217,7 @@ fn management_p_tag_adds_base_native_and_configured_codex_agents_with_restricted
     let work_dir = home.dir.path().join("work");
     start_channel(&home, &channel, &work_dir);
 
-    let interactive = run_cli_with_env_in_dir(
-        &home,
-        &["agents", "codex", "--workspace", &channel],
-        &[],
-        &work_dir,
-    );
+    let interactive = run_cli_with_env_in_dir(&home, &["codex"], &[], &work_dir);
     assert!(
         interactive.status.success(),
         "restricted-PATH PTY launch failed: {}",

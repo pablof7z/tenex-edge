@@ -126,7 +126,7 @@ fn channel_add_session_pulls_live_pty_without_resuming() {
 }
 
 #[test]
-fn launch_existing_reattaches_a_live_handle() {
+fn direct_fallback_reattaches_a_live_handle_and_rejects_launch_only_options() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let home = Home::new();
     write_config(&home, false);
@@ -160,19 +160,22 @@ fn launch_existing_reattaches_a_live_handle() {
     });
     let _ = wait_for_alive(&home, agent, &root);
 
-    let launched = rt().block_on(async {
-        let mut client = Client::connect_or_spawn().await.expect("connect");
-        client
-            .call(
-                "pty_launch_existing",
-                serde_json::json!({ "session": handle }),
-            )
-            .await
-            .expect("reattach live session")
-    });
-    assert_eq!(launched["action"], "attached");
-    assert_eq!(launched["pty_id"], pty_id);
-    assert_eq!(launched["handle"], handle);
+    let attached = run_cli_with_env_in_dir(&home, &[&handle], &[], &work_dir);
+    assert!(attached.status.success(), "{attached:?}");
+    assert!(
+        String::from_utf8_lossy(&attached.stderr).contains(&format!("Attached to {handle}")),
+        "{}",
+        String::from_utf8_lossy(&attached.stderr)
+    );
+    assert!(mosaico::pty::is_live(&pty_id));
+
+    let renamed = run_cli_with_env_in_dir(&home, &[&handle, "--name", "hi"], &[], &work_dir);
+    assert!(!renamed.status.success());
+    assert!(
+        String::from_utf8_lossy(&renamed.stderr).contains("no available agent"),
+        "{}",
+        String::from_utf8_lossy(&renamed.stderr)
+    );
 
     let _ = mosaico::pty::kill(&pty_id);
     stop_daemon(&home);

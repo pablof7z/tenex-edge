@@ -91,13 +91,12 @@ case "${MODE}" in
     cmd=("${common[@]}" mosaico __acp-smoke "${BUNDLE}" "$@")
     ;;
   launch)
-    launch_args=(agents "${AGENT_SLUG}")
+    launch_args=("${AGENT_SLUG}")
     if [[ -n "${MOSAICO_DEV_PROMPT:-}" ]]; then
       launch_args+=("${MOSAICO_DEV_PROMPT}")
     fi
     if [[ $# -gt 0 ]]; then
-      echo "launch mode does not accept provider arguments; put operational args in the harness bundle" >&2
-      exit 2
+      launch_args+=(-- "$@")
     fi
     if [[ "${TRANSPORT}" == "acp" || "${TRANSPORT}" == "app-server" ]]; then
       cmd=("${common[@]}" mosaico-hosted "${launch_args[@]}")

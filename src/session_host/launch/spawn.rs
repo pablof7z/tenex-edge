@@ -1,3 +1,4 @@
+use super::source::ResolvedSource;
 use super::*;
 
 pub struct DispatchedSpawn {
@@ -14,6 +15,7 @@ pub(crate) struct SpawnRequest<'a> {
     pub(crate) group: Option<&'a str>,
     pub(crate) client_cwd: Option<&'a std::path::Path>,
     pub(crate) session_name: Option<&'a str>,
+    pub(crate) extra_args: &'a [String],
     pub(crate) intent: LaunchIntent,
 }
 
@@ -32,6 +34,7 @@ pub(crate) async fn spawn_agent(
         request.group,
         request.client_cwd,
         request.session_name,
+        request.extra_args,
         false,
         request.intent,
     )
@@ -53,6 +56,7 @@ pub async fn spawn_ephemeral_agent(
         group,
         client_cwd,
         None,
+        &[],
         true,
         LaunchIntent::Managed,
     )
@@ -78,6 +82,7 @@ pub(crate) async fn spawn_ephemeral_agent_for_pubkey(
         None,
         client_cwd,
         None,
+        &[],
         true,
         LaunchIntent::Managed,
         Some(expected_pubkey),
@@ -106,6 +111,7 @@ pub async fn spawn_dispatched_ephemeral_agent(
         Some(dispatch_event),
         None,
         None,
+        &[],
         true,
         LaunchIntent::Managed,
         None,
@@ -125,6 +131,7 @@ async fn spawn_agent_inner(
     group: Option<&str>,
     client_cwd: Option<&std::path::Path>,
     session_name: Option<&str>,
+    extra_args: &[String],
     ephemeral: bool,
     intent: LaunchIntent,
 ) -> Result<(crate::session_host::transport::SessionEndpoint, String)> {
@@ -137,6 +144,7 @@ async fn spawn_agent_inner(
         None,
         client_cwd,
         session_name,
+        extra_args,
         ephemeral,
         intent,
         None,
@@ -154,12 +162,14 @@ async fn spawn_agent_inner_full(
     dispatch_event: Option<&str>,
     client_cwd: Option<&std::path::Path>,
     session_name: Option<&str>,
+    extra_args: &[String],
     ephemeral: bool,
     intent: LaunchIntent,
     expected_pubkey: Option<&str>,
 ) -> Result<(crate::session_host::transport::SessionEndpoint, String)> {
     let abs_path = workspace_abs_path(state, root, client_cwd)?;
-    let resolved = resolve_agent_source(state, slug, std::path::Path::new(&abs_path), intent)?;
+    let mut resolved = resolve_agent_source(state, slug, std::path::Path::new(&abs_path), intent)?;
+    append_extra_args(&mut resolved, extra_args);
     let agent_slug = resolved.identity.slug.clone();
     let retired_advertisements = resolved.retired_advertisements.clone();
     let agent_command = resolved.command.clone();
@@ -237,3 +247,27 @@ async fn spawn_agent_inner_full(
     state.schedule_agent_roster_refresh(retired_advertisements);
     Ok((endpoint, pubkey))
 }
+
+fn append_extra_args(resolved: &mut ResolvedSource, extra_args: &[String]) {
+    let rpc_argv = resolved
+        .prepared_launch
+        .rpc
+        .as_mut()
+        .map(|rpc| &mut rpc.argv);
+    append_command_args(&mut resolved.command, rpc_argv, extra_args);
+}
+
+fn append_command_args(
+    command: &mut Vec<String>,
+    rpc_argv: Option<&mut Vec<String>>,
+    extra_args: &[String],
+) {
+    command.extend_from_slice(extra_args);
+    if let Some(argv) = rpc_argv {
+        argv.extend_from_slice(extra_args);
+    }
+}
+
+#[cfg(test)]
+#[path = "spawn/tests.rs"]
+mod tests;

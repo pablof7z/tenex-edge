@@ -134,8 +134,9 @@ MOSAICO_DEV_PROMPT="Run mosaico my session." \
 ```
 
 The bundle's `transport: "pty"` selects portable PTY hosting. The current launch
-surface is `mosaico agents <target> [prompt]`; provider flags must already be in
-bundle `args`. Use the attached terminal for UI evidence.
+surface is `mosaico <target> [prompt] [-- <args>...]`; durable provider flags
+belong in bundle `args`, while separator arguments apply to one launch. Use the
+attached terminal for UI evidence.
 
 Use `grok-pty-lab.md` for native Grok hook provenance and p-tagged injection
 proof.

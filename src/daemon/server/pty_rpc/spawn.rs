@@ -5,7 +5,7 @@ struct PtySpawnParams {
     agent: String,
     root: String,
     /// The client's cwd, forwarded so the daemon spawns the agent in the
-    /// directory the user actually invoked `mosaico agents` from.
+    /// directory the user actually invoked the direct launch from.
     #[serde(default)]
     cwd: Option<String>,
     /// The resolved opaque channel id to scope the spawned session into.
@@ -18,6 +18,9 @@ struct PtySpawnParams {
     /// launch path, where the child lives in the daemon.
     #[serde(default)]
     prompt: Option<String>,
+    /// Raw arguments explicitly supplied after `--` for this launch.
+    #[serde(default)]
+    extra_args: Vec<String>,
 }
 
 pub(in crate::daemon::server) async fn rpc_pty_spawn(
@@ -40,6 +43,7 @@ pub(in crate::daemon::server) async fn rpc_pty_spawn(
             group,
             client_cwd,
             session_name: p.session_name.as_deref(),
+            extra_args: &p.extra_args,
             intent: crate::session_host::LaunchIntent::Interactive,
         },
     )

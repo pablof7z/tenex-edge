@@ -192,6 +192,7 @@ fn invalid_cli_invocation_writes_command_log_only_when_enabled() {
     let home = Home::new().with_backend_key();
 
     let args = &[
+        "agents",
         "send-this-message",
         "--session",
         "hallucinated-session",
@@ -237,7 +238,7 @@ fn invalid_cli_invocation_writes_command_log_only_when_enabled() {
         .find(|v| v["phase"] == "received")
         .expect("received record");
     assert_eq!(received["schema"], "mosaico.command-call.v1");
-    assert_eq!(received["command"]["subcommand"], "send-this-message");
+    assert_eq!(received["command"]["subcommand"], "agents");
     assert_eq!(
         received["command"]["explicit_session"],
         "hallucinated-session"

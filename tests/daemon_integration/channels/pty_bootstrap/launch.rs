@@ -12,12 +12,7 @@ fn launch_no_hook(home: &Home, agent: &str, channel: &str, mode: &str) {
     let work_dir = home.dir.path().join(channel);
     add_workspace_mapping(home, channel, &work_dir);
     configure_pty_agent(home, agent, mode);
-    let out = run_cli_with_env_in_dir(
-        home,
-        &["agents", agent, "--workspace", channel],
-        &[],
-        &work_dir,
-    );
+    let out = run_cli_with_env_in_dir(home, &[agent], &[], &work_dir);
     assert!(
         out.status.success(),
         "launch failed: {}",
@@ -55,7 +50,7 @@ fn launch_command_resolves_discovered_claude_profile_without_agent_json() {
     let isolated_home = home.dir.path().to_string_lossy().into_owned();
     let out = run_cli_with_env_in_dir(
         &home,
-        &["agents", "writing-partner"],
+        &["writing-partner"],
         &[("HOME", &isolated_home)],
         &work_dir,
     );
@@ -125,7 +120,7 @@ fn launch_lists_and_starts_harness_despite_invalid_same_named_agent() {
 
     let launched = run_cli_with_env_in_dir(
         &home,
-        &["agents", "opencode", "--workspace", &channel],
+        &["opencode", "--", "--yolo"],
         &[("HOME", &isolated_home), ("XDG_CONFIG_HOME", &xdg)],
         &work_dir,
     );
@@ -138,7 +133,7 @@ fn launch_lists_and_starts_harness_despite_invalid_same_named_agent() {
         .into_iter()
         .find(|meta| meta.agent == "opencode")
         .expect("launched bare opencode harness metadata");
-    assert_eq!(meta.command, ["opencode", "forever"]);
+    assert_eq!(meta.command, ["opencode", "forever", "--yolo"]);
     let stale = mosaico::identity::agent_launch_config(home.dir.path(), "opencode").unwrap();
     assert_eq!(stale.harness, "opencode");
 
@@ -186,27 +181,25 @@ fn pty_agent_receives_the_signer_matching_its_assigned_pubkey() {
     let capture_arg = capture.to_string_lossy().into_owned();
     let agent = "launch-agent-nsec";
     configure_pty_agent_with_args(&home, agent, &["capture-identity", &capture_arg]);
+    let isolated_home = home.dir.path().to_string_lossy().into_owned();
 
-    let out = run_cli_with_env_in_dir(
-        &home,
-        &["agents", agent, "--workspace", &channel],
-        &[],
-        &work_dir,
-    );
+    let out = run_cli_with_env_in_dir(&home, &[agent], &[("HOME", &isolated_home)], &work_dir);
     assert!(
         out.status.success(),
         "launch failed: {}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let pty_id = mosaico::pty::read_all_metadata()
+    let metadata = mosaico::pty::read_all_metadata()
         .into_iter()
         .find(|meta| meta.agent == agent)
-        .expect("launched PTY metadata")
-        .id;
+        .expect("launched PTY metadata");
+    let pty_id = metadata.id.clone();
     let cleanup = PtyCleanup(pty_id.clone());
     assert!(
         wait_until(Duration::from_secs(10), || capture.exists()),
-        "PTY harness did not capture its assigned identity"
+        "PTY harness did not capture its assigned identity; command={:?}; stderr={}",
+        metadata.command,
+        String::from_utf8_lossy(&out.stderr)
     );
 
     let captured = std::fs::read_to_string(&capture).unwrap();

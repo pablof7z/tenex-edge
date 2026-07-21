@@ -25,7 +25,7 @@ proof, not model quality.
 - `scripts/write-container-profiles`: writes current device, harness-bundle, and
   agent-selection state.
 - `scripts/launch-agent`: runs a provider directly, runs `__acp-smoke`, or calls
-  the current `mosaico agents` surface.
+  the current direct Mosaico launch surface.
 - `scripts/probe-lab`: captures relay metadata, logs, and Nostr events.
 - `scripts/cleanup-lab`: stops recorded containers before stopping the relay.
 
@@ -38,9 +38,10 @@ Treat these ownership boundaries as fixed:
   driver are code-owned.
 - `agents/<slug>.json` owns the public slug, selected bundle in `harness`,
   optional harness-native `profile`, identity mode, and metadata.
-- `mosaico agents [TARGET] [PROMPT]` selects an available target. It accepts
-  `--workspace`, `--channel`, and `--name`; it does not accept provider argv or
-  launch overrides.
+- `mosaico <TARGET> [PROMPT] [-- <ARGS>...]` first matches an existing session,
+  then an available agent. The workspace comes from the current directory; it
+  accepts `--channel` and `--name`. Arguments after `--` are appended to the
+  resolved harness command for that launch.
 - The selected bundle admits exactly one hosted transport kind: `pty` or `acp`.
   A configured `app-server` bundle uses the ACP hosted kind with the app-server
   protocol dialect; `app-server` is not a third admitted kind. There is no
@@ -51,8 +52,9 @@ Treat these ownership boundaries as fixed:
   composes the named config into an isolated `CODEX_HOME`. ACP dialects that do
   not support a named profile reject it.
 
-Never add old launch flags, separator-forwarded provider arguments, duplicate
-config fields, or fallback bundle names. Fix the generated config or caller.
+Never add old launch flags, duplicate config fields, or fallback bundle names.
+Fix durable defaults in generated config; use separator arguments only for an
+intentional one-launch override.
 
 ## Identity contract
 
@@ -163,7 +165,7 @@ MOSAICO_DEV_PROMPT="Run mosaico my session." \
 For Goose, generate `goose-acp`, run doctor, and run smoke before launch. The
 smoke must pass both ACP turns across a process restart using `session/load`.
 
-To audit launch inventory, run `mosaico agents` without a target. In a
+To audit launch inventory, run `mosaico agents` without an action. In a
 non-interactive command it prints the available configured agents, raw harness
 targets, and installed native profiles. Native profiles are discovered from
 Codex, Claude, and OpenCode global directories plus workspace-local agent

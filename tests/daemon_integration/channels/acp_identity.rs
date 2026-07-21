@@ -37,12 +37,7 @@ fn assert_acp_identity(harness: &str) {
     .unwrap();
 
     let isolated_home = home.dir.path().to_string_lossy().into_owned();
-    let out = run_cli_with_env_in_dir(
-        &home,
-        &["agents", &agent, "--workspace", &channel],
-        &[("HOME", &isolated_home)],
-        &work_dir,
-    );
+    let out = run_cli_with_env_in_dir(&home, &[&agent], &[("HOME", &isolated_home)], &work_dir);
     assert!(
         out.status.success(),
         "ACP launch failed: {}\ndaemon log:\n{}",

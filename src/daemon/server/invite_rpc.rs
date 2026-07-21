@@ -159,6 +159,7 @@ pub(super) async fn invite_agent(
             group: Some(channel_h),
             client_cwd: cwd.map(std::path::Path::new),
             session_name: None,
+            extra_args: &[],
             intent: crate::session_host::LaunchIntent::Managed,
         },
     )

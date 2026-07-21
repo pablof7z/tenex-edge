@@ -29,7 +29,7 @@ fn resolve_from_inventory(
             "agent {requested:?} is available from multiple harnesses; choose {}",
             choices
                 .iter()
-                .map(|choice| format!("`mosaico agents {}`", choice.slug))
+                .map(|choice| format!("`mosaico {}`", choice.slug))
                 .collect::<Vec<_>>()
                 .join(" or ")
         );
