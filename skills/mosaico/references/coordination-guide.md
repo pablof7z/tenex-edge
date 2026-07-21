@@ -123,6 +123,12 @@ mosaico channel send --tag <agent-ref> --wait 600 --message "..."
 mosaico wait 60 --channel <channel> --from <agent-ref>
 ```
 
+Through MCP, set `wait_seconds` on `mosaico.channel_send` for the correlated
+form, or call `mosaico.wait` with `timeout_seconds` plus optional `channels` and
+`from` filters for the ambient form. Both return a successful timeout outcome
+when the bound expires. A correlated send preserves its accepted send result
+under `send` and returns the message-or-timeout outcome under `wait`.
+
 For a distinct multi-participant workstream, read
 [Channel Creation](channel-creation.md). When ownership or context crosses a
 workspace boundary, read [Cross-Workspace Coordination](cross-workspace.md).

@@ -51,6 +51,20 @@ const SPECS: &[ToolSpec] = &[
         destructive: false,
     },
     ToolSpec {
+        name: "mosaico.wait",
+        description: "Wait for the next matching message without polling. Returns a message or \
+                      timeout outcome.",
+        props: &[
+            Prop::new("timeout_seconds", "integer", "Maximum seconds to wait."),
+            Prop::new("channels", "array", "Optional joined channels to watch."),
+            Prop::new("from", "string", "Optional human or agent author filter."),
+            SESSION_PROP,
+        ],
+        required: &["timeout_seconds"],
+        read_only: true,
+        destructive: false,
+    },
+    ToolSpec {
         name: "mosaico.channel_list",
         description: "List channels under a channel.",
         props: &[Prop::new(
@@ -90,6 +104,11 @@ const SPECS: &[ToolSpec] = &[
             Prop::new("channel", "string", "Optional destination channel."),
             SESSION_PROP,
             Prop::new("long_message", "boolean", "Allow long messages."),
+            Prop::new(
+                "wait_seconds",
+                "integer",
+                "After sending, wait this many seconds for a correlated reply.",
+            ),
             Prop::new(
                 "reply_to",
                 "string",
@@ -263,21 +282,5 @@ fn schema(props: &[Prop], required: &[&str]) -> Value {
 }
 
 #[cfg(test)]
-mod tests {
-    #[test]
-    fn catalog_contains_channel_basics() {
-        let names = super::list()
-            .into_iter()
-            .filter_map(|tool| tool["name"].as_str().map(str::to_string))
-            .collect::<Vec<_>>();
-
-        assert!(names.contains(&"mosaico.skill".to_string()));
-        assert!(names.contains(&"mosaico.channel_join".to_string()));
-        assert!(names.contains(&"mosaico.channel_send".to_string()));
-        assert!(names.contains(&"mosaico.dispatch".to_string()));
-        assert!(names.contains(&"mosaico.my_session".to_string()));
-        assert!(!names.contains(&"mosaico.who".to_string()));
-        assert!(!names.contains(&"mosaico.channels_join".to_string()));
-        assert!(!names.contains(&"mosaico.chat_write".to_string()));
-    }
-}
+#[path = "catalog/tests.rs"]
+mod tests;

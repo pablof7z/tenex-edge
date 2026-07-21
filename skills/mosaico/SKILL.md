@@ -73,7 +73,8 @@ coordination overhead.
 - Close loops after delegation. Sending a request does not end your
   responsibility unless ownership is explicitly accepted elsewhere.
 - When the current task truly cannot continue without a response, use a bounded
-  correlated `channel send --wait` or ambient `wait`; do not poll the fabric.
+  correlated send-wait or ambient wait from the active CLI/MCP surface; do not
+  poll the fabric.
 - If fabric context or another participant is unavailable, continue all safe
   local work from authoritative sources. Do not poll, repeatedly retry, or make
   fabric availability a dependency for work that can otherwise proceed.
