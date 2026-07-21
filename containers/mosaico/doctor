@@ -111,6 +111,19 @@ case "${AGENT}" in
     ;;
   hermes)
     test -s "${HERMES_HOME}/config.yaml"
+    HERMES_PROFILE="$(
+      jq -r '.profile // empty' "${MOSAICO_HOME}/agents/hermes.json" 2>/dev/null || true
+    )"
+    if [[ -n "${HERMES_PROFILE}" ]]; then
+      test -s "${HERMES_HOME}/profiles/${HERMES_PROFILE}/config.yaml"
+      HERMES_PROVIDER="$(
+        hermes --profile "${HERMES_PROFILE}" config get model.provider
+      )"
+      [[ -n "${HERMES_PROVIDER}" && "${HERMES_PROVIDER}" != "auto" ]]
+      hermes --profile "${HERMES_PROFILE}" auth status "${HERMES_PROVIDER}" \
+        | grep -Fq 'logged in'
+      echo "hermes profile auth: ${HERMES_PROFILE} (${HERMES_PROVIDER})"
+    fi
     HARNESS=hermes
     ;;
   opencode)

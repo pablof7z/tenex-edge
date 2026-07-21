@@ -25,10 +25,17 @@ pub struct AcpSmokeArgs {
     /// Prompt text to send.
     #[arg(long, default_value = "Reply with exactly one word: PONG")]
     pub prompt: String,
+    /// Harness-native named profile to activate for both processes.
+    #[arg(long)]
+    pub profile: Option<String>,
 }
 
 /// Resolve `name` to an explicitly configured RPC-transport bundle.
-fn resolve_rpc(name: &str, scratch: &std::path::Path) -> Result<crate::harness::ResolvedHarness> {
+fn resolve_rpc(
+    name: &str,
+    profile: Option<&str>,
+    scratch: &std::path::Path,
+) -> Result<crate::harness::ResolvedHarness> {
     use crate::harness::{config::HarnessesConfig, Transport};
 
     let cfg = HarnessesConfig::load()?;
@@ -41,7 +48,7 @@ fn resolve_rpc(name: &str, scratch: &std::path::Path) -> Result<crate::harness::
             bundle.transport.as_str()
         );
     }
-    crate::harness::resolve_with(&cfg, name, None, scratch)
+    crate::harness::resolve_with(&cfg, name, profile, scratch)
 }
 
 pub async fn acp_smoke(args: AcpSmokeArgs) -> Result<()> {
@@ -54,7 +61,7 @@ pub async fn acp_smoke(args: AcpSmokeArgs) -> Result<()> {
     let scratch = crate::config::mosaico_home()
         .join("harness-profiles")
         .join(&args.harness);
-    let resolved = resolve_rpc(&args.harness, &scratch)?;
+    let resolved = resolve_rpc(&args.harness, args.profile.as_deref(), &scratch)?;
     println!(
         "[acp-smoke] bundle={} harness={} transport={}",
         resolved.bundle,
@@ -88,6 +95,10 @@ pub async fn acp_smoke(args: AcpSmokeArgs) -> Result<()> {
         Dialect::AppServer => run_app_server(cfg, &cwd, &args.prompt, mk_cfg).await,
     }
 }
+
+#[cfg(test)]
+#[path = "acp_smoke/tests.rs"]
+mod tests;
 
 async fn run_acp(
     cfg: crate::rpc_harness::SpawnConfig,

@@ -65,6 +65,11 @@ printf '{"claudeAiOauth":{"accessToken":"test","refreshToken":"test"}}\n' \
 printf '{}\n' >"${HOST_HOME}/.claude/settings.json"
 printf 'model:\n  default: anthropic/test\n' >"${HOST_HOME}/.hermes/config.yaml"
 printf 'ANTHROPIC_API_KEY=test\n' >"${HOST_HOME}/.hermes/.env"
+printf 'model:\n  default: gpt-test\n  provider: openai-codex\n' \
+  >"${HOST_HOME}/.hermes/profiles/reviewer/config.yaml"
+printf '{"providers":{"openai-codex":{"tokens":{"access_token":"test","refresh_token":"test"}}}}\n' \
+  >"${HOST_HOME}/.hermes/profiles/reviewer/auth.json"
+chmod 600 "${HOST_HOME}/.hermes/profiles/reviewer/auth.json"
 printf '{}\n' >"${HOST_HOME}/.local/share/opencode/auth.json"
 printf '{}\n' >"${HOST_HOME}/.local/share/opencode/account.json"
 printf '{}\n' >"${HOST_HOME}/.config/opencode/opencode.jsonc"
@@ -135,6 +140,17 @@ cmp -s "${HOST_HOME}/.hermes/.env" "${STATE_DIR}/home/.hermes/.env" \
 [[ ! -L "${STATE_DIR}/home/.hermes/config.yaml" ]] \
   || fail 'Hermes config must be writable isolated state, not a host symlink'
 test -d "${STATE_DIR}/home/.hermes/profiles/reviewer"
+cmp -s "${HOST_HOME}/.hermes/profiles/reviewer/auth.json" \
+  "${STATE_DIR}/home/.hermes/profiles/reviewer/auth.json" \
+  || fail 'Hermes profile auth was not copied into isolated state'
+[[ ! -L "${STATE_DIR}/home/.hermes/profiles/reviewer/auth.json" ]] \
+  || fail 'Hermes profile auth must not point back into host state'
+HERMES_AUTH_MODE="$(
+  stat -f '%Lp' "${STATE_DIR}/home/.hermes/profiles/reviewer/auth.json" 2>/dev/null \
+    || stat -c '%a' "${STATE_DIR}/home/.hermes/profiles/reviewer/auth.json"
+)"
+[[ "${HERMES_AUTH_MODE}" == "600" ]] \
+  || fail 'Hermes staged profile auth is not private'
 echo 'ok: Hermes auth, config, and profiles are staged into writable state'
 
 CONFIG_HOME="${TMP}/mosaico"

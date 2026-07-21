@@ -25,6 +25,9 @@ then stages the macOS `goose`/`secrets` Keychain item as a private
 `secrets.yaml`; its session database is never imported from the host.
 Hermes copies `config.yaml`, optional `.env`, and named profile directories into
 writable isolated `HERMES_HOME`, where Mosaico installs its user plugin.
+Profile-scoped `auth.json` stays inside the copied profile with its private file
+mode; no host Hermes file is bind mounted. A named-profile doctor run requires
+an explicit provider whose native `hermes auth status` reports `logged in`.
 
 ## State boundary
 
