@@ -42,6 +42,18 @@ fn valid_readback_requires_at_least_one_event() {
 }
 
 #[test]
+fn skipped_probe_is_an_onboarding_warning_without_repair() {
+    let check = relay_check(
+        "relay.publish",
+        "SKIP no authorized materialized group",
+        false,
+        "repair relay",
+    );
+    assert_eq!(check.status, CheckStatus::Warning);
+    assert!(check.repair.is_none());
+}
+
+#[test]
 fn invalid_config_is_actionable_without_exposing_secrets() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("config.json");

@@ -246,26 +246,41 @@ async fn inspect_daemon(checks: &mut Vec<Check>) {
     match client.call("doctor", serde_json::json!({})).await {
         Ok(probe) => {
             let publish = probe["publish"].as_str().unwrap_or("missing result");
-            checks.push(if publish.starts_with("OK (") {
-                Check::new("relay.publish", CheckStatus::Ok, publish)
-            } else {
-                Check::new("relay.publish", CheckStatus::Error, publish).repair(
-                    "verify relay reachability, authorization, and the relays in config.json",
-                )
-            });
+            checks.push(relay_check(
+                "relay.publish",
+                publish,
+                publish.starts_with("OK ("),
+                "verify relay reachability, authorization, and the relays in config.json",
+            ));
             let readback = probe["readback"].as_str().unwrap_or("missing result");
-            checks.push(if readback_healthy(readback) {
-                Check::new("relay.readback", CheckStatus::Ok, readback)
-            } else {
-                Check::new("relay.readback", CheckStatus::Error, readback)
-                    .repair("verify relay read access and retry after connectivity is restored")
-            });
+            checks.push(relay_check(
+                "relay.readback",
+                readback,
+                readback_healthy(readback),
+                "verify relay read access and retry after connectivity is restored",
+            ));
         }
         Err(error) => checks.push(Check::new(
             "relay.probe",
             CheckStatus::Error,
             format!("daemon probe failed: {error:#}"),
         )),
+    }
+}
+
+fn relay_check(name: &str, summary: &str, healthy: bool, repair: &str) -> Check {
+    let status = if healthy {
+        CheckStatus::Ok
+    } else if summary.starts_with("SKIP ") {
+        CheckStatus::Warning
+    } else {
+        CheckStatus::Error
+    };
+    let check = Check::new(name, status, summary);
+    if status == CheckStatus::Error {
+        check.repair(repair)
+    } else {
+        check
     }
 }
 
