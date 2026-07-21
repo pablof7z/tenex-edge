@@ -1,10 +1,6 @@
 # mosaico
 
-![An agent finishes diagnosing a bug and, unprompted, sends the reproduction to the peer already implementing the fix](docs/images/handoff-to-relevant-agent.png)
-
-*An agent root-causes a session-resume bug — then routes the exact reproduction to
-`@juno-721-codex`, the peer already implementing that fix. Nobody told it to; it
-could see who the finding belonged to.*
+![An agent notices a peer is mid-flight on the same code area and coordinates instead of colliding](docs/images/related-work-awareness.png)
 
 ## The work is already connected. The agents aren't.
 
@@ -58,7 +54,11 @@ The fabric doesn't merge contexts. It gives related work a way to find itself. A
 session deep in one project stays deep in that project — a hint that something
 related is mid-flight is enough.
 
-![An agent notices a peer is mid-flight on the same code area and coordinates instead of colliding](docs/images/related-work-awareness.png)
+![An agent finishes diagnosing a bug and, unprompted, sends the reproduction to the peer already implementing the fix](docs/images/handoff-to-relevant-agent.png)
+
+*An agent root-causes a session-resume bug — then routes the exact reproduction to
+`@juno-721-codex`, the peer already implementing that fix. Nobody told it to; it
+could see who the finding belonged to.*
 
 ```
 $ mosaico who --live
