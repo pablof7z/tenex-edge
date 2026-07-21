@@ -116,9 +116,9 @@ impl Transport {
             .await;
     }
 
-    /// Publish the doctor's uniquely-tagged probe to the configured app relays.
-    pub(crate) async fn publish_probe_checked(&self, marker: &str) -> Result<EventId> {
-        let builder = doctor_probe_builder(marker)?;
+    /// Publish the doctor's uniquely-tagged probe inside an existing group.
+    pub(crate) async fn publish_probe_checked(&self, group: &str, marker: &str) -> Result<EventId> {
+        let builder = doctor_probe_builder(group, marker)?;
         self.client.wait_for_connection(PUBLISH_CONNECT_WAIT).await;
         let out = self
             .client
@@ -144,13 +144,12 @@ impl Transport {
     }
 }
 
-fn doctor_probe_builder(marker: &str) -> Result<EventBuilder> {
-    // `h` is a NIP-29 group id on the workshop relay. A random doctor marker
-    // in `h` is rejected as a nonexistent group before it can prove transport
-    // health. Use the ordinary topic tag instead.
+fn doctor_probe_builder(group: &str, marker: &str) -> Result<EventBuilder> {
+    // The relay requires kind:1 notes to target a real NIP-29 group. Keep the
+    // unique marker in `t`; `h` is only the already-existing authorized group.
     Ok(
         EventBuilder::new(Kind::from(1u16), format!("mosaico doctor {marker}"))
-            .tags([Tag::parse(["t", marker])?]),
+            .tags([Tag::parse(["h", group])?, Tag::parse(["t", marker])?]),
     )
 }
 

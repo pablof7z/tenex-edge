@@ -132,29 +132,105 @@ impl Nip29Provider {
         self.nmp.publish_group_builder(builder, keys, false).await
     }
 
-    /// Connectivity probe: publish a uniquely-tagged throwaway note and read it back.
+    /// Connectivity probe: publish a uniquely-tagged note to an existing group
+    /// this management identity belongs to, then read that exact marker back.
     pub async fn doctor_probe(&self) -> (String, String) {
-        use nostr_sdk::prelude::{Alphabet, Filter, Kind, SingleLetterTag};
-        let t = format!("mosaico-doctor-{}", crate::util::now_secs());
-        let publish = self.transport.publish_probe_checked(&t).await;
+        let marker = format!("mosaico-doctor-{}", crate::util::opaque_group_id());
+        let group = match self.doctor_probe_group().await {
+            Ok(Some(group)) => group,
+            Ok(None) => return self.doctor_read_only().await,
+            Err(error) => {
+                let error = format!("ERR {error:#}");
+                return (error.clone(), error);
+            }
+        };
+        let publish = self.transport.publish_probe_checked(&group, &marker).await;
         let publish = match publish {
             Ok(id) => format!("OK ({})", crate::util::pubkey_short(&id.to_hex())),
             Err(e) => format!("ERR {e:#}"),
         };
         tokio::time::sleep(Duration::from_secs(1)).await;
-        let f = Filter::new()
-            .kind(Kind::from(1u16))
-            .custom_tag(SingleLetterTag::lowercase(Alphabet::T), &t)
-            .limit(5);
+        let f = doctor_probe_filter(&group, &marker);
         let readback = match self.transport.fetch(f, Duration::from_secs(5)).await {
-            Ok(evs) => format!("{} event(s) with #t={t}", evs.len()),
+            Ok(evs) => format!("{} event(s) with #h={group} #t={marker}", evs.len()),
             Err(e) => format!("ERR {e:#}"),
         };
         (publish, readback)
     }
 
+    async fn doctor_probe_group(&self) -> Result<Option<String>> {
+        let pubkey = self
+            .management_pubkey()
+            .ok_or_else(|| anyhow::anyhow!("management signing identity is unavailable"))?;
+        let candidates = self.with_store(|store| store.list_channels_where_member(&pubkey))?;
+        if candidates.is_empty() {
+            return Ok(None);
+        }
+
+        let mut fetch_errors = Vec::new();
+        for group in candidates {
+            match self.fetch_group_state(&group).await {
+                Ok((true, roles, members))
+                    if roles.contains_key(&pubkey) || members.contains(&pubkey) =>
+                {
+                    return Ok(Some(group));
+                }
+                Ok(_) => {}
+                Err(error) => fetch_errors.push(format!("{group}: {error:#}")),
+            }
+        }
+        if !fetch_errors.is_empty() {
+            anyhow::bail!(
+                "could not verify an existing authorized NIP-29 group: {}",
+                fetch_errors.join("; ")
+            );
+        }
+        Ok(None)
+    }
+
+    async fn doctor_read_only(&self) -> (String, String) {
+        use crate::fabric::nip29::wire::{kind, KIND_GROUP_METADATA};
+        use nostr_sdk::prelude::Filter;
+        let reason = "SKIP no existing materialized NIP-29 group authorizes the management identity; publish probe not attempted";
+        let read = self
+            .transport
+            .fetch(
+                Filter::new().kind(kind(KIND_GROUP_METADATA)).limit(1),
+                Duration::from_secs(5),
+            )
+            .await;
+        let read = match read {
+            Ok(events) => format!(
+                "SKIP publish readback; relay read OK ({} metadata event(s))",
+                events.len()
+            ),
+            Err(error) => format!("ERR relay read failed: {error:#}"),
+        };
+        (reason.to_string(), read)
+    }
+
     pub(in crate::fabric::provider) fn with_store<R>(&self, f: impl FnOnce(&Store) -> R) -> R {
         let g = self.store.lock().expect("store mutex poisoned");
         f(&g)
+    }
+}
+
+fn doctor_probe_filter(group: &str, marker: &str) -> nostr_sdk::prelude::Filter {
+    use nostr_sdk::prelude::{Alphabet, Filter, Kind, SingleLetterTag};
+    Filter::new()
+        .kind(Kind::from(1u16))
+        .custom_tag(SingleLetterTag::lowercase(Alphabet::H), group)
+        .custom_tag(SingleLetterTag::lowercase(Alphabet::T), marker)
+        .limit(5)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn doctor_readback_is_scoped_to_existing_group_and_unique_marker() {
+        let filter = super::doctor_probe_filter("existing-workspace", "mosaico-doctor-test");
+        let json = serde_json::to_value(filter).unwrap();
+        assert_eq!(json["#h"], serde_json::json!(["existing-workspace"]));
+        assert_eq!(json["#t"], serde_json::json!(["mosaico-doctor-test"]));
     }
 }

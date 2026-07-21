@@ -46,9 +46,10 @@ fn no_accept_no_reason_reports_timeout() {
 }
 
 #[test]
-fn doctor_probe_marker_is_not_a_nonexistent_group() {
+fn doctor_probe_never_uses_the_unique_marker_as_a_group() {
+    let group = "existing-workspace";
     let marker = "mosaico-doctor-test";
-    let event = doctor_probe_builder(marker)
+    let event = doctor_probe_builder(group, marker)
         .unwrap()
         .sign_with_keys(&Keys::generate())
         .unwrap();
@@ -61,4 +62,20 @@ fn doctor_probe_marker_is_not_a_nonexistent_group() {
     assert!(!tags
         .iter()
         .any(|tag| tag == &serde_json::json!(["h", marker])));
+}
+
+#[test]
+fn doctor_probe_is_never_an_ungrouped_note() {
+    let group = "existing-workspace";
+    let event = doctor_probe_builder(group, "mosaico-doctor-test")
+        .unwrap()
+        .sign_with_keys(&Keys::generate())
+        .unwrap();
+    let tags = serde_json::to_value(event.tags).unwrap();
+
+    assert!(tags
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|tag| tag == &serde_json::json!(["h", group])));
 }
