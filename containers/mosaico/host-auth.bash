@@ -163,6 +163,41 @@ stage_grok_state() {
   fi
 }
 
+stage_goose_secrets() {
+  local target="$1" tmp="${1}.tmp"
+  if [[ "${HOST_AUTH}" != "1" ]]; then
+    return 0
+  fi
+  rm -f "${tmp}"
+  if command -v security >/dev/null 2>&1 \
+    && command -v jq >/dev/null 2>&1 \
+    && security find-generic-password -s goose -a secrets -w >"${tmp}" 2>/dev/null \
+    && jq -e 'type == "object"' "${tmp}" >/dev/null 2>&1; then
+    mv "${tmp}" "${target}"
+    chmod 600 "${target}"
+    return 0
+  fi
+  rm -f "${tmp}"
+  stage_auth_copy "${HOST_HOME}/.config/goose/secrets.yaml" "${target}"
+  chmod 600 "${target}"
+}
+
+stage_goose_state() {
+  if [[ "${HOST_AUTH}" != "1" || "${AGENT}" != "goose" ]]; then
+    return 0
+  fi
+
+  stage_auth_copy "${HOST_HOME}/.config/goose/config.yaml" \
+    "${STATE_DIR}/home/.config/goose/config.yaml"
+  if [[ -f "${HOST_HOME}/.config/goose/permission.yaml" ]]; then
+    stage_auth_copy "${HOST_HOME}/.config/goose/permission.yaml" \
+      "${STATE_DIR}/home/.config/goose/permission.yaml"
+  else
+    rm -f "${STATE_DIR}/home/.config/goose/permission.yaml"
+  fi
+  stage_goose_secrets "${STATE_DIR}/home/.config/goose/secrets.yaml"
+}
+
 build_host_auth_mounts() {
   HOST_AUTH_MOUNTS=()
   case "${AGENT}" in
@@ -174,6 +209,9 @@ build_host_auth_mounts() {
       ;;
     grok)
       # Grok state is copied into the writable isolated profile before launch.
+      ;;
+    goose)
+      # Goose config and keychain secrets are copied into isolated state.
       ;;
     opencode)
       add_required_auth_dir_mount \
@@ -238,6 +276,7 @@ stage_host_auth() {
     claude) stage_claude_auth ;;
     codex) stage_codex_auth ;;
     grok) stage_grok_state ;;
+    goose) stage_goose_state ;;
     opencode) stage_opencode_auth ;;
     *)
       echo "unsupported host-auth agent: ${AGENT}" >&2

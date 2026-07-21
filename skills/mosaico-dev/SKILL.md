@@ -1,6 +1,6 @@
 ---
 name: mosaico-dev
-description: "Use for Mosaico development live labs: run a local croissant relay, configure isolated PTY or ACP hosted bundles (including the app-server ACP dialect) with real host AI auth, launch Claude/Codex/Grok/OpenCode agents, and inspect sessions, logs, relay traffic, and Nostr events."
+description: "Use for Mosaico development live labs: run a local croissant relay, configure isolated PTY or ACP hosted bundles (including the app-server ACP dialect) with real host AI auth, launch Claude/Codex/Grok/Goose/OpenCode agents, and inspect sessions, logs, relay traffic, and Nostr events."
 ---
 
 # Mosaico development live lab
@@ -71,6 +71,8 @@ config fields, or fallback bundle names. Fix the generated config or caller.
   selected isolated profile.
 - Grok auth is copied into writable isolated `GROK_HOME`; native Mosaico hooks
   install at `.grok/hooks/mosaico.json`. Imported Claude hooks are not Grok proof.
+- Goose config and keychain secrets are copied into its isolated XDG home. Goose
+  is ACP-only and does not install Mosaico hooks or advertise native profiles.
 - Keep fabric state under `.container-state/<profile>` or the run's temporary
   work directory, never host `~/.mosaico`.
 - Run croissant on the host from `/tmp/croissant-smallmap` when present, else
@@ -103,7 +105,7 @@ Keep the emitted environment path:
 ```bash
 LAB_ENV=/tmp/mosaico-live-lab-YYYYmmdd-HHMMSS/lab.env
 skills/mosaico-dev/scripts/write-container-profiles "${LAB_ENV}" \
-  claude claude-acp codex codex-app-server grok opencode opencode-acp
+  claude claude-acp codex codex-app-server grok goose-acp opencode opencode-acp
 ```
 
 The writer resets disposable Mosaico state, including SQLite/WAL state and the
@@ -153,6 +155,9 @@ bash containers/mosaico/run --profile claude-acp mosaico channel init
 MOSAICO_DEV_PROMPT="Run mosaico my session." \
   skills/mosaico-dev/scripts/launch-agent "${LAB_ENV}" launch claude-acp
 ```
+
+For Goose, generate `goose-acp`, run doctor, and run smoke before launch. The
+smoke must pass both ACP turns across a process restart using `session/load`.
 
 To audit launch inventory, run `mosaico agents` without a target. In a
 non-interactive command it prints the available configured agents, raw harness

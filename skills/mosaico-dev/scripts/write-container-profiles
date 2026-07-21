@@ -72,6 +72,13 @@ profile_contract() {
       TRANSPORT=pty
       BUNDLE_ARGS_JSON="${MOSAICO_DEV_GROK_ARGS_JSON:-[]}"
       ;;
+    goose-acp)
+      AGENT_SLUG=goose
+      BUNDLE=goose-acp
+      HARNESS=goose
+      TRANSPORT=acp
+      BUNDLE_ARGS_JSON="${MOSAICO_DEV_GOOSE_ACP_ARGS_JSON:-[]}"
+      ;;
     opencode)
       AGENT_SLUG=opencode
       BUNDLE=opencode
@@ -104,7 +111,7 @@ profile_contract() {
       BUNDLE_ARGS_JSON="${MOSAICO_DEV_OPENCODE_OLLAMA_ARGS_JSON:-${default_opencode_args}}"
       ;;
     *)
-      printf 'unsupported profile %s; expected claude|claude-acp|codex|codex-app-server|grok|opencode|opencode-acp|codex-ollama|opencode-ollama\n' "${profile}" >&2
+      printf 'unsupported profile %s; expected claude|claude-acp|codex|codex-app-server|grok|goose-acp|opencode|opencode-acp|codex-ollama|opencode-ollama\n' "${profile}" >&2
       exit 2
       ;;
   esac

@@ -124,6 +124,7 @@ pub(in crate::cli) fn harness_name(harness: Harness) -> &'static str {
         Harness::Codex => "Codex",
         Harness::Opencode => "OpenCode",
         Harness::Grok => "Grok",
+        Harness::Goose => "Goose",
         Harness::Unknown => "Unknown",
     }
 }

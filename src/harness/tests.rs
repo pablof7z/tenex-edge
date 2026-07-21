@@ -15,10 +15,52 @@ fn every_declared_driver_cell_looks_up() {
 }
 
 #[test]
+fn every_canonical_harness_has_a_driver() {
+    for harness in [
+        Harness::ClaudeCode,
+        Harness::Codex,
+        Harness::Opencode,
+        Harness::Grok,
+        Harness::Goose,
+    ] {
+        assert!(
+            driver::all().iter().any(|driver| driver.harness == harness),
+            "{} has no driver",
+            harness.as_str()
+        );
+    }
+}
+
+#[test]
 fn invalid_driver_cells_are_absent() {
     assert!(driver::lookup(Harness::Codex, Transport::Acp).is_none());
     assert!(driver::lookup(Harness::Grok, Transport::AppServer).is_none());
     assert!(driver::lookup(Harness::Opencode, Transport::AppServer).is_none());
+    assert!(driver::lookup(Harness::Goose, Transport::Pty).is_none());
+    assert!(driver::lookup(Harness::Goose, Transport::AppServer).is_none());
+}
+
+#[test]
+fn goose_uses_native_acp_with_cross_process_resume() {
+    let goose = driver::lookup(Harness::Goose, Transport::Acp).unwrap();
+    assert_eq!(goose.base_argv, ["goose", "acp"]);
+    assert_eq!(goose.resume, ResumeMechanism::AcpSessionLoad);
+    assert_eq!(goose.steer, SteerPrimitive::None);
+    assert_eq!(goose.turn, TurnModel::RpcTurn);
+    assert_eq!(goose.profile, ProfileMechanism::Unsupported);
+}
+
+#[test]
+fn goose_bundle_round_trips_only_its_canonical_name() {
+    let cfg: HarnessesConfig =
+        serde_json::from_str(r#"{"goose-acp":{"harness":"goose","transport":"acp"}}"#).unwrap();
+    let bundle = cfg.get("goose-acp").unwrap();
+    assert_eq!(bundle.harness, Harness::Goose);
+    assert_eq!(
+        serde_json::to_value(&cfg).unwrap()["goose-acp"]["harness"],
+        "goose"
+    );
+    assert!(resolve_with(&cfg, "goose-acp", Some("profile"), scratch().path()).is_err());
 }
 
 #[test]
@@ -26,7 +68,7 @@ fn config_accepts_only_harness_transport_and_args() {
     let cfg: HarnessesConfig = serde_json::from_str(
         r#"{
           "yolo-claude": {
-            "harness": "claude",
+            "harness": "claude-code",
             "transport": "pty",
             "args": ["--dangerously-skip-permissions"]
           }
@@ -37,12 +79,21 @@ fn config_accepts_only_harness_transport_and_args() {
     assert_eq!(cfg.get("yolo-claude").unwrap().transport, Transport::Pty);
 
     for removed in [
-        r#"{"x":{"harness":"claude","transport":"pty","profile":"reviewer"}}"#,
+        r#"{"x":{"harness":"claude-code","transport":"pty","profile":"reviewer"}}"#,
         r#"{"x":{"harness":"codex","transport":"app-server","codex_config_profile":"planner"}}"#,
-        r#"{"x":{"harness":"claude","transport":"pty","commands":["claude"]}}"#,
+        r#"{"x":{"harness":"claude-code","transport":"pty","commands":["claude"]}}"#,
     ] {
         assert!(serde_json::from_str::<HarnessesConfig>(removed).is_err());
     }
+}
+
+#[test]
+fn removed_claude_alias_is_rejected() {
+    assert_eq!(Harness::from_str("claude"), Harness::Unknown);
+    assert!(serde_json::from_str::<HarnessesConfig>(
+        r#"{"legacy":{"harness":"claude","transport":"pty"}}"#
+    )
+    .is_err());
 }
 
 #[test]
@@ -54,7 +105,7 @@ fn missing_bundle_fails_without_builtin_fallback() {
 #[test]
 fn claude_pty_combines_bundle_args_and_agent_profile() {
     let cfg: HarnessesConfig = serde_json::from_str(
-        r#"{"yolo-claude":{"harness":"claude","transport":"pty","args":["--dangerously-skip-permissions"]}}"#,
+        r#"{"yolo-claude":{"harness":"claude-code","transport":"pty","args":["--dangerously-skip-permissions"]}}"#,
     )
     .unwrap();
     let resolved = resolve_with(&cfg, "yolo-claude", Some("reviewer"), scratch().path()).unwrap();
@@ -85,7 +136,7 @@ fn codex_pty_applies_profile_flag_in_code() {
 #[test]
 fn missing_agent_profile_uses_harness_default() {
     let cfg: HarnessesConfig =
-        serde_json::from_str(r#"{"claude":{"harness":"claude","transport":"pty"}}"#).unwrap();
+        serde_json::from_str(r#"{"claude":{"harness":"claude-code","transport":"pty"}}"#).unwrap();
     let resolved = resolve_with(&cfg, "claude", None, scratch().path()).unwrap();
     assert_eq!(resolved.base_argv, ["claude"]);
 }
@@ -121,7 +172,8 @@ fn codex_app_server_stages_named_profile() {
 #[test]
 fn unsupported_profile_pair_fails_loud() {
     let cfg: HarnessesConfig =
-        serde_json::from_str(r#"{"claude-rpc":{"harness":"claude","transport":"acp"}}"#).unwrap();
+        serde_json::from_str(r#"{"claude-rpc":{"harness":"claude-code","transport":"acp"}}"#)
+            .unwrap();
     assert!(resolve_with(&cfg, "claude-rpc", Some("reviewer"), scratch().path()).is_err());
     assert!(resolve_with(&cfg, "claude-rpc", None, scratch().path()).is_ok());
 }
@@ -129,7 +181,7 @@ fn unsupported_profile_pair_fails_loud() {
 #[test]
 fn native_selector_uses_only_supported_driver_cells() {
     let cfg: HarnessesConfig =
-        serde_json::from_str(r#"{"claude":{"harness":"claude","transport":"pty"}}"#).unwrap();
+        serde_json::from_str(r#"{"claude":{"harness":"claude-code","transport":"pty"}}"#).unwrap();
     let scratch = scratch();
     let mut resolved = resolve_with(&cfg, "claude", None, scratch.path()).unwrap();
     apply_native_agent(
@@ -146,7 +198,8 @@ fn native_selector_uses_only_supported_driver_cells() {
 #[test]
 fn claude_acp_defers_native_agent_to_session_new() {
     let cfg: HarnessesConfig =
-        serde_json::from_str(r#"{"claude-acp":{"harness":"claude","transport":"acp"}}"#).unwrap();
+        serde_json::from_str(r#"{"claude-acp":{"harness":"claude-code","transport":"acp"}}"#)
+            .unwrap();
     let scratch = scratch();
     let mut resolved = resolve_with(&cfg, "claude-acp", None, scratch.path()).unwrap();
     apply_native_agent(

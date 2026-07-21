@@ -52,6 +52,18 @@ ARG GROK_VERSION=0.2.102
 RUN curl -fsSL https://x.ai/cli/install.sh \
     | HOME=/opt/grok GROK_BIN_DIR=/usr/local/bin bash -s "${GROK_VERSION}"
 
+ARG GOOSE_VERSION=1.43.0
+ARG TARGETARCH=arm64
+RUN case "${TARGETARCH}" in \
+      arm64) goose_arch=aarch64 ;; \
+      amd64) goose_arch=x86_64 ;; \
+      *) echo "unsupported Goose architecture: ${TARGETARCH}" >&2; exit 2 ;; \
+    esac \
+    && curl -fsSL \
+      "https://github.com/aaif-goose/goose/releases/download/v${GOOSE_VERSION}/goose-${goose_arch}-unknown-linux-gnu.tar.gz" \
+      | tar -xzf - -C /usr/local/bin ./goose \
+    && chmod +x /usr/local/bin/goose
+
 # Grok's terminal tool starts a login shell that may replace PATH. Keep the
 # profile-local build reachable at a stable system path for injected commands.
 RUN printf '#!/usr/bin/env bash\nexec /state/target/debug/mosaico "$@"\n' \
@@ -64,10 +76,12 @@ ENV HOME=/state/home \
     XDG_CONFIG_HOME=/state/home/.config \
     XDG_CACHE_HOME=/state/home/.cache \
     XDG_DATA_HOME=/state/home/.local/share \
+    XDG_STATE_HOME=/state/home/.local/state \
     CARGO_HOME=/state/cargo \
     CARGO_TARGET_DIR=/state/target \
     CODEX_HOME=/state/home/.codex \
     GROK_HOME=/state/home/.grok \
+    GOOSE_DISABLE_KEYRING=1 \
     MOSAICO_CONFIG=/state/mosaico/config.json \
     MOSAICO_HOME=/state/mosaico \
     MOSAICO_BIN=/state/target/debug/mosaico \

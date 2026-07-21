@@ -16,6 +16,7 @@ pub enum Harness {
     Codex,
     Opencode,
     Grok,
+    Goose,
     Unknown,
 }
 
@@ -26,6 +27,7 @@ impl Harness {
             Harness::Codex => "codex",
             Harness::Opencode => "opencode",
             Harness::Grok => "grok",
+            Harness::Goose => "goose",
             Harness::Unknown => "unknown",
         }
     }
@@ -33,10 +35,11 @@ impl Harness {
     #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Self {
         match s {
-            "claude-code" | "claude" => Harness::ClaudeCode,
+            "claude-code" => Harness::ClaudeCode,
             "codex" => Harness::Codex,
             "opencode" => Harness::Opencode,
             "grok" => Harness::Grok,
+            "goose" => Harness::Goose,
             _ => Harness::Unknown,
         }
     }
@@ -48,6 +51,7 @@ impl Harness {
             Harness::Codex => "codex",
             Harness::Opencode => "opencode",
             Harness::Grok => "grok",
+            Harness::Goose => "goose",
             Harness::Unknown => "unknown",
         }
     }

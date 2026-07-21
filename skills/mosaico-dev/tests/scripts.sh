@@ -142,10 +142,10 @@ WRITER_OUTPUT="$(
     MOSAICO_DEV_CODEX_CONFIG_PROFILE=planner \
     MOSAICO_DEV_CODEX_APP_SERVER_ARGS_JSON='["--strict-config"]' \
     bash "${SKILL}/scripts/write-container-profiles" "${WRITER_ENV}" \
-      claude-acp codex-app-server grok codex-ollama opencode-ollama
+      claude-acp codex-app-server grok goose-acp codex-ollama opencode-ollama
 )"
 
-for profile in claude-acp codex-app-server grok codex-ollama opencode-ollama; do
+for profile in claude-acp codex-app-server grok goose-acp codex-ollama opencode-ollama; do
   HARNESSES="${TMP}/container-state/${profile}/mosaico/harnesses.json"
   AGENT="$(find "${TMP}/container-state/${profile}/mosaico/agents" -type f -name '*.json')"
   CONFIG="${TMP}/container-state/${profile}/mosaico/config.json"
@@ -166,6 +166,7 @@ assert_json '.["codex-app-server"].args == ["--strict-config"]' \
 assert_json '.["grok"] == {"harness":"grok","transport":"pty"}' \
   "${TMP}/container-state/grok/mosaico/harnesses.json" \
   'Grok profile emits a native PTY bundle'
+assert_json '.["goose-acp"] == {"harness":"goose","transport":"acp"}' "${TMP}/container-state/goose-acp/mosaico/harnesses.json" 'Goose profile emits a native ACP bundle'
 assert_json '.profile == "planner"' \
   "${TMP}/container-state/codex-app-server/mosaico/agents/codex.json" \
   'Codex named profile belongs to agent config'
@@ -175,14 +176,13 @@ assert_json '.["codex-ollama"].args == ["--oss","--local-provider","ollama"]' \
 assert_json '.["opencode-ollama"].args == ["-m","ollama/deepseek-r1:8b"]' \
   "${TMP}/container-state/opencode-ollama/mosaico/harnesses.json" \
   'OpenCode Ollama bundle owns model args'
-
 BACKEND_KEY_COUNT="$(
-  for profile in claude-acp codex-app-server grok codex-ollama opencode-ollama; do
+  for profile in claude-acp codex-app-server grok goose-acp codex-ollama opencode-ollama; do
     jq -r '.mosaicoPrivateKey' \
       "${TMP}/container-state/${profile}/mosaico/config.json"
   done | sort -u | wc -l | tr -d ' '
 )"
-assert_eq 5 "${BACKEND_KEY_COUNT}" 'each profile has a distinct backend key'
+assert_eq 6 "${BACKEND_KEY_COUNT}" 'each profile has a distinct backend key'
 CLAUDE_BACKEND_BEFORE="$(<"${TMP}/writer-work/keys/claude-acp.nsec")"
 PATH="${TMP}/writer-bin:${PATH}" \
   NAK_COUNTER_FILE="${TMP}/nak-counter" \

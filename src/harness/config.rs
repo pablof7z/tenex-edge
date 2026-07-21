@@ -24,8 +24,8 @@ pub struct HarnessesConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HarnessBundle {
-    /// Which underlying CLI. Parsed via `Harness::from_str` so `"claude"` and
-    /// `"claude-code"` both resolve; `Harness::Unknown` is rejected.
+    /// Which underlying CLI. Parsed via the canonical [`Harness`] names;
+    /// `Harness::Unknown` is rejected.
     #[serde(with = "harness_serde")]
     pub harness: Harness,
     /// How mosaico drives that CLI.
@@ -188,7 +188,7 @@ mod harness_serde {
         let raw = String::deserialize(d)?;
         match Harness::from_str(&raw) {
             Harness::Unknown => Err(serde::de::Error::custom(format!(
-                "unknown harness {raw:?} (expected claude-code|codex|opencode|grok)"
+                "unknown harness {raw:?} (expected claude-code|codex|opencode|grok|goose)"
             ))),
             h => Ok(h),
         }

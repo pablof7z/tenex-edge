@@ -10,7 +10,7 @@ pub(in crate::cli) enum HarnessAction {
     /// timeout, …) is fabric plumbing, never something to surface to the
     /// harness or inject into the agent's context.
     Hook {
-        /// Harness name: claude-code, codex, opencode, grok, …
+        /// Hook-capable harness name: claude-code, codex, opencode, grok, …
         /// Run with name "help" to list known harnesses.
         harness: String,
         /// Hook type the harness fires: session-start, user-prompt-submit,

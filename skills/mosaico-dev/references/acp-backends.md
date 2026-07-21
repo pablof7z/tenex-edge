@@ -1,6 +1,6 @@
 # ACP and app-server backends
 
-Use this reference for Claude ACP, Codex app-server, and OpenCode ACP labs.
+Use this reference for Claude ACP, Codex app-server, Goose ACP, and OpenCode ACP labs.
 These transports use structured RPC instead of terminal-byte injection.
 
 ## Configuration contract
@@ -60,6 +60,7 @@ false.
 | --- | --- | --- | --- |
 | `claude-acp` | `claude-code` | `acp` | `MOSAICO_DEV_CLAUDE_ACP_ARGS_JSON` |
 | `codex-app-server` | `codex` | `app-server` | `MOSAICO_DEV_CODEX_APP_SERVER_ARGS_JSON` |
+| `goose-acp` | `goose` | `acp` | `MOSAICO_DEV_GOOSE_ACP_ARGS_JSON` |
 | `opencode-acp` | `opencode` | `acp` | `MOSAICO_DEV_OPENCODE_ACP_ARGS_JSON` |
 
 Default args are `[]`. Use the listed writer override only when the lab needs
@@ -76,8 +77,8 @@ MOSAICO_DEV_CODEX_CONFIG_PROFILE=planner \
 The writer places `"profile":"planner"` in the Codex agent file. Mosaico then
 composes `$CODEX_HOME/planner.config.toml` over the base config in an isolated
 app-server home. Codex app-server does not accept the native `--profile` flag.
-Claude ACP and OpenCode ACP do not support named agent profiles; omit `profile`
-for those combinations.
+Claude ACP, Goose ACP, and OpenCode ACP do not support named agent profiles;
+omit `profile` for those combinations.
 
 ## Smoke before launch
 
@@ -90,8 +91,11 @@ skills/mosaico-dev/scripts/launch-agent "${LAB_ENV}" smoke claude-acp
 ```
 
 A passing smoke proves initialization, session/thread creation, a real turn,
-and cross-process resume. ACP uses `session/load`; Codex app-server uses
-`thread/resume` and a second real turn.
+and a second real turn after cross-process resume. ACP uses `session/load`;
+Codex app-server uses `thread/resume`.
+
+Goose's canonical command is `goose acp`. Do not configure a PTY bundle or a
+native profile for Goose; neither capability is supported.
 
 ## Launch
 

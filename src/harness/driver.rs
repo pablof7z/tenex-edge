@@ -163,6 +163,17 @@ static DRIVERS: &[HarnessDriver] = &[
         turn: TurnModel::InteractivePty,
         profile: ProfileMechanism::Unsupported,
     },
+    // ── Goose (native ACP only) ───────────────────────────────────
+    HarnessDriver {
+        harness: Harness::Goose,
+        transport: Transport::Acp,
+        base_argv: &["goose", "acp"],
+        base_env: &[],
+        resume: ResumeMechanism::AcpSessionLoad,
+        steer: SteerPrimitive::None,
+        turn: TurnModel::RpcTurn,
+        profile: ProfileMechanism::Unsupported,
+    },
 ];
 
 /// Look up the driver for a `(harness, transport)` pair. `None` for invalid

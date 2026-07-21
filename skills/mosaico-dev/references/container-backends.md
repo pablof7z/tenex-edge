@@ -20,6 +20,9 @@ Codex staging includes base auth/config and top-level named `*.config.toml`
 files. Claude may source current OAuth state from the macOS Keychain. OpenCode
 uses its staged XDG config/data homes. Grok copies `auth.json` and optional
 `config.toml` into writable isolated `GROK_HOME` without mutating host files.
+Goose copies `config.yaml` and optional permissions into its isolated XDG home,
+then stages the macOS `goose`/`secrets` Keychain item as a private
+`secrets.yaml`; its session database is never imported from the host.
 
 ## State boundary
 
@@ -111,7 +114,7 @@ translation are code-owned. Unknown bundle fields fail parsing.
 
 ```bash
 skills/mosaico-dev/scripts/write-container-profiles "${LAB_ENV}" \
-  claude claude-acp codex codex-app-server grok opencode opencode-acp \
+  claude claude-acp codex codex-app-server grok goose-acp opencode opencode-acp \
   codex-ollama opencode-ollama
 ```
 
@@ -129,6 +132,7 @@ Every profile has an exact JSON-array override:
 | `codex` | `MOSAICO_DEV_CODEX_ARGS_JSON` |
 | `codex-app-server` | `MOSAICO_DEV_CODEX_APP_SERVER_ARGS_JSON` |
 | `grok` | `MOSAICO_DEV_GROK_ARGS_JSON` |
+| `goose-acp` | `MOSAICO_DEV_GOOSE_ACP_ARGS_JSON` |
 | `opencode` | `MOSAICO_DEV_OPENCODE_ARGS_JSON` |
 | `opencode-acp` | `MOSAICO_DEV_OPENCODE_ACP_ARGS_JSON` |
 | `codex-ollama` | `MOSAICO_DEV_CODEX_OLLAMA_ARGS_JSON` |

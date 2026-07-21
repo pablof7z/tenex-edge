@@ -116,7 +116,7 @@ fn harness_resume_policy_ignores_stale_agent_binding() {
     env.set_var("HOME", home.path());
     write(
         &mosaico_home.join("harnesses.json"),
-        r#"{"claude-pty":{"harness":"claude","transport":"pty","args":["--dangerously-skip-permissions"]}}"#,
+        r#"{"claude-pty":{"harness":"claude-code","transport":"pty","args":["--dangerously-skip-permissions"]}}"#,
     );
     write(
         &mosaico_home.join("agents/developer.json"),
@@ -146,8 +146,8 @@ fn mapped_resume_prefers_its_recorded_pty_bundle() {
     write(
         &mosaico_home.join("harnesses.json"),
         r#"{
-          "claude-fast":{"harness":"claude","transport":"pty","args":["--fast"]},
-          "claude-safe":{"harness":"claude","transport":"pty","args":["--safe"]}
+          "claude-fast":{"harness":"claude-code","transport":"pty","args":["--fast"]},
+          "claude-safe":{"harness":"claude-code","transport":"pty","args":["--safe"]}
         }"#,
     );
 
@@ -200,7 +200,7 @@ async fn conflict_combination_resolves_and_persists_selected_binding() {
     write(
         &mosaico_home.join("harnesses.json"),
         r#"{
-          "claude-pty":{"harness":"claude","transport":"pty"},
+          "claude-pty":{"harness":"claude-code","transport":"pty"},
           "codex-pty":{"harness":"codex","transport":"pty"}
         }"#,
     );
@@ -264,5 +264,18 @@ async fn managed_generic_creates_preferred_rpc_bundle() {
     assert_eq!(
         saved.get("codex-app-server").unwrap().transport,
         Transport::AppServer
+    );
+}
+
+#[test]
+fn goose_uses_acp_for_managed_and_interactive_launches() {
+    for intent in [LaunchIntent::Managed, LaunchIntent::Interactive] {
+        assert_eq!(
+            desired_transport(crate::session::Harness::Goose, intent, false).unwrap(),
+            Transport::Acp
+        );
+    }
+    assert!(
+        desired_transport(crate::session::Harness::Goose, LaunchIntent::Managed, true).is_err()
     );
 }

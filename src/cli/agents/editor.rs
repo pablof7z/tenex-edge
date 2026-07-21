@@ -257,7 +257,7 @@ mod tests {
     #[test]
     fn compatible_bundle_filter_never_crosses_harnesses() {
         let config: HarnessesConfig = serde_json::from_str(
-            r#"{"claude-acp":{"harness":"claude","transport":"acp"},"codex-pty":{"harness":"codex","transport":"pty"}}"#,
+            r#"{"claude-acp":{"harness":"claude-code","transport":"acp"},"codex-pty":{"harness":"codex","transport":"pty"}}"#,
         )
         .unwrap();
         assert_eq!(

@@ -112,8 +112,10 @@ jq '.hooks | keys' .container-state/<profile>/home/.claude/settings.json
 find .container-state/<profile>/mosaico/sessions -name hook-calls.jsonl -print
 ```
 
-Doctor/install must use the real harness name (`claude-code`, `codex`, or
-`opencode`) even when the public agent slug differs.
+Doctor/install must use the canonical harness name (`claude-code`, `codex`,
+`grok`, `goose`, or `opencode`) even when the public agent slug differs. Goose
+has no installable hook surface; doctor validates its ACP command and staged
+auth/config instead.
 
 ## Same-profile inspection broke a live agent
 

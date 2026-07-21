@@ -121,7 +121,7 @@ ok "configs written (both whitelist both pubkeys; relays=[${RELAY_WS}])"
 cat >"$(backend_mosaico_home mosaico-a)/harnesses.json" <<'JSON'
 {
   "yolo-claude": {
-    "harness": "claude",
+    "harness": "claude-code",
     "transport": "pty",
     "args": ["--dangerously-skip-permissions"]
   }

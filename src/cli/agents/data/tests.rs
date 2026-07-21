@@ -31,7 +31,7 @@ fn combines_configured_native_and_generic_agents() {
     );
     let catalog = AgentCatalog::discover(&DiscoveryRoots::for_user_home(home.path()), &[]).unwrap();
     let harnesses: HarnessesConfig = serde_json::from_str(
-        r#"{"claude-pty":{"harness":"claude","transport":"pty"},"codex-pty":{"harness":"codex","transport":"pty"}}"#,
+        r#"{"claude-pty":{"harness":"claude-code","transport":"pty"},"codex-pty":{"harness":"codex","transport":"pty"}}"#,
     )
     .unwrap();
     crate::identity::add_local_agent(home.path(), "writer", "codex-pty", None, 1).unwrap();
@@ -61,7 +61,8 @@ fn configured_native_profile_is_one_row_with_exact_profile_attached() {
     );
     let catalog = AgentCatalog::discover(&DiscoveryRoots::for_user_home(home.path()), &[]).unwrap();
     let harnesses: HarnessesConfig =
-        serde_json::from_str(r#"{"claude-pty":{"harness":"claude","transport":"pty"}}"#).unwrap();
+        serde_json::from_str(r#"{"claude-pty":{"harness":"claude-code","transport":"pty"}}"#)
+            .unwrap();
     crate::identity::add_local_agent(home.path(), "reviewer", "claude-pty", None, 1).unwrap();
     let rows = rows(home.path(), &[Harness::ClaudeCode], &harnesses, &catalog);
     let reviewer = rows.iter().find(|row| row.slug == "reviewer").unwrap();

@@ -5,16 +5,29 @@ use std::time::Duration;
 #[test]
 fn acp_agent_receives_the_signer_matching_its_assigned_pubkey() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    assert_acp_identity("opencode");
+}
+
+#[test]
+fn goose_acp_agent_receives_the_signer_matching_its_assigned_pubkey() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    assert_acp_identity("goose");
+}
+
+fn assert_acp_identity(harness: &str) {
     let home = Home::new();
     write_config(&home, false);
     std::fs::write(
         home.dir.path().join("harnesses.json"),
-        r#"{"test-acp":{"harness":"opencode","transport":"acp"}}"#,
+        serde_json::json!({
+            "test-acp": {"harness": harness, "transport": "acp"}
+        })
+        .to_string(),
     )
     .unwrap();
-    let agent = "acp-agent-nsec";
-    mosaico::identity::add_local_agent(home.dir.path(), agent, "test-acp", None, 1).unwrap();
-    let channel = format!("acp-agent-nsec-{}", std::process::id());
+    let agent = format!("{harness}-acp-agent-nsec");
+    mosaico::identity::add_local_agent(home.dir.path(), &agent, "test-acp", None, 1).unwrap();
+    let channel = format!("{harness}-acp-agent-nsec-{}", std::process::id());
     let work_dir = home.dir.path().join(&channel);
     std::fs::create_dir_all(&work_dir).unwrap();
     std::fs::write(
@@ -23,21 +36,24 @@ fn acp_agent_receives_the_signer_matching_its_assigned_pubkey() {
     )
     .unwrap();
 
+    let isolated_home = home.dir.path().to_string_lossy().into_owned();
     let out = run_cli_with_env_in_dir(
         &home,
-        &["agents", agent, "--workspace", &channel],
-        &[],
+        &["agents", &agent, "--workspace", &channel],
+        &[("HOME", &isolated_home)],
         &work_dir,
     );
     assert!(
         out.status.success(),
-        "ACP launch failed: {}",
-        String::from_utf8_lossy(&out.stderr)
+        "ACP launch failed: {}\ndaemon log:\n{}",
+        String::from_utf8_lossy(&out.stderr),
+        daemon_log(&home)
     );
     let capture = home.dir.path().join("captured-acp-identity");
     assert!(
         wait_until(Duration::from_secs(10), || capture.exists()),
-        "ACP harness did not capture its assigned identity"
+        "ACP harness did not capture its assigned identity\ndaemon log:\n{}",
+        daemon_log(&home)
     );
 
     let captured = std::fs::read_to_string(&capture).unwrap();
@@ -45,11 +61,33 @@ fn acp_agent_receives_the_signer_matching_its_assigned_pubkey() {
     let pubkey = lines.next().expect("captured pubkey");
     let nsec = lines.next().expect("captured nsec");
     assert_eq!(Keys::parse(nsec).unwrap().public_key().to_hex(), pubkey);
-    assert!(Store::open(&home.store_path())
-        .unwrap()
-        .get_session(pubkey)
+    assert!(wait_until(Duration::from_secs(10), || {
+        Store::open(&home.store_path())
+            .and_then(|store| store.native_resume_locator(pubkey, harness))
+            .is_ok_and(|locator| locator.is_some())
+    }));
+    let store = Store::open(&home.store_path()).unwrap();
+    let session = store.get_session(pubkey).unwrap().unwrap();
+    assert_eq!(session.observed_harness, harness);
+    assert_eq!(session.admitted_bundle, "test-acp");
+    assert_eq!(session.admitted_transport, "acp");
+    assert_eq!(session.endpoint_provenance, "launch");
+    assert!(store
+        .locator_for_session(pubkey, harness, "acp")
         .unwrap()
         .is_some());
+    assert_eq!(
+        store
+            .native_resume_locator(pubkey, harness)
+            .unwrap()
+            .unwrap()
+            .locator_value,
+        "test-native-session"
+    );
 
     stop_daemon(&home);
+}
+
+fn daemon_log(home: &Home) -> String {
+    std::fs::read_to_string(home.dir.path().join("daemon.log")).unwrap_or_default()
 }

@@ -38,6 +38,14 @@ assert_mounts_only() {
   esac
 }
 
+assert_no_mounts() {
+  local agent="$1"
+  AGENT="${agent}"
+  build_host_auth_mounts
+  [[ "${#HOST_AUTH_MOUNTS[@]}" -eq 0 ]] \
+    || fail "${agent} should stage auth without host mounts"
+}
+
 HOST_HOME="${TMP}/host"
 # Consumed by functions sourced below.
 # shellcheck disable=SC2034
@@ -45,6 +53,7 @@ HOST_AUTH=1
 mkdir -p \
   "${HOST_HOME}/.codex/agents" \
   "${HOST_HOME}/.claude/agents" \
+  "${HOST_HOME}/.config/goose" \
   "${HOST_HOME}/.local/share/opencode" \
   "${HOST_HOME}/.config/opencode/agents"
 printf '{}\n' >"${HOST_HOME}/.codex/auth.json"
@@ -56,12 +65,18 @@ printf '{}\n' >"${HOST_HOME}/.claude/settings.json"
 printf '{}\n' >"${HOST_HOME}/.local/share/opencode/auth.json"
 printf '{}\n' >"${HOST_HOME}/.local/share/opencode/account.json"
 printf '{}\n' >"${HOST_HOME}/.config/opencode/opencode.jsonc"
+printf 'GOOSE_PROVIDER: openrouter\nGOOSE_MODEL: test/model\n' \
+  >"${HOST_HOME}/.config/goose/config.yaml"
+printf '{}\n' >"${HOST_HOME}/.config/goose/permission.yaml"
+printf '{"OPENROUTER_API_KEY":"test"}\n' \
+  >"${HOST_HOME}/.config/goose/secrets.yaml"
 
 # shellcheck source=/dev/null
 source "${ROOT}/containers/mosaico/host-auth.bash"
 assert_mounts_only claude '/host-auth/claude'
 assert_mounts_only codex '/host-auth/codex'
 assert_mounts_only opencode '/host-auth/opencode-config'
+assert_no_mounts goose
 echo 'ok: host auth mounts are provider-scoped'
 
 stage_provider() {
@@ -88,10 +103,26 @@ stage_provider opencode "${TMP}/state-opencode/home/.config/opencode/agents" \
   /host-auth/opencode-config/agents
 echo 'ok: native provider agent profiles are staged'
 
+AGENT=goose
+STATE_DIR="${TMP}/state-goose"
+mkdir -p "${STATE_DIR}/home/.config/goose"
+stage_host_auth
+for path in config.yaml permission.yaml secrets.yaml; do
+  [[ -f "${STATE_DIR}/home/.config/goose/${path}" ]] \
+    || fail "Goose ${path} was not staged"
+  [[ ! -L "${STATE_DIR}/home/.config/goose/${path}" ]] \
+    || fail "Goose ${path} must not point back into host state"
+done
+GOOSE_SECRET_MODE="$(stat -f '%Lp' "${STATE_DIR}/home/.config/goose/secrets.yaml" 2>/dev/null \
+  || stat -c '%a' "${STATE_DIR}/home/.config/goose/secrets.yaml")"
+[[ "${GOOSE_SECRET_MODE}" == "600" ]] \
+  || fail 'Goose staged secrets are not private'
+echo 'ok: Goose auth and config are copied into isolated writable state'
+
 CONFIG_HOME="${TMP}/mosaico"
 mkdir -p "${CONFIG_HOME}/agents"
 printf '%s\n' \
-  '{"codex-app-server":{"harness":"codex","transport":"app-server","args":["-c","model=test"]}}' \
+  '{"codex-app-server":{"harness":"codex","transport":"app-server","args":["-c","model=test"]},"goose-acp":{"harness":"goose","transport":"acp"}}' \
   >"${CONFIG_HOME}/harnesses.json"
 printf '%s\n' \
   '{"slug":"codex","created_at":1,"perSessionKey":true,"harness":"codex-app-server"}' \
@@ -99,6 +130,14 @@ printf '%s\n' \
 MOSAICO_AGENT=codex MOSAICO_HOME="${CONFIG_HOME}" MOSAICO_DOCTOR_CONFIG_ONLY=1 \
   bash "${ROOT}/containers/mosaico/doctor" codex 1 >/dev/null
 echo 'ok: doctor accepts current harness and keyless agent schemas'
+
+printf '%s\n' \
+  '{"legacy":{"harness":"claude","transport":"pty"}}' \
+  >"${CONFIG_HOME}/harnesses.json"
+if MOSAICO_AGENT=codex MOSAICO_HOME="${CONFIG_HOME}" MOSAICO_DOCTOR_CONFIG_ONLY=1 \
+  bash "${ROOT}/containers/mosaico/doctor" codex 1 >/dev/null 2>&1; then
+  fail 'doctor accepted the removed claude harness alias'
+fi
 
 printf '%s\n' \
   '{"codex-app-server":{"harness":"codex","transport":"app-server","profile":{}}}' \
@@ -118,7 +157,7 @@ if MOSAICO_AGENT=codex MOSAICO_HOME="${CONFIG_HOME}" MOSAICO_DOCTOR_CONFIG_ONLY=
   bash "${ROOT}/containers/mosaico/doctor" codex 1 >/dev/null 2>&1; then
   fail 'doctor accepted persisted keys for a per-session agent'
 fi
-echo 'ok: doctor rejects removed harness fields and redundant per-session keys'
+echo 'ok: doctor rejects aliases, removed harness fields, and redundant per-session keys'
 
 mkdir -p "${TMP}/fake-bin"
 # These are literal lines for the fake executable, not expressions here.

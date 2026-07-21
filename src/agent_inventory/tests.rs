@@ -22,7 +22,12 @@ fn bundleless_catalog_expands_profiles_and_includes_generic_agents() {
 
     let inventory = AgentInventory::build(
         home.path(),
-        &[Harness::ClaudeCode, Harness::Codex, Harness::Opencode],
+        &[
+            Harness::ClaudeCode,
+            Harness::Codex,
+            Harness::Opencode,
+            Harness::Goose,
+        ],
         &harnesses,
         &catalog,
         None,
@@ -38,6 +43,7 @@ fn bundleless_catalog_expands_profiles_and_includes_generic_agents() {
         [
             "claude",
             "codex",
+            "goose",
             "opencode",
             "writer-claude",
             "writer-codex"
@@ -68,7 +74,7 @@ fn configured_binding_collapses_profile_conflicts() {
     let catalog = AgentCatalog::discover(&DiscoveryRoots::for_user_home(home.path()), &[]).unwrap();
     let harnesses: HarnessesConfig = serde_json::from_str(
         r#"{
-          "claude-pty":{"harness":"claude","transport":"pty"},
+          "claude-pty":{"harness":"claude-code","transport":"pty"},
           "codex-pty":{"harness":"codex","transport":"pty"}
         }"#,
     )
@@ -97,7 +103,8 @@ fn sanitized_slug_reattaches_to_a_native_profile_with_spaces_in_its_name() {
     );
     let catalog = AgentCatalog::discover(&DiscoveryRoots::for_user_home(home.path()), &[]).unwrap();
     let harnesses: HarnessesConfig =
-        serde_json::from_str(r#"{"claude-pty":{"harness":"claude","transport":"pty"}}"#).unwrap();
+        serde_json::from_str(r#"{"claude-pty":{"harness":"claude-code","transport":"pty"}}"#)
+            .unwrap();
     // Mirrors `cli::agents::editor`'s `persistable_slug`: the raw native
     // profile name ("Ava Chen") isn't a valid slug, so the configured entry
     // is persisted under its sanitized form instead.
