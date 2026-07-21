@@ -66,7 +66,7 @@ fn bundleless_catalog_expands_profiles_and_includes_generic_agents() {
 }
 
 #[test]
-fn configured_binding_collapses_profile_conflicts() {
+fn configured_binding_keeps_other_harness_profiles_as_rebinding_choices() {
     let home = tempfile::tempdir().unwrap();
     write(
         &home.path().join(".codex/agents/writer.toml"),
@@ -96,7 +96,15 @@ fn configured_binding_collapses_profile_conflicts() {
 
     assert!(inventory.find("writer").is_some());
     assert!(inventory.find("writer-codex").is_none());
-    assert!(inventory.find("writer-claude").is_none());
+    let alternative = inventory.find("writer-claude").unwrap();
+    assert_eq!(alternative.agent_slug, "writer");
+    assert!(matches!(
+        alternative.source,
+        AgentSource::DetectedProfile {
+            persist_binding: true,
+            ..
+        }
+    ));
 }
 
 #[test]

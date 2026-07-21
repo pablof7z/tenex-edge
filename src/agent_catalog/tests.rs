@@ -1,6 +1,8 @@
 use super::*;
 use tempfile::TempDir;
 
+#[path = "tests/codex_named.rs"]
+mod codex_named;
 #[path = "tests/hermes.rs"]
 mod hermes;
 
