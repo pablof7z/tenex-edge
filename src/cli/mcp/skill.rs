@@ -76,18 +76,10 @@ pub(super) fn content(name: Option<&str>) -> Result<(String, String, String)> {
         .filter(|s| !s.is_empty())
         .unwrap_or("skill");
     if key == "list" || key == "index" {
-        return Ok((
-            "list".into(),
-            SKILL_URI.into(),
-            index_markdown(),
-        ));
+        return Ok(("list".into(), SKILL_URI.into(), index_markdown()));
     }
     let page = page(key)?;
-    Ok((
-        page.name.into(),
-        page_uri(page.name),
-        page.content.into(),
-    ))
+    Ok((page.name.into(), page_uri(page.name), page.content.into()))
 }
 
 pub(super) fn tool_result(name: Option<&str>) -> Result<Value> {
@@ -127,21 +119,6 @@ pub(super) fn resource_templates() -> Value {
         "description": "Agent skill entry or named reference. Use name=skill for the entry, list for the index.",
         "mimeType": "text/markdown",
     }])
-}
-
-/// Returns `Ok(None)` when `uri` is not a skill resource.
-pub(super) fn read_uri(uri: &str) -> Result<Option<String>> {
-    if uri == SKILL_URI {
-        return Ok(Some(content(None)?.2));
-    }
-    if let Some(name) = uri.strip_prefix(SKILL_PREFIX) {
-        let name = name.trim();
-        if name.is_empty() {
-            bail!("unsupported mosaico MCP resource URI: {uri}");
-        }
-        return Ok(Some(content(Some(name))?.2));
-    }
-    Ok(None)
 }
 
 fn page(key: &str) -> Result<&'static Page> {
@@ -201,19 +178,6 @@ mod tests {
         let err = content(Some("nope")).unwrap_err().to_string();
         assert!(err.contains("unknown skill page"));
         assert!(err.contains("coordination-guide"));
-    }
-
-    #[test]
-    fn skill_uris_read() {
-        assert!(read_uri(SKILL_URI)
-            .unwrap()
-            .unwrap()
-            .contains("Prime Directive"));
-        assert!(read_uri("mosaico://skill/identity-and-capabilities")
-            .unwrap()
-            .unwrap()
-            .contains("CLI wins"));
-        assert!(read_uri("mosaico://my/session").unwrap().is_none());
     }
 
     #[test]

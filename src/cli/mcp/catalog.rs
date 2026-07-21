@@ -67,11 +67,7 @@ const SPECS: &[ToolSpec] = &[
         description: "Read recent messages from a channel.",
         props: &[
             Prop::new("channel", "string", "Optional channel destination."),
-            Prop::new(
-                "session",
-                "string",
-                "Public session npub, hex pubkey, or handle.",
-            ),
+            SESSION_PROP,
             Prop::new("limit", "integer", "Maximum messages to return."),
             Prop::new("since", "string", "Unix timestamp or duration like 2h."),
             Prop::new("id", "string", "Read one message by id prefix."),
@@ -92,12 +88,15 @@ const SPECS: &[ToolSpec] = &[
                 "Allow literal mention-like text without tags.",
             ),
             Prop::new("channel", "string", "Optional destination channel."),
-            Prop::new(
-                "session",
-                "string",
-                "Public session npub, hex pubkey, or handle.",
-            ),
+            SESSION_PROP,
             Prop::new("long_message", "boolean", "Allow long messages."),
+            Prop::new(
+                "reply_to",
+                "string",
+                "Reply to this message id (short prefix from channel_read). \
+                 Threads the reply onto the original message and routes it to \
+                 that channel; tags/force/channel are ignored when set.",
+            ),
         ],
         required: &["message"],
         read_only: false,
@@ -111,11 +110,7 @@ const SPECS: &[ToolSpec] = &[
             Prop::new("about", "string", "Short stable channel description."),
             Prop::new("parent_channel", "string", "Parent channel reference."),
             Prop::new("agents", "array", "Agent targets as slug@backend strings."),
-            Prop::new(
-                "session",
-                "string",
-                "Public session npub, hex pubkey, or handle.",
-            ),
+            SESSION_PROP,
         ],
         required: &["name", "about"],
         read_only: false,
@@ -129,13 +124,37 @@ const SPECS: &[ToolSpec] = &[
         props: &[
             Prop::new("message_id", "string", "Target message id or short prefix."),
             Prop::new("emoji", "string", "Reaction emoji (e.g. 👍 ✅ 👀) or +/-."),
-            Prop::new(
-                "session",
-                "string",
-                "Public session npub, hex pubkey, or handle.",
-            ),
+            SESSION_PROP,
         ],
         required: &["message_id", "emoji"],
+        read_only: false,
+        destructive: false,
+    },
+    ToolSpec {
+        name: "mosaico.dispatch",
+        description: "Start a new fabric agent session and join it to channels. \
+                      Use to bring a capability online that is not already present; \
+                      prefer messaging an existing session that already owns the work.",
+        props: &[
+            Prop::new(
+                "target",
+                "string",
+                "Agent target as agent or agent@backend-label.",
+            ),
+            Prop::new("workspace", "string", "Workspace/root channel to run in."),
+            Prop::new(
+                "channels",
+                "array",
+                "Fully-qualified channels to join. Defaults to the workspace root.",
+            ),
+            Prop::new(
+                "message",
+                "string",
+                "Opening message delivered after the new session ACKs.",
+            ),
+            SESSION_PROP,
+        ],
+        required: &["target", "workspace", "message"],
         read_only: false,
         destructive: false,
     },
@@ -156,13 +175,15 @@ const SPECS: &[ToolSpec] = &[
     ),
 ];
 
+const SESSION_PROP: Prop = Prop::new(
+    "session",
+    "string",
+    "Public session npub, hex pubkey, or handle.",
+);
+
 const CHANNEL_PROPS: &[Prop] = &[
     Prop::new("channel", "string", "Channel name, path, or opaque id."),
-    Prop::new(
-        "session",
-        "string",
-        "Public session npub, hex pubkey, or handle.",
-    ),
+    SESSION_PROP,
 ];
 
 const fn channel_tool(
@@ -253,6 +274,7 @@ mod tests {
         assert!(names.contains(&"mosaico.skill".to_string()));
         assert!(names.contains(&"mosaico.channel_join".to_string()));
         assert!(names.contains(&"mosaico.channel_send".to_string()));
+        assert!(names.contains(&"mosaico.dispatch".to_string()));
         assert!(names.contains(&"mosaico.my_session".to_string()));
         assert!(!names.contains(&"mosaico.who".to_string()));
         assert!(!names.contains(&"mosaico.channels_join".to_string()));
