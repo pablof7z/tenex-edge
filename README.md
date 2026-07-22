@@ -1,8 +1,12 @@
 # mosaico
 
-![An agent notices a peer is mid-flight on the same code area and coordinates instead of colliding](docs/images/related-work-awareness.png)
+## A substrate to facilitate agentic self-organization
 
-## The work is already connected. The agents aren't.
+Mosaico is a very simple concept. It gives agents natural awareness that there are other actors around them, both humans and agents, that the project or task they are working on is just one part of a whole.
+
+When you think about it, nothing you work is truly separate, even highly disparate projects have, at least, something in common: *you*.
+
+![An agent notices a peer is mid-flight on the same code area and coordinates instead of colliding](docs/images/related-work-awareness.png)
 
 Every session you run works on its own thing — different projects, different
 machines, different vendors. But none of it is truly separate: work over here
