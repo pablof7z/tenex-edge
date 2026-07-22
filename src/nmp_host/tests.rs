@@ -7,17 +7,16 @@ mod auth_harness;
 use auth_harness::AuthRequiredRelay;
 
 #[test]
-fn query_is_authenticated_as_the_backend_and_pinned_to_the_configured_host() {
+fn public_query_is_pinned_to_the_configured_host() {
     let relay = RelayUrl::parse("wss://relay.example.com").unwrap();
     let relays = BTreeSet::from([relay.clone()]);
-    let backend = Keys::generate().public_key();
     let query = SubscriptionQuery {
         kinds: BTreeSet::from([9, 30315]),
         tag: Some(('h', "room".into())),
     };
 
-    let live = live_query(&relays, &query, AccessContext::Nip42(backend)).unwrap();
-    assert_eq!(live.0.access, AccessContext::Nip42(backend));
+    let live = live_query(&relays, &query, AccessContext::Public).unwrap();
+    assert_eq!(live.0.access, AccessContext::Public);
     assert_eq!(live.0.source, SourceAuthority::Pinned(relays));
     assert_eq!(live.0.selection.kinds, Some(query.kinds));
     let h = IndexedTagName::new('h').unwrap();
@@ -63,22 +62,29 @@ async fn strict_relay_authenticates_backend_reads_and_exact_author_writes() {
     let host = Arc::new(
         NmpHost::open(&[relay.url()], None, None, &backend).expect("open authenticated NMP host"),
     );
-    let mut materialized = host
-        .take_materialization_events()
-        .expect("take materialization stream");
-
-    host.apply(&SubEffect::Open {
-        id: "nip42-capstone".into(),
-        query: SubscriptionQuery {
-            kinds: BTreeSet::from([9000]),
-            tag: None,
-        },
-    })
-    .expect("open authenticated read");
-    let acquired = tokio::time::timeout(Duration::from_secs(10), materialized.recv())
-        .await
-        .expect("authenticated read deadline")
-        .expect("materialization stream remains open");
+    let subscription = host
+        .observe_with_access(
+            &SubscriptionQuery {
+                kinds: BTreeSet::from([9000]),
+                tag: None,
+            },
+            AccessContext::Nip42(backend.public_key()),
+        )
+        .expect("open authenticated read");
+    let acquired = tokio::time::timeout(
+        Duration::from_secs(10),
+        tokio::task::spawn_blocking(move || loop {
+            let frame = subscription
+                .recv()
+                .expect("authenticated observation remains open");
+            if let Some(event) = frame.deltas.iter().find_map(|delta| delta.event().cloned()) {
+                break event;
+            }
+        }),
+    )
+    .await
+    .expect("authenticated read deadline")
+    .expect("authenticated observation task");
     assert_eq!(acquired.id, seed.id);
 
     let written =

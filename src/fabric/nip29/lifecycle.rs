@@ -59,8 +59,8 @@ pub fn group_create_subgroup(child_h: &str, parent_h: &str) -> Result<EventBuild
 /// write) while keeping it `public` (the current product visibility policy) AND
 /// declares its NIP-29 subgroup parent via a `["parent", parent_h]` tag (per
 /// nostr-protocol/nips#2319). Unlike [`group_lock_closed`], `name` is a
-/// human-readable display name rather than the slug. Authenticated acquisition
-/// also supports private groups; this builder preserves Mosaico's public policy.
+/// human-readable display name rather than the slug. Shared acquisition follows
+/// this public visibility policy; closed membership still governs writes.
 pub fn group_lock_closed_with_parent(
     child_h: &str,
     name: &str,

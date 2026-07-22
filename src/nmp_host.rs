@@ -4,9 +4,9 @@
 //! deduplication, and acquisition evidence. Mosaico keeps its product read model:
 //! delivered events are projected into `state.db` by the existing fabric
 //! materializer. NMP also owns every durable write intent, route, receipt, and
-//! bounded retry. Shared reads authenticate as the daemon's stable backend/admin
-//! identity; writes authenticate as the exact event author. The provider supplies
-//! product policy and exact host authority.
+//! bounded retry. Shared reads are public because Mosaico-created groups are
+//! deliberately public; writes authenticate as the exact event author. The
+//! provider supplies product policy and exact host authority.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -34,7 +34,6 @@ pub(crate) struct NmpHost {
     engine: Engine,
     relays: BTreeSet<RelayUrl>,
     profile_relays: BTreeSet<RelayUrl>,
-    read_access: AccessContext,
     identities: Mutex<BTreeMap<nostr_sdk::PublicKey, IdentityRegistration>>,
     signing: Mutex<()>,
     subscriptions: Mutex<BTreeMap<String, ObservationCancel>>,
@@ -83,7 +82,6 @@ impl NmpHost {
             engine,
             relays: parsed,
             profile_relays,
-            read_access: AccessContext::Nip42(backend_keys.public_key()),
             identities: Mutex::new(BTreeMap::new()),
             signing: Mutex::new(()),
             subscriptions: Mutex::new(BTreeMap::new()),
@@ -109,8 +107,16 @@ impl NmpHost {
     /// Open a caller-owned NMP observation. Dropping the returned value closes
     /// it, making this suitable for precise, short-lived correlation queries.
     pub(crate) fn observe(&self, query: &SubscriptionQuery) -> Result<nmp::Subscription> {
+        self.observe_with_access(query, AccessContext::Public)
+    }
+
+    fn observe_with_access(
+        &self,
+        query: &SubscriptionQuery,
+        access: AccessContext,
+    ) -> Result<nmp::Subscription> {
         self.engine
-            .observe(live_query(&self.relays, query, self.read_access)?, None)
+            .observe(live_query(&self.relays, query, access)?, None)
             .context("opening NMP observation")
     }
 
