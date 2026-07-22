@@ -75,9 +75,13 @@ pub struct Cli {
     #[arg(long, hide = true)]
     pub all: bool,
 
-    /// Accept the current channel-topology suggestion using this child name.
-    #[arg(long, value_name = "NEW-CHANNEL-NAME")]
-    pub(super) yes_lets_move: Option<String>,
+    /// Accept the current channel-topology suggestion using this child name and topic.
+    #[arg(
+        long,
+        num_args = 2,
+        value_names = ["NEW-CHANNEL-NAME", "TOPIC"]
+    )]
+    pub(super) yes_lets_move: Option<Vec<String>>,
 
     #[command(subcommand)]
     pub(super) cmd: Option<Cmd>,
