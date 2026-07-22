@@ -101,11 +101,14 @@ pub async fn run(cli: Cli) -> Result<()> {
         crate::daemon::clear_inhibit();
         eprintln!("[mosaico] stop inhibit cleared");
     }
-    if let Some(name) = cli.yes_lets_move {
+    if let Some(values) = cli.yes_lets_move {
         if cli.cmd.is_some() {
             bail!("--yes-lets-move cannot be combined with another command");
         }
-        return channel_move::accept(name).await;
+        let mut values = values.into_iter();
+        let name = values.next().expect("clap requires a channel name");
+        let topic = values.next().expect("clap requires a channel topic");
+        return channel_move::accept(name, topic).await;
     }
     match cli.cmd {
         None => interactive::session_picker::home().await,

@@ -89,6 +89,50 @@ fn retry_can_continue_after_the_creator_already_switched_to_the_offered_child() 
     assert!(!caller_can_resume_offer("other", "root", Some("child")));
 }
 
+#[test]
+fn move_creation_uses_the_required_topic_as_the_child_about() {
+    let params = serde_json::json!({
+        "name": "focused",
+        "topic": "Coordinate the focused implementation",
+        "session": A1,
+    });
+    let created = move_create_params(
+        &params,
+        "root",
+        "focused",
+        "Coordinate the focused implementation",
+    );
+
+    assert_eq!(created["parent"], "root");
+    assert_eq!(created["name"], "focused");
+    assert_eq!(created["about"], "Coordinate the focused implementation");
+    assert_eq!(created["agents"], serde_json::json!([]));
+    assert_eq!(created["session"], A1);
+}
+
+#[tokio::test]
+async fn accepting_validates_the_topic_before_offer_lookup() {
+    let state = DaemonState::new_for_test().await;
+    let error = rpc_accept(
+        &state,
+        &serde_json::json!({ "name": "focused", "topic": "   ", "session": A1 }),
+    )
+    .await
+    .expect_err("empty topic must be rejected");
+
+    assert!(format!("{error:#}").contains("requires a non-empty channel topic"));
+
+    let too_long = "x".repeat(crate::channel_about::CHANNEL_ABOUT_MAX_CHARS + 1);
+    let error = rpc_accept(
+        &state,
+        &serde_json::json!({ "name": "focused", "topic": too_long, "session": A1 }),
+    )
+    .await
+    .expect_err("overlong topic must be rejected");
+
+    assert!(format!("{error:#}").contains("80 characters or fewer"));
+}
+
 #[tokio::test]
 async fn accepting_reuses_child_focuses_caller_and_passively_adds_idle_peer() {
     let state = DaemonState::new_for_test().await;
@@ -138,7 +182,11 @@ async fn accepting_reuses_child_focuses_caller_and_passively_adds_idle_peer() {
 
     let response = rpc_accept(
         &state,
-        &serde_json::json!({ "name": "focused", "session": A1 }),
+        &serde_json::json!({
+            "name": "focused",
+            "topic": "Coordinate the focused implementation",
+            "session": A1,
+        }),
     )
     .await
     .expect("acceptance should reuse the ready child");
