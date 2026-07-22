@@ -1,5 +1,5 @@
 use super::{delete::PendingDelete, state::PickerTab, PickerState};
-use crate::cli::{agents::AgentKind, interactive::session_picker::HomeChoice};
+use crate::cli::interactive::session_picker::HomeChoice;
 use ratatui::{
     layout::{Constraint, Layout},
     style::{Color, Modifier, Style},
@@ -13,6 +13,8 @@ const SELECTED_BG: Color = Color::Indexed(236);
 const MUTED: Color = Color::Indexed(245);
 const ERROR: Color = Color::Indexed(203);
 const WARNING: Color = Color::Indexed(214);
+
+mod agent;
 
 pub(super) fn draw(frame: &mut Frame<'_>, state: &PickerState) {
     let area = frame.area();
@@ -86,7 +88,7 @@ pub(super) fn draw(frame: &mut Frame<'_>, state: &PickerState) {
                     second.spans.insert(0, Span::raw("    "));
                     lines.extend([first, second]);
                 }
-                HomeChoice::Agent(row) => lines.extend(agent_lines(
+                HomeChoice::Agent(row) => lines.extend(agent::lines(
                     row,
                     width,
                     focused,
@@ -126,10 +128,23 @@ pub(super) fn draw(frame: &mut Frame<'_>, state: &PickerState) {
         .or_else(|| deletion.as_deref().map(|prompt| (prompt, ERROR)))
         .or_else(|| state.notice.as_ref().map(|notice| (notice.as_str(), ERROR)))
         .unwrap_or_else(|| (help(state), MUTED));
-    frame.render_widget(
-        Paragraph::new(format!("{} · {position}", footer.0)).style(Style::default().fg(footer.1)),
-        help_area,
-    );
+    let kind = (confirmation.is_none() && deletion.is_none() && state.notice.is_none())
+        .then(|| {
+            state
+                .current_agent_index()
+                .map(|index| agent::kind_label(state.agent(index).kind))
+        })
+        .flatten();
+    let mut footer_spans = Vec::new();
+    if let Some(kind) = kind {
+        footer_spans.push(Span::styled(kind, Style::default().fg(ACCENT)));
+        footer_spans.push(Span::styled(" · ", Style::default().fg(MUTED)));
+    }
+    footer_spans.push(Span::styled(
+        format!("{} · {position}", footer.0),
+        Style::default().fg(footer.1),
+    ));
+    frame.render_widget(Paragraph::new(Line::from(footer_spans)), help_area);
 }
 
 fn tab(label: &str, count: usize, active: bool) -> Span<'static> {
@@ -144,48 +159,6 @@ fn tab(label: &str, count: usize, active: bool) -> Span<'static> {
             Style::default().fg(MUTED)
         },
     )
-}
-
-fn agent_lines(
-    row: &crate::cli::agents::AgentRow,
-    width: usize,
-    focused: bool,
-    selected: bool,
-) -> [Line<'static>; 2] {
-    let source = match row.kind {
-        AgentKind::Configured => "configured",
-        AgentKind::NativeProfile => "native profile",
-        AgentKind::Generic => "generic",
-    };
-    let label = format!(
-        "{} · {source}",
-        crate::cli::agents::harness_name(row.harness)
-    );
-    let name_width = row.slug.chars().count();
-    let padding = width
-        .saturating_sub(4 + name_width + label.chars().count())
-        .max(2);
-    let name_style = if focused {
-        Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().add_modifier(Modifier::BOLD)
-    };
-    [
-        Line::from(vec![
-            caret(focused),
-            Span::styled(
-                if selected { "✓ " } else { "＋ " },
-                Style::default().fg(crate::console_style::harness_ratatui_color(row.harness)),
-            ),
-            Span::styled(row.slug.clone(), name_style),
-            Span::raw(" ".repeat(padding)),
-            Span::styled(label, Style::default().fg(MUTED)),
-        ]),
-        Line::from(Span::styled(
-            format!("    {}", row.summary(width.saturating_sub(4))),
-            Style::default().fg(MUTED),
-        )),
-    ]
 }
 
 fn caret(focused: bool) -> Span<'static> {

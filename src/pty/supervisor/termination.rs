@@ -59,7 +59,7 @@ mod tests {
             })
             .unwrap();
         let mut command = CommandBuilder::new("/bin/sh");
-        command.args(["-c", "trap '' HUP; exec sleep 60"]);
+        command.args(["-c", "trap '' HUP; exec /bin/sleep 60"]);
         let mut child = pair.slave.spawn_command(command).unwrap();
         std::thread::sleep(Duration::from_millis(100));
 

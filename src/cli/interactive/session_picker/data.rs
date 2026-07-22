@@ -26,6 +26,7 @@ pub(super) struct SessionRow {
     pub(super) title: String,
     pub(super) activity: String,
     pub(super) state: SessionState,
+    pub(super) state_since: u64,
     pub(super) running: bool,
     pub(super) resumable: bool,
     pub(super) last_seen: u64,
@@ -173,6 +174,7 @@ fn parse_row(value: &serde_json::Value) -> Option<SessionRow> {
         title: value["title"].as_str().unwrap_or("").to_string(),
         activity: value["activity"].as_str().unwrap_or("").to_string(),
         state,
+        state_since: value["state_since"].as_u64().unwrap_or(0),
         running: value["running"]
             .as_bool()
             .unwrap_or(state != SessionState::Offline),
