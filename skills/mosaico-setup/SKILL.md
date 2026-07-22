@@ -92,7 +92,7 @@ mosaico setup --dry-run
 
 Then run `mosaico setup` in an interactive terminal. It is the one first-run and reconfiguration surface. Review these choices with the user:
 
-- Mosaico public relay, one or more custom `ws://`/`wss://` relays, or the bundled local relay;
+- the bundled local relay, or one or more existing `ws://`/`wss://` relay URLs supplied by the user;
 - profile indexer relay;
 - host label;
 - operator public-key allowlist;

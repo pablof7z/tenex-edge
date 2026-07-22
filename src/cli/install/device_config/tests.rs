@@ -13,7 +13,7 @@ fn overrides_preserve_unknown_fields_and_secrets() {
         "unknown": "keep",
         "userNsec": operator.clone(),
         "mosaicoPrivateKey": backend.clone(),
-        "relays": [crate::config::DEFAULT_RELAY],
+        "relays": ["wss://relay.example"],
     });
     let mut options = opts();
     options.host_label = Some("workstation".into());
@@ -48,6 +48,15 @@ fn local_relay_requires_and_normalizes_an_owner() {
     assert!(setup.start_local_relay);
     assert_eq!(doc["relays"], json!([LOCAL_RELAY_URL]));
     assert_eq!(setup.owner_pubkey.unwrap().len(), 64);
+}
+
+#[test]
+fn fresh_document_requires_an_explicit_relay_choice() {
+    let mut doc = baseline_document();
+    let error = ensure_complete(&mut doc).unwrap_err().to_string();
+
+    assert!(error.contains("choose the bundled local relay"));
+    assert!(error.contains("existing relay URL"));
 }
 
 #[test]

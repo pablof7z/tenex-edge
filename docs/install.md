@@ -20,11 +20,12 @@ $ mosaico setup --dry-run
 $ mosaico setup
 ```
 
-`mosaico setup` is both the first-run and reconfiguration command. It manages
-the relay choice, profile indexer, host label, operator allowlist, optional CLI
-operator signing key, per-session-room policy, generated backend identity,
-runtime skill, and selected harness integrations. It can configure and start
-the bundled local relay or use one or more remote relays.
+`mosaico setup` is both the first-run and reconfiguration command. It requires
+an explicit choice between the bundled local relay and user-supplied existing
+relay URLs, then manages the profile indexer, host label, operator allowlist,
+optional CLI operator signing key, per-session-room policy, generated backend
+identity, runtime skill, and selected harness integrations. It can configure
+and start the bundled local relay or use one or more remote relays.
 
 After setup, restart open harness sessions and verify the complete installation:
 

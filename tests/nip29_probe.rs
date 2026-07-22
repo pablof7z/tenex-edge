@@ -4,7 +4,7 @@
 //!
 //! Gates the "daemon owns NIP-29 groups" feature. The relay's exact rules are the
 //! only real unknown and the codebase can't answer them — this asks the relay
-//! directly (default wss://nip29.f7z.io, or $MOSAICO_NIP29_RELAY). It walks the full
+//! directly at the explicitly required `$MOSAICO_NIP29_RELAY`. It walks the full
 //! create → add-member → write lifecycle and reports, in order:
 //!
 //! Publishes disposable `mosaico-probe-*` groups and kind:1 events, can be

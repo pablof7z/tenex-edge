@@ -68,6 +68,34 @@ fn invalid_config_is_actionable_without_exposing_secrets() {
 }
 
 #[test]
+fn missing_relay_is_an_error_with_explicit_setup_choices() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("config.json");
+    std::fs::write(
+        &path,
+        serde_json::json!({
+            "mosaicoPrivateKey": crate::config::generate_mosaico_private_key(),
+            "relays": [],
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let mut checks = Vec::new();
+
+    assert!(!config::inspect(&path, &mut checks));
+    let relay = checks
+        .iter()
+        .find(|check| check.name == "config.relays")
+        .unwrap();
+    assert_eq!(relay.status, CheckStatus::Error);
+    assert!(relay
+        .repair
+        .as_deref()
+        .unwrap()
+        .contains("bundled local relay"));
+}
+
+#[test]
 fn human_report_shows_repairs_and_verdict() {
     let report = DoctorReport {
         healthy: false,

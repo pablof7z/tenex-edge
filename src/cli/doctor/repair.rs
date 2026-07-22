@@ -26,10 +26,6 @@ fn repair_config(actions: &mut Vec<String>) -> Result<()> {
 
     match super::super::install::repair_device_config()? {
         ConfigRepair::Unchanged => {}
-        ConfigRepair::Created => actions.push(format!(
-            "created baseline device config at {} with no trusted operators",
-            crate::config::config_path().display()
-        )),
         ConfigRepair::GeneratedManagementKey => actions.push(format!(
             "generated missing mosaicoPrivateKey in {}",
             crate::config::config_path().display()

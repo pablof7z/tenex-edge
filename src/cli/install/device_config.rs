@@ -29,15 +29,16 @@ pub(super) struct DeviceSetup {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::cli) enum ConfigRepair {
     Unchanged,
-    Created,
     GeneratedManagementKey,
 }
 
 pub(super) fn repair_non_interactive() -> Result<ConfigRepair> {
     let path = crate::config::config_path();
     if !path.exists() {
-        super::write_json(&path, &baseline_document())?;
-        return Ok(ConfigRepair::Created);
+        bail!(
+            "{} does not exist; run `mosaico setup` and choose the bundled local relay or supply an existing relay URL",
+            path.display()
+        );
     }
     let mut doc = read_document(&path)?;
     match doc.get("mosaicoPrivateKey").and_then(Value::as_str) {
@@ -82,7 +83,7 @@ pub(super) fn configure(opts: &InstallOpts) -> Result<DeviceSetup> {
     };
 
     if should_edit {
-        if interactive && !overrides && !opts.dry_run {
+        if interactive && !overrides {
             edit_interactively(&mut doc)?;
         } else {
             apply_overrides(&mut doc, opts)?;

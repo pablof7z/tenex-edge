@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-RELAY_HOST="pablo@157.180.102.242"
+RELAY_HOST="${RELAY_HOST:-}"
 MOSAICO_HOME_DIR="${MOSAICO_HOME:-$HOME/.mosaico}"
 
 LOCAL_ONLY=false
@@ -28,11 +28,17 @@ Options:
       Wipe local state only (db, sessions, sockets). Relay untouched.
 
   $0 --yes-i-know-this-wipes-the-relay
-      Wipe local state AND SSHes to $RELAY_HOST to wipe nip29.f7z.io relay data.
+      Wipe local state AND SSHes to the explicit RELAY_HOST to wipe
+      nip29.f7z.io relay data.
 EOF
     exit 2
     ;;
 esac
+
+if [[ "$LOCAL_ONLY" == false && -z "$RELAY_HOST" ]]; then
+  echo "RELAY_HOST must explicitly name the nip29.f7z.io host for a remote wipe" >&2
+  exit 2
+fi
 
 if [[ ! -d "$MOSAICO_HOME_DIR" ]]; then
   echo "MOSAICO_HOME_DIR does not exist: $MOSAICO_HOME_DIR" >&2

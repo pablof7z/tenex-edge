@@ -12,7 +12,9 @@ pub(super) fn inspect(path: &Path, checks: &mut Vec<Check>) -> bool {
                     CheckStatus::Error,
                     format!("cannot read {}: {error}", path.display()),
                 )
-                .repair("run `mosaico doctor --fix` to create a missing baseline config"),
+                .repair(
+                    "run `mosaico setup` and choose the bundled local relay or supply an existing relay URL",
+                ),
             );
             return false;
         }
@@ -39,6 +41,27 @@ pub(super) fn inspect(path: &Path, checks: &mut Vec<Check>) -> bool {
             );
             return false;
         }
+    };
+
+    let relay_ready = if config.relays.is_empty() {
+        checks.push(
+            Check::new(
+                "config.relays",
+                CheckStatus::Error,
+                "no fabric relay is configured",
+            )
+            .repair(
+                "run `mosaico setup` and choose the bundled local relay or supply an existing relay URL",
+            ),
+        );
+        false
+    } else {
+        checks.push(Check::new(
+            "config.relays",
+            CheckStatus::Ok,
+            format!("{} fabric relay(s) configured", config.relays.len()),
+        ));
+        true
     };
 
     let key_ready = match config.backend_nsec() {
@@ -91,5 +114,5 @@ pub(super) fn inspect(path: &Path, checks: &mut Vec<Check>) -> bool {
             ),
         )
     });
-    key_ready
+    relay_ready && key_ready
 }

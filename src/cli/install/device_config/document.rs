@@ -7,7 +7,7 @@ use std::path::Path;
 pub(super) fn baseline_document() -> Value {
     json!({
         "whitelistedPubkeys": [],
-        "relays": [crate::config::DEFAULT_RELAY],
+        "relays": [],
         "indexerRelay": crate::config::DEFAULT_INDEXER_RELAY,
         "backendName": crate::config::hostname(),
         "mosaicoPrivateKey": crate::config::generate_mosaico_private_key(),
@@ -157,7 +157,7 @@ pub(super) fn normalize_label(label: &str) -> Result<String> {
 
 pub(super) fn normalize_relays(relays: &[String]) -> Result<Vec<String>> {
     if relays.is_empty() {
-        bail!("configure at least one relay URL");
+        bail!("choose the bundled local relay or configure at least one existing relay URL");
     }
     relays.iter().map(|relay| normalize_relay(relay)).collect()
 }
