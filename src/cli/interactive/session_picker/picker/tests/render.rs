@@ -48,8 +48,39 @@ fn presents_sessions_and_agents_in_separate_tabs_with_a_highlighted_row() {
         .collect::<Vec<_>>();
     assert!(rows[1].contains('＋'));
     assert!(rows[1].contains("codex"));
+    assert!(rows[1].contains("Codex"));
+    assert!(!rows[1].contains("generic"));
     assert!(!rows.iter().any(|row| row.contains("@one")));
-    assert!(rows[11].starts_with("enter launch"));
+    assert!(rows[11].starts_with("generic · enter launch"));
+}
+
+#[test]
+fn focused_agent_kind_moves_through_the_footer_not_the_rows() {
+    let mut picker = state(vec![
+        agent("generic-agent", AgentKind::Generic),
+        agent("configured-agent", AgentKind::Configured),
+        agent("profile-agent", AgentKind::NativeProfile),
+    ]);
+    let mut terminal = terminal();
+
+    for expected in ["generic", "configured", "native profile"] {
+        let completed = terminal
+            .draw(|frame| {
+                crate::cli::interactive::session_picker::picker::render::draw(frame, &picker)
+            })
+            .unwrap();
+        let rows = completed
+            .buffer
+            .content()
+            .chunks(100)
+            .map(|cells| cells.iter().map(|cell| cell.symbol()).collect::<String>())
+            .collect::<Vec<_>>();
+        assert!(rows[11].starts_with(expected), "{}", rows[11]);
+        assert!(!rows[1..7]
+            .iter()
+            .any(|row| row.contains(&format!("Codex · {expected}"))));
+        picker.handle_key(key(KeyCode::Down), 10);
+    }
 }
 
 #[test]

@@ -96,6 +96,7 @@ fn stopped_session_projection_retains_project_and_restart_capability() {
 
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0]["state"], "offline");
+    assert_eq!(rows[0]["state_since"], 12);
     assert_eq!(rows[0]["resumable"], true);
     assert_eq!(rows[0]["workspaces"][0]["name"], "mosaico");
     assert_eq!(rows[0]["workspaces"][0]["path"], "/repo/mosaico");
@@ -136,13 +137,49 @@ fn unhosted_resumable_projection_exposes_open_turn_takeover_state() {
     store
         .apply_session_turn_started(&pubkey, generation, 12, None)
         .unwrap();
-
     let rows = project_sessions(&store, "laptop", &HashMap::new()).unwrap();
 
     assert_eq!(rows[0]["state"], "working");
+    assert_eq!(rows[0]["state_since"], 12);
     assert_eq!(rows[0]["transport"], "process");
     assert_eq!(rows[0]["takeover"]["turn_open"], true);
     assert_eq!(rows[0]["takeover"]["turn_count"], 1);
+}
+
+#[test]
+fn projection_uses_semantic_status_time_instead_of_heartbeat_time() {
+    let store = Store::open_memory().unwrap();
+    store.upsert_channel("root", "root", "", "", 1).unwrap();
+    let pubkey = Keys::generate().public_key().to_hex();
+    store
+        .reserve_hook_session_for_test(&crate::state::RegisterSession {
+            pubkey: pubkey.clone(),
+            observed_harness: "codex".into(),
+            agent_slug: "codex".into(),
+            channel_h: "root".into(),
+            child_pid: Some(42),
+            transcript_path: None,
+            now: 10,
+        })
+        .unwrap();
+    let mut status = crate::state::Status {
+        pubkey: pubkey.clone(),
+        channel_h: "root".into(),
+        slug: "codex".into(),
+        title: "Picker status".into(),
+        activity: String::new(),
+        state: crate::session_state::SessionState::Suspended,
+        last_seen: 20,
+        updated_at: 20,
+        expiration: 200,
+    };
+    store.upsert_status(&status).unwrap();
+    status.last_seen = 100;
+    status.updated_at = 100;
+    store.upsert_status(&status).unwrap();
+    let rows = project_sessions(&store, "laptop", &HashMap::new()).unwrap();
+    assert_eq!(rows[0]["state"], "suspended");
+    assert_eq!(rows[0]["state_since"], 20);
 }
 
 #[test]

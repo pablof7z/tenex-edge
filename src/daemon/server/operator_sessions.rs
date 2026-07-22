@@ -36,7 +36,7 @@ fn project_sessions(
         .collect::<HashMap<_, _>>();
     let mut rows = Vec::new();
     let mut projected_endpoints = HashSet::new();
-    let activities = latest_activities(store)?;
+    let statuses = latest_statuses(store)?;
     for rec in store.list_sessions()? {
         let workspaces = session_workspaces(store, &rec.pubkey, &channels)?;
         let (endpoint, transport, takeover) = if rec.is_running() {
@@ -95,10 +95,29 @@ fn project_sessions(
             && store
                 .native_resume_locator(&rec.pubkey, &rec.observed_harness)?
                 .is_some();
-        let activity = activities
-            .get(&rec.pubkey)
-            .map(String::as_str)
+        let session_state = if rec.is_running() {
+            crate::session_state::SessionState::classify(
+                true,
+                rec.is_working(),
+                crate::session_host::session_has_live_delivery_path(store, &rec),
+            )
+        } else {
+            crate::session_state::SessionState::Offline
+        };
+        let latest_status = statuses.get(&rec.pubkey);
+        let activity = latest_status
+            .map(|status| status.activity.as_str())
             .unwrap_or_default();
+        let fallback_state_since = match session_state {
+            crate::session_state::SessionState::Working => rec.turn_started_at,
+            crate::session_state::SessionState::Idle => rec.idle_since,
+            crate::session_state::SessionState::Suspended => 0,
+            crate::session_state::SessionState::Offline => rec.stopped_at,
+        };
+        let state_since = latest_status
+            .filter(|status| status.state == session_state)
+            .map(|status| status.updated_at)
+            .unwrap_or(fallback_state_since);
         rows.push(serde_json::json!({
             "pubkey": rec.pubkey.clone(),
             "npub": npub,
@@ -106,15 +125,8 @@ fn project_sessions(
             "agent": rec.agent_slug,
             "title": rec.title,
             "activity": activity,
-            "state": if rec.is_running() {
-                crate::session_state::SessionState::classify(
-                    true,
-                    rec.is_working(),
-                    crate::session_host::session_has_live_delivery_path(store, &rec),
-                )
-            } else {
-                crate::session_state::SessionState::Offline
-            },
+            "state": session_state,
+            "state_since": state_since,
             "running": rec.is_running(),
             "resumable": resumable,
             "last_seen": rec.last_seen,
@@ -138,20 +150,17 @@ fn project_sessions(
     Ok(rows)
 }
 
-fn latest_activities(store: &Store) -> Result<HashMap<String, String>> {
-    let mut latest = HashMap::<String, (u64, String)>::new();
+fn latest_statuses(store: &Store) -> Result<HashMap<String, crate::state::Status>> {
+    let mut latest = HashMap::<String, crate::state::Status>::new();
     for status in store.list_status_sessions(None, None)? {
         let entry = latest
-            .entry(status.pubkey)
-            .or_insert_with(|| (status.updated_at, status.activity.clone()));
-        if status.updated_at > entry.0 {
-            *entry = (status.updated_at, status.activity);
+            .entry(status.pubkey.clone())
+            .or_insert_with(|| status.clone());
+        if status.updated_at > entry.updated_at {
+            *entry = status;
         }
     }
-    Ok(latest
-        .into_iter()
-        .map(|(pubkey, (_, activity))| (pubkey, activity))
-        .collect())
+    Ok(latest)
 }
 
 fn session_workspaces(
@@ -200,6 +209,7 @@ fn unbound_endpoint_value(
         "title": meta.command.join(" "),
         "activity": meta.cwd,
         "state": crate::session_state::SessionState::Suspended,
+        "state_since": 0,
         "running": true,
         "resumable": false,
         "last_seen": 0,

@@ -92,7 +92,7 @@ fn owned_child_fallback_escalates_past_ignored_hup() {
         })
         .unwrap();
     let mut command = CommandBuilder::new("/bin/sh");
-    command.args(["-c", "trap '' HUP; exec sleep 60"]);
+    command.args(["-c", "trap '' HUP; exec /bin/sleep 60"]);
     let mut child = pair.slave.spawn_command(command).unwrap();
     let pid = i32::try_from(child.process_id().unwrap()).unwrap();
     std::thread::sleep(std::time::Duration::from_millis(100));

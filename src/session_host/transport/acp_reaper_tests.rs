@@ -47,7 +47,7 @@ fn failing_app_server_spec(cwd: &std::path::Path, descendant_pid: &std::path::Pa
                 argv: vec![
                     "/bin/sh".into(),
                     "-c".into(),
-                    "sleep 60 & echo $! > \"$1\"; IFS= read -r line; printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-1,\"message\":\"fixture rejection\"}}'; wait".into(),
+                    "/bin/sleep 60 & echo $! > \"$1\"; IFS= read -r line; printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-1,\"message\":\"fixture rejection\"}}'; wait".into(),
                     "mosaico-failed-handshake".into(),
                     descendant_pid.to_string_lossy().into_owned(),
                 ],

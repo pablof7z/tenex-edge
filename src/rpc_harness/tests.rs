@@ -109,7 +109,7 @@ async fn rpc_kill_terminates_the_owned_process_group() {
         program: "/bin/sh".into(),
         args: vec![
             "-c".into(),
-            "sleep 60 & echo $! > \"$1\"; wait".into(),
+            "/bin/sleep 60 & echo $! > \"$1\"; wait".into(),
             "mosaico-rpc-test".into(),
             descendant_pid.to_string_lossy().into_owned(),
         ],

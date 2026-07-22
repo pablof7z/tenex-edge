@@ -18,8 +18,8 @@ pub(super) fn lines(row: &SessionRow, now: u64, width: usize, focused: bool) -> 
     let handle = format!("@{}", row.handle);
     let scope = scope_spans(&row.workspaces);
     let scope_width = scope.iter().map(|span| span.content.width()).sum::<usize>();
-    let age = seen(row.last_seen, now);
-    let fixed_width = 2 + handle.width() + 3 + age.width();
+    let status = state_status(row.state, row.state_since, now);
+    let fixed_width = 2 + handle.width() + 3 + status.width();
     let padding = width.saturating_sub(fixed_width + scope_width).max(1);
 
     let mut first = vec![
@@ -38,7 +38,10 @@ pub(super) fn lines(row: &SessionRow, now: u64, width: usize, focused: bool) -> 
     ];
     first.extend(scope);
     first.push(Span::raw(" ".repeat(padding)));
-    first.push(Span::styled(age, Style::default().fg(MUTED)));
+    first.push(Span::styled(
+        status,
+        Style::default().fg(state_color(row.state)),
+    ));
 
     let work_style = if greyed {
         Style::default().fg(MUTED).add_modifier(Modifier::DIM)
@@ -96,13 +99,11 @@ fn scope_spans(workspaces: &[WorkspaceGroup]) -> Vec<Span<'static>> {
     spans
 }
 
-fn seen(last_seen: u64, now: u64) -> String {
-    if last_seen == 0 {
-        "unknown".to_string()
-    } else if now.saturating_sub(last_seen) < 60 {
-        "online".to_string()
+fn state_status(state: crate::session_state::SessionState, since: u64, now: u64) -> String {
+    if state == crate::session_state::SessionState::Working || since == 0 {
+        state.to_string()
     } else {
-        crate::util::relative_time(last_seen, now)
+        format!("{state} · {}", crate::util::relative_time(since, now))
     }
 }
 
@@ -127,7 +128,7 @@ mod tests {
     use crate::cli::interactive::session_picker::data::{ChannelRef, WorkspaceGroup};
 
     #[test]
-    fn row_is_always_two_lines_without_textual_state_or_transport() {
+    fn row_is_always_two_lines_with_canonical_state_and_without_transport() {
         let row = SessionRow {
             handle: "delta-codex".into(),
             workspaces: vec![WorkspaceGroup {
@@ -142,6 +143,7 @@ mod tests {
             title: "Implement session picker".into(),
             activity: "running tests".into(),
             state: crate::session_state::SessionState::Working,
+            state_since: 90,
             last_seen: 98,
             ..SessionRow::default()
         };
@@ -159,33 +161,46 @@ mod tests {
             .collect::<String>();
         assert!(first.contains("● @delta-codex"));
         assert!(first.contains("mosaico: #ideas"));
-        assert!(!first.contains("working"));
+        assert!(first.ends_with("working"));
         assert!(!first.contains("PTY"));
         assert_eq!(second, "Implement session picker — running tests");
     }
 
     #[test]
-    fn recent_sessions_are_online_and_empty_titles_stay_empty() {
-        let row = SessionRow {
-            handle: "delta-codex".into(),
-            activity: "running tests".into(),
-            last_seen: 98,
-            ..SessionRow::default()
-        };
-
-        let rendered = lines(&row, 100, 100, false);
-        let first = rendered[0]
-            .spans
-            .iter()
-            .map(|span| span.content.as_ref())
-            .collect::<String>();
-        let second = rendered[1]
-            .spans
-            .iter()
-            .map(|span| span.content.as_ref())
-            .collect::<String>();
-
-        assert!(first.ends_with("online"), "{first}");
-        assert_eq!(second, "");
+    fn idle_suspended_and_offline_states_include_semantic_age() {
+        for (state, since, now, expected) in [
+            (
+                crate::session_state::SessionState::Idle,
+                40,
+                100,
+                "idle · 1 min ago",
+            ),
+            (
+                crate::session_state::SessionState::Suspended,
+                3_700,
+                7_300,
+                "suspended · 1 hour ago",
+            ),
+            (
+                crate::session_state::SessionState::Offline,
+                7_300,
+                14_500,
+                "offline · 2 hours ago",
+            ),
+        ] {
+            let row = SessionRow {
+                handle: "delta-codex".into(),
+                state,
+                state_since: since,
+                ..SessionRow::default()
+            };
+            let rendered = lines(&row, now, 100, false);
+            let first = rendered[0]
+                .spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect::<String>();
+            assert!(first.ends_with(expected), "{first}");
+        }
     }
 }

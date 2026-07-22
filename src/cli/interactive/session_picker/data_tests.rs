@@ -19,6 +19,7 @@ fn parses_grouped_workspace_and_attach_endpoint() {
             "title": "shipping the picker",
             "activity": "running tests",
             "state": "working",
+            "state_since": 11,
             "last_seen": 12,
             "host": "laptop",
             "harness": "codex",
@@ -36,6 +37,7 @@ fn parses_grouped_workspace_and_attach_endpoint() {
     assert_eq!(rows[0].handle, "opal-codex");
     assert_eq!(rows[0].title, "shipping the picker");
     assert_eq!(rows[0].state, SessionState::Working);
+    assert_eq!(rows[0].state_since, 11);
     assert!(rows[0].fuzzy_score("npub1public").is_some());
     assert!(rows[0].fuzzy_score("repo").is_some());
     assert_eq!(rows[0].workspaces[0].name, "mosaico");

@@ -301,7 +301,7 @@ fn exact_option<'a>(argv: &'a [String], option: &str) -> Option<&'a str> {
 }
 
 fn process_command(pid: i32) -> Result<Option<String>> {
-    let output = std::process::Command::new("ps")
+    let output = std::process::Command::new("/bin/ps")
         .args(["-p", &pid.to_string(), "-o", "state=", "-o", "command="])
         .output()
         .context("inspecting PTY supervisor command")?;
@@ -323,7 +323,7 @@ fn process_running(pid: i32) -> bool {
 }
 
 fn process_stopped(pid: i32) -> bool {
-    let Ok(output) = std::process::Command::new("ps")
+    let Ok(output) = std::process::Command::new("/bin/ps")
         .args(["-p", &pid.to_string(), "-o", "state="])
         .output()
     else {
@@ -336,7 +336,7 @@ fn process_stopped(pid: i32) -> bool {
 }
 
 fn process_rows() -> Result<Vec<(i32, i32, String)>> {
-    let output = std::process::Command::new("ps")
+    let output = std::process::Command::new("/bin/ps")
         .args(["-ax", "-o", "pid=", "-o", "ppid=", "-o", "state="])
         .output()
         .context("inspecting PTY process ownership")?;
