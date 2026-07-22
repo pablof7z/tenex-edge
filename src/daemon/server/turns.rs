@@ -85,7 +85,7 @@ pub(in crate::daemon::server) async fn rpc_turn_start(
     // drift. The receipt is the graph's OWN dependency trace — it replaces the
     // hand-rolled turn_start_audit and is consistent with the render by construction.
     let backend_pubkey = state.backend_pubkey().unwrap_or_default();
-    let turn = crate::turn_context::assemble_turn_start(
+    let mut turn = crate::turn_context::assemble_turn_start(
         &state.store,
         &rec,
         &backend_pubkey,
@@ -93,6 +93,9 @@ pub(in crate::daemon::server) async fn rpc_turn_start(
         prev_started,
         &state.runtime.hook_contexts,
     )?;
+    if let Some(nudge) = super::channel_move::maybe_nudge(state, &rec, now) {
+        turn.append_advisory(&nudge, "channel-topology-nudge");
+    }
     let audit = turn.receipt.to_json();
     record_hook_receipt(state, &turn);
     cursor::drive_cursor_request(state, &rec, turn.receipt.now.max(0) as u64, true)
@@ -133,7 +136,7 @@ pub(in crate::daemon::server) async fn rpc_turn_check(
     let delta_since = cursor::drive_cursor_request(state, &rec, now, rec.is_working())
         .context("applying cursor turn_check projection")?;
     schedule_context_profile_warm(state.clone(), rec.clone(), delta_since.unwrap_or(now));
-    let turn = crate::turn_context::assemble_turn_check(
+    let mut turn = crate::turn_context::assemble_turn_check(
         &state.store,
         &rec,
         &state.host,
@@ -141,6 +144,9 @@ pub(in crate::daemon::server) async fn rpc_turn_check(
         now,
         &state.runtime.hook_contexts,
     )?;
+    if let Some(nudge) = super::channel_move::maybe_nudge(state, &rec, now) {
+        turn.append_advisory(&nudge, "channel-topology-nudge");
+    }
     let audit = turn.receipt.to_json();
     record_hook_receipt(state, &turn);
     let context = turn
@@ -197,7 +203,6 @@ pub(in crate::daemon::server) async fn rpc_turn_end(
         }
         crate::session_host::ring_doorbells(state.clone());
     }
-
     // The turn is over. If it was a pty-injected mention that the agent never
     // answered via `channel send`, auto-publish its last transcript text as the
     // reply so the channel sees a response instead of silence.

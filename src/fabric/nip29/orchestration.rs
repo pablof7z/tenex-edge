@@ -15,6 +15,8 @@ use std::collections::HashMap;
 
 /// Marker `mosaico-op` value identifying the add-agents orchestration event.
 pub const MOSAICO_OP_ADD_AGENTS: &str = "subgroup.add-agents.v2";
+/// Marker for passively admitting exact sessions that are still running.
+pub const MOSAICO_OP_ADMIT_RUNNING: &str = "subgroup.admit-running.v1";
 
 fn tag(parts: &[&str]) -> Result<Tag> {
     Ok(Tag::parse(parts.iter().copied())?)
@@ -47,9 +49,37 @@ pub fn build_add_agents_event(
     adds: &[AddTarget],
     prose: &str,
 ) -> Result<EventBuilder> {
+    build_event(MOSAICO_OP_ADD_AGENTS, parent_h, child_h, adds, prose)
+}
+
+/// Build a distinct operation that only admits exact sessions that remain live.
+/// Older daemons ignore this operation instead of treating it as a resume.
+pub fn build_admit_running_event(
+    parent_h: &str,
+    child_h: &str,
+    adds: &[AddTarget],
+    prose: &str,
+) -> Result<EventBuilder> {
+    anyhow::ensure!(
+        adds.iter().all(|target| target
+            .session_pubkey
+            .as_deref()
+            .is_some_and(|pubkey| !pubkey.is_empty())),
+        "admit-running orchestration requires exact session pubkeys"
+    );
+    build_event(MOSAICO_OP_ADMIT_RUNNING, parent_h, child_h, adds, prose)
+}
+
+fn build_event(
+    operation: &str,
+    parent_h: &str,
+    child_h: &str,
+    adds: &[AddTarget],
+    prose: &str,
+) -> Result<EventBuilder> {
     let mut tags: Vec<Tag> = vec![
         tag(&["h", parent_h])?,
-        tag(&["mosaico-op", MOSAICO_OP_ADD_AGENTS])?,
+        tag(&["mosaico-op", operation])?,
         tag(&["parent", parent_h])?,
         tag(&["h-target", child_h])?,
     ];
@@ -83,16 +113,18 @@ pub struct AddAgentsOp {
     /// Child group id, from the `h-target` tag.
     pub child_h: String,
     pub adds: Vec<AddTarget>,
+    /// True only for the separate admit-running operation, which never spawns
+    /// or resumes a missing session.
+    pub running_only: bool,
 }
 
-/// Parse an event as an add-agents orchestration event, reading ONLY the
+/// Parse an add-agents or admit-running orchestration event, reading ONLY the
 /// structured tags (the prose content is ignored).
 ///
 /// Returns `Some` only if the event is well-formed:
 ///
 /// - `kind == 9`
-/// - has `["mosaico-op", MOSAICO_OP_ADD_AGENTS]` (this is what makes a prose-only kind:9
-///   ignored)
+/// - has one recognized `mosaico-op` (plain prose-only kind:9 stays ignored)
 /// - the single routing `["h", _]` equals the single `["parent", _]`
 /// - exactly one `["h-target", _]`
 /// - at least one `["add", pubkey, slug]` (both fields present)
@@ -141,10 +173,11 @@ pub fn parse_orchestration(event: &Event) -> Option<AddAgentsOp> {
         }
     }
 
-    // Must be tagged as an add-agents orchestration event.
-    if mosaico_op != Some(MOSAICO_OP_ADD_AGENTS) {
-        return None;
-    }
+    let running_only = match mosaico_op {
+        Some(MOSAICO_OP_ADD_AGENTS) => false,
+        Some(MOSAICO_OP_ADMIT_RUNNING) => true,
+        _ => return None,
+    };
     // Exactly one routing h and one parent, and they must match.
     let (&h, &parent) = match (h_vals.as_slice(), parent_vals.as_slice()) {
         ([h], [parent]) => (h, parent),
@@ -162,11 +195,15 @@ pub fn parse_orchestration(event: &Event) -> Option<AddAgentsOp> {
     if adds.is_empty() {
         return None;
     }
+    if running_only && adds.iter().any(|target| target.session_pubkey.is_none()) {
+        return None;
+    }
 
     Some(AddAgentsOp {
         parent: parent.to_string(),
         child_h,
         adds,
+        running_only,
     })
 }
 
@@ -183,210 +220,5 @@ pub fn adds_for_backend<'a>(adds: &'a [AddTarget], backend_pubkey: &str) -> Vec<
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn at(pk: &str, slug: &str) -> AddTarget {
-        AddTarget {
-            backend_pubkey: pk.to_string(),
-            slug: slug.to_string(),
-            session_pubkey: None,
-        }
-    }
-
-    fn resume(pk: &str, slug: &str, session_pubkey: &str) -> AddTarget {
-        AddTarget {
-            backend_pubkey: pk.to_string(),
-            slug: slug.to_string(),
-            session_pubkey: Some(session_pubkey.to_string()),
-        }
-    }
-
-    fn sign(b: EventBuilder) -> Event {
-        b.sign_with_keys(&Keys::generate()).unwrap()
-    }
-
-    fn tag_count(ev: &Event, name: &str) -> usize {
-        ev.tags
-            .iter()
-            .filter(|t| t.as_slice().first().map(String::as_str) == Some(name))
-            .count()
-    }
-
-    #[test]
-    fn build_parse_round_trip_preserves_order() {
-        let adds = vec![
-            at("bk1", "architect"),
-            at("bk2", "engineer"),
-            at("bk1", "qa"),
-        ];
-        let b = build_add_agents_event("parent-g", "child-g", &adds, "please add these").unwrap();
-        let ev = sign(b);
-        assert_eq!(ev.kind.as_u16(), KIND_CHAT);
-
-        let op = parse_orchestration(&ev).expect("well-formed");
-        assert_eq!(op.parent, "parent-g");
-        assert_eq!(op.child_h, "child-g");
-        assert_eq!(op.adds, adds, "add order preserved");
-    }
-
-    #[test]
-    fn build_dedups_p_tags_but_keeps_all_adds() {
-        let adds = vec![at("bk1", "architect"), at("bk1", "qa")];
-        let ev = sign(build_add_agents_event("p", "c", &adds, "x").unwrap());
-        // Two adds to the same backend → one p tag, two add tags.
-        assert_eq!(tag_count(&ev, "p"), 1);
-        assert_eq!(tag_count(&ev, "add"), 2);
-    }
-
-    #[test]
-    fn build_routes_h_to_parent_and_carries_child_in_h_target() {
-        let ev = sign(build_add_agents_event("p", "c", &[at("bk", "r")], "x").unwrap());
-        // Single routing h equals parent; child travels in h-target.
-        assert_eq!(tag_count(&ev, "h"), 1);
-        assert_eq!(tag_count(&ev, "h-target"), 1);
-        let op = parse_orchestration(&ev).unwrap();
-        assert_eq!(op.parent, "p");
-        assert_eq!(op.child_h, "c");
-    }
-
-    #[test]
-    fn build_parse_preserves_optional_session_pubkey() {
-        let adds = vec![resume("bk1", "architect", &"11".repeat(32))];
-        let ev = sign(build_add_agents_event("p", "c", &adds, "x").unwrap());
-        let op = parse_orchestration(&ev).unwrap();
-        assert_eq!(op.adds, adds);
-    }
-
-    #[test]
-    fn parse_none_for_plain_chat_without_mosaico_op() {
-        // A prose-only kind:9 chat message must be ignored.
-        let ev = sign(
-            EventBuilder::new(kind(KIND_CHAT), "just chatting")
-                .tags([tag(&["h", "p"]).unwrap()])
-                .allow_self_tagging(),
-        );
-        assert!(parse_orchestration(&ev).is_none());
-    }
-
-    #[test]
-    fn parse_none_for_different_mosaico_op() {
-        let ev = sign(
-            EventBuilder::new(kind(KIND_CHAT), "x")
-                .tags([
-                    tag(&["h", "p"]).unwrap(),
-                    tag(&["mosaico-op", "subgroup.remove-agents.v1"]).unwrap(),
-                    tag(&["parent", "p"]).unwrap(),
-                    tag(&["h-target", "c"]).unwrap(),
-                    tag(&["add", "bk", "r"]).unwrap(),
-                ])
-                .allow_self_tagging(),
-        );
-        assert!(parse_orchestration(&ev).is_none());
-    }
-
-    #[test]
-    fn parse_none_when_h_differs_from_parent() {
-        let ev = sign(
-            EventBuilder::new(kind(KIND_CHAT), "x")
-                .tags([
-                    tag(&["h", "other-group"]).unwrap(),
-                    tag(&["mosaico-op", MOSAICO_OP_ADD_AGENTS]).unwrap(),
-                    tag(&["parent", "p"]).unwrap(),
-                    tag(&["h-target", "c"]).unwrap(),
-                    tag(&["add", "bk", "r"]).unwrap(),
-                ])
-                .allow_self_tagging(),
-        );
-        assert!(parse_orchestration(&ev).is_none());
-    }
-
-    #[test]
-    fn parse_none_when_h_target_missing() {
-        let ev = sign(
-            EventBuilder::new(kind(KIND_CHAT), "x")
-                .tags([
-                    tag(&["h", "p"]).unwrap(),
-                    tag(&["mosaico-op", MOSAICO_OP_ADD_AGENTS]).unwrap(),
-                    tag(&["parent", "p"]).unwrap(),
-                    tag(&["add", "bk", "r"]).unwrap(),
-                ])
-                .allow_self_tagging(),
-        );
-        assert!(parse_orchestration(&ev).is_none());
-    }
-
-    #[test]
-    fn parse_none_when_two_h_target_tags() {
-        let ev = sign(
-            EventBuilder::new(kind(KIND_CHAT), "x")
-                .tags([
-                    tag(&["h", "p"]).unwrap(),
-                    tag(&["mosaico-op", MOSAICO_OP_ADD_AGENTS]).unwrap(),
-                    tag(&["parent", "p"]).unwrap(),
-                    tag(&["h-target", "c1"]).unwrap(),
-                    tag(&["h-target", "c2"]).unwrap(),
-                    tag(&["add", "bk", "r"]).unwrap(),
-                ])
-                .allow_self_tagging(),
-        );
-        assert!(parse_orchestration(&ev).is_none());
-    }
-
-    #[test]
-    fn parse_none_when_no_add_tags() {
-        let ev = sign(
-            EventBuilder::new(kind(KIND_CHAT), "x")
-                .tags([
-                    tag(&["h", "p"]).unwrap(),
-                    tag(&["mosaico-op", MOSAICO_OP_ADD_AGENTS]).unwrap(),
-                    tag(&["parent", "p"]).unwrap(),
-                    tag(&["h-target", "c"]).unwrap(),
-                ])
-                .allow_self_tagging(),
-        );
-        assert!(parse_orchestration(&ev).is_none());
-    }
-
-    #[test]
-    fn parse_none_for_wrong_kind() {
-        // A kind:1 with otherwise-valid tags is not an orchestration event.
-        let ev = sign(
-            EventBuilder::new(kind(1), "x")
-                .tags([
-                    tag(&["h", "p"]).unwrap(),
-                    tag(&["mosaico-op", MOSAICO_OP_ADD_AGENTS]).unwrap(),
-                    tag(&["parent", "p"]).unwrap(),
-                    tag(&["h-target", "c"]).unwrap(),
-                    tag(&["add", "bk", "r"]).unwrap(),
-                ])
-                .allow_self_tagging(),
-        );
-        assert!(parse_orchestration(&ev).is_none());
-    }
-
-    #[test]
-    fn is_authorized_only_for_admin() {
-        let mut roles = HashMap::new();
-        roles.insert("admin-pk".to_string(), "admin".to_string());
-        roles.insert("member-pk".to_string(), "member".to_string());
-        assert!(is_authorized(&roles, "admin-pk"));
-        assert!(!is_authorized(&roles, "member-pk"));
-        assert!(!is_authorized(&roles, "absent-pk"));
-    }
-
-    #[test]
-    fn adds_for_backend_filters() {
-        let adds = vec![
-            at("bk1", "architect"),
-            at("bk2", "engineer"),
-            at("bk1", "qa"),
-        ];
-        let mine = adds_for_backend(&adds, "bk1");
-        assert_eq!(mine.len(), 2);
-        assert_eq!(mine[0].slug, "architect");
-        assert_eq!(mine[1].slug, "qa");
-
-        assert!(adds_for_backend(&adds, "bk-none").is_empty());
-    }
-}
+#[path = "orchestration/tests.rs"]
+mod tests;

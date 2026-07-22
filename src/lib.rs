@@ -14,6 +14,7 @@ pub(crate) mod agent_inventory;
 mod attachment;
 mod channel_about;
 mod channel_name;
+mod channel_nudge;
 mod channel_ref;
 pub mod command_forensics;
 pub mod config;

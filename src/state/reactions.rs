@@ -69,6 +69,36 @@ impl Store {
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
+
+    /// Newest reactions in one channel, used as a bounded engagement signal.
+    pub fn recent_reactions_for_channel(
+        &self,
+        channel_h: &str,
+        since: u64,
+        limit: u32,
+    ) -> Result<Vec<ReactionRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT r.reaction_id, r.target_message_id, r.channel_h, r.reactor_pubkey,
+                    r.emoji, r.created_at, m.body
+             FROM relay_reactions r
+             JOIN messages m ON m.message_id = r.target_message_id
+             WHERE r.channel_h = ?1 AND r.created_at > ?2
+             ORDER BY r.created_at DESC, r.reaction_id DESC
+             LIMIT ?3",
+        )?;
+        let rows = stmt.query_map(params![channel_h, since, limit], |row| {
+            Ok(ReactionRow {
+                reaction_id: row.get(0)?,
+                target_message_id: row.get(1)?,
+                channel_h: row.get(2)?,
+                reactor_pubkey: row.get(3)?,
+                emoji: row.get(4)?,
+                created_at: row.get(5)?,
+                target_body: row.get(6)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
 }
 
 #[cfg(test)]
@@ -132,5 +162,24 @@ mod tests {
         assert_eq!(rows[0].reaction_id, "rx-visible");
         assert_eq!(rows[0].emoji, "👍");
         assert_eq!(rows[0].target_body, "pushed the fix");
+    }
+
+    #[test]
+    fn recent_channel_reactions_limit_keeps_the_newest_rows() {
+        let store = Store::open_memory().unwrap();
+        record_msg(&store, "target", "author", "decision", 1);
+        for (id, at) in [("old", 10), ("middle", 20), ("new", 30)] {
+            store
+                .upsert_reaction(id, "target", "chan", "reactor", "👍", at)
+                .unwrap();
+        }
+
+        let rows = store.recent_reactions_for_channel("chan", 0, 2).unwrap();
+        assert_eq!(
+            rows.iter()
+                .map(|reaction| reaction.reaction_id.as_str())
+                .collect::<Vec<_>>(),
+            ["new", "middle"]
+        );
     }
 }

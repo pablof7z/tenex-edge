@@ -1,6 +1,9 @@
 use super::resolution::work_root_for;
 use super::*;
 
+mod running;
+use running::admit_running_target;
+
 /// React to a subgroup add-agents orchestration event: authorize the signer,
 /// provision the agents addressed to THIS backend, and either spawn fresh sessions
 /// or resume exact prior sessions into the target channel.
@@ -81,8 +84,9 @@ pub(super) async fn handle_orchestration(
 
     let _ = ensure_subscription(state, &op.child_h).await;
     for (target_index, target) in mine {
-        let target_key = orchestration_target_key(&backend_pk, target_index, target);
-        let body = orchestration_target_body(target);
+        let target_key =
+            orchestration_target_key(&backend_pk, target_index, target, op.running_only);
+        let body = orchestration_target_body(target, op.running_only);
         let claimed = match state.with_store(|s| {
             s.claim_orchestration_target(
                 &event_id,
@@ -113,7 +117,9 @@ pub(super) async fn handle_orchestration(
             continue;
         }
 
-        let completed = if target
+        let completed = if op.running_only {
+            admit_running_target(state, &op, target).await
+        } else if target
             .session_pubkey
             .as_deref()
             .is_some_and(|s| !s.is_empty())
@@ -143,15 +149,31 @@ fn orchestration_target_key(
     backend_pk: &str,
     target_index: usize,
     target: &crate::fabric::nip29::orchestration::AddTarget,
+    running_only: bool,
 ) -> String {
     let session = target.session_pubkey.as_deref().unwrap_or("");
-    format!(
+    let base = format!(
         "orchestration:{backend_pk}:{target_index}:{}:{session}",
         target.slug
-    )
+    );
+    if running_only {
+        format!("{base}:running")
+    } else {
+        base
+    }
 }
 
-fn orchestration_target_body(target: &crate::fabric::nip29::orchestration::AddTarget) -> String {
+fn orchestration_target_body(
+    target: &crate::fabric::nip29::orchestration::AddTarget,
+    running_only: bool,
+) -> String {
+    if running_only {
+        return format!(
+            "admit-running {} {}",
+            target.slug,
+            target.session_pubkey.as_deref().unwrap_or("")
+        );
+    }
     match target.session_pubkey.as_deref().filter(|s| !s.is_empty()) {
         Some(session) => format!("resume {} {session}", target.slug),
         None => format!("spawn {}", target.slug),

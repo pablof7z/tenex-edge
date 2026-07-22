@@ -56,6 +56,26 @@ fn relay_event_backfill_uses_event_author_pubkey() {
 }
 
 #[test]
+fn recent_channel_messages_limit_keeps_the_newest_rows() {
+    let store = Store::open_memory().unwrap();
+    for (id, at) in [("old", 10), ("middle", 20), ("new", 30)] {
+        store
+            .record_message(&record_at(id, "inbound", "accepted", at))
+            .unwrap();
+    }
+
+    let rows = store
+        .recent_chat_messages_for_channel("chan", 0, 2)
+        .unwrap();
+    assert_eq!(
+        rows.iter()
+            .map(|message| message.message_id.as_str())
+            .collect::<Vec<_>>(),
+        ["new", "middle"]
+    );
+}
+
+#[test]
 fn outbound_reply_check_follows_pubkey_across_runtime_replacement() {
     let store = Store::open_memory().unwrap();
     store

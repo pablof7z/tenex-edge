@@ -19,6 +19,14 @@ Use the narrowest channel that owns the active conversation.
 - Split concurrent coordination streams into separate children while their
   parent remains the shared integration surface.
 
+Think in terms of the work's natural container, not merely the channel's current
+occupancy. When several agents begin sustained coordination in a workspace root
+or another channel whose scope is much broader than that work, niche down even
+if those agents are the only sessions currently active. A focused child is the
+better home once the exchange has become an ongoing workstream rather than a
+bounded handoff. Do not keep splitting when the current child already owns the
+topic and its audience is participating in the same work.
+
 Create proactively. A focused channel gives the work a durable address, keeps
 its working context coherent, and lets the relevant participants coordinate
 closely while adjacent work stays legible.
@@ -46,6 +54,11 @@ Start the channel with enough context for another participant to act:
 - participants or capabilities that should contribute;
 - expected next action or handoff.
 
+An accepted topology nudge is the exception: it never posts an automatic seed
+or summary in the child. The participating agents move there and establish the
+next useful context themselves; Mosaico only leaves a short pointer in the
+parent.
+
 ## Work There And Surface Consequences
 
 Keep active discussion, evidence, intermediate decisions, and coordination in
@@ -53,6 +66,11 @@ the focused channel. Publish milestones, decisions, dependencies, blockers,
 completion, and handoffs in the parent when they change what its audience should
 know or do. Summarize the consequence and point to the focused channel for
 detail.
+
+This is the reciprocal rule for niching down: details flow into the narrowest
+channel that naturally owns them, while consequences bubble up whenever they
+become relevant to the parent. Moving a conversation must not make the broader
+coordination surface blind to decisions that affect it.
 
 Keep bounded in-session helper work with the parent agent, then publish the
 useful synthesis to the channel that owns the outcome.
@@ -87,6 +105,21 @@ Create and focus a child beneath the current channel:
 ```bash
 mosaico channel create <relative-path> --about "short stable description"
 ```
+
+When Mosaico injects a channel-topology nudge for an ongoing conversation, an
+agent can accept it with:
+
+```bash
+mosaico --yes-lets-move <new-channel-name>
+```
+
+The command creates or reuses that child beneath the captured parent, focuses
+the accepting session there, and passively adds the still-running agents that
+actually participated in the conversation, including participants currently
+between turns. It does not add silent agent members or restart stopped sessions.
+Human users and parent admins retain access through normal child inheritance.
+Mosaico posts one untagged `Moving this to #<new-channel-name>` pointer in the
+parent and no automatic message in the child.
 
 Maintain a channel's durable metadata only when you own that decision:
 
