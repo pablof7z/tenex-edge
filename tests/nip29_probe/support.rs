@@ -9,7 +9,8 @@ pub(crate) const KIND_GROUP_MEMBERS: u16 = 39002;
 pub(crate) const KIND_NOTE: u16 = 1;
 
 pub(crate) fn relay_url() -> String {
-    std::env::var("MOSAICO_NIP29_RELAY").unwrap_or_else(|_| "wss://nip29.f7z.io".to_string())
+    std::env::var("MOSAICO_NIP29_RELAY")
+        .expect("set MOSAICO_NIP29_RELAY to the explicit relay used for this public probe")
 }
 
 pub(crate) fn unique_slug() -> String {

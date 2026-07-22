@@ -7,6 +7,8 @@ use anyhow::Result;
 use dialoguer::{Confirm, Input, Password, Select};
 use serde_json::{json, Value};
 
+const RELAY_CHOICES: [&str; 2] = ["Bundled local relay", "Use existing relay URL(s)"];
+
 pub(super) fn edit_interactively(doc: &mut Value) -> Result<()> {
     let current =
         crate::config::Config::from_json_str(&doc.to_string(), &crate::config::hostname())?;
@@ -21,29 +23,16 @@ pub(super) fn edit_interactively(doc: &mut Value) -> Result<()> {
         .with_initial_text(current.host)
         .interact_text()?;
 
-    let local = current.relays == [LOCAL_RELAY_URL];
-    let public = current.relays == [crate::config::DEFAULT_RELAY];
     let relay_choice = Select::new()
         .with_prompt("Fabric relay")
-        .items(&[
-            "Mosaico public relay",
-            "Bundled local relay",
-            "Custom relay URL(s)",
-        ])
-        .default(if public {
-            0
-        } else if local {
-            1
-        } else {
-            2
-        })
+        .items(&RELAY_CHOICES)
+        .default(relay_choice_default(&current.relays))
         .interact()?;
     let relays = match relay_choice {
-        0 => vec![crate::config::DEFAULT_RELAY.to_string()],
-        1 => vec![LOCAL_RELAY_URL.to_string()],
+        0 => vec![LOCAL_RELAY_URL.to_string()],
         _ => {
             let raw = Input::<String>::new()
-                .with_prompt("Relay URL(s), comma-separated")
+                .with_prompt("Existing relay URL(s), comma-separated")
                 .with_initial_text(current.relays.join(","))
                 .interact_text()?;
             normalize_relays(&split_csv(&raw))?
@@ -90,4 +79,28 @@ pub(super) fn edit_interactively(doc: &mut Value) -> Result<()> {
         _ => {}
     }
     Ok(())
+}
+
+fn relay_choice_default(relays: &[String]) -> usize {
+    if relays.is_empty() || relays == [LOCAL_RELAY_URL] {
+        0
+    } else {
+        1
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn relay_prompt_has_no_implicit_public_service() {
+        assert_eq!(
+            RELAY_CHOICES,
+            ["Bundled local relay", "Use existing relay URL(s)"]
+        );
+        assert_eq!(relay_choice_default(&[]), 0);
+        assert_eq!(relay_choice_default(&[LOCAL_RELAY_URL.into()]), 0);
+        assert_eq!(relay_choice_default(&["wss://relay.example".into()]), 1);
+    }
 }

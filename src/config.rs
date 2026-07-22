@@ -1,7 +1,7 @@
 //! Device-level config + mosaico's own writable home.
 //!
 //! mosaico *reads* `~/.mosaico/config.json` (for `whitelistedPubkeys`,
-//! optional `relays`, and `backendName` as the host label) and keeps all of its
+//! explicit `relays`, and `backendName` as the host label) and keeps all of its
 //! own writable state under `~/.mosaico`.
 
 use anyhow::{Context, Result};
@@ -15,7 +15,6 @@ pub use harness_detection::detect as detect_available_harnesses;
 mod harness_detection;
 pub(crate) use management_key::{ensure_mosaico_private_key, generate_mosaico_private_key};
 
-pub const DEFAULT_RELAY: &str = "wss://nip29.f7z.io";
 pub const DEFAULT_INDEXER_RELAY: &str = "wss://purplepag.es";
 pub const ISOLATED_HOME_ACK_ENV: &str = "MOSAICO_ISOLATED_HOME_OK";
 const MISSING_HOME_MESSAGE: &str =
@@ -116,11 +115,6 @@ impl Config {
     /// Parse from a JSON string. Pure — the unit-testable core of `load`.
     pub fn from_json_str(s: &str, fallback_host: &str) -> Result<Self> {
         let raw: RawConfig = serde_json::from_str(s).context("parsing mosaico config json")?;
-        let relays = if raw.relays.is_empty() {
-            vec![DEFAULT_RELAY.to_string()]
-        } else {
-            raw.relays
-        };
         let host = raw
             .backend_name
             .filter(|s| !s.trim().is_empty())
@@ -131,7 +125,7 @@ impl Config {
             .unwrap_or_else(|| DEFAULT_INDEXER_RELAY.to_string());
         Ok(Config {
             whitelisted_pubkeys: raw.whitelisted_pubkeys,
-            relays,
+            relays: raw.relays,
             indexer_relay,
             host,
             user_nsec: raw.user_nsec,
@@ -153,8 +147,18 @@ impl Config {
                 anyhow::Error::new(e).context(format!("reading {}", path.display()))
             }
         })?;
-        Self::from_json_str(&s, &hostname())
+        let config = Self::from_json_str(&s, &hostname())?;
+        require_configured_relay(config)
     }
+}
+
+fn require_configured_relay(config: Config) -> Result<Config> {
+    if config.relays.is_empty() {
+        anyhow::bail!(
+            "config has no fabric relay; run `mosaico setup` and choose the bundled local relay or supply an existing relay URL"
+        );
+    }
+    Ok(config)
 }
 
 pub fn config_path() -> PathBuf {

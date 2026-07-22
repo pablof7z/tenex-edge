@@ -11,7 +11,7 @@ fn parses_real_tenex_shape_with_camelcase() {
     let c = Config::from_json_str(json, "fallback").unwrap();
     assert_eq!(c.whitelisted_pubkeys, vec!["aa", "bb"]);
     assert_eq!(c.host, "pablos' laptop");
-    assert_eq!(c.relays, vec![DEFAULT_RELAY]);
+    assert!(c.relays.is_empty());
     assert_eq!(c.indexer_relay, DEFAULT_INDEXER_RELAY);
     assert_eq!(c.mosaico_private_key.as_deref(), Some("deadbeef"));
     assert_eq!(c.session_ikm_nsec().map(String::as_str), Some("deadbeef"));
@@ -52,6 +52,15 @@ fn explicit_relays_win_and_host_falls_back() {
     assert_eq!(c.host, "fallback-host");
     assert!(c.whitelisted_pubkeys.is_empty());
     assert_eq!(c.indexer_relay, DEFAULT_INDEXER_RELAY);
+}
+
+#[test]
+fn runtime_config_requires_an_explicit_relay() {
+    let config = Config::from_json_str(r#"{"whitelistedPubkeys":[]}"#, "host").unwrap();
+    let error = require_configured_relay(config).unwrap_err().to_string();
+
+    assert!(error.contains("choose the bundled local relay"));
+    assert!(error.contains("supply an existing relay URL"));
 }
 
 #[test]

@@ -26,7 +26,8 @@ use nostr_sdk::prelude::*;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 fn relay_url() -> String {
-    std::env::var("MOSAICO_NIP29_RELAY").unwrap_or_else(|_| "wss://nip29.f7z.io".to_string())
+    std::env::var("MOSAICO_NIP29_RELAY")
+        .expect("set MOSAICO_NIP29_RELAY to the explicit relay used for this destructive seed")
 }
 
 fn now_secs() -> u64 {
