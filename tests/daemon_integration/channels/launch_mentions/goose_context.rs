@@ -134,19 +134,18 @@ fn goose_pty_launch_injects_canonical_fabric_context_through_top_of_mind() {
     let session = wait_for_alive_session(&home, "goose", &channel);
     wait_for_group_member(&home, &channel, &session.pubkey);
     let marker = format!("GOOSE_FABRIC_{}", unique_session("marker"));
-    Store::open(&home.store_path())
-        .unwrap()
-        .insert_event(&mosaico::state::RelayEvent {
-            id: format!("{:064x}", mosaico::util::now_secs()),
-            kind: mosaico::fabric::nip29::wire::KIND_CHAT as u32,
-            pubkey: pubkey_of(EXAMPLE_USER_NSEC),
-            created_at: mosaico::util::now_secs(),
-            channel_h: channel.clone(),
-            d_tag: String::new(),
-            content: marker.clone(),
-            tags_json: serde_json::json!([["h", channel], ["p", session.pubkey]]).to_string(),
-        })
-        .unwrap();
+    rt().block_on(publish_user_kind9(&channel, &marker, &session.pubkey));
+    assert!(
+        wait_until(Duration::from_secs(25), || {
+            Store::open(&home.store_path()).is_ok_and(|store| {
+                chat_in_channel(&store, &channel)
+                    .iter()
+                    .any(|message| message.content == marker)
+            })
+        }),
+        "relay-published Goose marker never materialized; daemon={}",
+        std::fs::read_to_string(home.dir.path().join("daemon.log")).unwrap_or_default(),
+    );
     mosaico::pty::inject(&pty_id, "inspect current fabric", true, true)
         .expect("submit Goose prompt");
     assert!(

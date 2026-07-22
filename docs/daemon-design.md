@@ -302,17 +302,16 @@ defense-in-depth + a small perf win).
 ## 8a. Multi-agent relay ownership
 
 The daemon hosts one-pubkey identities, each with at most one active runtime. NMP
-observes their shared demand on a NIP-42 session authenticated as `mosaicoPrivateKey`.
-That identity is admin of every Mosaico-created group, giving private visibility
-one owner. Each author registers a signer plus exact-account AUTH policy. Per-write
-identity overrides authenticate as the frozen author; account changes never
-retarget another session's accepted write. Neither client belongs to a session.
+observes their shared demand publicly because Mosaico-created groups are public
+and closed: anyone may read them, while only admitted members may write. Each author
+registers a signer plus exact-account AUTH policy. Per-write identity overrides
+authenticate as the frozen author; account changes never retarget another session's
+accepted write. Neither client belongs to a session.
 
 1. **Cross-pubkey delivery.** A connection authenticated (NIP-42) as agent A
    *does* receive events p-tagged to a different agent B. The relay does **not**
    scope ordinary public event delivery to the connection's authed identity.
-   Mosaico pins its shared authenticated read demand to configured hosts and the
-   backend/admin pubkey; it does not multiply identical reads per hosted agent.
+   Mosaico pins one shared public read demand to configured hosts; NIP-42 protected reads remain an NMP capability, not the product acquisition path for public groups.
 2. **Multi-key publish.** NMP freezes the draft author at acceptance, selects the
    exact registered capability named by the write override, validates the signed
    result, authenticates the relay session as that author when challenged, and

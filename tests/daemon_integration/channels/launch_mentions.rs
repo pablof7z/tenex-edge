@@ -164,8 +164,10 @@ fn wait_for_injected_log(log: &Path, body: &str) {
         wait_until(Duration::from_secs(25), || std::fs::read_to_string(log)
             .map(|s| s.contains(body))
             .unwrap_or(false)),
-        "PTY session did not receive injected body {body:?}; log={}",
-        log.display()
+        "PTY session did not receive injected body {body:?}; log={}; daemon_log={}",
+        log.display(),
+        std::fs::read_to_string(log.parent().unwrap().join("daemon.log"))
+            .unwrap_or_else(|error| format!("<unreadable: {error}>"))
     );
 }
 
@@ -213,6 +215,8 @@ async fn publish_user_kind9(channel: &str, body: &str, mentioned_pubkey: &str) -
 
 #[path = "launch_mentions/goose_context.rs"]
 mod goose_context;
+#[path = "launch_mentions/hermes_context.rs"]
+mod hermes_context;
 #[path = "launch_mentions/offline.rs"]
 mod offline;
 #[path = "launch_mentions/working.rs"]
