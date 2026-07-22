@@ -15,6 +15,15 @@ fn parse_err(args: &[&str]) -> clap::Error {
 }
 
 #[test]
+fn yes_lets_move_parses_as_top_level_acceptance() {
+    let cli = Cli::try_parse_from(["mosaico", "--yes-lets-move", "harness-support"])
+        .expect("acceptance flag should parse");
+
+    assert_eq!(cli.yes_lets_move.as_deref(), Some("harness-support"));
+    assert!(cli.cmd.is_none());
+}
+
+#[test]
 fn unknown_top_level_command_routes_to_direct_fallback() {
     let cli = Cli::try_parse_from(["mosaico", "help", "--", "--yolo"]).unwrap();
 

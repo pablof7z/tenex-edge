@@ -48,5 +48,22 @@ pub(crate) struct TurnContext {
     pub(crate) revision: i64,
 }
 
+impl TurnContext {
+    /// Add a daemon policy advisory after the ordinary fabric view has rendered.
+    /// Keep the persisted receipt aligned with the exact bytes the hook emits.
+    pub(crate) fn append_advisory(&mut self, advisory: &str, cause: &str) {
+        let text = match self.text.take() {
+            Some(existing) => format!("{existing}\n\n{advisory}"),
+            None => advisory.to_string(),
+        };
+        self.receipt.emitted = true;
+        self.receipt.bytes = text.len();
+        if !self.receipt.input_causes.iter().any(|item| item == cause) {
+            self.receipt.input_causes.push(cause.to_string());
+        }
+        self.text = Some(text);
+    }
+}
+
 #[cfg(test)]
 mod tests;

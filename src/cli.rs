@@ -18,6 +18,7 @@ mod acp_smoke;
 mod admin;
 mod agents;
 mod args;
+mod channel_move;
 mod context;
 mod daemon_lifecycle;
 mod debug;
@@ -99,6 +100,12 @@ pub async fn run(cli: Cli) -> Result<()> {
     {
         crate::daemon::clear_inhibit();
         eprintln!("[mosaico] stop inhibit cleared");
+    }
+    if let Some(name) = cli.yes_lets_move {
+        if cli.cmd.is_some() {
+            bail!("--yes-lets-move cannot be combined with another command");
+        }
+        return channel_move::accept(name).await;
     }
     match cli.cmd {
         None => interactive::session_picker::home().await,

@@ -6,7 +6,7 @@ fn installed_codex_home() -> tempfile::TempDir {
     std::fs::create_dir_all(&mosaico_home).unwrap();
     std::fs::write(
         mosaico_home.join("config.json"),
-        r#"{"availableHarnesses":[]}"#,
+        r#"{"availableHarnesses":[],"relays":["ws://127.0.0.1:1"]}"#,
     )
     .unwrap();
     let codex_home = home.path().join(".codex");
@@ -120,6 +120,7 @@ fn agent_help_hides_operator_agent_management() {
 
     assert!(help.contains("  my"));
     assert!(help.contains("  doctor"));
+    assert!(help.contains("--yes-lets-move"));
     assert!(!help.contains("  agents"));
     assert!(!help.contains("  setup"));
     assert!(!help.contains("  uninstall"));

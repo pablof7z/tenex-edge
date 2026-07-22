@@ -153,6 +153,7 @@ impl DaemonState {
 
 // ── entry point ──────────────────────────────────────────────────────────────
 mod channel_membership_rpc;
+mod channel_move;
 mod channel_read_tail;
 mod channel_resolve;
 mod channel_send;
@@ -257,6 +258,7 @@ async fn dispatch(state: &Arc<DaemonState>, req: &Request) -> Response {
         "channel_join" => rpc_channel_join(state, &req.params).await,
         "channel_leave" => rpc_channel_leave(state, &req.params).await,
         "channel_switch" => rpc_channel_switch(state, &req.params).await,
+        "channel_move_accept" => channel_move::rpc_accept(state, &req.params).await,
         "dispatch" => session_dispatch::rpc_dispatch(state, &req.params).await,
         "statusline" => rpc_statusline(state, &req.params),
         "pty_status" => pty_rpc::rpc_pty_status(state).await,

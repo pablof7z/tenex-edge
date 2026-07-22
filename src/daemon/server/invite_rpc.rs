@@ -180,7 +180,7 @@ pub(super) async fn invite_agent(
 /// `rpc/channel.rs`'s `CHANNEL_MEMBER_READY_TIMEOUT`.
 const BACKEND_ADMIN_READY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);
 
-async fn ensure_backend_admin(
+pub(super) async fn ensure_backend_admin(
     state: &Arc<DaemonState>,
     channel_h: &str,
     backend_pubkey: &str,

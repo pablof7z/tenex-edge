@@ -172,6 +172,21 @@ impl Store {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
+    pub fn recent_chat_messages_for_channel(
+        &self,
+        channel_h: &str,
+        since: u64,
+        limit: u32,
+    ) -> Result<Vec<Message>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {MESSAGE_COLS} FROM messages
+             WHERE channel_h=?1 AND created_at > ?2
+             ORDER BY created_at DESC, message_id DESC LIMIT ?3"
+        ))?;
+        let rows = stmt.query_map(params![channel_h, since, limit], row_to_message)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
     pub fn chat_messages_for_channel_after(
         &self,
         channel_h: &str,
