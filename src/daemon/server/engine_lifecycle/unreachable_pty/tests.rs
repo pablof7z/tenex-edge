@@ -35,7 +35,6 @@ async fn startup_reconcile_without_locator_retains_live_pty_as_unavailable() {
                     agent_slug: "codex".into(),
                     channel_h: "room".into(),
                     child_pid: Some(std::process::id() as i32),
-                    transcript_path: None,
                     now: 1,
                 },
                 &crate::state::AdmittedRuntimeFacts {

@@ -146,7 +146,6 @@ mod tests {
             admitted_transport: String::new(),
             endpoint_provenance: "hook".to_string(),
             child_pid: None,
-            transcript_path: None,
             runtime_state: crate::state::RuntimeState::Running,
             presentation_state: crate::state::PresentationState::Headed,
             work_state: crate::state::WorkState::Idle,
@@ -164,7 +163,6 @@ mod tests {
             turn_started_at: 0,
             seen_cursor: 0,
             title: String::new(),
-            explicit_chat_published_at: 0,
             state_changed_at: 1,
         }
     }
@@ -237,7 +235,6 @@ mod tests {
                 agent_slug: "codex".to_string(),
                 channel_h: "root".to_string(),
                 child_pid: None,
-                transcript_path: None,
                 now: 1,
             })
             .unwrap();

@@ -36,7 +36,7 @@ fn fresh_file_db_uses_only_canonical_schema() {
     let version: u32 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 15);
+    assert_eq!(version, 16);
     assert!(table_exists(&conn, "workspace_roots"));
     assert!(table_exists(&conn, "session_locators"));
     assert!(!table_exists(&conn, "session_aliases"));
@@ -155,10 +155,6 @@ fn fresh_file_db_uses_only_canonical_schema() {
     assert!(!sess_cols.iter().any(|c| c == "agent_pubkey"));
     assert!(!sess_cols.iter().any(|c| c == "resume_id"));
     assert!(!table_exists(&conn, "llm_calls"));
-    assert!(
-        sess_cols.iter().any(|c| c == "explicit_chat_published_at"),
-        "sessions.explicit_chat_published_at"
-    );
     for removed in [
         "last_distill_at",
         "distill_fail_streak",
@@ -168,6 +164,8 @@ fn fresh_file_db_uses_only_canonical_schema() {
         "activity",
         "alive",
         "working",
+        "explicit_chat_published_at",
+        "transcript_path",
     ] {
         assert!(
             !sess_cols.iter().any(|c| c == removed),
@@ -268,7 +266,7 @@ fn stamped_non_canonical_file_db_is_rejected() {
         "#,
     )
     .unwrap();
-    conn.pragma_update(None, "user_version", 15u32).unwrap();
+    conn.pragma_update(None, "user_version", 16u32).unwrap();
     drop(conn);
 
     let err = match Store::open(&path) {

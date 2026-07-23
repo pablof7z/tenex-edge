@@ -6,7 +6,6 @@ use crate::util::CHANNEL_MESSAGE_CHAR_LIMIT;
 use anyhow::bail;
 
 mod body;
-mod explicit_publish;
 mod mention_guard;
 mod react;
 mod recipient;
@@ -15,7 +14,6 @@ mod reply;
 #[cfg(test)]
 mod tests;
 
-use explicit_publish::note_explicit_chat_published;
 pub(in crate::daemon::server) use react::rpc_channel_react;
 pub(in crate::daemon::server) use recipient::resolve_recipient;
 use recipient::TaggedRecipient;
@@ -162,8 +160,6 @@ pub(in crate::daemon::server) async fn rpc_channel_send(
         .await?;
     let event_id = published.event_id;
     let created_at = published.created_at;
-    note_explicit_chat_published(state, &rec.pubkey, created_at);
-
     // Local live delivery: relays often don't echo an event back to the same
     // connection that published it. Seed the verbatim log and park inbox rows for
     // sessions already running in the same routing scope.

@@ -52,7 +52,6 @@ pub(super) fn seed_channel(store: &Store) {
             agent_slug: "coder".to_string(),
             channel_h: "proj".to_string(),
             child_pid: None,
-            transcript_path: None,
             now: 1,
         })
         .unwrap();
@@ -72,7 +71,6 @@ pub(super) fn test_session(_id: &str) -> Session {
         admitted_transport: String::new(),
         endpoint_provenance: "hook".to_string(),
         child_pid: None,
-        transcript_path: None,
         runtime_state: crate::state::RuntimeState::Running,
         presentation_state: crate::state::PresentationState::Headed,
         work_state: crate::state::WorkState::Idle,
@@ -90,7 +88,6 @@ pub(super) fn test_session(_id: &str) -> Session {
         turn_started_at: 0,
         seen_cursor: 0,
         title: String::new(),
-        explicit_chat_published_at: 0,
         state_changed_at: 1,
     }
 }

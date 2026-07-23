@@ -13,7 +13,6 @@ fn reg(harness: &str, ext: &str, channel: &str) -> RegisterSession {
         agent_slug: "agent".into(),
         channel_h: channel.into(),
         child_pid: Some(42),
-        transcript_path: Some("/t/x.jsonl".into()),
         now: 1000,
     }
 }

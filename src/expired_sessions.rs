@@ -73,7 +73,6 @@ mod tests {
                 agent_slug: "coder".into(),
                 channel_h: channel.into(),
                 child_pid: Some(7),
-                transcript_path: None,
                 now: 1_000,
             })
             .unwrap();

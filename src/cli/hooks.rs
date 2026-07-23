@@ -131,13 +131,6 @@ async fn hook_dispatch(
         None => (host.agent_slug.to_string(), None),
     };
 
-    let transcript: Option<String> = host.transcript_field.and_then(|field| {
-        obj.and_then(|o| o.get(field))
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty())
-            .map(str::to_string)
-    });
-
     // Harness-native resume token, forwarded by programmatic hosts whose
     // assigned id differs from our identity (opencode → `ses_*`). claude-code /
     // codex omit it: their adopted `session_id` is already the resume token.
@@ -352,7 +345,7 @@ async fn hook_dispatch(
                     );
                 }
             }
-            let result = turn_start(sid.clone(), transcript, emit, degraded_notice).await?;
+            let result = turn_start(sid.clone(), emit, degraded_notice).await?;
             if host.name == "goose" {
                 crate::goose_integration::sync_hook_context(&hook_type, result.context.as_deref())?;
             }

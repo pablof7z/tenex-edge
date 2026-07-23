@@ -9,6 +9,7 @@ fn schema_fourteen_adds_zeroed_busy_time() {
     let conn = Connection::open(&path).unwrap();
     conn.execute("ALTER TABLE sessions DROP COLUMN busy_seconds", [])
         .unwrap();
+    fixture::add_removed_v15_session_columns(&conn);
     conn.execute(
         "INSERT INTO sessions
             (pubkey, runtime_generation, agent_slug, created_at, turn_count)
@@ -21,7 +22,7 @@ fn schema_fourteen_adds_zeroed_busy_time() {
 
     drop(Store::open(&path).expect("schema fourteen upgrades to current"));
     let conn = Connection::open(&path).unwrap();
-    assert_eq!(version(&conn), 15);
+    assert_eq!(version(&conn), 16);
     assert_eq!(
         conn.query_row(
             "SELECT busy_seconds FROM sessions WHERE pubkey='historical'",

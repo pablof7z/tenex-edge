@@ -16,7 +16,6 @@ fn seed_session(state: &Arc<DaemonState>) -> Session {
                 agent_slug: "self".into(),
                 channel_h: "x".into(),
                 child_pid: None,
-                transcript_path: None,
                 now: 1,
             })?;
             store.grant_session_route(SELF_PUBKEY, "x", 1)?;

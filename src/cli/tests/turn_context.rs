@@ -62,7 +62,6 @@ fn first_turn_snapshot_uses_bound_instance_identity() {
             agent_slug: "coder".to_string(),
             channel_h: "proj".to_string(),
             child_pid: None,
-            transcript_path: None,
             now: 1,
         })
         .unwrap();

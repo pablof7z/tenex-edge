@@ -74,7 +74,6 @@ fn dead_custom_handle_is_available_and_atomically_reclaimed() {
             agent_slug: "codex".into(),
             channel_h: "root".into(),
             child_pid: None,
-            transcript_path: None,
             now: 10,
         })
         .unwrap();

@@ -165,7 +165,6 @@ pub struct RegisterSession {
     pub agent_slug: String,
     pub channel_h: String,
     pub child_pid: Option<i32>,
-    pub transcript_path: Option<String>,
     pub now: u64,
 }
 
@@ -257,7 +256,6 @@ mod retention;
 pub use retention::{
     RetentionPruneReport, COMPLETED_LEDGER_RETENTION_SECS, RELAY_EVENT_RETENTION_SECS,
 };
-mod session_chat;
 mod session_context;
 mod session_cursor;
 mod session_lifecycle;

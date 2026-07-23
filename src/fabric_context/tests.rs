@@ -64,7 +64,6 @@ fn session_record(store: &Store, _label: &str, channel_h: &str) -> Session {
             agent_slug: "coder".into(),
             channel_h: channel_h.into(),
             child_pid: None,
-            transcript_path: None,
             now: 10,
         })
         .unwrap();

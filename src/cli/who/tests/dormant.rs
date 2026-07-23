@@ -22,7 +22,6 @@ fn seed_retained(store: &Store) {
                 agent_slug: "codex".into(),
                 channel_h: "proj".into(),
                 child_pid: None,
-                transcript_path: None,
                 now: 900,
             },
             &AdmittedRuntimeFacts {

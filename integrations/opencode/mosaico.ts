@@ -1,8 +1,7 @@
 import type { Plugin } from "@opencode-ai/plugin"
 import { execFile } from "node:child_process"
-import { writeFile } from "node:fs/promises"
 import { existsSync } from "node:fs"
-import { tmpdir, homedir } from "node:os"
+import { homedir } from "node:os"
 import { join } from "node:path"
 
 // ── mosaico ⇄ opencode bridge ─────────────────────────────────────────────
@@ -14,8 +13,8 @@ import { join } from "node:path"
 //                   presence engine, watching opencode's PID so it reaps on exit)
 //   user-prompt-submit (hook)   → experimental.chat.messages.transform, on the
 //                   first model invocation of a user message (marks "working",
-//                   captures the transcript path). Its stdout — self-identity,
-//                   workspace chat, peer roster, all assembled by
+//                   then injects its stdout — self-identity, workspace chat,
+//                   peer roster, all assembled by
 //                   the shared Rust hook — is injected verbatim into the turn.
 //   post-tool-use (hook)        → experimental.chat.messages.transform, on later
 //                   model invocations of the same message (mid-turn checkpoint:
@@ -24,9 +23,6 @@ import { join } from "node:path"
 //
 // The plugin never builds context strings itself: the hook is the single source
 // of truth, identical to Claude Code / Codex. We pipe its stdout into the turn.
-//
-// opencode has no transcript file, so we keep a temp JSONL snapshot fresh for
-// the daemon's transcript-backed auto-reply path.
 //
 // mosaico knows nothing about opencode; this plugin is the straw.
 // Env: MOSAICO_BIN (path), MOSAICO_AGENT (slug, default "opencode").
@@ -39,7 +35,7 @@ function resolveBin(): string {
   return "mosaico"
 }
 
-export const Mosaico: Plugin = async ({ client, directory }) => {
+export const Mosaico: Plugin = async ({ directory }) => {
   const BIN = resolveBin()
 
   // Session/turn lifecycle goes through the single `hook` entry point — the same
@@ -59,54 +55,6 @@ export const Mosaico: Plugin = async ({ client, directory }) => {
     })
   }
 
-  // ── transcript extraction (opencode-specific; the daemon reads a path) ──────
-  // opencode has no transcript file: the conversation lives in the SDK message
-  // store. So — exactly like pc — fetch recent messages, flatten the text parts
-  // to a flat {role,content} JSONL temp file, and hand that path to the engine,
-  // which can recover the latest assistant response for auto-replies. The temp
-  // path is deterministic per opencode session (mosaico-oc-<ocSID>.jsonl), so we
-  // rewrite it in place to keep it fresh as the turn progresses (at turn-start
-  // and on each tool.execute.after) — the path the engine holds stays valid.
-  // `_mosaicoInjected` parts (our own peer briefings) are filtered out.
-  function partsToText(parts: any[]): string {
-    return (parts ?? [])
-      .filter((p) => p?.type === "text" && !p?._mosaicoInjected && typeof p?.text === "string")
-      .map((p) => p.text)
-      .join("\n")
-      .trim()
-  }
-
-  async function writeTranscript(
-    msgs: Array<{ info: { role: string }; parts: any[] }>,
-    ocSessionID: string,
-  ): Promise<string | undefined> {
-    const lines: string[] = []
-    for (const m of msgs.slice(-20)) {
-      const role = m.info?.role
-      if (role !== "user" && role !== "assistant") continue
-      const text = partsToText(m.parts ?? [])
-      if (text) lines.push(JSON.stringify({ role, content: text }))
-    }
-    if (!lines.length) return undefined
-    const path = join(tmpdir(), `mosaico-oc-${ocSessionID}.jsonl`)
-    await writeFile(path, lines.join("\n"))
-    return path
-  }
-
-  // Fetch via the opencode client using the opencode-native session locator.
-  // Returns a temp transcript path, or undefined on any failure
-  // so the caller proceeds without --transcript.
-  async function fetchTranscript(ocSessionID: string): Promise<string | undefined> {
-    try {
-      const res: any = await client.session.messages({ path: { id: ocSessionID } })
-      const data = res?.data ?? res
-      if (!Array.isArray(data)) return undefined
-      return await writeTranscript(data, ocSessionID)
-    } catch {
-      return undefined
-    }
-  }
-
   // Start the session in the background (fire-and-forget) so plugin load NEVER
   // blocks opencode startup.
   // Watch opencode's PID so the engine reaps + goes idle when opencode exits.
@@ -118,14 +66,13 @@ export const Mosaico: Plugin = async ({ client, directory }) => {
   // Turn bracketing. The transform handler fires once per *model invocation*
   // (i.e. many times per user turn in an agentic loop), so turn-start is gated
   // to fire only when the latest user message id changes. We also remember the
-  // opencode session id so we can keep the
-  // transcript snapshot fresh on tool.execute.after (which has no message id).
+  // opencode session id so session.idle can close the current turn.
   let lastTurnMsgID = ""
   let ocSessionForTurn = ""
 
   return {
     // Inject peer mentions before the model sees the turn, and (once per user
-    // message) mark the turn "working" with a fresh transcript snapshot.
+    // message) mark the turn "working".
     "experimental.chat.messages.transform": async (_input, output) => {
       const msgs = output.messages as Array<{ info: any; parts: any[] }>
       let lastUser: { info: any; parts: any[] } | undefined
@@ -150,7 +97,6 @@ export const Mosaico: Plugin = async ({ client, directory }) => {
       let context = ""
       if (ocSessionID && msgID && msgID !== lastTurnMsgID) {
         lastTurnMsgID = msgID
-        const transcriptPath = await fetchTranscript(ocSessionID)
         // We deliberately omit `prompt`, so (unlike Claude Code / Codex) the
         // prompt is NOT published as a kind:1 OP — preserving prior behavior.
         // The opencode id is a harness locator and resume token, never identity.
@@ -158,7 +104,6 @@ export const Mosaico: Plugin = async ({ client, directory }) => {
           await runHook("user-prompt-submit", {
             session_id: ocSessionID,
             resume_id: ocSessionID,
-            ...(transcriptPath ? { transcript_path: transcriptPath } : {}),
           })
         ).trim()
       } else if (ocSessionID) {
@@ -175,13 +120,6 @@ export const Mosaico: Plugin = async ({ client, directory }) => {
           _mosaicoInjected: true,
         } as any)
       }
-    },
-
-    // Keep the transcript snapshot fresh during the turn for auto-replies.
-    "tool.execute.after": async (input: any, _output: any) => {
-      const ocSessionID = String(input?.sessionID ?? ocSessionForTurn ?? "")
-      if (!ocSessionID) return
-      await fetchTranscript(ocSessionID)
     },
 
     // Turn finished: opencode emits session.idle when the assistant is done

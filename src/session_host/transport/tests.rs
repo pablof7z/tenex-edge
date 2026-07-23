@@ -61,7 +61,6 @@ fn admitted_hosted_transport_remains_distinct_when_its_locator_is_missing() {
                     agent_slug: "codex".into(),
                     channel_h: "root".into(),
                     child_pid: Some(std::process::id() as i32),
-                    transcript_path: None,
                     now: 1,
                 },
                 &crate::state::AdmittedRuntimeFacts {
@@ -97,7 +96,6 @@ fn hosted_locator_lookup_errors_are_not_collapsed_to_unhosted() {
                 agent_slug: "codex".into(),
                 channel_h: "root".into(),
                 child_pid: Some(std::process::id() as i32),
-                transcript_path: None,
                 now: 1,
             },
             &crate::state::AdmittedRuntimeFacts {

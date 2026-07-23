@@ -165,7 +165,6 @@ CREATE TABLE IF NOT EXISTS sessions (
     endpoint_provenance TEXT NOT NULL DEFAULT ''
         CHECK (endpoint_provenance IN ('', 'launch', 'hook', 'migration')),
     child_pid         INTEGER,
-    transcript_path   TEXT,
     runtime_state     TEXT NOT NULL DEFAULT 'running'
         CHECK (runtime_state IN ('running', 'stopping', 'stopped')),
     presentation_state TEXT NOT NULL DEFAULT 'unavailable'
@@ -190,7 +189,6 @@ CREATE TABLE IF NOT EXISTS sessions (
     turn_started_at   INTEGER NOT NULL DEFAULT 0,
     seen_cursor       INTEGER NOT NULL DEFAULT 0,
     title             TEXT NOT NULL DEFAULT '',
-    explicit_chat_published_at INTEGER NOT NULL DEFAULT 0,
     state_changed_at  INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_runtime

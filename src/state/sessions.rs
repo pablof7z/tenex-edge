@@ -6,10 +6,10 @@ use rusqlite::{Transaction, TransactionBehavior};
 pub(super) const COLS: &str =
     "pubkey, runtime_generation, agent_slug, channel_h, work_root, readiness_parent, \
      observed_harness, claimed_harness, admitted_bundle, admitted_transport, \
-     endpoint_provenance, child_pid, transcript_path, runtime_state, presentation_state, \
+     endpoint_provenance, child_pid, runtime_state, presentation_state, \
      work_state, recovery_state, lifecycle_epoch, attachment_epoch, idle_since, idle_deadline, \
      stopped_at, stop_reason, turn_count, busy_seconds, created_at, last_seen, turn_started_at, \
-     seen_cursor, title, explicit_chat_published_at, state_changed_at";
+     seen_cursor, title, state_changed_at";
 
 fn conversion<T>(index: usize, result: Result<T>) -> rusqlite::Result<T> {
     result.map_err(|error| {
@@ -22,13 +22,13 @@ fn conversion<T>(index: usize, result: Result<T>) -> rusqlite::Result<T> {
 }
 
 pub(super) fn row_to_session(row: &rusqlite::Row) -> rusqlite::Result<Session> {
-    let runtime_state = conversion(13, RuntimeState::parse(&row.get::<_, String>(13)?))?;
-    let presentation_state = conversion(14, PresentationState::parse(&row.get::<_, String>(14)?))?;
-    let work_state = conversion(15, WorkState::parse(&row.get::<_, String>(15)?))?;
-    let recovery_state = conversion(16, RecoveryState::parse(&row.get::<_, String>(16)?))?;
+    let runtime_state = conversion(12, RuntimeState::parse(&row.get::<_, String>(12)?))?;
+    let presentation_state = conversion(13, PresentationState::parse(&row.get::<_, String>(13)?))?;
+    let work_state = conversion(14, WorkState::parse(&row.get::<_, String>(14)?))?;
+    let recovery_state = conversion(15, RecoveryState::parse(&row.get::<_, String>(15)?))?;
     let stop_reason = row
-        .get::<_, Option<String>>(22)?
-        .map(|value| conversion(22, StopReason::parse(&value)))
+        .get::<_, Option<String>>(21)?
+        .map(|value| conversion(21, StopReason::parse(&value)))
         .transpose()?;
     Ok(Session {
         pubkey: row.get(0)?,
@@ -43,26 +43,24 @@ pub(super) fn row_to_session(row: &rusqlite::Row) -> rusqlite::Result<Session> {
         admitted_transport: row.get(9)?,
         endpoint_provenance: row.get(10)?,
         child_pid: row.get(11)?,
-        transcript_path: row.get(12)?,
         runtime_state,
         presentation_state,
         work_state,
         recovery_state,
-        lifecycle_epoch: row.get(17)?,
-        attachment_epoch: row.get(18)?,
-        idle_since: row.get(19)?,
-        idle_deadline: row.get(20)?,
-        stopped_at: row.get(21)?,
+        lifecycle_epoch: row.get(16)?,
+        attachment_epoch: row.get(17)?,
+        idle_since: row.get(18)?,
+        idle_deadline: row.get(19)?,
+        stopped_at: row.get(20)?,
         stop_reason,
-        turn_count: row.get(23)?,
-        busy_seconds: row.get(24)?,
-        created_at: row.get(25)?,
-        last_seen: row.get(26)?,
-        turn_started_at: row.get(27)?,
-        seen_cursor: row.get(28)?,
-        title: row.get(29)?,
-        explicit_chat_published_at: row.get(30)?,
-        state_changed_at: row.get(31)?,
+        turn_count: row.get(22)?,
+        busy_seconds: row.get(23)?,
+        created_at: row.get(24)?,
+        last_seen: row.get(25)?,
+        turn_started_at: row.get(26)?,
+        seen_cursor: row.get(27)?,
+        title: row.get(28)?,
+        state_changed_at: row.get(29)?,
     })
 }
 
@@ -127,10 +125,10 @@ impl Store {
             "INSERT INTO sessions
                  (pubkey, runtime_generation, agent_slug, channel_h, observed_harness,
                   claimed_harness, admitted_bundle, admitted_transport, endpoint_provenance,
-                  child_pid, transcript_path, runtime_state, presentation_state, work_state,
+                  child_pid, runtime_state, presentation_state, work_state,
                   recovery_state, lifecycle_epoch, created_at, last_seen, state_changed_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
-                     'running', 'unavailable', 'idle', 'pending', 1, ?12, ?12, ?12)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
+                     'running', 'unavailable', 'idle', 'pending', 1, ?11, ?11, ?11)
              ON CONFLICT(pubkey) DO UPDATE SET
                  runtime_generation=excluded.runtime_generation,
                  agent_slug=excluded.agent_slug, channel_h=excluded.channel_h,
@@ -152,7 +150,7 @@ impl Store {
                      WHEN excluded.endpoint_provenance='launch' THEN excluded.endpoint_provenance
                      WHEN sessions.endpoint_provenance='launch' THEN sessions.endpoint_provenance
                      ELSE excluded.endpoint_provenance END,
-                 child_pid=excluded.child_pid, transcript_path=excluded.transcript_path,
+                 child_pid=excluded.child_pid,
                  runtime_state='running', presentation_state='unavailable', work_state='idle',
                  lifecycle_epoch=sessions.lifecycle_epoch+1, attachment_epoch=0,
                  idle_since=0, idle_deadline=0, stopped_at=0, stop_reason=NULL,
@@ -169,7 +167,6 @@ impl Store {
                 facts.transport,
                 facts.endpoint_provenance,
                 r.child_pid,
-                r.transcript_path,
                 r.now,
             ],
         )?;

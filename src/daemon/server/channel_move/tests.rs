@@ -20,7 +20,6 @@ fn seed_session(store: &crate::state::Store, pubkey: &str, slug: &str) -> u64 {
             agent_slug: slug.into(),
             channel_h: "root".into(),
             child_pid: None,
-            transcript_path: None,
             now: 1,
         })
         .unwrap()
@@ -64,10 +63,10 @@ async fn store_adapter_separates_conversation_busy_and_non_agent_audiences() {
             .unwrap();
 
         store
-            .apply_session_turn_started(A1, a1_generation, 900, None)
+            .apply_session_turn_started(A1, a1_generation, 900)
             .unwrap();
         store
-            .apply_session_turn_started(A2, a2_generation, 901, None)
+            .apply_session_turn_started(A2, a2_generation, 901)
             .unwrap();
         store
             .mark_runtime_stopped_if_generation(

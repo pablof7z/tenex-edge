@@ -7,7 +7,6 @@ fn session(pubkey: &str, agent_slug: &str, now: u64) -> RegisterSession {
         agent_slug: agent_slug.into(),
         channel_h: "root".into(),
         child_pid: None,
-        transcript_path: None,
         now,
     }
 }

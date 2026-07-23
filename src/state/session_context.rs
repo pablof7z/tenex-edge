@@ -1,14 +1,6 @@
 use super::*;
 
 impl Store {
-    pub fn set_session_transcript(&self, pubkey: &str, transcript_path: &str) -> Result<()> {
-        self.conn.execute(
-            "UPDATE sessions SET transcript_path=?2 WHERE pubkey=?1",
-            params![pubkey, transcript_path],
-        )?;
-        Ok(())
-    }
-
     pub fn set_session_channel(&self, pubkey: &str, channel_h: &str) -> Result<()> {
         self.conn.execute(
             "UPDATE sessions SET channel_h=?2 WHERE pubkey=?1",

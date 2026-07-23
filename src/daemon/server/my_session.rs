@@ -89,7 +89,6 @@ mod tests {
                         agent_slug: "codex".into(),
                         channel_h: "alpha".into(),
                         child_pid: Some(42),
-                        transcript_path: None,
                         now: 10,
                     },
                     &crate::state::AdmittedRuntimeFacts {
@@ -172,7 +171,6 @@ mod tests {
                     agent_slug: "codex".into(),
                     channel_h: "root".into(),
                     child_pid: None,
-                    transcript_path: None,
                     now: 1,
                 },
                 &crate::state::AdmittedRuntimeFacts {

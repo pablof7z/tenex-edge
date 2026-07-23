@@ -5,18 +5,10 @@ pub(crate) mod work_start_reaction;
 
 const CONTEXT_PROFILE_WARM_WINDOW_SECS: u64 = 4 * 60 * 60;
 
-#[derive(serde::Deserialize, Default)]
-pub(in crate::daemon::server) struct TurnStartParams {
-    #[serde(default)]
-    transcript: Option<String>,
-}
-
 pub(in crate::daemon::server) async fn rpc_turn_start(
     state: &Arc<DaemonState>,
     params: &serde_json::Value,
 ) -> Result<serde_json::Value> {
-    let p: TurnStartParams =
-        serde_json::from_value(params.clone()).context("parsing turn_start params")?;
     let anchor = CallerAnchor::from_params(params);
     if anchor.explicit.is_none()
         && anchor.pty_session.is_none()
@@ -57,12 +49,7 @@ pub(in crate::daemon::server) async fn rpc_turn_start(
             }));
         }
     };
-    let transcript_ref = p
-        .transcript
-        .as_deref()
-        .filter(|x| !x.is_empty())
-        .map(str::to_string);
-    turn_lifecycle::drive_turn_started(state, &before, now, transcript_ref)
+    turn_lifecycle::drive_turn_started(state, &before, now)
         .await
         .context("applying turn_start lifecycle projection")?;
 
@@ -209,18 +196,6 @@ pub(in crate::daemon::server) async fn rpc_turn_end(
             });
         }
         crate::session_host::ring_doorbells(state.clone());
-    }
-    // The turn is over. If it was a pty-injected mention that the agent never
-    // answered via `channel send`, auto-publish its last transcript text as the
-    // reply so the channel sees a response instead of silence.
-    if let Some(rec) = rec.as_ref() {
-        if let Some(pending) = auto_reply::take(&rec.pubkey) {
-            let state = state.clone();
-            let rec = rec.clone();
-            tokio::spawn(async move {
-                auto_reply::publish_last_response(&state, &rec, pending).await;
-            });
-        }
     }
     Ok(serde_json::json!({ "ok": true }))
 }

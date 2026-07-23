@@ -16,7 +16,6 @@ fn reserve_rpc_session(
                     agent_slug: pubkey.into(),
                     channel_h: "room".into(),
                     child_pid: Some(42),
-                    transcript_path: None,
                     now: 1,
                 },
                 &crate::state::AdmittedRuntimeFacts {
@@ -84,7 +83,6 @@ async fn failed_pty_probe_immediately_persists_unavailable_and_clears_idle() {
                     agent_slug: "codex".into(),
                     channel_h: "room".into(),
                     child_pid: Some(std::process::id() as i32),
-                    transcript_path: None,
                     now: 1,
                 },
                 &crate::state::AdmittedRuntimeFacts {

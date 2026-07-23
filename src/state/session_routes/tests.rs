@@ -7,7 +7,6 @@ fn running(store: &Store) -> (u64, Session) {
         agent_slug: "grok".into(),
         channel_h: "root".into(),
         child_pid: None,
-        transcript_path: None,
         now: 1,
     };
     let generation = store

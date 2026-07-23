@@ -24,9 +24,7 @@ The hook mapping is:
   (marks the session idle when the turn finishes)
 
 The adapter reads the Codex session identifier from `session_id` and uses that
-value consistently as the mosaico session id. Codex hook payloads may carry a
-live `transcript_path` (a JSONL rollout file) handed at `turn-start` and re-read
-as the turn progresses.
+value consistently as the mosaico session id.
 
 Codex hooks only fire in the interactive TUI, not in `codex exec`.
 

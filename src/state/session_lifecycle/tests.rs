@@ -12,7 +12,6 @@ fn seed() -> Store {
         agent_slug: "grok".into(),
         channel_h: "room".into(),
         child_pid: Some(42),
-        transcript_path: None,
         now: 1,
     };
     store
@@ -38,7 +37,7 @@ fn detach_while_working_arms_only_when_the_turn_ends() {
         .apply_session_presentation_edge("pk", generation, 1, PresentationState::Headed, 5)
         .unwrap());
     assert!(store
-        .apply_session_turn_started("pk", generation, 10, None)
+        .apply_session_turn_started("pk", generation, 10)
         .unwrap());
     assert!(store
         .apply_session_presentation_edge("pk", generation, 2, PresentationState::Headless, 20)
@@ -153,7 +152,7 @@ fn completed_turn_consumes_injected_fence_and_rearms_true_idle() {
         .mark_injected_for_echo(&["event".into()], "pk", 21)
         .unwrap();
     store
-        .apply_session_turn_started("pk", session.runtime_generation, 22, None)
+        .apply_session_turn_started("pk", session.runtime_generation, 22)
         .unwrap();
 
     assert!(store
@@ -199,7 +198,7 @@ fn rejected_old_end_does_not_clobber_a_superseding_turn_start() {
     let store = seed();
     let generation = running(&store).runtime_generation;
     assert!(store
-        .apply_session_turn_started("pk", generation, 10, None)
+        .apply_session_turn_started("pk", generation, 10)
         .unwrap());
     assert!(store
         .apply_session_turn_ended("pk", generation, 20)
@@ -211,7 +210,7 @@ fn rejected_old_end_does_not_clobber_a_superseding_turn_start() {
         .apply_session_turn_ended("pk", generation, 21)
         .unwrap());
     assert!(store
-        .apply_session_turn_started("pk", generation, 22, None)
+        .apply_session_turn_started("pk", generation, 22)
         .unwrap());
 
     let superseding = running(&store);

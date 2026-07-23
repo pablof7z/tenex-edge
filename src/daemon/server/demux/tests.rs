@@ -11,7 +11,6 @@ fn register(store: &Store, pubkey: &str, slug: &str, channel: &str, _locator: &s
             agent_slug: slug.into(),
             channel_h: channel.into(),
             child_pid: Some(42),
-            transcript_path: None,
             now: 1000,
         })
         .unwrap();

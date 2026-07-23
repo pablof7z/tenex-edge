@@ -33,7 +33,6 @@ fn register(store: &Store, pubkey: &str, channel_h: &str, agent_slug: &str) {
             agent_slug: agent_slug.into(),
             channel_h: channel_h.into(),
             child_pid: None,
-            transcript_path: None,
             now: 100,
         })
         .unwrap();

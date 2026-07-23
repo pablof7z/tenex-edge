@@ -54,7 +54,6 @@ async fn missing_hosted_locators_never_fall_back_to_a_live_pid() {
                         agent_slug: "codex".into(),
                         channel_h: "root".into(),
                         child_pid: Some(std::process::id() as i32),
-                        transcript_path: None,
                         now: 1,
                     },
                     &crate::state::AdmittedRuntimeFacts {
@@ -84,7 +83,6 @@ fn idle_eviction_and_exact_resume_reopen_presence_under_the_new_generation() {
         agent_slug: "codex".into(),
         channel_h: "root".into(),
         child_pid: None,
-        transcript_path: None,
         now,
     };
     let facts = AdmittedRuntimeFacts {

@@ -40,7 +40,7 @@ pub(super) async fn track(
         })
     })?;
     let started = state.with_store(|store| {
-        store.apply_session_turn_started(&rec.pubkey, rec.runtime_generation, started_at, None)
+        store.apply_session_turn_started(&rec.pubkey, rec.runtime_generation, started_at)
     })?;
     if !started {
         finalize_stopped_generation(state, rec, attempt_id);
@@ -208,7 +208,6 @@ mod tests {
                         agent_slug: "agent".into(),
                         channel_h: "root".into(),
                         child_pid: None,
-                        transcript_path: None,
                         now: 1,
                     },
                     &AdmittedRuntimeFacts {

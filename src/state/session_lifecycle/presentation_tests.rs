@@ -10,7 +10,6 @@ fn seed() -> (Store, Session) {
                 agent_slug: "codex".into(),
                 channel_h: "room".into(),
                 child_pid: Some(42),
-                transcript_path: None,
                 now: 1,
             },
             &AdmittedRuntimeFacts {

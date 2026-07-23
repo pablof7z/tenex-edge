@@ -11,7 +11,6 @@ async fn running_non_pty_session_refuses_a_second_process() {
                 agent_slug: "agent1".into(),
                 channel_h: "mosaico".into(),
                 child_pid: Some(42),
-                transcript_path: None,
                 now: 1,
             })
         })
