@@ -9,6 +9,14 @@ pub(crate) fn channel_for_path(path: &std::path::Path) -> Result<String> {
     crate::workspace::resolve(path)
 }
 
+pub(crate) fn channel_for_path_optional(path: &std::path::Path) -> Result<Option<String>> {
+    crate::workspace::resolve_optional(path)
+}
+
+pub(crate) fn channel_for_path_or_unscoped(path: &std::path::Path) -> Result<String> {
+    Ok(channel_for_path_optional(path)?.unwrap_or_default())
+}
+
 pub(crate) fn channel_for_path_or_bail(path: &std::path::Path) -> Result<String> {
     crate::workspace::resolve_or_bail(path)
 }
@@ -53,6 +61,9 @@ pub(crate) fn root_for_reader(
     store: crate::state::StoreReader<'_>,
     channel_h: &str,
 ) -> Result<String> {
+    if channel_h.is_empty() {
+        return Ok(String::new());
+    }
     if let Some(root) = store.root_channel_of(channel_h)? {
         return Ok(root);
     }
@@ -121,5 +132,13 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["alpha", "zeta"]
         );
+    }
+
+    #[test]
+    fn empty_channel_is_the_unscoped_root() {
+        let store = crate::state::Store::open_memory().unwrap();
+        let resolver = WorkspacePathResolver::new(&store);
+
+        assert_eq!(resolver.root_for_channel("").unwrap(), "");
     }
 }

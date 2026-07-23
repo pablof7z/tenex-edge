@@ -150,7 +150,9 @@ fn reserve_prepared(
     let pubkey = prepared.identity.pubkey;
     let channel = match group.filter(|group| !group.is_empty()) {
         Some(group) => group.to_string(),
-        None if state.per_session_rooms() => crate::util::session_room_id(&pubkey),
+        None if state.per_session_rooms() && !root.is_empty() => {
+            crate::util::session_room_id(&pubkey)
+        }
         None => root.to_string(),
     };
     let runtime_generation = state.with_store(|store| {

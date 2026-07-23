@@ -43,7 +43,7 @@ pub struct Profile {
     pub agent_slug: String,
     pub host: String,
     /// Top-level workspace channel this live agent session is working from.
-    /// Empty for backend and retired profiles.
+    /// Empty for unscoped sessions, backend profiles, and retired profiles.
     pub workspace: String,
     /// Owner pubkeys this agent claims (the human's whitelisted pubkeys).
     pub owners: Vec<String>,

@@ -136,7 +136,9 @@ or preserve any necessary handoff before using it.
 
 `channel init` registers the current non-git directory as a workspace. Use it
 only when the directory genuinely needs a durable workspace binding; do not use
-it to create an ad hoc coordination room.
+it to create an ad hoc coordination room. Sessions may start outside any known
+workspace; they remain unscoped while keeping their original working directory
+and filesystem access.
 
 Send an update to a specific joined channel:
 

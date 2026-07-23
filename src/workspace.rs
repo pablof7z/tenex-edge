@@ -9,9 +9,8 @@
 //!   2. **`~/.mosaico/workspaces.json`** — a JSON object mapping slugs to
 //!      absolute paths. The cwd itself, or its nearest ancestor present in the
 //!      map, wins. This is the only way to give a non-git directory a workspace.
-//!   3. Otherwise: `Err(NoWorkspace)`. The caller decides how to surface — hooks
-//!      exit 0 silently; explicit CLI verbs print a "run `mosaico channel
-//!      init` or `git init`" message and exit non-zero.
+//!   3. Otherwise: `Err(NoWorkspace)`. The caller decides whether the operation
+//!      requires a workspace or can continue unscoped.
 //!
 //! These are path-discovery inputs to the daemon-owned
 //! `daemon::workspace_path` resolver. They do not answer channel→path queries;
@@ -58,6 +57,19 @@ pub(crate) fn resolve(cwd: &Path) -> Result<String> {
     .into())
 }
 
+/// Resolve a workspace when one exists, preserving non-absence failures such as
+/// a corrupt workspace map. Launch and hook admission use `None` as the
+/// first-class unscoped session state.
+pub(crate) fn resolve_optional(cwd: &Path) -> Result<Option<String>> {
+    match resolve(cwd) {
+        Ok(slug) => Ok(Some(slug)),
+        Err(error) => match error.downcast::<NoWorkspace>() {
+            Ok(_) => Ok(None),
+            Err(error) => Err(error),
+        },
+    }
+}
+
 /// The workspace directory for a working dir: the dir whose slug `resolve`
 /// returned. Mirrors `resolve`'s search order:
 ///   1. the git repo root (derived from git-common-dir, shared across worktrees),
@@ -88,8 +100,8 @@ pub fn rel_cwd(cwd: &Path) -> Result<String> {
 
 /// Like [`resolve`], but on [`NoWorkspace`] returns an `anyhow::Error` whose
 /// `Display` form is the user-facing "no known workspace … run `mosaico
-/// channel init` or `git init`" message. For the explicit-CLI-verb path only;
-/// hooks should call [`resolve`] and exit 0 on `Err`.
+/// channel init` or `git init`" message. For explicit CLI verbs that require a
+/// workspace; launch and hook admission use [`resolve_optional`] instead.
 pub(crate) fn resolve_or_bail(cwd: &Path) -> Result<String> {
     match resolve(cwd) {
         Ok(slug) => Ok(slug),

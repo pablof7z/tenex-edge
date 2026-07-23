@@ -86,6 +86,10 @@ pub(in crate::daemon::server) async fn provision_before_spawn(
     channel: Option<&str>,
 ) -> Result<()> {
     let scope = channel.filter(|g| !g.is_empty()).unwrap_or(root);
+    if scope.is_empty() {
+        tracing::info!(slug, "provision: launching without a workspace channel");
+        return Ok(());
+    }
     let already_live = state
         .with_store(|s| s.list_running_sessions())
         .unwrap_or_default()

@@ -1,5 +1,6 @@
 use crate::daemon_harness::*;
 use mosaico::daemon::client::Client;
+use mosaico::state::Store;
 
 #[test]
 fn hooks_fail_open_without_spawning_daemon() {
@@ -62,6 +63,65 @@ fn hooks_fail_open_without_spawning_daemon() {
         "no-daemon hooks should fail open quickly, elapsed {:?}",
         started.elapsed()
     );
+}
+
+#[test]
+fn native_hook_launch_from_unknown_directory_registers_unscoped_session() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let home = Home::new();
+    std::fs::write(home.dir.path().join("workspaces.json"), "{}").unwrap();
+    let work_dir = home.dir.path().join("loose-files");
+    std::fs::create_dir_all(&work_dir).unwrap();
+    rt().block_on(async {
+        let mut client = Client::connect_or_spawn().await.expect("connect");
+        client
+            .call("ping", serde_json::json!({}))
+            .await
+            .expect("ping");
+    });
+
+    let payload = serde_json::json!({
+        "cwd": work_dir,
+        "session_id": "native-unscoped-session"
+    })
+    .to_string();
+    let output = run_cli_stdin_with_env_in_dir(
+        &home,
+        &["harness", "hook", "codex", "--type", "session-start"],
+        &payload,
+        &[
+            ("MOSAICO_OBSERVED_HARNESS", "codex"),
+            ("MOSAICO_INIT_PROGRESS", "0"),
+        ],
+        &work_dir,
+    );
+    assert!(
+        output.status.success(),
+        "native unscoped hook failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let mut session = None;
+    assert!(wait_until(std::time::Duration::from_secs(5), || {
+        session = Store::open(&home.store_path())
+            .and_then(|store| store.list_running_sessions())
+            .ok()
+            .and_then(|sessions| {
+                sessions
+                    .into_iter()
+                    .find(|session| session.agent_slug == "codex")
+            });
+        session.is_some()
+    }));
+    let session = session.unwrap();
+    assert_eq!(session.channel_h, "");
+    assert_eq!(session.work_root, "");
+    assert!(Store::open(&home.store_path())
+        .unwrap()
+        .list_session_routes(&session.pubkey)
+        .unwrap()
+        .is_empty());
+    stop_daemon(&home);
 }
 
 #[test]

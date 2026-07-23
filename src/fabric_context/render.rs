@@ -16,7 +16,9 @@ pub(super) fn render_workspace(out: &mut String, view: &FabricView) {
         render_no_new_activity(out, &view.workspace.name);
         return;
     }
-    render_workspace_block(out, &view.workspace, view.root.as_ref(), &view.channels);
+    if !view.workspace.name.is_empty() {
+        render_workspace_block(out, &view.workspace, view.root.as_ref(), &view.channels);
+    }
     for activity in &view.other_workspaces {
         render_workspace_block(
             out,

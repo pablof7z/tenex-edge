@@ -84,6 +84,20 @@ fn delta_includes_other_workspace_root_and_descendant_presence_only() {
 }
 
 #[test]
+fn unscoped_session_still_sees_workspace_presence_deltas() {
+    let store = seed_store();
+    let rec = session_record(&store, "unscoped", "");
+    add_workspace(&store);
+    put_status(&store, OTHER_PK, "remote", "coordinating release", 250, 500);
+
+    let text = render_fabric_context(&store, input(Some(&rec), "", 200, 300, false))
+        .expect("workspace activity should orient an unscoped session");
+    assert!(text.contains("<workspace name=\"remote\""), "{text}");
+    assert!(text.contains("text=\"coordinating release\""), "{text}");
+    assert!(!text.contains("<workspace name=\"\""), "{text}");
+}
+
+#[test]
 fn other_workspace_delta_reports_expiry_once_and_rejects_stale_and_self_statuses() {
     let store = seed_store();
     let rec = session(&store);

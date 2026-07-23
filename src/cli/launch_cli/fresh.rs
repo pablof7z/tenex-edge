@@ -99,6 +99,25 @@ mod tests {
     }
 
     #[test]
+    fn unscoped_launch_keeps_cwd_without_inventing_a_channel() {
+        let params = pty_spawn_params(
+            &FreshLaunchRequest {
+                agent: "codex".into(),
+                root: String::new(),
+                channel: None,
+                session_name: None,
+                prompt: None,
+                extra_args: Vec::new(),
+            },
+            std::path::Path::new("/tmp/work"),
+        );
+
+        assert_eq!(params["root"], "");
+        assert_eq!(params["cwd"], "/tmp/work");
+        assert!(params["channel"].is_null());
+    }
+
+    #[test]
     fn daemon_transport_contract_keeps_app_server_headless() {
         use crate::session_host::transport::TransportKind;
 

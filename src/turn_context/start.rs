@@ -70,7 +70,14 @@ pub(crate) fn assemble_turn_start(
         joined_channels(&s, rec)
     };
 
-    if first_turn {
+    if first_turn && scope.is_empty() {
+        warnings.push(
+            "This session started unscoped: it is not part of a Mosaico workspace or \
+             channel. Its current working directory and normal filesystem access are \
+             unchanged."
+                .to_string(),
+        );
+    } else if first_turn {
         // Warn only when this daemon does not manage the channel. If it is an
         // admin, channel/room-minting is responsible for signing the member-add
         // itself; a cache miss here is transient local state, not a user action.
@@ -140,7 +147,9 @@ pub(crate) fn assemble_turn_start(
                 slug = self_slug,
             ));
         }
+    }
 
+    if first_turn {
         // A session without a live daemon delivery endpoint cannot be steered
         // while idle: mentions remain in its inbox until the next turn. Output
         // presentation is a separate headless-mode fact above.
@@ -188,7 +197,7 @@ pub(crate) fn assemble_turn_start(
         let (_ambient, ambient_failed) =
             ambient_by_joined_channel(&s, &joined, ambient_since, &self_pubkey);
         read_failed |= ambient_failed;
-        let notice = if first_turn {
+        let notice = if first_turn && !scope.is_empty() {
             // A count failure must not silently render as "no prior history": log
             // loudly and flag the turn so the read-failure marker fires instead of
             // quietly hiding pre-join messages.
