@@ -200,9 +200,47 @@ printf '%s\n' \
   '#!/bin/sh' \
   'if [ "${1:-} ${2:-}" = "system status" ]; then exit 0; fi' \
   'if [ "${1:-} ${2:-}" = "image inspect" ]; then exit 0; fi' \
-  'if [ "${1:-}" = "run" ]; then exec /bin/sleep "${FAKE_CONTAINER_SLEEP:-0}"; fi' \
+  'if [ "${1:-}" = "run" ]; then' \
+  '  if [ -n "${FAKE_CONTAINER_ARGS_FILE:-}" ]; then printf "%s\n" "$@" >"${FAKE_CONTAINER_ARGS_FILE}"; fi' \
+  '  exec /bin/sleep "${FAKE_CONTAINER_SLEEP:-0}"' \
+  'fi' \
   'exit 2' >"${TMP}/fake-bin/container"
 chmod +x "${TMP}/fake-bin/container"
+
+DEFAULT_SHELL_STATE="${TMP}/default-shell-state"
+DEFAULT_SHELL_ARGS="${TMP}/default-shell-args"
+PATH="${TMP}/fake-bin:${PATH}" \
+  MOSAICO_CONTAINER_HOST_AUTH=0 \
+  MOSAICO_CONTAINER_STATE="${DEFAULT_SHELL_STATE}" \
+  FAKE_CONTAINER_ARGS_FILE="${DEFAULT_SHELL_ARGS}" \
+  bash "${ROOT}/containers/mosaico/run"
+[[ -d "${DEFAULT_SHELL_STATE}" ]] \
+  || fail 'no-command runner did not open the default shell container'
+grep -Fq '/workspace/containers/mosaico/shell-bin' "${DEFAULT_SHELL_ARGS}" \
+  || fail 'default shell did not expose the lazy-build mosaico command'
+
+printf '%s\n' \
+  '#!/bin/sh' \
+  'printf "%s\n" "$@" >"${FAKE_CARGO_ARGS_FILE}"' \
+  >"${TMP}/fake-bin/cargo"
+printf '%s\n' \
+  '#!/bin/sh' \
+  'printf "%s\n" "$@" >"${FAKE_MOSAICO_ARGS_FILE}"' \
+  >"${TMP}/fake-mosaico"
+chmod +x "${TMP}/fake-bin/cargo" "${TMP}/fake-mosaico"
+FAKE_CARGO_ARGS_FILE="${TMP}/cargo-args" \
+  FAKE_MOSAICO_ARGS_FILE="${TMP}/mosaico-args" \
+  MOSAICO_BIN="${TMP}/fake-mosaico" \
+  PATH="${TMP}/fake-bin:${PATH}" \
+  bash "${ROOT}/containers/mosaico/shell-bin/mosaico" setup --test-argument
+grep -Fq -- '--manifest-path' "${TMP}/cargo-args" \
+  || fail 'shell mosaico command did not build the mounted checkout'
+grep -Fxq 'setup' "${TMP}/mosaico-args" \
+  || fail 'shell mosaico command did not preserve the requested subcommand'
+grep -Fxq -- '--test-argument' "${TMP}/mosaico-args" \
+  || fail 'shell mosaico command did not preserve requested arguments'
+echo 'ok: no-command runner opens immediately and builds mosaico on first use'
+
 LOCK_STATE="${TMP}/lock-state"
 PATH="${TMP}/fake-bin:${PATH}" \
   MOSAICO_CONTAINER_HOST_AUTH=0 \
