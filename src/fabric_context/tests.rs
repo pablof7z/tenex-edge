@@ -4,6 +4,7 @@ mod agent_about;
 mod backend_traffic;
 mod channel_tree;
 mod cross_workspace;
+mod host_profiles;
 mod member_render;
 mod reactions;
 mod session_title;
@@ -182,7 +183,8 @@ fn mention_rows_are_marked_important_and_truncated_with_recovery_id() {
 
     let text = render_fabric_context(&store, input(Some(&rec), "root", 200, 300, false))
         .expect("mention should render");
-    assert!(text.contains("<workspace name=\"root\" channel=\"root\""));
+    assert!(text.contains("<workspace name=\"root\""));
+    assert!(!text.contains("<workspace name=\"root\" channel="));
     assert!(!text.contains("<channel name=\"#root\""));
     assert!(text.contains("<message from=\"@reviewer\" id=\"mentio\">"));
     assert!(text.contains("Reply via: `mosaico channel reply mentio --message \"hello world\"`"));
@@ -301,58 +303,6 @@ fn missing_channels_are_warned_not_rendered() {
     let captured = capture_inputs(&store, &input(Some(&rec), "ghost", 0, 100, false)).unwrap();
     let rendered = render_view_text(&assemble::assemble_view(&captured, 0, 100));
     assert_eq!(rendered, direct);
-}
-
-#[test]
-fn all_workspaces_agent_context_omits_rosters_while_human_view_preserves_them() {
-    let store = seed_store();
-    store
-        .upsert_channel("other", "other", "Other workspace", "", 1)
-        .unwrap();
-    store
-        .replace_agent_roster(&crate::state::AgentRoster {
-            backend_pubkey: "backend".into(),
-            host: "laptop".into(),
-            slug: "shared".into(),
-            use_criteria: "Available everywhere".into(),
-            channels: vec!["root".into(), "other".into()],
-            updated_at: 2,
-        })
-        .unwrap();
-    store
-        .replace_agent_roster(&crate::state::AgentRoster {
-            backend_pubkey: "backend".into(),
-            host: "laptop".into(),
-            slug: "other-only".into(),
-            use_criteria: "Only in other".into(),
-            channels: vec!["other".into()],
-            updated_at: 2,
-        })
-        .unwrap();
-
-    let roots = vec!["root".into(), "other".into()];
-    let rendered = render_fabric_all_workspaces(&store, &roots, 100, "laptop", "");
-    assert_eq!(rendered.matches("<mosaico>").count(), 1, "got: {rendered}");
-    assert!(!rendered.contains("mosaico agents list"), "got: {rendered}");
-    assert!(!rendered.contains("<available-agents>"), "got: {rendered}");
-    assert!(!rendered.contains("<workspace-agents>"), "got: {rendered}");
-    assert!(!rendered.contains("@shared"), "got: {rendered}");
-    assert!(!rendered.contains("@other-only"), "got: {rendered}");
-
-    let human =
-        render_fabric_all_workspaces_human(&store, &roots, 100, "laptop", "", false).unwrap();
-    assert_eq!(
-        human.matches("Available agents (all workspaces)").count(),
-        1,
-        "got: {human}"
-    );
-    assert_eq!(human.matches("@shared").count(), 1, "got: {human}");
-    assert_eq!(
-        human.matches("Workspace-specific agents").count(),
-        1,
-        "got: {human}"
-    );
-    assert!(human.contains("@other-only"), "got: {human}");
 }
 
 /// A forced but empty delta (nothing new since the cursor) must explain that the

@@ -1,6 +1,5 @@
 //! `Nip29Provider` — concrete NIP-29 wire, materializer, and lifecycle boundary.
 
-mod agent_roster;
 pub(crate) mod chat;
 mod group_management;
 mod group_state;
@@ -106,7 +105,11 @@ impl Nip29Provider {
         if matches!(ev, DomainEvent::Profile(_)) {
             let builder = self.wire.encode(ev)?;
             let signed = self.nmp.sign_event(builder, keys).await?;
-            return self.nmp.enqueue_profile_event(&signed);
+            let event_id = self.nmp.enqueue_profile_event(&signed)?;
+            self.with_store(|store| {
+                self.materialize(&RawEnvelope::Nostr(signed), store);
+            });
+            return Ok(event_id);
         }
         if let Some(ch) = ev.channel() {
             let agent_pubkey = keys.public_key().to_hex();

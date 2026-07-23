@@ -1,7 +1,7 @@
 //! Local persistence in SQLite (the persistence foundation).
 //! The store is two things and nothing else:
-//!   1. `relay_*` materialized caches — channels, members, profiles, roster,
-//!      status, and a verbatim event log. Every one is rebuildable from the
+//!   1. `relay_*` materialized caches — channels, membership, profiles, status,
+//!      and a verbatim event log. Every one is rebuildable from the
 //!      relay and is identical for local and remote agents.
 //!   2. local plumbing the relay can't carry — OS process handles (`sessions`),
 //!      joined-channel state (`session_channels`), typed runtime locators
@@ -214,8 +214,6 @@ pub struct InboxRow {
     pub delivered_at: u64,
 }
 
-mod agent_roster;
-pub use agent_roster::{AgentAvailability, AgentRoster};
 mod agent_usage;
 mod locators;
 pub(crate) use locators::{

@@ -5,9 +5,7 @@
 //! of this module.
 
 use crate::identity::SessionIdentity;
-use crate::state::{
-    AgentAvailability, Channel, ChannelMember, Profile, Session, SessionStanding, Status, Store,
-};
+use crate::state::{Channel, ChannelMember, Profile, Session, SessionStanding, Status, Store};
 use anyhow::{Context, Result};
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet};
@@ -19,7 +17,7 @@ pub(crate) struct WhoAggregation {
     pub(crate) local_sessions: Vec<Session>,
     pub(crate) local_pubkeys: BTreeSet<String>,
     pub(crate) retained_standing: Vec<SessionStanding>,
-    pub(crate) agents: Vec<AgentAvailability>,
+    pub(crate) backend_profiles: Vec<Profile>,
     pub(crate) local_spawnable: BTreeMap<String, (String, Option<String>)>,
     now: u64,
     channels_by_id: BTreeMap<String, Channel>,
@@ -45,9 +43,9 @@ impl WhoAggregation {
             .context("who aggregation: failed to list local session pubkeys")?
             .into_iter()
             .collect();
-        let agents = store
-            .list_agent_roster()
-            .context("who aggregation: failed to list agent capabilities")?;
+        let backend_profiles = store
+            .list_backend_profiles()
+            .context("who aggregation: failed to list backend profiles")?;
         let local_spawnable = crate::session_host::spawnable_agents()
             .into_iter()
             .map(|(slug, command, byline)| (slug, (command, byline)))
@@ -108,6 +106,11 @@ impl WhoAggregation {
                 .flatten()
                 .map(|status| status.pubkey.clone()),
         );
+        referenced_pubkeys.extend(
+            backend_profiles
+                .iter()
+                .map(|profile| profile.pubkey.clone()),
+        );
         let mut profiles = BTreeMap::new();
         let mut identities = BTreeMap::new();
         let mut sessions_by_pubkey = BTreeMap::new();
@@ -153,7 +156,7 @@ impl WhoAggregation {
             local_sessions,
             local_pubkeys,
             retained_standing,
-            agents,
+            backend_profiles,
             local_spawnable,
             now,
             channels_by_id,
@@ -217,11 +220,18 @@ impl WhoAggregation {
         )
     }
 
-    pub(crate) fn agents_for_root(&self, root: Option<&str>) -> Vec<AgentAvailability> {
-        self.agents
+    pub(crate) fn backend_profiles_for_root(&self, root: Option<&str>) -> Vec<&Profile> {
+        self.backend_profiles
             .iter()
-            .filter(|agent| root.is_none_or(|root| agent.channel_h == root))
-            .cloned()
+            .filter(|profile| {
+                root.is_none_or(|root| {
+                    profile.workspaces.iter().any(|workspace| workspace == root)
+                        && self
+                            .members_for(root)
+                            .iter()
+                            .any(|member| member.pubkey == profile.pubkey && member.role == "admin")
+                })
+            })
             .collect()
     }
 }

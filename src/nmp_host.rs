@@ -210,6 +210,9 @@ fn live_query(
         kinds: Some(query.kinds.clone()),
         ..nmp::Filter::default()
     };
+    if !query.authors.is_empty() {
+        filter.authors = Some(Binding::Literal(query.authors.clone()));
+    }
     if let Some((name, value)) = &query.tag {
         let tag = IndexedTagName::new(*name)
             .with_context(|| format!("invalid indexed tag name {name}"))?;

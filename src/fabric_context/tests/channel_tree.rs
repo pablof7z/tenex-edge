@@ -14,7 +14,8 @@ fn session_view_has_self_and_chatter_human_view_does_not() {
         agent.contains("<message from=\"@reviewer\" id=\"m1\" age=\"1 min ago\">post join context"),
         "every agent-visible message must expose its reaction/reply id: {agent}"
     );
-    assert!(agent.contains("<workspace name=\"root\" channel=\"root\""));
+    assert!(agent.contains("<workspace name=\"root\""));
+    assert!(!agent.contains("<workspace name=\"root\" channel="));
     assert!(agent.contains("<channel name=\"#task\" ref=\"root.task\""));
     assert!(!agent.contains("<channel name=\"#root\""));
     assert!(!agent.contains("<subchannels>"));
@@ -82,7 +83,8 @@ fn changed_descendant_metadata_renders_once_with_its_canonical_ref() {
 
     let text = render_fabric_context(&store, input(Some(&rec), "root", 200, 300, false))
         .expect("changed descendant should render");
-    assert!(text.contains("<workspace name=\"root\" channel=\"root\""));
+    assert!(text.contains("<workspace name=\"root\""));
+    assert!(!text.contains("<workspace name=\"root\" channel="));
     assert!(
         text.contains("<channel name=\"#task\" ref=\"root.task\" about=\"Updated task room\" />")
     );

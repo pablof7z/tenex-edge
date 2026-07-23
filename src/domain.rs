@@ -51,8 +51,11 @@ pub struct Profile {
     /// on the backend profile (empty for agent sessions); serialized as
     /// `["agent", slug, description]` tags so clients can offer an add-agent
     /// picker. `slug` is command-compatible with `add <slug>`; `description` is
-    /// the agent's `effective_byline`, matching the kind:30555 roster.
+    /// the agent's `effective_byline`.
     pub agents: Vec<(String, String)>,
+    /// Root workspaces known by this backend. Only populated on the backend
+    /// management-key profile; live agent profiles use singular `workspace`.
+    pub workspaces: Vec<String>,
 }
 
 impl Profile {
@@ -70,6 +73,7 @@ impl Profile {
             owners,
             is_backend: false,
             agents: Vec::new(),
+            workspaces: Vec::new(),
         }
     }
 
@@ -82,6 +86,7 @@ impl Profile {
             owners,
             is_backend: true,
             agents: Vec::new(),
+            workspaces: Vec::new(),
         }
     }
 
@@ -94,11 +99,17 @@ impl Profile {
         Self::backend(AgentRef::new(pubkey, name), host, owners)
     }
 
-    /// Attach the managed-agent roster `(slug, description)` advertised on the
+    /// Attach the managed-agent inventory `(slug, description)` advertised on the
     /// backend kind:0. No-op semantics for agent sessions — callers only set
     /// this on backend profiles.
     pub fn with_agents(mut self, agents: Vec<(String, String)>) -> Self {
         self.agents = agents;
+        self
+    }
+
+    /// Attach the complete known-workspace set advertised by a backend profile.
+    pub fn with_workspaces(mut self, workspaces: Vec<String>) -> Self {
+        self.workspaces = workspaces;
         self
     }
 

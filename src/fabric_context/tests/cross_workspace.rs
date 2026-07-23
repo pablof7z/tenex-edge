@@ -57,7 +57,8 @@ fn delta_includes_other_workspace_root_and_descendant_presence_only() {
         1,
         "{text}"
     );
-    assert!(text.contains("<workspace name=\"remote\" channel=\"remote\""));
+    assert!(text.contains("<workspace name=\"remote\""));
+    assert!(!text.contains("<workspace name=\"remote\" channel="));
     assert!(text.contains("text=\"coordinating release\""), "{text}");
     assert!(text.contains("<channel name=\"#review\" ref=\"remote.review\""));
     assert!(text.contains("text=\"reviewing patch\""), "{text}");

@@ -12,6 +12,7 @@ mod v12_v13;
 mod v13_v14;
 mod v14_v15;
 mod v15_v16;
+mod v16_v17;
 mod v5_v6;
 mod v9_v10;
 
@@ -45,6 +46,10 @@ pub(super) fn v14_to_v15(conn: &mut Connection, path: &Path) -> Result<()> {
 
 pub(super) fn v15_to_v16(conn: &mut Connection, path: &Path) -> Result<()> {
     v15_v16::migrate(conn, path)
+}
+
+pub(super) fn v16_to_v17(conn: &mut Connection, path: &Path) -> Result<()> {
+    v16_v17::migrate(conn, path)
 }
 
 pub(super) fn v4_to_v5(conn: &mut Connection, _path: &Path) -> Result<()> {

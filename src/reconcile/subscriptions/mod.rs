@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SubscriptionQuery {
     pub kinds: BTreeSet<u16>,
+    pub authors: BTreeSet<String>,
     pub tag: Option<(char, String)>,
 }
 
@@ -37,6 +38,7 @@ pub enum SubEffect {
 pub struct CoverageSnapshot {
     pub daemon_channels: BTreeSet<String>,
     pub addressed_pubkeys: BTreeSet<String>,
+    pub profile_pubkeys: BTreeSet<String>,
     pub archived_channels: BTreeSet<String>,
     pub sessions: BTreeMap<String, BTreeSet<String>>,
 }
@@ -47,6 +49,7 @@ enum Space {
     ChannelH,
     GroupStateD,
     PubkeyP,
+    ProfileAuthor,
 }
 
 type SubKey = (Space, String);
@@ -139,6 +142,9 @@ fn desired_owners(snapshot: &CoverageSnapshot) -> BTreeMap<SubKey, usize> {
     for pubkey in &snapshot.addressed_pubkeys {
         add_owner(&mut desired, (Space::PubkeyP, pubkey.clone()));
     }
+    for pubkey in &snapshot.profile_pubkeys {
+        add_owner(&mut desired, (Space::ProfileAuthor, pubkey.clone()));
+    }
     desired
 }
 
@@ -164,30 +170,39 @@ fn sub_id((space, entity): &SubKey) -> String {
         Space::ChannelH => format!("mosaico-h-{entity}"),
         Space::GroupStateD => format!("mosaico-gstate-{entity}"),
         Space::PubkeyP => format!("mosaico-p-{entity}"),
+        Space::ProfileAuthor => format!("mosaico-profile-{entity}"),
     }
 }
 
 fn sub_query((space, entity): &SubKey) -> SubscriptionQuery {
     use crate::fabric::nip29::wire::{
-        KIND_AGENT_ROSTER, KIND_CHAT, KIND_GROUP_ADMINS, KIND_GROUP_MEMBERS, KIND_GROUP_METADATA,
-        KIND_STATUS,
+        KIND_CHAT, KIND_GROUP_ADMINS, KIND_GROUP_MEMBERS, KIND_GROUP_METADATA, KIND_STATUS,
     };
     match space {
         Space::GlobalKind => SubscriptionQuery {
             kinds: BTreeSet::from([entity.parse().expect("global kind is numeric")]),
+            authors: BTreeSet::new(),
             tag: None,
         },
         Space::ChannelH => SubscriptionQuery {
-            kinds: BTreeSet::from([KIND_CHAT, KIND_STATUS, KIND_AGENT_ROSTER]),
+            kinds: BTreeSet::from([KIND_CHAT, KIND_STATUS]),
+            authors: BTreeSet::new(),
             tag: Some(('h', entity.clone())),
         },
         Space::GroupStateD => SubscriptionQuery {
             kinds: BTreeSet::from([KIND_GROUP_METADATA, KIND_GROUP_ADMINS, KIND_GROUP_MEMBERS]),
+            authors: BTreeSet::new(),
             tag: Some(('d', entity.clone())),
         },
         Space::PubkeyP => SubscriptionQuery {
             kinds: BTreeSet::from([KIND_CHAT]),
+            authors: BTreeSet::new(),
             tag: Some(('p', entity.clone())),
+        },
+        Space::ProfileAuthor => SubscriptionQuery {
+            kinds: BTreeSet::from([crate::fabric::nip29::wire::KIND_PROFILE]),
+            authors: BTreeSet::from([entity.clone()]),
+            tag: None,
         },
     }
 }

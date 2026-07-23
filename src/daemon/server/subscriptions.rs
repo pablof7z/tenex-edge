@@ -58,6 +58,20 @@ pub(in crate::daemon::server) async fn reconcile_subs_logged(
     }
 }
 
+pub(in crate::daemon::server) fn reconcile_after_admin_event(
+    state: &Arc<DaemonState>,
+    event: &nostr_sdk::Event,
+    first_sight: bool,
+) {
+    if !first_sight || event.kind.as_u16() != crate::fabric::nip29::wire::KIND_GROUP_ADMINS {
+        return;
+    }
+    let state = state.clone();
+    tokio::spawn(async move {
+        reconcile_subs_logged(&state, "group admins changed").await;
+    });
+}
+
 /// Apply policy effects through NMP. NMP owns relay planning, observation
 /// lifecycle, reconnect repair, and canonical wire-event deduplication.
 pub(in crate::daemon::server) async fn apply_effects(
@@ -93,8 +107,8 @@ pub(in crate::daemon::server) async fn replay_channel_chat(state: &Arc<DaemonSta
             kinds: BTreeSet::from([
                 crate::fabric::nip29::wire::KIND_CHAT,
                 crate::fabric::nip29::wire::KIND_STATUS,
-                crate::fabric::nip29::wire::KIND_AGENT_ROSTER,
             ]),
+            authors: BTreeSet::new(),
             tag: Some(('h', h.to_string())),
         },
     };
@@ -115,6 +129,9 @@ pub(in crate::daemon::server) async fn replay_channel_chat(state: &Arc<DaemonSta
 ///   owning session leaves.
 /// - `addressed_pubkeys`: selected session pubkeys and the backend identity.
 ///   Owned by the daemon scope.
+/// - `profile_pubkeys`: the backend identity plus current root-channel admins.
+///   Each gets a narrow exact-author kind:0 observation so host snapshots stay
+///   current without a global profile feed.
 fn build_coverage_snapshot(state: &Arc<DaemonState>) -> CoverageSnapshot {
     let mut daemon_channels: BTreeSet<String> = state
         .subscriptions
@@ -125,6 +142,7 @@ fn build_coverage_snapshot(state: &Arc<DaemonState>) -> CoverageSnapshot {
         .cloned()
         .collect();
     let mut pubkeys: BTreeSet<String> = BTreeSet::new();
+    let mut profile_pubkeys: BTreeSet<String> = BTreeSet::new();
     let mut sessions: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     let backend_pubkey = state.backend_pubkey();
 
@@ -133,6 +151,7 @@ fn build_coverage_snapshot(state: &Arc<DaemonState>) -> CoverageSnapshot {
         pubkeys.extend(local_pubkeys.iter().cloned());
         if let Some(pk) = backend_pubkey.as_ref() {
             pubkeys.insert(pk.clone());
+            profile_pubkeys.insert(pk.clone());
         }
         // Channels any ordinal pubkey is a member of (spawn-on-mention path),
         // plus channels this backend manages as admin.
@@ -143,6 +162,18 @@ fn build_coverage_snapshot(state: &Arc<DaemonState>) -> CoverageSnapshot {
             if let Ok(gs) = s.list_channels_where_admin(pk) {
                 daemon_channels.extend(gs);
             }
+        }
+        for channel in s.list_channels().unwrap_or_default() {
+            if channel.is_archived() || !channel.parent.is_empty() {
+                continue;
+            }
+            profile_pubkeys.extend(
+                s.list_channel_members(&channel.channel_h)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|member| member.role == "admin")
+                    .map(|member| member.pubkey),
+            );
         }
         // Channels each live session listens to (active + passively joined).
         for sess in s.list_running_sessions().unwrap_or_default() {
@@ -169,6 +200,7 @@ fn build_coverage_snapshot(state: &Arc<DaemonState>) -> CoverageSnapshot {
     CoverageSnapshot {
         daemon_channels,
         addressed_pubkeys: pubkeys,
+        profile_pubkeys,
         archived_channels: archived,
         sessions,
     }

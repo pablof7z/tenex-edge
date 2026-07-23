@@ -14,9 +14,6 @@ pub(super) fn render_workspace_block(
         "\n\n  <workspace name=\"{}\"",
         esc_attr(&workspace.name)
     );
-    if !workspace.channel.is_empty() {
-        let _ = write!(out, " channel=\"{}\"", esc_attr(&workspace.channel));
-    }
     if !workspace.about.is_empty() {
         let _ = write!(out, " about=\"{}\"", esc_attr(&workspace.about));
     }

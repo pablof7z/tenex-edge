@@ -171,7 +171,6 @@ async fn spawn_agent_inner_full(
     let mut resolved = resolve_agent_source(state, slug, std::path::Path::new(&abs_path), intent)?;
     append_extra_args(&mut resolved, extra_args);
     let agent_slug = resolved.identity.slug.clone();
-    let retired_advertisements = resolved.retired_advertisements.clone();
     let agent_command = resolved.command.clone();
     let harness = resolved.harness;
     let reservation = match expected_pubkey {
@@ -244,7 +243,7 @@ async fn spawn_agent_inner_full(
             return Err(e.context("registering hosted session"));
         }
     };
-    state.schedule_agent_roster_refresh(retired_advertisements);
+    state.schedule_backend_profile_refresh();
     Ok((endpoint, pubkey))
 }
 

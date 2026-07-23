@@ -56,7 +56,7 @@ async fn interactive() -> Result<()> {
             crate::cli::interactive::agent_picker::PickerAction::Edit(index) => {
                 cursor = index;
                 editor::edit(&rows[index]).await?;
-                schedule_roster_refresh(None).await;
+                schedule_backend_profile_refresh().await;
             }
             crate::cli::interactive::agent_picker::PickerAction::Delete(plan) => {
                 cursor = plan.iter().map(|(index, _)| *index).min().unwrap_or(0);
@@ -80,7 +80,7 @@ pub(in crate::cli) async fn ordered_inventory() -> Result<Vec<AgentRow>> {
 
 pub(in crate::cli) async fn edit_inventory_row(row: &AgentRow) -> Result<()> {
     editor::edit(row).await?;
-    schedule_roster_refresh(None).await;
+    schedule_backend_profile_refresh().await;
     Ok(())
 }
 
@@ -134,14 +134,14 @@ async fn add(slug: &str, harness: &str, profile: Option<&str>) -> Result<()> {
         slug.bold(),
         saved.harness
     );
-    schedule_roster_refresh(None).await;
+    schedule_backend_profile_refresh().await;
     Ok(())
 }
 
 async fn remove(slug: &str) -> Result<()> {
     if remove_agent_config(slug).await? {
         println!("Deleted {}", slug.bold());
-        schedule_roster_refresh(Some(slug)).await;
+        schedule_backend_profile_refresh().await;
     } else {
         eprintln!("no such configured agent: {slug}");
     }
@@ -188,15 +188,10 @@ pub(super) async fn remove_agent_config(slug: &str) -> Result<bool> {
         .context("agent_remove response missing removed")
 }
 
-pub(super) async fn schedule_roster_refresh(remove_slug: Option<&str>) {
-    match crate::cli::daemon_call_async(
-        "agent_roster_refresh",
-        serde_json::json!({ "remove_slug": remove_slug }),
-    )
-    .await
-    {
+pub(super) async fn schedule_backend_profile_refresh() {
+    match crate::cli::daemon_call_async("backend_profile_refresh", serde_json::json!({})).await {
         Ok(_) => {}
-        Err(error) => eprintln!("  roster refresh deferred: {error}"),
+        Err(error) => eprintln!("  backend profile refresh deferred: {error}"),
     }
 }
 

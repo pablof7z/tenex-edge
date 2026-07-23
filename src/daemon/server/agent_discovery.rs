@@ -8,10 +8,6 @@ use std::time::Duration;
 
 const REFRESH_INTERVAL: Duration = Duration::from_secs(3);
 
-pub(crate) struct CatalogChange {
-    pub(crate) removed_slugs: Vec<String>,
-}
-
 pub(in crate::daemon::server) fn rpc_agent_inventory(
     state: &Arc<DaemonState>,
     params: &serde_json::Value,
@@ -52,7 +48,7 @@ impl DaemonState {
         self.catalog.agents.lock().unwrap().clone()
     }
 
-    pub(crate) fn refresh_agent_catalog(&self) -> Result<Option<CatalogChange>> {
+    pub(crate) fn refresh_agent_catalog(&self) -> Result<bool> {
         let roots = DiscoveryRoots::installed()?;
         let workspaces = self.with_store(|store| -> Result<Vec<PathBuf>> {
             let bindings =
@@ -67,25 +63,11 @@ impl DaemonState {
         let current = self.catalog.agents.lock().unwrap().clone();
         let current_harnesses = self.installed_harnesses();
         if current == discovered && current_harnesses == installed {
-            return Ok(None);
+            return Ok(false);
         }
-        let new_slugs = discovered.slugs();
-        let mut removed_slugs = current
-            .slugs()
-            .into_iter()
-            .filter(|slug| !new_slugs.contains(slug))
-            .collect::<Vec<_>>();
-        removed_slugs.extend(
-            current_harnesses
-                .iter()
-                .filter(|harness| !installed.contains(harness))
-                .map(|harness| harness.agent_slug().to_string()),
-        );
-        removed_slugs.sort();
-        removed_slugs.dedup();
         *self.catalog.agents.lock().unwrap() = discovered;
         *self.catalog.harnesses.lock().unwrap() = installed;
-        Ok(Some(CatalogChange { removed_slugs }))
+        Ok(true)
     }
 
     pub(crate) fn resolve_native_agent(
@@ -118,27 +100,15 @@ pub(super) fn start_monitor(state: Arc<DaemonState>) {
         loop {
             interval.tick().await;
             match state.refresh_agent_catalog() {
-                Ok(None) => {}
-                Ok(Some(change)) => {
+                Ok(false) => {}
+                Ok(true) => {
                     tracing::info!("native agent catalog changed");
-                    for slug in &change.removed_slugs {
-                        if let Err(error) =
-                            super::agent_roster::publish_local_agent_roster(&state, Some(slug))
-                                .await
-                        {
-                            tracing::warn!(
-                                slug,
-                                error = %format!("{error:#}"),
-                                "removed native agent roster publish failed"
-                            );
-                        }
-                    }
                     if let Err(error) =
-                        super::agent_roster::publish_local_agent_roster(&state, None).await
+                        super::backend_profile::publish_backend_profile(&state).await
                     {
                         tracing::warn!(
                             error = %format!("{error:#}"),
-                            "native agent catalog roster publish failed"
+                            "native agent catalog backend profile publish failed"
                         );
                     }
                 }

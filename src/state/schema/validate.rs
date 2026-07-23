@@ -15,7 +15,6 @@ const TABLES: &[&str] = &[
     "native_turn_attempts",
     "mcp_actor_aliases",
     "receipts",
-    "relay_agent_roster",
     "relay_channel_member_sets",
     "relay_channel_members",
     "relay_channels",
@@ -31,7 +30,7 @@ const TABLES: &[&str] = &[
     "sessions",
     "workspace_roots",
 ];
-
+const PROFILE_COLUMNS: &[&str] = &["agent_slug", "agents_json", "workspaces_json"];
 pub(super) fn canonical(conn: &Connection, path: Option<&Path>) -> Result<()> {
     ensure_only_tables(conn, path)?;
     for table in [
@@ -51,6 +50,7 @@ pub(super) fn canonical(conn: &Connection, path: Option<&Path>) -> Result<()> {
         "durable_agent_sessions",
         "session_claims",
         "llm_calls",
+        "relay_agent_roster",
     ] {
         ensure_absent_table(conn, table, path)?;
     }
@@ -80,7 +80,7 @@ fn validate_identity_and_delivery(conn: &Connection, path: Option<&Path>) -> Res
         &["external_id_kind", "external_id", "session_id"],
         path,
     )?;
-    ensure_columns(conn, "relay_profiles", &["agent_slug"], &[], path)?;
+    ensure_columns(conn, "relay_profiles", PROFILE_COLUMNS, &[], path)?;
     ensure_columns(
         conn,
         "relay_status",

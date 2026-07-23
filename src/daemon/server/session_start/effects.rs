@@ -34,7 +34,7 @@ pub(super) fn schedule_channel_ready(
                 )
                 .await
                 {
-                    Ok(true) => publish_root_roster_if_needed(&state, &check.channel_h).await,
+                    Ok(true) => publish_host_profile_if_root(&state, &check.channel_h).await,
                     Ok(false) => {
                         tracing::warn!(pubkey, channel = %check.channel_h, lifecycle_epoch, "confirmed channel admission became stale")
                     }
@@ -55,23 +55,23 @@ pub(super) fn schedule_channel_ready(
     });
 }
 
-async fn publish_root_roster_if_needed(state: &Arc<DaemonState>, channel_h: &str) {
+async fn publish_host_profile_if_root(state: &Arc<DaemonState>, channel_h: &str) {
     let is_root = state.with_store(|s| s.is_root_channel(channel_h).unwrap_or(false));
     if !is_root {
         return;
     }
-    match publish_local_agent_roster(state, None).await {
+    match publish_backend_profile(state).await {
         Ok(report) => tracing::info!(
             channel = %channel_h,
-            published = report.published,
-            removed = report.removed,
+            agents = report.agents,
+            workspaces = report.workspaces,
             failed = report.failed.len(),
-            "published backend agent roster for root channel"
+            "published backend host profile for root workspace"
         ),
         Err(e) => tracing::warn!(
             channel = %channel_h,
             error = %e,
-            "backend agent roster publish failed for root channel"
+            "backend host profile publish failed for root workspace"
         ),
     }
 }

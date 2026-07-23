@@ -15,7 +15,7 @@ pub(super) fn encode(pf: &Profile) -> Result<EventBuilder> {
     if !pf.agent_slug.is_empty() {
         tags.push(tag(&["agent-slug", &pf.agent_slug])?);
     }
-    if !pf.workspace.is_empty() {
+    if !pf.is_backend && !pf.workspace.is_empty() {
         tags.push(tag(&["workspace", &pf.workspace])?);
     }
     for owner in &pf.owners {
@@ -23,11 +23,14 @@ pub(super) fn encode(pf: &Profile) -> Result<EventBuilder> {
     }
     if pf.is_backend {
         tags.push(tag(&["backend"])?);
-        // Advertise the managed-agent roster so clients (e.g. 29er iOS) can offer
+        // Advertise the managed-agent inventory so clients (e.g. 29er iOS) can offer
         // an add-agent picker: on tap they send `add <slug>`, so slug stays
-        // command-compatible. `desc` mirrors the kind:30555 use-criteria.
+        // command-compatible. `desc` carries the agent's compact use criteria.
         for (slug, desc) in &pf.agents {
             tags.push(tag(&["agent", slug, desc])?);
+        }
+        for workspace in &pf.workspaces {
+            tags.push(tag(&["workspace", workspace])?);
         }
     }
     Ok(EventBuilder::new(kind(KIND_PROFILE), content)
@@ -49,9 +52,13 @@ pub(super) fn decode(event: &Event, pubkey: String) -> Option<DomainEvent> {
         agent: AgentRef::new(pubkey, slug),
         agent_slug,
         host,
-        workspace: first_tag(event, "workspace")
-            .unwrap_or_default()
-            .to_string(),
+        workspace: if is_backend {
+            String::new()
+        } else {
+            first_tag(event, "workspace")
+                .unwrap_or_default()
+                .to_string()
+        },
         owners: all_tag_values(event, "p"),
         is_backend,
         agents: if is_backend {
@@ -59,11 +66,16 @@ pub(super) fn decode(event: &Event, pubkey: String) -> Option<DomainEvent> {
         } else {
             Vec::new()
         },
+        workspaces: if is_backend {
+            all_tag_values(event, "workspace")
+        } else {
+            Vec::new()
+        },
     }))
 }
 
 /// Parse the backend's advertised `["agent", slug, desc]` tags into
-/// `(slug, description)`. A missing description defaults to empty (the roster
+/// `(slug, description)`. A missing description defaults to empty (the inventory
 /// omits the third element when the agent has no use-criteria byline).
 fn managed_agents(event: &Event) -> Vec<(String, String)> {
     event
@@ -90,6 +102,15 @@ fn agent_slug(event: &Event) -> String {
 fn name_from_metadata(content: &str) -> String {
     serde_json::from_str::<serde_json::Value>(content)
         .ok()
-        .and_then(|v| v.get("name").and_then(|n| n.as_str()).map(String::from))
+        .and_then(|value| {
+            ["display_name", "name"].into_iter().find_map(|key| {
+                value
+                    .get(key)
+                    .and_then(|name| name.as_str())
+                    .map(str::trim)
+                    .filter(|name| !name.is_empty())
+                    .map(String::from)
+            })
+        })
         .unwrap_or_default()
 }

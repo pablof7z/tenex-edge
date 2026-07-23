@@ -1,17 +1,17 @@
-use super::super::{agent_roster::publish_local_agent_roster, DaemonState};
+use super::super::{backend_profile::publish_backend_profile, DaemonState};
 use std::sync::Arc;
 
-pub(super) async fn publish_startup_roster(state: &Arc<DaemonState>) {
+pub(super) async fn publish_startup_profile(state: &Arc<DaemonState>) {
     state.provider.refresh_root_channels().await.ok();
     restore_workspace_root_names(state).await;
-    match publish_local_agent_roster(state, None).await {
+    match publish_backend_profile(state).await {
         Ok(report) => tracing::info!(
-            published = report.published,
-            removed = report.removed,
+            agents = report.agents,
+            workspaces = report.workspaces,
             failed = report.failed.len(),
-            "published backend agent roster"
+            "published backend host profile"
         ),
-        Err(e) => tracing::warn!(error = %e, "backend agent roster publish failed"),
+        Err(e) => tracing::warn!(error = %e, "backend host profile publish failed"),
     }
 }
 

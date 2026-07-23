@@ -132,15 +132,14 @@ fn handle_incoming(state: &Arc<DaemonState>, event: &Event) {
         h
     };
     let now = now_secs();
-    // ALWAYS materialize: store writes are idempotent, and re-deliveries are
-    // load-bearing — a refreshed subscription replays stored events, which is
-    // how a NEW session receives mentions that predate it.
+    // ALWAYS materialize: re-deliveries are how a NEW session receives mentions
+    // that predate it; store writes are idempotent.
     let outcome = state.with_store(|s| state.provider.materialize(&env, s));
 
-    // Proactively resolve the kind:0 of every identity this event just surfaced
-    // (author + p-tagged members/mentions), so a peer seen for the first time in a
-    // 3900x/chat/status is named without waiting for a turn to warm the cache.
+    // Resolve newly surfaced identities without waiting for a turn to warm them.
     warm_profiles(state, referenced_pubkeys(event));
+    let first_sight = state.first_sight(&event.id.to_hex());
+    super::subscriptions::reconcile_after_admin_event(state, event, first_sight);
 
     // The relay pool notifies once PER MATCHING SUBSCRIPTION (scope filters ×
     // live sessions), so the same event reaches here many times. The tail
@@ -149,7 +148,7 @@ fn handle_incoming(state: &Arc<DaemonState>, event: &Event) {
     // event+recipient claim covers daemon-restart idempotency.
     if let Some(de) = outcome.tail {
         let kind = event.kind.as_u16();
-        if state.first_sight(&event.id.to_hex()) {
+        if first_sight {
             // Presence-lease renewals (kind:30315) are too noisy for info.
             let is_lease_renewal = kind == 30315;
             if is_lease_renewal {

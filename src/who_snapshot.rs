@@ -205,30 +205,31 @@ pub(crate) fn build_who_snapshot(
         .collect();
 
     let local_spawnable = &aggregation.local_spawnable;
-    let roster_scope = current_root
+    let profile_scope = current_root
         .map(|p| work_root_for(aggregation, p))
         .transpose()?;
     let mut seen_spawnable = BTreeSet::new();
-    let mut spawnable: Vec<SpawnableRow> = aggregation
-        .agents_for_root(roster_scope.as_deref())
-        .into_iter()
-        .map(|row| {
-            let local = (row.host == local_host)
-                .then(|| local_spawnable.get(&row.slug))
+    let mut spawnable = Vec::new();
+    for profile in aggregation.backend_profiles_for_root(profile_scope.as_deref()) {
+        for (slug, about) in &profile.agents {
+            if !seen_spawnable.insert((profile.host.clone(), slug.clone())) {
+                continue;
+            }
+            let local = (profile.host == local_host)
+                .then(|| local_spawnable.get(slug))
                 .flatten();
-            seen_spawnable.insert((row.host.clone(), row.slug.clone()));
-            SpawnableRow {
-                host: row.host,
-                slug: row.slug,
+            spawnable.push(SpawnableRow {
+                host: profile.host.clone(),
+                slug: slug.clone(),
                 command: local
                     .map(|(command, _)| command.clone())
                     .unwrap_or_default(),
-                byline: Some(row.use_criteria)
-                    .filter(|s| !s.trim().is_empty())
+                byline: Some(about.clone())
+                    .filter(|description| !description.trim().is_empty())
                     .or_else(|| local.and_then(|(_, byline)| byline.clone())),
-            }
-        })
-        .collect();
+            });
+        }
+    }
     for (slug, (command, byline)) in local_spawnable {
         if !seen_spawnable.insert((local_host.clone(), slug.clone())) {
             continue;

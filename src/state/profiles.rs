@@ -10,11 +10,14 @@ fn row_to_profile(row: &rusqlite::Row) -> rusqlite::Result<Profile> {
         agent_slug: row.get(3)?,
         host: row.get(4)?,
         is_backend: row.get::<_, i64>(5)? != 0,
-        updated_at: row.get(6)?,
+        agents: serde_json::from_str(&row.get::<_, String>(6)?).unwrap_or_default(),
+        workspaces: serde_json::from_str(&row.get::<_, String>(7)?).unwrap_or_default(),
+        updated_at: row.get(8)?,
     })
 }
 
-const COLS: &str = "pubkey, name, slug, agent_slug, host, is_backend, updated_at";
+const COLS: &str =
+    "pubkey, name, slug, agent_slug, host, is_backend, agents_json, workspaces_json, updated_at";
 
 impl Store {
     /// Materialize a kind:0 profile. Newer `updated_at` wins.
@@ -41,14 +44,48 @@ impl Store {
         is_backend: bool,
         updated_at: u64,
     ) -> Result<()> {
+        self.upsert_profile_snapshot(
+            pubkey,
+            name,
+            slug,
+            agent_slug,
+            host,
+            is_backend,
+            &[],
+            &[],
+            updated_at,
+        )
+    }
+
+    /// Materialize one complete kind:0 profile snapshot. Backend agents and
+    /// workspaces replace atomically with the profile row.
+    #[allow(clippy::too_many_arguments)]
+    pub fn upsert_profile_snapshot(
+        &self,
+        pubkey: &str,
+        name: &str,
+        slug: &str,
+        agent_slug: &str,
+        host: &str,
+        is_backend: bool,
+        agents: &[(String, String)],
+        workspaces: &[String],
+        updated_at: u64,
+    ) -> Result<()> {
+        let agents_json = serde_json::to_string(agents)?;
+        let workspaces_json = serde_json::to_string(workspaces)?;
         self.conn.execute(
             "INSERT INTO relay_profiles
-                 (pubkey, name, slug, agent_slug, host, is_backend, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                 (pubkey, name, slug, agent_slug, host, is_backend,
+                  agents_json, workspaces_json, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
              ON CONFLICT(pubkey) DO UPDATE SET
                  name=excluded.name, slug=excluded.slug,
                  agent_slug=excluded.agent_slug, host=excluded.host,
-                 is_backend=excluded.is_backend, updated_at=excluded.updated_at
+                 is_backend=excluded.is_backend,
+                 agents_json=excluded.agents_json,
+                 workspaces_json=excluded.workspaces_json,
+                 updated_at=excluded.updated_at
              WHERE excluded.updated_at >= relay_profiles.updated_at",
             params![
                 pubkey,
@@ -57,6 +94,8 @@ impl Store {
                 agent_slug,
                 host,
                 is_backend as i64,
+                agents_json,
+                workspaces_json,
                 updated_at
             ],
         )?;
@@ -73,6 +112,16 @@ impl Store {
                 row_to_profile,
             )
             .optional()?)
+    }
+
+    /// Complete management-key backend profiles, ordered by host label.
+    pub fn list_backend_profiles(&self) -> Result<Vec<Profile>> {
+        let mut statement = self.conn.prepare(&format!(
+            "SELECT {COLS} FROM relay_profiles
+             WHERE is_backend=1 ORDER BY host, pubkey"
+        ))?;
+        let rows = statement.query_map([], row_to_profile)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
     /// Reverse lookup: the pubkey of an agent advertising `slug` on the exact

@@ -235,10 +235,6 @@ async fn conflict_combination_resolves_and_persists_selected_binding() {
 
     assert_eq!(source.identity.slug, "writer");
     assert_eq!(source.bundle, "codex-pty");
-    assert_eq!(
-        source.retired_advertisements,
-        ["writer-claude", "writer-codex"]
-    );
     let saved = crate::identity::agent_launch_config(&mosaico_home, "writer").unwrap();
     assert_eq!(saved.harness, "codex-pty");
     assert!(saved.profile.is_none());

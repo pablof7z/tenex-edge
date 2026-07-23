@@ -1,28 +1,28 @@
-//! Agent roster listing for backend-addressed management commands.
+//! Host agent inventory for backend-addressed management commands.
 
 use super::super::DaemonState;
 use anyhow::Result;
 use std::sync::Arc;
 
 pub(super) fn list_agents(state: &Arc<DaemonState>) -> Result<String> {
-    let (agents, failures) = super::super::agent_roster::capability_advertisements(state)?;
-    if agents.is_empty() {
+    let snapshot = super::super::backend_profile::backend_profile_snapshot(state)?;
+    if snapshot.agents.is_empty() {
         return Ok(format!("mgmt ok: no agents known on {}", state.host));
     }
     let mut lines = vec![format!(
         "mgmt ok: {} agent(s) on {}",
-        agents.len(),
+        snapshot.agents.len(),
         state.host
     )];
-    for agent in agents {
-        let description = crate::agent_about::for_injection(&agent.use_criteria);
+    for agent in snapshot.agents {
+        let description = crate::agent_about::for_injection(&agent.about);
         if description.is_empty() {
             lines.push(format!("- {}", agent.slug));
         } else {
             lines.push(format!("- {}: {description}", agent.slug));
         }
     }
-    for failure in failures {
+    for failure in snapshot.failures {
         tracing::warn!(error = %failure, "agent inventory entry is unavailable");
     }
     Ok(lines.join("\n"))

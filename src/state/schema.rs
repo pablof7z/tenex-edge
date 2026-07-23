@@ -1,6 +1,6 @@
 //! The stamped persistence schema.
-//! Six `relay_*` tables are materialized caches and may be dropped/rebuilt from
-//! relay state. The remaining local tables are non-rebuildable daemon state:
+//! `relay_*` tables are materialized caches and may be dropped/rebuilt from relay
+//! state. The remaining local tables are non-rebuildable daemon state:
 //! runtime bindings and locators, inbox, event claims, channel
 //! reservations, and workspace roots.
 use anyhow::{Context, Result};

@@ -2,7 +2,7 @@ use super::*;
 use crate::state::{RegisterSession, Store};
 use nostr_sdk::prelude::{EventBuilder, Keys, Kind, Tag, Timestamp, ToBech32};
 
-mod agent_roster;
+mod backend_profile;
 mod membership;
 mod repeated_tags;
 

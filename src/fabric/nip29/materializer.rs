@@ -14,7 +14,6 @@ use crate::domain::{ChatMessage, Profile};
 use crate::state::{RelayEvent, Store};
 use nostr_sdk::Event;
 
-mod agent_roster;
 mod messages;
 mod reactions;
 
@@ -98,13 +97,15 @@ impl Nip29Materializer {
         } else {
             name.clone()
         };
-        if let Err(e) = store.upsert_profile_with_agent_slug(
+        if let Err(e) = store.upsert_profile_snapshot(
             &pf.agent.pubkey,
             &name,
             &slug,
             &pf.agent_slug,
             &pf.host,
             pf.is_backend,
+            &pf.agents,
+            &pf.workspaces,
             updated_at,
         ) {
             tracing::error!(
@@ -154,10 +155,6 @@ impl Nip29Materializer {
                 );
             }
         }
-    }
-
-    pub fn materialize_agent_roster(store: &Store, event: &Event) {
-        agent_roster::materialize(store, event);
     }
 
     // ── relay_events (every other kind, verbatim) ────────────────────────────

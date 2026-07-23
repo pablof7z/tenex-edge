@@ -2,10 +2,9 @@
 //!
 //! | Domain      | Wire |
 //! |-------------|------|
-//! | Profile     | kind:0,     content `{"name": "sessionCode-agent"}`, `["host", host]`, optional `["agent-slug", slug]` and scoped live-agent `["workspace", root_h]`; backend profiles additionally carry `["backend"]` + one `["agent", slug, desc]` per managed agent |
+//! | Profile     | kind:0,     content `{"name": "sessionCode-agent"}`, `["host", host]`, optional `["agent-slug", slug]` and scoped live-agent `["workspace", root_h]`; backend profiles additionally carry `["backend"]`, repeated `["agent", slug, desc]`, and repeated `["workspace", root_h]` tags |
 //! | Activity    | kind:1,     `["h", channel]` — social narrative (no inbox routing) |
 //! | Status      | kind:30315, content = live activity (may be empty between turns), `["d", "status"]`, one or more `["h", channel]`, `["title", title]` (always), `["state", "working"\|"idle"\|"suspended"\|"offline"]`, `["state-since", ts]`, `["host", host]`, optional `["slug", slug]`, optional `["rel-cwd", rel]`, optional NIP-40 `["expiration", ts]` |
-//! | AgentRoster | kind:30555, backend management-key signed, `["d", capability_slug]`, `["hostname", host]`, `["use-criteria", text]`, one or more root-channel `["h", channel]` |
 //! | Chat        | kind:9,     `["h", channel]`, repeated `["p", mentioned_pubkey]` |
 //!
 //! Status is the single self-contained per-agent signal: ONE kind:30315 event
@@ -25,7 +24,7 @@
 //! Most events resolve slug downstream; status carries an optional render-hint slug. Authorization
 //! uses only event.pubkey (signer). Self-asserted `agent` tags on *agent-session* kind:0s have no
 //! authority and are never written; only the **backend** management-key-signed kind:0 advertises
-//! `["agent", slug, desc]` tags (the managed-agent roster for client add-agent pickers).
+//! `["agent", slug, desc]` tags (the host inventory for client add-agent pickers).
 
 use crate::domain::{Activity, AgentRef, ChatMessage, DomainEvent, Reaction, Status};
 use crate::fabric::{NostrEventCodec, RawEnvelope};
@@ -39,7 +38,6 @@ pub const KIND_CHAT: u16 = 9;
 /// signed by the backend management key.
 pub const KIND_REACTION: u16 = 7;
 pub const KIND_STATUS: u16 = 30315;
-pub const KIND_AGENT_ROSTER: u16 = 30555;
 
 // NIP-29 group management (mosaicoPrivateKey-signed) + relay-authored state.
 pub const KIND_GROUP_CREATE: u16 = 9007;

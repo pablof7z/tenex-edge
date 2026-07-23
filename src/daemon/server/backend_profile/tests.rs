@@ -13,22 +13,8 @@ fn write_executable(path: &std::path::Path) {
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
 }
 
-#[test]
-fn only_absent_capabilities_are_tombstoned() {
-    let advertised = vec![CapabilityAdvertisement {
-        slug: "reviewer".into(),
-        use_criteria: "Reviews changes".into(),
-        root_channels: Vec::new(),
-        available_since: 1,
-    }];
-
-    assert!(!should_tombstone(&advertised, "reviewer"));
-    assert!(should_tombstone(&advertised, "deleted"));
-    assert!(!should_tombstone(&advertised, ""));
-}
-
 #[tokio::test]
-async fn discovered_capabilities_are_global_or_workspace_scoped() {
+async fn snapshot_owns_agents_and_workspaces_independently() {
     let home = tempfile::tempdir().unwrap();
     let mosaico_home = home.path().join("mosaico");
     let codex_home = home.path().join(".codex");
@@ -36,6 +22,7 @@ async fn discovered_capabilities_are_global_or_workspace_scoped() {
     env.set_var("MOSAICO_ISOLATED_HOME_OK", "1");
     env.set_var("HOME", home.path());
     env.set_var("CODEX_HOME", &codex_home);
+    env.set_var("PATH", home.path().join(".local/bin"));
     write(
         &mosaico_home.join("harnesses.json"),
         r#"{"codex-rpc":{"harness":"codex","transport":"app-server"}}"#,
@@ -50,7 +37,7 @@ async fn discovered_capabilities_are_global_or_workspace_scoped() {
     std::fs::create_dir_all(&work_b).unwrap();
     write(
         &work_a.join(".codex/agents/project.toml"),
-        "name='project'\ndescription='Only A'\ndeveloper_instructions='Work'",
+        "name='project'\ndescription='Project work'\ndeveloper_instructions='Work'",
     );
     let state = DaemonState::new_for_test().await;
     state.with_store(|store| {
@@ -65,16 +52,20 @@ async fn discovered_capabilities_are_global_or_workspace_scoped() {
     });
     state.refresh_agent_catalog().unwrap();
 
-    let (advertised, failed) = capability_advertisements(&state).unwrap();
-    assert!(failed.is_empty(), "{failed:?}");
-    let global = advertised
-        .iter()
-        .find(|agent| agent.slug == "global")
-        .unwrap();
-    assert_eq!(global.root_channels, ["root-a", "root-b"]);
-    let project = advertised
-        .iter()
-        .find(|agent| agent.slug == "project")
-        .unwrap();
-    assert_eq!(project.root_channels, ["root-a"]);
+    let snapshot = backend_profile_snapshot(&state).unwrap();
+
+    assert!(snapshot.failures.is_empty(), "{:?}", snapshot.failures);
+    assert_eq!(snapshot.workspaces, ["root-a", "root-b"]);
+    assert_eq!(
+        snapshot
+            .agents
+            .iter()
+            .map(|agent| (agent.slug.as_str(), agent.about.as_str()))
+            .collect::<Vec<_>>(),
+        [
+            ("codex", ""),
+            ("global", "Everywhere"),
+            ("project", "Project work"),
+        ]
+    );
 }

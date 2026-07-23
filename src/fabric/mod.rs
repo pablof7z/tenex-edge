@@ -90,10 +90,6 @@ pub fn materialize(env: &RawEnvelope, store: &crate::state::Store) -> Materializ
                 ),
             };
         }
-        crate::fabric::nip29::wire::KIND_AGENT_ROSTER => {
-            Nip29Materializer::materialize_agent_roster(store, event);
-            return MaterializationOutcome::default();
-        }
         _ => {}
     }
 
@@ -101,7 +97,7 @@ pub fn materialize(env: &RawEnvelope, store: &crate::state::Store) -> Materializ
     let codec = Nip29WireCodec;
     let Some(de) = codec.decode(env) else {
         let k = event.kind.as_u16();
-        if k != 0 && k != 30315 && k != crate::fabric::nip29::wire::KIND_AGENT_ROSTER {
+        if k != 0 && k != 30315 {
             Nip29Materializer::materialize_event(store, event);
         }
         return MaterializationOutcome::default();

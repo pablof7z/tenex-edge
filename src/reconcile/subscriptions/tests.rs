@@ -47,6 +47,7 @@ fn opens_one_narrow_req_per_entity_and_is_idempotent() {
     let snapshot = CoverageSnapshot {
         daemon_channels: set(["room-a", "room-b"]),
         addressed_pubkeys: set(["pk-1", "pk-2"]),
+        profile_pubkeys: set(["backend-1"]),
         ..Default::default()
     };
 
@@ -60,9 +61,28 @@ fn opens_one_narrow_req_per_entity_and_is_idempotent() {
             "mosaico-gstate-room-b",
             "mosaico-p-pk-1",
             "mosaico-p-pk-2",
+            "mosaico-profile-backend-1",
         ])
     );
     assert!(sync(&mut policy, &snapshot).is_empty());
+}
+
+#[test]
+fn host_profiles_are_observed_by_exact_author() {
+    let effects = SubscriptionReconciler::new().plan(&CoverageSnapshot {
+        profile_pubkeys: set(["backend-1"]),
+        ..Default::default()
+    });
+    let query = effects
+        .iter()
+        .find_map(|effect| match effect {
+            SubEffect::Open { id, query } if id == "mosaico-profile-backend-1" => Some(query),
+            _ => None,
+        })
+        .expect("profile observation");
+    assert_eq!(query.kinds, BTreeSet::from([0]));
+    assert_eq!(query.authors, set(["backend-1"]));
+    assert!(query.tag.is_none());
 }
 
 #[test]

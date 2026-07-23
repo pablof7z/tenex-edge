@@ -6,7 +6,7 @@ pub(crate) const AGENT_ABOUT_MAX_CHARS: usize = 200;
 ///
 /// Native profile descriptions sometimes contain escaped newlines and long
 /// usage examples. Those remain intact in the source profile; agent-facing
-/// roster views need only a concise routing hint.
+/// host capability views need only a concise routing hint.
 pub(crate) fn for_injection(value: &str) -> String {
     compact(value, AGENT_ABOUT_MAX_CHARS)
 }

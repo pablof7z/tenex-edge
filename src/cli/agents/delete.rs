@@ -19,6 +19,6 @@ pub(super) async fn delete(row: &AgentRow, scope: DeleteScope) -> Result<()> {
             }
         }
     }
-    super::schedule_roster_refresh(Some(&row.slug)).await;
+    super::schedule_backend_profile_refresh().await;
     Ok(())
 }

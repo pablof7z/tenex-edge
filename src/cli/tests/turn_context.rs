@@ -27,7 +27,6 @@ fn first_turn_renders_awareness_snapshot_not_session_code() {
     seed_channel(&store);
     let rec = test_session("sess-intro");
     let m = Mutex::new(store);
-
     let text = render_turn_start_text_for_test(&m, &rec, BACKEND, "laptop", 0)
         .expect("first-turn intro expected");
     assert!(
@@ -35,8 +34,9 @@ fn first_turn_renders_awareness_snapshot_not_session_code() {
         "first turn should render fabric awareness; got: {text:?}"
     );
     assert!(
-        text.contains("<workspace name=\"proj\" channel=\"proj\""),
-        "awareness should name the channel; got: {text:?}"
+        text.contains("<workspace name=\"proj\"")
+            && !text.contains("<workspace name=\"proj\" channel="),
+        "awareness should name only the workspace; got: {text:?}"
     );
     assert!(
         text.contains("Agent: coder · Session: @coder · Backend: laptop"),

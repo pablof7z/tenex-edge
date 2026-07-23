@@ -33,7 +33,6 @@ pub(crate) fn assemble_view(inputs: &ViewInputs, cursor: u64, now: u64) -> Fabri
         }),
         workspace: WorkspaceRow {
             name: meta.workspace.name.clone(),
-            channel: meta.workspace.channel.clone(),
             about: meta.workspace.about.clone(),
         },
         agents: agent_rows(inputs, cursor, now),
@@ -135,7 +134,6 @@ fn other_workspace_rows(inputs: &ViewInputs, cursor: u64, now: u64) -> Vec<Works
             (root.is_some() || !channels.is_empty()).then(|| WorkspaceActivity {
                 workspace: WorkspaceRow {
                     name: workspace.summary.name.clone(),
-                    channel: workspace.summary.channel.clone(),
                     about: workspace.summary.about.clone(),
                 },
                 root,

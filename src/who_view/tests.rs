@@ -1,6 +1,42 @@
 use super::{render_agent_who, render_agent_who_from_aggregation, AgentWhoInput};
-use crate::state::{AgentRoster, Status, Store};
+use crate::state::{Status, Store};
 use std::collections::BTreeSet;
+
+fn advertise_host(
+    store: &Store,
+    pubkey: &str,
+    host: &str,
+    agents: &[(&str, &str)],
+    workspaces: &[&str],
+    updated_at: u64,
+) {
+    let agents = agents
+        .iter()
+        .map(|(slug, about)| ((*slug).to_string(), (*about).to_string()))
+        .collect::<Vec<_>>();
+    let workspaces = workspaces
+        .iter()
+        .map(|workspace| (*workspace).to_string())
+        .collect::<Vec<_>>();
+    store
+        .upsert_profile_snapshot(
+            pubkey,
+            host,
+            host,
+            "",
+            host,
+            true,
+            &agents,
+            &workspaces,
+            updated_at,
+        )
+        .unwrap();
+    for workspace in workspaces {
+        store
+            .upsert_channel_member(&workspace, pubkey, "admin", updated_at)
+            .unwrap();
+    }
+}
 
 fn seed() -> Store {
     let store = Store::open_memory().unwrap();
@@ -65,19 +101,14 @@ fn seed() -> Store {
             expiration: 200,
         })
         .unwrap();
-    store
-        .replace_agent_roster(&AgentRoster {
-            backend_pubkey: "remote-pk".into(),
-            host: "remoteBackend1".into(),
-            slug: "claude".into(),
-            use_criteria: "Remote review".into(),
-            channels: vec!["joined".into(), "beta".into()],
-            updated_at: 1,
-        })
-        .unwrap();
-    store
-        .upsert_channel_member("alpha", "remote-pk", "admin", 1)
-        .unwrap();
+    advertise_host(
+        &store,
+        "remote-pk",
+        "remoteBackend1",
+        &[("claude", "Remote review")],
+        &["alpha", "beta"],
+        1,
+    );
     store
 }
 
@@ -151,37 +182,37 @@ fn lists_global_agents_and_compacts_other_workspaces() {
         xml.contains("<self name=\"@quill-peak-369-codex\" host=\"laptop\" headless=\"off\" />"),
         "{xml}"
     );
+    assert!(xml.contains("<host name=\"remoteBackend1\">"), "{xml}");
+    assert!(!xml.contains("<host name=\"remote\">"), "{xml}");
     assert!(
-        xml.contains("<agent name=\"claude@remoteBackend1\""),
+        xml.contains("<agent ref=\"claude@remoteBackend1\" about=\"Remote review\" />"),
         "{xml}"
     );
     assert!(
-        xml.contains("workspace-availability=\"alpha,beta\""),
-        "{xml}"
-    );
-    assert!(
-        xml.contains("<workspace name=\"alpha\" channel=\"alpha\" path=\"/work/alpha\""),
+        xml.contains(
+            "<workspace name=\"alpha\" about=\"Alpha workspace\" members=\"2\" hosts=\"remoteBackend1\""
+        ),
         "{xml}"
     );
     assert!(xml.contains(
-        "<workspace name=\"beta\" channel=\"beta\" about=\"Beta workspace\" members=\"1\" />"
+        "<workspace name=\"beta\" about=\"Beta workspace\" members=\"1\" hosts=\"remoteBackend1\" />"
     ));
+    assert!(!xml.contains(" path="), "{xml}");
+    assert!(!xml.contains(" channel=\"alpha\""), "{xml}");
 }
 
 #[test]
 fn agent_about_is_compact_and_bounded() {
     let store = seed();
     let long_about = format!("Routes\\narchitecture work {}", "carefully ".repeat(40));
-    store
-        .replace_agent_roster(&AgentRoster {
-            backend_pubkey: "long-pk".into(),
-            host: "laptop".into(),
-            slug: "architect".into(),
-            use_criteria: long_about,
-            channels: vec!["alpha".into()],
-            updated_at: 2,
-        })
-        .unwrap();
+    advertise_host(
+        &store,
+        "long-pk",
+        "laptop",
+        &[("architect", &long_about)],
+        &["alpha"],
+        2,
+    );
     let roots = vec!["alpha".to_string()];
     let xml = render_agent_who(
         &store,
@@ -197,7 +228,7 @@ fn agent_about_is_compact_and_bounded() {
         },
     )
     .unwrap();
-    let start = xml.find("<agent name=\"architect\"").unwrap();
+    let start = xml.find("<agent ref=\"architect@laptop\"").unwrap();
     let row = &xml[start..xml[start..].find(" />").map(|end| start + end).unwrap()];
     let about = row
         .split_once("about=\"")
@@ -217,7 +248,7 @@ fn workspace_carries_root_members_and_membership_gated_children() {
     let xml = render(false);
     assert!(
         xml.contains(
-            "<workspace name=\"alpha\" channel=\"alpha\" path=\"/work/alpha\" about=\"Alpha workspace\" members=\"2\""
+            "<workspace name=\"alpha\" about=\"Alpha workspace\" members=\"2\" hosts=\"remoteBackend1\""
         ),
         "{xml}"
     );
@@ -225,7 +256,10 @@ fn workspace_carries_root_members_and_membership_gated_children() {
     assert!(xml.contains(
         "<agent name=\"@quill-peak-369-codex\" state=\"idle\" status=\"Implement awareness\""
     ));
-    assert!(xml.contains("members=\"2\">\n      <members>"), "{xml}");
+    assert!(
+        xml.contains("members=\"2\" hosts=\"remoteBackend1\">\n      <members>"),
+        "{xml}"
+    );
     assert!(xml.contains(
         "<channel name=\"small-talk\" id=\"alpha.small-talk\" members=\"1\" about=\"Chit chat\" />"
     ));
@@ -237,7 +271,7 @@ fn workspace_carries_root_members_and_membership_gated_children() {
 fn exact_session_joined_workspace_set_controls_expansion() {
     let xml = render(true);
     assert!(xml.contains(
-        "<workspace name=\"beta\" channel=\"beta\" about=\"Beta workspace\" members=\"1\">"
+        "<workspace name=\"beta\" about=\"Beta workspace\" members=\"1\" hosts=\"remoteBackend1\">"
     ));
     assert!(xml.contains("<agent name=\"@quill-peak-369-codex\" state=\"offline\""));
 }

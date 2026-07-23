@@ -91,7 +91,7 @@ pub fn list_invitable_agents(mosaico_home: &Path) -> Vec<(String, Option<String>
 
 /// `(slug, effective_byline_or_empty)` for every local agent, sorted by slug —
 /// the exact set advertised to clients. Both the backend kind:0 `agent` tags and
-/// the kind:30555 roster are built from this, so an add-agent picker's slug
+/// the backend host profile is built from this, so an add-agent picker's slug
 /// round-trips through the `add <slug>` management command.
 pub fn list_advertised_agents(mosaico_home: &Path) -> Vec<(String, String)> {
     list_local_agents(mosaico_home)

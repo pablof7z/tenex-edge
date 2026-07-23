@@ -10,7 +10,7 @@ pub(super) fn render_agent_who(view: &AgentWhoView) -> String {
         attr(&view.self_host),
         if view.headless { "on" } else { "off" },
     );
-    render_agents(&mut out, &view.agents);
+    render_hosts(&mut out, &view.hosts);
     out.push_str("\n  <workspaces>");
     for workspace in &view.workspaces {
         render_workspace(&mut out, workspace);
@@ -19,36 +19,34 @@ pub(super) fn render_agent_who(view: &AgentWhoView) -> String {
     out
 }
 
-fn render_agents(out: &mut String, agents: &[AgentCapabilityView]) {
-    out.push_str("\n  <agents>");
-    for agent in agents {
-        let _ = write!(out, "\n    <agent name=\"{}\"", attr(&agent.name));
-        if !agent.about.is_empty() {
-            let _ = write!(out, " about=\"{}\"", attr(&agent.about));
+fn render_hosts(out: &mut String, hosts: &[HostView]) {
+    out.push_str("\n  <hosts>");
+    for host in hosts {
+        let _ = write!(out, "\n    <host name=\"{}\">", attr(&host.name));
+        out.push_str("\n      <agents>");
+        for agent in &host.agents {
+            let _ = write!(out, "\n        <agent ref=\"{}\"", attr(&agent.reference));
+            if !agent.about.is_empty() {
+                let _ = write!(out, " about=\"{}\"", attr(&agent.about));
+            }
+            out.push_str(" />");
         }
-        let _ = write!(
-            out,
-            " workspace-availability=\"{}\" />",
-            attr(&agent.workspaces.join(","))
-        );
+        out.push_str("\n      </agents>\n    </host>");
     }
-    out.push_str("\n  </agents>");
+    out.push_str("\n  </hosts>");
 }
 
 fn render_workspace(out: &mut String, workspace: &WorkspaceView) {
-    let _ = write!(
-        out,
-        "\n    <workspace name=\"{}\" channel=\"{}\"",
-        attr(&workspace.name),
-        attr(&workspace.channel)
-    );
-    if !workspace.path.is_empty() {
-        let _ = write!(out, " path=\"{}\"", attr(&workspace.path));
-    }
+    let _ = write!(out, "\n    <workspace name=\"{}\"", attr(&workspace.name));
     if !workspace.about.is_empty() {
         let _ = write!(out, " about=\"{}\"", attr(&workspace.about));
     }
-    let _ = write!(out, " members=\"{}\"", workspace.member_count);
+    let _ = write!(
+        out,
+        " members=\"{}\" hosts=\"{}\"",
+        workspace.member_count,
+        attr(&workspace.hosts.join(","))
+    );
     if !workspace.expanded {
         out.push_str(" />");
         return;

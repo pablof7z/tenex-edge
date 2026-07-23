@@ -11,6 +11,7 @@ fn profile_roundtrip() {
         owners: vec!["09d4".repeat(16)],
         is_backend: false,
         agents: Vec::new(),
+        workspaces: Vec::new(),
     });
     assert_eq!(roundtrip(ev.clone(), &keys), ev);
 
@@ -36,7 +37,8 @@ fn backend_profile_advertises_managed_agents_as_tags() {
     .with_agents(vec![
         ("developer".into(), "writes and reviews code".into()),
         ("writer".into(), String::new()),
-    ]);
+    ])
+    .with_workspaces(vec!["mosaico".into(), "nampplets".into()]);
     let ev = DomainEvent::Profile(profile);
 
     // Round-trips: `["agent", slug, desc]` tags survive encode -> decode, and an
@@ -65,6 +67,17 @@ fn backend_profile_advertises_managed_agents_as_tags() {
             vec!["agent".to_string(), "writer".to_string(), String::new()],
         ]
     );
+    let workspaces: Vec<String> = signed
+        .tags
+        .iter()
+        .filter_map(|tag| {
+            let values = tag.as_slice();
+            (values.first().map(String::as_str) == Some("workspace"))
+                .then(|| values.get(1).cloned())
+                .flatten()
+        })
+        .collect();
+    assert_eq!(workspaces, ["mosaico", "nampplets"]);
 }
 
 #[test]
@@ -78,6 +91,7 @@ fn non_backend_profile_omits_agent_tags() {
         Vec::new(),
     );
     profile.agents = vec![("leaked".into(), "should not be encoded".into())];
+    profile.workspaces = vec!["leaked".into()];
     let signed = Nip29WireCodec
         .encode_event(&DomainEvent::Profile(profile))
         .unwrap()
@@ -89,6 +103,13 @@ fn non_backend_profile_omits_agent_tags() {
             .iter()
             .any(|t| t.as_slice().first().map(String::as_str) == Some("agent")),
         "non-backend profile must not emit agent tags"
+    );
+    assert!(
+        !signed
+            .tags
+            .iter()
+            .any(|t| t.as_slice().first().map(String::as_str) == Some("workspace")),
+        "non-backend profile without a singular workspace must not emit backend workspaces"
     );
 }
 
@@ -104,6 +125,7 @@ fn retired_profile_roundtrip_keeps_npub_as_the_name() {
         owners: Vec::new(),
         is_backend: false,
         agents: Vec::new(),
+        workspaces: Vec::new(),
     });
     let signed = Nip29WireCodec
         .encode_event(&profile)
@@ -134,6 +156,25 @@ fn profile_decode_builds_handle_from_session_code_and_canonical_tag() {
             assert_eq!(p.agent_slug, "developer");
             assert_eq!(p.host, "remoteBackend");
             assert_eq!(p.workspace, "");
+            assert!(p.workspaces.is_empty());
+        }
+        other => panic!("expected profile, got {other:?}"),
+    }
+}
+
+#[test]
+fn profile_decode_prefers_nonempty_display_name() {
+    let keys = Keys::generate();
+    let event = EventBuilder::new(
+        Kind::from(KIND_PROFILE),
+        r#"{"name":"fallback","display_name":" Display Name "}"#,
+    )
+    .sign_with_keys(&keys)
+    .unwrap();
+
+    match Nip29WireCodec.decode_event(&event) {
+        Some(DomainEvent::Profile(profile)) => {
+            assert_eq!(profile.agent.slug, "Display Name");
         }
         other => panic!("expected profile, got {other:?}"),
     }

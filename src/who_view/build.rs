@@ -28,39 +28,45 @@ pub(super) fn build_agent_who(
         self_name: input.self_name.to_string(),
         self_host: input.local_host.to_string(),
         headless: input.headless,
-        agents: available_agents(aggregation, input.local_host)?,
+        hosts: available_hosts(aggregation, input.roots),
         workspaces,
     })
 }
 
-fn available_agents(
+fn available_hosts(
     aggregation: &crate::who_aggregation::WhoAggregation,
-    local_host: &str,
-) -> anyhow::Result<Vec<AgentCapabilityView>> {
-    let mut grouped: BTreeMap<(String, String, String), BTreeSet<String>> = BTreeMap::new();
-    for row in &aggregation.agents {
-        let name = if row.host.is_empty() || row.host == local_host {
-            row.slug.clone()
-        } else {
-            format!("{}@{}", row.slug, row.host)
-        };
-        let about = crate::agent_about::for_injection(&row.use_criteria);
-        let workspace = aggregation.root_for_channel(&row.channel_h)?;
-        grouped
-            .entry((row.backend_pubkey.clone(), name, about))
-            .or_default()
-            .insert(workspace);
+    roots: &[String],
+) -> Vec<HostView> {
+    let mut grouped = BTreeMap::<String, BTreeMap<String, String>>::new();
+    let mut seen_pubkeys = BTreeSet::new();
+    for profile in roots
+        .iter()
+        .flat_map(|root| aggregation.backend_profiles_for_root(Some(root)))
+    {
+        if !seen_pubkeys.insert(profile.pubkey.as_str()) {
+            continue;
+        }
+        let host = profile.host.trim();
+        if host.is_empty() {
+            continue;
+        }
+        let agents = grouped.entry(host.to_string()).or_default();
+        for (slug, about) in &profile.agents {
+            agents
+                .entry(format!("{slug}@{host}"))
+                .or_insert_with(|| crate::agent_about::for_injection(about));
+        }
     }
-    Ok(grouped
+    grouped
         .into_iter()
-        .map(
-            |((_backend, name, about), workspaces)| AgentCapabilityView {
-                name,
-                about,
-                workspaces: workspaces.into_iter().collect(),
-            },
-        )
-        .collect())
+        .map(|(name, agents)| HostView {
+            name,
+            agents: agents
+                .into_iter()
+                .map(|(reference, about)| AgentCapabilityView { reference, about })
+                .collect(),
+        })
+        .collect()
 }
 
 fn channels_by_parent(channels: Vec<Channel>) -> BTreeMap<String, Vec<Channel>> {
@@ -112,18 +118,18 @@ fn workspace_view(
     };
     Ok(WorkspaceView {
         name: root.to_string(),
-        channel: root.to_string(),
-        path: {
-            aggregation.root_for_channel(root)?;
-            aggregation
-                .workspace_path(root)
-                .unwrap_or_default()
-                .to_string()
-        },
         about: meta
             .map(|channel| channel.about.clone())
             .unwrap_or_default(),
         member_count: members.len(),
+        hosts: aggregation
+            .backend_profiles_for_root(Some(root))
+            .into_iter()
+            .map(|profile| profile.host.clone())
+            .filter(|host| !host.is_empty())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect(),
         expanded,
         members: if expanded { members } else { Vec::new() },
         channels,
@@ -196,9 +202,9 @@ fn member_views(
     input: &AgentWhoInput<'_>,
 ) -> Vec<MemberView> {
     let backend_pubkeys = aggregation
-        .agents
+        .backend_profiles
         .iter()
-        .map(|row| row.backend_pubkey.clone())
+        .map(|profile| profile.pubkey.clone())
         .collect::<BTreeSet<_>>();
     let statuses = aggregation
         .statuses_for(channel)

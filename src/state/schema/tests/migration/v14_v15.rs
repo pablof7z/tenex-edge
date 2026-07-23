@@ -22,7 +22,7 @@ fn schema_fourteen_adds_zeroed_busy_time() {
 
     drop(Store::open(&path).expect("schema fourteen upgrades to current"));
     let conn = Connection::open(&path).unwrap();
-    assert_eq!(version(&conn), 16);
+    assert_eq!(version(&conn), 17);
     assert_eq!(
         conn.query_row(
             "SELECT busy_seconds FROM sessions WHERE pubkey='historical'",

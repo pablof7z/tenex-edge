@@ -12,6 +12,7 @@ fn public_query_is_pinned_to_the_configured_host() {
     let relays = BTreeSet::from([relay.clone()]);
     let query = SubscriptionQuery {
         kinds: BTreeSet::from([9, 30315]),
+        authors: BTreeSet::new(),
         tag: Some(('h', "room".into())),
     };
 
@@ -19,10 +20,29 @@ fn public_query_is_pinned_to_the_configured_host() {
     assert_eq!(live.0.access, AccessContext::Public);
     assert_eq!(live.0.source, SourceAuthority::Pinned(relays));
     assert_eq!(live.0.selection.kinds, Some(query.kinds));
+    assert_eq!(live.0.selection.authors, None);
     let h = IndexedTagName::new('h').unwrap();
     assert_eq!(
         live.0.selection.tags.get(&h),
         Some(&Binding::Literal(BTreeSet::from(["room".to_string()])))
+    );
+}
+
+#[test]
+fn profile_query_is_scoped_to_exact_authors() {
+    let relays = BTreeSet::from([RelayUrl::parse("wss://relay.example.com").unwrap()]);
+    let author = "a".repeat(64);
+    let query = SubscriptionQuery {
+        kinds: BTreeSet::from([0]),
+        authors: BTreeSet::from([author.clone()]),
+        tag: None,
+    };
+
+    let live = live_query(&relays, &query, AccessContext::Public).unwrap();
+
+    assert_eq!(
+        live.0.selection.authors,
+        Some(Binding::Literal(BTreeSet::from([author])))
     );
 }
 
@@ -66,6 +86,7 @@ async fn strict_relay_authenticates_backend_reads_and_exact_author_writes() {
         .observe_with_access(
             &SubscriptionQuery {
                 kinds: BTreeSet::from([9000]),
+                authors: BTreeSet::new(),
                 tag: None,
             },
             AccessContext::Nip42(backend.public_key()),

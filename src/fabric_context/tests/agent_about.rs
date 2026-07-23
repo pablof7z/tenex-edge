@@ -1,20 +1,19 @@
+use super::host_profiles::advertise_host;
 use super::*;
 use crate::reconcile::{hook_context::FrameKind, HookContextState};
 
 #[test]
-fn agent_context_omits_capabilities_while_human_view_keeps_roster() {
+fn agent_context_omits_capabilities_while_human_view_keeps_host_profile() {
     let store = seed_store();
     let rec = session(&store);
-    store
-        .replace_agent_roster(&crate::state::AgentRoster {
-            backend_pubkey: "backend".into(),
-            host: "laptop".into(),
-            slug: "helper".into(),
-            use_criteria: "For testing".into(),
-            channels: vec!["root".into()],
-            updated_at: 2,
-        })
-        .unwrap();
+    advertise_host(
+        &store,
+        "backend",
+        "laptop",
+        &[("helper", "For testing")],
+        &["root"],
+        2,
+    );
 
     let text = render_fabric_context(&store, input(Some(&rec), "root", 0, 100, true))
         .expect("context should render");
@@ -28,7 +27,7 @@ fn agent_context_omits_capabilities_while_human_view_keeps_roster() {
         .unwrap()
         .unwrap();
     assert!(human.contains("Available agents"));
-    assert!(human.contains("@helper  For testing"));
+    assert!(human.contains("@helper@laptop  For testing"));
 
     let empty = Store::open_memory().unwrap();
     empty.upsert_channel("solo", "solo", "", "", 1).unwrap();
@@ -37,7 +36,8 @@ fn agent_context_omits_capabilities_while_human_view_keeps_roster() {
         .unwrap();
     let solo = session_record(&empty, "solo", "solo");
     let text = render_fabric_context(&empty, input(Some(&solo), "solo", 0, 100, true)).unwrap();
-    assert!(text.contains("<workspace name=\"solo\" channel=\"solo\""));
+    assert!(text.contains("<workspace name=\"solo\""));
+    assert!(!text.contains("<workspace name=\"solo\" channel="));
     assert!(!text.contains("<channel name=\"#solo\""));
     assert!(!text.contains("<members>"), "got: {text}");
 }
@@ -47,16 +47,14 @@ fn human_agent_about_is_compact_and_bounded() {
     let store = seed_store();
     let rec = session(&store);
     let long_about = format!("Routes\\nreview work {}", "carefully ".repeat(40));
-    store
-        .replace_agent_roster(&crate::state::AgentRoster {
-            backend_pubkey: "backend".into(),
-            host: "laptop".into(),
-            slug: "helper".into(),
-            use_criteria: long_about.clone(),
-            channels: vec!["root".into()],
-            updated_at: 2,
-        })
-        .unwrap();
+    advertise_host(
+        &store,
+        "backend",
+        "laptop",
+        &[("helper", &long_about)],
+        &["root"],
+        2,
+    );
 
     let text = render_fabric_context_human(&store, input(Some(&rec), "root", 0, 100, true), false)
         .unwrap()
@@ -67,7 +65,7 @@ fn human_agent_about_is_compact_and_bounded() {
 }
 
 #[test]
-fn roster_only_delta_does_not_emit_agent_hook_context() {
+fn host_profile_only_delta_does_not_emit_agent_hook_context() {
     let store = seed_store();
     let rec = session(&store);
     let mut state = HookContextState::default();
@@ -76,16 +74,14 @@ fn roster_only_delta_does_not_emit_agent_hook_context() {
     let baseline = state.render_context("sess", "turn_start", 100, 200, before);
     assert!(baseline.text.is_none());
 
-    store
-        .replace_agent_roster(&crate::state::AgentRoster {
-            backend_pubkey: "backend".into(),
-            host: "laptop".into(),
-            slug: "new-helper".into(),
-            use_criteria: "Newly available".into(),
-            channels: vec!["root".into()],
-            updated_at: 150,
-        })
-        .unwrap();
+    advertise_host(
+        &store,
+        "backend",
+        "laptop",
+        &[("new-helper", "Newly available")],
+        &["root"],
+        150,
+    );
     let after = capture_inputs(&store, &input(Some(&rec), "root", 100, 200, false)).unwrap();
     let unchanged = state.render_context("sess", "turn_start", 100, 200, after);
 

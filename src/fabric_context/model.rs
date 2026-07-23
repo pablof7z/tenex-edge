@@ -30,7 +30,7 @@ pub(crate) struct FabricView {
 
 impl FabricView {
     /// Agent hook context omits the capability roster. Removing the rows before
-    /// change detection also keeps roster-only relay updates from producing
+    /// change detection also keeps profile-only relay updates from producing
     /// empty hook frames.
     pub(crate) fn for_agent_context(mut self) -> Self {
         self.agents.clear();
@@ -87,7 +87,6 @@ pub(in crate::fabric_context) struct WorkspaceActivity {
 #[derive(Clone, Default, PartialEq)]
 pub(in crate::fabric_context) struct WorkspaceRow {
     pub(in crate::fabric_context) name: String,
-    pub(in crate::fabric_context) channel: String,
     pub(in crate::fabric_context) about: String,
 }
 
@@ -106,7 +105,7 @@ pub(in crate::fabric_context) struct AgentRow {
 }
 
 /// Agents declared in every workspace view. The all-workspaces renderers can
-/// show these once, then emit only each workspace's roster delta.
+/// show these once, then emit only each workspace's capability delta.
 pub(in crate::fabric_context) fn shared_agents(views: &[FabricView]) -> Vec<AgentRow> {
     let Some((first, rest)) = views.split_first() else {
         return Vec::new();

@@ -4,17 +4,15 @@ Companion to [daemon-design.md](daemon-design.md). This file owns the durable wi
 
 ## 6. RPC surface (every method)
 
-Coarse, lifecycle/intent-level — **not** fine-grained DB ops. The engine lives
-inside the daemon, so there is no per-DB-op RPC chatter; the surface is
-low-frequency lifecycle signals from hooks, CLI reads, and channel sends.
+Coarse, lifecycle/intent-level — **not** fine-grained DB ops. The daemon-owned
+engine exposes only low-frequency lifecycle signals from hooks, CLI reads, and
+channel sends.
 
 All params/results are JSON. Public selectors are full npub/hex pubkeys or a
-session's current leased handle, never private runtime ids. Harness-owned IDs
-are typed locators, not identity. The daemon resolves the caller from the explicit public identity
-when present, then the PTY locator, harness-native locator, watched harness
-process, and finally the cwd+agent scan where that fallback is safe. **The
-resolution stays daemon-side** so every client path observes the same identity
-rules.
+session's leased handle, never private runtime ids. Harness IDs are typed
+locators, not identity. Caller resolution prefers explicit public identity, then
+PTY or harness-native locators, watched process, and finally safe cwd+agent
+scanning. It stays daemon-side so every client observes identical rules.
 
 ## Session lifecycle RPCs
 
@@ -42,13 +40,11 @@ result: {
   "channel_parent": "…"|null, "root_display": "…"
 }
 ```
-The normal snapshot result above is the exact serde shape of `WhoSnapshot`; the
-nested row, other-root, and spawnable fields are exhaustive. The RPC may add a
-top-level `fabric_human` string for terminal rendering. `expired: true` selects the alternate
+The result is the exhaustive serde shape of `WhoSnapshot` and may add a top-level
+`fabric_human` terminal rendering. `expired: true` instead selects
 `{"expired": [{"agent_slug", "pubkey", "npub", "handle", "host", "channel",
-"last_seen", "resumable"}, …]}` result. The live snapshot and `my_session`'s XML
-tree project the same canonical `WhoAggregation` store read, so channel,
-session-state, capability, and live-status rules cannot drift.
+"last_seen", "resumable"}, …]}`. Live and `my_session` XML views share the same
+canonical `WhoAggregation` read so their state and capability rules cannot drift.
 
 ### `agent_inventory`
 ```jsonc
@@ -68,14 +64,12 @@ params: {"slug": "…", "harness": "…",
          "profile": "…"|null, "per_session_key": bool|null}
 result: {"created": bool, "slug": "…", "harness": "…"}
 ```
-Strict daemon-owned create/update of one durable agent configuration. `slug` and
-`harness` are required; `profile` and `per_session_key` may be omitted (the same
-as `null`). Unknown fields or wrong JSON types are rejected. Slugs accept only
-`[A-Za-z0-9._-]`; harness/profile names are trimmed and must be non-empty when
-present. A null/omitted profile clears the stored profile. A null/omitted
-`per_session_key` preserves an existing identity mode and defaults a new agent
-to per-session identity. `created` distinguishes create from update; the result
-returns the persisted slug and normalized harness.
+Strict daemon-owned create/update. `slug` and `harness` are required; optional
+`profile` and `per_session_key` treat omission as null. Unknown or wrongly typed
+fields are rejected. Slugs accept `[A-Za-z0-9._-]`; harness/profile names are
+trimmed and non-empty. Null profile clears it; null `per_session_key` preserves
+existing identity mode and defaults new agents to per-session. `created`
+distinguishes creation; the result returns persisted slug and normalized harness.
 
 ### `agent_remove`
 ```jsonc
@@ -87,6 +81,16 @@ uses the same validation as `agent_save`; missing, unknown, or wrongly typed
 fields are rejected. `removed` is false only when no configured agent file
 exists for that slug.
 
+### `backend_profile_refresh`
+```jsonc
+params: {}
+result: {"scheduled": true}
+```
+Refreshes daemon-owned agent discovery and schedules publication of one complete
+management-key kind:0 host profile containing all host agents (with compact
+`about`) and known workspace roots. Replacement is atomic; exact-author
+observations keep management/admin profiles current without a global feed.
+
 ### `my_session`
 ```jsonc
 params: {"pty_session": "…"|null, "harness_session": "…"|null,
@@ -94,10 +98,11 @@ params: {"pty_session": "…"|null, "harness_session": "…"|null,
 result: {"fabric": "<mosaico>…</mosaico>"}
 ```
 Strict self-scoped agent briefing. It resolves the exact live caller and emits
-`<self>`, global `<agents>` capabilities, all known workspaces, nested channels,
-and typed member sessions. Every workspace joined by this exact session is
-expanded; merely known workspaces stay compact. This is a pure read and does
-not advance the hook-awareness cursor.
+`<self>`, `<hosts>` with host-qualified agents and compact `about`, workspaces,
+channels, and member sessions. A workspace lists only advertising hosts whose
+management keys are current admins; rows expose neither repeated channel ids nor
+local paths. Joined workspaces expand while merely known ones stay compact. This
+pure read does not advance the hook-awareness cursor.
 
 ### `my_session_status`
 ```jsonc
@@ -117,8 +122,8 @@ mentions from the inbox ledger, and returns the hook fabric context. A first
 turn (`seen_cursor=0`) renders the relevant channel snapshot;
 later turns render only rows changed since the session cursor. The cursor
 advances after rendering. An absent harness locator yields `context: null`.
-Hook context does not embed the agent roster, and roster-only updates do not
-emit a delta.
+Hook context does not embed host capability inventory, and profile-only updates
+do not emit a delta.
 
 ### `turn_check`
 ```jsonc

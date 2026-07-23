@@ -7,5 +7,7 @@ pub struct Profile {
     pub agent_slug: String,
     pub host: String,
     pub is_backend: bool,
+    pub agents: Vec<(String, String)>,
+    pub workspaces: Vec<String>,
     pub updated_at: u64,
 }

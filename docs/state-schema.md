@@ -17,7 +17,20 @@ start from production-shaped deployed schemas and verify preservation through
 the complete chain to current. A malformed source schema fails before its
 version or tables are changed.
 
-## Current schema: 14
+## Current schema: 17
+
+Schema 17 moves host capability and workspace discovery into the management
+key's complete kind:0 profile snapshot. `relay_profiles.agents_json` stores the
+host-owned `(slug, about)` inventory and `workspaces_json` stores the roots that
+host knows. Updating a profile replaces both sets atomically. The separate
+agent-advertisement table is dropped, and cached backend profiles are cleared
+during migration so the daemon refetches complete snapshots from relay truth.
+
+Schema 16 removes the transcript path and explicit-chat publication marker from
+sessions after transcript auto-publication was removed.
+
+Schema 15 adds `sessions.busy_seconds`, the persisted cumulative working time
+used by session lifecycle projections.
 
 Schema 14 adds `native_turn_attempts`, the daemon-owned operational ledger for
 RPC turn attempts. Each row correlates the public session, runtime generation,

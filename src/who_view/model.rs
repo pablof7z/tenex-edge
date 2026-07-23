@@ -3,24 +3,28 @@ pub(super) struct AgentWhoView {
     pub(super) self_name: String,
     pub(super) self_host: String,
     pub(super) headless: bool,
-    pub(super) agents: Vec<AgentCapabilityView>,
+    pub(super) hosts: Vec<HostView>,
     pub(super) workspaces: Vec<WorkspaceView>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct AgentCapabilityView {
+pub(super) struct HostView {
     pub(super) name: String,
+    pub(super) agents: Vec<AgentCapabilityView>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct AgentCapabilityView {
+    pub(super) reference: String,
     pub(super) about: String,
-    pub(super) workspaces: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct WorkspaceView {
     pub(super) name: String,
-    pub(super) channel: String,
-    pub(super) path: String,
     pub(super) about: String,
     pub(super) member_count: usize,
+    pub(super) hosts: Vec<String>,
     pub(super) expanded: bool,
     pub(super) members: Vec<MemberView>,
     pub(super) channels: Vec<ChannelView>,

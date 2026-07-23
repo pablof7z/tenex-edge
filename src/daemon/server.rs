@@ -24,8 +24,8 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::Notify;
 mod agent_config;
 mod agent_discovery;
-mod agent_roster;
 mod agent_usage;
+mod backend_profile;
 mod background;
 mod delivery_drive;
 mod demux;
@@ -179,7 +179,7 @@ mod test_support;
 mod turn_lifecycle;
 pub(crate) mod turns;
 mod who;
-use agent_roster::{publish_local_agent_roster, rpc_agent_roster_refresh};
+use backend_profile::{publish_backend_profile, rpc_backend_profile_refresh};
 use channel_membership_rpc::{rpc_channel_join, rpc_channel_leave, rpc_channel_switch};
 use channel_read_tail::{handle_channel_read, handle_tail};
 use channel_resolve::{
@@ -250,7 +250,7 @@ async fn dispatch(state: &Arc<DaemonState>, req: &Request) -> Response {
         "pty_presentation_changed" => {
             managed_lifecycle::rpc_pty_presentation_changed(state, &req.params)
         }
-        "agent_roster_refresh" => rpc_agent_roster_refresh(state, &req.params),
+        "backend_profile_refresh" => rpc_backend_profile_refresh(state),
         "channel_create" => rpc_channel_create(state, &req.params).await,
         "channel_edit" => rpc_channel_edit(state, &req.params).await,
         "channel_resolve" => rpc_channel_resolve(state, &req.params).await,

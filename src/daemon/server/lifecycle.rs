@@ -1,8 +1,8 @@
 use super::*;
 use crate::reconcile::StatusReconciler;
 mod auth_restore;
+mod host_profile_bootstrap;
 mod pending_writes;
-mod roster_bootstrap;
 mod shutdown;
 
 pub async fn run() -> Result<()> {
@@ -140,11 +140,6 @@ pub async fn run() -> Result<()> {
         tracing::info!("relay warmup complete; opening subscriptions");
         super::agent_discovery::start_monitor(relay_state.clone());
 
-        // Publish the backend kind:0 with its managed-agent tags. It is intentionally
-        // absent from hosted state so the echo never reaches `who` or agent context.
-        // Failure is best-effort and deferred to the next roster change or restart.
-        super::agent_roster::publish_backend_profile(&relay_state).await;
-
         // Proactively warm the profiles we already know we care about — the human
         // operator(s) and every persisted local session pubkey — so the first awareness
         // renders them by name instead of raw hex. Members we learn about later are
@@ -157,12 +152,11 @@ pub async fn run() -> Result<()> {
             warm_profiles(&relay_state, known);
         }
 
-        roster_bootstrap::publish_startup_roster(&relay_state).await;
+        host_profile_bootstrap::publish_startup_profile(&relay_state).await;
 
-        // Seed the daemon-lifetime kind:9000 discovery observation plus the
-        // refcounted per-entity #h / #p / group-state observations. No kind:0 is
-        // observed live — a
-        // put-user p-tag triggers an on-demand profile fetch in the demux.
+        // Seed daemon-lifetime discovery plus refcounted #h / #p / group-state
+        // observations. Kind:0 stays narrow: exact management/admin authors are
+        // observed live, while other referenced identities use on-demand fetches.
         if let Err(e) = sync_subscriptions(&relay_state).await {
             tracing::warn!(error = %e, "initial subscription sync failed");
         }

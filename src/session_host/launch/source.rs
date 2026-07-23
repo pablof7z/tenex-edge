@@ -11,7 +11,6 @@ pub(super) struct ResolvedSource {
     pub(super) native_agent: Option<NativeAgentActivation>,
     pub(super) identity: crate::identity::AgentIdentity,
     pub(super) prepared_launch: crate::session_host::transport::PreparedLaunch,
-    pub(super) retired_advertisements: Vec<String>,
 }
 
 pub(super) fn resolve_agent_source(
@@ -47,8 +46,7 @@ pub(super) fn resolve_agent_source(
         }
     })?;
 
-    let (identity, bundle, profile, native_profile, retired_advertisements) = match selected.source
-    {
+    let (identity, bundle, profile, native_profile) = match selected.source {
         AgentSource::Durable {
             bundle,
             profile,
@@ -57,7 +55,7 @@ pub(super) fn resolve_agent_source(
         } => {
             let identity = crate::identity::load(&home, &selected.agent_slug)?;
             let native_profile = profile.is_none().then_some(native_profile).flatten();
-            (identity, bundle, profile, native_profile, Vec::new())
+            (identity, bundle, profile, native_profile)
         }
         AgentSource::DetectedHarness => {
             let bundle = realize_implicit_bundle(&mut harnesses, selected.harness, intent, false)?;
@@ -66,7 +64,6 @@ pub(super) fn resolve_agent_source(
                 bundle,
                 None,
                 None,
-                Vec::new(),
             )
         }
         AgentSource::DetectedProfile {
@@ -74,13 +71,6 @@ pub(super) fn resolve_agent_source(
             persist_binding,
         } => {
             let bundle = realize_implicit_bundle(&mut harnesses, selected.harness, intent, true)?;
-            let retired = persist_binding.then(|| {
-                inventory
-                    .profile_choices(&selected.agent_slug)
-                    .into_iter()
-                    .map(|choice| choice.slug.clone())
-                    .collect::<Vec<_>>()
-            });
             let identity = if persist_binding {
                 state
                     .mutate_agent_config(|| {
@@ -96,13 +86,7 @@ pub(super) fn resolve_agent_source(
             } else {
                 crate::identity::AgentIdentity::per_session(&selected.agent_slug, &bundle)
             };
-            (
-                identity,
-                bundle,
-                None,
-                Some(native_profile),
-                retired.unwrap_or_default(),
-            )
+            (identity, bundle, None, Some(native_profile))
         }
     };
 
@@ -113,7 +97,6 @@ pub(super) fn resolve_agent_source(
         profile.as_deref(),
         native_profile.as_ref(),
         identity,
-        retired_advertisements,
         selector,
     )
 }
@@ -145,16 +128,7 @@ pub(super) fn resolve_harness_source(
         .map(Ok)
         .unwrap_or_else(|| realize_implicit_bundle(&mut harnesses, harness, intent, false))?;
     let identity = crate::identity::AgentIdentity::per_session(slug, &bundle);
-    finish_source(
-        &home,
-        &harnesses,
-        bundle,
-        None,
-        None,
-        identity,
-        Vec::new(),
-        slug,
-    )
+    finish_source(&home, &harnesses, bundle, None, None, identity, slug)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -165,7 +139,6 @@ fn finish_source(
     profile: Option<&str>,
     native_profile: Option<&crate::agent_catalog::NativeAgentProfile>,
     identity: crate::identity::AgentIdentity,
-    retired_advertisements: Vec<String>,
     selector: &str,
 ) -> Result<ResolvedSource> {
     let native_agent = native_profile
@@ -190,7 +163,6 @@ fn finish_source(
         native_agent,
         identity,
         prepared_launch,
-        retired_advertisements,
     })
 }
 

@@ -122,22 +122,34 @@ pub(super) fn subchannel_caps(store: &Store, channel: &str) -> Vec<ChannelSummar
 pub(super) fn agent_caps(
     store: &Store,
     root: &str,
-    input: &FabricContextInput<'_>,
+    _input: &FabricContextInput<'_>,
 ) -> Vec<AgentCap> {
-    store
-        .list_agent_roster_for_channel(root)
+    let mut agents = store
+        .list_backend_profiles()
         .unwrap_or_default()
         .into_iter()
-        .map(|row| AgentCap {
-            reference: if row.host.is_empty() || row.host == input.local_host {
-                row.slug
-            } else {
-                format!("{}@{}", row.slug, row.host)
-            },
-            about: row.use_criteria,
-            created_at: row.updated_at,
+        .filter(|profile| {
+            profile.workspaces.iter().any(|workspace| workspace == root)
+                && store
+                    .is_channel_admin(root, &profile.pubkey)
+                    .unwrap_or(false)
         })
-        .collect()
+        .flat_map(|profile| {
+            let host = profile.host;
+            let updated_at = profile.updated_at;
+            profile
+                .agents
+                .into_iter()
+                .map(move |(slug, about)| AgentCap {
+                    reference: format!("{slug}@{host}"),
+                    about,
+                    created_at: updated_at,
+                })
+        })
+        .collect::<Vec<_>>();
+    agents.sort_by(|left, right| left.reference.cmp(&right.reference));
+    agents.dedup_by(|left, right| left.reference == right.reference);
+    agents
 }
 
 pub(super) fn capture_messages(

@@ -42,6 +42,8 @@ CREATE TABLE IF NOT EXISTS relay_profiles (
     agent_slug  TEXT NOT NULL DEFAULT '',
     host        TEXT NOT NULL DEFAULT '',
     is_backend  INTEGER NOT NULL DEFAULT 0,
+    agents_json TEXT NOT NULL DEFAULT '[]',
+    workspaces_json TEXT NOT NULL DEFAULT '[]',
     updated_at  INTEGER NOT NULL
 );
 
@@ -60,20 +62,6 @@ CREATE TABLE IF NOT EXISTS relay_status (
 );
 CREATE INDEX IF NOT EXISTS idx_relay_status_channel
     ON relay_status(channel_h, expiration);
-
-CREATE TABLE IF NOT EXISTS relay_agent_roster (
-    backend_pubkey TEXT NOT NULL,
-    agent_slug     TEXT NOT NULL,
-    channel_h      TEXT NOT NULL,
-    host           TEXT NOT NULL DEFAULT '',
-    use_criteria   TEXT NOT NULL DEFAULT '',
-    updated_at     INTEGER NOT NULL,
-    PRIMARY KEY (backend_pubkey, agent_slug, channel_h)
-);
-CREATE INDEX IF NOT EXISTS idx_relay_agent_roster_channel
-    ON relay_agent_roster(channel_h, host, agent_slug);
-CREATE INDEX IF NOT EXISTS idx_relay_agent_roster_backend
-    ON relay_agent_roster(backend_pubkey, agent_slug);
 
 CREATE TABLE IF NOT EXISTS relay_events (
     id          TEXT PRIMARY KEY,
