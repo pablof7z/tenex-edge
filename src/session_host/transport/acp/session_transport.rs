@@ -93,10 +93,17 @@ impl SessionTransport for RpcTransport {
                         .initialize("mosaico", env!("CARGO_PKG_VERSION"))
                         .await
                         .map_err(|e| anyhow::anyhow!("app-server initialize (resume): {e}"))?;
-                    client
+                    let catalog = client
+                        .model_catalog()
+                        .await
+                        .map_err(|e| anyhow::anyhow!("app-server model/list (resume): {e}"))?;
+                    let opened = client
                         .thread_resume(&resume.native_id, &cwd)
                         .await
                         .map_err(|e| anyhow::anyhow!("app-server thread/resume: {e}"))?;
+                    catalog
+                        .admit(&opened)
+                        .map_err(|e| anyhow::anyhow!("app-server resume admission: {e}"))?;
                 }
             }
             Ok(())

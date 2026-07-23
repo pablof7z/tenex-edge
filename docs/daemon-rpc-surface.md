@@ -248,7 +248,11 @@ an optional typed endpoint `{id, kind, live, attachable, cwd, command}` whose
 liveness and attachability are projected by its owning transport. Remote
 relay-only status rows are intentionally
 excluded; they remain observable through `who` and cannot be killed by this
-machine.
+machine. A local managed-RPC row may additionally contain `native_outcome`
+with `{outcome, delivery_kind, delivery_event_id, native_thread_id,
+native_turn_id, error_message, error_details, finished_at}`. This diagnostic is
+separate from `state`; a failed native turn never invents a fifth presence
+state.
 
 ### `pty_send`
 Sends keystrokes or text to a portable PTY session.
@@ -258,7 +262,8 @@ Spawns an agent through either its explicit bundle binding or an unambiguous
 logical native/generic provider. This interactive boundary selects PTY launch
 policy and atomically creates the canonical zero-argument bundle when none is
 configured, optionally pre-loading a message. The RPC accepts no argv, command,
-or bundle override.
+or bundle override. Its response confirms the session is registered and ready;
+it does not claim that an optional opening prompt completed.
 
 ### `pty_attach`
 Accepts an npub, hex pubkey, or handle and returns the PTY target plus public identity.

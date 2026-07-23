@@ -110,14 +110,31 @@ fn state_status(state: crate::session_state::SessionState, since: u64, now: u64)
 impl SessionRow {
     fn work(&self) -> String {
         let title = self.title.trim();
-        if title.is_empty() {
-            return String::new();
-        }
         let activity = self.activity.trim();
-        if activity.is_empty() || activity == title {
+        let work = if title.is_empty() {
+            String::new()
+        } else if activity.is_empty() || activity == title {
             title.to_string()
         } else {
             format!("{title} — {activity}")
+        };
+        let Some(outcome) = self
+            .native_outcome
+            .as_ref()
+            .filter(|outcome| outcome.is_failure())
+        else {
+            return work;
+        };
+        let detail = outcome.error_message.trim();
+        let failure = if detail.is_empty() {
+            format!("native {}", outcome.outcome.replace('_', " "))
+        } else {
+            format!("native {}: {detail}", outcome.outcome.replace('_', " "))
+        };
+        if work.is_empty() {
+            failure
+        } else {
+            format!("{work} — {failure}")
         }
     }
 }
@@ -202,5 +219,35 @@ mod tests {
                 .collect::<String>();
             assert!(first.ends_with(expected), "{first}");
         }
+    }
+
+    #[test]
+    fn native_failure_is_shown_without_changing_idle_state() {
+        let row = SessionRow {
+            handle: "delta-codex".into(),
+            title: "Review change".into(),
+            state: crate::session_state::SessionState::Idle,
+            state_since: 40,
+            native_outcome: Some(
+                crate::cli::interactive::session_picker::data::NativeOutcomeRow {
+                    outcome: "failed".into(),
+                    error_message: "unsupported model".into(),
+                },
+            ),
+            ..SessionRow::default()
+        };
+        let rendered = lines(&row, 100, 100, false);
+        let first = rendered[0]
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+        let second = rendered[1]
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+        assert!(first.ends_with("idle · 1 min ago"), "{first}");
+        assert_eq!(second, "Review change — native failed: unsupported model");
     }
 }

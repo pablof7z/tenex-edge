@@ -97,6 +97,9 @@ fn project_sessions(
                 .is_some();
         let latest_status = statuses.get(&rec.pubkey);
         let presence = crate::session_presence::local(store, &rec, latest_status);
+        let native_outcome = store
+            .latest_native_turn_attempt(&rec.pubkey, rec.runtime_generation)?
+            .map(native_outcome_value);
         rows.push(serde_json::json!({
             "pubkey": rec.pubkey.clone(),
             "npub": npub,
@@ -116,6 +119,7 @@ fn project_sessions(
             "workspaces": workspaces,
             "endpoint": endpoint,
             "takeover": takeover,
+            "native_outcome": native_outcome,
         }));
     }
     let mut unbound = endpoints
@@ -127,6 +131,19 @@ fn project_sessions(
         rows.push(unbound_endpoint_value(store, host, endpoint)?);
     }
     Ok(rows)
+}
+
+fn native_outcome_value(row: crate::state::NativeTurnAttempt) -> serde_json::Value {
+    serde_json::json!({
+        "outcome": row.outcome.as_str(),
+        "delivery_kind": row.delivery_kind.as_str(),
+        "native_thread_id": row.native_thread_id,
+        "native_turn_id": row.native_turn_id,
+        "delivery_event_id": row.delivery_event_id,
+        "error_message": row.error_message,
+        "error_details": row.error_details,
+        "finished_at": row.finished_at,
+    })
 }
 
 fn latest_statuses(store: &Store) -> Result<HashMap<String, crate::state::Status>> {
@@ -198,6 +215,7 @@ fn unbound_endpoint_value(
         "child_pid": meta.supervisor_pid,
         "bound": false,
         "takeover": null,
+        "native_outcome": null,
         "endpoint": {
             "id": meta.id,
             "kind": "pty",

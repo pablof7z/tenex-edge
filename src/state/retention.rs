@@ -8,11 +8,15 @@ pub struct RetentionPruneReport {
     pub relay_events: usize,
     pub delivered_inbox: usize,
     pub completed_event_claims: usize,
+    pub native_turn_attempts: usize,
 }
 
 impl RetentionPruneReport {
     pub fn total(self) -> usize {
-        self.relay_events + self.delivered_inbox + self.completed_event_claims
+        self.relay_events
+            + self.delivered_inbox
+            + self.completed_event_claims
+            + self.native_turn_attempts
     }
 }
 
@@ -51,10 +55,16 @@ impl Store {
                 format!("{}%", super::event_claims::OFFLINE_MENTION_CLAIM_PREFIX)
             ],
         )?;
+        let native_turn_attempts = self.conn.execute(
+            "DELETE FROM native_turn_attempts
+             WHERE finished_at>0 AND finished_at<?1",
+            params![completed_ledgers_before],
+        )?;
         Ok(RetentionPruneReport {
             relay_events,
             delivered_inbox,
             completed_event_claims,
+            native_turn_attempts,
         })
     }
 }

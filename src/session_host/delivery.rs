@@ -77,17 +77,41 @@ fn prune_debounce(active_pubkeys: &HashSet<String>) {
 /// bracketed-paste spawn inject. The ACP child lives in the daemon registry, so
 /// this MUST run in the daemon (the caller that spawned it). Failures are logged,
 /// not propagated: the session is already live and can still receive mentions via
-/// the doorbell path.
-pub async fn deliver_spawn_prompt(endpoint: &EndpointRef, text: &str) {
+/// the doorbell path. RPC completion is still projected into the same durable
+/// lifecycle and native-outcome ledger as an inbox delivery.
+pub async fn deliver_spawn_prompt(
+    state: &Arc<DaemonState>,
+    pubkey: &str,
+    endpoint: &EndpointRef,
+    text: &str,
+) {
     let transport = transport_for_kind(endpoint.kind);
     tokio::time::sleep(transport.opening_delivery_delay()).await;
-    if let Err(e) = transport.deliver(endpoint, text, true).await {
-        tracing::warn!(
-            endpoint = %endpoint.endpoint_id,
-            transport = endpoint.kind.as_str(),
-            error = %format!("{e:#}"),
-            "failed to deliver spawn prompt"
-        );
+    let completion = match transport.deliver(endpoint, text, true).await {
+        Ok(completion) => completion,
+        Err(error) => {
+            tracing::warn!(
+                endpoint = %endpoint.endpoint_id,
+                transport = endpoint.kind.as_str(),
+                error = %format!("{error:#}"),
+                "failed to deliver spawn prompt"
+            );
+            return;
+        }
+    };
+    let rec = match state.with_store(|store| store.get_session(pubkey)) {
+        Ok(Some(rec)) => rec,
+        Ok(None) => {
+            tracing::error!(pubkey, "spawn prompt has no registered session");
+            return;
+        }
+        Err(error) => {
+            tracing::error!(pubkey, %error, "spawn prompt session lookup failed");
+            return;
+        }
+    };
+    if let Err(error) = prompt::track_spawn_prompt(state, &rec, completion).await {
+        tracing::error!(pubkey, %error, "failed to track spawn prompt");
     }
 }
 

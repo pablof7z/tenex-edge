@@ -238,6 +238,11 @@ mod session_signers;
 pub use members::ChannelMemberSet;
 mod mcp_actors;
 mod messages;
+mod native_turn_attempts;
+pub use native_turn_attempts::{
+    FinishNativeTurnAttempt, NativeTurnAttempt, NativeTurnDeliveryKind, NativeTurnOutcome,
+    NewNativeTurnAttempt,
+};
 mod profiles;
 mod workspace_roots;
 pub use workspace_roots::WorkspaceBinding;

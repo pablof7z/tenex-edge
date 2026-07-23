@@ -36,7 +36,7 @@ fn fresh_file_db_uses_only_canonical_schema() {
     let version: u32 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 13);
+    assert_eq!(version, 14);
     assert!(table_exists(&conn, "workspace_roots"));
     assert!(table_exists(&conn, "session_locators"));
     assert!(!table_exists(&conn, "session_aliases"));
@@ -44,6 +44,23 @@ fn fresh_file_db_uses_only_canonical_schema() {
     assert!(!table_exists(&conn, "durable_agent_sessions"));
     assert!(table_exists(&conn, "relay_reactions"));
     assert!(!table_exists(&conn, "project_roots"));
+    assert_eq!(
+        columns(&conn, "native_turn_attempts"),
+        [
+            "id",
+            "pubkey",
+            "runtime_generation",
+            "delivery_kind",
+            "delivery_event_id",
+            "native_thread_id",
+            "native_turn_id",
+            "outcome",
+            "error_message",
+            "error_details",
+            "started_at",
+            "finished_at",
+        ]
+    );
 
     let reactions = columns(&conn, "relay_reactions");
     for col in [
@@ -251,7 +268,7 @@ fn stamped_non_canonical_file_db_is_rejected() {
         "#,
     )
     .unwrap();
-    conn.pragma_update(None, "user_version", 13u32).unwrap();
+    conn.pragma_update(None, "user_version", 14u32).unwrap();
     drop(conn);
 
     let err = match Store::open(&path) {

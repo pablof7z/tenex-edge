@@ -151,3 +151,24 @@ immediately. Time initiates an authoritative read; it never changes lifecycle
 state itself. This recovers a lost start response or terminal notification
 without turn replay, while explicit process cancellation or child exit closes
 the waiter deterministically.
+
+Before an app-server launch or resume is registered as ready, Mosaico reads all
+pages of the native `model/list` catalog and validates the exact model and
+reasoning effort resolved by `thread/start` or `thread/resume`. Matching is
+literal. An absent, duplicate, unsupported, malformed, or unavailable native
+capability rejects admission and terminates the unregistered child; there are
+no aliases or fallback models.
+
+Every fresh daemon-owned ACP or app-server turn, whether opened by an inbox
+event or a direct spawn prompt, writes one generation-fenced
+`native_turn_attempts` row. The row begins as `started` and may finalize exactly
+once as `completed`, `failed`, `interrupted`, `rejected_before_start`,
+`child_exited`, or `unknown_reconciled`. A daemon restart resolves any open row
+to `unknown_reconciled`; uncertainty never causes turn replay. Diagnostic text
+is credential-scrubbed and bounded before persistence.
+
+This outcome ledger is not presence and is not an acceptance receipt. Presence
+continues to expose only `working`, `idle`, `suspended`, and `offline`.
+Work-start reactions acknowledge accepted delivery separately. Session-picker
+and hook context may show the latest terminal failure alongside the canonical
+presence state.

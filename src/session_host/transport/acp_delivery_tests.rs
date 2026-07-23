@@ -107,14 +107,14 @@ async fn retained_rpc_transports_are_live_deliver_and_kill() {
                 .or_else(|| request["params"]["threadId"].as_str()),
             Some("native-delivery-test")
         );
-        let DeliveryCompletion::Managed(completion) = completion else {
+        let DeliveryCompletion::Managed { completion, .. } = completion else {
             panic!("RPC delivery must return daemon-owned turn completion");
         };
-        tokio::time::timeout(std::time::Duration::from_secs(2), completion)
+        let result = tokio::time::timeout(std::time::Duration::from_secs(2), completion)
             .await
             .expect("managed RPC turn did not complete")
-            .expect("managed completion sender dropped")
-            .expect("managed RPC turn failed");
+            .expect("managed completion sender dropped");
+        assert_eq!(result.outcome, crate::state::NativeTurnOutcome::Completed);
         transport.kill(&endpoint).await.unwrap();
         assert!(!transport.is_live(&endpoint));
         assert!(

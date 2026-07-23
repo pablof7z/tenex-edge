@@ -24,6 +24,15 @@ struct WireThreadRead {
 }
 
 #[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WireThreadOpened {
+    thread: WireThread,
+    model: String,
+    #[serde(default)]
+    reasoning_effort: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
 struct WireThread {
     id: String,
     turns: Vec<WireTurn>,
@@ -61,6 +70,13 @@ pub(super) enum ObservedTurn {
 
 pub(super) type TurnBaseline = HashSet<String>;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThreadOpened {
+    pub thread_id: String,
+    pub model: String,
+    pub reasoning_effort: Option<String>,
+}
+
 pub(super) fn parse_started(
     thread_id: &str,
     baseline: &TurnBaseline,
@@ -77,18 +93,25 @@ pub(super) fn parse_started(
     Ok((turn_id, observed))
 }
 
-pub(super) fn parse_thread_started(
+pub(super) fn parse_thread_opened(
+    label: &str,
     value: serde_json::Value,
-) -> Result<(String, TurnBaseline), RpcError> {
-    let started: WireThreadRead = decode("thread/start response", value)?;
-    let thread_id = started.thread.id;
-    let baseline = started
+) -> Result<(ThreadOpened, TurnBaseline), RpcError> {
+    let response: WireThreadOpened = decode(label, value)?;
+    let baseline = response
         .thread
         .turns
         .into_iter()
         .map(|turn| turn.id)
         .collect();
-    Ok((thread_id, baseline))
+    Ok((
+        ThreadOpened {
+            thread_id: response.thread.id,
+            model: response.model,
+            reasoning_effort: response.reasoning_effort,
+        },
+        baseline,
+    ))
 }
 
 pub(super) fn parse_completed(

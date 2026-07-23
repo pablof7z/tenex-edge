@@ -40,6 +40,19 @@ pub(super) struct SessionRow {
     pub(super) takeover_available: bool,
     pub(super) turn_open: bool,
     pub(super) turn_count: u64,
+    pub(super) native_outcome: Option<NativeOutcomeRow>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct NativeOutcomeRow {
+    pub(super) outcome: String,
+    pub(super) error_message: String,
+}
+
+impl NativeOutcomeRow {
+    pub(super) fn is_failure(&self) -> bool {
+        !matches!(self.outcome.as_str(), "completed" | "started")
+    }
 }
 
 impl SessionRow {
@@ -197,6 +210,15 @@ fn parse_row(value: &serde_json::Value) -> Option<SessionRow> {
         takeover_available,
         turn_open,
         turn_count,
+        native_outcome: parse_native_outcome(value.get("native_outcome")),
+    })
+}
+
+fn parse_native_outcome(value: Option<&serde_json::Value>) -> Option<NativeOutcomeRow> {
+    let value = value.filter(|value| !value.is_null())?;
+    Some(NativeOutcomeRow {
+        outcome: value["outcome"].as_str()?.to_string(),
+        error_message: value["error_message"].as_str().unwrap_or("").to_string(),
     })
 }
 

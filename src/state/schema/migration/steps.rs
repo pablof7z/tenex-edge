@@ -9,6 +9,7 @@ use super::journal;
 mod v10_v11;
 mod v11_v12;
 mod v12_v13;
+mod v13_v14;
 mod v5_v6;
 mod v9_v10;
 
@@ -30,6 +31,10 @@ pub(super) fn v11_to_v12(conn: &mut Connection, path: &Path) -> Result<()> {
 
 pub(super) fn v12_to_v13(conn: &mut Connection, path: &Path) -> Result<()> {
     v12_v13::migrate(conn, path)
+}
+
+pub(super) fn v13_to_v14(conn: &mut Connection, path: &Path) -> Result<()> {
+    v13_v14::migrate(conn, path)
 }
 
 pub(super) fn v4_to_v5(conn: &mut Connection, _path: &Path) -> Result<()> {

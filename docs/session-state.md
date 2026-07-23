@@ -21,11 +21,20 @@ every viewer. Lease renewals refresh liveness without advancing the semantic
 `updated_at` clock; only a title, activity, slug, or normalized-state change
 produces a presence delta.
 
+Heartbeat therefore has one role: renew an expiring signed remote lease. It is
+not proof of work, idleness, progress, or successful delivery. Local runtime
+lifecycle remains authoritative on the owning host; an unrenewed remote lease
+expires to `offline`.
+
 Local and remote observation intentionally differ during a partition: the
 owning daemon can still know its runtime is live while remote viewers must mark
 the expired lease offline. The signed lease carries `state-since`; rendered
 `since` age is that semantic transition age, never the lease-renewal observation
 time.
+
+Native RPC outcomes are a separate local diagnostic ledger. A failed,
+interrupted, rejected, or uncertain turn may be rendered beside a session, but
+it never changes the four-state presence contract.
 
 ## Managed runtime lifecycle
 

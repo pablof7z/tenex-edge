@@ -1,8 +1,11 @@
 use crate::daemon::server::DaemonState;
-use crate::session_host::transport::{DeliveryCompletion, EndpointRef, TransportImpl};
+use crate::session_host::transport::{EndpointRef, TransportImpl};
 use crate::util::now_secs;
 use anyhow::Result;
 use std::sync::Arc;
+
+#[path = "prompt/managed_turn.rs"]
+mod managed_turn;
 
 struct PendingPrompt {
     text: String,
@@ -49,12 +52,16 @@ async fn collect_pending_prompt(
         return Ok(None);
     };
 
-    let trigger = chat_rows.last();
-    let trigger_event_id = trigger.map(|r| r.event_id.clone()).unwrap_or_default();
-    let trigger_channel = trigger
-        .map(|r| r.channel_h.clone())
-        .unwrap_or_else(|| rec.channel_h.clone());
-    let trigger_from_pubkey = trigger.map(|r| r.from_pubkey.clone()).unwrap_or_default();
+    let trigger = chat_rows
+        .last()
+        .expect("claimed prompt always contains at least one inbox row");
+    let trigger_event_id = trigger.event_id.clone();
+    let trigger_channel = if trigger.channel_h.is_empty() {
+        rec.channel_h.clone()
+    } else {
+        trigger.channel_h.clone()
+    };
+    let trigger_from_pubkey = trigger.from_pubkey.clone();
     Ok(Some(PendingPrompt {
         text,
         chat_ids,
@@ -93,114 +100,32 @@ pub(super) async fn inject_planned_messages(
         }
     };
     finalize_injection(state, rec, &prompt)?;
-    track_managed_turn(state, rec, &prompt.chat_ids, completion).await?;
+    managed_turn::track(
+        state,
+        rec,
+        &prompt.chat_ids,
+        crate::state::NativeTurnDeliveryKind::InboxEvent,
+        &prompt.trigger_event_id,
+        completion,
+    )
+    .await?;
     Ok(true)
 }
 
-/// RPC transports own their turn boundary, unlike PTY transports whose native
-/// hooks project it. Start the durable turn only after the inbox rows are
-/// committed as injected, then close it from the exact RPC completion signal.
-/// This makes the resulting idle deadline mean "ten minutes since real work
-/// finished" and atomically releases the injected-message eviction fence.
-async fn track_managed_turn(
+pub(super) async fn track_spawn_prompt(
     state: &Arc<DaemonState>,
     rec: &crate::state::Session,
-    event_ids: &[String],
-    completion: DeliveryCompletion,
+    completion: crate::session_host::transport::DeliveryCompletion,
 ) -> Result<()> {
-    let completion = match completion {
-        DeliveryCompletion::ExternallyObserved => return Ok(()),
-        DeliveryCompletion::Managed(completion) => completion,
-        DeliveryCompletion::ManagedSteer(accepted) => {
-            let state = state.clone();
-            let rec = rec.clone();
-            let event_ids = event_ids.to_vec();
-            tokio::spawn(async move {
-                match accepted.await {
-                    Ok(Ok(())) => {
-                        crate::daemon::server::turns::work_start_reaction::publish_for_started_events(
-                            &state, &rec, &event_ids,
-                        );
-                    }
-                    Ok(Err(error)) => tracing::warn!(
-                        session = %rec.pubkey,
-                        %error,
-                        "app-server steer was not accepted; work-start reaction skipped"
-                    ),
-                    Err(_) => tracing::warn!(
-                        session = %rec.pubkey,
-                        "app-server steer confirmation was dropped; work-start reaction skipped"
-                    ),
-                }
-            });
-            return Ok(());
-        }
-    };
-    let started_at = now_secs();
-    let started = state.with_store(|store| {
-        store.apply_session_turn_started(&rec.pubkey, rec.runtime_generation, started_at, None)
-    })?;
-    if !started {
-        anyhow::bail!(
-            "RPC turn started after session {} generation {} stopped",
-            rec.pubkey,
-            rec.runtime_generation
-        );
-    }
-    crate::daemon::server::presence::reconcile_generation(
+    managed_turn::track(
         state,
-        &rec.pubkey,
-        rec.runtime_generation,
-        "managed_turn_started",
+        rec,
+        &[],
+        crate::state::NativeTurnDeliveryKind::SpawnPrompt,
+        "",
+        completion,
     )
-    .await;
-    crate::daemon::server::turns::work_start_reaction::publish_for_started_events(
-        state, rec, event_ids,
-    );
-
-    let state = state.clone();
-    let pubkey = rec.pubkey.clone();
-    let generation = rec.runtime_generation;
-    tokio::spawn(async move {
-        match completion.await {
-            Ok(Ok(())) => {}
-            Ok(Err(error)) => tracing::warn!(
-                session = %pubkey,
-                error = %format!("{error:#}"),
-                "managed RPC turn ended with an error"
-            ),
-            Err(_) => tracing::warn!(
-                session = %pubkey,
-                "managed RPC turn completion sender was dropped"
-            ),
-        }
-        match state
-            .with_store(|store| store.apply_session_turn_ended(&pubkey, generation, now_secs()))
-        {
-            Ok(true) => {
-                crate::daemon::server::presence::reconcile_generation(
-                    &state,
-                    &pubkey,
-                    generation,
-                    "managed_turn_ended",
-                )
-                .await;
-                crate::session_host::ring_doorbells(state)
-            }
-            Ok(false) => tracing::debug!(
-                session = %pubkey,
-                generation,
-                "managed RPC completion was superseded by a lifecycle edge"
-            ),
-            Err(error) => tracing::error!(
-                session = %pubkey,
-                generation,
-                error = %error,
-                "failed to project managed RPC turn completion"
-            ),
-        }
-    });
-    Ok(())
+    .await
 }
 
 /// Roll claimed inbox rows back to `pending` after a delivery failure so the

@@ -9,11 +9,33 @@ pub enum DeliveryCompletion {
     /// The harness owns its own hook boundary (PTY).
     ExternallyObserved,
     /// The transport started a fresh daemon-owned turn.
-    Managed(tokio::sync::oneshot::Receiver<anyhow::Result<()>>),
+    Managed {
+        native_thread_id: String,
+        completion: tokio::sync::oneshot::Receiver<ManagedTurnResult>,
+    },
     /// An already-working app-server turn accepted a steer. This is not a new
     /// lifecycle edge, but it is the transport's exact work-start equivalent
     /// for a newly delivered message.
     ManagedSteer(tokio::sync::oneshot::Receiver<anyhow::Result<()>>),
+}
+
+#[derive(Debug)]
+pub struct ManagedTurnResult {
+    pub native_turn_id: String,
+    pub outcome: crate::state::NativeTurnOutcome,
+    pub error_message: String,
+    pub error_details: String,
+}
+
+impl ManagedTurnResult {
+    pub fn completed(native_turn_id: impl Into<String>) -> Self {
+        Self {
+            native_turn_id: native_turn_id.into(),
+            outcome: crate::state::NativeTurnOutcome::Completed,
+            error_message: String::new(),
+            error_details: String::new(),
+        }
+    }
 }
 
 /// Fully-resolved, transport-agnostic launch intent.

@@ -2,10 +2,15 @@ use std::path::Path;
 
 use rusqlite::Connection;
 
+fn create_current(conn: &Connection) {
+    for part in super::super::super::ddl::SCHEMA_PARTS {
+        conn.execute_batch(part).unwrap();
+    }
+}
+
 pub(super) fn create_schema_four(path: &Path) {
     let conn = Connection::open(path).unwrap();
-    conn.execute_batch(super::super::super::ddl::SCHEMA)
-        .unwrap();
+    create_current(&conn);
     conn.execute_batch(
         r#"
         DROP TABLE message_recipients;
@@ -156,8 +161,7 @@ fn seed_schema_four(conn: &Connection) {
 
 pub(super) fn create_schema_seven(path: &Path) {
     let conn = Connection::open(path).unwrap();
-    conn.execute_batch(super::super::super::ddl::SCHEMA)
-        .unwrap();
+    create_current(&conn);
     conn.execute_batch(
         r#"
         ALTER TABLE sessions DROP COLUMN work_root;
@@ -182,8 +186,7 @@ pub(super) fn create_schema_seven(path: &Path) {
 
 pub(super) fn create_schema_eight(path: &Path) {
     let conn = Connection::open(path).unwrap();
-    conn.execute_batch(super::super::super::ddl::SCHEMA)
-        .unwrap();
+    create_current(&conn);
     conn.execute_batch(
         r#"
         DROP INDEX idx_sessions_runtime;

@@ -20,6 +20,7 @@ pub fn spawn_pruner(state: Arc<DaemonState>) {
                     relay_events = report.relay_events,
                     delivered_inbox = report.delivered_inbox,
                     completed_event_claims = report.completed_event_claims,
+                    native_turn_attempts = report.native_turn_attempts,
                     "pruned retained state"
                 ),
                 Ok(_) => {}
