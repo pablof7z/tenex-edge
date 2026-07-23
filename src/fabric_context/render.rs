@@ -155,12 +155,13 @@ fn render_messages(out: &mut String, channel: &ChannelBlock, indent: usize) {
             render_mention_message(out, message, &child_pad);
             continue;
         }
-        let _ = write!(out, "\n{child_pad}<message");
         let short = crate::util::short_id(&message.id);
-        if message.truncated {
-            let _ = write!(out, " id=\"{}\"", esc_attr(&short));
-        }
-        let _ = write!(out, " from=\"@{}\"", esc_attr(&message.from));
+        let _ = write!(
+            out,
+            "\n{child_pad}<message from=\"@{}\" id=\"{}\"",
+            esc_attr(&message.from),
+            esc_attr(&short)
+        );
         if !message.recipients.is_empty() {
             let recipients = message
                 .recipients
