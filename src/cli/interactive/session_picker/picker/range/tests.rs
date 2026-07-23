@@ -24,7 +24,7 @@ fn choice(handle: &str, running: bool, last_seen: u64) -> HomeChoice {
 }
 
 #[test]
-fn plus_expands_history_progressively_and_minus_narrows_it() {
+fn ctrl_o_expands_history_progressively_and_ctrl_u_narrows_it() {
     let now = crate::util::now_secs();
     let hour = 60 * 60;
     let day = 24 * hour;
@@ -54,28 +54,30 @@ fn plus_expands_history_progressively_and_minus_narrows_it() {
         (HistoryRange::All, 9),
     ];
     for (range, visible) in expected {
-        state.handle_key(
-            KeyEvent::new(
-                KeyCode::Char('+'),
-                KeyModifiers::CONTROL | KeyModifiers::SHIFT,
-            ),
-            10,
-        );
+        state.handle_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL), 10);
         assert_eq!(state.range, range);
         assert_eq!(state.visible.len(), visible);
     }
 
-    state.handle_key(KeyEvent::new(KeyCode::Char('+'), KeyModifiers::NONE), 10);
+    state.handle_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::NONE), 10);
     assert_eq!(state.range, HistoryRange::All);
-    assert_eq!(state.query, "+");
-    state.handle_key(KeyEvent::new(KeyCode::Char('-'), KeyModifiers::CONTROL), 10);
+    assert_eq!(state.query, "o");
+    state.handle_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL), 10);
     assert_eq!(state.range, HistoryRange::Days30);
 }
 
 #[test]
-fn tab_is_not_a_history_range_control() {
+fn removed_symbol_shortcuts_and_tab_do_not_change_history_range() {
     let mut state = PickerState::new(vec![choice("live", true, 0)], None);
 
+    state.handle_key(
+        KeyEvent::new(
+            KeyCode::Char('+'),
+            KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+        ),
+        10,
+    );
+    state.handle_key(KeyEvent::new(KeyCode::Char('-'), KeyModifiers::CONTROL), 10);
     state.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE), 10);
 
     assert_eq!(state.range, HistoryRange::Live);

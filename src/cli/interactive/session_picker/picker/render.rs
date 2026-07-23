@@ -202,11 +202,11 @@ fn help(state: &PickerState) -> &'static str {
     match state.choices[index] {
         HomeChoice::Session(_) => {
             if state.project_filter.is_some() {
-                "enter attach/restart · ctrl-k kill · ctrl-+/- history · ctrl-p project · tab all projects · ←/→ start · type search · ↑↓ · esc"
+                "enter attach/restart · ctrl-k kill · ctrl-o older · ctrl-u newer · ctrl-p project · tab all projects · ←/→ start · type search · ↑↓ · esc"
             } else if state.project_toggle.is_some() {
-                "enter attach/restart · ctrl-k kill · ctrl-+/- history · ctrl-p project · tab project · ←/→ start · type search · ↑↓ · esc"
+                "enter attach/restart · ctrl-k kill · ctrl-o older · ctrl-u newer · ctrl-p project · tab project · ←/→ start · type search · ↑↓ · esc"
             } else {
-                "enter attach/restart · ctrl-k kill · ctrl-+/- history · ctrl-p project · ←/→ start · type search · ↑↓ · esc"
+                "enter attach/restart · ctrl-k kill · ctrl-o older · ctrl-u newer · ctrl-p project · ←/→ start · type search · ↑↓ · esc"
             }
         }
         HomeChoice::Agent(_) => {
