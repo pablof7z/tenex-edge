@@ -230,6 +230,27 @@ wait "${FIRST_RUNNER}"
   || fail 'profile lock was not released after the runner exited'
 echo 'ok: same-profile commands cannot replace a live daemon socket'
 
+ONBOARD_STATE="${TMP}/onboarding-state"
+PATH="${TMP}/fake-bin:${PATH}" \
+  MOSAICO_CONTAINER_STATE="${ONBOARD_STATE}" \
+  bash "${ROOT}/containers/mosaico/run" onboard
+[[ ! -e "${ONBOARD_STATE}/mosaico/config.json" ]] \
+  || fail 'onboarding seeded a device config before the first-run wizard'
+
+printf '{}\n' >"${ONBOARD_STATE}/mosaico/config.json"
+if ONBOARD_OUTPUT="$(
+  PATH="${TMP}/fake-bin:${PATH}" \
+    MOSAICO_CONTAINER_STATE="${ONBOARD_STATE}" \
+    bash "${ROOT}/containers/mosaico/run" onboard 2>&1
+)"; then
+  fail 'onboarding reused an existing device config'
+fi
+grep -Fq 'onboarding profile already has a device config' <<<"${ONBOARD_OUTPUT}" \
+  || fail 'onboarding replay failure did not explain the existing state'
+grep -Fq 'run --profile onboarding clean-state' <<<"${ONBOARD_OUTPUT}" \
+  || fail 'onboarding replay failure did not provide the reset command'
+echo 'ok: onboarding starts pristine and refuses to fake a first-run replay'
+
 bash -n \
   "${ROOT}/containers/mosaico/doctor" \
   "${ROOT}/containers/mosaico/host-auth.bash" \

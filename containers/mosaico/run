@@ -15,6 +15,7 @@ Usage: bash containers/mosaico/run [--profile NAME] <command> [args...]
 
 Commands:
   build-image              Build the Apple container image.
+  onboard [setup args]     Run first-time setup in a pristine isolated profile.
   doctor                   Verify mounts, tools, hooks/plugins, and isolated state.
   test-unit                Build mosaico and run hermetic library tests.
   claude [args]            Run isolated Claude Code using host auth/config.
@@ -146,7 +147,16 @@ prepare_state() {
     "${STATE_DIR}/target" \
     "${STATE_DIR}/mosaico"
 
-  if [[ ! -f "${STATE_DIR}/mosaico/config.json" ]]; then
+  if [[ "${MOSAICO_CONTAINER_REQUIRE_FRESH_CONFIG:-0}" == "1" \
+    && -e "${STATE_DIR}/mosaico/config.json" ]]; then
+    echo "onboarding profile already has a device config: ${STATE_DIR}/mosaico/config.json" >&2
+    echo "reset it before replaying first-time setup:" >&2
+    echo "  bash containers/mosaico/run --profile ${PROFILE} clean-state" >&2
+    exit 1
+  fi
+
+  if [[ "${MOSAICO_CONTAINER_SEED_CONFIG:-1}" == "1" \
+    && ! -f "${STATE_DIR}/mosaico/config.json" ]]; then
     cat >"${STATE_DIR}/mosaico/config.json" <<JSON
 {
   "whitelistedPubkeys": [],
@@ -317,6 +327,17 @@ main() {
   case "${cmd}" in
     build-image)
       build_image
+      ;;
+    onboard)
+      select_command_profile onboarding opencode
+      HOST_AUTH=0
+      MOSAICO_CONTAINER_REQUIRE_FRESH_CONFIG=1
+      MOSAICO_CONTAINER_SEED_CONFIG=0
+      container_run readonly bash -c '
+        set -euo pipefail
+        cargo build >/dev/null
+        exec mosaico setup "$@"
+      ' bash "$@"
       ;;
     doctor)
       container_run readonly bash /workspace/containers/mosaico/doctor \
