@@ -178,7 +178,7 @@ mod tests {
             .upsert_channel("b2222222", "planning", "", "a1111111", 1)
             .unwrap();
 
-        let resolved = resolve_chat_channel_ref(&store, "root", "epic.planning").unwrap();
+        let resolved = resolve_chat_channel_ref(&store, "root", "epic/planning").unwrap();
         assert_eq!(resolved, "b2222222");
     }
 
@@ -248,8 +248,8 @@ mod tests {
             .map(|(h, _)| channel_reference_for(&store, h))
             .collect::<Result<Vec<_>>>()
             .unwrap();
-        assert!(refs.contains(&"root".to_string()));
-        assert!(refs.contains(&"other".to_string()));
+        assert!(refs.contains(&"/root".to_string()));
+        assert!(refs.contains(&"/other".to_string()));
         assert_eq!(rec.channel_h, "root");
     }
 
@@ -266,7 +266,7 @@ mod tests {
 
         assert_eq!(
             channel_reference_for(&store, "h-plan").unwrap(),
-            "root.epic.planning"
+            "/root/epic/planning"
         );
     }
 }

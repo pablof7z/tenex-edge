@@ -188,7 +188,7 @@ fn resolve_active_reference(
             })
             .collect::<Vec<_>>()
     });
-    let suffix = format!(".{reference_lower}");
+    let suffix = format!("/{reference_lower}");
     let matches = active_refs
         .iter()
         .filter(|(channel, full)| {

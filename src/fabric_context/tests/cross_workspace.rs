@@ -60,7 +60,7 @@ fn delta_includes_other_workspace_root_and_descendant_presence_only() {
     assert!(text.contains("<workspace name=\"remote\""));
     assert!(!text.contains("<workspace name=\"remote\" channel="));
     assert!(text.contains("text=\"coordinating release\""), "{text}");
-    assert!(text.contains("<channel name=\"#review\" ref=\"remote.review\""));
+    assert!(text.contains("<channel name=\"#review\" ref=\"/remote/review\""));
     assert!(text.contains("text=\"reviewing patch\""), "{text}");
     assert!(!text.contains("private unjoined chatter"), "{text}");
 
@@ -77,7 +77,7 @@ fn delta_includes_other_workspace_root_and_descendant_presence_only() {
             .expect("valid channel ancestry")
             .expect("human delta");
     assert!(human.contains("remote\nRemote room"), "{human}");
-    assert!(human.contains("#remote.review"), "{human}");
+    assert!(human.contains("#/remote/review"), "{human}");
     assert!(human.contains("reviewing patch"), "{human}");
 
     let full = render_fabric_context(&store, input(Some(&rec), "root", 0, 300, false))

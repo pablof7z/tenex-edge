@@ -43,7 +43,7 @@ pub(super) async fn rpc_dispatch(
             .context("local backend has no management pubkey")?,
     };
     let requested = if p.channels.is_empty() {
-        vec![p.workspace.clone()]
+        vec![crate::channel_ref::format_channel_ref(&p.workspace, &[])]
     } else {
         p.channels.clone()
     };
@@ -95,10 +95,9 @@ async fn resolve_dispatch_channels(
         if raw.is_empty() {
             anyhow::bail!("dispatch --channel must not be empty");
         }
-        let (root, rest) = split_fully_qualified_channel(raw);
-        if root.is_empty() || rest == Some("") {
+        let Some((root, rest)) = split_fully_qualified_channel(raw) else {
             anyhow::bail!("dispatch --channel {raw:?} is not a valid fully-qualified channel");
-        }
+        };
         let channel = match rest {
             Some(path) => resolve_channel_path(state, root, path, true).await?,
             None => root.to_string(),
@@ -110,16 +109,15 @@ async fn resolve_dispatch_channels(
     Ok(out)
 }
 
-fn split_fully_qualified_channel(raw: &str) -> (&str, Option<&str>) {
-    let dot = raw.find('.');
-    let slash = raw.find('/');
-    match (dot, slash) {
-        (Some(d), Some(s)) if d < s => (&raw[..d], Some(&raw[d + 1..])),
-        (Some(_), Some(s)) => (&raw[..s], Some(&raw[s + 1..])),
-        (Some(d), None) => (&raw[..d], Some(&raw[d + 1..])),
-        (None, Some(s)) => (&raw[..s], Some(&raw[s + 1..])),
-        (None, None) => (raw, None),
+fn split_fully_qualified_channel(raw: &str) -> Option<(&str, Option<&str>)> {
+    let path = raw.strip_prefix('/')?;
+    if path.is_empty() || path.ends_with('/') || path.contains("//") || path.contains('.') {
+        return None;
     }
+    Some(match path.split_once('/') {
+        Some((root, rest)) => (root, Some(rest)),
+        None => (path, None),
+    })
 }
 
 fn first_shared_channel(

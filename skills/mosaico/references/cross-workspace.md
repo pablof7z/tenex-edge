@@ -44,7 +44,7 @@ continue:
 
 ```bash
 mosaico dispatch <agent-ref> --workspace <workspace> \
-  --channel <workspace.channel> --message "..."
+  --channel /<workspace>/<channel> --message "..."
 ```
 
 Keep active coordination in that focused channel and surface its consequences

@@ -2,7 +2,7 @@ use super::model::ChannelBlock;
 use std::collections::BTreeMap;
 
 /// Merge detailed joined-channel rows with compact descendant rows, then attach
-/// every node beneath the parent named by its canonical dotted reference.
+/// every node beneath the parent named by its canonical slash reference.
 pub(super) fn arrange(
     workspace: &str,
     channels: Vec<ChannelBlock>,
@@ -14,11 +14,12 @@ pub(super) fn arrange(
 
     let mut references = nodes.keys().cloned().collect::<Vec<_>>();
     references.sort_by_key(|reference| std::cmp::Reverse(depth(reference)));
+    let root_reference = crate::channel_ref::format_channel_ref(workspace, &[]);
     for reference in references {
-        if reference == workspace {
+        if reference == root_reference {
             continue;
         }
-        let Some((parent, _)) = reference.rsplit_once('.') else {
+        let Some((parent, _)) = reference.rsplit_once('/') else {
             continue;
         };
         if !nodes.contains_key(parent) {
@@ -34,7 +35,7 @@ pub(super) fn arrange(
             .push(child);
     }
 
-    let mut root = nodes.remove(workspace);
+    let mut root = nodes.remove(&root_reference);
     if let Some(root) = &mut root {
         sort_children(root);
     }
@@ -88,5 +89,5 @@ fn sort_children(channel: &mut ChannelBlock) {
 }
 
 fn depth(reference: &str) -> usize {
-    reference.bytes().filter(|byte| *byte == b'.').count()
+    reference.bytes().filter(|byte| *byte == b'/').count()
 }

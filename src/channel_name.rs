@@ -2,7 +2,7 @@ use anyhow::Result;
 
 pub(crate) fn validate_child(name: &str, workspace_root: Option<&str>) -> Result<()> {
     if name.trim().is_empty() || name.contains(['.', '/']) {
-        anyhow::bail!("channel names must be one non-empty dotted-path segment");
+        anyhow::bail!("channel names must be one non-empty path segment");
     }
     if workspace_root.is_some_and(|root| name.eq_ignore_ascii_case(root)) {
         anyhow::bail!(

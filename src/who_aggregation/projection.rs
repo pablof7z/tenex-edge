@@ -66,10 +66,11 @@ impl WhoAggregation {
                 anyhow::bail!("workspace resolver: incomplete ancestry for channel {channel_h:?}");
             };
             if channel.parent.is_empty() {
-                let mut reference = vec![channel.channel_h.clone()];
                 parts.reverse();
-                reference.extend(parts);
-                return Ok(reference.join("."));
+                return Ok(crate::channel_ref::format_channel_ref(
+                    &channel.channel_h,
+                    &parts,
+                ));
             }
             parts.push(self.channel_name(current).to_string());
             current = &channel.parent;

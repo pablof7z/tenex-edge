@@ -118,7 +118,7 @@ fn human_who_renderer_is_non_xml_and_terminal_friendly() {
         .expect("human who should render");
 
     assert!(human.starts_with("root\nRoot room\n\n"), "got: {human}");
-    assert!(human.contains("#root.task"), "got: {human}");
+    assert!(human.contains("#/root/task"), "got: {human}");
     assert!(human.contains("Members"), "got: {human}");
     assert!(human.contains("@coder"), "got: {human}");
     assert!(human.contains("idle"), "got: {human}");
@@ -185,14 +185,14 @@ fn mention_rows_are_marked_important_and_truncated_with_recovery_id() {
         .expect("mention should render");
     assert!(text.contains("<workspace name=\"root\""));
     assert!(!text.contains("<workspace name=\"root\" channel="));
-    assert!(text.contains("<channel name=\"#root\" ref=\"root\""));
+    assert!(text.contains("<channel name=\"#root\" ref=\"/root\""));
     assert!(text.contains("<message from=\"@reviewer\" id=\"mentio\">"));
     assert!(text.contains("Reply via: `mosaico channel reply mentio --message \"hello world\"`"));
     assert!(text.contains("Attachments: add `--attach label=/path/to/file`"));
     assert!(!text.contains("mention=\"true\""));
     assert!(!text.contains("truncated=\"true\""));
     assert!(text.contains("<important>"));
-    assert!(text.contains("<mention channel=\"root\""));
+    assert!(text.contains("<mention channel=\"/root\""));
     assert!(text.contains("message_id=\"mentio\""));
 }
 

@@ -50,13 +50,15 @@ fn render_channel(out: &mut String, channel: &ChannelView, indent: usize) {
     let pad = " ".repeat(indent);
     let _ = write!(
         out,
-        "\n{pad}<channel name=\"{}\" id=\"{}\" members=\"{}\"",
+        "\n{pad}<channel name=\"{}\" id=\"{}\"",
         attr(&channel.name),
-        attr(&channel.id),
-        channel.member_count
+        attr(&channel.id)
     );
     if !channel.about.is_empty() {
         let _ = write!(out, " about=\"{}\"", attr(&channel.about));
+    }
+    if !channel.active {
+        let _ = write!(out, " members=\"{}\"", channel.member_count);
     }
     if !channel.expanded {
         out.push_str(" />");

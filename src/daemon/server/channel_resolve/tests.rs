@@ -71,8 +71,8 @@ fn ambiguous_name_lists_relative_paths() {
             assert_eq!(
                 refs,
                 vec![
-                    "h-root.epic999.planning".to_string(),
-                    "h-root.planning".to_string()
+                    "/h-root/epic999/planning".to_string(),
+                    "/h-root/planning".to_string()
                 ]
             );
         }
@@ -80,23 +80,27 @@ fn ambiguous_name_lists_relative_paths() {
     }
     // A fuller path disambiguates.
     assert!(matches!(
-        resolve_channel_ref(&store, "h-root", "epic999.planning"),
+        resolve_channel_ref(&store, "h-root", "epic999/planning"),
         ChannelResolution::Unique(ref id) if id == "h-epic-plan"
     ));
 }
 
 #[test]
-fn dotted_paths_are_canonical_and_slashes_are_not_aliases() {
+fn slash_paths_are_canonical_and_dots_are_not_aliases() {
     let store = Store::open_memory().unwrap();
     chan(&store, "h-root", "proj", "");
     chan(&store, "h-epic", "epic", "h-root");
     chan(&store, "h-plan", "planning", "h-epic");
     assert!(matches!(
-        resolve_channel_ref(&store, "h-root", "epic.planning"),
+        resolve_channel_ref(&store, "h-root", "epic/planning"),
         ChannelResolution::Unique(ref id) if id == "h-plan"
     ));
     assert!(matches!(
-        resolve_channel_ref(&store, "h-root", "epic/planning"),
+        resolve_channel_ref(&store, "h-root", "/h-root/epic/planning"),
+        ChannelResolution::Unique(ref id) if id == "h-plan"
+    ));
+    assert!(matches!(
+        resolve_channel_ref(&store, "h-root", "epic.planning"),
         ChannelResolution::NotFound
     ));
 }
@@ -108,11 +112,11 @@ fn canonical_workspace_references_resolve_from_workspace_root() {
     chan(&store, "h-plan", "planning", "workspace");
 
     assert!(matches!(
-        resolve_channel_ref(&store, "workspace", "workspace"),
+        resolve_channel_ref(&store, "workspace", "/workspace"),
         ChannelResolution::Unique(ref id) if id == "workspace"
     ));
     assert!(matches!(
-        resolve_channel_ref(&store, "workspace", "workspace.planning"),
+        resolve_channel_ref(&store, "workspace", "/workspace/planning"),
         ChannelResolution::Unique(ref id) if id == "h-plan"
     ));
     assert!(matches!(
@@ -120,7 +124,7 @@ fn canonical_workspace_references_resolve_from_workspace_root() {
         ChannelResolution::Unique(ref id) if id == "h-plan"
     ));
     assert!(matches!(
-        resolve_channel_ref(&store, "workspace", "workspace.general"),
+        resolve_channel_ref(&store, "workspace", "/workspace/general"),
         ChannelResolution::NotFound
     ));
 }
@@ -134,7 +138,7 @@ fn channel_reference_prefers_unique_relative_path() {
 
     assert_eq!(
         channel_reference_for(&store, "h-plan").unwrap(),
-        "h-root.epic.planning"
+        "/h-root/epic/planning"
     );
 }
 
@@ -186,7 +190,7 @@ fn nested_sender_explicit_channel_refs_resolve_from_root_channel() {
     let root = root_channel(&store, "h-leaf").unwrap();
     assert_eq!(root, "h-root");
     assert!(matches!(
-        resolve_channel_ref(&store, &root, "epic.review"),
+        resolve_channel_ref(&store, &root, "epic/review"),
         ChannelResolution::Unique(ref id) if id == "h-review"
     ));
 }

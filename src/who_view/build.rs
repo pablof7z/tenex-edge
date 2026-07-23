@@ -11,6 +11,7 @@ pub(crate) struct AgentWhoInput<'a> {
     pub(crate) backend_pubkey: &'a str,
     pub(crate) now: u64,
     pub(crate) headless: bool,
+    pub(crate) active_channels: &'a BTreeSet<String>,
     pub(crate) expanded_workspaces: &'a BTreeSet<String>,
 }
 
@@ -144,6 +145,7 @@ fn root_channel_view(
         id: aggregation.full_channel_ref(root)?,
         about: String::new(),
         member_count: members.len(),
+        active: input.active_channels.contains(root),
         expanded,
         members: if expanded { members } else { Vec::new() },
         children,
@@ -192,6 +194,7 @@ fn channel_view(
             .map(|channel| channel.about.clone())
             .unwrap_or_default(),
         member_count: members.len(),
+        active: input.active_channels.contains(channel_h),
         expanded,
         members: if expanded { members } else { Vec::new() },
         children,
@@ -201,9 +204,10 @@ fn channel_view(
 fn empty_channel(workspace: &str, channel_h: &str) -> ChannelView {
     ChannelView {
         name: channel_h.to_string(),
-        id: format!("{workspace}.{channel_h}"),
+        id: crate::channel_ref::format_channel_ref(workspace, &[channel_h.to_string()]),
         about: String::new(),
         member_count: 0,
+        active: false,
         expanded: false,
         members: Vec::new(),
         children: Vec::new(),

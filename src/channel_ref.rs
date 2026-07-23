@@ -11,7 +11,7 @@ pub(crate) fn full_channel_ref(store: &Store, channel_h: &str) -> String {
     for _ in 0..MAX_CHANNEL_REF_DEPTH {
         let Some(channel) = store.get_channel(&cur).ok().flatten() else {
             if parts.is_empty() {
-                return channel_h.to_string();
+                return format_channel_ref(channel_h, &[]);
             }
             parts.push(cur);
             break;
@@ -29,9 +29,16 @@ pub(crate) fn full_channel_ref(store: &Store, channel_h: &str) -> String {
         cur = channel.parent;
     }
     parts.reverse();
-    let mut reference = vec![workspace];
-    reference.extend(parts);
-    reference.join(".")
+    format_channel_ref(&workspace, &parts)
+}
+
+pub(crate) fn format_channel_ref(workspace: &str, descendants: &[String]) -> String {
+    let mut reference = format!("/{workspace}");
+    for descendant in descendants {
+        reference.push('/');
+        reference.push_str(descendant);
+    }
+    reference
 }
 
 #[cfg(test)]
@@ -51,14 +58,14 @@ mod tests {
             .upsert_channel("qa-h", "qa", "", "child-h", 3)
             .unwrap();
 
-        assert_eq!(full_channel_ref(&store, "qa-h"), "root-h.channel.qa");
+        assert_eq!(full_channel_ref(&store, "qa-h"), "/root-h/channel/qa");
     }
 
     #[test]
     fn full_channel_ref_falls_back_to_unknown_h() {
         let store = Store::open_memory().unwrap();
 
-        assert_eq!(full_channel_ref(&store, "opaque"), "opaque");
+        assert_eq!(full_channel_ref(&store, "opaque"), "/opaque");
     }
 
     #[test]
@@ -68,6 +75,6 @@ mod tests {
             .upsert_channel("workspace", "workspace", "", "", 1)
             .unwrap();
 
-        assert_eq!(full_channel_ref(&store, "workspace"), "workspace");
+        assert_eq!(full_channel_ref(&store, "workspace"), "/workspace");
     }
 }

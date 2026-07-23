@@ -43,6 +43,11 @@ working conversation. Nest a narrower stream beneath the child that owns it.
 Choose a durable topic name and a short stable `--about` description. Treat the
 name and description as shared orientation for future participants.
 
+Canonical channel IDs are absolute slash paths: `/<workspace>` is the root and
+`/<workspace>/<child>` addresses a descendant. Commands also accept a
+slash-separated path relative to the current workspace, such as
+`research/synthesis`. Dotted paths are not aliases.
+
 ## Seed The Channel
 
 Start the channel with enough context for another participant to act:
@@ -103,7 +108,7 @@ mosaico channel add --session <session-handle> <channel>
 Create and focus a child beneath the current channel:
 
 ```bash
-mosaico channel create <relative-path> --about "short stable description"
+mosaico channel create <relative/slash-path> --about "short stable description"
 ```
 
 When Mosaico injects a channel-topology nudge for an ongoing conversation, an

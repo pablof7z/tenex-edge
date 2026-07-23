@@ -312,11 +312,11 @@ fn same_named_channels_under_different_workspaces_show_workspace_context() {
     let request = input(Some(&rec), "test1-xxx", 200, 300, true);
     let text = render_fabric_context(&store, request).expect("context should render");
     assert!(
-        text.contains("<channel name=\"#xxx\" ref=\"test1.xxx\""),
+        text.contains("<channel name=\"#xxx\" ref=\"/test1/xxx\""),
         "got: {text}"
     );
     assert!(
-        text.contains("<channel name=\"#xxx\" ref=\"test2.xxx\""),
+        text.contains("<channel name=\"#xxx\" ref=\"/test2/xxx\""),
         "got: {text}"
     );
     let reviewer = "amber-reviewer";
@@ -338,6 +338,6 @@ fn same_named_channels_under_different_workspaces_show_workspace_context() {
     )
     .expect("valid channel ancestry")
     .expect("human context should render");
-    assert!(human.contains("#test1.xxx"), "got: {human}");
-    assert!(human.contains("#test2.xxx"), "got: {human}");
+    assert!(human.contains("#/test1/xxx"), "got: {human}");
+    assert!(human.contains("#/test2/xxx"), "got: {human}");
 }

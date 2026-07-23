@@ -54,9 +54,9 @@ mod tests {
             "--workspace",
             "project2",
             "--channel",
-            "project2.qa",
+            "/project2/qa",
             "--channel",
-            "project1.bug-123",
+            "/project1/bug-123",
             "--message",
             "investigate",
         ])
@@ -66,7 +66,7 @@ mod tests {
             crate::cli::args::Cmd::Dispatch(args) => {
                 assert_eq!(args.target, "codex@backend2");
                 assert_eq!(args.workspace, "project2");
-                assert_eq!(args.channels, vec!["project2.qa", "project1.bug-123"]);
+                assert_eq!(args.channels, vec!["/project2/qa", "/project1/bug-123"]);
                 assert_eq!(args.message.as_deref(), Some("investigate"));
             }
             _ => panic!("expected dispatch command"),

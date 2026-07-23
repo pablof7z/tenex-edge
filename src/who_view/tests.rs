@@ -119,6 +119,7 @@ fn render(expand_beta: bool) -> String {
     if expand_beta {
         expanded_workspaces.insert("beta".to_string());
     }
+    let active_channels = expanded_workspaces.clone();
     render_agent_who(
         &store,
         AgentWhoInput {
@@ -129,6 +130,7 @@ fn render(expand_beta: bool) -> String {
             backend_pubkey: "backend-pk",
             now: 100,
             headless: false,
+            active_channels: &active_channels,
             expanded_workspaces: &expanded_workspaces,
         },
     )
@@ -140,6 +142,7 @@ fn both_renderers_use_one_immutable_capture() {
     let store = seed();
     let roots = vec!["alpha".to_string(), "beta".to_string()];
     let expanded = BTreeSet::from(["alpha".to_string()]);
+    let active = expanded.clone();
     let aggregation = crate::who_aggregation::WhoAggregation::load(&store, 100).unwrap();
     let render_view = || {
         render_agent_who_from_aggregation(
@@ -152,6 +155,7 @@ fn both_renderers_use_one_immutable_capture() {
                 backend_pubkey: "backend-pk",
                 now: 100,
                 headless: false,
+                active_channels: &active,
                 expanded_workspaces: &expanded,
             },
         )
@@ -194,11 +198,11 @@ fn lists_global_agents_and_compacts_other_workspaces() {
         ),
         "{xml}"
     );
-    assert!(xml.contains("<channel name=\"alpha\" id=\"alpha\" members=\"2\">"));
+    assert!(xml.contains("<channel name=\"alpha\" id=\"/alpha\">"));
     assert!(
         xml.contains("<workspace name=\"beta\" about=\"Beta workspace\" hosts=\"remoteBackend1\">")
     );
-    assert!(xml.contains("<channel name=\"beta\" id=\"beta\" members=\"1\" />"));
+    assert!(xml.contains("<channel name=\"beta\" id=\"/beta\" members=\"1\" />"));
     assert!(!xml.contains("<workspace name=\"alpha\" members="), "{xml}");
     assert!(!xml.contains(" path="), "{xml}");
     assert!(!xml.contains(" channel=\"alpha\""), "{xml}");
@@ -227,6 +231,7 @@ fn agent_about_is_compact_and_bounded() {
             backend_pubkey: "backend-pk",
             now: 100,
             headless: false,
+            active_channels: &BTreeSet::from(["alpha".to_string()]),
             expanded_workspaces: &BTreeSet::from(["alpha".to_string()]),
         },
     )
@@ -260,11 +265,14 @@ fn root_channel_carries_members_and_membership_gated_children() {
         "<agent name=\"@quill-peak-369-codex\" state=\"idle\" status=\"Implement awareness\""
     ));
     assert!(
-        xml.contains("<channel name=\"alpha\" id=\"alpha\" members=\"2\">\n        <members>"),
+        xml.contains("<channel name=\"alpha\" id=\"/alpha\">\n        <members>"),
         "{xml}"
     );
     assert!(xml.contains(
-        "<channel name=\"small-talk\" id=\"alpha.small-talk\" members=\"1\" about=\"Chit chat\" />"
+        "<channel name=\"planning\" id=\"/alpha/planning\" about=\"Plan work\" members=\"1\">"
+    ));
+    assert!(xml.contains(
+        "<channel name=\"small-talk\" id=\"/alpha/small-talk\" about=\"Chit chat\" members=\"1\" />"
     ));
     assert!(!xml.contains("general"), "synthetic root leaked: {xml}");
     assert!(!xml.contains("@remote\" state="), "backend leaked: {xml}");
@@ -276,6 +284,6 @@ fn exact_session_joined_workspace_set_controls_expansion() {
     assert!(
         xml.contains("<workspace name=\"beta\" about=\"Beta workspace\" hosts=\"remoteBackend1\">")
     );
-    assert!(xml.contains("<channel name=\"beta\" id=\"beta\" members=\"1\">"));
+    assert!(xml.contains("<channel name=\"beta\" id=\"/beta\">"));
     assert!(xml.contains("<agent name=\"@quill-peak-369-codex\" state=\"offline\""));
 }

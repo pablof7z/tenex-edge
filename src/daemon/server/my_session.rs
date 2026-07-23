@@ -15,16 +15,21 @@ pub(in crate::daemon::server) fn rpc_my_session(
     let roots = state.with_store(super::who::root_channels)?;
     let instance = state.session_instance(&rec);
     let headless = state.with_store(|store| crate::session_host::session_is_headless(store, &rec));
-    let expanded_workspaces = state.with_store(|store| {
-        store
+    let (active_channels, expanded_workspaces) = state.with_store(|store| {
+        let active_channels = store
             .list_session_routes(&rec.pubkey)
             .unwrap_or_default()
             .into_iter()
-            .map(|(channel, _)| {
+            .map(|(channel, _)| channel)
+            .collect::<BTreeSet<_>>();
+        let expanded_workspaces = active_channels
+            .iter()
+            .map(|channel| {
                 crate::daemon::workspace_path::WorkspacePathResolver::new(store)
-                    .root_for_channel(&channel)
+                    .root_for_channel(channel)
             })
-            .collect::<Result<BTreeSet<_>>>()
+            .collect::<Result<BTreeSet<_>>>()?;
+        Ok::<_, anyhow::Error>((active_channels, expanded_workspaces))
     })?;
     let host = state.host.clone();
     let backend_pubkey = state.backend_pubkey().unwrap_or_default();
@@ -39,6 +44,7 @@ pub(in crate::daemon::server) fn rpc_my_session(
                 backend_pubkey: &backend_pubkey,
                 now: now_secs(),
                 headless,
+                active_channels: &active_channels,
                 expanded_workspaces: &expanded_workspaces,
             },
         )
@@ -126,9 +132,9 @@ mod tests {
         assert!(first.contains("headless=\"on\""), "{first}");
         assert!(first.contains("<hosts>"), "{first}");
         assert!(first.contains("<workspace name=\"alpha\" about=\"Alpha\" hosts=\"\">"));
-        assert!(first.contains("<channel name=\"alpha\" id=\"alpha\" members=\"1\">"));
+        assert!(first.contains("<channel name=\"alpha\" id=\"/alpha\">"));
         assert!(first.contains("<workspace name=\"beta\" about=\"Beta\" hosts=\"\">"));
-        assert!(first.contains("<channel name=\"beta\" id=\"beta\" members=\"1\" />"));
+        assert!(first.contains("<channel name=\"beta\" id=\"/beta\" members=\"1\" />"));
 
         state.with_store(|s| s.grant_session_route(&pubkey, "beta", 20).unwrap());
         let second = rpc_my_session(
@@ -141,7 +147,7 @@ mod tests {
         .unwrap();
         let second = second["fabric"].as_str().expect("agent briefing");
         assert!(second.contains("<workspace name=\"beta\" about=\"Beta\" hosts=\"\">"));
-        assert!(second.contains("<channel name=\"beta\" id=\"beta\" members=\"1\">"));
+        assert!(second.contains("<channel name=\"beta\" id=\"/beta\">"));
 
         let seen_cursor = state.with_store(|s| {
             s.get_session(&pubkey)

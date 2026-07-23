@@ -1,16 +1,31 @@
 use std::collections::BTreeMap;
 
-pub(super) fn canonical_segments(root: &str, reference: &str) -> Vec<String> {
-    let mut segments = reference
-        .split('.')
+pub(super) fn canonical_segments(root: &str, reference: &str) -> Option<Vec<String>> {
+    let reference = reference.trim();
+    if reference.is_empty()
+        || reference.contains('.')
+        || reference.ends_with('/')
+        || reference.contains("//")
+    {
+        return None;
+    }
+    let absolute = reference.starts_with('/');
+    let path = reference.strip_prefix('/').unwrap_or(reference);
+    let mut segments = path
+        .split('/')
         .map(str::trim)
-        .filter(|segment| !segment.is_empty())
         .map(str::to_string)
         .collect::<Vec<_>>();
-    if segments.first().is_some_and(|segment| segment == root) {
+    if segments.iter().any(String::is_empty) {
+        return None;
+    }
+    if absolute {
+        if !segments.first().is_some_and(|segment| segment == root) {
+            return None;
+        }
         segments.remove(0);
     }
-    segments
+    Some(segments)
 }
 
 /// A copy-pasteable canonical channel path for diagnostics and ambiguity reruns.
@@ -30,7 +45,7 @@ pub(in crate::daemon::server) fn channel_reference_for(
 }
 
 pub(super) fn canonical_channel_reference(root: &str, segs: &[String]) -> String {
-    format!("{root}.{}", segs.join("."))
+    crate::channel_ref::format_channel_ref(root, segs)
 }
 
 fn channel_id_reference(id: &str) -> String {

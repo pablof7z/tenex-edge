@@ -101,9 +101,10 @@ Strict self-scoped agent briefing. It resolves the exact live caller and emits
 `<self>`, `<hosts>` with host-qualified agents and compact `about`, workspaces,
 channels, and member sessions. A workspace lists only advertising hosts whose
 management keys are current admins; rows expose neither repeated channel ids nor
-local paths. Each workspace contains its root `<channel>`; member counts and
-member rows belong only to channel nodes. This pure read does not advance the
-hook-awareness cursor.
+local paths. Each workspace contains its root `<channel>` and member data belongs
+only to channels. IDs are absolute slash paths (`/<workspace>/<child>`). A channel
+on the exact session's active route omits `members`; inactive channels retain the
+count, and expanded channels may expose typed member rows. This pure read does not advance the hook-awareness cursor.
 
 ### `my_session_status`
 ```jsonc

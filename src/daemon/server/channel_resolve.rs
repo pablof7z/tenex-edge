@@ -105,7 +105,7 @@ pub(in crate::daemon::server) async fn resolve_channel(
     Ok(child_h)
 }
 
-/// Resolve a dotted path within `root`, provisioning each missing ancestor via
+/// Resolve a slash path within `root`, provisioning each missing ancestor via
 /// [`resolve_channel`] when requested. There is no depth cap.
 pub(in crate::daemon::server) async fn resolve_channel_path(
     state: &Arc<DaemonState>,
@@ -113,10 +113,9 @@ pub(in crate::daemon::server) async fn resolve_channel_path(
     reference: &str,
     create_if_absent: bool,
 ) -> Result<String> {
-    if reference.contains('/') {
-        anyhow::bail!("channel paths use dots, not slashes: {reference:?}");
-    }
-    let segments = canonical_segments(root, reference);
+    let segments = canonical_segments(root, reference).with_context(|| {
+        format!("invalid channel path {reference:?}; use a relative slash path or /{root}/child")
+    })?;
     if segments.is_empty() {
         return Ok(root.to_string());
     }
@@ -197,7 +196,10 @@ pub(in crate::daemon::server) fn resolve_channel_ref(
     if reference.is_empty() {
         return ChannelResolution::NotFound;
     }
-    let want = canonical_segments(root, reference)
+    let Some(segments) = canonical_segments(root, reference) else {
+        return ChannelResolution::NotFound;
+    };
+    let want = segments
         .into_iter()
         .map(|segment| segment.to_lowercase())
         .collect::<Vec<_>>();
@@ -226,7 +228,7 @@ pub(in crate::daemon::server) fn resolve_channel_ref(
         };
     }
 
-    // Name path: suffix-match dotted requested segments against each
+    // Name path: suffix-match slash-separated requested segments against each
     // descendant's relative NAME path (case-insensitive).
     let hits: Vec<(String, Vec<String>)> = paths
         .into_iter()

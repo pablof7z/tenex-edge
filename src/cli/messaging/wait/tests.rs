@@ -53,13 +53,13 @@ fn wait_has_no_json_mode() {
 
 #[test]
 fn agent_native_wait_renderers_use_one_mosaico_envelope() {
-    let message = crate::injection::render_agent_message("root.x", "agent5", "abcdef123", "done");
+    let message = crate::injection::render_agent_message("/root/x", "agent5", "abcdef123", "done");
     assert!(message.starts_with("<mosaico>"));
-    assert!(message.contains("<channel ref=\"root.x\">"));
+    assert!(message.contains("<channel ref=\"/root/x\">"));
     assert!(message.contains("<message from=\"@agent5\" id=\"abcdef\">done</message>"));
 
-    let timeout = crate::injection::render_agent_wait_timeout(60, &["root.x", "root.y"]);
+    let timeout = crate::injection::render_agent_wait_timeout(60, &["/root/x", "/root/y"]);
     assert!(timeout.starts_with("<mosaico>"));
     assert!(timeout.contains("<wait outcome=\"timeout\" after=\"60s\">"));
-    assert!(timeout.contains("<channel ref=\"root.y\" />"));
+    assert!(timeout.contains("<channel ref=\"/root/y\" />"));
 }

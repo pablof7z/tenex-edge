@@ -4,7 +4,7 @@
 //!
 //! ```text
 //! <mosaico>
-//!   <channel ref="workspace.channel.qa">
+//!   <channel ref="/workspace/channel/qa">
 //!     <message from="@mist-ridge-204-developer" id="abc123">hello</message>
 //!   </channel>
 //!

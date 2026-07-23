@@ -1,10 +1,8 @@
-use std::collections::BTreeSet;
-use std::path::Path;
-
+use super::journal;
 use anyhow::{Context, Result};
 use rusqlite::Connection;
-
-use super::journal;
+use std::collections::BTreeSet;
+use std::path::Path;
 
 mod v10_v11;
 mod v11_v12;

@@ -80,7 +80,7 @@ fn channel_create_parses_hierarchical_path() {
         "mosaico",
         "channel",
         "create",
-        "epic.planning",
+        "epic/planning",
         "--about",
         "planning room",
         "--agent",
@@ -100,7 +100,7 @@ fn channel_create_parses_hierarchical_path() {
                     session,
                 },
         } => {
-            assert_eq!(path, "epic.planning");
+            assert_eq!(path, "epic/planning");
             assert_eq!(about, "planning room");
             assert_eq!(agents, vec!["codex@laptop".to_string()]);
             assert_eq!(session.as_deref(), Some("session-1"));
@@ -159,7 +159,7 @@ fn channel_edit_about_parses() {
         "mosaico",
         "channel",
         "edit",
-        "epic.planning",
+        "epic/planning",
         "--about",
         "new description",
     ])
@@ -174,7 +174,7 @@ fn channel_edit_about_parses() {
                     session: None,
                 },
         } => {
-            assert_eq!(channel, "epic.planning");
+            assert_eq!(channel, "epic/planning");
             assert_eq!(about, "new description");
         }
         _ => panic!("expected channel edit command"),

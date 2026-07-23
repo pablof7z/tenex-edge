@@ -96,7 +96,7 @@ async fn explicit_channel_filters_resolve_across_every_active_workspace() {
         .unwrap();
 
     assert_eq!(
-        resolve_active_scopes(&state, &rec, &["other.y".into()]).unwrap(),
+        resolve_active_scopes(&state, &rec, &["/other/y".into()]).unwrap(),
         ["other-y"]
     );
     let error = resolve_active_scopes(&state, &rec, &["y".into()]).unwrap_err();
@@ -227,7 +227,7 @@ async fn ambient_rpc_returns_first_new_chat_from_any_active_channel() {
     let result = waiting.await.unwrap().unwrap();
     assert_eq!(result["outcome"], "message");
     assert_eq!(result["message"]["event_id"], "new-chat");
-    assert_eq!(result["message"]["channel_ref"], "root.y");
+    assert_eq!(result["message"]["channel_ref"], "/root/y");
 }
 
 #[tokio::test]
@@ -247,5 +247,5 @@ async fn timeout_is_a_normal_structured_outcome() {
 
     assert_eq!(result["outcome"], "timeout");
     assert_eq!(result["timeout_secs"], 1);
-    assert_eq!(result["channels"], serde_json::json!(["root.x"]));
+    assert_eq!(result["channels"], serde_json::json!(["/root/x"]));
 }
