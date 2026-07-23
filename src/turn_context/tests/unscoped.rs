@@ -14,7 +14,6 @@ fn first_turn_explains_unscoped_state_without_fake_channel_warnings() {
                 agent_slug: "test-agent".into(),
                 channel_h: String::new(),
                 child_pid: None,
-                transcript_path: None,
                 now: 100,
             })
             .unwrap();

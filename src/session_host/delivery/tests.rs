@@ -65,7 +65,6 @@ fn session_has_live_delivery_path_true_only_for_a_live_locator() {
                 channel_h: "proj".into(),
                 observed_harness: "claude-code".into(),
                 child_pid: None,
-                transcript_path: None,
                 now: 1,
             },
             &crate::state::AdmittedRuntimeFacts {
@@ -142,7 +141,6 @@ fn headless_mode_separates_output_visibility_from_reachability() {
                 channel_h: "root".into(),
                 observed_harness: "codex".into(),
                 child_pid: None,
-                transcript_path: None,
                 now: 1,
             },
             &crate::state::AdmittedRuntimeFacts {

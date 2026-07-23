@@ -1,5 +1,4 @@
 //! Fail-closed validation of the one current persistence shape.
-
 use anyhow::{Context, Result};
 use rusqlite::Connection;
 use std::collections::BTreeSet;
@@ -193,7 +192,6 @@ fn validate_session(conn: &Connection, path: Option<&Path>) -> Result<()> {
             "stop_reason",
             "turn_count",
             "busy_seconds",
-            "explicit_chat_published_at",
             "state_changed_at",
         ],
         &[
@@ -209,6 +207,8 @@ fn validate_session(conn: &Connection, path: Option<&Path>) -> Result<()> {
             "alive",
             "working",
             "harness",
+            "explicit_chat_published_at",
+            "transcript_path",
         ],
         path,
     )

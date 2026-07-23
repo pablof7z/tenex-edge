@@ -46,7 +46,6 @@ fn native_failure_delta_does_not_overwrite_presence_state() {
             agent_slug: "reviewer".into(),
             channel_h: "root".into(),
             child_pid: None,
-            transcript_path: None,
             now: 90,
         })
         .unwrap();

@@ -172,7 +172,6 @@ mod tests {
                     agent_slug: "agent".into(),
                     channel_h: "old-room".into(),
                     child_pid: None,
-                    transcript_path: None,
                     now: 1,
                 })?;
                 store.set_session_context("pk", "old-room", "workspace", "old-parent")?;

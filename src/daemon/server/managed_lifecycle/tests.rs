@@ -15,7 +15,6 @@ async fn replay_finalizes_reserved_idle_stop_once() {
                     agent_slug: "codex".into(),
                     channel_h: "room".into(),
                     child_pid: Some(42),
-                    transcript_path: None,
                     now: 1,
                 },
                 &crate::state::AdmittedRuntimeFacts {

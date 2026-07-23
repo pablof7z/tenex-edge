@@ -114,7 +114,6 @@ fn upsert_runtime(store: &Store, pubkey: &str, now: u64) {
             agent_slug: "codex".into(),
             channel_h: "room".into(),
             child_pid: None,
-            transcript_path: None,
             now,
         })
         .unwrap();

@@ -10,11 +10,6 @@ mod managed_turn;
 struct PendingPrompt {
     text: String,
     chat_ids: Vec<String>,
-    /// The most recent injected mention — the event an auto-reply threads to,
-    /// the channel it publishes into, and the requester it p-tags.
-    trigger_event_id: String,
-    trigger_channel: String,
-    trigger_from_pubkey: String,
 }
 
 async fn collect_pending_prompt(
@@ -52,23 +47,7 @@ async fn collect_pending_prompt(
         return Ok(None);
     };
 
-    let trigger = chat_rows
-        .last()
-        .expect("claimed prompt always contains at least one inbox row");
-    let trigger_event_id = trigger.event_id.clone();
-    let trigger_channel = if trigger.channel_h.is_empty() {
-        rec.channel_h.clone()
-    } else {
-        trigger.channel_h.clone()
-    };
-    let trigger_from_pubkey = trigger.from_pubkey.clone();
-    Ok(Some(PendingPrompt {
-        text,
-        chat_ids,
-        trigger_event_id,
-        trigger_channel,
-        trigger_from_pubkey,
-    }))
+    Ok(Some(PendingPrompt { text, chat_ids }))
 }
 
 pub(super) async fn inject_planned_messages(
@@ -105,7 +84,7 @@ pub(super) async fn inject_planned_messages(
         rec,
         &prompt.chat_ids,
         crate::state::NativeTurnDeliveryKind::InboxEvent,
-        &prompt.trigger_event_id,
+        prompt.chat_ids.last().map(String::as_str).unwrap_or(""),
         completion,
     )
     .await?;
@@ -155,7 +134,7 @@ fn reenqueue_after_failure(
 /// Post-delivery bookkeeping shared by the PTY and ACP injectors: flip the
 /// delivered rows to `injected` (echo-suppression on PTY; fabric-context de-dup on
 /// both transports — a mention handed to the agent as literal input must not
-/// re-appear as fresh chat context), then arm a turn-end auto-reply.
+/// re-appear as fresh chat context).
 fn finalize_injection(
     state: &Arc<DaemonState>,
     rec: &crate::state::Session,
@@ -176,18 +155,6 @@ fn finalize_injection(
             format!("failed to mark injected inbox rows for echo suppression: {e:#}"),
         );
         anyhow::bail!("failed to mark injected inbox rows for echo suppression: {e:#}");
-    }
-    // Arm a turn-end auto-reply so the channel still hears back if the agent
-    // finishes the turn without publishing its own `channel send`.
-    if !prompt.trigger_event_id.is_empty()
-        && crate::daemon::server::auto_reply::should_arm_for_session(rec)
-    {
-        crate::daemon::server::auto_reply::arm(
-            &rec.pubkey,
-            &prompt.trigger_channel,
-            &prompt.trigger_event_id,
-            &prompt.trigger_from_pubkey,
-        );
     }
     Ok(())
 }

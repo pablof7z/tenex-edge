@@ -9,7 +9,6 @@ fn register_session(store: &Store, pubkey: &str, agent_slug: &str, channel_h: &s
             agent_slug: agent_slug.to_string(),
             channel_h: channel_h.to_string(),
             child_pid: None,
-            transcript_path: None,
             now: 1,
         })
         .unwrap();

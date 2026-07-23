@@ -19,7 +19,6 @@ fn register(store: &Store, pk: &str, channel: &str, now: u64) -> String {
             agent_slug: "test-agent".into(),
             channel_h: channel.to_string(),
             child_pid: None,
-            transcript_path: None,
             now,
         })
         .unwrap();

@@ -9,7 +9,6 @@ fn seed() -> Store {
             agent_slug: "codex".into(),
             channel_h: "mosaico".into(),
             child_pid: Some(42),
-            transcript_path: None,
             now: 1,
         })
         .unwrap();
@@ -25,7 +24,7 @@ fn accumulates_once_on_turn_end_and_runtime_stop() {
     let store = seed();
     let generation = session(&store).runtime_generation;
     assert!(store
-        .apply_session_turn_started("pk", generation, 10, None)
+        .apply_session_turn_started("pk", generation, 10)
         .unwrap());
     assert!(store
         .apply_session_turn_ended("pk", generation, 30)
@@ -38,7 +37,7 @@ fn accumulates_once_on_turn_end_and_runtime_stop() {
     assert_eq!(session(&store).busy_seconds, 20);
 
     assert!(store
-        .apply_session_turn_started("pk", generation, 40, None)
+        .apply_session_turn_started("pk", generation, 40)
         .unwrap());
     store
         .mark_runtime_stopped("pk", StopReason::OperatorKill, 55)

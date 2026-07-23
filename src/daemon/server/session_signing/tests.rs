@@ -23,7 +23,6 @@ async fn reconstructs_signer_from_pubkey_bound_material() {
                 agent_slug: "codex".into(),
                 channel_h: "root".into(),
                 child_pid: None,
-                transcript_path: None,
                 now: 1,
             })
         })

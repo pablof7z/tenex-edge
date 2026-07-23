@@ -108,7 +108,6 @@ fn local_lifecycle_overrides_an_expired_offline_relay_echo() {
             agent_slug: "reviewer".into(),
             channel_h: "root".into(),
             child_pid: None,
-            transcript_path: None,
             now: 95,
         })
         .unwrap();

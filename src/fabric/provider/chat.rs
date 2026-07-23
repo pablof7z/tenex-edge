@@ -48,7 +48,7 @@ impl Nip29Provider {
     }
 
     /// Like [`publish_chat_checked`] but threads the kind:9 as a reply to
-    /// `reply_to` via an `e` tag. Used by the turn-end auto-reply path.
+    /// `reply_to` via an `e` tag.
     pub(crate) async fn publish_chat_reply_checked(
         &self,
         chat: &ChatMessage,

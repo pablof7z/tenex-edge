@@ -66,7 +66,6 @@ impl Store {
         pubkey: &str,
         generation: u64,
         at: u64,
-        transcript_ref: Option<&str>,
     ) -> Result<bool> {
         Ok(self.conn.execute(
             "UPDATE sessions
@@ -74,11 +73,10 @@ impl Store {
                  work_state='working',
                  turn_count=turn_count + CASE WHEN work_state='idle' THEN 1 ELSE 0 END,
                  state_changed_at=CASE WHEN work_state='idle' THEN ?3 ELSE state_changed_at END,
-                 idle_since=0, idle_deadline=0,
-                 transcript_path=COALESCE(?4, transcript_path)
+                 idle_since=0, idle_deadline=0
              WHERE pubkey=?1 AND runtime_generation=?2 AND runtime_state='running'
             ",
-            params![pubkey, generation, at, transcript_ref],
+            params![pubkey, generation, at],
         )? == 1)
     }
 

@@ -26,7 +26,6 @@ mod agent_config;
 mod agent_discovery;
 mod agent_roster;
 mod agent_usage;
-pub(crate) mod auto_reply;
 mod background;
 mod delivery_drive;
 mod demux;

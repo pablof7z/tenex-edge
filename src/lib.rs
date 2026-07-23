@@ -53,7 +53,6 @@ pub mod runtime;
 pub mod session_host;
 pub(crate) mod session_title;
 pub mod state;
-pub mod transcript;
 pub(crate) mod transport;
 
 pub mod reconcile;

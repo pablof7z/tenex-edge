@@ -109,10 +109,10 @@ status/title. CLI: `mosaico my session status <TITLE>`.
 
 ### `turn_start`
 ```jsonc
-params: {"harness_session": "native-id", "transcript": "/path"|null, "json": bool, "cwd": "/path"}
+params: {"harness_session": "native-id", "json": bool, "cwd": "/path"}
 result: {"context": "…"|null}    // the assembled injection text, or null
 ```
-Daemon marks the turn, records the transcript path, claims pending directed
+Daemon marks the turn and claims pending directed
 mentions from the inbox ledger, and returns the hook fabric context. A first
 turn (`seen_cursor=0`) renders the relevant channel snapshot;
 later turns render only rows changed since the session cursor. The cursor

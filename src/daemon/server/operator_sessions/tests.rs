@@ -28,7 +28,6 @@ fn projection_exposes_public_identity_without_private_runtime_id() {
             agent_slug: "codex".into(),
             channel_h: "room".into(),
             child_pid: Some(42),
-            transcript_path: None,
             now: 10,
         })
         .unwrap();
@@ -81,7 +80,6 @@ fn stopped_session_projection_retains_project_and_restart_capability() {
             agent_slug: "codex".into(),
             channel_h: "root".into(),
             child_pid: Some(42),
-            transcript_path: None,
             now: 10,
         })
         .unwrap();
@@ -122,7 +120,6 @@ fn unhosted_resumable_projection_exposes_open_turn_takeover_state() {
             agent_slug: "codex".into(),
             channel_h: "root".into(),
             child_pid: Some(42),
-            transcript_path: None,
             now: 10,
         })
         .unwrap();
@@ -141,7 +138,7 @@ fn unhosted_resumable_projection_exposes_open_turn_takeover_state() {
         .unwrap()
         .runtime_generation;
     store
-        .apply_session_turn_started(&pubkey, generation, 12, None)
+        .apply_session_turn_started(&pubkey, generation, 12)
         .unwrap();
     let rows = project_sessions(&store, "laptop", &HashMap::new()).unwrap();
 
@@ -209,7 +206,6 @@ fn bound_endpoint_projection_is_transport_owned_and_generic() {
                 agent_slug: "codex".into(),
                 channel_h: "root".into(),
                 child_pid: Some(42),
-                transcript_path: None,
                 now: 1,
             },
             &crate::state::AdmittedRuntimeFacts {
@@ -256,7 +252,6 @@ fn missing_hosted_locator_preserves_the_admitted_transport() {
                     agent_slug: "codex".into(),
                     channel_h: "root".into(),
                     child_pid: Some(42),
-                    transcript_path: None,
                     now: 1,
                 },
                 &crate::state::AdmittedRuntimeFacts {

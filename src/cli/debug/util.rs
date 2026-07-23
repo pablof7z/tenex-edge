@@ -204,12 +204,7 @@ pub(super) fn classify_hook(hook_type: &str, stdin: &Value) -> (String, String, 
             }
         }
         "stop" | "subagent-stop" => stdin["stop_reason"].as_str().unwrap_or("stop").to_string(),
-        _ => stdin["transcript_path"]
-            .as_str()
-            .and_then(|p| std::path::Path::new(p).file_name())
-            .and_then(|n| n.to_str())
-            .unwrap_or("")
-            .to_string(),
+        _ => String::new(),
     };
 
     // Detail: human-readable expanded view

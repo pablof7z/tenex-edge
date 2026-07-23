@@ -87,7 +87,6 @@ mod tests {
                     agent_slug: "reviewer".into(),
                     channel_h: "active".into(),
                     child_pid: None,
-                    transcript_path: None,
                     now: now_secs(),
                 })
                 .unwrap()

@@ -8,6 +8,17 @@ fn create_current(conn: &Connection) {
     }
 }
 
+pub(super) fn add_removed_v15_session_columns(conn: &Connection) {
+    conn.execute_batch(
+        r#"
+        ALTER TABLE sessions ADD COLUMN transcript_path TEXT;
+        ALTER TABLE sessions
+            ADD COLUMN explicit_chat_published_at INTEGER NOT NULL DEFAULT 0;
+        "#,
+    )
+    .unwrap();
+}
+
 pub(super) fn create_schema_four(path: &Path) {
     let conn = Connection::open(path).unwrap();
     create_current(&conn);
@@ -162,6 +173,7 @@ fn seed_schema_four(conn: &Connection) {
 pub(super) fn create_schema_seven(path: &Path) {
     let conn = Connection::open(path).unwrap();
     create_current(&conn);
+    add_removed_v15_session_columns(&conn);
     conn.execute_batch(
         r#"
         ALTER TABLE sessions DROP COLUMN work_root;
@@ -187,6 +199,7 @@ pub(super) fn create_schema_seven(path: &Path) {
 pub(super) fn create_schema_eight(path: &Path) {
     let conn = Connection::open(path).unwrap();
     create_current(&conn);
+    add_removed_v15_session_columns(&conn);
     conn.execute_batch(
         r#"
         DROP INDEX idx_sessions_runtime;

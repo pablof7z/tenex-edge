@@ -87,7 +87,6 @@ mod tests {
                     agent_slug: "agent".into(),
                     channel_h: "root".into(),
                     child_pid: None,
-                    transcript_path: None,
                     now: 1,
                 })
                 .unwrap();

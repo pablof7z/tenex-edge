@@ -163,7 +163,6 @@ pub(super) fn reserve_generation(
                 agent_slug: params.agent.clone(),
                 channel_h: channel.to_string(),
                 child_pid: params.watch_pid,
-                transcript_path: None,
                 now,
             },
             &crate::state::AdmittedRuntimeFacts {

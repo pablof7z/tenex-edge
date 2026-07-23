@@ -89,7 +89,6 @@ mod tests {
                 agent_slug: "codex".into(),
                 channel_h: "mosaico".into(),
                 child_pid: None,
-                transcript_path: None,
                 now: 1,
             })
             .unwrap();

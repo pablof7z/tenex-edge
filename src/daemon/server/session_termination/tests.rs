@@ -14,7 +14,6 @@ fn register(
                 agent_slug: "codex".into(),
                 channel_h: "root".into(),
                 child_pid: Some(child_pid),
-                transcript_path: None,
                 now: 1,
             };
             if admitted_transport.is_empty() {

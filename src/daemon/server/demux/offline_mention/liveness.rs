@@ -37,7 +37,6 @@ mod tests {
                 agent_slug: "chief".into(),
                 channel_h: "channel-a".into(),
                 child_pid: None,
-                transcript_path: None,
                 now: 1,
             })
             .unwrap();

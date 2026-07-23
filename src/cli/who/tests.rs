@@ -25,7 +25,6 @@ fn register_local_in(
             agent_slug: slug.to_string(),
             channel_h: channel.to_string(),
             child_pid: Some(42),
-            transcript_path: None,
             now: ts,
         })
         .unwrap();

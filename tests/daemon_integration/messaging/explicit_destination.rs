@@ -250,7 +250,6 @@ fn channel_commands_require_channel_when_session_joined_to_multiple_channels() {
                 agent_slug: "multi-chat".to_string(),
                 channel_h: "root-chat-channel".to_string(),
                 child_pid: None,
-                transcript_path: None,
                 now: 1,
             },
             &mosaico::state::AdmittedRuntimeFacts {

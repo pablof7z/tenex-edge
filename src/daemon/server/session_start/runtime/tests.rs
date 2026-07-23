@@ -11,7 +11,6 @@ async fn mapped_pubkey_overrides_stale_hook_agent_claim() {
                 agent_slug: "claude".into(),
                 channel_h: "mosaico".into(),
                 child_pid: None,
-                transcript_path: None,
                 now: 1,
             })
         })
@@ -62,7 +61,6 @@ fn bind_locators_records_native_resume_locator() {
             agent_slug: "claude".into(),
             channel_h: "root".into(),
             child_pid: None,
-            transcript_path: None,
             now: 1,
         })
         .unwrap();

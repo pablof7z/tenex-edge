@@ -82,7 +82,6 @@ pub struct Session {
     /// Where the endpoint facts came from (`launch`, `hook`, or `migration`).
     pub endpoint_provenance: String,
     pub child_pid: Option<i32>,
-    pub transcript_path: Option<String>,
     pub runtime_state: RuntimeState,
     pub presentation_state: PresentationState,
     pub work_state: WorkState,
@@ -101,7 +100,6 @@ pub struct Session {
     pub turn_started_at: u64,
     pub seen_cursor: u64,
     pub title: String,
-    pub explicit_chat_published_at: u64,
     /// Semantic transition time for the canonical public-state projection.
     pub state_changed_at: u64,
 }

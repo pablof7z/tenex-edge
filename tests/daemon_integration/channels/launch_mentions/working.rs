@@ -106,7 +106,6 @@ fn operator_kind9_injects_into_working_launch_session() {
             &rec.pubkey,
             rec.runtime_generation,
             mosaico::util::now_secs(),
-            None,
         )
         .expect("mark launch session working");
 
@@ -132,6 +131,44 @@ fn operator_kind9_injects_into_working_launch_session() {
             .iter()
             .any(|m| m.content == body && m.pubkey == pubkey_of(EXAMPLE_USER_NSEC)),
         "operator kind:9 should be materialized as user-authored chat"
+    );
+    let agent_messages_before = messages
+        .iter()
+        .filter(|event| event.pubkey == rec.pubkey)
+        .count();
+
+    let legacy_transcript = home.dir.path().join("legacy-transcript.jsonl");
+    std::fs::write(
+        &legacy_transcript,
+        r#"{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"must remain private"}]}}"#,
+    )
+    .unwrap();
+    rt().block_on(async {
+        let mut client = DaemonClient::connect_or_spawn().await.expect("connect");
+        client
+            .call(
+                "turn_start",
+                serde_json::json!({
+                    "pty_session": pty_id,
+                    "transcript_path": legacy_transcript,
+                }),
+            )
+            .await
+            .expect("start turn with removed transcript input");
+        client
+            .call("turn_end", serde_json::json!({"pty_session": pty_id}))
+            .await
+            .expect("finish injected turn");
+    });
+    assert!(
+        !wait_until(Duration::from_secs(2), || Store::open(&home.store_path())
+            .map(|store| chat_in_channel(&store, &channel)
+                .iter()
+                .filter(|event| event.pubkey == rec.pubkey)
+                .count()
+                > agent_messages_before)
+            .unwrap_or(false)),
+        "turn completion must not publish an implicit channel message"
     );
 
     kill_pty(&pty_id);
@@ -227,7 +264,6 @@ fn native_hermes_profile_persists_admission_and_receives_tagged_delivery() {
             &session.pubkey,
             session.runtime_generation,
             mosaico::util::now_secs(),
-            None,
         )
         .expect("mark Hermes profile working");
     let body = format!("Hermes profile delivery {}", unique_session("body"));

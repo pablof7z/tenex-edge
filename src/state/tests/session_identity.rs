@@ -45,25 +45,3 @@ fn typed_locator_resolves_directly_to_pubkey() {
     assert!(!store.get_session("pk").unwrap().unwrap().is_running());
     assert!(store.locators_for_pubkey("pk").unwrap().is_empty());
 }
-
-#[test]
-fn explicit_chat_marker_keeps_first_publish() {
-    let store = Store::open_memory().unwrap();
-    store
-        .reserve_hook_session_for_test(&reg("codex", "pk", "h1"))
-        .unwrap();
-    store
-        .mark_session_explicit_chat_published("pk", 1200)
-        .unwrap();
-    store
-        .mark_session_explicit_chat_published("pk", 1300)
-        .unwrap();
-    assert_eq!(
-        store
-            .get_session("pk")
-            .unwrap()
-            .unwrap()
-            .explicit_chat_published_at,
-        1200
-    );
-}

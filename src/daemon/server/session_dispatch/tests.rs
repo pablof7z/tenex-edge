@@ -15,7 +15,6 @@ fn caller_session(state: &Arc<DaemonState>, channels: &[&str]) -> crate::state::
             agent_slug: "codex".to_string(),
             channel_h: channels.first().copied().unwrap_or("project1").to_string(),
             child_pid: None,
-            transcript_path: None,
             now: 1,
         })
         .unwrap();

@@ -163,7 +163,6 @@ fn reserve_prepared(
                 agent_slug: slug.to_string(),
                 channel_h: channel,
                 child_pid: None,
-                transcript_path: None,
                 now: crate::util::now_secs(),
             },
             &crate::state::AdmittedRuntimeFacts {

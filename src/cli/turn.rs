@@ -29,7 +29,6 @@ pub(super) struct HookContextResult {
 /// It is prepended to whatever the daemon assembles.
 pub(super) async fn turn_start(
     session: String,
-    transcript: Option<String>,
     emit: EmitFormat,
     degraded_notice: Option<String>,
 ) -> Result<HookContextResult> {
@@ -56,7 +55,6 @@ pub(super) async fn turn_start(
     }
     let params = crate::cli::rpc_params(serde_json::json!({
         "harness_session": session,
-        "transcript": transcript,
     }));
     // The daemon RPC can itself fail (daemon down/restarting) — exactly the case a
     // degradation marker exists for. If we have one, don't `?`-return and drop it:

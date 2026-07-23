@@ -443,7 +443,6 @@ mod tests {
                 agent_slug: "haiku".into(),
                 channel_h: "aaa".into(),
                 child_pid: None,
-                transcript_path: None,
                 now: 1,
             })
             .unwrap();

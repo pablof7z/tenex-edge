@@ -41,7 +41,6 @@ fn seed_session(store: &crate::state::Store, pubkey: &str, slug: &str, now: u64)
             agent_slug: slug.into(),
             channel_h: "root".into(),
             child_pid: None,
-            transcript_path: None,
             now,
         })
         .unwrap()
@@ -145,7 +144,7 @@ async fn accepting_reuses_child_focuses_caller_and_passively_adds_idle_peer() {
         let a1_generation = seed_session(store, A1, "a1", now.saturating_sub(60));
         seed_session(store, A2, "a2", now.saturating_sub(60));
         store
-            .apply_session_turn_started(A1, a1_generation, now, None)
+            .apply_session_turn_started(A1, a1_generation, now)
             .unwrap();
         store
             .replace_channel_members("child", &[A1.into(), A2.into()], now)

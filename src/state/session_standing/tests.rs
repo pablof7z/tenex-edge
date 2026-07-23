@@ -9,7 +9,6 @@ fn reserve(store: &Store, at: u64) {
                 agent_slug: "grok".into(),
                 channel_h: "room".into(),
                 child_pid: None,
-                transcript_path: None,
                 now: at,
             },
             &AdmittedRuntimeFacts {

@@ -7,7 +7,6 @@ fn reg(pubkey: &str, channel: &str, now: u64) -> RegisterSession {
         agent_slug: "agent".into(),
         channel_h: channel.into(),
         child_pid: None,
-        transcript_path: None,
         now,
     }
 }

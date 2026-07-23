@@ -9,7 +9,6 @@ fn local_session(store: &Store) {
             agent_slug: "local-codex".into(),
             channel_h: "room".into(),
             child_pid: None,
-            transcript_path: None,
             now: 10,
         })
         .unwrap();
@@ -91,7 +90,7 @@ fn working_and_offline_local_recipients_do_not_get_reminders() {
         .unwrap()
         .runtime_generation;
     store
-        .apply_session_turn_started("local-pk", generation, 11, None)
+        .apply_session_turn_started("local-pk", generation, 11)
         .unwrap();
     assert!(suspension_reminder(&store, "local-pk", "room", None, 11)
         .unwrap()

@@ -12,7 +12,6 @@ fn projection_uses_lifecycle_transition_time_instead_of_lease_times() {
             agent_slug: "codex".into(),
             channel_h: "root".into(),
             child_pid: Some(42),
-            transcript_path: None,
             now: 10,
         })
         .unwrap();
@@ -49,7 +48,6 @@ fn native_failure_is_separate_from_canonical_presence() {
             agent_slug: "codex".into(),
             channel_h: "root".into(),
             child_pid: Some(42),
-            transcript_path: None,
             now: 10,
         })
         .unwrap();
