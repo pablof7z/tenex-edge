@@ -10,7 +10,10 @@ fn session_view_has_self_and_chatter_human_view_does_not() {
         .expect("session view should render");
     assert!(agent.contains("Agent: coder · Session: @coder · Backend: laptop"));
     assert!(agent.contains("<chatter>"));
-    assert!(agent.contains("post join context"));
+    assert!(
+        agent.contains("<message from=\"@reviewer\" id=\"m1\" age=\"1 min ago\">post join context"),
+        "every agent-visible message must expose its reaction/reply id: {agent}"
+    );
     assert!(agent.contains("<workspace name=\"root\" channel=\"root\""));
     assert!(agent.contains("<channel name=\"#task\" ref=\"root.task\""));
     assert!(!agent.contains("<channel name=\"#root\""));

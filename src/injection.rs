@@ -22,7 +22,8 @@
 //!
 //! Echo suppression no longer lives in this text; direct delivery records the
 //! pasted inbox event ids as explicit `injected` ledger rows. Envelopes are free
-//! to be bare. Message ids are intentionally absent: replies target `@name`.
+//! to be bare. Message ids are always present so agents can reply or react to
+//! the exact message.
 
 use crate::state::{InboxRow, Store};
 use crate::util::pubkey_short;
