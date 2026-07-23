@@ -34,6 +34,7 @@ pub(crate) mod liveness;
 pub mod logging;
 mod nmp_host;
 pub mod profile;
+mod secret_scrub;
 pub mod session;
 pub(crate) mod session_presence;
 pub mod session_state;

@@ -3,6 +3,7 @@ use crate::reconcile::StatusReconciler;
 mod auth_restore;
 mod pending_writes;
 mod roster_bootstrap;
+mod shutdown;
 
 pub async fn run() -> Result<()> {
     let storage = crate::daemon::storage_paths::StoragePaths::current();
@@ -52,7 +53,15 @@ pub async fn run() -> Result<()> {
         indexer = ?cfg.indexer_relay,
         "relay pool connected"
     );
-    let store = Arc::new(Mutex::new(Store::open(&store_path())?));
+    let store = Store::open(&store_path())?;
+    let reconciled_attempts = store.reconcile_open_native_turn_attempts(now_secs())?;
+    if reconciled_attempts > 0 {
+        tracing::warn!(
+            reconciled_attempts,
+            "reconciled native turn attempts left open by the prior daemon"
+        );
+    }
+    let store = Arc::new(Mutex::new(store));
     let nmp = Arc::new(crate::nmp_host::NmpHost::open(
         &cfg.relays,
         Some(&cfg.indexer_relay),
@@ -176,44 +185,12 @@ pub async fn run() -> Result<()> {
     }
     tracing::info!("daemon shutting down");
     accept.abort();
-    shutdown_rpc_sessions(&state).await;
+    shutdown::rpc_sessions(&state).await;
     cleanup();
     state.nmp.shutdown();
     state.transport.shutdown().await;
     drop(lock);
     Ok(())
-}
-
-async fn shutdown_rpc_sessions(state: &Arc<DaemonState>) {
-    for (kind, endpoint, confirmation) in
-        crate::session_host::transport::acp::shutdown_owned_sessions().await
-    {
-        match confirmation {
-            Ok(()) => {
-                let session = state
-                    .with_store(|store| {
-                        store.session_for_runtime_locator(kind.locator_kind(), &endpoint)
-                    })
-                    .ok()
-                    .flatten();
-                if let Some(session) = session {
-                    if let Err(error) = state.with_store(|store| {
-                        store.mark_runtime_stopped_if_generation(
-                            &session.pubkey,
-                            session.runtime_generation,
-                            crate::state::StopReason::Superseded,
-                            crate::util::now_secs(),
-                        )
-                    }) {
-                        tracing::error!(%endpoint, %error, "RPC shutdown state update failed");
-                    }
-                }
-            }
-            Err(error) => {
-                tracing::error!(%endpoint, %error, "RPC process-group shutdown failed");
-            }
-        }
-    }
 }
 
 pub(in crate::daemon::server) fn bind_socket() -> Result<UnixListener> {

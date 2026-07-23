@@ -177,14 +177,23 @@ fn presence_rows(inputs: &ViewInputs, channel: &str, cursor: u64, now: u64) -> V
             } else {
                 s.changed_at.max(presence.state_since)
             };
-            if changed_at <= cursor || changed_at > now {
+            let native_failure = s
+                .native_failure
+                .as_ref()
+                .filter(|failure| failure.finished_at > cursor && failure.finished_at <= now)
+                .map(|failure| NativeFailureRow {
+                    outcome: failure.outcome.clone(),
+                    message: failure.message.clone(),
+                    since: relative_time(failure.finished_at, now),
+                });
+            if (changed_at <= cursor || changed_at > now) && native_failure.is_none() {
                 return None;
             }
             if &s.pubkey == self_pubkey {
                 return None;
             }
             let status = presence.text();
-            if status.is_empty() {
+            if status.is_empty() && native_failure.is_none() {
                 return None;
             }
             Some(PresenceRow {
@@ -192,6 +201,7 @@ fn presence_rows(inputs: &ViewInputs, channel: &str, cursor: u64, now: u64) -> V
                 state: presence.state,
                 status,
                 since: relative_time(presence.state_since, now),
+                native_failure,
             })
         })
         .collect()

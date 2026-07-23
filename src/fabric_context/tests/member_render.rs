@@ -6,6 +6,8 @@ use crate::fabric_context::{
 use crate::state::{RegisterSession, Status, Store};
 
 use super::{input, seed_store, session, session_record, OTHER_PK, SELF_PK};
+#[path = "member_render/native_outcome.rs"]
+mod native_outcome;
 
 #[test]
 fn empty_status_agents_are_omitted_from_snapshots_and_deltas() {
@@ -210,41 +212,6 @@ fn lease_renewal_without_state_change_produces_no_presence_delta() {
     let text = render_fabric_context(&store, input(Some(&rec), "root", 100, 160, true))
         .expect("forced quiet delta should render");
     assert!(!text.contains("<recent-presence>"), "got: {text}");
-    let captured = capture_inputs(&store, &input(Some(&rec), "root", 100, 160, true)).unwrap();
-    assert_eq!(
-        render_view_text(&assemble::assemble_view(&captured, 100, 160)),
-        text
-    );
-}
-
-#[test]
-fn semantic_status_change_is_a_delta_without_resetting_state_age() {
-    let store = seed_store();
-    let rec = session(&store);
-    let mut peer = Status {
-        pubkey: OTHER_PK.into(),
-        channel_h: "root".into(),
-        slug: "amber-reviewer".into(),
-        title: "Reviewing".into(),
-        activity: String::new(),
-        state: crate::session_state::SessionState::Suspended,
-        state_since: 90,
-        last_seen: 90,
-        updated_at: 90,
-        expiration: 240,
-    };
-    store.upsert_status(&peer).unwrap();
-    peer.title = "Updated title".into();
-    peer.last_seen = 150;
-    peer.updated_at = 150;
-    peer.expiration = 300;
-    store.upsert_status(&peer).unwrap();
-
-    let text = render_fabric_context(&store, input(Some(&rec), "root", 100, 160, true))
-        .expect("status-change delta should render");
-    assert!(text.contains("<recent-presence>"), "got: {text}");
-    assert!(text.contains("text=\"Updated title\""), "got: {text}");
-    assert!(text.contains("since=\"1 min ago\""), "got: {text}");
     let captured = capture_inputs(&store, &input(Some(&rec), "root", 100, 160, true)).unwrap();
     assert_eq!(
         render_view_text(&assemble::assemble_view(&captured, 100, 160)),

@@ -1,5 +1,13 @@
-//! The raw schema DDL, split out of `schema.rs` to keep that file small.
-pub(super) const SCHEMA: &str = r#"
+//! The core schema DDL, split out of `schema.rs` to keep that file small.
+pub(in crate::state::schema) mod operational;
+
+pub(super) const SCHEMA_PARTS: &[&str] = &[
+    CORE_SCHEMA,
+    operational::OPERATIONAL_SCHEMA,
+    operational::NATIVE_TURN_SCHEMA,
+];
+
+const CORE_SCHEMA: &str = r#"
 -- ── relay_* materialized caches (drop & rebuild from relay anytime) ───────────
 CREATE TABLE IF NOT EXISTS relay_channels (
     channel_h   TEXT PRIMARY KEY,
@@ -296,19 +304,4 @@ CREATE TABLE IF NOT EXISTS channel_resolution_intents (
     created_at  INTEGER NOT NULL,
     PRIMARY KEY (parent, name)
 );
-
-CREATE TABLE IF NOT EXISTS channel_readiness_attempts (id INTEGER PRIMARY KEY AUTOINCREMENT, channel_h TEXT NOT NULL, expect_member TEXT NOT NULL DEFAULT '', parent_hint TEXT, name TEXT, source TEXT NOT NULL DEFAULT '', outcome TEXT NOT NULL DEFAULT '', reason TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL);
-CREATE INDEX IF NOT EXISTS idx_channel_readiness_attempts_channel ON channel_readiness_attempts(channel_h, created_at);
-CREATE TABLE IF NOT EXISTS receipts (
-    id               INTEGER PRIMARY KEY AUTOINCREMENT,
-    surface          TEXT NOT NULL,
-    transaction_id   INTEGER NOT NULL,
-    revision         INTEGER NOT NULL,
-    changed_summary  TEXT NOT NULL,
-    commands         TEXT NOT NULL,
-    artifact_ref     TEXT,
-    created_at       INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_receipts_surface ON receipts(surface, created_at);
-CREATE INDEX IF NOT EXISTS idx_receipts_artifact_ref ON receipts(artifact_ref);
 "#;

@@ -26,6 +26,29 @@ pub enum TurnOutcome {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TurnStartFailureKind {
+    RejectedBeforeStart,
+    ChildExited,
+    Unknown,
+}
+
+#[derive(Debug)]
+pub struct TurnStartFailure {
+    pub thread_id: String,
+    pub turn_id: Option<String>,
+    pub kind: TurnStartFailureKind,
+    pub error: crate::rpc_harness::transport::RpcError,
+}
+
+impl std::fmt::Display for TurnStartFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.error)
+    }
+}
+
+impl std::error::Error for TurnStartFailure {}
+
 impl TurnOutcome {
     pub fn thread_id(&self) -> &str {
         match self {
@@ -61,7 +84,7 @@ impl std::fmt::Display for TurnOutcome {
 }
 
 pub(super) fn sanitize_error(value: &str) -> String {
-    value
+    crate::secret_scrub::scrub(value)
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")

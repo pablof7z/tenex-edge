@@ -124,3 +124,43 @@ fn retention_keeps_offline_mention_replay_tombstones() {
         .claim_management_command("management", "from", "room", "who", 4)
         .unwrap());
 }
+
+#[test]
+fn retention_prunes_finished_native_outcomes_but_keeps_open_attempts() {
+    let s = Store::open_memory().unwrap();
+    let finished = s
+        .start_native_turn_attempt(&NewNativeTurnAttempt {
+            pubkey: "pk",
+            runtime_generation: 1,
+            delivery_kind: NativeTurnDeliveryKind::InboxEvent,
+            delivery_event_id: "event",
+            native_thread_id: "thread",
+            started_at: 1,
+        })
+        .unwrap();
+    s.finish_native_turn_attempt(&FinishNativeTurnAttempt {
+        id: finished,
+        pubkey: "pk",
+        runtime_generation: 1,
+        native_turn_id: "turn",
+        outcome: NativeTurnOutcome::Completed,
+        error_message: "",
+        error_details: "",
+        finished_at: 2,
+    })
+    .unwrap();
+    s.start_native_turn_attempt(&NewNativeTurnAttempt {
+        pubkey: "pk",
+        runtime_generation: 1,
+        delivery_kind: NativeTurnDeliveryKind::SpawnPrompt,
+        delivery_event_id: "",
+        native_thread_id: "thread",
+        started_at: 1,
+    })
+    .unwrap();
+
+    let report = s.prune_retained_state_before(0, 3).unwrap();
+
+    assert_eq!(report.native_turn_attempts, 1);
+    assert_eq!(count_rows(&s, "native_turn_attempts"), 1);
+}

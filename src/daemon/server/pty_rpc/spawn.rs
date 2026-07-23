@@ -49,7 +49,13 @@ pub(in crate::daemon::server) async fn rpc_pty_spawn(
     )
     .await?;
     if let Some(prompt) = p.prompt.as_deref().filter(|prompt| !prompt.is_empty()) {
-        crate::session_host::deliver_spawn_prompt(&spawn.endpoint.endpoint_ref(), prompt).await;
+        crate::session_host::deliver_spawn_prompt(
+            state,
+            &spawn.pubkey,
+            &spawn.endpoint.endpoint_ref(),
+            prompt,
+        )
+        .await;
     }
     let handle = state.with_store(|store| {
         let session = store

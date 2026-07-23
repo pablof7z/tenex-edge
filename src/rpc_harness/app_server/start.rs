@@ -6,28 +6,39 @@ use super::turn_protocol::{
     parse_completed, parse_completed_after, parse_new_turn, parse_started, parse_thread_read,
     parse_turn_baseline, ObservedTurn, TurnBaseline,
 };
-use super::{AppServerClient, TurnOutcome, RPC_TIMEOUT};
+use super::{AppServerClient, TurnOutcome, TurnStartFailure, TurnStartFailureKind, RPC_TIMEOUT};
 use crate::rpc_harness::transport::{RpcError, TurnObserver, TurnSignal};
 
 const TURN_RECONCILE_INTERVAL: Duration = Duration::from_secs(5);
 
 impl AppServerClient {
     /// Send one `turn/start`, then await exact native terminal evidence.
-    pub async fn turn_start(&self, thread_id: &str, text: &str) -> Result<TurnOutcome, RpcError> {
+    pub async fn turn_start(
+        &self,
+        thread_id: &str,
+        text: &str,
+    ) -> Result<TurnOutcome, TurnStartFailure> {
         // This read happens before delivery. If it fails, no turn was sent and
         // the caller may safely report a pre-start rejection. Once delivery is
         // attempted, the baseline identifies the exact new turn even when the
         // immediate JSON-RPC response is lost.
-        let baseline = self.thread_turn_baseline(thread_id).await?;
-        let mut observer = self.handle.register_turn_waiter(thread_id)?;
+        let baseline = self
+            .thread_turn_baseline(thread_id)
+            .await
+            .map_err(|error| turn_failure(thread_id, None, true, error))?;
+        let mut observer = self
+            .handle
+            .register_turn_waiter(thread_id)
+            .map_err(|error| turn_failure(thread_id, None, true, error))?;
         let (turn_id, observed) = self
             .start_once_and_observe(thread_id, text, &baseline, &mut observer)
-            .await?;
+            .await
+            .map_err(|error| turn_failure(thread_id, None, false, error))?;
         match observed {
-            ObservedTurn::InProgress => {
-                self.await_terminal(thread_id, &turn_id, &mut observer)
-                    .await
-            }
+            ObservedTurn::InProgress => self
+                .await_terminal(thread_id, &turn_id, &mut observer)
+                .await
+                .map_err(|error| turn_failure(thread_id, Some(turn_id), false, error)),
             ObservedTurn::Terminal(outcome) => Ok(outcome),
         }
     }
@@ -218,6 +229,29 @@ impl AppServerClient {
                 RPC_TIMEOUT,
             )
             .await
+    }
+}
+
+fn turn_failure(
+    thread_id: &str,
+    turn_id: Option<String>,
+    before_delivery: bool,
+    error: RpcError,
+) -> TurnStartFailure {
+    let kind = if before_delivery
+        || matches!(&error, RpcError::Protocol(protocol) if protocol.code != -1)
+    {
+        TurnStartFailureKind::RejectedBeforeStart
+    } else if matches!(error, RpcError::ChildExited) {
+        TurnStartFailureKind::ChildExited
+    } else {
+        TurnStartFailureKind::Unknown
+    };
+    TurnStartFailure {
+        thread_id: thread_id.to_string(),
+        turn_id,
+        kind,
+        error,
     }
 }
 

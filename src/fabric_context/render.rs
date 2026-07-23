@@ -123,14 +123,26 @@ fn render_presence(out: &mut String, presence: &[PresenceRow], indent: usize) {
     let child_pad = " ".repeat(indent + 2);
     let _ = write!(out, "\n{pad}<recent-presence>");
     for status in presence {
-        let _ = write!(
-            out,
-            "\n{child_pad}<status ref=\"@{}\" state=\"{}\" text=\"{}\" since=\"{}\" />",
-            esc_attr(&status.reference),
-            status.state.as_str(),
-            esc_attr(&status.status),
-            esc_attr(&status.since)
-        );
+        if !status.status.is_empty() {
+            let _ = write!(
+                out,
+                "\n{child_pad}<status ref=\"@{}\" state=\"{}\" text=\"{}\" since=\"{}\" />",
+                esc_attr(&status.reference),
+                status.state.as_str(),
+                esc_attr(&status.status),
+                esc_attr(&status.since)
+            );
+        }
+        if let Some(failure) = &status.native_failure {
+            let _ = write!(
+                out,
+                "\n{child_pad}<native-outcome ref=\"@{}\" outcome=\"{}\" text=\"{}\" since=\"{}\" />",
+                esc_attr(&status.reference),
+                esc_attr(&failure.outcome),
+                esc_attr(&failure.message),
+                esc_attr(&failure.since)
+            );
+        }
     }
     let _ = write!(out, "\n{pad}</recent-presence>");
 }

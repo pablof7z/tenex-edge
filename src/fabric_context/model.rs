@@ -185,6 +185,14 @@ pub(in crate::fabric_context) struct PresenceRow {
     pub(in crate::fabric_context) state: crate::session_state::SessionState,
     pub(in crate::fabric_context) status: String,
     pub(in crate::fabric_context) since: String,
+    pub(in crate::fabric_context) native_failure: Option<NativeFailureRow>,
+}
+
+#[derive(Clone, PartialEq)]
+pub(in crate::fabric_context) struct NativeFailureRow {
+    pub(in crate::fabric_context) outcome: String,
+    pub(in crate::fabric_context) message: String,
+    pub(in crate::fabric_context) since: String,
 }
 
 #[derive(Clone, PartialEq)]

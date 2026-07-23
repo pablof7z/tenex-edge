@@ -192,6 +192,10 @@ async fn run_app_server(
         .config_read(cwd)
         .await
         .map_err(|e| anyhow::anyhow!("config/read: {e}"))?;
+    let catalog = client
+        .model_catalog()
+        .await
+        .map_err(|e| anyhow::anyhow!("model/list: {e}"))?;
     let config = effective.get("config").cloned().unwrap_or_default();
     println!(
         "[acp-smoke] config/read -> model={} effort={} sandbox={} approval={}",
@@ -206,10 +210,19 @@ async fn run_app_server(
             .get("approval_policy")
             .unwrap_or(&serde_json::Value::Null),
     );
-    let thread_id = client
+    let opened = client
         .thread_start(cwd, None, None)
         .await
         .map_err(|e| anyhow::anyhow!("thread/start: {e}"))?;
+    catalog
+        .admit(&opened)
+        .map_err(|e| anyhow::anyhow!("launch admission: {e}"))?;
+    println!(
+        "[acp-smoke] admission ok -> model={} effort={}",
+        opened.model,
+        opened.reasoning_effort.as_deref().unwrap_or("<default>")
+    );
+    let thread_id = opened.thread_id;
     println!("[acp-smoke] thread/start -> {thread_id}");
     let outcome = client
         .turn_start(&thread_id, prompt)
@@ -226,10 +239,17 @@ async fn run_app_server(
         .initialize("mosaico", env!("CARGO_PKG_VERSION"))
         .await
         .map_err(|e| anyhow::anyhow!("initialize #2: {e}"))?;
-    client2
+    let resumed_catalog = client2
+        .model_catalog()
+        .await
+        .map_err(|e| anyhow::anyhow!("model/list #2: {e}"))?;
+    let resumed_opened = client2
         .thread_resume(&thread_id, cwd)
         .await
         .map_err(|e| anyhow::anyhow!("thread/resume: {e}"))?;
+    resumed_catalog
+        .admit(&resumed_opened)
+        .map_err(|e| anyhow::anyhow!("resume admission: {e}"))?;
     println!("[acp-smoke] thread/resume cross-process ok for {thread_id}");
     let resumed = client2
         .turn_start(&thread_id, "Reply with exactly one word: RESUMED")

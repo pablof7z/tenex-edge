@@ -9,7 +9,7 @@ use crate::rpc_harness::{AcpClient, AppServerClient, RpcHandle};
 
 use super::{
     acp_runtime::{AcpRuntime, SteerState},
-    DeliveryCompletion,
+    DeliveryCompletion, ManagedTurnResult,
 };
 
 pub(crate) fn spawn_acp_prompt(
@@ -19,21 +19,36 @@ pub(crate) fn spawn_acp_prompt(
     runtime: Arc<Mutex<AcpRuntime>>,
 ) -> DeliveryCompletion {
     let (completion_tx, completion_rx) = tokio::sync::oneshot::channel();
+    let task_native_id = native_id.clone();
     tokio::spawn(async move {
         let res = AcpClient::new(handle)
-            .session_prompt(&native_id, &text)
+            .session_prompt(&task_native_id, &text)
             .await;
         if let Ok(mut rt) = runtime.lock() {
             rt.mark_turn_finished();
         }
-        if let Err(e) = res {
-            tracing::warn!(session = %native_id, "ACP session/prompt failed: {e}");
-            let _ = completion_tx.send(Err(anyhow::anyhow!("ACP session/prompt failed: {e}")));
-        } else {
-            let _ = completion_tx.send(Ok(()));
-        }
+        let result = match res {
+            Ok(crate::rpc_harness::StopReason::EndTurn) => ManagedTurnResult::completed(""),
+            Ok(crate::rpc_harness::StopReason::Cancelled) => ManagedTurnResult {
+                native_turn_id: String::new(),
+                outcome: crate::state::NativeTurnOutcome::Interrupted,
+                error_message: "ACP turn was cancelled".into(),
+                error_details: String::new(),
+            },
+            Ok(reason) => ManagedTurnResult {
+                native_turn_id: String::new(),
+                outcome: crate::state::NativeTurnOutcome::Failed,
+                error_message: format!("ACP turn stopped with {}", reason.as_str()),
+                error_details: String::new(),
+            },
+            Err(error) => rpc_failure("", error),
+        };
+        let _ = completion_tx.send(result);
     });
-    DeliveryCompletion::Managed(completion_rx)
+    DeliveryCompletion::Managed {
+        native_thread_id: native_id,
+        completion: completion_rx,
+    }
 }
 
 pub(crate) fn spawn_app_server_turn(
@@ -43,27 +58,76 @@ pub(crate) fn spawn_app_server_turn(
     runtime: Arc<Mutex<AcpRuntime>>,
 ) -> DeliveryCompletion {
     let (completion_tx, completion_rx) = tokio::sync::oneshot::channel();
+    let task_native_id = native_id.clone();
     tokio::spawn(async move {
         let res = AppServerClient::new(handle)
-            .turn_start(&native_id, &text)
+            .turn_start(&task_native_id, &text)
             .await;
         if let Ok(mut rt) = runtime.lock() {
             rt.mark_turn_finished();
         }
         let completion = match res {
-            Ok(crate::rpc_harness::TurnOutcome::Completed { .. }) => Ok(()),
-            Ok(outcome) => {
-                tracing::warn!(thread = %native_id, %outcome, "app-server turn ended unsuccessfully");
-                Err(anyhow::anyhow!("{outcome}"))
+            Ok(crate::rpc_harness::TurnOutcome::Completed { turn_id, .. }) => {
+                ManagedTurnResult::completed(turn_id)
             }
-            Err(error) => {
-                tracing::warn!(thread = %native_id, %error, "app-server turn/start failed");
-                Err(anyhow::anyhow!("app-server turn/start failed: {error}"))
+            Ok(crate::rpc_harness::TurnOutcome::Interrupted { turn_id, .. }) => ManagedTurnResult {
+                native_turn_id: turn_id,
+                outcome: crate::state::NativeTurnOutcome::Interrupted,
+                error_message: "native turn was interrupted".into(),
+                error_details: String::new(),
+            },
+            Ok(crate::rpc_harness::TurnOutcome::Failed { turn_id, error, .. }) => {
+                ManagedTurnResult {
+                    native_turn_id: turn_id,
+                    outcome: crate::state::NativeTurnOutcome::Failed,
+                    error_message: error
+                        .as_ref()
+                        .map(|error| error.message.clone())
+                        .unwrap_or_else(|| "native turn failed".into()),
+                    error_details: error
+                        .and_then(|error| error.additional_details)
+                        .unwrap_or_default(),
+                }
             }
+            Err(failure) => ManagedTurnResult {
+                native_turn_id: failure.turn_id.clone().unwrap_or_default(),
+                outcome: match failure.kind {
+                    crate::rpc_harness::TurnStartFailureKind::RejectedBeforeStart => {
+                        crate::state::NativeTurnOutcome::RejectedBeforeStart
+                    }
+                    crate::rpc_harness::TurnStartFailureKind::ChildExited => {
+                        crate::state::NativeTurnOutcome::ChildExited
+                    }
+                    crate::rpc_harness::TurnStartFailureKind::Unknown => {
+                        crate::state::NativeTurnOutcome::UnknownReconciled
+                    }
+                },
+                error_message: failure.to_string(),
+                error_details: String::new(),
+            },
         };
         let _ = completion_tx.send(completion);
     });
-    DeliveryCompletion::Managed(completion_rx)
+    DeliveryCompletion::Managed {
+        native_thread_id: native_id,
+        completion: completion_rx,
+    }
+}
+
+fn rpc_failure(native_turn_id: &str, error: crate::rpc_harness::RpcError) -> ManagedTurnResult {
+    let outcome = match error {
+        crate::rpc_harness::RpcError::Protocol(_) => {
+            crate::state::NativeTurnOutcome::RejectedBeforeStart
+        }
+        crate::rpc_harness::RpcError::ChildExited => crate::state::NativeTurnOutcome::ChildExited,
+        _ => crate::state::NativeTurnOutcome::UnknownReconciled,
+    };
+    ManagedTurnResult {
+        native_turn_id: native_turn_id.to_string(),
+        outcome,
+        error_message: error.to_string(),
+        error_details: String::new(),
+    }
 }
 
 pub(crate) fn spawn_app_server_steer(

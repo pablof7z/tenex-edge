@@ -11,11 +11,14 @@ use std::time::Duration;
 
 use super::transport::{RpcError, RpcHandle};
 
+mod model_catalog;
 mod outcome;
 mod start;
 mod turn_protocol;
-pub use outcome::{TurnFailure, TurnOutcome};
-use turn_protocol::{parse_thread_started, parse_turn_baseline};
+pub use model_catalog::ModelCatalog;
+pub use outcome::{TurnFailure, TurnOutcome, TurnStartFailure, TurnStartFailureKind};
+use turn_protocol::parse_thread_opened;
+pub use turn_protocol::ThreadOpened;
 
 const RPC_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -66,7 +69,7 @@ impl AppServerClient {
         cwd: &Path,
         developer_instructions: Option<&str>,
         config: Option<&serde_json::Value>,
-    ) -> Result<String, RpcError> {
+    ) -> Result<ThreadOpened, RpcError> {
         let value = self
             .handle
             .request_timeout(
@@ -75,9 +78,10 @@ impl AppServerClient {
                 RPC_TIMEOUT,
             )
             .await?;
-        let (thread_id, baseline) = parse_thread_started(value)?;
-        self.handle.record_turn_baseline(&thread_id, baseline);
-        Ok(thread_id)
+        let (opened, baseline) = parse_thread_opened("thread/start response", value)?;
+        self.handle
+            .record_turn_baseline(&opened.thread_id, baseline);
+        Ok(opened)
     }
 
     /// `turn/steer {threadId, expectedTurnId, input}` — mid-turn inject; resolves
@@ -103,7 +107,11 @@ impl AppServerClient {
     }
 
     /// `thread/resume {threadId, cwd}`.
-    pub async fn thread_resume(&self, thread_id: &str, cwd: &Path) -> Result<(), RpcError> {
+    pub async fn thread_resume(
+        &self,
+        thread_id: &str,
+        cwd: &Path,
+    ) -> Result<ThreadOpened, RpcError> {
         let value = self
             .handle
             .request_timeout(
@@ -115,9 +123,15 @@ impl AppServerClient {
                 RPC_TIMEOUT,
             )
             .await?;
-        let baseline = parse_turn_baseline(thread_id, value)?;
+        let (opened, baseline) = parse_thread_opened("thread/resume response", value)?;
+        if opened.thread_id != thread_id {
+            return Err(model_catalog::protocol_error(format!(
+                "thread/resume id mismatch: expected {thread_id}, got {}",
+                opened.thread_id
+            )));
+        }
         self.handle.record_turn_baseline(thread_id, baseline);
-        Ok(())
+        Ok(opened)
     }
 }
 

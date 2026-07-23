@@ -35,6 +35,16 @@ impl StopReason {
             _ => StopReason::Other,
         }
     }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::EndTurn => "end_turn",
+            Self::Cancelled => "cancelled",
+            Self::MaxTokens => "max_tokens",
+            Self::Refusal => "refusal",
+            Self::Other => "other",
+        }
+    }
 }
 
 /// A classified inbound JSON-RPC frame.

@@ -17,14 +17,25 @@ start from production-shaped deployed schemas and verify preservation through
 the complete chain to current. A malformed source schema fails before its
 version or tables are changed.
 
-## Current schema: 11
+## Current schema: 14
+
+Schema 14 adds `native_turn_attempts`, the daemon-owned operational ledger for
+RPC turn attempts. Each row correlates the public session, runtime generation,
+delivery kind, triggering inbox event when one exists, native thread, native
+turn, and one terminal outcome. It does not store presence. Open attempts are
+reconciled to `unknown_reconciled` after daemon restart; finished rows expire
+after seven days.
+
+Schema 13 adds an exact semantic transition clock to local sessions and remote
+status rows. Lease renewal does not advance this clock.
+
+Schema 12 adds stable MCP actor aliases.
 
 Schema 11 keeps schema 10's lifecycle shape and closes the one-time delivery
 state gap for sessions migrated from the pre-lifecycle daemon. Historical
 `injected` inbox rows are converted to `echo_consumed` only when their target
 session is already idle. Pending delivery and injected work owned by a Working
-session remain fenced. This lets an adopted idle runtime enter its ten-minute
-headless eviction policy without pretending that in-flight work completed.
+session remain fenced.
 
 Schema 10 keeps schema 9's admitted-runtime facts and makes managed lifecycle
 ownership explicit in each `sessions` row:

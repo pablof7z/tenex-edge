@@ -137,15 +137,28 @@ fn render_presence(out: &mut String, presence: &[PresenceRow], color: bool) {
     let _ = writeln!(out, "  {}", dim("Recent presence", color));
     for p in presence {
         let reference = pad_ref(&p.reference, width);
-        let _ = writeln!(
-            out,
-            "    {}  {:<12} {} {} {}",
-            style(&reference, color, Style::Agent),
-            state_text(p.state, color),
-            p.status,
-            dim("since", color),
-            dim(&p.since, color)
-        );
+        if !p.status.is_empty() {
+            let _ = writeln!(
+                out,
+                "    {}  {:<12} {} {} {}",
+                style(&reference, color, Style::Agent),
+                state_text(p.state, color),
+                p.status,
+                dim("since", color),
+                dim(&p.since, color)
+            );
+        }
+        if let Some(failure) = &p.native_failure {
+            let _ = writeln!(
+                out,
+                "    {}  native {}: {} {} {}",
+                style(&reference, color, Style::Agent),
+                failure.outcome.replace('_', " "),
+                failure.message,
+                dim("since", color),
+                dim(&failure.since, color)
+            );
+        }
     }
 }
 

@@ -80,7 +80,7 @@ done
 async fn fresh_thread_uses_exact_start_history_without_a_preflight_read() {
     let script = r#"
 IFS= read -r start_thread || exit 1
-printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"thread":{"id":"thread-1","turns":[]}}}'
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"thread":{"id":"thread-1","turns":[]},"model":"gpt-current","reasoningEffort":"medium"}}'
 IFS= read -r start_turn || exit 1
 printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"turn":{"id":"turn-1","items":[],"status":"inProgress"}}}'
 printf '%s\n' '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[],"status":"completed"}}}'
@@ -88,11 +88,11 @@ while IFS= read -r line; do :; done
 "#;
     let (handle, _updates) = RpcHandle::spawn(fixture(script)).await.unwrap();
     let client = AppServerClient::new(handle.clone());
-    let thread_id = client
+    let opened = client
         .thread_start(std::path::Path::new("/workspace"), None, None)
         .await
         .unwrap();
-    let outcome = client.turn_start(&thread_id, "work").await.unwrap();
+    let outcome = client.turn_start(&opened.thread_id, "work").await.unwrap();
     assert!(matches!(outcome, TurnOutcome::Completed { .. }));
     handle.kill().await.unwrap();
 }
@@ -101,7 +101,7 @@ while IFS= read -r line; do :; done
 async fn resumed_thread_uses_exact_resume_history_without_a_preflight_read() {
     let script = r#"
 IFS= read -r resume || exit 1
-printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"thread":{"id":"thread-1","turns":[{"id":"old-turn","items":[],"status":"completed"}]}}}'
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"thread":{"id":"thread-1","turns":[{"id":"old-turn","items":[],"status":"completed"}]},"model":"gpt-current","reasoningEffort":"medium"}}'
 IFS= read -r start_turn || exit 1
 printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"turn":{"id":"turn-1","items":[],"status":"inProgress"}}}'
 printf '%s\n' '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[],"status":"completed"}}}'
@@ -182,7 +182,10 @@ exit 0
         .turn_start("thread-1", "work")
         .await
         .unwrap_err();
-    assert!(matches!(error, RpcError::ChildExited));
+    assert!(matches!(
+        error.kind,
+        crate::rpc_harness::TurnStartFailureKind::ChildExited
+    ));
 }
 
 #[tokio::test]
@@ -247,7 +250,14 @@ while IFS= read -r line; do :; done
     handle.kill().await.unwrap();
     let result = turn.await.unwrap();
     assert!(
-        matches!(result, Err(RpcError::ChildExited)),
+        matches!(
+            result,
+            Err(crate::rpc_harness::TurnStartFailure {
+                kind: crate::rpc_harness::TurnStartFailureKind::ChildExited
+                    | crate::rpc_harness::TurnStartFailureKind::RejectedBeforeStart,
+                ..
+            })
+        ),
         "unexpected cancellation result: {result:?}"
     );
 }

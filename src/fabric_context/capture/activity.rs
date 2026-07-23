@@ -28,6 +28,15 @@ pub(in crate::fabric_context) struct StatusCap {
     pub(in crate::fabric_context) observed_at: u64,
     /// Absent for lifecycle-authoritative local sessions.
     pub(in crate::fabric_context) expiration: Option<u64>,
+    #[serde(default)]
+    pub(in crate::fabric_context) native_failure: Option<NativeFailureCap>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub(in crate::fabric_context) struct NativeFailureCap {
+    pub(in crate::fabric_context) outcome: String,
+    pub(in crate::fabric_context) message: String,
+    pub(in crate::fabric_context) finished_at: u64,
 }
 
 pub(super) fn workspace_caps(
@@ -102,12 +111,17 @@ pub(super) fn status_caps(
                 agent_slugs,
                 backend,
             );
-            let local = store
+            let local_session = store
                 .get_session(&status.pubkey)
                 .ok()
                 .flatten()
-                .filter(|session| session.is_running())
-                .map(|session| crate::session_presence::local(store, &session, Some(&status)));
+                .filter(|session| session.is_running());
+            let native_failure = local_session
+                .as_ref()
+                .and_then(|session| native_failure(store, session));
+            let local = local_session
+                .as_ref()
+                .map(|session| crate::session_presence::local(store, session, Some(&status)));
             StatusCap {
                 host: read::profile_host(store, &status.pubkey),
                 slug: status.slug,
@@ -127,6 +141,7 @@ pub(super) fn status_caps(
                     .as_ref()
                     .map_or(status.last_seen, |row| row.observed_at),
                 expiration: local.is_none().then_some(status.expiration),
+                native_failure,
             }
         })
         .collect::<Vec<_>>();
@@ -147,6 +162,7 @@ pub(super) fn status_caps(
             backend,
         );
         let presence = crate::session_presence::local(store, &session, None);
+        let native_failure = native_failure(store, &session);
         let slug = store
             .session_identity(&session.pubkey)
             .ok()
@@ -164,8 +180,22 @@ pub(super) fn status_caps(
             state_since: presence.state_since,
             observed_at: presence.observed_at,
             expiration: None,
+            native_failure,
         });
     }
     rows.sort_by_key(|row| std::cmp::Reverse(row.changed_at));
     rows
+}
+
+fn native_failure(store: &Store, session: &crate::state::Session) -> Option<NativeFailureCap> {
+    store
+        .latest_native_turn_attempt(&session.pubkey, session.runtime_generation)
+        .ok()
+        .flatten()
+        .filter(|attempt| attempt.outcome.is_failure())
+        .map(|attempt| NativeFailureCap {
+            outcome: attempt.outcome.as_str().to_string(),
+            message: attempt.error_message,
+            finished_at: attempt.finished_at,
+        })
 }
