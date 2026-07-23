@@ -123,14 +123,14 @@ impl PickerState {
                     self.project_filter.as_deref(),
                 ));
             }
-            KeyCode::Char('+')
+            KeyCode::Char('o' | 'O')
                 if self.tab == PickerTab::Sessions
                     && key.modifiers.contains(KeyModifiers::CONTROL) =>
             {
                 self.range.expand();
                 self.refilter();
             }
-            KeyCode::Char('-')
+            KeyCode::Char('u' | 'U')
                 if self.tab == PickerTab::Sessions
                     && key.modifiers.contains(KeyModifiers::CONTROL) =>
             {
