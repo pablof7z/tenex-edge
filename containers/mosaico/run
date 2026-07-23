@@ -255,6 +255,15 @@ container_run() {
     "${IMAGE}" "$@"
 }
 
+container_shell() {
+  local access="$1"
+  shift
+  container_run "${access}" bash -c '
+    export PATH="/workspace/containers/mosaico/shell-bin:${PATH}"
+    exec bash "$@"
+  ' bash "$@"
+}
+
 with_mosaico() {
   local harness="${1}"
   shift
@@ -396,10 +405,10 @@ main() {
       with_mosaico_hosted "$(harness_for_agent "${AGENT}")" mosaico "$@"
       ;;
     shell)
-      container_run readonly bash "$@"
+      container_shell readonly "$@"
       ;;
     shell-rw)
-      container_run writable bash "$@"
+      container_shell writable "$@"
       ;;
     clean-state)
       acquire_profile_lock

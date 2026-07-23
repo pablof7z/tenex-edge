@@ -13,6 +13,10 @@ container:
 bash containers/mosaico/run
 ```
 
+The prompt opens immediately. Its `mosaico` command builds the current checkout
+on first use, then executes the profile-local binary. Later invocations reuse
+Cargo's build cache.
+
 The checkout is read-only by default. Use `shell-rw` when the commands need to
 modify source files:
 
