@@ -65,7 +65,10 @@ pub(super) fn missing_channels(store: &Store, input: &FabricContextInput<'_>) ->
 
 fn channels_for(store: &Store, session: Option<&Session>, scope: &str) -> Vec<String> {
     let Some(rec) = session else {
-        return vec![scope.to_string()];
+        return (!scope.is_empty())
+            .then(|| scope.to_string())
+            .into_iter()
+            .collect();
     };
     let mut channels = store
         .list_session_routes(&rec.pubkey)
@@ -73,7 +76,8 @@ fn channels_for(store: &Store, session: Option<&Session>, scope: &str) -> Vec<St
         .into_iter()
         .map(|(h, _)| h)
         .collect::<Vec<_>>();
-    if !channels.iter().any(|h| h == scope) {
+    channels.retain(|channel| !channel.is_empty());
+    if !scope.is_empty() && !channels.iter().any(|h| h == scope) {
         channels.push(scope.to_string());
     }
     channels

@@ -131,6 +131,26 @@ skills/mosaico-dev/scripts/write-container-profiles "${LAB_ENV}" \
 The writer resets disposable Mosaico state, including SQLite/WAL state and the
 NMP `nmp.redb` store, while preserving provider home and build caches.
 
+## Manual onboarding
+
+To inspect the real first-time setup wizard without pre-generating live-lab
+configuration or importing host provider credentials:
+
+```bash
+bash containers/mosaico/run onboard
+```
+
+This builds the current checkout inside the standard lab image and runs
+`mosaico setup` in the isolated `onboarding` profile. The completed state stays
+under `.container-state/onboarding`. Reset that exact profile before replaying:
+
+```bash
+bash containers/mosaico/run --profile onboarding clean-state
+```
+
+Do not use `write-container-profiles` for this workflow; it intentionally
+bypasses first-time device configuration.
+
 Prewarm the exact profile with a real supported operation:
 
 ```bash

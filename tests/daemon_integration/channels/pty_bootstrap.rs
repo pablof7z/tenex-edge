@@ -10,6 +10,8 @@ mod named;
 mod native_resume;
 #[path = "pty_bootstrap/startup_failure.rs"]
 mod startup_failure;
+#[path = "pty_bootstrap/unscoped.rs"]
+mod unscoped;
 
 fn add_workspace_mapping(home: &Home, channel: &str, path: &Path) {
     std::fs::create_dir_all(path).unwrap();

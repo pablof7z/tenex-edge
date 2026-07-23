@@ -42,16 +42,19 @@ pub(super) fn workspace_abs_path(
 ) -> Result<String> {
     if let Some(cwd) = client_cwd {
         let abs = cwd.to_string_lossy().to_string();
-        let now = crate::util::now_secs();
-        // The recorded workspace path is what the resume path reads back; if the
-        // write is dropped, a later resume falls into the "no workspace" branch and
-        // we'd spawn in the wrong directory. Propagate the failure, don't swallow.
-        state
-            .with_store(|s| {
-                crate::daemon::workspace_path::WorkspacePathResolver::new(s)
-                    .bind_root_path(channel, cwd, now)
-            })
-            .with_context(|| format!("recording workspace path for {channel:?}"))?;
+        if !channel.is_empty() {
+            let now = crate::util::now_secs();
+            // The recorded workspace path is what the resume path reads back; if
+            // the write is dropped, a later resume falls into the "no workspace"
+            // branch and we'd spawn in the wrong directory. Unscoped launches
+            // deliberately have no shared root binding.
+            state
+                .with_store(|s| {
+                    crate::daemon::workspace_path::WorkspacePathResolver::new(s)
+                        .bind_root_path(channel, cwd, now)
+                })
+                .with_context(|| format!("recording workspace path for {channel:?}"))?;
+        }
         state
             .refresh_agent_catalog()
             .context("refreshing native agents for recorded workspace")?;

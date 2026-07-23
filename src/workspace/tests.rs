@@ -58,6 +58,34 @@ fn resolve_errors_when_no_git_and_not_in_map() {
 }
 
 #[test]
+fn resolve_optional_returns_none_only_for_an_unknown_workspace() {
+    let (_g, _home) = isolated_home();
+    let dir = tempfile::tempdir().unwrap();
+    let abs = std::fs::canonicalize(dir.path()).unwrap();
+    write_workspaces_map(&[]);
+
+    if git_toplevel(&abs).is_none() {
+        assert_eq!(resolve_optional(&abs).unwrap(), None);
+    }
+}
+
+#[test]
+fn resolve_optional_preserves_workspace_map_errors() {
+    let (_g, home) = isolated_home();
+    let dir = tempfile::tempdir().unwrap();
+    let abs = std::fs::canonicalize(dir.path()).unwrap();
+    std::fs::write(home.path().join("workspaces.json"), "{not json").unwrap();
+
+    if git_toplevel(&abs).is_none() {
+        let error = resolve_optional(&abs).unwrap_err();
+        assert!(
+            format!("{error:#}").contains("corrupt workspace map"),
+            "error = {error:#}"
+        );
+    }
+}
+
+#[test]
 fn resolve_rejects_a_corrupt_workspace_map() {
     let (_g, home) = isolated_home();
     let dir = tempfile::tempdir().unwrap();

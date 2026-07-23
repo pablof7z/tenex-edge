@@ -1,6 +1,8 @@
 use crate::state::{RegisterSession, RelayEvent, Store};
 use std::sync::Mutex;
 
+mod unscoped;
+
 // Two distinct (fake) pubkeys used throughout — long enough for SQLite but
 // not real Nostr pubkeys (unit tests do not sign or verify).
 const SELF_PK: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";

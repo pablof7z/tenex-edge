@@ -8,6 +8,7 @@ all generated state lives under `.container-state/<profile>` on the host.
 
 ```bash
 bash containers/mosaico/run build-image
+bash containers/mosaico/run onboard
 bash containers/mosaico/run doctor
 bash containers/mosaico/run test-unit
 
@@ -20,6 +21,32 @@ bash containers/mosaico/run goose
 bash containers/mosaico/run opencode
 bash containers/mosaico/run opencode-ollama ollama/qwen2.5-coder:7b
 ```
+
+## Manual onboarding
+
+Run the real first-time setup wizard in the same Apple container environment:
+
+```bash
+bash containers/mosaico/run onboard
+```
+
+This uses the isolated `onboarding` profile, does not import host provider
+credentials, and deliberately starts without a generated Mosaico config. The
+current checkout is built inside the container, then `mosaico setup` is attached
+to the terminal.
+
+The completed state remains at `.container-state/onboarding` for inspection.
+To experience first-time setup again, reset only that profile and rerun it:
+
+```bash
+bash containers/mosaico/run --profile onboarding clean-state
+bash containers/mosaico/run onboard
+```
+
+Use `--profile NAME` before `onboard` when keeping several independent
+walkthroughs. The runner refuses to reuse a profile that already contains a
+device config, so a reconfiguration flow is never presented as first-time
+onboarding.
 
 The `mosaico-dev` profile writer also supports structured agent profiles:
 

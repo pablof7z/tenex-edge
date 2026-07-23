@@ -7,7 +7,10 @@ pub(super) fn record(
     mut requested: Vec<String>,
     _now: u64,
 ) -> Vec<String> {
-    requested.push(primary);
+    requested.retain(|channel| !channel.is_empty());
+    if !primary.is_empty() {
+        requested.push(primary);
+    }
     requested.sort();
     requested.dedup();
     requested
@@ -60,4 +63,15 @@ pub(super) fn schedule_admission(
         }
         let _ = sync_subscriptions(&state).await;
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::record;
+
+    #[tokio::test]
+    async fn unscoped_start_records_no_empty_channel_route() {
+        let state = crate::daemon::server::DaemonState::new_for_test().await;
+        assert!(record(&state, "pk", String::new(), vec![String::new()], 1).is_empty());
+    }
 }

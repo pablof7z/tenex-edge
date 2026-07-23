@@ -43,8 +43,9 @@ pub(super) struct SessionStartPlan {
 
 pub(super) fn plan(request: &SessionStartRequest) -> SessionStartPlan {
     let active = !request.already_running;
+    let scoped = !request.channel_h.is_empty();
     SessionStartPlan {
-        channel_ready: active.then(|| ChannelReadyIntent {
+        channel_ready: (active && scoped).then(|| ChannelReadyIntent {
             channel_h: request.channel_h.clone(),
             room_parent: request.room_parent.clone(),
             readiness_parent: request.readiness_parent.clone(),
@@ -53,6 +54,7 @@ pub(super) fn plan(request: &SessionStartRequest) -> SessionStartPlan {
         }),
         ring_doorbell: request.ring_doorbell,
         replay_chat: active
+            && scoped
             && (request.channel_already_subscribed || request.pty_session.is_some()),
         spawn: active.then(|| EngineStartIntent {
             channel_h: request.channel_h.clone(),
@@ -99,5 +101,16 @@ mod tests {
         assert!(reassert.spawn.is_none());
         assert!(reassert.channel_ready.is_none());
         assert!(reassert.reassert);
+    }
+
+    #[test]
+    fn unscoped_start_skips_channel_effects() {
+        let mut unscoped = request(false);
+        unscoped.channel_h.clear();
+
+        let plan = plan(&unscoped);
+        assert!(plan.channel_ready.is_none());
+        assert!(!plan.replay_chat);
+        assert!(plan.spawn.is_some());
     }
 }

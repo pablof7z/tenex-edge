@@ -112,7 +112,7 @@ async fn hook_dispatch(
         .map(PathBuf::from)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
 
-    if let Some((note, detail)) = applicability::inapplicable(&cwd) {
+    if let Some((note, detail)) = applicability::inapplicable() {
         call_log.note(note, detail);
         return Ok(());
     }

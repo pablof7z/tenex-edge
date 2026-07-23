@@ -56,6 +56,32 @@ async fn fresh_and_resumed_reservations_expose_the_same_assigned_signer() {
 }
 
 #[tokio::test]
+async fn unscoped_reservation_has_no_channel_route() {
+    let state = DaemonState::new_for_test().await;
+    let reservation = reserve_fresh(
+        &state,
+        &agent(),
+        "codex",
+        "codex-pty",
+        "pty",
+        "",
+        None,
+        None,
+    )
+    .unwrap();
+    let session = state
+        .with_store(|store| store.get_session(&reservation.pubkey))
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(session.channel_h, "");
+    assert!(state
+        .with_store(|store| store.list_session_routes(&reservation.pubkey))
+        .unwrap()
+        .is_empty());
+}
+
+#[tokio::test]
 async fn exact_resume_keeps_the_persisted_agent_slug() {
     let state = DaemonState::new_for_test().await;
     let developer = crate::identity::AgentIdentity::per_session("developer", "claude-pty");

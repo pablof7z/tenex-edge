@@ -22,16 +22,11 @@ pub(in crate::cli) async fn launch(request: LaunchRequest) -> Result<()> {
     let cwd = std::env::current_dir().unwrap_or_default();
     let selection = resolve_fresh_agent(&requested_agent, &cwd).await?;
     let agent = selection.slug;
-    let root = crate::daemon::workspace_path::channel_for_path(&cwd).map_err(|error| {
-        anyhow::anyhow!(
-            "{error}; direct launches resolve their workspace from the current directory — run `mosaico channel init` or `git init` there first"
-        )
-    })?;
-
-    let channel = resolve_launch_channel(&root, &agent, channel).await?;
+    let root = crate::daemon::workspace_path::channel_for_path_optional(&cwd)?;
+    let channel = resolve_launch_channel(root.as_deref(), &agent, channel).await?;
     super::fresh::launch(super::fresh::FreshLaunchRequest {
         agent,
-        root,
+        root: root.unwrap_or_default(),
         channel,
         session_name,
         prompt,
@@ -45,10 +40,19 @@ pub(in crate::cli) async fn launch(request: LaunchRequest) -> Result<()> {
 /// workspace channel; a name is resolved to its opaque `channel_h` (created if
 /// absent) BEFORE spawning, so MOSAICO_CHANNEL and provisioning see one id.
 async fn resolve_launch_channel(
-    root: &str,
+    root: Option<&str>,
     agent: &str,
     channel: Option<String>,
 ) -> Result<Option<String>> {
+    let Some(root) = root else {
+        if channel.is_some() {
+            anyhow::bail!(
+                "an unscoped launch cannot select a channel; launch from a known workspace \
+                 or run `mosaico channel init` first"
+            );
+        }
+        return Ok(None);
+    };
     let want_picker = matches!(channel, Some(ref s) if s.is_empty());
     if want_picker {
         use std::io::IsTerminal;
@@ -170,7 +174,7 @@ async fn create_channel_interactive(
 
 #[cfg(test)]
 mod tests {
-    use super::channel_resolve_params;
+    use super::{channel_resolve_params, resolve_launch_channel};
 
     #[test]
     fn named_launch_channel_uses_channel_resolve_contract() {
@@ -183,5 +187,21 @@ mod tests {
                 "create_if_absent": true,
             })
         );
+    }
+
+    #[tokio::test]
+    async fn unknown_workspace_launches_unscoped_without_a_channel() {
+        assert_eq!(
+            resolve_launch_channel(None, "codex", None).await.unwrap(),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn unknown_workspace_cannot_resolve_a_relative_channel() {
+        let error = resolve_launch_channel(None, "codex", Some("ops".into()))
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("unscoped launch"), "{error:#}");
     }
 }
