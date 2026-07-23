@@ -76,6 +76,25 @@ fn recent_channel_messages_limit_keeps_the_newest_rows() {
 }
 
 #[test]
+fn latest_channel_activity_uses_only_accepted_messages() {
+    let store = Store::open_memory().unwrap();
+    for (id, state, at) in [
+        ("old", "accepted", 10),
+        ("failed", "failed", 30),
+        ("latest", "accepted", 20),
+    ] {
+        store
+            .record_message(&record_at(id, "inbound", state, at))
+            .unwrap();
+    }
+
+    assert_eq!(
+        store.latest_accepted_message_at_by_channel().unwrap()["chan"],
+        20
+    );
+}
+
+#[test]
 fn outbound_reply_check_follows_pubkey_across_runtime_replacement() {
     let store = Store::open_memory().unwrap();
     store

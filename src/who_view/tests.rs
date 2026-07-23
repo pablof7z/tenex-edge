@@ -2,6 +2,8 @@ use super::{render_agent_who, render_agent_who_from_aggregation, AgentWhoInput};
 use crate::state::{Status, Store};
 use std::collections::BTreeSet;
 
+mod last_active;
+
 fn advertise_host(
     store: &Store,
     pubkey: &str,

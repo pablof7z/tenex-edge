@@ -34,6 +34,8 @@ pub(super) struct ChannelView {
     pub(super) about: String,
     pub(super) member_count: usize,
     pub(super) active: bool,
+    pub(super) member: bool,
+    pub(super) last_active: Option<String>,
     pub(super) expanded: bool,
     pub(super) members: Vec<MemberView>,
     pub(super) children: Vec<ChannelView>,

@@ -60,6 +60,11 @@ fn render_channel(out: &mut String, channel: &ChannelView, indent: usize) {
     if !channel.active {
         let _ = write!(out, " members=\"{}\"", channel.member_count);
     }
+    if !channel.member {
+        if let Some(last_active) = &channel.last_active {
+            let _ = write!(out, " last-active=\"{}\"", attr(last_active));
+        }
+    }
     if !channel.expanded {
         out.push_str(" />");
         return;

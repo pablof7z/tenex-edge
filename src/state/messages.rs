@@ -5,6 +5,7 @@
 //! pubkeys. Delivery state still lives in `inbox`.
 
 use super::*;
+use std::collections::BTreeMap;
 
 mod wait_cursor;
 
@@ -215,6 +216,19 @@ impl Store {
         ))?;
         let rows = stmt.query_map(params![since, limit], row_to_message)?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Latest accepted chat activity by channel. Pending or failed optimistic
+    /// sends have not become channel activity and therefore do not contribute.
+    pub fn latest_accepted_message_at_by_channel(&self) -> Result<BTreeMap<String, u64>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT channel_h, MAX(created_at)
+             FROM messages
+             WHERE sync_state='accepted' AND channel_h<>''
+             GROUP BY channel_h",
+        )?;
+        let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        Ok(rows.collect::<rusqlite::Result<BTreeMap<_, _>>>()?)
     }
 
     pub fn pubkey_has_outbound_message_since(&self, pubkey: &str, since: u64) -> Result<bool> {

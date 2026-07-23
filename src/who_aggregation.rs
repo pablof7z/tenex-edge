@@ -23,6 +23,7 @@ pub(crate) struct WhoAggregation {
     channels_by_id: BTreeMap<String, Channel>,
     members: BTreeMap<String, Vec<ChannelMember>>,
     statuses: BTreeMap<String, Vec<Status>>,
+    latest_message_at: BTreeMap<String, u64>,
     profiles: BTreeMap<String, Profile>,
     identities: BTreeMap<String, SessionIdentity>,
     sessions_by_pubkey: BTreeMap<String, Session>,
@@ -87,6 +88,9 @@ impl WhoAggregation {
         for rows in statuses.values_mut() {
             rows.sort_by_key(|status| Reverse(status.updated_at));
         }
+        let latest_message_at = store
+            .latest_accepted_message_at_by_channel()
+            .context("who aggregation: failed to read latest channel activity")?;
         let mut referenced_pubkeys = BTreeSet::new();
         referenced_pubkeys.extend(local_sessions.iter().map(|session| session.pubkey.clone()));
         referenced_pubkeys.extend(
@@ -162,6 +166,7 @@ impl WhoAggregation {
             channels_by_id,
             members,
             statuses,
+            latest_message_at,
             profiles,
             identities,
             sessions_by_pubkey,
@@ -192,6 +197,10 @@ impl WhoAggregation {
             .get(channel_h)
             .map(Vec::as_slice)
             .unwrap_or_default()
+    }
+
+    pub(crate) fn latest_message_at(&self, channel_h: &str) -> Option<u64> {
+        self.latest_message_at.get(channel_h).copied()
     }
 
     pub(crate) fn public_presence(
