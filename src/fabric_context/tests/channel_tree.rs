@@ -5,6 +5,7 @@ fn session_view_has_self_and_chatter_human_view_does_not() {
     let store = seed_store();
     let rec = session(&store);
     chat(&store, "m1", "root", 900, "post join context", "[]");
+    publish_idle_status(&store, OTHER_PK, "reviewer", "Reviewing");
 
     let agent = render_fabric_context(&store, input(Some(&rec), "root", 0, 1_000, false))
         .expect("session view should render");
@@ -17,7 +18,19 @@ fn session_view_has_self_and_chatter_human_view_does_not() {
     assert!(agent.contains("<workspace name=\"root\""));
     assert!(!agent.contains("<workspace name=\"root\" channel="));
     assert!(agent.contains("<channel name=\"#task\" ref=\"root.task\""));
-    assert!(!agent.contains("<channel name=\"#root\""));
+    assert!(agent.contains("<channel name=\"#root\" ref=\"root\""));
+    let workspace = agent.find("<workspace name=\"root\"").unwrap();
+    let root_channel = agent.find("<channel name=\"#root\" ref=\"root\"").unwrap();
+    let members = agent.find("<members>").unwrap();
+    assert!(
+        workspace < root_channel && root_channel < members,
+        "got: {agent}"
+    );
+    let workspace_tag = &agent[workspace..workspace + agent[workspace..].find('>').unwrap()];
+    assert!(
+        !workspace_tag.contains("members="),
+        "workspace must not own membership: {agent}"
+    );
     assert!(!agent.contains("<subchannels>"));
     assert!(!agent.contains("<channels-not-joined>"));
 

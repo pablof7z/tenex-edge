@@ -1,6 +1,6 @@
 use std::fmt::Write as _;
 
-use super::{esc_attr, render_channel, render_channel_body};
+use super::{esc_attr, render_channel};
 use crate::fabric_context::model::{ChannelBlock, WorkspaceRow};
 
 pub(super) fn render_workspace_block(
@@ -19,15 +19,10 @@ pub(super) fn render_workspace_block(
     }
     out.push('>');
     if let Some(root) = root {
-        render_channel_body(out, root, 4);
+        render_channel(out, root, 4);
     }
-    if root.is_some_and(|root| !root.children.is_empty()) || !channels.is_empty() {
+    if !channels.is_empty() {
         out.push_str("\n    <channels>");
-        if let Some(root) = root {
-            for channel in &root.children {
-                render_channel(out, channel, 6);
-            }
-        }
         for channel in channels {
             render_channel(out, channel, 6);
         }

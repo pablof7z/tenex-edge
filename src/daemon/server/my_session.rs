@@ -125,12 +125,10 @@ mod tests {
         assert!(first.contains("<self name=\"@codex\""), "{first}");
         assert!(first.contains("headless=\"on\""), "{first}");
         assert!(first.contains("<hosts>"), "{first}");
-        assert!(
-            first.contains("<workspace name=\"alpha\" about=\"Alpha\" members=\"1\" hosts=\"\">")
-        );
-        assert!(
-            first.contains("<workspace name=\"beta\" about=\"Beta\" members=\"1\" hosts=\"\" />")
-        );
+        assert!(first.contains("<workspace name=\"alpha\" about=\"Alpha\" hosts=\"\">"));
+        assert!(first.contains("<channel name=\"alpha\" id=\"alpha\" members=\"1\">"));
+        assert!(first.contains("<workspace name=\"beta\" about=\"Beta\" hosts=\"\">"));
+        assert!(first.contains("<channel name=\"beta\" id=\"beta\" members=\"1\" />"));
 
         state.with_store(|s| s.grant_session_route(&pubkey, "beta", 20).unwrap());
         let second = rpc_my_session(
@@ -142,9 +140,8 @@ mod tests {
         )
         .unwrap();
         let second = second["fabric"].as_str().expect("agent briefing");
-        assert!(
-            second.contains("<workspace name=\"beta\" about=\"Beta\" members=\"1\" hosts=\"\">")
-        );
+        assert!(second.contains("<workspace name=\"beta\" about=\"Beta\" hosts=\"\">"));
+        assert!(second.contains("<channel name=\"beta\" id=\"beta\" members=\"1\">"));
 
         let seen_cursor = state.with_store(|s| {
             s.get_session(&pubkey)

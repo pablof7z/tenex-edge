@@ -6,8 +6,7 @@ pub(crate) struct FabricView {
     pub(in crate::fabric_context) self_row: Option<SelfRow>,
     pub(in crate::fabric_context) workspace: WorkspaceRow,
     pub(in crate::fabric_context) agents: Vec<AgentRow>,
-    /// Activity owned by the workspace's root channel. Rendered directly on the
-    /// workspace so the root is not repeated as a child channel.
+    /// Activity owned by the workspace's root channel.
     pub(in crate::fabric_context) root: Option<ChannelBlock>,
     pub(in crate::fabric_context) channels: Vec<ChannelBlock>,
     /// Presence deltas from workspace roots other than the current session's.

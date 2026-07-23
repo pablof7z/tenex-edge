@@ -23,11 +23,8 @@ pub(super) struct AgentCapabilityView {
 pub(super) struct WorkspaceView {
     pub(super) name: String,
     pub(super) about: String,
-    pub(super) member_count: usize,
     pub(super) hosts: Vec<String>,
-    pub(super) expanded: bool,
-    pub(super) members: Vec<MemberView>,
-    pub(super) channels: Vec<ChannelView>,
+    pub(super) root: ChannelView,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

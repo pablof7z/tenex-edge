@@ -41,23 +41,9 @@ fn render_workspace(out: &mut String, workspace: &WorkspaceView) {
     if !workspace.about.is_empty() {
         let _ = write!(out, " about=\"{}\"", attr(&workspace.about));
     }
-    let _ = write!(
-        out,
-        " members=\"{}\" hosts=\"{}\"",
-        workspace.member_count,
-        attr(&workspace.hosts.join(","))
-    );
-    if !workspace.expanded {
-        out.push_str(" />");
-        return;
-    }
-    out.push('>');
-    render_members(out, &workspace.members, 6);
-    out.push_str("\n      <channels>");
-    for channel in &workspace.channels {
-        render_channel(out, channel, 8);
-    }
-    out.push_str("\n      </channels>\n    </workspace>");
+    let _ = write!(out, " hosts=\"{}\">", attr(&workspace.hosts.join(",")));
+    render_channel(out, &workspace.root, 6);
+    out.push_str("\n    </workspace>");
 }
 
 fn render_channel(out: &mut String, channel: &ChannelView, indent: usize) {

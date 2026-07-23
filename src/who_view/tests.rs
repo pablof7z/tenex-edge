@@ -190,13 +190,16 @@ fn lists_global_agents_and_compacts_other_workspaces() {
     );
     assert!(
         xml.contains(
-            "<workspace name=\"alpha\" about=\"Alpha workspace\" members=\"2\" hosts=\"remoteBackend1\""
+            "<workspace name=\"alpha\" about=\"Alpha workspace\" hosts=\"remoteBackend1\">"
         ),
         "{xml}"
     );
-    assert!(xml.contains(
-        "<workspace name=\"beta\" about=\"Beta workspace\" members=\"1\" hosts=\"remoteBackend1\" />"
-    ));
+    assert!(xml.contains("<channel name=\"alpha\" id=\"alpha\" members=\"2\">"));
+    assert!(
+        xml.contains("<workspace name=\"beta\" about=\"Beta workspace\" hosts=\"remoteBackend1\">")
+    );
+    assert!(xml.contains("<channel name=\"beta\" id=\"beta\" members=\"1\" />"));
+    assert!(!xml.contains("<workspace name=\"alpha\" members="), "{xml}");
     assert!(!xml.contains(" path="), "{xml}");
     assert!(!xml.contains(" channel=\"alpha\""), "{xml}");
 }
@@ -244,11 +247,11 @@ fn agent_about_is_compact_and_bounded() {
 }
 
 #[test]
-fn workspace_carries_root_members_and_membership_gated_children() {
+fn root_channel_carries_members_and_membership_gated_children() {
     let xml = render(false);
     assert!(
         xml.contains(
-            "<workspace name=\"alpha\" about=\"Alpha workspace\" members=\"2\" hosts=\"remoteBackend1\""
+            "<workspace name=\"alpha\" about=\"Alpha workspace\" hosts=\"remoteBackend1\">"
         ),
         "{xml}"
     );
@@ -257,7 +260,7 @@ fn workspace_carries_root_members_and_membership_gated_children() {
         "<agent name=\"@quill-peak-369-codex\" state=\"idle\" status=\"Implement awareness\""
     ));
     assert!(
-        xml.contains("members=\"2\" hosts=\"remoteBackend1\">\n      <members>"),
+        xml.contains("<channel name=\"alpha\" id=\"alpha\" members=\"2\">\n        <members>"),
         "{xml}"
     );
     assert!(xml.contains(
@@ -270,8 +273,9 @@ fn workspace_carries_root_members_and_membership_gated_children() {
 #[test]
 fn exact_session_joined_workspace_set_controls_expansion() {
     let xml = render(true);
-    assert!(xml.contains(
-        "<workspace name=\"beta\" about=\"Beta workspace\" members=\"1\" hosts=\"remoteBackend1\">"
-    ));
+    assert!(
+        xml.contains("<workspace name=\"beta\" about=\"Beta workspace\" hosts=\"remoteBackend1\">")
+    );
+    assert!(xml.contains("<channel name=\"beta\" id=\"beta\" members=\"1\">"));
     assert!(xml.contains("<agent name=\"@quill-peak-369-codex\" state=\"offline\""));
 }

@@ -38,7 +38,7 @@ fn agent_context_omits_capabilities_while_human_view_keeps_host_profile() {
     let text = render_fabric_context(&empty, input(Some(&solo), "solo", 0, 100, true)).unwrap();
     assert!(text.contains("<workspace name=\"solo\""));
     assert!(!text.contains("<workspace name=\"solo\" channel="));
-    assert!(!text.contains("<channel name=\"#solo\""));
+    assert!(text.contains("<channel name=\"#solo\" ref=\"solo\""));
     assert!(!text.contains("<members>"), "got: {text}");
 }
 

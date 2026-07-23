@@ -93,10 +93,33 @@ fn workspace_view(
     input: &AgentWhoInput<'_>,
 ) -> anyhow::Result<WorkspaceView> {
     let meta = aggregation.channel(root);
-    let members = member_views(aggregation, root, input);
+    Ok(WorkspaceView {
+        name: root.to_string(),
+        about: meta
+            .map(|channel| channel.about.clone())
+            .unwrap_or_default(),
+        hosts: aggregation
+            .backend_profiles_for_root(Some(root))
+            .into_iter()
+            .map(|profile| profile.host.clone())
+            .filter(|host| !host.is_empty())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect(),
+        root: root_channel_view(aggregation, by_parent, root, input)?,
+    })
+}
+
+fn root_channel_view(
+    aggregation: &crate::who_aggregation::WhoAggregation,
+    by_parent: &BTreeMap<String, Vec<Channel>>,
+    root: &str,
+    input: &AgentWhoInput<'_>,
+) -> anyhow::Result<ChannelView> {
     let expanded = input.expanded_workspaces.contains(root);
-    let channels = if expanded {
-        let mut seen = BTreeSet::from([root.to_string()]);
+    let members = member_views(aggregation, root, input);
+    let mut seen = BTreeSet::from([root.to_string()]);
+    let children = if expanded {
         by_parent
             .get(root)
             .map(Vec::as_slice)
@@ -116,23 +139,14 @@ fn workspace_view(
     } else {
         Vec::new()
     };
-    Ok(WorkspaceView {
-        name: root.to_string(),
-        about: meta
-            .map(|channel| channel.about.clone())
-            .unwrap_or_default(),
+    Ok(ChannelView {
+        name: aggregation.channel_name(root).to_string(),
+        id: aggregation.full_channel_ref(root)?,
+        about: String::new(),
         member_count: members.len(),
-        hosts: aggregation
-            .backend_profiles_for_root(Some(root))
-            .into_iter()
-            .map(|profile| profile.host.clone())
-            .filter(|host| !host.is_empty())
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect(),
         expanded,
         members: if expanded { members } else { Vec::new() },
-        channels,
+        children,
     })
 }
 

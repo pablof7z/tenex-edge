@@ -185,7 +185,7 @@ fn mention_rows_are_marked_important_and_truncated_with_recovery_id() {
         .expect("mention should render");
     assert!(text.contains("<workspace name=\"root\""));
     assert!(!text.contains("<workspace name=\"root\" channel="));
-    assert!(!text.contains("<channel name=\"#root\""));
+    assert!(text.contains("<channel name=\"#root\" ref=\"root\""));
     assert!(text.contains("<message from=\"@reviewer\" id=\"mentio\">"));
     assert!(text.contains("Reply via: `mosaico channel reply mentio --message \"hello world\"`"));
     assert!(text.contains("Attachments: add `--attach label=/path/to/file`"));
