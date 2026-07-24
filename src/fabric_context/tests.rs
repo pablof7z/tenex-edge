@@ -8,6 +8,7 @@ mod host_profiles;
 mod member_render;
 mod reactions;
 mod session_title;
+mod topology;
 
 const SELF_PK: &str = "self-pubkey";
 const OTHER_PK: &str = "other-pubkey";
@@ -123,7 +124,6 @@ fn human_who_renderer_is_non_xml_and_terminal_friendly() {
     assert!(human.contains("@coder"), "got: {human}");
     assert!(human.contains("idle"), "got: {human}");
     assert!(!human.contains(" member "), "got: {human}");
-    assert!(!human.contains(" admin "), "got: {human}");
     assert!(!human.contains("<mosaico>"), "got: {human}");
     assert!(!human.contains("<member"), "got: {human}");
 }
@@ -165,7 +165,7 @@ fn archived_joined_channels_are_hidden_from_fabric_context() {
 
     let text = render_fabric_context(&store, input(Some(&rec), "root", 0, 300, true))
         .expect("forced context should render");
-    assert!(!text.contains("name=\"#archived\""));
+    assert!(!text.contains("name=\"archived\""));
     assert!(!text.contains("[ARCHIVED] done"));
     assert!(!text.contains("old task note"));
 }
@@ -185,7 +185,7 @@ fn mention_rows_are_marked_important_and_truncated_with_recovery_id() {
         .expect("mention should render");
     assert!(text.contains("<workspace name=\"root\""));
     assert!(!text.contains("<workspace name=\"root\" channel="));
-    assert!(text.contains("<channel name=\"#root\" ref=\"/root\""));
+    assert!(text.contains("<channel name=\"root\" id=\"/root\""));
     assert!(text.contains("<message from=\"@reviewer\" id=\"mentio\">"));
     assert!(text.contains("Reply via: `mosaico channel reply mentio --message \"hello world\"`"));
     assert!(text.contains("Attachments: add `--attach label=/path/to/file`"));
@@ -283,7 +283,7 @@ fn empty_delta_is_silent_unless_forced() {
 
     let forced = render_fabric_context(&store, input(Some(&rec), "root", 200, 300, true))
         .expect("explicit who context should still render");
-    assert!(forced.contains("Agent: coder · Session: @coder · Backend: laptop"));
+    assert!(forced.contains("<self name=\"@coder\" host=\"laptop\" headless=\"off\""));
 }
 
 #[test]
@@ -297,7 +297,7 @@ fn missing_channels_are_warned_not_rendered() {
     let direct = render_fabric_context(&store, input(Some(&rec), "ghost", 0, 100, false))
         .expect("missing channel warning should render");
     assert!(direct.contains("Fabric channel \"ghost\" is unavailable"));
-    assert!(!direct.contains("<channel name=\"#ghost\""));
+    assert!(!direct.contains("<channel name=\"ghost\""));
     assert!(!direct.contains("<members>"));
 
     let captured = capture_inputs(&store, &input(Some(&rec), "ghost", 0, 100, false)).unwrap();
@@ -315,7 +315,7 @@ fn quiet_forced_delta_renders_no_new_activity_note() {
 
     let text = render_fabric_context(&store, input(Some(&rec), "root", 200, 300, true))
         .expect("forced who should always render");
-    assert!(text.contains("Agent: coder · Session: @coder · Backend: laptop"));
+    assert!(text.contains("<self name=\"@coder\" host=\"laptop\" headless=\"off\""));
     assert!(text.contains("<no-new-activity workspace=\"root\">"));
     assert!(text.contains("The fabric surfaces only what changed"));
     // The tell-tale empty skeleton must NOT appear: no channel/members blocks.

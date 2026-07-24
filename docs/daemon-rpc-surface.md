@@ -97,8 +97,8 @@ params: {"pty_session": "…"|null, "harness_session": "…"|null,
          "watch_pid": N|null, ...}
 result: {"fabric": "<mosaico>…</mosaico>"}
 ```
-Strict self-scoped agent briefing. It resolves the exact live caller and emits
-`<self>`, `<hosts>` with host-qualified agents and compact `about`, workspaces,
+Strict self-scoped agent briefing. It resolves the exact live caller, requests
+canonical state at cursor `0`, and emits `<self>`, host agents, workspaces,
 channels, and member sessions. A workspace lists only advertising hosts whose
 management keys are current admins; rows expose neither repeated channel ids nor
 local paths. Each workspace contains its root `<channel>` and member data belongs
@@ -124,8 +124,8 @@ mentions from the inbox ledger, and returns the hook fabric context. A first
 turn (`seen_cursor=0`) renders the relevant channel snapshot;
 later turns render only rows changed since the session cursor. The cursor
 advances after rendering. An absent harness locator yields `context: null`.
-Hook context does not embed host capability inventory, and profile-only updates
-do not emit a delta.
+`my_session` and hooks use the same capture, assembly, and XML renderer. Profile
+capabilities follow their own cursor delta policy like other canonical nodes.
 
 ### `turn_check`
 ```jsonc

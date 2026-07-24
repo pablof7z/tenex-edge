@@ -1,102 +1,110 @@
+//! Sole agent-facing XML serializer; node selection happens before rendering,
+//! so this module cannot vary by cursor, caller, or delivery surface.
+
 use crate::fabric_context::model::*;
+use crate::fabric_context::xml::{attr, text};
 use std::fmt::Write as _;
-pub(in crate::fabric_context) mod all_workspaces;
-mod workspace;
-use workspace::render_workspace_block;
 pub(in crate::fabric_context) fn render_view(view: &FabricView) -> String {
     let mut out = String::from("<mosaico>");
     render_self(&mut out, view.self_row.as_ref());
-    render_workspace(&mut out, view);
+    render_hosts(&mut out, view.hosts.as_deref());
+    render_workspaces(&mut out, view.workspaces.as_deref());
+    render_important(&mut out, &view.important);
+    render_reactions(&mut out, &view.reactions, view.reactions_omitted);
+    render_warnings(&mut out, &view.warnings);
+    render_notices(&mut out, &view.notices);
     out.push_str("\n</mosaico>");
     out
 }
-
-pub(super) fn render_workspace(out: &mut String, view: &FabricView) {
-    if view.is_quiet_delta() {
-        render_no_new_activity(out, &view.workspace.name);
-        return;
-    }
-    if !view.workspace.name.is_empty() {
-        render_workspace_block(out, &view.workspace, view.root.as_ref(), &view.channels);
-    }
-    for activity in &view.other_workspaces {
-        render_workspace_block(
-            out,
-            &activity.workspace,
-            activity.root.as_ref(),
-            &activity.channels,
-        );
-    }
-    render_important(out, &view.important);
-    render_reactions(out, &view.reactions, view.reactions_omitted);
-    render_warnings(out, &view.warnings);
-}
-
-fn render_no_new_activity(out: &mut String, workspace: &str) {
-    let _ = write!(
-        out,
-        "\n\n  <no-new-activity workspace=\"{}\">\
-         \n    Nothing new since your last check. The fabric surfaces only what \
-         changed — your channels, members, and messages are unchanged, not gone.\
-         \n  </no-new-activity>",
-        esc_attr(workspace)
-    );
-}
-
 fn render_self(out: &mut String, row: Option<&SelfRow>) {
     let Some(row) = row else {
         return;
     };
+    let name = attr(row.name.trim_start_matches('@'));
+    let host = attr(&row.host);
+    let headless = if row.headless { "on" } else { "off" };
     let _ = write!(
         out,
-        "\n  Agent: {} · Session: @{} · Backend: {}",
-        esc_text(&row.agent_slug),
-        esc_text(&row.agent),
-        esc_text(&row.host)
+        "\n  <self name=\"@{name}\" host=\"{host}\" headless=\"{headless}\""
     );
     if !row.title.is_empty() {
-        let _ = write!(
-            out,
-            "\n  Current title: \"{}\"\n  [if your title drifted you can update it]",
-            esc_text(&row.title)
-        );
-    } else {
-        out.push_str(
-            "\n  No session status set — once your outcome is clear, set a short one with \
-             `mosaico my session status \"<outcome>\"` so peers can see what you own.",
-        );
+        let _ = write!(out, " title=\"{}\"", attr(&row.title));
+    }
+    out.push_str(" />");
+    if !row.hint.is_empty() {
+        let _ = write!(out, "\n  <notice>{}</notice>", text(&row.hint));
     }
 }
-
-pub(super) fn render_channel(out: &mut String, channel: &ChannelBlock, indent: usize) {
+fn render_hosts(out: &mut String, hosts: Option<&[HostRow]>) {
+    let Some(hosts) = hosts else {
+        return;
+    };
+    out.push_str("\n  <hosts>");
+    for host in hosts {
+        let _ = write!(out, "\n    <host name=\"{}\">", attr(&host.name));
+        out.push_str("\n      <agents>");
+        for agent in &host.agents {
+            let _ = write!(out, "\n        <agent ref=\"{}\"", attr(&agent.reference));
+            if !agent.about.is_empty() {
+                let _ = write!(out, " about=\"{}\"", attr(&agent.about));
+            }
+            out.push_str(" />");
+        }
+        out.push_str("\n      </agents>\n    </host>");
+    }
+    out.push_str("\n  </hosts>");
+}
+fn render_workspaces(out: &mut String, workspaces: Option<&[WorkspaceView]>) {
+    let Some(workspaces) = workspaces else {
+        return;
+    };
+    out.push_str("\n  <workspaces>");
+    for workspace in workspaces {
+        render_workspace(out, workspace);
+    }
+    out.push_str("\n  </workspaces>");
+}
+fn render_workspace(out: &mut String, workspace: &WorkspaceView) {
+    let _ = write!(out, "\n    <workspace name=\"{}\"", attr(&workspace.name));
+    if !workspace.about.is_empty() {
+        let _ = write!(out, " about=\"{}\"", attr(&workspace.about));
+    }
+    let _ = write!(out, " hosts=\"{}\">", attr(&workspace.hosts.join(",")));
+    if let Some(root) = &workspace.root {
+        render_channel(out, root, 6);
+    }
+    for channel in &workspace.channels {
+        render_channel(out, channel, 6);
+    }
+    out.push_str("\n    </workspace>");
+}
+fn render_channel(out: &mut String, channel: &ChannelBlock, indent: usize) {
     let pad = " ".repeat(indent);
-    let _ = write!(
-        out,
-        "\n{pad}<channel name=\"#{}\" ref=\"{}\"",
-        esc_attr(&channel.name),
-        esc_attr(&channel.reference)
-    );
+    let name = attr(&channel.name);
+    let id = attr(&channel.id);
+    let _ = write!(out, "\n{pad}<channel name=\"{name}\" id=\"{id}\"");
     if !channel.about.is_empty() {
-        let _ = write!(out, " about=\"{}\"", esc_attr(&channel.about));
+        let _ = write!(out, " about=\"{}\"", attr(&channel.about));
+    }
+    if let Some(count) = channel.member_count {
+        let _ = write!(out, " members=\"{count}\"");
+    }
+    if let Some(last_active) = &channel.last_active {
+        let _ = write!(out, " last-active=\"{}\"", attr(last_active));
     }
     if channel.is_compact() {
         out.push_str(" />");
         return;
     }
     out.push('>');
-    render_channel_body(out, channel, indent + 2);
+    render_members(out, &channel.members, indent + 2);
+    render_presence(out, &channel.presence, indent + 2);
+    render_messages(out, channel, indent + 2);
     for child in &channel.children {
         render_channel(out, child, indent + 2);
     }
     let _ = write!(out, "\n{pad}</channel>");
 }
-
-pub(super) fn render_channel_body(out: &mut String, channel: &ChannelBlock, indent: usize) {
-    render_members(out, &channel.members, indent);
-    render_presence(out, &channel.presence, indent);
-    render_messages(out, channel, indent);
-}
-
 fn render_members(out: &mut String, members: &[MemberRow], indent: usize) {
     if members.is_empty() {
         return;
@@ -105,18 +113,23 @@ fn render_members(out: &mut String, members: &[MemberRow], indent: usize) {
     let child_pad = " ".repeat(indent + 2);
     let _ = write!(out, "\n{pad}<members>");
     for member in members {
+        let tag = match member.kind {
+            MemberKind::Agent => "agent",
+            MemberKind::Human => "human",
+        };
+        let name = attr(member.name.trim_start_matches('@'));
+        let state = member.state.as_str();
         let _ = write!(
             out,
-            "\n{child_pad}<member ref=\"@{}\" state=\"{}\" status=\"{}\" since=\"{}\" />",
-            esc_attr(&member.reference),
-            member.state.as_str(),
-            esc_attr(&member.status),
-            esc_attr(&member.since)
+            "\n{child_pad}<{tag} name=\"@{name}\" state=\"{state}\""
         );
+        if !member.status.is_empty() {
+            let _ = write!(out, " status=\"{}\"", attr(&member.status));
+        }
+        let _ = write!(out, " since=\"{}\" />", attr(&member.since));
     }
     let _ = write!(out, "\n{pad}</members>");
 }
-
 fn render_presence(out: &mut String, presence: &[PresenceRow], indent: usize) {
     if presence.is_empty() {
         return;
@@ -126,29 +139,30 @@ fn render_presence(out: &mut String, presence: &[PresenceRow], indent: usize) {
     let _ = write!(out, "\n{pad}<recent-presence>");
     for status in presence {
         if !status.status.is_empty() {
+            let name = attr(status.name.trim_start_matches('@'));
+            let state = status.state.as_str();
+            let status_text = attr(&status.status);
+            let since = attr(&status.since);
             let _ = write!(
                 out,
-                "\n{child_pad}<status ref=\"@{}\" state=\"{}\" text=\"{}\" since=\"{}\" />",
-                esc_attr(&status.reference),
-                status.state.as_str(),
-                esc_attr(&status.status),
-                esc_attr(&status.since)
+                "\n{child_pad}<status name=\"@{name}\" state=\"{state}\" \
+                 text=\"{status_text}\" since=\"{since}\" />"
             );
         }
         if let Some(failure) = &status.native_failure {
+            let name = attr(status.name.trim_start_matches('@'));
+            let outcome = attr(&failure.outcome);
+            let message = attr(&failure.message);
+            let since = attr(&failure.since);
             let _ = write!(
                 out,
-                "\n{child_pad}<native-outcome ref=\"@{}\" outcome=\"{}\" text=\"{}\" since=\"{}\" />",
-                esc_attr(&status.reference),
-                esc_attr(&failure.outcome),
-                esc_attr(&failure.message),
-                esc_attr(&failure.since)
+                "\n{child_pad}<native-outcome name=\"@{name}\" outcome=\"{outcome}\" \
+                 text=\"{message}\" since=\"{since}\" />"
             );
         }
     }
     let _ = write!(out, "\n{pad}</recent-presence>");
 }
-
 fn render_messages(out: &mut String, channel: &ChannelBlock, indent: usize) {
     if channel.messages.is_empty() && channel.omitted == 0 {
         return;
@@ -170,12 +184,9 @@ fn render_messages(out: &mut String, channel: &ChannelBlock, indent: usize) {
             continue;
         }
         let short = crate::util::short_id(&message.id);
-        let _ = write!(
-            out,
-            "\n{child_pad}<message from=\"@{}\" id=\"{}\"",
-            esc_attr(&message.from),
-            esc_attr(&short)
-        );
+        let from = attr(&message.from);
+        let id = attr(&short);
+        let _ = write!(out, "\n{child_pad}<message from=\"@{from}\" id=\"{id}\"");
         if !message.recipients.is_empty() {
             let recipients = message
                 .recipients
@@ -183,80 +194,77 @@ fn render_messages(out: &mut String, channel: &ChannelBlock, indent: usize) {
                 .map(|recipient| format!("@{recipient}"))
                 .collect::<Vec<_>>()
                 .join(" ");
-            let _ = write!(out, " for=\"{}\"", esc_attr(&recipients));
+            let _ = write!(out, " for=\"{}\"", attr(&recipients));
         }
-        let _ = write!(out, " age=\"{}\">", esc_attr(&message.age));
-        out.push_str(&esc_text(&message.body));
+        let _ = write!(out, " age=\"{}\">", attr(&message.age));
+        out.push_str(&text(&message.body));
         if message.truncated {
             let _ = write!(
                 out,
                 "\n{detail_pad}[message truncated; run `mosaico channel read --id {}`]",
-                esc_text(&short)
+                text(&short)
             );
         }
         out.push_str("</message>");
     }
     let _ = write!(out, "\n{pad}</chatter>");
 }
-
 fn render_mention_message(out: &mut String, message: &MessageRow, pad: &str) {
     let short = crate::util::short_id(&message.id);
+    let from = attr(&message.from);
+    let id = attr(&short);
+    let body = text(&message.body);
     let _ = write!(
         out,
-        "\n{pad}<message from=\"@{}\" id=\"{}\">{}</message>",
-        esc_attr(&message.from),
-        esc_attr(&short),
-        esc_text(&message.body)
+        "\n{pad}<message from=\"@{from}\" id=\"{id}\">{body}</message>"
     );
     let _ = write!(
         out,
         "\n{pad}Reply via: `mosaico channel reply {} --message \"hello world\"`",
-        esc_text(&short)
+        text(&short)
     );
     let _ = write!(out, "\n{pad}{}", crate::attachment::AGENT_HINT);
     let _ = write!(
         out,
         "\n{pad}Ack-only? `mosaico channel react {} 👍` — never interrupts. \
          Reply only with substantive content; never send a bare \"ok\"/\"noted\".",
-        esc_text(&short)
+        text(&short)
     );
 }
-
 fn render_important(out: &mut String, rows: &[ImportantRow]) {
     if rows.is_empty() {
         return;
     }
-    out.push_str("\n\n  <important>");
+    out.push_str("\n  <important>");
     for row in rows {
+        let channel = attr(&row.channel_ref);
+        let message_id = attr(&crate::util::short_id(&row.message_id));
         let _ = write!(
             out,
-            "\n    <mention channel=\"{}\" message_id=\"{}\" />",
-            esc_attr(&row.channel_ref),
-            esc_attr(&crate::util::short_id(&row.message_id))
+            "\n    <mention channel=\"{channel}\" message_id=\"{message_id}\" />"
         );
     }
     out.push_str("\n  </important>");
 }
-
 fn render_reactions(out: &mut String, rows: &[ReactionRow], omitted: usize) {
-    if rows.is_empty() {
+    if rows.is_empty() && omitted == 0 {
         return;
     }
-    out.push_str("\n\n  <reactions>");
+    out.push_str("\n  <reactions>");
     for row in rows {
         let reactors = row
             .reactors
             .iter()
-            .map(|r| format!("@{}", esc_text(r)))
+            .map(|reactor| format!("@{}", text(reactor)))
             .collect::<Vec<_>>()
             .join(" ");
         let _ = write!(
             out,
             "\n    {} {} on your message \"{}\" ({})",
             reactors,
-            esc_text(&row.emoji),
-            esc_text(&row.target_snippet),
-            esc_text(&row.age)
+            text(&row.emoji),
+            text(&row.target_snippet),
+            text(&row.age)
         );
     }
     if omitted > 0 {
@@ -264,25 +272,25 @@ fn render_reactions(out: &mut String, rows: &[ReactionRow], omitted: usize) {
     }
     out.push_str("\n  </reactions>");
 }
-
 fn render_warnings(out: &mut String, rows: &[WarningRow]) {
     if rows.is_empty() {
         return;
     }
-    out.push_str("\n\n  <warnings>");
+    out.push_str("\n  <warnings>");
     for row in rows {
-        let _ = write!(out, "\n    <warning>{}</warning>", esc_text(&row.text));
+        let _ = write!(out, "\n    <warning>{}</warning>", text(&row.text));
     }
     out.push_str("\n  </warnings>");
 }
-
-pub(super) fn esc_attr(input: &str) -> String {
-    esc_text(input).replace('"', "&quot;")
-}
-
-fn esc_text(input: &str) -> String {
-    input
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
+fn render_notices(out: &mut String, rows: &[NoticeRow]) {
+    for NoticeRow::NoNewActivity { workspace } in rows {
+        let _ = write!(
+            out,
+            "\n  <no-new-activity workspace=\"{}\">\
+             \n    Nothing new since your last check. The fabric surfaces only what \
+             changed — your channels, members, and messages are unchanged, not gone.\
+             \n  </no-new-activity>",
+            attr(workspace)
+        );
+    }
 }

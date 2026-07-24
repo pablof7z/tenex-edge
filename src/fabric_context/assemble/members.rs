@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use super::projected_presence;
 use crate::fabric_context::capture::{MembersInput, StatusCap, ViewInputs};
-use crate::fabric_context::model::MemberRow;
+use crate::fabric_context::model::{MemberKind, MemberRow};
 use crate::util::relative_time;
 
 /// Full-snapshot member rows from the frozen roster, profile, and status inputs.
@@ -23,7 +23,7 @@ pub(super) fn member_rows(inputs: &ViewInputs, channel: &str, now: u64) -> Vec<M
         .unwrap_or_default()
         .into_iter()
         .filter(|(pk, _)| !members.backend.contains(pk))
-        .filter_map(|(pk, _role)| {
+        .map(|(pk, _role)| {
             let status = status_map.get(&pk);
             let presence = status.map(|status| projected_presence(status, now));
             let state = presence
@@ -34,17 +34,27 @@ pub(super) fn member_rows(inputs: &ViewInputs, channel: &str, now: u64) -> Vec<M
                 .as_ref()
                 .map(crate::session_presence::PublicPresence::text)
                 .unwrap_or_default();
-            if status_text.is_empty() {
-                return None;
-            }
-            Some(MemberRow {
-                reference: reference(inputs, &pk, status),
+            let kind = if pk == inputs.meta.self_pubkey
+                || status.is_some()
+                || inputs
+                    .members
+                    .agent_slugs
+                    .get(&pk)
+                    .is_some_and(|slug| !slug.trim().is_empty())
+            {
+                MemberKind::Agent
+            } else {
+                MemberKind::Human
+            };
+            MemberRow {
+                kind,
+                name: reference(inputs, &pk, status),
                 state,
                 status: status_text,
                 since: presence
                     .map(|row| relative_time(row.state_since, now))
                     .unwrap_or_else(|| "unknown".to_string()),
-            })
+            }
         })
         .collect()
 }

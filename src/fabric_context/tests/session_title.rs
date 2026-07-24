@@ -9,11 +9,11 @@ fn agent_supplied_title_appears_immediately() {
     let visible = render_fabric_context(&store, input(Some(&rec), "root", 0, 100, true))
         .expect("explicit context should render");
     assert!(
-        visible.contains("Agent: coder · Session: @coder · Backend: laptop\n  Current title: \"Researching MCP improvements around resource allocation\""),
+        visible.contains("<self name=\"@coder\" host=\"laptop\" headless=\"off\" title=\"Researching MCP improvements around resource allocation\" />"),
         "got: {visible}"
     );
     assert!(
-        visible.contains("[if your title drifted you can update it]"),
+        visible.contains("If your title drifted, update it with `mosaico my session status`."),
         "got: {visible}"
     );
 

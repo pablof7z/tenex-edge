@@ -11,6 +11,7 @@ mod render;
 #[cfg(test)]
 mod tests;
 mod tree;
+mod xml;
 
 pub(crate) use capture::{capture_inputs, ViewInputs};
 pub(crate) use messages::{is_backend_pubkey, p_tag_pubkeys};
@@ -22,7 +23,7 @@ use render::render_view;
 /// Stringify an already-derived [`FabricView`] into the exact `<mosaico>`
 /// snapshot agents see.
 pub(crate) fn render_view_text(view: &FabricView) -> String {
-    render_view(&view.clone().for_agent_context())
+    render_view(view)
 }
 
 fn derive_view(store: &Store, input: FabricContextInput<'_>) -> anyhow::Result<FabricView> {
@@ -75,9 +76,7 @@ pub(crate) fn render_fabric_context(
     input: FabricContextInput<'_>,
 ) -> Option<String> {
     let force = input.force;
-    let view = derive_view(store, input)
-        .expect("fabric test fixture has valid channel ancestry")
-        .for_agent_context();
+    let view = derive_view(store, input).expect("fabric test fixture has valid channel ancestry");
     if !force && view.is_empty() {
         return None;
     }
@@ -97,10 +96,7 @@ pub(crate) fn render_fabric_context_human(
     Ok(Some(render_human_view(&view, color)))
 }
 
-/// `--all-workspaces`: the same fabric renderer as a single-scope `who`, one
-/// workspace block per root channel in `roots`. No single caller session
-/// exists across workspaces, so each block is built session-less (no self row, no
-/// chatter — `build_view` only pulls messages when a session is present).
+/// Test-only agent XML entry point for a full all-workspaces snapshot.
 #[cfg(test)]
 pub(crate) fn render_fabric_all_workspaces(
     store: &Store,
@@ -109,12 +105,10 @@ pub(crate) fn render_fabric_all_workspaces(
     local_host: &str,
     backend_pubkey: &str,
 ) -> String {
-    let views = roots
-        .iter()
-        .map(|root| derive_view(store, root_input(root, now, local_host, backend_pubkey)))
-        .collect::<anyhow::Result<Vec<_>>>()
+    let scope = roots.first().map(String::as_str).unwrap_or_default();
+    let view = derive_view(store, root_input(scope, now, local_host, backend_pubkey))
         .expect("fabric test fixtures have valid channel ancestry");
-    render::all_workspaces::render_views(&views)
+    render_view(&view)
 }
 
 /// Human-rendered counterpart of [`render_fabric_all_workspaces`].
@@ -126,11 +120,9 @@ pub(crate) fn render_fabric_all_workspaces_human(
     backend_pubkey: &str,
     color: bool,
 ) -> anyhow::Result<String> {
-    let views = roots
-        .iter()
-        .map(|root| derive_view(store, root_input(root, now, local_host, backend_pubkey)))
-        .collect::<anyhow::Result<Vec<_>>>()?;
-    Ok(render_human_views(&views, color))
+    let scope = roots.first().map(String::as_str).unwrap_or_default();
+    let view = derive_view(store, root_input(scope, now, local_host, backend_pubkey))?;
+    Ok(render_human_views(&[view], color))
 }
 
 fn root_input<'a>(
@@ -152,6 +144,33 @@ fn root_input<'a>(
         warnings: &[],
         force: true,
     }
+}
+
+pub(crate) fn render_full_session_state(
+    store: &Store,
+    session: &Session,
+    self_slug: &str,
+    backend_pubkey: &str,
+    local_host: &str,
+    now: u64,
+) -> anyhow::Result<String> {
+    let view = derive_view(
+        store,
+        FabricContextInput {
+            session: Some(session),
+            scope: &session.channel_h,
+            cursor: 0,
+            now,
+            self_slug,
+            self_pubkey: &session.pubkey,
+            backend_pubkey,
+            local_host,
+            forced_messages: &[],
+            warnings: &[],
+            force: true,
+        },
+    )?;
+    Ok(render_view_text(&view))
 }
 
 pub(crate) fn inbox_seed(row: &InboxRow) -> FabricMessageSeed {

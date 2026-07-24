@@ -39,7 +39,7 @@ fn first_turn_renders_awareness_snapshot_not_session_code() {
         "awareness should name only the workspace; got: {text:?}"
     );
     assert!(
-        text.contains("Agent: coder · Session: @coder · Backend: laptop"),
+        text.contains("<self name=\"@coder\" host=\"laptop\""),
         "awareness should not derive a handle from the session id; got: {text:?}"
     );
     assert!(
@@ -88,11 +88,11 @@ fn first_turn_snapshot_uses_bound_instance_identity() {
     let text = render_turn_start_text_for_test(&m, &rec, BACKEND, "laptop", 0)
         .expect("first-turn intro expected");
     assert!(
-        text.contains("Agent: coder · Session: @willow-vale-071-coder · Backend: laptop"),
+        text.contains("<self name=\"@willow-vale-071-coder\" host=\"laptop\""),
         "snapshot must render the bound session codename; got: {text:?}"
     );
     assert!(
-        !text.contains("Session: @coder"),
+        !text.contains("<self name=\"@coder\""),
         "bare agent slug must not override the bound session handle; got: {text:?}"
     );
 }

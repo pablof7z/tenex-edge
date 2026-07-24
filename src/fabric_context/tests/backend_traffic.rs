@@ -58,8 +58,8 @@ fn backend_pubkey_excluded_from_roster_without_cached_profile() {
     };
 
     let filtered = excluded(MGMT_PK);
-    assert!(filtered.contains("<member ref=\"@coder\""));
-    assert!(filtered.contains("<member ref=\"@reviewer\""));
+    assert!(filtered.contains("<agent name=\"@coder\""));
+    assert!(filtered.contains("<agent name=\"@reviewer\""));
     assert!(
         !filtered.contains("@backend"),
         "mgmt key leaked into roster: {filtered}"

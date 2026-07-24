@@ -40,7 +40,7 @@ pub(super) fn arrange(
         sort_children(root);
     }
     let mut top = nodes.into_values().collect::<Vec<_>>();
-    top.sort_by(|a, b| a.reference.cmp(&b.reference));
+    top.sort_by(|a, b| a.id.cmp(&b.id));
     for channel in &mut top {
         sort_children(channel);
     }
@@ -49,7 +49,7 @@ pub(super) fn arrange(
 
 fn collect(nodes: &mut BTreeMap<String, ChannelBlock>, mut channel: ChannelBlock) {
     let children = std::mem::take(&mut channel.children);
-    let reference = channel.reference.clone();
+    let reference = channel.id.clone();
     if let Some(existing) = nodes.get_mut(&reference) {
         merge(existing, channel);
     } else {
@@ -67,6 +67,12 @@ fn merge(existing: &mut ChannelBlock, incoming: ChannelBlock) {
     if !incoming.about.is_empty() {
         existing.about = incoming.about;
     }
+    if incoming.member_count.is_some() {
+        existing.member_count = incoming.member_count;
+    }
+    if incoming.last_active.is_some() {
+        existing.last_active = incoming.last_active;
+    }
     if !incoming.members.is_empty() {
         existing.members = incoming.members;
     }
@@ -80,9 +86,7 @@ fn merge(existing: &mut ChannelBlock, incoming: ChannelBlock) {
 }
 
 fn sort_children(channel: &mut ChannelBlock) {
-    channel
-        .children
-        .sort_by(|a, b| a.reference.cmp(&b.reference));
+    channel.children.sort_by(|a, b| a.id.cmp(&b.id));
     for child in &mut channel.children {
         sort_children(child);
     }

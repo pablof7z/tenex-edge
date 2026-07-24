@@ -61,7 +61,6 @@ mod expired_sessions;
 mod turn_context;
 mod who_aggregation;
 mod who_snapshot;
-mod who_view;
 
 #[cfg(test)]
 pub(crate) mod test_env;
