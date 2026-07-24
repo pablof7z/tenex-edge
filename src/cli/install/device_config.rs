@@ -13,18 +13,9 @@ mod prompt;
 
 use document::{
     apply_overrides, baseline_document, ensure_complete, has_overrides, missing_management_key,
-    print_summary, read_document, summarize, summarize_document,
+    print_summary, read_document,
 };
 use prompt::edit_interactively;
-
-pub(super) const LOCAL_RELAY_URL: &str = "ws://127.0.0.1:9888";
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct DeviceSetup {
-    pub local_relay: bool,
-    pub start_local_relay: bool,
-    pub owner_pubkey: Option<String>,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::cli) enum ConfigRepair {
@@ -36,7 +27,7 @@ pub(super) fn repair_non_interactive() -> Result<ConfigRepair> {
     let path = crate::config::config_path();
     if !path.exists() {
         bail!(
-            "{} does not exist; run `mosaico setup` and choose the bundled local relay or supply an existing relay URL",
+            "{} does not exist; run `mosaico setup --relay <ws-url>` with an externally operated NIP-29 relay",
             path.display()
         );
     }
@@ -60,7 +51,7 @@ pub(super) fn repair_non_interactive() -> Result<ConfigRepair> {
 
 /// Configure a missing device or update the supported fields of an existing
 /// document. Unknown fields and secrets that the wizard does not own survive.
-pub(super) fn configure(opts: &InstallOpts) -> Result<DeviceSetup> {
+pub(super) fn configure(opts: &InstallOpts) -> Result<()> {
     let path = crate::config::config_path();
     let existed = path.exists();
     let mut doc = if existed {
@@ -90,8 +81,6 @@ pub(super) fn configure(opts: &InstallOpts) -> Result<DeviceSetup> {
         }
     }
     ensure_complete(&mut doc)?;
-    let setup = summarize(&doc, opts)?;
-
     if opts.dry_run {
         let action = if existed { "update" } else { "create" };
         println!(
@@ -99,8 +88,8 @@ pub(super) fn configure(opts: &InstallOpts) -> Result<DeviceSetup> {
             "Device config".bold(),
             path.display().to_string().cyan()
         );
-        print_summary(&doc, &setup);
-        return Ok(setup);
+        print_summary(&doc);
+        return Ok(());
     }
 
     if !existed || should_edit || missing_management_key(&path)? {
@@ -109,8 +98,41 @@ pub(super) fn configure(opts: &InstallOpts) -> Result<DeviceSetup> {
     } else {
         println!("using existing device config at {}", path.display());
     }
-    print_summary(&doc, &setup);
-    Ok(setup)
+    print_summary(&doc);
+    Ok(())
+}
+
+/// Generated operator identity plus the device label collected by onboarding.
+pub(super) struct OnboardingIdentity {
+    pub device_name: String,
+    pub operator_pubkey_hex: String,
+    pub operator_nsec: String,
+}
+
+/// Write `config.json` from onboarding decisions. Onboarding owns the
+/// configuration document; it reuses the same normalization and invariants as
+/// the scriptable flow via `ensure_complete`. `relays` are externally operated
+/// NIP-29 relay URLs — Mosaico no longer runs one.
+pub(super) fn write_onboarding(identity: &OnboardingIdentity, relays: Vec<String>) -> Result<()> {
+    let path = crate::config::config_path();
+    let mut doc = if path.exists() {
+        read_document(&path)?
+    } else {
+        baseline_document()
+    };
+    {
+        let object = doc.as_object_mut().expect("configuration is an object");
+        object.insert("backendName".into(), json!(identity.device_name));
+        object.insert(
+            "whitelistedPubkeys".into(),
+            json!([identity.operator_pubkey_hex]),
+        );
+        object.insert("userNsec".into(), json!(identity.operator_nsec));
+        object.insert("relays".into(), json!(relays));
+    }
+    ensure_complete(&mut doc)?;
+    super::write_json(&path, &doc)?;
+    Ok(())
 }
 
 pub(super) fn print_status() -> Result<()> {
@@ -120,9 +142,8 @@ pub(super) fn print_status() -> Result<()> {
         return Ok(());
     }
     let doc = read_document(&path)?;
-    let setup = summarize_document(&doc)?;
     println!("device config   configured  {}", path.display());
-    print_summary(&doc, &setup);
+    print_summary(&doc);
     Ok(())
 }
 
