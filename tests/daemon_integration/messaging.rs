@@ -1,14 +1,14 @@
 use crate::daemon_harness::*;
-use mosaico::daemon::client::Client;
-use mosaico::state::Store;
+use mosaico::{daemon::client::Client, state::Store};
 use std::time::Duration;
-
 #[path = "messaging/explicit_destination.rs"]
 mod explicit_destination;
 #[path = "messaging/inbox_rows.rs"]
 mod inbox_rows;
 #[path = "messaging/non_mention.rs"]
 mod non_mention;
+#[path = "messaging/self_target.rs"]
+mod self_target;
 #[path = "messaging/target_wire.rs"]
 mod target_wire;
 use inbox_rows::receiver_inbox_rows;
