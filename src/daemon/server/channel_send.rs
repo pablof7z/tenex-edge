@@ -11,6 +11,7 @@ mod react;
 mod recipient;
 mod recipient_notice;
 mod reply;
+mod self_target;
 #[cfg(test)]
 mod tests;
 
@@ -79,6 +80,7 @@ pub(in crate::daemon::server) async fn rpc_channel_send(
         let target = state
             .with_store(|s| resolve_recipient(s, &destination, &state.host, label))
             .with_context(|| format!("resolving --tag {raw:?}"))?;
+        self_target::reject(&rec.pubkey, &target.pubkey, self_target::Action::Tag(label))?;
         let same_work_root = state.with_store(|s| -> Result<bool> {
             Ok(work_root_for(s, &destination)? == work_root_for(s, &target.channel)?)
         })?;

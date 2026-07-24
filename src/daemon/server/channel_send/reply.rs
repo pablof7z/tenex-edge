@@ -1,5 +1,6 @@
 use super::super::*;
 use super::recipient_notice;
+use super::self_target;
 use crate::fabric::provider::chat::OutboundChatRecord;
 use crate::state::{Message, Session};
 use crate::util::CHANNEL_MESSAGE_CHAR_LIMIT;
@@ -41,6 +42,11 @@ pub(in crate::daemon::server) async fn rpc_channel_reply(
         .with_store(|s| s.get_message_by_prefix(p.id.trim()))
         .with_context(|| format!("resolving reply id {:?}", p.id.trim()))?
         .with_context(|| format!("message not found for reply id {:?}", p.id.trim()))?;
+    self_target::reject(
+        &rec.pubkey,
+        &original.author_pubkey,
+        self_target::Action::Reply,
+    )?;
     let reply_to = original
         .native_event_id
         .clone()
