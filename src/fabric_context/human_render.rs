@@ -2,63 +2,61 @@ use crate::fabric_context::model::*;
 use owo_colors::OwoColorize as _;
 use std::fmt::Write as _;
 
-mod all_workspaces;
 mod channel;
 
-pub(in crate::fabric_context) use all_workspaces::render_human_views;
 use channel::render_channel;
 
 pub(in crate::fabric_context) fn render_human_view(view: &FabricView, color: bool) -> String {
     let mut out = String::new();
-    render_human_workspace(&mut out, view, &view.agents, "Available agents", color);
+    let agents = view
+        .hosts
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .flat_map(|host| host.agents.iter().cloned())
+        .collect::<Vec<_>>();
+    render_agents(&mut out, &agents, "Available agents", color);
+    if let Some(workspaces) = &view.workspaces {
+        for workspace in workspaces {
+            render_human_workspace(&mut out, workspace, color);
+        }
+    }
+    for notice in &view.notices {
+        match notice {
+            NoticeRow::NoNewActivity { .. } => {
+                let _ = writeln!(
+                    out,
+                    "{}",
+                    dim(
+                        "Nothing new since your last check. The fabric surfaces only what \
+                         changed — your channels and members are unchanged, not gone.",
+                        color
+                    )
+                );
+            }
+        }
+    }
+    render_important(&mut out, &view.important, color);
+    render_warnings(&mut out, &view.warnings, color);
     out
 }
 
-pub(super) fn render_human_workspace(
-    out: &mut String,
-    view: &FabricView,
-    agents: &[AgentRow],
-    agents_label: &str,
-    color: bool,
-) {
-    let workspace =
-        crate::console_style::paint_workspace(&view.workspace.name, &view.workspace.name, color);
+pub(in crate::fabric_context) fn render_human_views(views: &[FabricView], color: bool) -> String {
+    views
+        .iter()
+        .map(|view| render_human_view(view, color))
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+fn render_human_workspace(out: &mut String, view: &WorkspaceView, color: bool) {
+    let workspace = crate::console_style::paint_workspace(&view.name, &view.name, color);
     let _ = writeln!(out, "{}", style(&workspace, color, Style::Title));
-    if !view.workspace.about.is_empty() {
-        let _ = writeln!(out, "{}", dim(&view.workspace.about, color));
+    if !view.about.is_empty() {
+        let _ = writeln!(out, "{}", dim(&view.about, color));
     }
     out.push('\n');
-    if view.is_quiet_delta() {
-        let _ = writeln!(
-            out,
-            "{}",
-            dim(
-                "Nothing new since your last check. The fabric surfaces only what \
-                 changed — your channels and members are unchanged, not gone.",
-                color
-            )
-        );
-        return;
-    }
-
-    render_agents(out, agents, agents_label, color);
     render_workspace_tree(out, view.root.as_ref(), &view.channels, color);
-    for activity in &view.other_workspaces {
-        out.push('\n');
-        let workspace = crate::console_style::paint_workspace(
-            &activity.workspace.name,
-            &activity.workspace.name,
-            color,
-        );
-        let _ = writeln!(out, "{}", style(&workspace, color, Style::Title));
-        if !activity.workspace.about.is_empty() {
-            let _ = writeln!(out, "{}", dim(&activity.workspace.about, color));
-        }
-        out.push('\n');
-        render_workspace_tree(out, activity.root.as_ref(), &activity.channels, color);
-    }
-    render_important(out, &view.important, color);
-    render_warnings(out, &view.warnings, color);
 }
 
 fn render_workspace_tree(
@@ -105,13 +103,13 @@ fn render_members(out: &mut String, members: &[MemberRow], color: bool) {
     }
     let width = members
         .iter()
-        .map(|m| m.reference.len() + 1)
+        .map(|m| m.name.len() + 1)
         .max()
         .unwrap_or(0)
         .max(8);
     let _ = writeln!(out, "  {}", dim("Members", color));
     for m in members {
-        let reference = pad_ref(&m.reference, width);
+        let reference = pad_ref(&m.name, width);
         let _ = writeln!(
             out,
             "    {}  {:<12} {} {} {}",
@@ -130,13 +128,13 @@ fn render_presence(out: &mut String, presence: &[PresenceRow], color: bool) {
     }
     let width = presence
         .iter()
-        .map(|p| p.reference.len() + 1)
+        .map(|p| p.name.len() + 1)
         .max()
         .unwrap_or(0)
         .max(8);
     let _ = writeln!(out, "  {}", dim("Recent presence", color));
     for p in presence {
-        let reference = pad_ref(&p.reference, width);
+        let reference = pad_ref(&p.name, width);
         if !p.status.is_empty() {
             let _ = writeln!(
                 out,

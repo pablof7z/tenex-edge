@@ -52,32 +52,6 @@ impl WhoAggregation {
                 || (self.is_root(current) && self.root_for_channel(channel_h)? == current)))
     }
 
-    pub(crate) fn is_member(&self, channel_h: &str, pubkey: &str) -> bool {
-        self.members_for(channel_h)
-            .iter()
-            .any(|member| member.pubkey == pubkey)
-    }
-
-    pub(crate) fn full_channel_ref(&self, channel_h: &str) -> anyhow::Result<String> {
-        let mut parts = Vec::new();
-        let mut current = channel_h;
-        for _ in 0..32 {
-            let Some(channel) = self.channel(current) else {
-                anyhow::bail!("workspace resolver: incomplete ancestry for channel {channel_h:?}");
-            };
-            if channel.parent.is_empty() {
-                parts.reverse();
-                return Ok(crate::channel_ref::format_channel_ref(
-                    &channel.channel_h,
-                    &parts,
-                ));
-            }
-            parts.push(self.channel_name(current).to_string());
-            current = &channel.parent;
-        }
-        anyhow::bail!("workspace resolver: cyclic ancestry for channel {channel_h:?}")
-    }
-
     pub(crate) fn display_slug(&self, pubkey: &str) -> Option<String> {
         self.session_identity(pubkey)
             .map(SessionIdentity::display_slug)
@@ -90,22 +64,5 @@ impl WhoAggregation {
                 })
             })
             .filter(|slug| !slug.is_empty())
-    }
-
-    pub(crate) fn pubkey_ref(&self, pubkey: &str, local_host: &str) -> String {
-        let profile = self.profile(pubkey);
-        let slug = profile
-            .map(|profile| profile.slug.clone())
-            .filter(|slug| !slug.is_empty())
-            .unwrap_or_else(|| crate::util::pubkey_short(pubkey));
-        let host = profile
-            .map(|profile| profile.host.clone())
-            .filter(|host| !host.is_empty())
-            .unwrap_or_else(|| local_host.to_string());
-        if profile.is_some_and(|profile| !profile.agent_slug.is_empty()) {
-            slug
-        } else {
-            crate::idref::agent_ref_from(&slug, &host, local_host)
-        }
     }
 }

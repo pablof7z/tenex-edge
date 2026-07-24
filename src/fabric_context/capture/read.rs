@@ -4,10 +4,10 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
-use super::{AgentCap, ChannelSummaryCap, EvCap, MsgBundle, SelfCap, SummaryCap};
+use super::{EvCap, MsgBundle, SelfCap};
 use crate::fabric_context::messages::{is_backend_traffic, mentions_pubkey, p_tag_pubkeys};
 pub(super) use crate::fabric_context::refs::profile_host;
-use crate::fabric_context::refs::{display_name, pubkey_ref};
+use crate::fabric_context::refs::pubkey_ref;
 use crate::fabric_context::{FabricContextInput, FabricMessageSeed};
 use crate::state::{Session, Store};
 use crate::util::{truncate_words, CHAT_RENDER_WORD_LIMIT};
@@ -22,19 +22,54 @@ enum ChannelReadiness {
     Missing,
 }
 
-pub(super) fn self_cap(s: &Session, input: &FabricContextInput<'_>) -> SelfCap {
+pub(super) fn self_cap(store: &Store, s: &Session, input: &FabricContextInput<'_>) -> SelfCap {
     SelfCap {
-        agent: input.self_slug.to_string(),
-        agent_slug: s.agent_slug.clone(),
+        name: input.self_slug.to_string(),
         host: input.local_host.to_string(),
+        headless: crate::session_host::session_is_headless(store, s),
         title: s.title.clone(),
     }
+}
+
+pub(super) fn active_channels(store: &Store, session: Option<&Session>) -> Vec<String> {
+    session_channels(store, session)
+        .into_iter()
+        .filter(|channel| matches!(channel_readiness(store, channel), ChannelReadiness::Ready))
+        .collect()
+}
+
+fn session_channels(store: &Store, session: Option<&Session>) -> Vec<String> {
+    let Some(rec) = session else {
+        return Vec::new();
+    };
+    let mut channels = store
+        .list_session_routes(&rec.pubkey)
+        .unwrap_or_else(|_| vec![(rec.channel_h.clone(), rec.created_at)])
+        .into_iter()
+        .map(|(h, _)| h)
+        .filter(|channel| !channel.is_empty())
+        .collect::<Vec<_>>();
+    if !rec.channel_h.is_empty() && !channels.iter().any(|channel| channel == &rec.channel_h) {
+        channels.push(rec.channel_h.clone());
+    }
+    channels.sort();
+    channels.dedup();
+    channels
 }
 
 /// The ordered, deduped, archived-pruned channel set: joined channels plus
 /// forced-message channels, minus archived channels.
 pub(super) fn selected_channels(store: &Store, input: &FabricContextInput<'_>) -> Vec<String> {
-    let mut channels = channels_for(store, input.session, input.scope);
+    let mut channels = active_channels(store, input.session);
+    if input.session.is_none() && !input.scope.is_empty() {
+        channels.push(input.scope.to_string());
+    }
+    if input.session.is_some()
+        && !input.scope.is_empty()
+        && !channels.iter().any(|channel| channel == input.scope)
+    {
+        channels.push(input.scope.to_string());
+    }
     let forced_by_channel = group_forced(input.forced_messages, input.scope);
     for ch in forced_by_channel.keys() {
         if !channels.iter().any(|c| c == ch) {
@@ -48,7 +83,10 @@ pub(super) fn selected_channels(store: &Store, input: &FabricContextInput<'_>) -
 }
 
 pub(super) fn missing_channels(store: &Store, input: &FabricContextInput<'_>) -> Vec<String> {
-    let mut channels = channels_for(store, input.session, input.scope);
+    let mut channels = session_channels(store, input.session);
+    if !input.scope.is_empty() && !channels.iter().any(|channel| channel == input.scope) {
+        channels.push(input.scope.to_string());
+    }
     let forced_by_channel = group_forced(input.forced_messages, input.scope);
     for ch in forced_by_channel.keys() {
         if !channels.iter().any(|c| c == ch) {
@@ -61,26 +99,6 @@ pub(super) fn missing_channels(store: &Store, input: &FabricContextInput<'_>) ->
         .into_iter()
         .filter(|channel| matches!(channel_readiness(store, channel), ChannelReadiness::Missing))
         .collect()
-}
-
-fn channels_for(store: &Store, session: Option<&Session>, scope: &str) -> Vec<String> {
-    let Some(rec) = session else {
-        return (!scope.is_empty())
-            .then(|| scope.to_string())
-            .into_iter()
-            .collect();
-    };
-    let mut channels = store
-        .list_session_routes(&rec.pubkey)
-        .unwrap_or_else(|_| vec![(rec.channel_h.clone(), rec.created_at)])
-        .into_iter()
-        .map(|(h, _)| h)
-        .collect::<Vec<_>>();
-    channels.retain(|channel| !channel.is_empty());
-    if !scope.is_empty() && !channels.iter().any(|h| h == scope) {
-        channels.push(scope.to_string());
-    }
-    channels
 }
 
 pub(super) fn group_forced(
@@ -99,57 +117,6 @@ pub(super) fn group_forced(
             .push(row.clone());
     }
     out
-}
-
-pub(super) fn subchannel_caps(store: &Store, channel: &str) -> Vec<ChannelSummaryCap> {
-    store
-        .list_channels()
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|c| c.parent == channel && !c.is_archived())
-        .filter_map(|c| {
-            let name = c.human_name().unwrap_or(&c.channel_h).to_string();
-            (!name.is_empty()).then(|| ChannelSummaryCap {
-                name,
-                reference: crate::channel_ref::full_channel_ref(store, &c.channel_h),
-                about: c.about,
-                updated_at: c.updated_at,
-            })
-        })
-        .collect()
-}
-
-pub(super) fn agent_caps(
-    store: &Store,
-    root: &str,
-    _input: &FabricContextInput<'_>,
-) -> Vec<AgentCap> {
-    let mut agents = store
-        .list_backend_profiles()
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|profile| {
-            profile.workspaces.iter().any(|workspace| workspace == root)
-                && store
-                    .is_channel_admin(root, &profile.pubkey)
-                    .unwrap_or(false)
-        })
-        .flat_map(|profile| {
-            let host = profile.host;
-            let updated_at = profile.updated_at;
-            profile
-                .agents
-                .into_iter()
-                .map(move |(slug, about)| AgentCap {
-                    reference: format!("{slug}@{host}"),
-                    about,
-                    created_at: updated_at,
-                })
-        })
-        .collect::<Vec<_>>();
-    agents.sort_by(|left, right| left.reference.cmp(&right.reference));
-    agents.dedup_by(|left, right| left.reference == right.reference);
-    agents
 }
 
 pub(super) fn capture_messages(
@@ -249,41 +216,6 @@ pub(super) fn resolve_pubkey(
         if profile.is_backend {
             backend.insert(pubkey.to_string());
         }
-    }
-}
-
-pub(super) fn root_channel(store: &Store, channel: &str) -> anyhow::Result<String> {
-    crate::daemon::workspace_path::WorkspacePathResolver::new(store).root_for_channel(channel)
-}
-
-pub(super) fn channel_summary(store: &Store, channel: &str) -> SummaryCap {
-    let ch = store
-        .get_channel(channel)
-        .ok()
-        .flatten()
-        .expect("renderable channels are filtered through get_channel first");
-    SummaryCap {
-        name: if ch.parent.is_empty() {
-            channel.to_string()
-        } else {
-            ch.human_name()
-                .map(str::to_string)
-                .unwrap_or_else(|| display_name(store, channel))
-        },
-        channel: crate::channel_ref::full_channel_ref(store, channel),
-        about: ch.about,
-    }
-}
-
-pub(super) fn workspace_summary(store: &Store, channel: &str) -> SummaryCap {
-    let ch = store.get_channel(channel).ok().flatten();
-    SummaryCap {
-        name: channel.to_string(),
-        channel: ch
-            .as_ref()
-            .map(|_| crate::channel_ref::full_channel_ref(store, channel))
-            .unwrap_or_default(),
-        about: ch.map(|channel| channel.about).unwrap_or_default(),
     }
 }
 

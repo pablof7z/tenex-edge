@@ -1,14 +1,5 @@
 use crate::state::Store;
 
-pub(super) fn display_name(store: &Store, channel: &str) -> String {
-    store
-        .get_channel(channel)
-        .ok()
-        .flatten()
-        .and_then(|c| c.human_name().map(str::to_string))
-        .unwrap_or_else(|| channel.to_string())
-}
-
 /// The raw profile host for a pubkey (empty when unknown). Kept separate from
 /// [`pubkey_ref`] because capture stores the host independently from the
 /// rendered public reference.

@@ -9,7 +9,7 @@ fn session_view_has_self_and_chatter_human_view_does_not() {
 
     let agent = render_fabric_context(&store, input(Some(&rec), "root", 0, 1_000, false))
         .expect("session view should render");
-    assert!(agent.contains("Agent: coder · Session: @coder · Backend: laptop"));
+    assert!(agent.contains("<self name=\"@coder\" host=\"laptop\" headless=\"off\""));
     assert!(agent.contains("<chatter>"));
     assert!(
         agent.contains("<message from=\"@reviewer\" id=\"m1\" age=\"1 min ago\">post join context"),
@@ -17,10 +17,10 @@ fn session_view_has_self_and_chatter_human_view_does_not() {
     );
     assert!(agent.contains("<workspace name=\"root\""));
     assert!(!agent.contains("<workspace name=\"root\" channel="));
-    assert!(agent.contains("<channel name=\"#task\" ref=\"/root/task\""));
-    assert!(agent.contains("<channel name=\"#root\" ref=\"/root\""));
+    assert!(agent.contains("<channel name=\"task\" id=\"/root/task\""));
+    assert!(agent.contains("<channel name=\"root\" id=\"/root\""));
     let workspace = agent.find("<workspace name=\"root\"").unwrap();
-    let root_channel = agent.find("<channel name=\"#root\" ref=\"/root\"").unwrap();
+    let root_channel = agent.find("<channel name=\"root\" id=\"/root\"").unwrap();
     let members = agent.find("<members>").unwrap();
     assert!(
         workspace < root_channel && root_channel < members,
@@ -50,7 +50,7 @@ fn cursor_delta_only_renders_changed_joined_channel() {
 
     let text = render_fabric_context(&store, input(Some(&rec), "root", 200, 300, false))
         .expect("changed task channel should render");
-    assert!(text.contains("name=\"#task\""));
+    assert!(text.contains("name=\"task\" id=\"/root/task\""));
     assert!(text.contains("new task message"));
     assert!(!text.contains("name=\"#main\""));
     assert!(!text.contains("old root message"));
@@ -78,7 +78,7 @@ fn presence_delta_does_not_repeat_unchanged_descendants() {
     let text = render_fabric_context(&store, input(Some(&rec), "root", 200, 300, false))
         .expect("presence delta should render");
     assert!(text.contains("<recent-presence>"));
-    assert!(text.contains("ref=\"@amber-reviewer\""));
+    assert!(text.contains("name=\"@amber-reviewer\""));
     assert!(text.contains("text=\"checking tests\""));
     assert!(
         !text.contains("/root/task"),
@@ -99,9 +99,9 @@ fn changed_descendant_metadata_renders_once_with_its_canonical_ref() {
     assert!(text.contains("<workspace name=\"root\""));
     assert!(!text.contains("<workspace name=\"root\" channel="));
     assert!(
-        text.contains("<channel name=\"#task\" ref=\"/root/task\" about=\"Updated task room\" />")
+        text.contains("<channel name=\"task\" id=\"/root/task\" about=\"Updated task room\" />")
     );
-    assert_eq!(text.matches("ref=\"/root/task\"").count(), 1, "{text}");
+    assert_eq!(text.matches("id=\"/root/task\"").count(), 1, "{text}");
     assert!(!text.contains("<subchannels>"), "{text}");
     assert!(!text.contains("<channels-not-joined>"), "{text}");
 
@@ -122,10 +122,10 @@ fn full_snapshot_nests_multilevel_channels_by_slash_reference() {
 
     let text = render_fabric_context(&store, input(Some(&rec), "root", 0, 300, false))
         .expect("full descendant tree should render");
-    let task = text.find("ref=\"/root/task\"").expect("task ref");
-    let leaf = text.find("ref=\"/root/task/leaf\"").expect("leaf ref");
+    let task = text.find("id=\"/root/task\"").expect("task id");
+    let leaf = text.find("id=\"/root/task/leaf\"").expect("leaf id");
     assert!(task < leaf, "child must follow its parent: {text}");
-    assert_eq!(text.matches("ref=\"/root/task\"").count(), 1, "{text}");
+    assert_eq!(text.matches("id=\"/root/task\"").count(), 1, "{text}");
 
     let captured = capture_inputs(&store, &input(Some(&rec), "root", 0, 300, false)).unwrap();
     assert_eq!(

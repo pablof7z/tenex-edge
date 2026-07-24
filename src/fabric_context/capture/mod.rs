@@ -1,19 +1,13 @@
-//! Canonical, now/cursor-independent capture of everything the fabric view reads
-//! from the store, partitioned into the four sources the snapshot derives
-//! from: channel/subchannel metadata, the member roster, presence/status rows,
-//! and chat/mentions. This is the pure-data boundary consumed by the hook-context
-//! policy; the wall-clock `now` and the seen `cursor` are separate inputs applied by
-//! [`super::assemble::assemble_view`], never baked in here.
-//!
-//! Captures are SUPERSETS: every status is kept regardless of NIP-40 expiration
-//! and every chat row since time 0 is kept, so the `expiration >= now` liveness
-//! window and the `created_at > since` chat window remain pure functions of the
-//! `now`/`cursor` inputs at assemble time rather than ambient reads.
+//! Canonical, now/cursor-independent capture of metadata, rosters, presence,
+//! messages, and reactions. Captures are supersets: expiration, time windows,
+//! and cursor selection remain pure assembly decisions.
 
 mod activity;
 mod read;
+mod topology;
 
-pub(super) use activity::{StatusCap, WorkspaceCap};
+pub(super) use activity::StatusCap;
+pub(super) use topology::WorkspaceCap;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -44,10 +38,10 @@ impl ViewInputs {
 #[derive(Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct MetaInput {
     pub(super) self_row: Option<SelfCap>,
-    pub(super) workspace: SummaryCap,
-    pub(super) agents: Vec<AgentCap>,
-    pub(super) channels: Vec<ChannelCap>,
-    pub(super) other_workspaces: Vec<WorkspaceCap>,
+    pub(super) hosts: Vec<HostCap>,
+    pub(super) workspaces: Vec<WorkspaceCap>,
+    pub(super) active_channels: BTreeSet<String>,
+    pub(super) current_workspace: String,
     pub(super) warnings: Vec<String>,
     pub(super) self_pubkey: String,
     pub(super) self_ref: String,
@@ -93,11 +87,11 @@ pub(crate) struct ReactionsInput {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(super) struct SelfCap {
-    pub(super) agent: String,
-    #[serde(default)]
-    pub(super) agent_slug: String,
+    pub(super) name: String,
     #[serde(default)]
     pub(super) host: String,
+    #[serde(default)]
+    pub(super) headless: bool,
     #[serde(default)]
     pub(super) title: String,
 }
@@ -115,6 +109,13 @@ pub(super) struct AgentCap {
     pub(super) about: String,
     pub(super) created_at: u64,
 }
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub(super) struct HostCap {
+    pub(super) name: String,
+    pub(super) agents: Vec<AgentCap>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(super) struct ChannelCap {
     pub(super) h: String,
@@ -122,15 +123,8 @@ pub(super) struct ChannelCap {
     #[serde(default)]
     pub(super) reference: String,
     pub(super) about: String,
-    pub(super) subchannels: Vec<ChannelSummaryCap>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub(super) struct ChannelSummaryCap {
-    pub(super) name: String,
-    pub(super) reference: String,
-    pub(super) about: String,
     pub(super) updated_at: u64,
+    pub(super) latest_message_at: Option<u64>,
 }
 
 #[derive(Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -164,13 +158,19 @@ pub(crate) fn capture_inputs(
 ) -> anyhow::Result<ViewInputs> {
     // Missing relay metadata is an explicit outer-view degraded case: retain the
     // requested scope only to label the warning, never as an alternate binding.
-    let root = if store.get_channel(input.scope)?.is_some() {
-        read::root_channel(store, input.scope)?
+    let current_workspace = if store.get_channel(input.scope)?.is_some() {
+        crate::daemon::workspace_path::WorkspacePathResolver::new(store)
+            .root_for_channel(input.scope)?
     } else {
         input.scope.to_string()
     };
-    let channel_hs = read::selected_channels(store, input);
-    let other_workspaces = activity::workspace_caps(store, &root)?;
+    let active_channels = read::active_channels(store, input.session)
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+    let selected_channels = read::selected_channels(store, input)
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+    let (hosts, workspaces) = topology::capture(store)?;
     let mut warnings = input.warnings.to_vec();
     warnings.extend(
         read::missing_channels(store, input)
@@ -186,17 +186,11 @@ pub(crate) fn capture_inputs(
     let mut messages: BTreeMap<String, MsgBundle> = BTreeMap::new();
     let forced_by_channel = read::group_forced(input.forced_messages, input.scope);
 
-    let mut channels = Vec::new();
-    for h in &channel_hs {
-        let summary = read::channel_summary(store, h);
-        channels.push(ChannelCap {
-            h: h.clone(),
-            name: summary.name,
-            reference: crate::channel_ref::full_channel_ref(store, h),
-            about: summary.about,
-            subchannels: read::subchannel_caps(store, h),
-        });
-
+    for h in workspaces
+        .iter()
+        .flat_map(|workspace| &workspace.channels)
+        .map(|channel| &channel.h)
+    {
         // Keep relay roles in the frozen input; rendered rows do not expose them.
         let members: BTreeMap<String, String> = store
             .list_channel_members(h)
@@ -225,18 +219,11 @@ pub(crate) fn capture_inputs(
         roster.insert(h.clone(), members);
         statuses.insert(h.clone(), chan_statuses);
 
-        let forced = forced_by_channel.get(h).cloned().unwrap_or_default();
-        messages.insert(h.clone(), read::capture_messages(store, input, h, &forced));
+        if selected_channels.contains(h) {
+            let forced = forced_by_channel.get(h).cloned().unwrap_or_default();
+            messages.insert(h.clone(), read::capture_messages(store, input, h, &forced));
+        }
     }
-    activity::capture_statuses(
-        store,
-        input.local_host,
-        &other_workspaces,
-        &mut statuses,
-        &mut refs,
-        &mut agent_slugs,
-        &mut backend,
-    );
     if !input.self_pubkey.is_empty() {
         read::resolve_pubkey(
             store,
@@ -261,11 +248,11 @@ pub(crate) fn capture_inputs(
     let self_ref =
         crate::idref::agent_ref_from(input.self_slug, input.local_host, input.local_host);
     let meta = MetaInput {
-        self_row: input.session.map(|s| read::self_cap(s, input)),
-        workspace: read::workspace_summary(store, &root),
-        agents: read::agent_caps(store, &root, input),
-        channels,
-        other_workspaces,
+        self_row: input.session.map(|s| read::self_cap(store, s, input)),
+        hosts,
+        workspaces,
+        active_channels,
+        current_workspace,
         warnings,
         self_pubkey: input.self_pubkey.to_string(),
         self_ref,

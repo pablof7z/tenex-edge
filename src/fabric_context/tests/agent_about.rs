@@ -3,7 +3,7 @@ use super::*;
 use crate::reconcile::{hook_context::FrameKind, HookContextState};
 
 #[test]
-fn agent_context_omits_capabilities_while_human_view_keeps_host_profile() {
+fn canonical_context_and_human_view_keep_host_capabilities() {
     let store = seed_store();
     let rec = session(&store);
     advertise_host(
@@ -20,8 +20,12 @@ fn agent_context_omits_capabilities_while_human_view_keeps_host_profile() {
     assert!(!text.contains("mosaico agents list"));
     assert!(!text.contains("<available-agents>"));
     assert!(!text.contains("<workspace-agents>"));
-    assert!(!text.contains("@helper"));
-    assert!(!text.contains("<members>"));
+    assert!(text.contains("<host name=\"laptop\">"), "{text}");
+    assert!(
+        text.contains("<agent ref=\"helper@laptop\" about=\"For testing\" />"),
+        "{text}"
+    );
+    assert!(text.contains("<members>"), "{text}");
 
     let human = render_fabric_context_human(&store, input(Some(&rec), "root", 0, 100, true), false)
         .unwrap()
@@ -38,7 +42,7 @@ fn agent_context_omits_capabilities_while_human_view_keeps_host_profile() {
     let text = render_fabric_context(&empty, input(Some(&solo), "solo", 0, 100, true)).unwrap();
     assert!(text.contains("<workspace name=\"solo\""));
     assert!(!text.contains("<workspace name=\"solo\" channel="));
-    assert!(text.contains("<channel name=\"#solo\" ref=\"/solo\""));
+    assert!(text.contains("<channel name=\"solo\" id=\"/solo\""));
     assert!(!text.contains("<members>"), "got: {text}");
 }
 
@@ -65,7 +69,7 @@ fn human_agent_about_is_compact_and_bounded() {
 }
 
 #[test]
-fn host_profile_only_delta_does_not_emit_agent_hook_context() {
+fn host_profile_delta_emits_through_the_canonical_hook_context() {
     let store = seed_store();
     let rec = session(&store);
     let mut state = HookContextState::default();
@@ -83,8 +87,17 @@ fn host_profile_only_delta_does_not_emit_agent_hook_context() {
         150,
     );
     let after = capture_inputs(&store, &input(Some(&rec), "root", 100, 200, false)).unwrap();
-    let unchanged = state.render_context("sess", "turn_start", 100, 200, after);
+    let changed = state.render_context("sess", "turn_start", 100, 200, after);
 
-    assert!(unchanged.text.is_none());
-    assert_eq!(unchanged.receipt.frame, FrameKind::Unchanged);
+    let text = changed.text.expect("new capability is a delta");
+    assert!(text.contains("<hosts>"), "{text}");
+    assert!(
+        text.contains("<agent ref=\"new-helper@laptop\" about=\"Newly available\" />"),
+        "{text}"
+    );
+    assert!(
+        text.contains("<workspace name=\"root\" about=\"Root room\" hosts=\"laptop\">"),
+        "{text}"
+    );
+    assert_eq!(changed.receipt.frame, FrameKind::Delta);
 }

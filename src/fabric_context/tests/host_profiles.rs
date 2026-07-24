@@ -37,7 +37,7 @@ pub(super) fn advertise_host(
 }
 
 #[test]
-fn agent_context_omits_capabilities_while_human_view_preserves_them() {
+fn canonical_agent_context_and_human_view_preserve_capabilities() {
     let store = seed_store();
     store
         .upsert_channel("other", "other", "Other workspace", "", 1)
@@ -60,16 +60,18 @@ fn agent_context_omits_capabilities_while_human_view_preserves_them() {
     assert!(!rendered.contains("mosaico agents list"), "got: {rendered}");
     assert!(!rendered.contains("<available-agents>"), "got: {rendered}");
     assert!(!rendered.contains("<workspace-agents>"), "got: {rendered}");
-    assert!(!rendered.contains("@shared"), "got: {rendered}");
-    assert!(!rendered.contains("@other-only"), "got: {rendered}");
+    assert!(
+        rendered.contains("<agent ref=\"shared@laptop\" about=\"Available everywhere\" />"),
+        "got: {rendered}"
+    );
+    assert!(
+        rendered.contains("<agent ref=\"other-only@laptop\" about=\"Only in other\" />"),
+        "got: {rendered}"
+    );
 
     let human =
         render_fabric_all_workspaces_human(&store, &roots, 100, "laptop", "", false).unwrap();
-    assert_eq!(
-        human.matches("Available agents (all workspaces)").count(),
-        1,
-        "got: {human}"
-    );
+    assert_eq!(human.matches("Available agents").count(), 1, "got: {human}");
     assert_eq!(human.matches("@shared").count(), 1, "got: {human}");
     assert_eq!(human.matches("@other-only").count(), 1, "got: {human}");
     assert!(!human.contains("Workspace-specific agents"), "got: {human}");

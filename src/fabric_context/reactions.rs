@@ -78,7 +78,7 @@ pub(super) fn group_reactions(
         latest: u64,
     }
     let mut groups: BTreeMap<(String, String), Group> = BTreeMap::new();
-    // Gate on the same half-open window sibling renderers use: strictly after the
+    // Gate on the same half-open window as other delta sources: strictly after the
     // seen-cursor and no later than wall-clock `now`. The upper bound matters
     // because the seen-cursor only ever advances to `now`, so a future-dated
     // (clock-skewed-ahead) reaction would otherwise satisfy `> cursor` and

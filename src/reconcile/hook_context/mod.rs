@@ -37,8 +37,7 @@ impl HookContextState {
         inputs: ViewInputs,
     ) -> HookContextOutcome {
         let force = inputs.force();
-        let view =
-            assemble_view(&inputs, cursor.max(0) as u64, now.max(0) as u64).for_agent_context();
+        let view = assemble_view(&inputs, cursor.max(0) as u64, now.max(0) as u64);
         let changed = self.last_view.as_ref() != Some(&view);
         let first = self.last_view.is_none();
         let frame = if first {

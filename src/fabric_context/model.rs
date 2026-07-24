@@ -1,100 +1,61 @@
-// The rendered fabric-context view. `Clone + PartialEq` supports change detection
-// and byte-for-byte comparison in tests. Fields stay module-private so only
-// capture/assembly construct it and the renderers read it.
+//! Canonical agent fabric document.
+//!
+//! Capture and assembly decide which nodes exist. The sole agent XML renderer
+//! serializes this model without knowing the cursor, caller, or surface.
+
 #[derive(Clone, Default, PartialEq)]
 pub(crate) struct FabricView {
     pub(in crate::fabric_context) self_row: Option<SelfRow>,
-    pub(in crate::fabric_context) workspace: WorkspaceRow,
-    pub(in crate::fabric_context) agents: Vec<AgentRow>,
-    /// Activity owned by the workspace's root channel.
-    pub(in crate::fabric_context) root: Option<ChannelBlock>,
-    pub(in crate::fabric_context) channels: Vec<ChannelBlock>,
-    /// Presence deltas from workspace roots other than the current session's.
-    /// Chat remains scoped to the session's joined channels.
-    pub(in crate::fabric_context) other_workspaces: Vec<WorkspaceActivity>,
+    /// `Some` means the canonical `<hosts>` node is present, including when its
+    /// full-state value is empty. Delta assembly uses `None` when it is unchanged.
+    pub(in crate::fabric_context) hosts: Option<Vec<HostRow>>,
+    /// `Some` means the canonical `<workspaces>` node is present. Each workspace
+    /// contains only the channel nodes selected by assembly for this cursor.
+    pub(in crate::fabric_context) workspaces: Option<Vec<WorkspaceView>>,
     pub(in crate::fabric_context) important: Vec<ImportantRow>,
-    /// Reactions on THIS agent's own recent messages, delta-scoped to the cursor
-    /// so each reaction surfaces exactly once. Passive awareness only — never a
-    /// mention, never an inject.
     pub(in crate::fabric_context) reactions: Vec<ReactionRow>,
-    /// Reaction groups elided by the render cap.
     pub(in crate::fabric_context) reactions_omitted: usize,
     pub(in crate::fabric_context) warnings: Vec<WarningRow>,
-    /// True when this view was built in delta mode (cursor > 0): it carries only
-    /// what changed since the caller's last snapshot, not the full current state.
-    /// The renderer uses it to explain a quiet result rather than emitting a bare
-    /// empty workspace block that reads as "everything disappeared".
-    pub(in crate::fabric_context) incremental: bool,
+    pub(in crate::fabric_context) notices: Vec<NoticeRow>,
 }
 
 impl FabricView {
-    /// Agent hook context omits the capability roster. Removing the rows before
-    /// change detection also keeps profile-only relay updates from producing
-    /// empty hook frames.
-    pub(crate) fn for_agent_context(mut self) -> Self {
-        self.agents.clear();
-        self
-    }
-
-    /// Whether the view carries nothing renderable — the daemon suppresses an
-    /// empty snapshot unless the caller forced it.
+    /// Self identity is framing, not activity. A view containing only `<self>`
+    /// remains suppressible on a quiet unforced hook turn.
     pub(crate) fn is_empty(&self) -> bool {
-        self.root.is_none()
-            && self.channels.is_empty()
-            && self.other_workspaces.is_empty()
-            && self.agents.is_empty()
+        self.hosts.is_none()
+            && self.workspaces.is_none()
             && self.important.is_empty()
             && self.reactions.is_empty()
             && self.warnings.is_empty()
+            && self.notices.is_empty()
     }
 
-    /// A forced delta snapshot that surfaced nothing new. Rendered as an explicit
-    /// "nothing changed" note (see `render_no_new_activity`) instead of an empty
-    /// `<workspace>` skeleton, so a quiet fabric never looks like data loss.
-    pub(in crate::fabric_context) fn is_quiet_delta(&self) -> bool {
-        self.incremental
-            && self.root.is_none()
-            && self.channels.is_empty()
-            && self.other_workspaces.is_empty()
-            && self.agents.is_empty()
-            && self.important.is_empty()
-            && self.reactions.is_empty()
-            && self.warnings.is_empty()
+    pub(in crate::fabric_context) fn has_activity(&self) -> bool {
+        self.hosts.as_ref().is_some_and(|rows| !rows.is_empty())
+            || self
+                .workspaces
+                .as_ref()
+                .is_some_and(|rows| !rows.is_empty())
+            || !self.important.is_empty()
+            || !self.reactions.is_empty()
+            || !self.warnings.is_empty()
     }
-}
-
-/// One grouped reaction awareness row: every peer who reacted with the same
-/// `emoji` to the same message of yours, collapsed into a single line.
-#[derive(Clone, PartialEq)]
-pub(in crate::fabric_context) struct ReactionRow {
-    /// Resolved display refs of the reactors (deduped, sorted).
-    pub(in crate::fabric_context) reactors: Vec<String>,
-    pub(in crate::fabric_context) emoji: String,
-    /// A short snippet of the reacted-to message body.
-    pub(in crate::fabric_context) target_snippet: String,
-    /// Relative age of the most recent reaction in the group.
-    pub(in crate::fabric_context) age: String,
-}
-
-#[derive(Clone, Default, PartialEq)]
-pub(in crate::fabric_context) struct WorkspaceActivity {
-    pub(in crate::fabric_context) workspace: WorkspaceRow,
-    pub(in crate::fabric_context) root: Option<ChannelBlock>,
-    pub(in crate::fabric_context) channels: Vec<ChannelBlock>,
-}
-
-#[derive(Clone, Default, PartialEq)]
-pub(in crate::fabric_context) struct WorkspaceRow {
-    pub(in crate::fabric_context) name: String,
-    pub(in crate::fabric_context) about: String,
 }
 
 #[derive(Clone, PartialEq)]
 pub(in crate::fabric_context) struct SelfRow {
-    pub(in crate::fabric_context) agent: String,
-    pub(in crate::fabric_context) agent_slug: String,
+    pub(in crate::fabric_context) name: String,
     pub(in crate::fabric_context) host: String,
+    pub(in crate::fabric_context) headless: bool,
     pub(in crate::fabric_context) title: String,
+    pub(in crate::fabric_context) hint: String,
+}
+
+#[derive(Clone, PartialEq)]
+pub(in crate::fabric_context) struct HostRow {
+    pub(in crate::fabric_context) name: String,
+    pub(in crate::fabric_context) agents: Vec<AgentRow>,
 }
 
 #[derive(Clone, PartialEq)]
@@ -103,36 +64,24 @@ pub(in crate::fabric_context) struct AgentRow {
     pub(in crate::fabric_context) about: String,
 }
 
-/// Agents declared in every workspace view. The all-workspaces renderers can
-/// show these once, then emit only each workspace's capability delta.
-pub(in crate::fabric_context) fn shared_agents(views: &[FabricView]) -> Vec<AgentRow> {
-    let Some((first, rest)) = views.split_first() else {
-        return Vec::new();
-    };
-    first
-        .agents
-        .iter()
-        .filter(|agent| rest.iter().all(|view| view.agents.contains(agent)))
-        .cloned()
-        .collect()
-}
-
-pub(in crate::fabric_context) fn workspace_agents(
-    view: &FabricView,
-    shared: &[AgentRow],
-) -> Vec<AgentRow> {
-    view.agents
-        .iter()
-        .filter(|agent| !shared.contains(agent))
-        .cloned()
-        .collect()
+#[derive(Clone, Default, PartialEq)]
+pub(in crate::fabric_context) struct WorkspaceView {
+    pub(in crate::fabric_context) name: String,
+    pub(in crate::fabric_context) about: String,
+    pub(in crate::fabric_context) hosts: Vec<String>,
+    pub(in crate::fabric_context) root: Option<ChannelBlock>,
+    /// Channels whose ancestors are unavailable remain explicit top-level rows
+    /// rather than being silently dropped.
+    pub(in crate::fabric_context) channels: Vec<ChannelBlock>,
 }
 
 #[derive(Clone, PartialEq)]
 pub(in crate::fabric_context) struct ChannelBlock {
     pub(in crate::fabric_context) name: String,
-    pub(in crate::fabric_context) reference: String,
+    pub(in crate::fabric_context) id: String,
     pub(in crate::fabric_context) about: String,
+    pub(in crate::fabric_context) member_count: Option<usize>,
+    pub(in crate::fabric_context) last_active: Option<String>,
     pub(in crate::fabric_context) members: Vec<MemberRow>,
     pub(in crate::fabric_context) presence: Vec<PresenceRow>,
     pub(in crate::fabric_context) children: Vec<ChannelBlock>,
@@ -141,23 +90,6 @@ pub(in crate::fabric_context) struct ChannelBlock {
 }
 
 impl ChannelBlock {
-    pub(in crate::fabric_context) fn compact(
-        name: String,
-        reference: String,
-        about: String,
-    ) -> Self {
-        Self {
-            name,
-            reference,
-            about,
-            members: Vec::new(),
-            presence: Vec::new(),
-            children: Vec::new(),
-            messages: Vec::new(),
-            omitted: 0,
-        }
-    }
-
     pub(in crate::fabric_context) fn is_compact(&self) -> bool {
         self.members.is_empty()
             && self.presence.is_empty()
@@ -167,11 +99,16 @@ impl ChannelBlock {
     }
 }
 
+#[derive(Clone, Copy, PartialEq)]
+pub(in crate::fabric_context) enum MemberKind {
+    Agent,
+    Human,
+}
+
 #[derive(Clone, PartialEq)]
 pub(in crate::fabric_context) struct MemberRow {
-    /// `@sessionCode-agent` for a member whose session identity is known, else the
-    /// slug/npub `pubkey_ref` fallback (human operators, offline sessions).
-    pub(in crate::fabric_context) reference: String,
+    pub(in crate::fabric_context) kind: MemberKind,
+    pub(in crate::fabric_context) name: String,
     pub(in crate::fabric_context) state: crate::session_state::SessionState,
     pub(in crate::fabric_context) status: String,
     pub(in crate::fabric_context) since: String,
@@ -179,7 +116,7 @@ pub(in crate::fabric_context) struct MemberRow {
 
 #[derive(Clone, PartialEq)]
 pub(in crate::fabric_context) struct PresenceRow {
-    pub(in crate::fabric_context) reference: String,
+    pub(in crate::fabric_context) name: String,
     pub(in crate::fabric_context) state: crate::session_state::SessionState,
     pub(in crate::fabric_context) status: String,
     pub(in crate::fabric_context) since: String,
@@ -212,6 +149,19 @@ pub(in crate::fabric_context) struct ImportantRow {
 }
 
 #[derive(Clone, PartialEq)]
+pub(in crate::fabric_context) struct ReactionRow {
+    pub(in crate::fabric_context) reactors: Vec<String>,
+    pub(in crate::fabric_context) emoji: String,
+    pub(in crate::fabric_context) target_snippet: String,
+    pub(in crate::fabric_context) age: String,
+}
+
+#[derive(Clone, PartialEq)]
 pub(in crate::fabric_context) struct WarningRow {
     pub(in crate::fabric_context) text: String,
+}
+
+#[derive(Clone, PartialEq)]
+pub(in crate::fabric_context) enum NoticeRow {
+    NoNewActivity { workspace: String },
 }

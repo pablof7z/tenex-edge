@@ -386,9 +386,9 @@ that value for the human `who` view and the agent `my session` briefing.
 - `remote` is derived by comparing exact backend labels.
 
 Human `who` renders terminal-oriented fabric text and supports `--live`. Agent
-`my session` renders XML with self identity, host-owned capabilities, qualified
-workspaces, and channels that own their member sessions at slash-path references (`/<workspace>/<descendant>`).
-Turn hooks omit host capabilities; there is no agent renderer or XML branch under `who`.
+`my session` and turn hooks share one capture, cursor-aware assembly, canonical
+document, and XML renderer. Cursor `0` selects full state; later cursors select
+per-node deltas while preserving the same schema, values, nesting, and escaping.
 
 ## 9. Landmines preserved (must not regress)
 

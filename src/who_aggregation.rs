@@ -1,8 +1,4 @@
-//! Canonical store aggregation for both `who` renderers.
-//!
-//! CLI JSON/text and the agent XML tree project the same captured channel,
-//! session, capability, and status facts. Renderer-specific layout stays out
-//! of this module.
+//! Canonical store aggregation for the human and JSON `who` projections.
 
 use crate::identity::SessionIdentity;
 use crate::state::{Channel, ChannelMember, Profile, Session, SessionStanding, Status, Store};
@@ -19,11 +15,9 @@ pub(crate) struct WhoAggregation {
     pub(crate) retained_standing: Vec<SessionStanding>,
     pub(crate) backend_profiles: Vec<Profile>,
     pub(crate) local_spawnable: BTreeMap<String, (String, Option<String>)>,
-    now: u64,
     channels_by_id: BTreeMap<String, Channel>,
     members: BTreeMap<String, Vec<ChannelMember>>,
     statuses: BTreeMap<String, Vec<Status>>,
-    latest_message_at: BTreeMap<String, u64>,
     profiles: BTreeMap<String, Profile>,
     identities: BTreeMap<String, SessionIdentity>,
     sessions_by_pubkey: BTreeMap<String, Session>,
@@ -88,9 +82,6 @@ impl WhoAggregation {
         for rows in statuses.values_mut() {
             rows.sort_by_key(|status| Reverse(status.updated_at));
         }
-        let latest_message_at = store
-            .latest_accepted_message_at_by_channel()
-            .context("who aggregation: failed to read latest channel activity")?;
         let mut referenced_pubkeys = BTreeSet::new();
         referenced_pubkeys.extend(local_sessions.iter().map(|session| session.pubkey.clone()));
         referenced_pubkeys.extend(
@@ -162,11 +153,9 @@ impl WhoAggregation {
             retained_standing,
             backend_profiles,
             local_spawnable,
-            now,
             channels_by_id,
             members,
             statuses,
-            latest_message_at,
             profiles,
             identities,
             sessions_by_pubkey,
@@ -197,21 +186,6 @@ impl WhoAggregation {
             .get(channel_h)
             .map(Vec::as_slice)
             .unwrap_or_default()
-    }
-
-    pub(crate) fn latest_message_at(&self, channel_h: &str) -> Option<u64> {
-        self.latest_message_at.get(channel_h).copied()
-    }
-
-    pub(crate) fn public_presence(
-        &self,
-        pubkey: &str,
-        status: &Status,
-    ) -> crate::session_presence::PublicPresence {
-        self.local_presence
-            .get(pubkey)
-            .cloned()
-            .unwrap_or_else(|| crate::session_presence::remote(status, self.now))
     }
 
     pub(crate) fn local_session_presence(

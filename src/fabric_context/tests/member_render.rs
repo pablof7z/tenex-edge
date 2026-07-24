@@ -1,4 +1,4 @@
-//! `<members>` rendering: `@codename-agent` per member.
+//! Typed `<members>` rendering from the full roster.
 
 use crate::fabric_context::{
     assemble, capture_inputs, render_fabric_context, render_fabric_context_human, render_view_text,
@@ -10,15 +10,18 @@ use super::{input, seed_store, session, session_record, OTHER_PK, SELF_PK};
 mod native_outcome;
 
 #[test]
-fn empty_status_agents_are_omitted_from_snapshots_and_deltas() {
+fn full_snapshot_keeps_offline_members_while_empty_presence_deltas_stay_quiet() {
     let store = seed_store();
     let rec = session(&store);
 
     let snapshot = render_fabric_context(&store, input(Some(&rec), "root", 0, 100, true))
         .expect("snapshot should render");
-    assert!(!snapshot.contains("<members>"), "got: {snapshot}");
+    assert!(snapshot.contains("<members>"), "got: {snapshot}");
+    assert!(
+        snapshot.contains("<agent name=\"@reviewer\" state=\"offline\" since=\"unknown\" />"),
+        "got: {snapshot}"
+    );
     assert!(!snapshot.contains("status=\"\""), "got: {snapshot}");
-    assert!(!snapshot.contains("since=\"unknown\""), "got: {snapshot}");
 
     store
         .upsert_status(&Status {
@@ -74,14 +77,13 @@ fn member_row_shows_session_handle_without_role_for_peer_session() {
 
     let text = render_fabric_context(&store, input(Some(&rec), "root", 0, 100, true))
         .expect("context should render");
-    // The empty-status self row is absent; the peer renders under its public handle.
-    assert!(!text.contains("<member ref=\"@coder\""), "got: {text}");
+    // The full roster is retained; the peer renders under its public handle.
+    assert!(text.contains("<agent name=\"@coder\""), "got: {text}");
     assert!(
-        text.contains("<member ref=\"@amber-reviewer\" state=\"idle\" status=\""),
+        text.contains("<agent name=\"@amber-reviewer\" state=\"idle\" status=\""),
         "got: {text}"
     );
     assert!(!text.contains("status=\"\""), "got: {text}");
-    assert!(!text.contains("since=\"unknown\""), "got: {text}");
     assert!(
         !text.contains(" agentSlug=\""),
         "member rows must not render agentSlug attributes: {text}"
@@ -130,13 +132,9 @@ fn local_lifecycle_overrides_an_expired_offline_relay_echo() {
         .expect("context should render");
     assert!(
         text.contains(
-            "<member ref=\"@reviewer\" state=\"suspended\" status=\"Recovered session\" since=\"just now\""
+            "<agent name=\"@reviewer\" state=\"suspended\" status=\"Recovered session\" since=\"just now\""
         ),
         "got: {text}"
-    );
-    assert!(
-        !text.contains("<member ref=\"@reviewer\" state=\"offline\""),
-        "local lifecycle must win over its relay echo: {text}"
     );
 }
 
@@ -238,7 +236,7 @@ fn agent_render_uses_workspace_and_never_leaks_project() {
         "agent render must carry a <workspace ...> element; got: {text}"
     );
     assert!(
-        text.contains("<member "),
+        text.contains("<agent "),
         "expected a members block; got: {text}"
     );
     assert!(
@@ -312,20 +310,20 @@ fn same_named_channels_under_different_workspaces_show_workspace_context() {
     let request = input(Some(&rec), "test1-xxx", 200, 300, true);
     let text = render_fabric_context(&store, request).expect("context should render");
     assert!(
-        text.contains("<channel name=\"#xxx\" ref=\"/test1/xxx\""),
+        text.contains("<channel name=\"xxx\" id=\"/test1/xxx\""),
         "got: {text}"
     );
     assert!(
-        text.contains("<channel name=\"#xxx\" ref=\"/test2/xxx\""),
+        text.contains("<channel name=\"xxx\" id=\"/test2/xxx\""),
         "got: {text}"
     );
     let reviewer = "amber-reviewer";
     let tester = "atlas-tester";
     assert!(
-        text.contains(&format!("ref=\"@{reviewer}\"")),
+        text.contains(&format!("name=\"@{reviewer}\"")),
         "got: {text}"
     );
-    assert!(text.contains(&format!("ref=\"@{tester}\"")), "got: {text}");
+    assert!(text.contains(&format!("name=\"@{tester}\"")), "got: {text}");
 
     let captured = capture_inputs(&store, &input(Some(&rec), "test1-xxx", 200, 300, true)).unwrap();
     let rendered = render_view_text(&assemble::assemble_view(&captured, 200, 300));
