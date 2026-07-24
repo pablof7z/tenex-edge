@@ -19,6 +19,7 @@ pub(super) enum Step {
     Harnesses,
     Relay,
     RelayUrl,
+    Deploy,
     Review,
 }
 
@@ -27,19 +28,22 @@ pub(super) enum Step {
 pub(super) const SUGGESTED_RELAY: &str = "ws://127.0.0.1:9888";
 
 /// The relay branches offered during onboarding. Mosaico does not run a relay;
-/// both branches point it at an externally operated NIP-29 relay.
+/// every branch points it at an externally operated NIP-29 relay.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum RelayChoice {
     Existing,
+    Assist,
     Manual,
 }
 
 impl RelayChoice {
-    pub(super) const ALL: [RelayChoice; 2] = [RelayChoice::Existing, RelayChoice::Manual];
+    pub(super) const ALL: [RelayChoice; 3] =
+        [RelayChoice::Existing, RelayChoice::Assist, RelayChoice::Manual];
 
     pub(super) fn title(self) -> &'static str {
         match self {
             RelayChoice::Existing => "Connect an existing relay",
+            RelayChoice::Assist => "Set one up with an agent",
             RelayChoice::Manual => "Run a Croissant relay myself",
         }
     }
@@ -47,6 +51,7 @@ impl RelayChoice {
     pub(super) fn blurb(self) -> &'static str {
         match self {
             RelayChoice::Existing => "Point Mosaico at a NIP-29 relay you already operate.",
+            RelayChoice::Assist => "An agent helps you stand one up, right in this panel.",
             RelayChoice::Manual => "I'll run Croissant; show me how and wait for it.",
         }
     }
@@ -66,6 +71,7 @@ pub(super) enum RelayStatus {
 pub(super) enum Action {
     None,
     ProbeRelay(String),
+    StartDeploy(String),
     Commit,
     Quit,
 }
@@ -139,6 +145,16 @@ impl Onboarding {
         RelayChoice::ALL[self.relay_cursor.min(RelayChoice::ALL.len() - 1)]
     }
 
+    /// The first selected harness that can host the structured assist modal.
+    pub(super) fn assistable_harness(&self) -> Option<&'static str> {
+        self.all
+            .iter()
+            .zip(&self.selected)
+            .filter(|(_, on)| **on)
+            .map(|(h, _)| h.id)
+            .find(|id| super::deploy::can_assist(id))
+    }
+
     /// Called when a spawned relay probe resolves.
     pub(super) fn on_probe(&mut self, probe: super::relay::Probe) {
         use super::relay::Probe;
@@ -166,6 +182,8 @@ impl Onboarding {
             Step::Harnesses => self.key_harnesses(key),
             Step::Relay => self.key_relay(key),
             Step::RelayUrl => self.key_relay_url(key),
+            // The assist modal owns its own keys via DeploySession.
+            Step::Deploy => Action::None,
             Step::Review => self.key_review(key),
         }
     }
@@ -237,10 +255,21 @@ impl Onboarding {
             }
             KeyCode::Enter => {
                 self.relay_status = RelayStatus::Idle;
-                if self.relay_choice() == RelayChoice::Manual && self.relay_url.trim().is_empty() {
-                    self.relay_url = SUGGESTED_RELAY.to_string();
+                match self.relay_choice() {
+                    RelayChoice::Assist if self.assistable_harness().is_none() => {
+                        self.relay_status = RelayStatus::Failed(
+                            "pick Claude, Codex, OpenCode, Goose, or Hermes to use an agent".into(),
+                        );
+                        Action::None
+                    }
+                    RelayChoice::Assist | RelayChoice::Manual => {
+                        if self.relay_url.trim().is_empty() {
+                            self.relay_url = SUGGESTED_RELAY.to_string();
+                        }
+                        self.advance(Step::RelayUrl)
+                    }
+                    RelayChoice::Existing => self.advance(Step::RelayUrl),
                 }
-                self.advance(Step::RelayUrl)
             }
             KeyCode::Esc => self.advance(Step::Harnesses),
             _ => Action::None,
@@ -260,6 +289,11 @@ impl Onboarding {
                     RelayChoice::Manual => {
                         self.relay_status = RelayStatus::Idle;
                         self.advance(Step::Review)
+                    }
+                    RelayChoice::Assist => {
+                        self.relay_status = RelayStatus::Idle;
+                        self.step = Step::Deploy;
+                        Action::StartDeploy(url)
                     }
                     RelayChoice::Existing => {
                         self.relay_status = RelayStatus::Verifying;

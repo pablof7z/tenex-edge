@@ -75,6 +75,8 @@ fn relay_choice_maps_from_cursor() {
     let mut state = fixture();
     assert_eq!(state.relay_choice(), RelayChoice::Existing);
     state.relay_cursor = 1;
+    assert_eq!(state.relay_choice(), RelayChoice::Assist);
+    state.relay_cursor = 2;
     assert_eq!(state.relay_choice(), RelayChoice::Manual);
 }
 
@@ -103,7 +105,7 @@ fn existing_url_enter_triggers_probe() {
 fn manual_flow_prefills_url_and_reaches_commit() {
     let mut state = fixture();
     state.step = Step::Relay;
-    state.relay_cursor = 1; // Manual
+    state.relay_cursor = 2; // Manual
     state.handle_key(press(KeyCode::Enter)); // → RelayUrl, prefilled
     assert_eq!(state.step, Step::RelayUrl);
     assert_eq!(state.relay_url, SUGGESTED_RELAY);
@@ -113,6 +115,36 @@ fn manual_flow_prefills_url_and_reaches_commit() {
         state.handle_key(press(KeyCode::Enter)),
         Action::Commit
     ));
+}
+
+#[test]
+fn assist_available_with_rpc_harness() {
+    let state = fixture(); // claude-code + codex
+    assert_eq!(state.assistable_harness(), Some("claude-code"));
+}
+
+#[test]
+fn assist_blocked_without_rpc_harness() {
+    let mut state = Onboarding::new(vec![harness("grok", "Grok Build", true)]).unwrap();
+    state.step = Step::Relay;
+    state.relay_cursor = 1; // Assist
+    let action = state.handle_key(press(KeyCode::Enter));
+    assert!(matches!(action, Action::None));
+    assert_eq!(state.step, Step::Relay);
+    assert!(matches!(state.relay_status, RelayStatus::Failed(_)));
+}
+
+#[test]
+fn assist_flow_starts_deploy() {
+    let mut state = fixture();
+    state.step = Step::Relay;
+    state.relay_cursor = 1; // Assist
+    state.handle_key(press(KeyCode::Enter)); // → RelayUrl, prefilled
+    assert_eq!(state.step, Step::RelayUrl);
+    assert_eq!(state.relay_url, SUGGESTED_RELAY);
+    let action = state.handle_key(press(KeyCode::Enter)); // → StartDeploy
+    assert!(matches!(action, Action::StartDeploy(_)));
+    assert_eq!(state.step, Step::Deploy);
 }
 
 #[test]

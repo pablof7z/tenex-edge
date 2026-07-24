@@ -87,7 +87,7 @@ fn step_rank(step: Step) -> usize {
         Step::Splash | Step::Identity => 0,
         Step::DeviceName => 1,
         Step::Harnesses => 2,
-        Step::Relay | Step::RelayUrl => 3,
+        Step::Relay | Step::RelayUrl | Step::Deploy => 3,
         Step::Review => 4,
     }
 }
@@ -122,6 +122,7 @@ fn render_body(frame: &mut Frame, area: Rect, state: &Onboarding) {
         Step::Harnesses => harnesses(state),
         Step::Relay => relay(state),
         Step::RelayUrl => relay_url(state),
+        Step::Deploy => vec![muted("Launching the agent…")],
         Step::Review => review(state),
     };
     frame.render_widget(
@@ -250,6 +251,10 @@ fn relay(state: &Onboarding) -> Vec<Line<'static>> {
             Span::styled(choice.blurb().to_string(), theme::fg(MUTED)),
         ]));
     }
+    if let RelayStatus::Failed(msg) = &state.relay_status {
+        lines.push(blank());
+        lines.push(Line::from(Span::styled(format!("  ! {msg}"), theme::fg(WARN))));
+    }
     lines
 }
 
@@ -262,6 +267,10 @@ fn relay_url(state: &Onboarding) -> Vec<Line<'static>> {
         RelayChoice::Manual => (
             "Where will your relay run?",
             "Enter the ws:// or wss:// URL you'll serve Croissant on.",
+        ),
+        RelayChoice::Assist => (
+            "Where should the agent put the relay?",
+            "Enter the ws:// or wss:// URL the agent should make reachable.",
         ),
     };
     let mut lines = vec![
@@ -305,6 +314,7 @@ fn review(state: &Onboarding) -> Vec<Line<'static>> {
     };
     let relay_summary = match state.relay_choice() {
         RelayChoice::Existing => state.relay_url.trim().to_string(),
+        RelayChoice::Assist => format!("{}  (set up with an agent)", state.relay_url.trim()),
         RelayChoice::Manual => format!("{}  (you'll run Croissant)", state.relay_url.trim()),
     };
     vec![
@@ -328,6 +338,7 @@ fn render_footer(frame: &mut Frame, area: Rect, state: &Onboarding) {
         Step::Harnesses => "↑↓ move · Space toggle · Enter continue · Esc back",
         Step::Relay => "↑↓ move · Enter select · Esc back",
         Step::RelayUrl => "type URL · Enter continue · Esc back",
+        Step::Deploy => "watching the agent · Esc cancel",
         Step::Review => "Enter apply · Esc back",
     };
     let block = Block::default().borders(Borders::TOP).border_style(theme::fg(FAINT));
